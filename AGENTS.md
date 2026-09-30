@@ -1,4 +1,4 @@
-# Gitnuro Agent
+# AweGit Agent
 
 ## 自动提交
 
@@ -23,7 +23,7 @@ Compose Desktop + JGit 的多平台 Git 客户端。主体是 Kotlin（JVM），
 
 约定：
 
-- 包名 `com.jetpackduba.gitnuro`
+- 包名 `com.zhoujun.awegit`
 - 依赖注入用 Dagger：构造函数 `@Inject`，接口在 Module 里 `@Binds`
 - 业务放 UseCase，Git 操作放 GitAction，界面不直接调 JGit
 - 依赖版本写在 `gradle/libs.versions.toml`

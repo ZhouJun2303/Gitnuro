@@ -40,6 +40,7 @@ dependencies {
     testRuntimeOnly(libs.junit.platform.launcher)
 
     testImplementation(libs.mockk)
+    testImplementation(libs.ktor.client.mock)
 
     implementation(libs.kotlin.logging)
     implementation(libs.slf4j.api)

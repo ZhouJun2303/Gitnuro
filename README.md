@@ -1,178 +1,26 @@
-# Gitnuro - Multiplatform Git Client
+# AweGit
 
-[![Latest release](https://img.shields.io/github/v/release/JetpackDuba/Gitnuro?color=blue&label=latest%20release)](https://github.com/JetpackDuba/Gitnuro/releases/latest)
+AweGit 是一个基于 Compose Desktop 和 JGit 的多平台 Git 客户端，界面风格参考 Fork。它在 [Gitnuro](https://github.com/JetpackDuba/Gitnuro) 上继续开发，并加入工作区、AI 生成提交说明，以及未推送提交的说明修改。
 
-![Icon](res/img/cover.png)
+## 功能
 
-A FOSS Git client based on (Jetbrains) Compose and JGit.
+- 实时查看仓库状态、提交历史和差异
+- 暂存、提交、拉取、推送、变基、合并、贮藏
+- Fork 风格的拉取对话框
+- 修改尚未推送的提交说明
+- 用 AI 生成提交说明
+- 工作区：把一组仓库放在一起打开
+- 分支可见性、多选提交、冲突解决、交互式变基
+- Git Flow、Worktree、自定义命令、补丁、Reflog 和统计
 
-The main goal of Gitnuro is to provide a multiplatform open source Git client without any kind of constraint to how you
-can use it nor relying on web technologies.
+## 下载
 
-## Download/Install
+安装包发布在 [Releases](https://github.com/ZhouJun2303/AweGit/releases)。
 
-Linux:
+## 从源码构建
 
-- Available as Flatpak [here](https://flathub.org/apps/details/com.jetpackduba.Gitnuro) or by
-  running `flatpak install com.jetpackduba.Gitnuro` if you have Flatpak & Flathub already setup.
-    - If Flathub is not set up, you can add the source with the following
-      command `flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`.
-- JAR file can be executed as a portable version (Requires JRE 17).
+见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
-Windows:
+## 许可证
 
-- [Installable & portable version](https://github.com/JetpackDuba/Gitnuro/releases/latest).
-
-MacOS:
-
-- [ZIP which contains the app bundle](https://github.com/JetpackDuba/Gitnuro/releases/latest).
-- Using hombrew: `brew install jetpackduba/apps/gitnuro`
-
-## Features
-
-Gitnuro has support for the following features:
-
-- View diffs for text based files.
-- View your history log and all its branches.
-- Add (stage) & reset (unstage) files.
-- Stage & unstage of hunks.
-- Checkout files (revert changes of uncommitted files).
-- Clone.
-- Commit.
-- Reset commits.
-- Revert commits.
-- Amend previous commit.
-- Merge.
-- Rebase.
-- Create and delete branches locally.
-- Create and delete tags locally.
-- View remote branches.
-- Pull and push.
-- Stash and pop stash.
-- Checkout a commit (detached HEAD).
-- View changes/diff in images (side to side comparison).
-- Force push.
-- Remove branches from remote.
-- Manage remotes.
-- Start a new local repository.
-- Search by commit message/author/commit id.
-- Rebase interactive.
-- Blame file.
-- View file history.
-- Theming.
-- Side by side diff in text files.
-- Stage/Unstage specific lines.
-- Submodules support.
-- Change the tracking of a specific branch.
-
-<details>
-  <summary><b>Features planned</b></summary>
-
-- Create/Apply patches
-- Remove tags from remote.
-- View stashes in the log tree.
-- Syntax highlighting for diff.
-- Various log options like showing the author, filtering by current branch o hide remote branches.
-- Customizations settings.
-
-</details>
-
-## Contributing
-
-If you find a bug or you would like to suggest a new feature, feel free to open an issue.
-
-Pull requests are also welcome but please create an issue first if it's a new feature. If you want to work on an
-existing issue, please comment so I'm aware of it and discuss the changes if required.
-See [this page](DEVELOPMENT.md) for how to set up your development environment.
-
-## FAQ
-
-> Is Gitnuro completly free?
-
-Yes, free in both meanings of the word (in money and freedom).
-
-> Does Gitnuro keep track of my data?
-
-Gitnuro does not track data in any way, don't worry.
-
-> I don't like the built-in themes, can I create a custom one?
-
-Gitnuro includes the option to set custom themes in a JSON format. Keep in mind that themes may break with new releases,
-making the default theme the fallback option.
-
-For the latest stable version, you can use this JSON as an example:
-
-```
-{
-    "primary": "FF456b00",
-    "primaryVariant": "FF456b00",
-    "onPrimary": "FFFFFFFFF",
-    "secondary": "FF9c27b0",
-    "onBackground": "FF141f00",
-    "onBackgroundSecondary": "FF595858",
-    "error": "FFc93838",
-    "onError": "FFFFFFFF",
-    "background": "FFe7f2d3",
-    "backgroundSelected": "C0cee1f2",
-    "surface": "FFc5f078",
-    "secondarySurface": "FFedeef2",
-    "tertiarySurface": "FFF4F6FA",
-    "addFile": "FF32A852",
-    "deletedFile": "FFc93838",
-    "modifiedFile": "FF0070D8",
-    "conflictingFile": "FFFFB638",
-    "dialogOverlay": "AA000000",
-    "normalScrollbar": "FFCCCCCC",
-    "hoverScrollbar": "FF0070D8",
-    "diffLineAdded": "FF0070D8",
-    "diffLineRemoved": "FF0070D8",
-    "onSecondary": "FF000000",
-    "diffContentAdded": "FF000000",
-    "diffContentRemoved": "FF000000",
-    "diffKeyword": "FF000000", 
-    "diffAnnotation": "FF000000",
-    "diffComment": "FF000000",
-    "isLight": true
-}
-```
-
-Colors are in ARGB Hex format.
-
-> Why isn't the Mac version signed?
-
-The cost of the Apple Developer Program is quite high with a platform that currently has very few users. I may pay for
-it if it's a very requested feature but not for now.
-
-> Authentication has failed. What's wrong?
-
-Currently there are some limitations regarding this topic. Here are some known problematic setups:
-
-- Multicast DNS remote URL (https://github.com/JetpackDuba/Gitnuro/issues/19) with this
-  workaround (https://github.com/JetpackDuba/Gitnuro/issues/19#issuecomment-1374431720).
-- Self signed server certificate (https://github.com/JetpackDuba/Gitnuro/issues/48)
-
-If the authentication fails and you think its due to a different reason, please open a new issue.
-
-
-> Does it support Git credentials manager (aka manager-core)?
-
-Yes, but it requires specifying the full path of the binary in your `.gitconfig`.
-
-Example for linux:
-
-```
-[credential]
-   helper = /usr/share/git-credential-manager-core/git-credential-manager-core
-```
-
-Example for windows (you may want to edit `C:\Program Files\Git\etc\gitconfig`):
-
-```
-[credential]
-   helper = C:/Program Files/Git/mingw64/bin/git-credential-manager-core.exe
-```
-
-## Sponsors
-
-Thank you to all the sponsors for helping improve Gitnuro and JetBrains for providing the necessary tooling.
-
+AweGit 基于 Gitnuro 修改，以 GNU GPL v3 发布。详见 [NOTICE](NOTICE) 和 [LICENSE](LICENSE)。

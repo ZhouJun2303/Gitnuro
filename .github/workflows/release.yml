@@ -5,9 +5,12 @@ on:
     tags:
       - '**'
 
+permissions:
+  contents: write
+
 jobs:
   build_linux_x86_64:
-    runs-on: [self-hosted, linux]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
@@ -38,15 +41,13 @@ jobs:
           body: "Beta release"
           prerelease: true
           draft: true
-          repository: JetpackDuba/Gitnuro
-          with:
           files: |
-            app/build/libs/Gitnuro-linux-x86_64-*.jar
-            app/build/libs/Gitnuro-linux-x86_64-*.jar.sum
-          token: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
+            app/build/libs/AweGit-linux-x86_64-*.jar
+            app/build/libs/AweGit-linux-x86_64-*.jar.sum
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   build_linux_aarch64:
-    runs-on: [self-hosted, linux]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
@@ -75,12 +76,10 @@ jobs:
           body: "Beta release"
           prerelease: true
           draft: true
-          repository: JetpackDuba/Gitnuro
-          with:
           files: |
-            app/build/libs/Gitnuro-linux-arm_aarch64-*.jar
-            app/build/libs/Gitnuro-linux-arm_aarch64-*.jar.sum
-          token: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
+            app/build/libs/AweGit-linux-arm_aarch64-*.jar
+            app/build/libs/AweGit-linux-arm_aarch64-*.jar.sum
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   build_windows:
     runs-on: windows-latest
@@ -106,10 +105,10 @@ jobs:
       - name: Compile .ISS to .EXE Installer
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
-          path: gitnuro.iss
+          path: awegit.iss
           options: /O+ /DMyAppVersion="${{github.ref_name}}"
       - name: Windows portable ZIP
-        run: Compress-Archive -Path app/build/compose/binaries/main/app/Gitnuro/* -Destination Output/Gitnuro_Windows_Portable_${{github.ref_name}}.zip
+        run: Compress-Archive -Path app/build/compose/binaries/main/app/AweGit/* -Destination Output/AweGit_Windows_Portable_${{github.ref_name}}.zip
       - name: Generate SHA256 Checksum
         shell: bash
         working-directory: ./Output/
@@ -121,16 +120,14 @@ jobs:
           body: "Beta release"
           prerelease: true
           draft: true
-          repository: JetpackDuba/Gitnuro
-          with:
           files: |
-            Output/Gitnuro*.exe
-            Output/Gitnuro*.sum
-            Output/Gitnuro*.zip
-          token: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
+            Output/AweGit*.exe
+            Output/AweGit*.sum
+            Output/AweGit*.zip
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   build_macos:
-    runs-on: [self-hosted, macOS]
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
         with:
@@ -151,7 +148,7 @@ jobs:
         run: mkdir Output
       - name: MacOS DMG
         working-directory: app/build/compose/binaries/main/app/
-        run: zip -r ../../../../../../Output/Gitnuro_macos_${{github.ref_name}}.zip .
+        run: zip -r ../../../../../../Output/AweGit_macos_${{github.ref_name}}.zip .
       - name: Generate SHA256 Checksum
         working-directory: ./Output/
         run: find . -type f -exec bash -c "shasum -a 256 {}  > {}.sum " \;
@@ -162,9 +159,7 @@ jobs:
           body: "Beta release"
           prerelease: true
           draft: true
-          repository: JetpackDuba/Gitnuro
-          with:
           files: |
-            Output/Gitnuro*.zip
-            Output/Gitnuro*.sum
-          token: ${{ secrets.CUSTOM_GITHUB_TOKEN }}
+            Output/AweGit*.zip
+            Output/AweGit*.sum
+          token: ${{ secrets.GITHUB_TOKEN }}

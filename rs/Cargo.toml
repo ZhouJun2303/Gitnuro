@@ -1,11 +1,12 @@
 [package]
-name = "gitnuro-rs"
+name = "awegit-rs"
 version = "0.1.0"
 edition = "2024"
+authors = ["ZhouJun"]
 
 [lib]
 crate-type = ["cdylib"]
-name = "gitnuro_rs"
+name = "awegit_rs"
 
 [dependencies]
 notify = "8.0.0"

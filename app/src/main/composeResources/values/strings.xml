@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Gitnuro</string>
+    <string name="app_name">AweGit</string>
 
     <!-- Generic -->
     <string name="generic_button_ok">OK</string>
@@ -45,7 +45,7 @@
     <string name="menu_actions">Actions</string>
     <string name="menu_actions_tooltip">Additional actions</string>
     <string name="menu_settings">Settings</string>
-    <string name="menu_settings_tooltip">Gitnuro's settings</string>
+    <string name="menu_settings_tooltip">AweGit's settings</string>
 
     <string name="rebase_interactive_view_title">Rebase interactive</string>
     <string name="rebase_interactive_view_button_complete_rebase">Complete rebase</string>
@@ -125,6 +125,7 @@
 
     <!-- Log context menu -->
     <string name="log_context_menu_show_status_to_amend">Show status to amend this commit</string>
+    <string name="log_context_menu_reword_commit">Edit Commit Message…</string>
     <string name="log_context_menu_checkout_commit">Checkout commit</string>
     <string name="log_context_menu_create_branch">Create branch</string>
     <string name="log_context_menu_create_tag">Create tag</string>
@@ -187,6 +188,8 @@
     <string name="settings_entry_auth">Authentication</string>
     <string name="settings_entry_security">Security</string>
     <string name="settings_section_tools">Tools</string>
+    <string name="settings_section_ai">AI</string>
+    <string name="settings_entry_ai_commit_messages">Commit messages</string>
     <string name="settings_entry_terminal">Terminal</string>
     <string name="settings_entry_logs">Logs</string>
 
@@ -207,7 +210,7 @@
 
     <string name="error_hook_rejection">Commit rejected by hook: "%1$s"</string>
 
-    <string name="error_repository_path_not_set">Repository path is not stored, if you believe this is a bug, please report it to Gitnuro's issue tracker.</string>
+    <string name="error_repository_path_not_set">Repository path is not stored, if you believe this is a bug, please report it to AweGit's issue tracker.</string>
     <string name="error_repository_read_error">Failed to read a repository: %1$s. Please verify the repository exists and it's accessible.</string>
 
     <string name="error_stash_no_data">No data to stash</string>

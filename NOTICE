@@ -1,0 +1,10 @@
+AweGit
+Copyright (C) 2026 ZhouJun
+
+AweGit is a modified version of Gitnuro (https://github.com/JetpackDuba/Gitnuro),
+licensed under the GNU General Public License version 3. AweGit is distributed
+under the same license, see LICENSE.
+
+Modifications by ZhouJun since September 2026: new name and package
+(com.zhoujun.awegit), Fork-style user interface, workspaces, AI generated commit
+messages, editing messages of unpushed commits, performance work.

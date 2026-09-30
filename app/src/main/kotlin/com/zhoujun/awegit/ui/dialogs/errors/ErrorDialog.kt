@@ -1,0 +1,233 @@
+package com.zhoujun.awegit.ui.dialogs.errors
+
+import androidx.compose.foundation.HorizontalScrollbar
+import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.Icon
+import androidx.compose.material.IconButton
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.OutlinedTextField
+import androidx.compose.material.Text
+import androidx.compose.material.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ClipboardManager
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.zhoujun.awegit.app.generated.resources.Res
+import com.zhoujun.awegit.app.generated.resources.copy
+import com.zhoujun.awegit.app.generated.resources.error
+import com.zhoujun.awegit.domain.errors.GenericError
+import com.zhoujun.awegit.domain.models.TaskType
+import com.zhoujun.awegit.domain.repositories.CompletedTask
+import com.zhoujun.awegit.extensions.handOnHover
+import com.zhoujun.awegit.extensions.onDoubleClick
+import com.zhoujun.awegit.theme.secondarySurface
+import com.zhoujun.awegit.ui.components.tooltip.InstantTooltip
+import com.zhoujun.awegit.ui.dialogs.base.ForkDialog
+import com.zhoujun.awegit.ui.getErrorText
+import org.jetbrains.compose.resources.painterResource
+
+@Composable
+fun ErrorDialog(
+    error: CompletedTask.Failure,
+    onAccept: () -> Unit,
+) {
+    val horizontalScroll = rememberScrollState()
+    val verticalScroll = rememberScrollState()
+    val clipboard = LocalClipboardManager.current
+    val errorStackTrace = remember(error) {
+        (error.reason as? GenericError)
+            ?.exception
+            ?.stackTraceToString()
+    }
+    var showStackTrace by remember { mutableStateOf(false) }
+
+    ForkDialog(
+        title = error.taskType.errorTitle(),
+        subtitle = null,
+        primaryText = "OK",
+        onPrimary = onAccept,
+        onDismiss = onAccept,
+        width = 560.dp,
+    ) {
+        SelectionContainer {
+            Text(
+                text = error.reason.getErrorText(),
+                color = MaterialTheme.colors.onBackground,
+                fontSize = 12.sp,
+            )
+        }
+
+        Icon(
+            painterResource(Res.drawable.error),
+            contentDescription = null,
+            tint = MaterialTheme.colors.error,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .size(24.dp)
+                .onDoubleClick { showStackTrace = !showStackTrace },
+        )
+
+        if (showStackTrace && errorStackTrace != null) {
+            Box(
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .height(240.dp)
+                    .fillMaxWidth(),
+            ) {
+                OutlinedTextField(
+                    value = errorStackTrace,
+                    onValueChange = {},
+                    readOnly = true,
+                    colors = TextFieldDefaults.outlinedTextFieldColors(backgroundColor = MaterialTheme.colors.secondarySurface),
+                    textStyle = MaterialTheme.typography.body2,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .horizontalScroll(horizontalScroll)
+                        .verticalScroll(verticalScroll),
+                )
+                HorizontalScrollbar(
+                    rememberScrollbarAdapter(horizontalScroll),
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                )
+                VerticalScrollbar(
+                    rememberScrollbarAdapter(verticalScroll),
+                    modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+                )
+                InstantTooltip(
+                    text = "Copy",
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 16.dp),
+                ) {
+                    IconButton(
+                        onClick = { copyMessageError(clipboard, Exception(error.reason.toString())) },
+                        modifier = Modifier
+                            .size(24.dp)
+                            .handOnHover()
+                            .background(MaterialTheme.colors.background.copy(alpha = 0.8f)),
+                    ) {
+                        Icon(
+                            painter = painterResource(Res.drawable.copy),
+                            contentDescription = null,
+                            tint = MaterialTheme.colors.onSurface,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+fun copyMessageError(clipboard: ClipboardManager, ex: Exception) {
+    clipboard.setText(AnnotatedString(ex.stackTraceToString()))
+}
+
+fun TaskType.errorTitle(): String {
+    return when (this) {
+        TaskType.Unspecified -> "Error"
+        TaskType.StageAllFiles -> "Staging all the files failed"
+        TaskType.UnstageAllFiles -> "Unstaging all the files failed"
+        TaskType.StageFile -> "File stage failed"
+        TaskType.UnstageFile -> "File unstage failed"
+        TaskType.StageHunk -> "File stage failed"
+        TaskType.UnstageHunk -> "Hunk unstage failed"
+        TaskType.StageLine -> "File line stage failed"
+        TaskType.UnstageLine -> "File line unstage failed"
+        TaskType.DiscardFile -> "Discard file failed"
+        TaskType.DeleteFile -> "Delete file failed"
+        TaskType.BlameFile -> "File blaming failed"
+        TaskType.HistoryFile -> "Could not load file history"
+        TaskType.DoCommit -> "Commit failed"
+        TaskType.RevertCommit -> "Commit revert failed"
+        TaskType.RewordCommit -> "Editing commit message failed"
+        TaskType.CherryPickCommit -> "Commit cherry-pick failed"
+        TaskType.CheckoutCommit -> "Checkout commit failed"
+        TaskType.ResetToCommit -> "Reset to commit failed"
+        TaskType.CheckoutBranch -> "Branch checkout failed"
+        TaskType.CheckoutRemoteBranch -> "Remote branch checkout failed"
+        TaskType.CreateBranch -> "Could not create the new branch"
+        TaskType.DeleteBranch -> "Could not delete the branch"
+        TaskType.RenameBranch -> "Could not rename the branch"
+        TaskType.MergeBranch -> "Merge failed"
+        TaskType.RebaseBranch -> "Rebase failed"
+        TaskType.RebaseInteractive -> "Rebase interactive failed"
+        TaskType.ContinueRebase -> "Could not continue rebase"
+        TaskType.AbortRebase -> "Could not abort rebase"
+        TaskType.SkipRebase -> "Could not skip rebase step"
+        TaskType.ChangeBranchUpstream -> "Upstream branch change failed"
+        TaskType.PullFromBranch -> "Pull from branch failed"
+        TaskType.PushToBranch -> "Push to branch failed"
+        TaskType.DeleteRemoteBranch -> "Deleting remote branch failed"
+        TaskType.Pull -> "Pull failed"
+        TaskType.Push -> "Push failed"
+        TaskType.Fetch -> "Fetch failed"
+        TaskType.Stash -> "Stash failed"
+        TaskType.ApplyStash -> "Apply stash failed"
+        TaskType.PopStash -> "Pop stash failed"
+        TaskType.DeleteStash -> "Delete stash failed"
+        TaskType.CreateTag -> "Create tag failed"
+        TaskType.CheckoutTag -> "Could not checkout tag's commit"
+        TaskType.DeleteTag -> "Could not delete tag"
+        TaskType.AddSubmodule -> "Add submodule failed"
+        TaskType.DeleteSubmodule -> "Delete submodule failed"
+        TaskType.InitSubmodule -> "Init submodule failed"
+        TaskType.DeinitSubmodule -> "Deinit submodule failed"
+        TaskType.SyncSubmodule -> "Sync submodule failed"
+        TaskType.UpdateSubmodule -> "Update submodule failed"
+        TaskType.SaveCustomTheme -> "Failed trying to save the custom theme"
+        TaskType.ResetRepoState -> "Could not reset repository state"
+        TaskType.ChangesDetection -> "Repository changes detection has stopped working"
+        TaskType.RepositoryOpen -> "Could not open the repository"
+        TaskType.RepositoryClone -> "Could not clone the repository"
+        TaskType.AddRemote -> "Adding remote failed"
+        TaskType.DeleteRemote -> "Deleting remote failed"
+        TaskType.LoadAuthor -> "Loading author failed"
+        TaskType.StageDir -> "Staging directory failed"
+        TaskType.UnstageDir -> "Unstaging directory failed"
+        TaskType.SaveAuthor -> "Saving author failed"
+        TaskType.GetCommitForRebase -> "Get commit for rebase failed"
+        TaskType.GetFileCommits -> "Get file commits failed"
+        TaskType.GetLinesForRebaseInteractive -> "Get lines for rebase interactive failed"
+        TaskType.GetCommitDiffEntries -> "Getting commit entries failed"
+        TaskType.RefreshBranches -> "Refresh branches failed"
+        TaskType.RefreshLog -> "Refresh log failed"
+        TaskType.RefreshRemotes -> "Refresh remotes failed"
+        TaskType.RefreshRepositoryState -> "Refresh repository state failed"
+        TaskType.RefreshStashes -> "Refresh stashes failed"
+        TaskType.RefreshStatus -> "Refresh status failed"
+        TaskType.RefreshSubmodules -> "Refresh submodules failed"
+        TaskType.RefreshTags -> "Refresh tags failed"
+        TaskType.GetWorktree -> "Get worktree failed"
+        TaskType.GenerateCommitMessage -> "Generating commit message failed"
+        TaskType.CommitAndPush -> "Commit and push failed"
+        TaskType.GitFlowInit -> "Git Flow init failed"
+        TaskType.GitFlowStart -> "Git Flow start failed"
+        TaskType.GitFlowFinish -> "Git Flow finish failed"
+        TaskType.SquashCommits -> "Squash failed"
+        TaskType.ApplyPatch -> "Apply patch failed"
+        TaskType.CustomCommand -> "Custom command failed"
+        TaskType.WriteCommitGraph -> "Writing commit-graph failed"
+        TaskType.WorktreeAdd -> "Adding worktree failed"
+        TaskType.WorktreeRemove -> "Removing worktree failed"
+        TaskType.UpdateRemote -> "Update remote failed"
+    }
+}
