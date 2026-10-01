@@ -35,6 +35,11 @@ fn main() {
             "log_client",
             "perf_snapshot",
             "open_log_folder",
+            "repo_facts",
+            "scan_repositories",
+            "mark_notification",
+            "create_github_repo",
+            "generate_ssh_key",
         ]),
     );
     tauri_build::try_build(attributes).expect("failed to run tauri-build");

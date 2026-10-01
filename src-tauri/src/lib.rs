@@ -182,9 +182,9 @@ fn commit_changes(
 }
 
 #[tauri::command]
-fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u32>) -> Result<awegit_git::FileDiff, String> {
+fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u32>, ignore_space: Option<bool>) -> Result<awegit_git::FileDiff, String> {
     let repo = repo_from(path)?;
-    awegit_git::file_diff_with(&repo, &file, staged, unified.unwrap_or(3)).map_err(|error| error.to_string())
+    awegit_git::file_diff_with(&repo, &file, staged, unified.unwrap_or(3), ignore_space.unwrap_or(false)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -309,6 +309,9 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::StashPop { .. } => "stashPop",
         awegit_git::Mutation::StashApply { .. } => "stashApply",
         awegit_git::Mutation::StashDrop { .. } => "stashDrop",
+        awegit_git::Mutation::StashRename { .. } => "stashRename",
+        awegit_git::Mutation::StashBranch { .. } => "stashBranch",
+        awegit_git::Mutation::StashPatch { .. } => "stashPatch",
         awegit_git::Mutation::Checkout { .. } => "checkout",
         awegit_git::Mutation::CreateBranch { .. } => "createBranch",
         awegit_git::Mutation::DeleteBranch { .. } => "deleteBranch",
@@ -324,6 +327,10 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::Reword { .. } => "reword",
         awegit_git::Mutation::Tag { .. } => "tag",
         awegit_git::Mutation::DeleteTag { .. } => "deleteTag",
+        awegit_git::Mutation::DeleteRemoteTag { .. } => "deleteRemoteTag",
+        awegit_git::Mutation::RestoreFile { .. } => "restoreFile",
+        awegit_git::Mutation::Bisect { .. } => "bisect",
+        awegit_git::Mutation::WriteGitignore { .. } => "writeGitignore",
         awegit_git::Mutation::StageHunk { .. } => "stageHunk",
         awegit_git::Mutation::StageLine { .. } => "stageLine",
         awegit_git::Mutation::StagePaths { .. } => "stagePaths",
@@ -375,10 +382,13 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::Push { remote, set_upstream, tags, force_with_lease } => {
             join([opt(remote), flag("setUpstream", *set_upstream), flag("tags", *tags), flag("forceWithLease", *force_with_lease)])
         }
-        Mutation::Stash { message } => bytes("message", message),
+        Mutation::Stash { message, include_untracked } => join([bytes("message", message), flag("untracked", *include_untracked)]),
         Mutation::StashPop { name } => scrub(name),
-        Mutation::StashApply { name } | Mutation::StashDrop { name } => scrub(name),
-        Mutation::Checkout { name } | Mutation::DeleteBranch { name } => scrub(name),
+        Mutation::StashApply { name } | Mutation::StashDrop { name } | Mutation::StashPatch { name } => scrub(name),
+        Mutation::StashRename { name, message } => join([scrub(name), bytes("message", message)]),
+        Mutation::StashBranch { name, branch } => join([scrub(name), scrub(branch)]),
+        Mutation::Checkout { name } => scrub(name),
+        Mutation::DeleteBranch { name, force } => join([scrub(name), flag("force", *force)]),
         Mutation::CreateBranch { name, start } => join([scrub(name), opt(start)]),
         Mutation::Merge { name, squash, no_ff, autostash } => {
             join([scrub(name), flag("squash", *squash), flag("noFf", *no_ff), flag("autostash", *autostash)])
@@ -388,16 +398,21 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
             join([scrub(onto), format!("drop={}", drop.len()), format!("steps={}", steps.len()), flag("autostash", *autostash), flag("updateRefs", *update_refs)])
         }
         Mutation::Reset { rev, mode } => join([scrub(rev), format!("{mode:?}")]),
-        Mutation::CherryPick { rev } | Mutation::Revert { rev } => scrub(rev),
+        Mutation::CherryPick { rev, record } => join([scrub(rev), flag("record", *record)]),
+        Mutation::Revert { rev } => scrub(rev),
         Mutation::Reword { rev, summary } => join([scrub(rev), bytes("summary", summary)]),
         Mutation::Tag { name, rev, message } => join([scrub(name), scrub(rev), bytes("message", message)]),
         Mutation::DeleteTag { name } | Mutation::RemoveRemote { name } => scrub(name),
+        Mutation::DeleteRemoteTag { remote, name } => join([scrub(remote), scrub(name)]),
+        Mutation::RestoreFile { rev, file } => join([scrub(rev), scrub(file)]),
+        Mutation::Bisect { verb, rev } => join([scrub(verb), scrub(rev)]),
+        Mutation::WriteGitignore { text } => format!("bytes={}", text.len()),
         Mutation::StageHunk { file, index, unstage } => join([scrub(file), format!("hunk={index}"), flag("unstage", *unstage)]),
         Mutation::StageLine { file, unstage, .. } => join([scrub(file), flag("unstage", *unstage)]),
         Mutation::StagePaths { files, unstage } => join([files.iter().cloned().map(|file| scrub(&file)).collect::<Vec<_>>().join(","), flag("unstage", *unstage)]),
         Mutation::DiscardHunk { file, index } => join([scrub(file), format!("hunk={index}")]),
         Mutation::DiscardLine { file, .. } | Mutation::Discard { file } | Mutation::Delete { file } => scrub(file),
-        Mutation::Resolve { file, side } => join([scrub(file), scrub(side)]),
+        Mutation::Resolve { file, side, text } => join([scrub(file), scrub(side), format!("bytes={}", text.len())]),
         Mutation::RenameBranch { name, to } => join([scrub(name), scrub(to)]),
         Mutation::SetUpstream { branch, upstream } => join([scrub(branch), scrub(upstream)]),
         Mutation::DeleteRemoteBranch { remote, branch }
@@ -410,7 +425,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::RemoveWorktree { path } => scrub(path),
         Mutation::SubmoduleAdd { url, path } => join([scrub(path), public_url(url)]),
         Mutation::SubmoduleInit { path } | Mutation::SubmoduleSync { path } | Mutation::SubmoduleRemove { path } => scrub(path),
-        Mutation::GitFlowStart { name } | Mutation::GitFlowFinish { name } => scrub(name),
+        Mutation::GitFlowStart { name, kind } | Mutation::GitFlowFinish { name, kind } => join([scrub(name), scrub(kind)]),
         Mutation::GitFlowInit { master, develop, feature, release, hotfix, support } => {
             join([scrub(master), scrub(develop), scrub(feature), scrub(release), scrub(hotfix), scrub(support)])
         }
@@ -721,6 +736,50 @@ fn forge_pulls(path: Option<String>) -> Result<Vec<forge::PullRequest>, String> 
 }
 
 #[tauri::command]
+fn repo_facts(path: Option<String>) -> Result<awegit_git::RepoFacts, String> {
+    let repo = repo_from(path)?;
+    awegit_git::repo_facts(&repo).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn scan_repositories(root: String) -> Result<Vec<String>, String> {
+    awegit_git::scan_repositories(std::path::Path::new(&root)).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn mark_notification(id: String) -> Result<(), String> {
+    let values = settings::load()?;
+    forge::mark_read(&values.github_token, &id)
+}
+
+#[tauri::command]
+fn create_github_repo(name: String, private_repo: bool) -> Result<String, String> {
+    let values = settings::load()?;
+    forge::create_repo(&values.github_token, &name, private_repo)
+}
+
+#[tauri::command]
+fn generate_ssh_key() -> Result<String, String> {
+    let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).map_err(|_| "home directory is missing".to_string())?;
+    let dir = std::path::PathBuf::from(home).join(".ssh");
+    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let key = dir.join("id_ed25519");
+    if key.exists() {
+        return Err("id_ed25519 already exists".into());
+    }
+    let output = std::process::Command::new("ssh-keygen")
+        .args(["-t", "ed25519", "-f"])
+        .arg(&key)
+        .args(["-N", "", "-C", "awegit"])
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    std::fs::read_to_string(dir.join("id_ed25519.pub")).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn set_repo_author(path: Option<String>, name: String, email: String) -> Result<(), String> {
     let repo = repo_from(path)?;
     let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
@@ -800,6 +859,11 @@ pub fn run() {
             launch_tool,
             forge_notifications,
             forge_pulls,
+            repo_facts,
+            scan_repositories,
+            mark_notification,
+            create_github_repo,
+            generate_ssh_key,
             log_client,
             perf_snapshot,
             open_log_folder

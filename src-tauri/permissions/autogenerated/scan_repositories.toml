@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-scan-repositories"
+description = "Enables the scan_repositories command without any pre-configured scope."
+commands.allow = ["scan_repositories"]
+
+[[permission]]
+identifier = "deny-scan-repositories"
+description = "Denies the scan_repositories command without any pre-configured scope."
+commands.deny = ["scan_repositories"]

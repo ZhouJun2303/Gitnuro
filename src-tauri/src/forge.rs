@@ -131,9 +131,49 @@ fn remote_project(url: &str) -> Option<(String, String)> {
     Some((host.to_string(), path.to_string()))
 }
 
+pub fn mark_read(github_token: &str, id: &str) -> Result<(), String> {
+    let id = id.trim();
+    if github_token.trim().is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
+        return Err("notification id is missing".into());
+    }
+    let url = format!("https://api.github.com/notifications/threads/{id}");
+    http_send("PATCH", &url, &[("Authorization", &format!("Bearer {}", github_token.trim())), ("Accept", "application/vnd.github+json")], None)?;
+    Ok(())
+}
+
+pub fn create_repo(github_token: &str, name: &str, private_repo: bool) -> Result<String, String> {
+    let name = name.trim();
+    let safe = !name.is_empty()
+        && !name.starts_with('-')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if github_token.trim().is_empty() || !safe {
+        return Err("repository name is missing".into());
+    }
+    let body = format!(r#"{{"name":"{name}","private":{private_repo}}}"#);
+    let text = http_send(
+        "POST",
+        "https://api.github.com/user/repos",
+        &[
+            ("Authorization", &format!("Bearer {}", github_token.trim())),
+            ("Accept", "application/vnd.github+json"),
+            ("Content-Type", "application/json"),
+        ],
+        Some(body.as_str()),
+    )?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    value.get("html_url").and_then(|item| item.as_str()).map(str::to_string).ok_or_else(|| "GitHub did not return a repository".into())
+}
+
 fn http_get(url: &str, headers: &[(&str, &str)]) -> Result<String, String> {
+    http_send("GET", url, headers, None)
+}
+
+fn http_send(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<String, String> {
     let mut command = std::process::Command::new("curl");
-    command.args(["--silent", "--show-error", "--fail", "--max-time", "20", "--header", "User-Agent: AweGit"]);
+    command.args(["--silent", "--show-error", "--fail", "--max-time", "20", "--request", method, "--header", "User-Agent: AweGit"]);
+    if let Some(body) = body {
+        command.arg("--data").arg(body);
+    }
     for (name, value) in headers {
         command.arg("--header").arg(format!("{name}: {value}"));
     }

@@ -306,8 +306,19 @@ fn show_stage(repo: &Path, path: &str, stage: u8) -> String {
     }
 }
 
-pub fn resolve_conflict(repo: &Path, path: &str, side: &str) -> Result<(), Error> {
+pub fn resolve_conflict(repo: &Path, path: &str, side: &str, text: &str) -> Result<(), Error> {
     let path = check_path(path)?;
+    if side == "text" {
+        if text.contains('\0') {
+            return Err(Error::Git("conflict text contains a null".into()));
+        }
+        let full = repo.join(path);
+        std::fs::write(&full, text).map_err(|source| Error::Read {
+            path: path.to_string(),
+            source,
+        })?;
+        return run(repo, &["add", "--", path]).map(|_| ());
+    }
     match side {
         "ours" => {
             run(repo, &["checkout", "--ours", "--", path])?;
@@ -409,14 +420,17 @@ fn split_hunks(text: &str) -> (String, Vec<String>) {
 
 /// Unified diff for one path. `staged` selects the index rather than the work tree.
 pub fn file_diff(repo: &Path, path: &str, staged: bool) -> Result<FileDiff, Error> {
-    file_diff_with(repo, path, staged, 3)
+    file_diff_with(repo, path, staged, 3, false)
 }
 
 /// `context` is the number of unchanged lines around each hunk. A large value shows the whole file.
-pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32) -> Result<FileDiff, Error> {
+pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignore_space: bool) -> Result<FileDiff, Error> {
     let path = check_path(path)?;
     let unified = format!("--unified={}", context.min(1_000_000));
     let mut args = vec!["diff", "--no-ext-diff", "--no-color", unified.as_str()];
+    if ignore_space {
+        args.push("--ignore-all-space");
+    }
     if staged {
         args.push("--cached");
     }

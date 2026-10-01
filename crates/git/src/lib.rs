@@ -23,7 +23,7 @@ pub use model::{
     RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
 pub use cli::{cancel_running, configure, set_http_proxy, set_passphrase, set_trace, stop_process_tree, use_bundled_git, Session, Trace};
-pub use ops::{approve_credential, perform, set_repo_author, Mutation, RebaseStep, ResetMode};
+pub use ops::{approve_credential, perform, repo_facts, scan_repositories, set_repo_author, Mutation, RebaseStep, RepoFacts, ResetMode};
 
 use gix::bstr::BStr;
 use serde::Serialize;

@@ -141,7 +141,7 @@ fn merge_conflict_rebase_abort_stash_and_tag() {
     let repo = repo();
     commit_file(&repo, "a.txt", "one\n", "base");
     fs::write(repo.path.join("a.txt"), "dirty\n").unwrap();
-    perform(&repo.path, Mutation::Stash { message: "wip".into() }).unwrap();
+    perform(&repo.path, Mutation::Stash { include_untracked: false, message: "wip".into() }).unwrap();
     let clean = status(&repo.path).unwrap();
     assert!(clean.staged.is_empty() && clean.unstaged.is_empty(), "{clean:?}");
     let stashed = repository_refs(&repo.path).unwrap();
@@ -242,7 +242,7 @@ fn resets_cherry_pick_and_revert() {
     repo.git(&["checkout", "-b", "side"]);
     commit_file(&repo, "c.txt", "c\n", "from-side");
     repo.git(&["checkout", "main"]);
-    perform(&repo.path, Mutation::CherryPick { rev: "side".into() }).unwrap();
+    perform(&repo.path, Mutation::CherryPick { rev: "side".into(), record: false }).unwrap();
     assert!(repo.output(&["log", "--format=%s"]).contains("from-side"));
     assert!(repo.path.join("c.txt").exists());
     perform(&repo.path, Mutation::Revert { rev: "HEAD".into() }).unwrap();
@@ -435,10 +435,10 @@ fn submodule_and_worktree() {
 fn git_flow_start_and_finish() {
     let repo = repo();
     commit_file(&repo, "a.txt", "a\n", "base");
-    perform(&repo.path, Mutation::GitFlowStart { name: "demo".into() }).unwrap();
+    perform(&repo.path, Mutation::GitFlowStart { name: "demo".into(), kind: String::new() }).unwrap();
     assert!(repo.output(&["rev-parse", "--abbrev-ref", "HEAD"]).contains("feature/demo"));
     commit_file(&repo, "b.txt", "b\n", "feature work");
-    perform(&repo.path, Mutation::GitFlowFinish { name: "demo".into() }).unwrap();
+    perform(&repo.path, Mutation::GitFlowFinish { name: "demo".into(), kind: String::new() }).unwrap();
     assert!(repo.output(&["rev-parse", "--abbrev-ref", "HEAD"]).contains("develop"));
     let log = repo.output(&["log", "--format=%s"]);
     assert!(log.contains("feature work"), "{log}");
@@ -488,6 +488,7 @@ fn resolve_conflict_keeps_ours() {
         Mutation::Resolve {
             file: "a.txt".into(),
             side: "ours".into(),
+            text: String::new(),
         },
     )
     .unwrap();
@@ -689,9 +690,9 @@ fn named_stash_pop_restores_that_stash() {
     let repo = repo();
     commit_file(&repo, "a.txt", "one\n", "base");
     fs::write(repo.path.join("a.txt"), "first\n").unwrap();
-    perform(&repo.path, Mutation::Stash { message: "first".into() }).unwrap();
+    perform(&repo.path, Mutation::Stash { include_untracked: false, message: "first".into() }).unwrap();
     fs::write(repo.path.join("a.txt"), "second\n").unwrap();
-    perform(&repo.path, Mutation::Stash { message: "second".into() }).unwrap();
+    perform(&repo.path, Mutation::Stash { include_untracked: false, message: "second".into() }).unwrap();
     let stashes = repository_refs(&repo.path).unwrap().stashes;
     let older = stashes.iter().find(|stash| stash.summary.contains("first")).expect("older stash");
     perform(&repo.path, Mutation::StashPop { name: older.name.clone() }).unwrap();
@@ -774,7 +775,7 @@ fn stash_records_its_parent() {
     commit_file(&repo, "a.txt", "one\n", "base");
     let parent = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
     fs::write(repo.path.join("a.txt"), "dirty\n").unwrap();
-    perform(&repo.path, Mutation::Stash { message: "keep".into() }).unwrap();
+    perform(&repo.path, Mutation::Stash { include_untracked: false, message: "keep".into() }).unwrap();
     let stash = repository_refs(&repo.path).unwrap().stashes.into_iter().next().expect("stash");
     assert!(stash.summary.contains("keep"), "{}", stash.summary);
     assert_eq!(stash.parent, parent);
@@ -785,6 +786,50 @@ fn rejects_an_option_shaped_revision() {
     let repo = repo();
     let error = perform(&repo.path, Mutation::Checkout { name: "--force".into() }).unwrap_err();
     assert!(error.to_string().contains("--force"), "{error}");
+}
+
+#[test]
+fn restore_file_checks_out_one_path() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    commit_file(&repo, "a.txt", "next\n", "next");
+    perform(
+        &repo.path,
+        Mutation::RestoreFile { rev: "HEAD~1".into(), file: "a.txt".into() },
+    )
+    .unwrap();
+    let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
+    assert!(text.contains("base"), "{text}");
+}
+
+#[test]
+fn write_gitignore_replaces_the_root_file() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    perform(&repo.path, Mutation::WriteGitignore { text: "target/\n".into() }).unwrap();
+    let text = fs::read_to_string(repo.path.join(".gitignore")).unwrap();
+    assert_eq!(text, "target/\n");
+}
+
+#[test]
+fn resolve_text_writes_the_editor_result() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main");
+    let _ = perform(
+        &repo.path,
+        Mutation::Merge { name: "side".into(), squash: false, no_ff: false, autostash: false },
+    );
+    perform(
+        &repo.path,
+        Mutation::Resolve { file: "a.txt".into(), side: "text".into(), text: "merged\n".into() },
+    )
+    .unwrap();
+    let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
+    assert_eq!(text, "merged\n");
 }
 
 struct RemoveDir(PathBuf);

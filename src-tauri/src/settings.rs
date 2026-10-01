@@ -190,6 +190,19 @@ pub struct Settings {
     pub merge_tool_path: String,
     #[serde(default)]
     pub merge_tool_args: String,
+    #[serde(default)]
+    pub ignore_space: bool,
+    #[serde(default)]
+    pub vertical_tabs: bool,
+    /// `repository<TAB>branch` pairs pinned in the sidebar.
+    #[serde(default)]
+    pub pinned_refs: Vec<String>,
+    /// Extra folders scanned by the repository manager.
+    #[serde(default)]
+    pub source_directories: Vec<String>,
+    /// `folder<TAB>label` names for repository-manager groups.
+    #[serde(default)]
+    pub group_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -376,6 +389,11 @@ impl Default for Settings {
             merge_tool_name: String::new(),
             merge_tool_path: String::new(),
             merge_tool_args: String::new(),
+            ignore_space: false,
+            vertical_tabs: false,
+            pinned_refs: Vec::new(),
+            source_directories: Vec::new(),
+            group_names: Vec::new(),
         }
     }
 }

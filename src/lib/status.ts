@@ -212,6 +212,11 @@ export type Settings = {
   mergeToolName: string;
   mergeToolPath: string;
   mergeToolArgs: string;
+  ignoreSpace: boolean;
+  verticalTabs: boolean;
+  pinnedRefs: string[];
+  sourceDirectories: string[];
+  groupNames: string[];
 };
 
 export type WorkspaceRecord = {
