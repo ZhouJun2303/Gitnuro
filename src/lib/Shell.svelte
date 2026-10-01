@@ -986,6 +986,14 @@
     else pulls = await invoke<typeof pulls>("forge_pulls", { path: repoPath() }).catch(() => []);
   }
 
+  function fitImage(event: Event) {
+    const image = event.currentTarget as HTMLImageElement;
+    const side = Math.max(image.naturalWidth, image.naturalHeight);
+    const scale = side > 0 && side < 128 ? Math.floor(128 / side) : 1;
+    image.style.width = scale > 1 ? `${image.naturalWidth * scale}px` : "";
+    image.style.imageRendering = scale > 1 ? "pixelated" : "";
+  }
+
   async function paintPixel(left: string, right: string) {
     const load = (src: string) =>
       new Promise<HTMLImageElement>((resolve, reject) => {
@@ -2999,15 +3007,27 @@
         <input type="range" min="0" max="100" bind:value={imagePos} aria-label={imageMode} />
       {/if}
     </div>
-    <div class="image-stage">
+    <div class="image-stage" class:pair={imageMode === "side"}>
       {#if imageMode === "pixel" && pixelUrl}
-        <img alt="" src={pixelUrl} />
+        <figure class="image-frame"><div class="image-box"><img alt="" src={pixelUrl} onload={fitImage} /></div></figure>
       {:else if imageMode === "side"}
-        {#if before}<img alt="" src={before} />{/if}
-        {#if after}<img alt="" src={after} />{/if}
+        <figure class="image-frame">
+          <figcaption class="del">{tr("dialog.imageBefore")}</figcaption>
+          <div class="image-box">{#if before}<img alt="" src={before} onload={fitImage} />{:else}<span class="meta">—</span>{/if}</div>
+        </figure>
+        <figure class="image-frame">
+          <figcaption class="add">{tr("dialog.imageAfter")}</figcaption>
+          <div class="image-box">{#if after}<img alt="" src={after} onload={fitImage} />{:else}<span class="meta">—</span>{/if}</div>
+        </figure>
       {:else}
-        {#if before}<img class="under" alt="" src={before} />{/if}
-        {#if after}<img class="over" alt="" src={after} style:opacity={imageMode === "onion" ? imagePos / 100 : 1} style:clip-path={imageMode === "swipe" ? `inset(0 ${100 - imagePos}% 0 0)` : "none"} />{/if}
+        <figure class="image-frame">
+          <div class="image-box">
+            <div class="image-overlay">
+              {#if before}<img alt="" src={before} onload={fitImage} />{/if}
+              {#if after}<img class="over" alt="" src={after} style:opacity={imageMode === "onion" ? imagePos / 100 : 1} style:clip-path={imageMode === "swipe" ? `inset(0 ${100 - imagePos}% 0 0)` : "none"} />{/if}
+            </div>
+          </div>
+        </figure>
       {/if}
     </div>
   {/snippet}
@@ -4413,9 +4433,16 @@
   .image-toolbar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; }
   .image-toolbar button { border: 0; background: transparent; font: inherit; color: inherit; padding: 2px 8px; border-radius: 6px; }
   .image-toolbar button.on { background: var(--selection); }
-  .image-stage { position: relative; display: flex; gap: 12px; padding: 12px; min-height: 80px; }
-  .image-stage img { max-width: 48%; background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
-  .image-stage .under, .image-stage .over { position: absolute; left: 12px; top: 12px; max-width: calc(100% - 24px); }
+  .image-stage { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 12px; padding: 0 12px 12px; }
+  .image-stage.pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .image-frame { margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .image-frame figcaption { align-self: flex-start; padding: 1px 8px; border-radius: 6px; font-size: 12px; }
+  .image-frame figcaption.del { background: var(--diff-del); }
+  .image-frame figcaption.add { background: var(--diff-add); }
+  .image-box { display: flex; align-items: center; justify-content: center; min-height: 160px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: repeating-conic-gradient(#e6e6e6 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
+  .image-box img { display: block; max-width: 100%; max-height: 60vh; height: auto; }
+  .image-overlay { position: relative; max-width: 100%; }
+  .image-overlay .over { position: absolute; inset: 0; width: 100%; height: 100%; }
   .pref-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--field); }
   .pref-tabs button { flex: 1; height: 28px; border: 0; background: transparent; color: var(--text-secondary); font: inherit; padding: 0 10px; border-radius: 7px; white-space: nowrap; transition: background 120ms ease, color 120ms ease; }
   .pref-tabs button:hover { color: var(--text); }

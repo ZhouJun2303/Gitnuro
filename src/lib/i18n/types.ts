@@ -209,6 +209,8 @@ export type Messages = {
     imageSwipe: string;
     imageOnion: string;
     imagePixel: string;
+    imageBefore: string;
+    imageAfter: string;
     noToken: string;
     noPulls: string;
     openBrowser: string;

@@ -209,6 +209,8 @@ export const zh: Messages = {
     imageSwipe: "滑动",
     imageOnion: "洋葱皮",
     imagePixel: "像素差分",
+    imageBefore: "修改前",
+    imageAfter: "修改后",
     noToken: "在偏好设置里填写令牌后才能加载。",
     noPulls: "没有打开的拉取请求。",
     openBrowser: "在浏览器中打开",

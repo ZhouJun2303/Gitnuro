@@ -209,6 +209,8 @@ export const en: Messages = {
     imageSwipe: "Swipe",
     imageOnion: "Onion",
     imagePixel: "Pixel",
+    imageBefore: "Before",
+    imageAfter: "After",
     noToken: "Add a token in Preferences to load this list.",
     noPulls: "No open pull requests.",
     openBrowser: "Open in browser",
