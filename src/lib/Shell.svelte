@@ -400,7 +400,8 @@
         const track = bar(side);
         if (!track?.firstElementChild) continue;
         let width = 0;
-        for (const cell of node.querySelectorAll<HTMLElement>(`.split-code[data-side="${side}"]`)) width = Math.max(width, cell.scrollWidth);
+        for (const text of node.querySelectorAll<HTMLElement>(`.split-code[data-side="${side}"] > .split-text`)) width = Math.max(width, text.offsetWidth);
+        width += 16;
         (track.firstElementChild as HTMLElement).style.width = `${width}px`;
         node.style.setProperty(`--sx-${side}`, `${track.scrollLeft}px`);
       }
@@ -4874,7 +4875,7 @@
   .split-bar,
   .split-bar-pad {
     position: sticky;
-    bottom: -8px;
+    bottom: 0;
   }
   .split-bar { overflow-x: auto; overflow-y: hidden; }
   .split-bar > div { height: 1px; }
