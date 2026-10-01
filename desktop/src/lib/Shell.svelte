@@ -1,21 +1,48 @@
 <script lang="ts">
-  import { commits, diffs, unstaged, type FileChange } from "./sample";
+  import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import { commits, diffs, unstaged as sampleUnstaged } from "./sample";
+  import { badge, type StatusFile, type StatusSnapshot } from "./status";
+
+  type Mode = "sample" | "loading" | "live" | "error";
+  type Row = { path: string; letter: string; tone: "added" | "modified" | "deleted" };
 
   let section = $state<"changes" | "history">("changes");
-  let selectedPath = $state<string | null>(unstaged[0]?.path ?? null);
+  let selectedPath = $state<string | null>(sampleUnstaged[0]?.path ?? null);
   let summary = $state("");
   let description = $state("");
   let amend = $state(false);
   let signOff = $state(false);
+  let mode = $state<Mode>(
+    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window ? "loading" : "sample",
+  );
+  let snapshot = $state<StatusSnapshot | null>(null);
+  let loadError = $state<string | null>(null);
 
   const summaryTooLong = $derived(summary.length > 72);
   const canCommit = $derived(summary.trim().length > 0 && !summaryTooLong);
-  const selectedDiff = $derived(selectedPath ? (diffs[selectedPath] ?? []) : []);
+  const selectedDiff = $derived(mode === "sample" && selectedPath ? (diffs[selectedPath] ?? []) : []);
+  const staged = $derived<Row[]>(mode === "live" ? (snapshot?.staged ?? []).map(toRow) : []);
+  const unstaged = $derived<Row[]>(
+    mode === "live"
+      ? (snapshot?.unstaged ?? []).map(toRow)
+      : sampleUnstaged.map((file) => ({
+          path: file.path,
+          letter: file.kind,
+          tone: file.kind === "A" ? "added" : file.kind === "D" ? "deleted" : "modified",
+        })),
+  );
+  const branchLabel = $derived(
+    mode === "sample" ? "main" : (snapshot?.branch ?? (mode === "loading" ? "…" : "HEAD")),
+  );
+  const tabLabel = $derived(mode === "live" && snapshot ? folderName(snapshot.path) : "Gitnuro");
+  const changeCount = $derived(
+    mode === "live" ? staged.length + unstaged.length : mode === "sample" ? unstaged.length : 0,
+  );
 
-  function kindClass(kind: FileChange["kind"]) {
-    if (kind === "A") return "added";
-    if (kind === "D") return "deleted";
-    return "modified";
+  function toRow(file: StatusFile): Row {
+    const mark = badge(file.kind);
+    return { path: file.path, letter: mark.letter, tone: mark.tone };
   }
 
   function fileName(path: string) {
@@ -27,13 +54,35 @@
     const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
     return slash >= 0 ? path.slice(0, slash) : "";
   }
+
+  function folderName(path: string) {
+    const trimmed = path.replace(/[\\/]+$/, "");
+    const slash = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+    return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
+  }
+
+  onMount(() => {
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    mode = "loading";
+    selectedPath = null;
+    invoke<StatusSnapshot>("workspace_status")
+      .then((value) => {
+        snapshot = value;
+        mode = "live";
+        selectedPath = value.unstaged[0]?.path ?? value.staged[0]?.path ?? null;
+      })
+      .catch((error: unknown) => {
+        loadError = error instanceof Error ? error.message : String(error);
+        mode = "error";
+      });
+  });
 </script>
 
 <div class="shell">
   <header class="chrome">
     <div class="tabs">
       <button class="tab" type="button">Default</button>
-      <button class="tab active" type="button">Gitnuro</button>
+      <button class="tab active" type="button">{tabLabel}</button>
     </div>
     <div class="toolbar">
       <button class="tool" type="button"><span class="glyph">↓</span>Fetch</button>
@@ -59,7 +108,7 @@
         onclick={() => (section = "changes")}
       >
         <span>Local Changes</span>
-        <span class="count">{unstaged.length}</span>
+        <span class="count">{changeCount}</span>
       </button>
       <button
         class="side"
@@ -73,8 +122,10 @@
       <div class="group">Local branches</div>
       <div class="side current">
         <span class="dot"></span>
-        <span class="name">main</span>
-        <span class="ahead">↑5</span>
+        <span class="name">{branchLabel}</span>
+        {#if mode === "sample"}
+          <span class="ahead">↑5</span>
+        {/if}
       </div>
       <div class="group">Remotes</div>
       <div class="side quiet"><span class="name">origin</span></div>
@@ -91,29 +142,54 @@
       <section class="changes">
         <div class="pane-head">
           <span>Staged</span>
-          <span class="count">0</span>
+          <span class="count">{staged.length}</span>
           <button class="text-button" type="button" disabled>Unstage all</button>
         </div>
-        <p class="empty">No staged changes</p>
+        {#if staged.length === 0}
+          <p class="empty">No staged changes</p>
+        {:else}
+          <div class="file-list staged-list">
+            {#each staged as file (file.path)}
+              <button
+                class="file"
+                class:selected={selectedPath === file.path}
+                type="button"
+                onclick={() => (selectedPath = file.path)}
+              >
+                <span class="badge {file.tone}">{file.letter}</span>
+                <span class="file-name">{fileName(file.path)}</span>
+                <span class="file-dir">{parentDir(file.path)}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
 
         <div class="pane-head">
           <span>Unstaged</span>
-          <span class="count">{unstaged.length}</span>
-          <button class="text-button" type="button">Stage all</button>
+          <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : unstaged.length}</span>
+          <button class="text-button" type="button" disabled>Stage all</button>
         </div>
         <div class="file-list">
-          {#each unstaged as file (file.path)}
-            <button
-              class="file"
-              class:selected={selectedPath === file.path}
-              type="button"
-              onclick={() => (selectedPath = file.path)}
-            >
-              <span class="badge {kindClass(file.kind)}">{file.kind}</span>
-              <span class="file-name">{fileName(file.path)}</span>
-              <span class="file-dir">{parentDir(file.path)}</span>
-            </button>
-          {/each}
+          {#if mode === "loading"}
+            <p class="empty">Reading repository status…</p>
+          {:else if mode === "error"}
+            <p class="empty">{loadError}</p>
+          {:else if unstaged.length === 0}
+            <p class="empty">No unstaged changes</p>
+          {:else}
+            {#each unstaged as file (file.path)}
+              <button
+                class="file"
+                class:selected={selectedPath === file.path}
+                type="button"
+                onclick={() => (selectedPath = file.path)}
+              >
+                <span class="badge {file.tone}">{file.letter}</span>
+                <span class="file-name">{fileName(file.path)}</span>
+                <span class="file-dir">{parentDir(file.path)}</span>
+              </button>
+            {/each}
+          {/if}
         </div>
 
         <form class="composer" onsubmit={(event) => event.preventDefault()}>
@@ -134,6 +210,10 @@
           </div>
         </form>
       </section>
+    {:else if mode !== "sample"}
+      <section class="history">
+        <p class="empty">History is not loaded yet</p>
+      </section>
     {:else}
       <section class="history">
         {#each commits as commit (commit.id)}
@@ -146,8 +226,8 @@
             <span class="lane" aria-hidden="true"></span>
             <span class="subject">{commit.summary}</span>
             <span class="badges">
-              {#each commit.badges as badge (badge)}
-                <span class="ref">{badge}</span>
+              {#each commit.badges as label (label)}
+                <span class="ref">{label}</span>
               {/each}
             </span>
             <span class="meta">{commit.author}</span>
@@ -159,12 +239,17 @@
     {/if}
 
     <section class="diff">
-      {#if section === "changes" && selectedPath && selectedDiff.length > 0}
+      {#if mode !== "sample" && section === "changes" && selectedPath}
+        <header class="diff-head">{selectedPath}</header>
+        <p class="diff-empty">Diff is not loaded yet</p>
+      {:else if section === "changes" && selectedPath && selectedDiff.length > 0}
         <header class="diff-head">{selectedPath}</header>
         <pre class="diff-body">{#each selectedDiff as line, index (index)}<span
               class:add={line.startsWith("+") && !line.startsWith("+++")}
               class:del={line.startsWith("-") && !line.startsWith("---")}
               class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+      {:else if mode !== "sample" && section === "history"}
+        <p class="diff-empty">History is not loaded yet</p>
       {:else if section === "history" && selectedPath}
         <header class="diff-head">{commits.find((row) => row.id === selectedPath)?.summary}</header>
         <p class="diff-empty">Select a file in this commit to see changes</p>
@@ -398,6 +483,11 @@
     flex: 1;
     overflow: auto;
     padding-bottom: 8px;
+  }
+
+  .staged-list {
+    flex: none;
+    max-height: 30%;
   }
 
   .file,

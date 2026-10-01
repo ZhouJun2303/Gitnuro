@@ -19,6 +19,7 @@ rs/Cargo.lock
 desktop/node_modules/
 desktop/.svelte-kit/
 desktop/src-tauri/target/
+desktop/target/
 src/main/resources/*awegit_rs*
 *.salive
 *.hprof
