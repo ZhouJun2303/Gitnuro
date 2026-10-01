@@ -5,4 +5,4 @@ set -eu
 cd "$(dirname "$0")/.."
 pnpm install
 pnpm tauri build
-echo "The disk image is under src-tauri/target/release/bundle"
+echo "The disk image is under target/release/bundle"

@@ -23,7 +23,10 @@
 - 不改全局 gitconfig。仓库本地配置和 `.git/awegit` 可以写
 - 写操作按仓库排队
 - 前端依赖写在 `package.json`，Rust 依赖写在对应的 `Cargo.toml`
-- 测试：`cargo test -p awegit-git -- --test-threads=1`
+- 网页界面：`pnpm dev`（http://127.0.0.1:1420，示例数据，没有 Git 后端）
+- 启动桌面：`pnpm start`（等同 `pnpm tauri dev`）
+- 测试：`pnpm test`（`cargo test -p awegit-git -- --test-threads=1`）
 - 类型检查：`pnpm check`
-- 开发：`pnpm tauri dev`
+- Windows 打包：`pnpm package:windows`
+- macOS 打包：`pnpm package:mac`
 - 不提交 `target/`、`node_modules/`、`src-tauri/target/`，也不提交打包进来的 MinGit
