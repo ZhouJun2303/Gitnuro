@@ -4,16 +4,13 @@ plugins {
     id("buildsrc.convention.kotlin-jvm")
 
     alias(libs.plugins.ksp)
-    alias(libs.plugins.compose.compiler)
-    alias(libs.plugins.compose)
     alias(libs.plugins.kotlinx.serialization)
 }
 
 dependencies {
     implementation(project(":common"))
 
-    // TODO Remove this after refactor
-    implementation(compose.desktop.currentOs)
+    implementation(libs.compose.runtime)
 
     implementation(libs.dagger)
     ksp(libs.dagger.compiler)

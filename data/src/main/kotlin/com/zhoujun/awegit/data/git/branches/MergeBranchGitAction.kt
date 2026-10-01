@@ -20,8 +20,8 @@ class MergeBranchGitAction @Inject constructor(
         repositoryPath: String,
         branch: Branch,
         fastForward: Boolean,
-        squash: Boolean = false,
-        fastForwardOnly: Boolean = false,
+        squash: Boolean,
+        fastForwardOnly: Boolean,
     ) = jgit.provide(repositoryPath) { git ->
 
         val fastForwardMode = when {

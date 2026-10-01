@@ -48,6 +48,7 @@ class ResolveConflictGitAction @Inject constructor(
                 file.outputStream().use { output -> input.copyTo(output) }
             }
             git.add().addFilepattern(wanted).call()
+            Unit
         }
     }
 

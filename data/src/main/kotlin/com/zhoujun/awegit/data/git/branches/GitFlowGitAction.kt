@@ -48,6 +48,7 @@ class GitFlowGitAction @Inject constructor(
                 .setName(branch)
                 .setStartPoint(base)
                 .call()
+            Unit
         }
     }
 
@@ -78,6 +79,7 @@ class GitFlowGitAction @Inject constructor(
                 git.branchDelete().setBranchNames(branch).setForce(false).call()
             }
             git.checkout().setName(if (type == GitFlowBranchType.Feature) config.develop else config.develop).call()
+            Unit
         }
     }
 
