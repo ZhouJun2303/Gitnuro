@@ -2133,10 +2133,10 @@
       </button>
       <input class="search side-filter" placeholder={tr("chrome.filterSidebar")} aria-label={tr("chrome.filterSidebar")} bind:value={sideQuery} />
 
-      {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void }[] = [])}
+      {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void }[] = [], empty = count === 0)}
         <div class="side section" class:selected={sideSelected === key} role="group">
-          <button class="file-select" type="button" aria-expanded={sideOpen(key)} onclick={() => pickSide(key)}>
-            <span class="twist">{sideOpen(key) ? "▾" : "▸"}</span>
+          <button class="file-select" type="button" aria-expanded={empty ? undefined : sideOpen(key)} onclick={() => (empty ? (sideSelected = key) : pickSide(key))}>
+            <span class="twist">{empty ? "" : sideOpen(key) ? "▾" : "▸"}</span>
             <span class="name">{label}</span>
             {#if count !== null}<span class="count">{count}</span>{/if}
           </button>
@@ -2150,7 +2150,7 @@
         {@render sideHead("branches", tr("chrome.localBranches"), null, [
           { label: tr("chrome.new"), run: () => { draft = ""; draftExtra = ""; dialog = "branch"; } },
           { label: tr("chrome.showAll"), run: showAllRefs },
-        ])}
+        ], visibleBranches.length === 0)}
         {#if sideOpen("branches")}
         {#each visibleBranches as branch, index (branch.name)}
           {@const group = branchGroup(branch.name)}
@@ -2194,18 +2194,19 @@
         {/if}
         {@render sideHead("remotes", tr("chrome.remotes"), null, [
           { label: tr("chrome.add"), run: () => { draft = ""; draftExtra = ""; dialog = "remote"; } },
-        ])}
+        ], refs.remotes.length === 0)}
         {#if sideOpen("remotes")}
         {#each refs.remotes as remote (remote.name)}
           {#if matchesQuery(remote.name, sideQuery) || remote.branches.some((branch) => matchesQuery(branch, sideQuery))}
           {@const remoteKey = `remote:${remote.name}`}
+          {@const remoteEmpty = remote.branches.length === 0 && !remote.head}
           <div class="side nested quiet" class:selected={sideSelected === remoteKey} role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("chrome.fetch"), run: () => mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: settings.fetchTags }) },
             { label: tr("dialog.url"), run: () => { draft = remote.name; draftExtra = remote.url ?? ""; dialog = "remote"; } },
             { label: tr("menu.remove"), run: () => mutate({ action: "removeRemote", name: remote.name }) },
           ])}>
-            <button class="file-select" type="button" aria-expanded={sideOpen(remoteKey)} title={remote.url ?? ""} onclick={() => pickSide(remoteKey)}>
-              <span class="twist">{sideOpen(remoteKey) ? "▾" : "▸"}</span>
+            <button class="file-select" type="button" aria-expanded={remoteEmpty ? undefined : sideOpen(remoteKey)} title={remote.url ?? ""} onclick={() => (remoteEmpty ? (sideSelected = remoteKey) : pickSide(remoteKey))}>
+              <span class="twist">{remoteEmpty ? "" : sideOpen(remoteKey) ? "▾" : "▸"}</span>
               <span class="name">{remote.name}</span>
               <span class="count">{remote.branches.length}</span>
             </button>
