@@ -6,10 +6,15 @@ AweGit 是 Windows 和 macOS 上的 Git 客户端。界面用 Tauri 2 和 Svelte
 
 ## 准备
 
-每个新终端先装好依赖，再让 Rust 链接器排到 PATH 前面。`pnpm dev` 和 `pnpm check` 不编译 Rust，可以不设这段 PATH。
+每个新终端先装好依赖。`pnpm start`、`pnpm test`、`pnpm tauri` 和 `pnpm package:windows` 会自己把 WinLibs 和 `%USERPROFILE%\.cargo\bin` 排到 PATH 前面。`pnpm dev` 和 `pnpm check` 不编译 Rust。
 
 ```powershell
 pnpm install
+```
+
+直接在终端里跑 `cargo` 时，这个会话还要自己补 PATH：
+
+```powershell
 $env:PATH = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin;$env:USERPROFILE\.cargo\bin;" + $env:PATH
 ```
 
