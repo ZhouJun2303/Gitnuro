@@ -14,6 +14,21 @@ export type StatusSnapshot = {
   unstaged: StatusFile[];
 };
 
+export type DiffLineKind = "add" | "delete" | "hunk" | "context" | "meta";
+
+export type DiffLine = {
+  kind: DiffLineKind;
+  text: string;
+};
+
+export type FileDiff = {
+  path: string;
+  staged: boolean;
+  binary: boolean;
+  truncated: boolean;
+  lines: DiffLine[];
+};
+
 export type BadgeTone = "added" | "modified" | "deleted";
 
 /** Single-letter badge used in the file list. */

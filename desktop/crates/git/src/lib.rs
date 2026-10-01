@@ -1,6 +1,13 @@
-//! Read a repository's staged and unstaged changes with gitoxide.
+//! Repository status, diffs, and the writes that change the index or `HEAD`.
+//!
+//! Status is read with gitoxide. Staging, committing, and diff text go through `git`.
+
+mod change;
+mod cli;
 
 use std::path::{Path, PathBuf};
+
+pub use change::{commit, file_diff, stage_all, stage_paths, unstage_all, unstage_paths, CommitRequest, DiffLine, DiffLineKind, FileDiff};
 
 use gix::bstr::BStr;
 use serde::Serialize;
@@ -52,6 +59,20 @@ pub enum Error {
     Item(#[from] gix::status::iter::Error),
     #[error(transparent)]
     Head(#[from] gix::reference::find::existing::Error),
+    #[error("git is not on PATH")]
+    GitMissing(#[source] std::io::Error),
+    #[error("{0}")]
+    Git(String),
+    #[error("commit summary is empty")]
+    EmptySummary,
+    #[error("path is not inside the repository: {0}")]
+    Path(String),
+    #[error("could not read {path}")]
+    Read {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Read status for the repository at `path` (the work tree, or any directory inside it).

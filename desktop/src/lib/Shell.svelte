@@ -2,9 +2,10 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { commits, diffs, unstaged as sampleUnstaged } from "./sample";
-  import { badge, type StatusFile, type StatusSnapshot } from "./status";
+  import { badge, type FileDiff, type StatusFile, type StatusSnapshot } from "./status";
 
   type Mode = "sample" | "loading" | "live" | "error";
+  type Side = "staged" | "unstaged";
   type Row = { path: string; letter: string; tone: "added" | "modified" | "deleted" };
 
   let section = $state<"changes" | "history">("changes");
@@ -13,14 +14,19 @@
   let description = $state("");
   let amend = $state(false);
   let signOff = $state(false);
+  let selectedSide = $state<Side>("unstaged");
   let mode = $state<Mode>(
     typeof window !== "undefined" && "__TAURI_INTERNALS__" in window ? "loading" : "sample",
   );
   let snapshot = $state<StatusSnapshot | null>(null);
   let loadError = $state<string | null>(null);
+  let actionError = $state<string | null>(null);
+  let busy = $state(false);
+  let diff = $state<FileDiff | null>(null);
+  let diffError = $state<string | null>(null);
+  let diffToken = 0;
 
   const summaryTooLong = $derived(summary.length > 72);
-  const canCommit = $derived(summary.trim().length > 0 && !summaryTooLong);
   const selectedDiff = $derived(mode === "sample" && selectedPath ? (diffs[selectedPath] ?? []) : []);
   const staged = $derived<Row[]>(mode === "live" ? (snapshot?.staged ?? []).map(toRow) : []);
   const unstaged = $derived<Row[]>(
@@ -39,6 +45,88 @@
   const changeCount = $derived(
     mode === "live" ? staged.length + unstaged.length : mode === "sample" ? unstaged.length : 0,
   );
+  const canCommit = $derived(
+    summary.trim().length > 0 &&
+      !summaryTooLong &&
+      !busy &&
+      (mode !== "live" || staged.length > 0 || amend),
+  );
+
+  function repoPath() {
+    return snapshot?.path;
+  }
+
+  function message(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  function applySnapshot(value: StatusSnapshot) {
+    snapshot = value;
+    mode = "live";
+    const sameSide = (selectedSide === "staged" ? value.staged : value.unstaged).some(
+      (file) => file.path === selectedPath,
+    );
+    if (selectedPath && sameSide) return;
+    const otherSide: Side = selectedSide === "staged" ? "unstaged" : "staged";
+    const other = otherSide === "staged" ? value.staged : value.unstaged;
+    if (selectedPath && other.some((file) => file.path === selectedPath)) {
+      selectedSide = otherSide;
+      return;
+    }
+    if (value.unstaged[0]) {
+      selectedSide = "unstaged";
+      selectedPath = value.unstaged[0].path;
+    } else if (value.staged[0]) {
+      selectedSide = "staged";
+      selectedPath = value.staged[0].path;
+    } else {
+      selectedPath = null;
+    }
+  }
+
+  async function loadDiff() {
+    if (mode !== "live" || !selectedPath || section !== "changes") {
+      diff = null;
+      diffError = null;
+      return;
+    }
+    const token = ++diffToken;
+    const file = selectedPath;
+    const staged = selectedSide === "staged";
+    try {
+      const value = await invoke<FileDiff>("file_diff", { path: repoPath(), file, staged });
+      if (token === diffToken) {
+        diff = value;
+        diffError = null;
+      }
+    } catch (error) {
+      if (token === diffToken) {
+        diff = null;
+        diffError = message(error);
+      }
+    }
+  }
+
+  function selectFile(path: string, side: Side) {
+    selectedPath = path;
+    selectedSide = side;
+    if (mode === "live") void loadDiff();
+  }
+
+  async function runChange(command: string, extra: Record<string, unknown> = {}) {
+    if (mode !== "live" || busy) return;
+    busy = true;
+    actionError = null;
+    try {
+      const value = await invoke<StatusSnapshot>(command, { path: repoPath(), ...extra });
+      applySnapshot(value);
+      await loadDiff();
+    } catch (error) {
+      actionError = message(error);
+    } finally {
+      busy = false;
+    }
+  }
 
   function toRow(file: StatusFile): Row {
     const mark = badge(file.kind);
@@ -66,13 +154,12 @@
     mode = "loading";
     selectedPath = null;
     invoke<StatusSnapshot>("workspace_status")
-      .then((value) => {
-        snapshot = value;
-        mode = "live";
-        selectedPath = value.unstaged[0]?.path ?? value.staged[0]?.path ?? null;
+      .then(async (value) => {
+        applySnapshot(value);
+        await loadDiff();
       })
       .catch((error: unknown) => {
-        loadError = error instanceof Error ? error.message : String(error);
+        loadError = message(error);
         mode = "error";
       });
   });
@@ -143,23 +230,19 @@
         <div class="pane-head">
           <span>Staged</span>
           <span class="count">{staged.length}</span>
-          <button class="text-button" type="button" disabled>Unstage all</button>
+          <button
+            class="text-button"
+            type="button"
+            disabled={mode !== "live" || busy || staged.length === 0}
+            onclick={() => runChange("unstage_all")}
+          >Unstage all</button>
         </div>
         {#if staged.length === 0}
           <p class="empty">No staged changes</p>
         {:else}
           <div class="file-list staged-list">
             {#each staged as file (file.path)}
-              <button
-                class="file"
-                class:selected={selectedPath === file.path}
-                type="button"
-                onclick={() => (selectedPath = file.path)}
-              >
-                <span class="badge {file.tone}">{file.letter}</span>
-                <span class="file-name">{fileName(file.path)}</span>
-                <span class="file-dir">{parentDir(file.path)}</span>
-              </button>
+              {@render fileRow(file, "staged")}
             {/each}
           </div>
         {/if}
@@ -167,7 +250,12 @@
         <div class="pane-head">
           <span>Unstaged</span>
           <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : unstaged.length}</span>
-          <button class="text-button" type="button" disabled>Stage all</button>
+          <button
+            class="text-button"
+            type="button"
+            disabled={mode !== "live" || busy || unstaged.length === 0}
+            onclick={() => runChange("stage_all")}
+          >Stage all</button>
         </div>
         <div class="file-list">
           {#if mode === "loading"}
@@ -178,21 +266,43 @@
             <p class="empty">No unstaged changes</p>
           {:else}
             {#each unstaged as file (file.path)}
-              <button
-                class="file"
-                class:selected={selectedPath === file.path}
-                type="button"
-                onclick={() => (selectedPath = file.path)}
-              >
-                <span class="badge {file.tone}">{file.letter}</span>
-                <span class="file-name">{fileName(file.path)}</span>
-                <span class="file-dir">{parentDir(file.path)}</span>
-              </button>
+              {@render fileRow(file, "unstaged")}
             {/each}
           {/if}
         </div>
 
-        <form class="composer" onsubmit={(event) => event.preventDefault()}>
+        {#snippet fileRow(file: Row, side: Side)}
+          <div class="file" class:selected={selectedPath === file.path && (mode !== "live" || selectedSide === side)}>
+            <button class="file-select" type="button" onclick={() => selectFile(file.path, side)}>
+              <span class="badge {file.tone}">{file.letter}</span>
+              <span class="file-name">{fileName(file.path)}</span>
+              <span class="file-dir">{parentDir(file.path)}</span>
+            </button>
+            {#if mode === "live"}
+              <button
+                class="text-button row-action"
+                type="button"
+                disabled={busy}
+                onclick={() => runChange(side === "staged" ? "unstage_path" : "stage_path", { file: file.path })}
+              >{side === "staged" ? "Unstage" : "Stage"}</button>
+            {/if}
+          </div>
+        {/snippet}
+
+        <form
+          class="composer"
+          onsubmit={(event) => {
+            event.preventDefault();
+            if (mode !== "live" || !canCommit) return;
+            void runChange("commit_changes", { summary, description, amend, signOff }).then(() => {
+              if (!actionError) {
+                summary = "";
+                description = "";
+                amend = false;
+              }
+            });
+          }}
+        >
           <label class="field">
             <input
               placeholder="Summary"
@@ -206,8 +316,11 @@
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={amend} /> Amend</label>
             <label class="check"><input type="checkbox" bind:checked={signOff} /> Sign-off</label>
-            <button class="commit" type="submit" disabled={!canCommit}>Commit</button>
+            <button class="commit" type="submit" disabled={!canCommit}>{busy ? "Working…" : "Commit"}</button>
           </div>
+          {#if actionError}
+            <p class="empty">{actionError}</p>
+          {/if}
         </form>
       </section>
     {:else if mode !== "sample"}
@@ -239,9 +352,23 @@
     {/if}
 
     <section class="diff">
-      {#if mode !== "sample" && section === "changes" && selectedPath}
+      {#if mode === "live" && section === "changes" && selectedPath}
         <header class="diff-head">{selectedPath}</header>
-        <p class="diff-empty">Diff is not loaded yet</p>
+        {#if diffError}
+          <p class="diff-empty">{diffError}</p>
+        {:else if !diff}
+          <p class="diff-empty">Reading diff…</p>
+        {:else if diff.binary}
+          <p class="diff-empty">Binary file</p>
+        {:else if diff.lines.length === 0}
+          <p class="diff-empty">No changes in this view</p>
+        {:else}
+          <pre class="diff-body">{#each diff.lines as line, index (index)}<span
+                class:add={line.kind === "add"}
+                class:del={line.kind === "delete"}
+                class:hunk={line.kind === "hunk"}
+                class:meta={line.kind === "meta"}>{line.text + "\n"}</span>{/each}{#if diff.truncated}<span class="meta">Diff truncated.</span>{/if}</pre>
+        {/if}
       {:else if section === "changes" && selectedPath && selectedDiff.length > 0}
         <header class="diff-head">{selectedPath}</header>
         <pre class="diff-body">{#each selectedDiff as line, index (index)}<span
@@ -506,6 +633,21 @@
     padding: 0 8px;
   }
 
+  .file-select {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-align: left;
+  }
+
+  .row-action {
+    margin-left: 0;
+    flex: none;
+  }
+
   .file.selected,
   .commit-row.selected {
     background: var(--selection);
@@ -535,6 +677,8 @@
   }
 
   .file-dir {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -698,7 +842,8 @@
     background: var(--diff-del);
   }
 
-  .diff-body .hunk {
+  .diff-body .hunk,
+  .diff-body .meta {
     color: var(--text-secondary);
   }
 

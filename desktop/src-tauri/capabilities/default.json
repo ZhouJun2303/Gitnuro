@@ -6,6 +6,12 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "allow-workspace-status"
+    "allow-workspace-status",
+    "allow-stage-all",
+    "allow-unstage-all",
+    "allow-stage-path",
+    "allow-unstage-path",
+    "allow-commit-changes",
+    "allow-file-diff"
   ]
 }

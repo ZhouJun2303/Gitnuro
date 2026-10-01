@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-unstage-path"
+description = "Enables the unstage_path command without any pre-configured scope."
+commands.allow = ["unstage_path"]
+
+[[permission]]
+identifier = "deny-unstage-path"
+description = "Denies the unstage_path command without any pre-configured scope."
+commands.deny = ["unstage_path"]
