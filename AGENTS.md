@@ -11,21 +11,19 @@
 
 ## 项目规范
 
-Compose Desktop + JGit 的多平台 Git 客户端。主体是 Kotlin（JVM），少量 Rust 经 UniFFI 暴露给 Kotlin。
+客户端只在 `desktop/`。Tauri 2 + SvelteKit / Svelte 5 + TypeScript，Rust 后端。
 
-模块：
-
-- `app`：界面、ViewModel、Dagger 装配
-- `domain`：用例（`*UseCase`）、接口（`I*GitAction`）、模型；错误用 `Either`
-- `data`：`*GitAction` 实现（JGit）和数据仓库
-- `common`：共用工具、`TabScope`
-- `rs`：Rust 绑定
+- `desktop/src`：界面
+- `desktop/src-tauri`：窗口、命令、设置
+- `desktop/crates/git`：状态用 gitoxide，历史和写操作走 `git` porcelain
 
 约定：
 
-- 包名 `com.zhoujun.awegit`
-- 依赖注入用 Dagger：构造函数 `@Inject`，接口在 Module 里 `@Binds`
-- 业务放 UseCase，Git 操作放 GitAction，界面不直接调 JGit
-- 依赖版本写在 `gradle/libs.versions.toml`
-- JVM toolchain 25；测试用 JUnit 5 + MockK
-- 运行 `./gradlew run`，测试 `./gradlew test`
+- 标识 `com.zhoujun.awegit`，产品名 AweGit
+- 不改全局 gitconfig。仓库本地配置和 `.git/awegit` 可以写
+- 写操作按仓库排队
+- 前端依赖写在 `desktop/package.json`，Rust 依赖写在对应的 `Cargo.toml`
+- 在 `desktop/` 测试：`cargo test -p awegit-git -- --test-threads=1`
+- 在 `desktop/` 做类型检查：`pnpm check`
+- 开发：`pnpm tauri dev`
+- 不提交 `desktop/target`、`desktop/node_modules`、`desktop/src-tauri/target`，也不提交打包进来的 MinGit
