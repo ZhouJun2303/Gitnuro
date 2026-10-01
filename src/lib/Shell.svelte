@@ -2044,26 +2044,19 @@
         <button type="button" disabled={busy} onclick={() => void doFetch()} oncontextmenu={(event) => openMenu(event, [
           { label: tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: mode !== "live", run: () => void doFetch() },
           { label: tr("chrome.fetchAll"), disabled: mode !== "live", run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: settings.fetchTags }) },
-        ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M5 7l3 3 3-3M3 13h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.fetch")}</button>
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>{tr("chrome.fetch")}</button>
         <button type="button" disabled={busy} onclick={() => void doPull()} oncontextmenu={(event) => openMenu(event, [
           { label: tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: mode !== "live", run: () => void doPull() },
           { label: tr("dialog.fastForward"), disabled: mode !== "live", run: () => { settings.pullRebase = false; void doPull(); } },
-        ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V4M5 7l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.pull")}</button>
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg>{tr("chrome.pull")}</button>
         <button type="button" disabled={busy} onclick={() => void doPush()} oncontextmenu={(event) => openMenu(event, [
           { label: tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: mode !== "live", run: () => void doPush() },
           { label: tr("menu.createTag"), disabled: mode !== "live", run: () => void mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: settings.forceWithLease }) },
-        ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14V5M5 8l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.push")}</button>
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg>{tr("chrome.push")}</button>
       </div>
-      <button class="icon-btn" type="button" disabled={busy} title={tr("chrome.stash")} onclick={() => { draft = ""; dialog = "stash"; }} oncontextmenu={(event) => openMenu(event, [
-        { label: tr("chrome.stash"), shortcut: shortcutLabel("stash"), disabled: mode !== "live", run: () => { draft = ""; dialog = "stash"; } },
-        { label: tr("chrome.pop"), disabled: mode !== "live", run: () => void mutate({ action: "stashPop" }) },
-      ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5h10v8H3zM5 5V3h6v2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
-      <button class="icon-btn" type="button" disabled={busy} title={tr("chrome.flow")} onclick={() => { draft = ""; dialog = "flow"; }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h4v4H3zM9 9h4v4H9zM5 7v2h4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
-      <button class="icon-btn" type="button" title={tr("chrome.notifications")} onclick={() => openForge("notes")}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a4 4 0 0 1 4 4v2l1 2H3l1-2V6a4 4 0 0 1 4-4zM6.5 12a1.5 1.5 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>{#if notices.some((item) => item.unread)}<span class="count badge-count">{notices.filter((item) => item.unread).length}</span>{/if}</button>
-      <button class="icon-btn" type="button" title={tr("chrome.terminal")} onclick={() => invoke("open_terminal", { path: repoPath() })}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4l4 4-4 4M8 12h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
-      <button class="icon-btn" type="button" title={tr("chrome.explorer")} onclick={() => snapshot && openPath(snapshot.path)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h5l1 2h6v7H2z" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
-      <button class="icon-btn" type="button" title={tr("chrome.preferences")} onclick={() => (dialog = "prefs")}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-      <button class="icon-btn" type="button" title={tr("chrome.pulls")} onclick={() => openForge("pulls")}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="4" r="1.4" fill="none" stroke="currentColor"/><circle cx="12" cy="12" r="1.4" fill="none" stroke="currentColor"/><path d="M4 5.5v5a2 2 0 0 0 2 2h4.2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
+      <span class="chrome-divider" aria-hidden="true"></span>
+      <button class="icon-btn" type="button" title={tr("chrome.terminal")} onclick={() => invoke("open_terminal", { path: repoPath() })}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m7 9 3 3-3 3M12 15h5"/></svg></button>
+      <button class="icon-btn" type="button" title={tr("chrome.explorer")} onclick={() => snapshot && openPath(snapshot.path)}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
     </div>
   </header>
 
@@ -3732,21 +3725,24 @@
     color: var(--text-secondary);
   }
 
-  .badge-count {
-    position: absolute;
-    top: 1px;
-    right: 1px;
-    min-width: 14px;
-    height: 14px;
-    padding: 0 3px;
-    border-radius: 7px;
-    background: var(--accent);
-    color: var(--on-accent);
-    font-size: 10px;
-    line-height: 14px;
-  }
   .tab-close { opacity: 0; }
   .tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
+  .line-icon {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .chrome-divider {
+    width: 1px;
+    height: 16px;
+    margin: 0 2px;
+    background: var(--separator);
+    flex: none;
+  }
+
   .glyph {
     font-size: 13px;
     line-height: 1;
