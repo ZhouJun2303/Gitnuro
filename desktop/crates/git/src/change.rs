@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use crate::cli::{check_path, run, run_stdin};
+use crate::cli::{check_path, commit_config, run, run_stdin};
 use crate::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +55,10 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
         return Err(Error::EmptySummary);
     }
     let description = request.description.trim();
-    let mut args = vec!["commit".to_string(), "-m".to_string(), summary.to_string()];
+    let mut args = commit_config(repo);
+    args.push("commit".to_string());
+    args.push("-m".to_string());
+    args.push(summary.to_string());
     if !description.is_empty() {
         args.push("-m".to_string());
         args.push(description.to_string());
@@ -88,6 +91,9 @@ fn git_paths(repo: &Path, prefix: &[&str], paths: &[String]) -> Result<(), Error
 pub struct DiffLine {
     pub kind: DiffLineKind,
     pub text: String,
+    /// Index into the file that `stage_line` edits. Absent for context and headers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage_at: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -146,6 +152,75 @@ pub fn stage_hunk(repo: &Path, path: &str, index: u32, unstage: bool) -> Result<
     run_stdin(repo, &apply, patch.as_bytes()).map(|_| ())
 }
 
+/// Stage or unstage one added or removed line. `at` is the index carried on that diff line.
+pub fn stage_line(repo: &Path, path: &str, text: &str, addition: bool, at: u32, unstage: bool) -> Result<(), Error> {
+    let path = check_path(path)?;
+    if text.contains(['\n', '\r', '\0']) {
+        return Err(Error::Git("a staged line cannot contain a newline".into()));
+    }
+    let current = index_blob(repo, path)?;
+    let (mut lines, trailing) = split_lines(&current);
+    let remove = unstage == addition;
+    if remove {
+        let index = at as usize;
+        if lines.get(index).map(String::as_str) != Some(text) {
+            return Err(Error::Git(format!("line {at} is not in {path}")));
+        }
+        lines.remove(index);
+    } else {
+        let index = (at as usize).min(lines.len());
+        lines.insert(index, text.to_string());
+    }
+    let mut body = lines.join("\n");
+    if trailing || !body.is_empty() {
+        body.push('\n');
+    }
+    write_index(repo, path, &body)
+}
+
+fn index_blob(repo: &Path, path: &str) -> Result<String, Error> {
+    match run(repo, &["show", &format!(":{path}")]) {
+        Ok(output) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+        Err(Error::Git(_)) => Ok(String::new()),
+        Err(error) => Err(error),
+    }
+}
+
+fn split_lines(text: &str) -> (Vec<String>, bool) {
+    if text.is_empty() {
+        return (Vec::new(), true);
+    }
+    let trailing = text.ends_with('\n');
+    let mut lines: Vec<String> = text.split('\n').map(|line| line.trim_end_matches('\r').to_string()).collect();
+    if trailing {
+        lines.pop();
+    }
+    (lines, trailing)
+}
+
+fn write_index(repo: &Path, path: &str, body: &str) -> Result<(), Error> {
+    let hashed = run_stdin(repo, &["hash-object", "-w", "--stdin"], body.as_bytes())?;
+    let hash = String::from_utf8_lossy(&hashed.stdout).trim().to_string();
+    if hash.len() < 40 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(Error::Git("git hash-object returned no id".into()));
+    }
+    let mode = index_mode(repo, path);
+    let info = format!("{mode},{hash},{path}");
+    run(repo, &["update-index", "--add", "--cacheinfo", &info]).map(|_| ())
+}
+
+fn index_mode(repo: &Path, path: &str) -> String {
+    let Ok(output) = run(repo, &["ls-files", "-s", "--", path]) else {
+        return "100644".into();
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.split_whitespace()
+        .next()
+        .filter(|mode| mode.len() == 6 && mode.chars().all(|c| c.is_ascii_digit()))
+        .unwrap_or("100644")
+        .to_string()
+}
+
 fn split_hunks(text: &str) -> (String, Vec<String>) {
     let mut preamble = String::new();
     let mut hunks = Vec::new();
@@ -172,8 +247,14 @@ fn split_hunks(text: &str) -> (String, Vec<String>) {
 
 /// Unified diff for one path. `staged` selects the index rather than the work tree.
 pub fn file_diff(repo: &Path, path: &str, staged: bool) -> Result<FileDiff, Error> {
+    file_diff_with(repo, path, staged, 3)
+}
+
+/// `context` is the number of unchanged lines around each hunk. A large value shows the whole file.
+pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32) -> Result<FileDiff, Error> {
     let path = check_path(path)?;
-    let mut args = vec!["diff", "--no-ext-diff", "--no-color", "--unified=3"];
+    let unified = format!("--unified={}", context.min(1_000_000));
+    let mut args = vec!["diff", "--no-ext-diff", "--no-color", unified.as_str()];
     if staged {
         args.push("--cached");
     }
@@ -278,9 +359,11 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
     }
     let mut body: Vec<DiffLine> = parts
         .into_iter()
-        .map(|line| DiffLine {
+        .enumerate()
+        .map(|(index, line)| DiffLine {
             kind: DiffLineKind::Add,
             text: format!("+{line}"),
+            stage_at: Some(index as u32),
         })
         .collect();
     let truncated = body.len() > MAX_DIFF_LINES;
@@ -288,6 +371,7 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
     let mut lines = vec![DiffLine {
         kind: DiffLineKind::Hunk,
         text: format!("@@ -0,0 +1,{} @@", body.len()),
+        stage_at: None,
     }];
     lines.append(&mut body);
     Ok(FileDiff {
@@ -304,8 +388,13 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
     let mut lines = Vec::new();
     let mut binary = false;
     let mut truncated = false;
+    let mut in_hunk = false;
+    let mut old_i = 0u32;
+    let mut new_i = 0u32;
+    let mut insert_at = 0u32;
+    let mut last_keep: i32 = -1;
     for raw in text.lines() {
-        if raw.starts_with("Binary files ") {
+        if raw.starts_with("Binary files ") || raw.starts_with("GIT binary patch") {
             binary = true;
             break;
         }
@@ -316,9 +405,22 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
             truncated = true;
             break;
         }
-        let kind = if raw.starts_with("@@") {
-            DiffLineKind::Hunk
-        } else if raw.starts_with('+') && !raw.starts_with("+++") {
+        if raw.starts_with("@@") {
+            if let Some((old_start, old_count, new_start, _)) = hunk_header(raw) {
+                in_hunk = true;
+                old_i = old_start.saturating_sub(1);
+                new_i = new_start.saturating_sub(1);
+                insert_at = if old_count == 0 { old_start } else { old_i };
+                last_keep = new_start as i32 - 1;
+            }
+            lines.push(DiffLine {
+                kind: DiffLineKind::Hunk,
+                text: raw.to_string(),
+                stage_at: None,
+            });
+            continue;
+        }
+        let kind = if raw.starts_with('+') && !raw.starts_with("+++") {
             DiffLineKind::Add
         } else if raw.starts_with('-') && !raw.starts_with("---") {
             DiffLineKind::Delete
@@ -327,9 +429,32 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
         } else {
             DiffLineKind::Meta
         };
+        let mut stage_at = None;
+        if in_hunk {
+            match kind {
+                DiffLineKind::Context => {
+                    insert_at = old_i + 1;
+                    last_keep = new_i as i32;
+                    old_i += 1;
+                    new_i += 1;
+                }
+                DiffLineKind::Delete => {
+                    let unstage_at = if last_keep < 0 { 0 } else { last_keep as u32 + 1 };
+                    stage_at = Some(if staged { unstage_at } else { old_i });
+                    old_i += 1;
+                }
+                DiffLineKind::Add => {
+                    stage_at = Some(if staged { new_i } else { insert_at });
+                    last_keep = new_i as i32;
+                    new_i += 1;
+                }
+                _ => {}
+            }
+        }
         lines.push(DiffLine {
             kind,
             text: raw.to_string(),
+            stage_at,
         });
     }
     FileDiff {
@@ -340,4 +465,101 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
         lines,
         hunks: 0,
     }
+}
+
+fn hunk_header(line: &str) -> Option<(u32, u32, u32, u32)> {
+    let rest = line.strip_prefix("@@ -")?;
+    let (old, rest) = rest.split_once(" +")?;
+    let new = rest.split_once(' ')?.0;
+    let (old_start, old_count) = split_count(old)?;
+    let (new_start, new_count) = split_count(new)?;
+    Some((old_start, old_count, new_start, new_count))
+}
+
+fn split_count(text: &str) -> Option<(u32, u32)> {
+    if let Some((count, size)) = text.split_once(',') {
+        Some((count.parse().ok()?, size.parse().ok()?))
+    } else {
+        Some((text.parse().ok()?, 1))
+    }
+}
+
+/// Image bytes from the work tree, when the path is a png, jpeg, gif, webp, or bmp.
+pub fn file_preview(repo: &Path, path: &str) -> Result<Option<FilePreview>, Error> {
+    let path = check_path(path)?;
+    let full = repo.join(path);
+    let bytes = match std::fs::read(&full) {
+        Ok(bytes) => bytes,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(Error::Read {
+                path: path.to_string(),
+                source,
+            })
+        }
+    };
+    if bytes.len() > 8_000_000 {
+        return Ok(None);
+    }
+    let Some((mime, animated)) = image_kind(&bytes) else {
+        return Ok(None);
+    };
+    Ok(Some(FilePreview {
+        mime: mime.into(),
+        data_url: format!("data:{mime};base64,{}", base64_encode(&bytes)),
+        animated,
+    }))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePreview {
+    pub mime: String,
+    pub data_url: String,
+    pub animated: bool,
+}
+
+fn image_kind(bytes: &[u8]) -> Option<(&'static str, bool)> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some(("image/png", false));
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some(("image/jpeg", false));
+    }
+    if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        let frames = bytes.windows(8).filter(|window| *window == b"\x21\xF9\x04").count();
+        return Some(("image/gif", frames > 1));
+    }
+    if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        let animated = bytes.windows(4).any(|window| window == b"ANIM");
+        return Some(("image/webp", animated));
+    }
+    if bytes.starts_with(b"BM") {
+        return Some(("image/bmp", false));
+    }
+    None
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0] as u32;
+        let second = chunk.get(1).copied().unwrap_or(0) as u32;
+        let third = chunk.get(2).copied().unwrap_or(0) as u32;
+        let value = (first << 16) | (second << 8) | third;
+        out.push(TABLE[((value >> 18) & 63) as usize] as char);
+        out.push(TABLE[((value >> 12) & 63) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[((value >> 6) & 63) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(value & 63) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
 }

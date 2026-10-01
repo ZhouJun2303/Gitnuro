@@ -22,6 +22,9 @@ pub struct CommitRow {
     pub parents: Vec<String>,
     pub refs: Vec<String>,
     pub lane: u32,
+    /// Unix seconds from `%at`. Zero when the log line has no timestamp.
+    #[serde(default)]
+    pub at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -94,15 +97,20 @@ pub enum InProgress {
 }
 
 pub fn commit_log(repo: &Path, limit: usize) -> Result<Vec<CommitRow>, Error> {
-    log_with(repo, limit, &[])
+    log_with(repo, limit, true, &[])
+}
+
+/// Commits reachable from `HEAD` only, without `--all`.
+pub fn branch_commits(repo: &Path, limit: usize) -> Result<Vec<CommitRow>, Error> {
+    log_with(repo, limit, false, &[])
 }
 
 pub fn file_history(repo: &Path, path: &str, limit: usize) -> Result<Vec<CommitRow>, Error> {
     let path = check_path(path)?;
-    log_with(repo, limit, &[path])
+    log_with(repo, limit, false, &[path])
 }
 
-fn log_with(repo: &Path, limit: usize, path: &[&str]) -> Result<Vec<CommitRow>, Error> {
+fn log_with(repo: &Path, limit: usize, all: bool, path: &[&str]) -> Result<Vec<CommitRow>, Error> {
     if run(repo, &["rev-parse", "--verify", "HEAD"]).is_err() {
         return Ok(Vec::new());
     }
@@ -113,11 +121,11 @@ fn log_with(repo: &Path, limit: usize, path: &[&str]) -> Result<Vec<CommitRow>, 
         &limit,
         "--date-order",
         "-z",
-        "--pretty=format:%H%x1f%P%x1f%an%x1f%ar%x1f%s%x1f%D",
+        "--pretty=format:%H%x1f%P%x1f%an%x1f%ar%x1f%s%x1f%D%x1f%at",
     ];
-    if path.is_empty() {
+    if path.is_empty() && all {
         args.insert(1, "--all");
-    } else {
+    } else if !path.is_empty() {
         args.push("--");
         args.extend_from_slice(path);
     }
@@ -143,6 +151,7 @@ fn parse_commits(text: &str) -> Vec<CommitRow> {
         let when = fields.next().unwrap_or("").to_string();
         let summary = fields.next().unwrap_or("").to_string();
         let refs = parse_decoration(fields.next().unwrap_or(""));
+        let at = fields.next().unwrap_or("").trim().parse().unwrap_or(0);
         let short_id = id.chars().take(7).collect();
         commits.push(CommitRow {
             id,
@@ -153,6 +162,7 @@ fn parse_commits(text: &str) -> Vec<CommitRow> {
             parents,
             refs,
             lane: 0,
+            at,
         });
     }
     commits
@@ -253,9 +263,26 @@ pub fn blame_file(repo: &Path, path: &str) -> Result<Vec<BlameLine>, Error> {
 }
 
 pub fn show_commit_file(repo: &Path, id: &str, path: &str) -> Result<FileDiff, Error> {
+    show_commit_file_with(repo, id, path, 3)
+}
+
+pub fn show_commit_file_with(repo: &Path, id: &str, path: &str, context: u32) -> Result<FileDiff, Error> {
     let id = check_rev(id)?;
     let path = check_path(path)?;
-    let output = run(repo, &["show", "--no-ext-diff", "--no-color", "--unified=3", "--format=", id, "--", path])?;
+    let unified = format!("--unified={}", context.min(1_000_000));
+    let output = run(
+        repo,
+        &[
+            "show",
+            "--no-ext-diff",
+            "--no-color",
+            &unified,
+            "--format=",
+            id,
+            "--",
+            path,
+        ],
+    )?;
     Ok(parse_diff(path, false, &String::from_utf8_lossy(&output.stdout)))
 }
 

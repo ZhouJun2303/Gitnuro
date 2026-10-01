@@ -21,6 +21,11 @@ fn main() {
             "watch_repository",
             "open_terminal",
             "suggest_commit_message",
+            "file_preview",
+            "cancel_operation",
+            "set_passphrase",
+            "approve_credential",
+            "check_for_update",
         ]),
     );
     tauri_build::try_build(attributes).expect("failed to run tauri-build");

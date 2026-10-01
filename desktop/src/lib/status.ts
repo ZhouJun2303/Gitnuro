@@ -19,6 +19,7 @@ export type DiffLineKind = "add" | "delete" | "hunk" | "context" | "meta";
 export type DiffLine = {
   kind: DiffLineKind;
   text: string;
+  stageAt?: number;
 };
 
 export type FileDiff = {
@@ -59,6 +60,7 @@ export type CommitRow = {
   parents: string[];
   refs: string[];
   lane: number;
+  at: number;
 };
 
 export type BranchRow = {
@@ -111,6 +113,40 @@ export type Settings = {
   aiModel: string;
   aiApiKey: string;
   terminal: string;
+  swapPanes: boolean;
+  showEntireFile: boolean;
+  linesHeight: string;
+  uiScale: number;
+  dateRelative: boolean;
+  dateFormat: string;
+  date24h: boolean;
+  hiddenRefs: string;
+  authorName: string;
+  authorEmail: string;
+  sslVerify: boolean;
+  sslCaFile: string;
+  proxyUser: string;
+  proxyPassword: string;
+  signCommits: boolean;
+  mergeNoFf: boolean;
+  mergeAutostash: boolean;
+  cloneDirectory: string;
+  windowX: number;
+  windowY: number;
+  windowWidth: number;
+  windowHeight: number;
+};
+
+export type FilePreview = {
+  mime: string;
+  dataUrl: string;
+  animated: boolean;
+};
+
+export type UpdateNotice = {
+  appVersion: string;
+  appCode: number;
+  downloadUrl: string;
 };
 
 export type Suggestion = {

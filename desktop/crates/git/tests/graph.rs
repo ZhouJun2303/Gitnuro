@@ -2,7 +2,7 @@ mod common;
 
 use std::fs;
 
-use awegit_git::{blame_file, commit_files, commit_log, repository_refs, ChangeKind};
+use awegit_git::{blame_file, branch_commits, commit_files, commit_log, repository_refs, ChangeKind};
 
 fn repo() -> common::TempRepo {
     let repo = common::TempRepo::new();
@@ -48,10 +48,29 @@ fn log_lists_commits_branches_and_tags() {
 
     let blame = blame_file(&repo.path, "c.txt").unwrap();
     assert!(blame.iter().any(|line| line.text.contains("one")), "{blame:?}");
+    assert!(log.iter().all(|commit| commit.at > 0), "{log:?}");
 
     let refs = repository_refs(&repo.path).unwrap();
     assert!(refs.branches.iter().any(|branch| branch.name == "main" && branch.current));
     assert!(refs.branches.iter().any(|branch| branch.name == "topic" && !branch.current));
     assert!(refs.tags.iter().any(|tag| tag.name == "v1"));
     assert_eq!(refs.worktrees.len(), 1, "{:?}", refs.worktrees);
+}
+
+#[test]
+fn branch_log_hides_other_branches() {
+    let repo = repo();
+    fs::write(repo.path.join("a.txt"), "one\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    repo.git(&["commit", "-m", "first"]);
+    repo.git(&["checkout", "-b", "other"]);
+    fs::write(repo.path.join("b.txt"), "two\n").unwrap();
+    repo.git(&["add", "b.txt"]);
+    repo.git(&["commit", "-m", "only-other"]);
+    repo.git(&["checkout", "main"]);
+
+    let current = branch_commits(&repo.path, 20).unwrap();
+    assert!(current.iter().all(|commit| commit.summary != "only-other"), "{current:?}");
+    let all = commit_log(&repo.path, 20).unwrap();
+    assert!(all.iter().any(|commit| commit.summary == "only-other"), "{all:?}");
 }

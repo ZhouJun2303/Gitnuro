@@ -4,27 +4,115 @@
 //! and the text of a diff go through `git` so filters, hooks, and line endings match
 //! what the user already has configured. Nothing here writes the global gitconfig.
 
-use std::cell::RefCell;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Mutex;
 
 use crate::Error;
 
-thread_local! {
-    static HTTP_PROXY: RefCell<String> = const { RefCell::new(String::new()) };
+static BUNDLED_GIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+static CHILDREN: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+/// Values applied to `git` child processes. Nothing here is written to gitconfig.
+#[derive(Clone)]
+pub struct Session {
+    pub proxy: String,
+    pub author_name: String,
+    pub author_email: String,
+    pub ssl_verify: bool,
+    pub ssl_ca: String,
+    pub sign_commits: bool,
+    pub ask_user: String,
 }
 
-static BUNDLED_GIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+impl Default for Session {
+    fn default() -> Self {
+        Self {
+            proxy: String::new(),
+            author_name: String::new(),
+            author_email: String::new(),
+            ssl_verify: true,
+            ssl_ca: String::new(),
+            sign_commits: false,
+            ask_user: String::new(),
+        }
+    }
+}
+
+struct Process {
+    session: Session,
+    passphrase: String,
+}
+
+static PROCESS: Mutex<Process> = Mutex::new(Process {
+    session: Session {
+        proxy: String::new(),
+        author_name: String::new(),
+        author_email: String::new(),
+        ssl_verify: true,
+        ssl_ca: String::new(),
+        sign_commits: false,
+        ask_user: String::new(),
+    },
+    passphrase: String::new(),
+});
 
 /// Prefer a Portable Git `cmd` directory shipped beside the executable.
 pub fn use_bundled_git(dir: &Path) {
     let _ = BUNDLED_GIT.set(dir.display().to_string());
 }
 
-/// Proxy used by the next `git` processes on this thread. Empty clears it.
-/// This does not write gitconfig.
+/// Replace the session used by later `git` processes. The in-memory passphrase is kept.
+pub fn configure(session: Session) {
+    if let Ok(mut guard) = PROCESS.lock() {
+        let ask_user = guard.session.ask_user.clone();
+        guard.session = session;
+        guard.session.ask_user = ask_user;
+    }
+}
+
+/// Remember a signing or askpass secret for this process only. It is not written to settings.
+pub fn set_passphrase(user: String, secret: String) {
+    if secret.contains(['\n', '\r', '\0']) || user.contains(['\n', '\r', '\0']) {
+        return;
+    }
+    if let Ok(mut guard) = PROCESS.lock() {
+        guard.session.ask_user = user;
+        guard.passphrase = secret;
+    }
+}
+
+/// Proxy used by later `git` processes. Empty clears it. This does not write gitconfig.
 pub fn set_http_proxy(value: Option<String>) {
-    HTTP_PROXY.with(|slot| *slot.borrow_mut() = value.unwrap_or_default());
+    if let Ok(mut guard) = PROCESS.lock() {
+        guard.session.proxy = value.unwrap_or_default();
+    }
+}
+
+pub(crate) fn session_snapshot() -> (Session, String) {
+    PROCESS
+        .lock()
+        .map(|guard| (guard.session.clone(), guard.passphrase.clone()))
+        .unwrap_or_else(|_| (Session::default(), String::new()))
+}
+
+/// Stop every `git` process this library started, including grandchildren.
+pub fn cancel_running() {
+    let pids = CHILDREN.lock().map(|guard| guard.clone()).unwrap_or_default();
+    for pid in pids {
+        stop_process_tree(pid);
+    }
+}
+
+pub fn stop_process_tree(pid: u32) {
+    if cfg!(windows) {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .output();
+    } else {
+        let _ = Command::new("kill").args(["-TERM", &format!("-{pid}")]).output();
+        let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).output();
+    }
 }
 
 pub fn run(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
@@ -49,7 +137,10 @@ fn run_prepared(
     command
         .current_dir(repo)
         .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0");
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     if let Some(dir) = BUNDLED_GIT.get() {
         let mut path = std::ffi::OsString::from(dir);
         path.push(";");
@@ -58,34 +149,60 @@ fn run_prepared(
         }
         command.env("PATH", path);
     }
-    let proxy = HTTP_PROXY.with(|slot| slot.borrow().clone());
-    if !proxy.is_empty() {
-        command.env("http_proxy", &proxy);
-        command.env("https_proxy", &proxy);
-        command.env("HTTP_PROXY", &proxy);
-        command.env("HTTPS_PROXY", &proxy);
+    let (session, passphrase) = session_snapshot();
+    if !session.proxy.is_empty() {
+        command.env("http_proxy", &session.proxy);
+        command.env("https_proxy", &session.proxy);
+        command.env("HTTP_PROXY", &session.proxy);
+        command.env("HTTPS_PROXY", &session.proxy);
+    }
+    if !session.author_name.is_empty() {
+        command.env("GIT_AUTHOR_NAME", &session.author_name);
+        command.env("GIT_COMMITTER_NAME", &session.author_name);
+    }
+    if !session.author_email.is_empty() {
+        command.env("GIT_AUTHOR_EMAIL", &session.author_email);
+        command.env("GIT_COMMITTER_EMAIL", &session.author_email);
+    }
+    if !session.ssl_verify {
+        command.env("GIT_SSL_NO_VERIFY", "1");
+    }
+    if !session.ssl_ca.is_empty() {
+        command.env("GIT_SSL_CAINFO", &session.ssl_ca);
+    }
+    if !passphrase.is_empty() {
+        if let Some(script) = askpass_script() {
+            command.env("GIT_ASKPASS", &script);
+            command.env("SSH_ASKPASS", &script);
+            command.env("SSH_ASKPASS_REQUIRE", "force");
+            command.env("AWE_ASKPASS", &passphrase);
+            command.env("AWE_ASK_USER", &session.ask_user);
+        }
     }
     for (key, value) in env {
         command.env(key, value);
     }
-    let output = if let Some(bytes) = stdin_bytes {
-        let mut child = command
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(Error::GitMissing)?;
-        if let Some(mut stdin) = child.stdin.take() {
-            use std::io::Write;
-            stdin.write_all(bytes).map_err(|source| Error::Read {
+    let mut child = command.spawn().map_err(Error::GitMissing)?;
+    let pid = child.id();
+    if let Ok(mut guard) = CHILDREN.lock() {
+        guard.push(pid);
+    }
+    if let Some(bytes) = stdin_bytes {
+        use std::io::Write;
+        let write_result = child.stdin.as_mut().map(|stdin| stdin.write_all(bytes));
+        if let Some(Err(source)) = write_result {
+            stop_process_tree(pid);
+            let _ = child.wait();
+            untrack(pid);
+            return Err(Error::Read {
                 path: "git stdin".to_string(),
                 source,
-            })?;
+            });
         }
-        child.wait_with_output().map_err(Error::GitMissing)?
-    } else {
-        command.output().map_err(Error::GitMissing)?
-    };
+        drop(child.stdin.take());
+    }
+    let output = child.wait_with_output().map_err(Error::GitMissing)?;
+    untrack(pid);
     if output.status.success() {
         return Ok(output);
     }
@@ -95,6 +212,53 @@ fn run_prepared(
     } else {
         stderr
     }))
+}
+
+fn untrack(pid: u32) {
+    if let Ok(mut guard) = CHILDREN.lock() {
+        guard.retain(|item| *item != pid);
+    }
+}
+
+/// `-c` arguments that keep commit signing on only when the session asked for it.
+pub(crate) fn commit_config(repo: &Path) -> Vec<String> {
+    let (session, passphrase) = session_snapshot();
+    if !session.sign_commits {
+        return vec!["-c".into(), "commit.gpgsign=false".into()];
+    }
+    let mut prefix = vec!["-c".into(), "commit.gpgsign=true".into()];
+    if passphrase.is_empty() {
+        return prefix;
+    }
+    let format = run(repo, &["config", "--get", "gpg.format"])
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .unwrap_or_default();
+    if format != "ssh" {
+        if let Some(program) = gpg_wrapper() {
+            prefix.push("-c".into());
+            prefix.push(format!("gpg.program={program}"));
+        }
+    }
+    prefix
+}
+
+fn askpass_script() -> Option<String> {
+    let dir = std::env::temp_dir().join("awegit-askpass");
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join("ask.sh");
+    let body = "#!/bin/sh\ncase \"$1\" in\n*[Uu]sername*)\n  printf '%s\\n' \"$AWE_ASK_USER\"\n  ;;\n*)\n  printf '%s\\n' \"$AWE_ASKPASS\"\n  ;;\nesac\n";
+    std::fs::write(&path, body).ok()?;
+    Some(path.display().to_string().replace('\\', "/"))
+}
+
+fn gpg_wrapper() -> Option<String> {
+    let dir = std::env::temp_dir().join("awegit-askpass");
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join("gpgwrap.sh");
+    let body = "#!/bin/sh\ntmp=\"${TMP:-/tmp}/awegit-pass-$$\"\nprintf '%s\\n' \"$AWE_ASKPASS\" > \"$tmp\"\ngpg --batch --yes --pinentry-mode loopback --passphrase-file \"$tmp\" \"$@\"\ncode=$?\nrm -f \"$tmp\"\nexit $code\n";
+    std::fs::write(&path, body).ok()?;
+    Some(path.display().to_string().replace('\\', "/"))
 }
 
 /// A commit id or a revision such as `HEAD~2`. Rejects option-like values.

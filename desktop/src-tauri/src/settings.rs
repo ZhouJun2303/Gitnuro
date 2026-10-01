@@ -25,6 +25,50 @@ pub struct Settings {
     pub ai_api_key: String,
     #[serde(default)]
     pub terminal: String,
+    #[serde(default)]
+    pub swap_panes: bool,
+    #[serde(default)]
+    pub show_entire_file: bool,
+    #[serde(default = "compact")]
+    pub lines_height: String,
+    #[serde(default = "scale_default")]
+    pub ui_scale: u32,
+    #[serde(default = "default_true")]
+    pub date_relative: bool,
+    #[serde(default)]
+    pub date_format: String,
+    #[serde(default = "default_true")]
+    pub date_24h: bool,
+    #[serde(default)]
+    pub hidden_refs: String,
+    #[serde(default)]
+    pub author_name: String,
+    #[serde(default)]
+    pub author_email: String,
+    #[serde(default = "default_true")]
+    pub ssl_verify: bool,
+    #[serde(default)]
+    pub ssl_ca_file: String,
+    #[serde(default)]
+    pub proxy_user: String,
+    #[serde(default)]
+    pub proxy_password: String,
+    #[serde(default)]
+    pub sign_commits: bool,
+    #[serde(default)]
+    pub merge_no_ff: bool,
+    #[serde(default)]
+    pub merge_autostash: bool,
+    #[serde(default)]
+    pub clone_directory: String,
+    #[serde(default)]
+    pub window_x: i32,
+    #[serde(default)]
+    pub window_y: i32,
+    #[serde(default)]
+    pub window_width: u32,
+    #[serde(default)]
+    pub window_height: u32,
 }
 
 fn theme_default() -> String {
@@ -42,6 +86,12 @@ fn ai_base() -> String {
 fn ai_model() -> String {
     "grok-4.7".into()
 }
+fn compact() -> String {
+    "compact".into()
+}
+fn scale_default() -> u32 {
+    13
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -55,6 +105,28 @@ impl Default for Settings {
             ai_model: ai_model(),
             ai_api_key: String::new(),
             terminal: String::new(),
+            swap_panes: false,
+            show_entire_file: false,
+            lines_height: compact(),
+            ui_scale: scale_default(),
+            date_relative: true,
+            date_format: String::new(),
+            date_24h: true,
+            hidden_refs: String::new(),
+            author_name: String::new(),
+            author_email: String::new(),
+            ssl_verify: true,
+            ssl_ca_file: String::new(),
+            proxy_user: String::new(),
+            proxy_password: String::new(),
+            sign_commits: false,
+            merge_no_ff: false,
+            merge_autostash: false,
+            clone_directory: String::new(),
+            window_x: 0,
+            window_y: 0,
+            window_width: 0,
+            window_height: 0,
         }
     }
 }

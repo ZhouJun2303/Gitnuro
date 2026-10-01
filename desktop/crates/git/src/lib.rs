@@ -10,15 +10,16 @@ mod ops;
 use std::path::{Path, PathBuf};
 
 pub use change::{
-    commit, file_diff, stage_all, stage_hunk, stage_paths, unstage_all, unstage_paths, workspace_diff, CommitRequest,
-    DiffLine, DiffLineKind, FileDiff,
+    commit, file_diff, file_diff_with, file_preview, stage_all, stage_hunk, stage_line, stage_paths, unstage_all,
+    unstage_paths, workspace_diff, CommitRequest, DiffLine, DiffLineKind, FileDiff, FilePreview,
 };
 pub use model::{
-    blame_file, commit_files, commit_log, file_history, in_progress, repository_refs, show_commit_file, BlameLine,
-    BranchRow, CommitRow, InProgress, RefSnapshot, RemoteRow, StashRow, SubmoduleRow, TagRow, WorktreeRow,
+    blame_file, branch_commits, commit_files, commit_log, file_history, in_progress, repository_refs, show_commit_file,
+    show_commit_file_with, BlameLine, BranchRow, CommitRow, InProgress, RefSnapshot, RemoteRow, StashRow, SubmoduleRow,
+    TagRow, WorktreeRow,
 };
-pub use cli::{set_http_proxy, use_bundled_git};
-pub use ops::{perform, Mutation, ResetMode};
+pub use cli::{cancel_running, configure, set_http_proxy, set_passphrase, stop_process_tree, use_bundled_git, Session};
+pub use ops::{approve_credential, perform, Mutation, ResetMode};
 
 use gix::bstr::BStr;
 use serde::Serialize;

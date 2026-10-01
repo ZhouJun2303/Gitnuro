@@ -25,6 +25,16 @@
     "allow-save-settings",
     "allow-watch-repository",
     "allow-open-terminal",
-    "allow-suggest-commit-message"
+    "allow-suggest-commit-message",
+    "allow-file-preview",
+    "allow-cancel-operation",
+    "allow-set-passphrase",
+    "allow-approve-credential",
+    "allow-check-for-update",
+    "core:window:allow-inner-size",
+    "core:window:allow-outer-position",
+    "core:window:allow-scale-factor",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position"
   ]
 }

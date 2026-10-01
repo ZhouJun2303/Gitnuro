@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    file_diff, in_progress, perform, repository_refs, stage_hunk, status, InProgress, Mutation, ResetMode,
+    file_diff, file_preview, in_progress, perform, repository_refs, stage_hunk, stage_line, status, stop_process_tree,
+    InProgress, Mutation, ResetMode,
 };
 
 fn repo() -> common::TempRepo {
@@ -164,7 +165,15 @@ fn merge_conflict_rebase_abort_stash_and_tag() {
     commit_file(&repo, "a.txt", "topic\n", "topic");
     repo.git(&["checkout", "main"]);
     commit_file(&repo, "a.txt", "main\n", "main-edit");
-    let conflict = perform(&repo.path, Mutation::Merge { name: "topic".into(), squash: false });
+    let conflict = perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "topic".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+        },
+    );
     assert!(conflict.is_err(), "merge should conflict");
     assert_eq!(in_progress(&repo.path).unwrap(), Some(InProgress::Merge));
     perform(&repo.path, Mutation::Abort).unwrap();
@@ -239,6 +248,51 @@ fn resets_cherry_pick_and_revert() {
     perform(&repo.path, Mutation::Revert { rev: "HEAD".into() }).unwrap();
     assert!(!repo.path.join("c.txt").exists());
     assert!(repo.output(&["log", "-1", "--format=%s"]).contains("Revert"));
+}
+
+#[test]
+fn line_stage_keeps_the_other_line() {
+    let repo = repo();
+    fs::write(repo.path.join("a.txt"), "1\n2\n3\n4\n5\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    repo.git(&["commit", "-m", "base"]);
+    fs::write(repo.path.join("a.txt"), "1\nTWO\nTHREE\n4\n5\n").unwrap();
+
+    let diff = file_diff(&repo.path, "a.txt", false).unwrap();
+    let line = diff.lines.iter().find(|line| line.text == "+TWO").expect("added line");
+    stage_line(&repo.path, "a.txt", "TWO", true, line.stage_at.expect("stage index"), false).unwrap();
+
+    let cached = repo.output(&["diff", "--cached"]);
+    assert!(cached.contains("TWO"), "{cached}");
+    assert!(!cached.contains("THREE"), "{cached}");
+    let pending = repo.output(&["diff"]);
+    assert!(pending.contains("THREE"), "{pending}");
+}
+
+#[test]
+fn preview_reads_a_png() {
+    let repo = repo();
+    let png = [
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+    ];
+    fs::write(repo.path.join("dot.png"), png).unwrap();
+    let preview = file_preview(&repo.path, "dot.png").unwrap().expect("png");
+    assert_eq!(preview.mime, "image/png");
+    assert!(preview.data_url.starts_with("data:image/png;base64,"));
+    assert!(file_preview(&repo.path, "missing.png").unwrap().is_none());
+}
+
+#[test]
+fn cancel_stops_a_child_process() {
+    let mut child = Command::new("ping")
+        .args(["-n", "30", "127.0.0.1"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    stop_process_tree(child.id());
+    let status = child.wait().unwrap();
+    assert!(!status.success(), "{status}");
 }
 
 #[test]

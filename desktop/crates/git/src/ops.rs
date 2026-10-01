@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cli::{check_name, check_path, check_rev, run, run_env, run_stdin};
 use crate::model::in_progress;
-use crate::{commit, stage_hunk, CommitRequest, Error, InProgress};
+use crate::{commit, stage_hunk, stage_line, CommitRequest, Error, InProgress};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -71,6 +71,10 @@ pub enum Mutation {
         name: String,
         #[serde(default)]
         squash: bool,
+        #[serde(default)]
+        no_ff: bool,
+        #[serde(default)]
+        autostash: bool,
     },
     Rebase {
         onto: String,
@@ -110,6 +114,14 @@ pub enum Mutation {
     StageHunk {
         file: String,
         index: u32,
+        #[serde(default)]
+        unstage: bool,
+    },
+    StageLine {
+        file: String,
+        text: String,
+        addition: bool,
+        at: u32,
         #[serde(default)]
         unstage: bool,
     },
@@ -187,7 +199,12 @@ pub fn perform(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::Checkout { name } => run(repo, &["checkout", check_rev(&name)?]).map(|_| ()),
         Mutation::CreateBranch { name, start } => create_branch(repo, &name, start.as_deref()),
         Mutation::DeleteBranch { name } => run(repo, &["branch", "-d", check_name(&name)?]).map(|_| ()),
-        Mutation::Merge { name, squash } => merge(repo, &name, squash),
+        Mutation::Merge {
+            name,
+            squash,
+            no_ff,
+            autostash,
+        } => merge(repo, &name, squash, no_ff, autostash),
         Mutation::Rebase { onto } => with_editor(repo, &["rebase", check_rev(&onto)?]),
         Mutation::RebaseInteractive { onto, drop } => rebase_interactive(repo, &onto, &drop),
         Mutation::Abort => flow(repo, "abort"),
@@ -200,6 +217,13 @@ pub fn perform(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::Tag { name, rev, message } => tag(repo, &name, &rev, &message),
         Mutation::DeleteTag { name } => run(repo, &["tag", "-d", check_name(&name)?]).map(|_| ()),
         Mutation::StageHunk { file, index, unstage } => stage_hunk(repo, &file, index, unstage),
+        Mutation::StageLine {
+            file,
+            text,
+            addition,
+            at,
+            unstage,
+        } => stage_line(repo, &file, &text, addition, at, unstage),
         Mutation::Discard { file } => discard(repo, &file),
         Mutation::Delete { file } => delete_path(repo, &file),
         Mutation::ApplyPatch { patch } => run_stdin(repo, &["apply", "--index"], patch.as_bytes()).map(|_| ()),
@@ -300,13 +324,38 @@ fn create_branch(repo: &Path, name: &str, start: Option<&str>) -> Result<(), Err
     }
 }
 
-fn merge(repo: &Path, name: &str, squash: bool) -> Result<(), Error> {
+fn merge(repo: &Path, name: &str, squash: bool, no_ff: bool, autostash: bool) -> Result<(), Error> {
     let name = check_rev(name)?;
-    if squash {
-        with_editor(repo, &["merge", "--squash", "--no-edit", name])
-    } else {
-        with_editor(repo, &["merge", "--no-edit", name])
+    let mut args = vec!["merge"];
+    if autostash {
+        args.push("--autostash");
     }
+    if squash {
+        args.push("--squash");
+    } else if no_ff {
+        args.push("--no-ff");
+    }
+    args.push("--no-edit");
+    args.push(name);
+    with_editor(repo, &args)
+}
+
+/// Store a credential in the user's installed helper. The password is not written to settings.
+pub fn approve_credential(repo: &Path, protocol: &str, host: &str, username: &str, password: &str) -> Result<(), Error> {
+    for part in [protocol, host, username, password] {
+        if part.contains(['\n', '\r', '\0']) {
+            return Err(Error::Rev("credential field".into()));
+        }
+    }
+    if protocol.is_empty() || host.is_empty() || password.is_empty() {
+        return Err(Error::Git("protocol, host, and password are required".into()));
+    }
+    let mut body = format!("protocol={protocol}\nhost={host}\n");
+    if !username.is_empty() {
+        body.push_str(&format!("username={username}\n"));
+    }
+    body.push_str(&format!("password={password}\n\n"));
+    run_stdin(repo, &["credential", "approve"], body.as_bytes()).map(|_| ())
 }
 
 fn flow(repo: &Path, verb: &str) -> Result<(), Error> {

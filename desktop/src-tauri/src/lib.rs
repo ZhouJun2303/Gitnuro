@@ -1,5 +1,6 @@
 mod ai;
 mod settings;
+mod updates;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -7,18 +8,26 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 static GIT_WRITE: Mutex<()> = Mutex::new(());
 static WATCH_TICK: AtomicU64 = AtomicU64::new(0);
 
 struct RepoWatch(Mutex<Option<RecommendedWatcher>>);
 
+fn git_cmd(dir: &Path) -> Option<PathBuf> {
+    let cmd = dir.join("git").join("cmd");
+    if cmd.join("git.exe").is_file() || cmd.join("git").is_file() {
+        Some(cmd)
+    } else {
+        None
+    }
+}
+
 fn prefer_bundled_git() {
     let Ok(exe) = std::env::current_exe() else { return };
     let Some(parent) = exe.parent() else { return };
-    let cmd = parent.join("git").join("cmd");
-    if cmd.join("git.exe").is_file() {
+    if let Some(cmd) = git_cmd(parent).or_else(|| git_cmd(&parent.join("resources"))) {
         awegit_git::use_bundled_git(&cmd);
     }
 }
@@ -35,17 +44,50 @@ fn read_status(repo: &Path) -> Result<awegit_git::StatusSnapshot, String> {
     awegit_git::status(repo).map_err(|error| error.to_string())
 }
 
-fn apply_proxy() {
-    let proxy = settings::load().ok().and_then(|settings| {
-        let proxy = settings.proxy.trim().to_string();
-        if proxy.is_empty() { None } else { Some(proxy) }
+fn compose_proxy(settings: &settings::Settings) -> String {
+    let proxy = settings.proxy.trim();
+    if proxy.is_empty() {
+        return String::new();
+    }
+    if settings.proxy_user.trim().is_empty() {
+        return proxy.to_string();
+    }
+    let user = encode_userinfo(settings.proxy_user.trim());
+    let password = encode_userinfo(&settings.proxy_password);
+    if let Some((scheme, rest)) = proxy.split_once("://") {
+        format!("{scheme}://{user}:{password}@{rest}")
+    } else {
+        format!("http://{user}:{password}@{proxy}")
+    }
+}
+
+fn encode_userinfo(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+fn apply_session() {
+    let values = settings::load().unwrap_or_default();
+    awegit_git::configure(awegit_git::Session {
+        proxy: compose_proxy(&values),
+        author_name: values.author_name.trim().to_string(),
+        author_email: values.author_email.trim().to_string(),
+        ssl_verify: values.ssl_verify,
+        ssl_ca: values.ssl_ca_file.trim().to_string(),
+        sign_commits: values.sign_commits,
+        ask_user: String::new(),
     });
-    awegit_git::set_http_proxy(proxy);
 }
 
 fn write_then_status(repo: &Path, write: impl FnOnce(&Path) -> Result<(), awegit_git::Error>) -> Result<awegit_git::StatusSnapshot, String> {
     let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
-    apply_proxy();
+    apply_session();
     write(repo).map_err(|error| error.to_string())?;
     read_status(repo)
 }
@@ -102,15 +144,21 @@ fn commit_changes(
 }
 
 #[tauri::command]
-fn file_diff(path: Option<String>, file: String, staged: bool) -> Result<awegit_git::FileDiff, String> {
+fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u32>) -> Result<awegit_git::FileDiff, String> {
     let repo = repo_from(path)?;
-    awegit_git::file_diff(&repo, &file, staged).map_err(|error| error.to_string())
+    awegit_git::file_diff_with(&repo, &file, staged, unified.unwrap_or(3)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn commit_log(path: Option<String>, limit: Option<usize>) -> Result<Vec<awegit_git::CommitRow>, String> {
+fn commit_log(path: Option<String>, limit: Option<usize>, all: Option<bool>) -> Result<Vec<awegit_git::CommitRow>, String> {
     let repo = repo_from(path)?;
-    awegit_git::commit_log(&repo, limit.unwrap_or(500)).map_err(|error| error.to_string())
+    let limit = limit.unwrap_or(500);
+    let rows = if all.unwrap_or(true) {
+        awegit_git::commit_log(&repo, limit)
+    } else {
+        awegit_git::branch_commits(&repo, limit)
+    };
+    rows.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -126,9 +174,9 @@ fn commit_files(path: Option<String>, id: String) -> Result<Vec<awegit_git::File
 }
 
 #[tauri::command]
-fn show_commit_file(path: Option<String>, id: String, file: String) -> Result<awegit_git::FileDiff, String> {
+fn show_commit_file(path: Option<String>, id: String, file: String, unified: Option<u32>) -> Result<awegit_git::FileDiff, String> {
     let repo = repo_from(path)?;
-    awegit_git::show_commit_file(&repo, &id, &file).map_err(|error| error.to_string())
+    awegit_git::show_commit_file_with(&repo, &id, &file, unified.unwrap_or(3)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -153,7 +201,7 @@ fn blame_file(path: Option<String>, file: String) -> Result<Vec<awegit_git::Blam
 fn mutate(path: Option<String>, request: awegit_git::Mutation) -> Result<awegit_git::StatusSnapshot, String> {
     let repo = repo_from(path)?;
     let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
-    apply_proxy();
+    apply_session();
     let next = match &request {
         awegit_git::Mutation::Clone { destination, .. } | awegit_git::Mutation::Init { destination } => {
             PathBuf::from(destination)
@@ -225,6 +273,37 @@ fn open_terminal(path: Option<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn file_preview(path: Option<String>, file: String) -> Result<Option<awegit_git::FilePreview>, String> {
+    let repo = repo_from(path)?;
+    awegit_git::file_preview(&repo, &file).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn cancel_operation() -> Result<(), String> {
+    awegit_git::cancel_running();
+    Ok(())
+}
+
+#[tauri::command]
+fn set_passphrase(user: String, secret: String) -> Result<(), String> {
+    awegit_git::set_passphrase(user, secret);
+    Ok(())
+}
+
+#[tauri::command]
+fn approve_credential(path: Option<String>, protocol: String, host: String, username: String, password: String) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
+    apply_session();
+    awegit_git::approve_credential(&repo, &protocol, &host, &username, &password).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn check_for_update() -> Result<Option<updates::UpdateNotice>, String> {
+    updates::check()
+}
+
+#[tauri::command]
 fn suggest_commit_message(path: Option<String>) -> Result<ai::Suggestion, String> {
     let repo = repo_from(path)?;
     let values = settings::load()?;
@@ -237,6 +316,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(RepoWatch(Mutex::new(None)))
+        .setup(|app| {
+            if let Ok(dir) = app.path().resource_dir() {
+                if let Some(cmd) = git_cmd(&dir) {
+                    awegit_git::use_bundled_git(&cmd);
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             workspace_status,
             stage_all,
@@ -257,7 +344,12 @@ pub fn run() {
             save_settings,
             watch_repository,
             open_terminal,
-            suggest_commit_message
+            suggest_commit_message,
+            file_preview,
+            cancel_operation,
+            set_passphrase,
+            approve_credential,
+            check_for_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running AweGit");

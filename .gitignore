@@ -20,6 +20,8 @@ desktop/node_modules/
 desktop/.svelte-kit/
 desktop/src-tauri/target/
 desktop/target/
+desktop/src-tauri/resources/git/*
+!desktop/src-tauri/resources/git/.gitkeep
 src/main/resources/*awegit_rs*
 *.salive
 *.hprof

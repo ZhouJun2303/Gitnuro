@@ -14,4 +14,6 @@ The host toolchain is `nightly-x86_64-pc-windows-gnu`. Rustc calls its own `dllt
 
 To look at the layout without the native window, run `pnpm dev` and open http://127.0.0.1:1420. The browser keeps the sample repository. The debug executable loads that same URL, so it shows a connection error until `pnpm dev` is running.
 
-The window can fetch, pull, push, stash, merge, rebase, reset, cherry-pick, revert, tag, and read the commit graph. Settings are saved to `%APPDATA%\AweGit\settings.json` on Windows and are not the old DataStore. A Portable Git build can sit in `git\cmd\git.exe` next to `awegit.exe`; when that file exists it is preferred over `PATH`. This machine cannot produce the Mac package.
+The window covers the current Git client: history, branches, remotes, tags, stash, merge, rebase, reset, cherry-pick, revert, line and hunk staging, commit search, and the same shortcuts as the existing app. On macOS those shortcuts use Command where the old client does. Settings are saved to `%APPDATA%\AweGit\settings.json` on Windows (`~/Library/Application Support/AweGit/settings.json` on macOS) and are not the old DataStore. A signing passphrase and HTTPS password are not written into that file.
+
+Git is the `git` on `PATH`, unless `git\cmd\git.exe` sits next to `awegit.exe` or inside the bundle's `resources\git\cmd`. `scripts\package-windows.ps1` downloads Git for Windows MinGit 2.56.0, checks its SHA-256, and builds the installer. `scripts\package-mac.sh` is the Mac build and uses the system Git. This Windows machine cannot produce the Mac package.
