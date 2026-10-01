@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.zhoujun.awegit.ui.components.AiGenerateButton
 import com.zhoujun.awegit.app.generated.resources.*
 import com.zhoujun.awegit.common.systemSeparator
+import com.zhoujun.awegit.LocalTabFocusRequester
 import com.zhoujun.awegit.compose.rememberInTab
 import com.zhoujun.awegit.domain.extensions.fileName
 import com.zhoujun.awegit.domain.extensions.parentDirectoryPath
@@ -590,7 +591,6 @@ private fun CommitField(
                 onCommit = doCommit,
             )
         }
-    }
 }
 
 @Composable

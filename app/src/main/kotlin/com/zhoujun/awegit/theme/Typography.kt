@@ -3,6 +3,7 @@ package com.zhoujun.awegit.theme
 import androidx.compose.material.Colors
 import androidx.compose.material.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
@@ -29,6 +30,7 @@ import org.jetbrains.compose.resources.Font
 
 const val LETTER_SPACING = 0.5
 
+@OptIn(ExperimentalTextApi::class)
 @Composable
 fun typography(composeColors: Colors): Typography {
     val interFontFamily = FontFamily(

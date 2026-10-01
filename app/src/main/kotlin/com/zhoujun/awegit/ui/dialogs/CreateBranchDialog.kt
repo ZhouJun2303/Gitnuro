@@ -40,6 +40,6 @@ fun CreateBranchDialog(
                 modifier = Modifier.weight(1f),
             )
         }
-        ForkCheckboxRow("Check out after create", checkout) { checkout = it }
+        ForkCheckboxRow("Check out after create", checkout, { checkout = it })
     }
 }

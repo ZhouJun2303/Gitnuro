@@ -37,7 +37,7 @@ fun FetchDialog(viewModel: FetchDialogViewModel, onDismiss: () -> Unit) {
                 onSelected = { selectedName = it },
             )
         }
-        ForkCheckboxRow("Fetch all tags", fetchAllTags) { fetchAllTags = it }
-        ForkCheckboxRow("Prune remote branches", prune) { prune = it }
+        ForkCheckboxRow("Fetch all tags", fetchAllTags, { fetchAllTags = it })
+        ForkCheckboxRow("Prune remote branches", prune, { prune = it })
     }
 }

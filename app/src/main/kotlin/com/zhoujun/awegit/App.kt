@@ -37,6 +37,7 @@ import com.zhoujun.awegit.data.git.signers.SshSigner
 import com.zhoujun.awegit.domain.TempFilesManager
 import com.zhoujun.awegit.domain.credentials.CredentialsRequest
 import com.zhoujun.awegit.domain.models.*
+import com.zhoujun.awegit.theme.onBackgroundSecondary
 import com.zhoujun.awegit.domain.repositories.CompletedTask
 import com.zhoujun.awegit.domain.services.AppSettingsService
 import com.zhoujun.awegit.keybindings.KeybindingOption

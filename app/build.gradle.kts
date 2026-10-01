@@ -180,6 +180,42 @@ compose.desktop {
     }
 }
 
+val appImageDir = layout.buildDirectory.dir("compose/binaries/main/app")
+val appInputDir = layout.buildDirectory.dir("compose/app-input")
+
+val stageAppInput = tasks.register<Copy>("stageAppInput") {
+    dependsOn(tasks.named("jar"))
+    from(tasks.named<Jar>("jar").map { it.archiveFile })
+    from(configurations.named("runtimeClasspath"))
+    into(appInputDir)
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+tasks.register<Exec>("testExe") {
+    group = "distribution"
+    description = "Build AweGit.exe with the current JDK. This JDK has no jmods, so jlink cannot create a runtime image."
+    dependsOn(stageAppInput)
+    val destDir = appImageDir.get().asFile
+    val inputDir = appInputDir.get().asFile
+    val javaHome = File(System.getProperty("java.home"))
+    val jarName = tasks.named<Jar>("jar").get().archiveFileName.get()
+    doFirst {
+        destDir.resolve(projectName).deleteRecursively()
+        destDir.mkdirs()
+    }
+    commandLine(
+        File(javaHome, "bin/jpackage.exe").absolutePath,
+        "--type", "app-image",
+        "--name", projectName,
+        "--dest", destDir.absolutePath,
+        "--input", inputDir.absolutePath,
+        "--main-jar", jarName,
+        "--main-class", "com.zhoujun.awegit.MainKt",
+        "--runtime-image", javaHome.absolutePath,
+        "--icon", rootProject.file("icons/icon.ico").absolutePath,
+    )
+}
+
 
 tasks.register("fatJarLinux", type = Jar::class) {
     val archSuffix = if (isLinuxAarch64) {

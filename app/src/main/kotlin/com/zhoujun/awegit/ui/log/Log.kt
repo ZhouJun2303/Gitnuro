@@ -154,6 +154,12 @@ fun Log(
             onRenameBranch = onRenameBranch,
             onPullFromRemoteBranch = onPullFromRemoteBranch,
             onRewordCommit = onRewordCommit,
+            onMergeBranch = onMergeBranch,
+            onRebaseBranch = onRebaseBranch,
+            onCheckoutRemoteBranch = onCheckoutRemoteBranch,
+            onDeleteBranch = onDeleteBranch,
+            onDeleteTag = onDeleteTag,
+            onDeleteStash = onDeleteStash,
             onGraphPaddingChange = { newGraphPadding ->
                 graphPadding += newGraphPadding
                 viewModel.graphPadding = graphPadding
@@ -188,6 +194,12 @@ private fun LogView(
     onRenameBranch: (Branch) -> Unit,
     onPullFromRemoteBranch: (Branch) -> Unit,
     onRewordCommit: (Commit) -> Unit,
+    onMergeBranch: (Branch) -> Unit,
+    onRebaseBranch: (Branch) -> Unit,
+    onCheckoutRemoteBranch: (Branch) -> Unit,
+    onDeleteBranch: (Branch) -> Unit,
+    onDeleteTag: (Tag) -> Unit,
+    onDeleteStash: (Commit) -> Unit,
     onGraphPaddingChange: (Float) -> Unit,
     onAction: (LogAction) -> Unit,
     searchView: @Composable (LogSearch.SearchResults) -> Unit,
@@ -298,6 +310,12 @@ private fun LogView(
                 onRenameBranch = onRenameBranch,
                 onPullFromRemoteBranch = onPullFromRemoteBranch,
                 onRewordCommit = onRewordCommit,
+                onMergeBranch = onMergeBranch,
+                onRebaseBranch = onRebaseBranch,
+                onCheckoutRemoteBranch = onCheckoutRemoteBranch,
+                onDeleteBranch = onDeleteBranch,
+                onDeleteTag = onDeleteTag,
+                onDeleteStash = onDeleteStash,
                 onAction = onAction,
             )
 
@@ -508,6 +526,12 @@ fun CommitsList(
     onRenameBranch: (Branch) -> Unit,
     onPullFromRemoteBranch: (Branch) -> Unit,
     onRewordCommit: (Commit) -> Unit,
+    onMergeBranch: (Branch) -> Unit,
+    onRebaseBranch: (Branch) -> Unit,
+    onCheckoutRemoteBranch: (Branch) -> Unit,
+    onDeleteBranch: (Branch) -> Unit,
+    onDeleteTag: (Tag) -> Unit,
+    onDeleteStash: (Commit) -> Unit,
     graphWidth: Dp,
     horizontalScrollState: ScrollState,
 ) {

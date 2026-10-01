@@ -7,6 +7,7 @@ import com.zhoujun.awegit.common.OS
 import com.zhoujun.awegit.common.currentOs
 import com.zhoujun.awegit.common.extensions.nullIf
 import com.zhoujun.awegit.domain.ai.CommitMessageCleaner
+import com.zhoujun.awegit.domain.errors.Either
 import com.zhoujun.awegit.domain.errors.GenericError
 import com.zhoujun.awegit.domain.repositories.FailureSeverity
 import com.zhoujun.awegit.domain.repositories.RepositoryStateRepository

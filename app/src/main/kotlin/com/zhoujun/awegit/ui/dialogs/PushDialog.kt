@@ -84,8 +84,8 @@ fun PushDialog(viewModel: PushDialogViewModel, onDismiss: () -> Unit) {
                 modifier = Modifier.weight(0.6f),
             )
         }
-        ForkCheckboxRow("Push all tags", pushAllTags) { pushAllTags = it }
-        ForkCheckboxRow("Create tracking reference", createTracking) { createTracking = it }
-        ForkCheckboxRow("Force push", forcePush) { forcePush = it }
+        ForkCheckboxRow("Push all tags", pushAllTags, { pushAllTags = it })
+        ForkCheckboxRow("Create tracking reference", createTracking, { createTracking = it })
+        ForkCheckboxRow("Force push", forcePush, { forcePush = it })
     }
 }

@@ -40,9 +40,9 @@ fun DeleteBranchDialog(
     ) {
         Text("Delete this branch?", fontSize = 12.sp)
         if (upstream != null) {
-            ForkCheckboxRow("Also delete remote branch $upstream", alsoDeleteRemote) { alsoDeleteRemote = it }
+            ForkCheckboxRow("Also delete remote branch $upstream", alsoDeleteRemote, { alsoDeleteRemote = it })
         }
-        ForkCheckboxRow("Force delete", force) { force = it }
+        ForkCheckboxRow("Force delete", force, { force = it })
     }
 }
 

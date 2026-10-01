@@ -134,12 +134,14 @@ fun SidePanel(
                 tagsState = tagsState,
                 selectedItem = selectedItem,
                 viewModel = viewModel,
+                onNavigate = onNavigate,
             )
 
             stashes(
                 stashesState = stashesState,
                 selectedItem = selectedItem,
                 viewModel = viewModel,
+                onNavigate = onNavigate,
             )
 
             submodules(
@@ -374,6 +376,7 @@ fun LazyListScope.tags(
     tagsState: TagsState,
     viewModel: RepositoryOpenViewModel,
     selectedItem: SelectedItem,
+    onNavigate: (Screen) -> Unit,
 ) {
     val isExpanded = tagsState.isExpanded
     val tags = tagsState.tags
@@ -410,6 +413,7 @@ fun LazyListScope.stashes(
     stashesState: StashesState,
     viewModel: RepositoryOpenViewModel,
     selectedItem: SelectedItem,
+    onNavigate: (Screen) -> Unit,
 ) {
     val isExpanded = stashesState.isExpanded
     val stashes = stashesState.stashes

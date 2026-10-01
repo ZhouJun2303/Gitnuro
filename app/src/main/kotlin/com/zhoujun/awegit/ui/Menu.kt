@@ -195,6 +195,7 @@ fun Menu(
     }
 }
 
+@Composable
 fun MenuButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
@@ -288,7 +289,7 @@ fun getParts(keybinding: Keybinding): List<String> {
     }
 
     if (keybinding.meta) {
-        parts.add("鈱?)
+        parts.add("Win")
     }
 
     if (keybinding.alt) {
