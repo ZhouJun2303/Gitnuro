@@ -560,8 +560,11 @@ $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.ShowNewFolderButton = $true
 if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }
 "#;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let output = std::process::Command::new("powershell")
             .args(["-NoProfile", "-STA", "-Command", script])
+            .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|error| error.to_string())?;
         if !output.status.success() {

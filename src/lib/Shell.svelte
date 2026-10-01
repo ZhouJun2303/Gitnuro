@@ -494,7 +494,7 @@
       { label: tr("chrome.commitAndPush"), group: action, run: () => void submitCommit(true) },
       { label: tr("chrome.preferences"), group: action, run: () => { dialog = "prefs"; } },
       { label: tr("chrome.terminal"), group: action, run: () => void invoke("open_terminal", { path: repoPath() }) },
-      { label: tr("chrome.explorer"), group: action, run: () => { if (snapshot) void openPath(snapshot.path); } },
+      { label: tr("chrome.explorer"), group: action, run: () => { if (snapshot) void openLocal(snapshot.path); } },
       { label: tr("chrome.flow"), group: action, run: () => { draft = ""; dialog = "flow"; } },
       { label: tr("chrome.about"), group: action, run: () => { dialog = "about"; } },
       { label: tr("chrome.open"), group: action, run: () => { draft = ""; dialog = "open"; } },
@@ -1046,7 +1046,7 @@
       { label: tr("menu.lfsUnlock"), disabled: locked || !lfsAvailable, run: () => void mutate({ action: "lfsUnlock", path: file.path }) },
       { sep: true, label: "" },
       { label: tr("menu.reveal"), disabled: locked, run: () => revealItemInDir(fullPath(file.path)) },
-      { label: tr("menu.openFile"), disabled: locked, run: () => openPath(fullPath(file.path)) },
+      { label: tr("menu.openFile"), disabled: locked, run: () => void openLocal(fullPath(file.path)) },
       { label: tr("menu.copyPath"), run: () => copyText(fullPath(file.path)) },
       { label: tr("menu.copyRelative"), run: () => copyText(file.path) },
       ...(file.letter === "C" ? [{ label: tr("menu.resolve"), disabled: locked, run: () => openResolve(file.path) }] : []),
@@ -1305,11 +1305,24 @@
     }
   }
 
-  async function pickFolder() {
-    if (!inApp()) return;
+  async function browseFolder() {
+    if (!inApp()) return null;
     try {
-      const folder = await invoke<string | null>("pick_directory");
-      if (folder) settings = { ...settings, cloneDirectory: folder };
+      return await invoke<string | null>("pick_directory");
+    } catch (error) {
+      actionError = message(error);
+      return null;
+    }
+  }
+
+  async function pickFolder() {
+    const folder = await browseFolder();
+    if (folder) settings = { ...settings, cloneDirectory: folder };
+  }
+
+  async function openLocal(path: string) {
+    try {
+      await openPath(path);
     } catch (error) {
       actionError = message(error);
     }
@@ -1502,7 +1515,7 @@
       { label: tr("chrome.newRepo"), run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
       { sep: true, label: "" },
       { label: tr("chrome.terminal"), disabled: locked, run: () => void invoke("open_terminal", { path: repoPath() }) },
-      { label: tr("chrome.explorer"), disabled: !snapshot, run: () => snapshot && openPath(snapshot.path) },
+      { label: tr("chrome.explorer"), disabled: !snapshot, run: () => snapshot && void openLocal(snapshot.path) },
     ];
   }
 
@@ -1915,7 +1928,7 @@
     } else if (action === "stageAll") void runChange(selectedSide === "staged" ? "unstage_all" : "stage_all");
     else if (action === "discard" && selectedPath && selectedSide === "unstaged") {
       ask(tr("menu.discard"), tr("dialog.discardBody", { name: selectedPath }), () => void mutate({ action: "discard", file: selectedPath }));
-    } else if (action === "explorer" && snapshot) void openPath(snapshot.path);
+    } else if (action === "explorer" && snapshot) void openLocal(snapshot.path);
     else if (action === "terminal") void invoke("open_terminal", { path: repoPath() });
     else if (action === "filterBranch") {
       allBranches = !allBranches;
@@ -2129,7 +2142,7 @@
       </div>
       <span class="chrome-divider" aria-hidden="true"></span>
       <button class="icon-btn" type="button" title={tr("chrome.terminal")} onclick={() => invoke("open_terminal", { path: repoPath() })}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m7 9 3 3-3 3M12 15h5"/></svg></button>
-      <button class="icon-btn" type="button" title={tr("chrome.explorer")} onclick={() => snapshot && openPath(snapshot.path)}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
+      <button class="icon-btn" type="button" title={tr("chrome.explorer")} onclick={() => snapshot && void openLocal(snapshot.path)}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
     </div>
   </header>
 
@@ -3413,14 +3426,20 @@
         {:else if dialog === "clone"}
           <h2>Clone</h2>
           <input placeholder="URL" bind:value={draft} />
-          <input placeholder="Destination folder" bind:value={draftExtra} />
+          <div class="composer-row path-row">
+            <input placeholder="Destination folder" bind:value={draftExtra} />
+            <button class="text-button" type="button" onclick={async () => { const folder = await browseFolder(); if (folder) draftExtra = folder; }}>{tr("dialog.browse")}</button>
+          </div>
           <div class="composer-row">
             <button class="commit" type="submit">Clone</button>
             <button class="text-button" type="button" onclick={() => mutate({ action: "init", destination: draftExtra })}>Init</button>
           </div>
         {:else if dialog === "open"}
           <h2>Open repository</h2>
-          <input placeholder="Path" bind:value={draft} />
+          <div class="composer-row path-row">
+            <input placeholder="Path" bind:value={draft} />
+            <button class="text-button" type="button" onclick={async () => { const folder = await browseFolder(); if (folder) void openRepo(folder); }}>{tr("dialog.browse")}</button>
+          </div>
           <div class="composer-row">
             <button class="commit" type="submit">Open</button>
             <button class="text-button" type="button" onclick={() => (dialog = "clone")}>Clone</button>
@@ -4017,6 +4036,12 @@
   .side.section .text-button {
     margin-left: 0;
     flex: none;
+    opacity: 0;
+  }
+
+  .side.section:hover .text-button,
+  .side.section:focus-within .text-button {
+    opacity: 1;
   }
 
   .twist {
@@ -4290,6 +4315,15 @@
     align-items: center;
     gap: 12px;
     flex-wrap: wrap;
+  }
+
+  .path-row {
+    flex-wrap: nowrap;
+  }
+
+  .path-row input {
+    flex: 1;
+    min-width: 0;
   }
 
   .check {
