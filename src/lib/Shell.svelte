@@ -4021,16 +4021,12 @@
     font-weight: 600;
   }
 
-  .pane-filter {
-    flex: 1;
+  .search.pane-filter {
     min-width: 60px;
-    height: 22px;
-    font-size: 11px;
+    height: 24px;
+    font-size: 12px;
+    font-weight: 400;
     padding: 0 6px;
-    border-radius: 4px;
-    border: 1px solid var(--line);
-    background: var(--elevated);
-    color: inherit;
   }
 
   .text-button {
@@ -4701,6 +4697,7 @@
     background: var(--field);
     color: inherit;
     font: inherit;
+    font-weight: 400;
     padding: 0 8px;
     transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
     animation: search-in 140ms ease-out;
@@ -4977,7 +4974,7 @@
   .tool-list button { border: 0; background: transparent; text-align: left; padding: 6px 8px; font: inherit; color: inherit; border-radius: 6px; }
   .tool-list button:hover { background: var(--hover); }
   .tool-list button.on { background: var(--selection); color: var(--accent); font-weight: 500; }
-  .image-toolbar button:hover { background: var(--hover); }
+  .image-toolbar button:hover:not(.on) { background: var(--hover); }
   .tool-fields { display: flex; flex-direction: column; gap: 8px; }
 
   .welcome-view {
