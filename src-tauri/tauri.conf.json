@@ -4,7 +4,7 @@
   "version": "2.0.0",
   "identifier": "com.zhoujun.awegit",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "node ./scripts/dev-server.mjs",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../build"

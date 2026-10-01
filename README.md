@@ -57,7 +57,7 @@ pnpm start
 
 调试程序是 `target\debug\awegit.exe`，它加载 http://127.0.0.1:1420 。单独双击它之前要先有 `pnpm dev`，否则窗口里是无法连接。`pnpm start` 会自己拉起 Vite 和窗口。
 
-窗口已经开着时再执行 `pnpm start` 会因为 1420 被占用而失败。关掉窗口，或继续用已经打开的那个。
+1420 上已经有 Vite 时，再执行 `pnpm start` 会沿用它并打开窗口。单独再跑一次 `pnpm dev` 仍会因为端口被占用而失败。
 
 设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令和 HTTPS 密码不写入这个文件。
 
