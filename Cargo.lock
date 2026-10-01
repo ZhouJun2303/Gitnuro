@@ -233,6 +233,7 @@ name = "awegit"
 version = "2.0.0"
 dependencies = [
  "awegit-git",
+ "chrono",
  "notify",
  "serde",
  "serde_json",

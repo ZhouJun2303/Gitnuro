@@ -22,7 +22,7 @@ pub use model::{
     show_commit_file_with, BlameLine, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, RefSnapshot, ReflogRow,
     RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
-pub use cli::{cancel_running, configure, set_http_proxy, set_passphrase, stop_process_tree, use_bundled_git, Session};
+pub use cli::{cancel_running, configure, set_http_proxy, set_passphrase, set_trace, stop_process_tree, use_bundled_git, Session, Trace};
 pub use ops::{approve_credential, perform, set_repo_author, Mutation, RebaseStep, ResetMode};
 
 use gix::bstr::BStr;

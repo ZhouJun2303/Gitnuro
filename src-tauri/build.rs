@@ -32,6 +32,9 @@ fn main() {
             "compare_files",
             "compare_file",
             "set_repo_author",
+            "log_client",
+            "perf_snapshot",
+            "open_log_folder",
         ]),
     );
     tauri_build::try_build(attributes).expect("failed to run tauri-build");

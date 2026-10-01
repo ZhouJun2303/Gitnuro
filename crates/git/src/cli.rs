@@ -12,6 +12,14 @@ use crate::Error;
 
 static BUNDLED_GIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 static CHILDREN: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+static TRACE: std::sync::OnceLock<Trace> = std::sync::OnceLock::new();
+
+/// Called after each `git` child exits with its arguments, wall time, and success.
+pub type Trace = fn(&[&str], std::time::Duration, bool);
+
+pub fn set_trace(hook: Trace) {
+    let _ = TRACE.set(hook);
+}
 
 /// Values applied to `git` child processes. Nothing here is written to gitconfig.
 #[derive(Clone)]
@@ -217,6 +225,7 @@ fn run_prepared(
     for (key, value) in env {
         command.env(key, value);
     }
+    let started = std::time::Instant::now();
     let mut child = command.spawn().map_err(Error::GitMissing)?;
     let pid = child.id();
     if let Ok(mut guard) = CHILDREN.lock() {
@@ -238,6 +247,9 @@ fn run_prepared(
     }
     let output = child.wait_with_output().map_err(Error::GitMissing)?;
     untrack(pid);
+    if let Some(hook) = TRACE.get() {
+        hook(args, started.elapsed(), output.status.success());
+    }
     if output.status.success() || allow_failure {
         return Ok(output);
     }

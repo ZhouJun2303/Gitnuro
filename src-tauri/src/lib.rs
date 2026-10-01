@@ -1,5 +1,6 @@
 mod ai;
 mod forge;
+mod perf;
 mod settings;
 mod updates;
 
@@ -477,9 +478,11 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
         }
         let ticket = WATCH_TICK.fetch_add(1, Ordering::Relaxed) + 1;
         let app_handle = app_handle.clone();
+        let sample = event.paths.iter().find(|path| !ignored_path(path)).map(|path| path.display().to_string()).unwrap_or_default();
         std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(300));
             if WATCH_TICK.load(Ordering::Relaxed) == ticket {
+                perf::write("INFO", "watch", &format!("repo-changed {sample}"));
                 let _ = app_handle.emit("repo-changed", ());
             }
         });
@@ -728,21 +731,31 @@ fn suggest_commit_message(path: Option<String>) -> Result<ai::Suggestion, String
     ai::suggest(&repo, &values)
 }
 
+#[tauri::command]
+fn log_client(entries: Vec<perf::ClientEntry>) {
+    perf::client(entries);
+}
+
+#[tauri::command]
+fn perf_snapshot() -> perf::Snapshot {
+    perf::snapshot()
+}
+
+#[tauri::command]
+fn open_log_folder() -> Result<(), String> {
+    let dir = perf::dir();
+    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let program = if cfg!(windows) { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    std::process::Command::new(program).arg(&dir).spawn().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    perf::init();
+    awegit_git::set_trace(perf::git);
     prefer_bundled_git();
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .manage(RepoWatch(Mutex::new(None)))
-        .setup(|app| {
-            if let Ok(dir) = app.path().resource_dir() {
-                if let Some(cmd) = git_cmd(&dir) {
-                    awegit_git::use_bundled_git(&cmd);
-                }
-            }
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
+    let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = Box::new(tauri::generate_handler![
             workspace_status,
             stage_all,
             unstage_all,
@@ -783,8 +796,37 @@ pub fn run() {
             lfs_locks,
             launch_tool,
             forge_notifications,
-            forge_pulls
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running AweGit");
+            forge_pulls,
+            log_client,
+            perf_snapshot,
+            open_log_folder
+        ]);
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .manage(RepoWatch(Mutex::new(None)))
+        .setup(|app| {
+            perf::mark("setup");
+            if let Ok(dir) = app.path().resource_dir() {
+                if let Some(cmd) = git_cmd(&dir) {
+                    awegit_git::use_bundled_git(&cmd);
+                }
+            }
+            perf::watch_main_thread(app.handle().clone());
+            Ok(())
+        })
+        .on_page_load(|_, payload| {
+            perf::mark(&format!("page {:?} {}", payload.event(), payload.url()));
+        })
+        .invoke_handler(move |invoke| {
+            let name = invoke.message.command().to_string();
+            let _span = (!matches!(name.as_str(), "log_client" | "perf_snapshot")).then(|| perf::command(&name));
+            handler(invoke)
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building AweGit")
+        .run(|_, event| {
+            if let tauri::RunEvent::Exit = event {
+                perf::summary();
+            }
+        });
 }

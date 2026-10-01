@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
+  import { invoke } from "./perf";
   import { listen } from "@tauri-apps/api/event";
   import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -8,6 +8,7 @@
   import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, unstaged as sampleUnstaged } from "./sample";
   import { highlight } from "./highlight";
   import SplitHandle from "./SplitHandle.svelte";
+  import PerfPanel from "./PerfPanel.svelte";
   import { resolveLocale, translate } from "./i18n";
   import { shortcut, shortcutLabel, typing } from "./keys";
   import { branchGroup, commitGraph, formatWhen, gravatarUrl, laneColors, numberedDiff, splitDiff, windowSlice, type SplitRow } from "./view";
@@ -2086,6 +2087,8 @@
     };
   });
 </script>
+
+<PerfPanel />
 
 <div class="shell" style:--diff-font="{settings.diffFontSize || 13}px" style:--guide="{settings.pageGuide || 72}">
   <nav class="menubar">
