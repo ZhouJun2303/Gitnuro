@@ -4,10 +4,21 @@
 
 mod change;
 mod cli;
+mod model;
+mod ops;
 
 use std::path::{Path, PathBuf};
 
-pub use change::{commit, file_diff, stage_all, stage_paths, unstage_all, unstage_paths, CommitRequest, DiffLine, DiffLineKind, FileDiff};
+pub use change::{
+    commit, file_diff, stage_all, stage_hunk, stage_paths, unstage_all, unstage_paths, workspace_diff, CommitRequest,
+    DiffLine, DiffLineKind, FileDiff,
+};
+pub use model::{
+    blame_file, commit_files, commit_log, file_history, in_progress, repository_refs, show_commit_file, BlameLine,
+    BranchRow, CommitRow, InProgress, RefSnapshot, RemoteRow, StashRow, SubmoduleRow, TagRow, WorktreeRow,
+};
+pub use cli::{set_http_proxy, use_bundled_git};
+pub use ops::{perform, Mutation, ResetMode};
 
 use gix::bstr::BStr;
 use serde::Serialize;
@@ -67,6 +78,8 @@ pub enum Error {
     EmptySummary,
     #[error("path is not inside the repository: {0}")]
     Path(String),
+    #[error("revision is not allowed: {0}")]
+    Rev(String),
     #[error("could not read {path}")]
     Read {
         path: String,

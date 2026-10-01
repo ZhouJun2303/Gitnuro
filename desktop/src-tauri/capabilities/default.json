@@ -12,6 +12,19 @@
     "allow-stage-path",
     "allow-unstage-path",
     "allow-commit-changes",
-    "allow-file-diff"
+    "allow-file-diff",
+    "allow-commit-log",
+    "allow-repository-refs",
+    "allow-commit-files",
+    "allow-show-commit-file",
+    "allow-in-progress",
+    "allow-mutate",
+    "allow-file-history",
+    "allow-blame-file",
+    "allow-load-settings",
+    "allow-save-settings",
+    "allow-watch-repository",
+    "allow-open-terminal",
+    "allow-suggest-commit-message"
   ]
 }

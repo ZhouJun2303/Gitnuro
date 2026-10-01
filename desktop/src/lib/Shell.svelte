@@ -1,12 +1,38 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
+  import { openPath } from "@tauri-apps/plugin-opener";
   import { commits, diffs, unstaged as sampleUnstaged } from "./sample";
-  import { badge, type FileDiff, type StatusFile, type StatusSnapshot } from "./status";
+  import {
+    badge,
+    type BlameLine,
+    type CommitRow,
+    type FileDiff,
+    type InProgress,
+    type RefSnapshot,
+    type Settings,
+    type StatusFile,
+    type StatusSnapshot,
+    type Suggestion,
+  } from "./status";
 
   type Mode = "sample" | "loading" | "live" | "error";
   type Side = "staged" | "unstaged";
   type Row = { path: string; letter: string; tone: "added" | "modified" | "deleted" };
+  type Dialog = "branch" | "flow" | "clone" | "open" | "prefs" | "reset" | "command" | null;
+
+  const defaultSettings: Settings = {
+    theme: "system",
+    pullRebase: false,
+    fetchPrune: true,
+    diffStyle: "unified",
+    proxy: "",
+    aiBaseUrl: "https://api.x.ai/v1",
+    aiModel: "grok-4.7",
+    aiApiKey: "",
+    terminal: "",
+  };
 
   let section = $state<"changes" | "history">("changes");
   let selectedPath = $state<string | null>(sampleUnstaged[0]?.path ?? null);
@@ -25,6 +51,24 @@
   let diff = $state<FileDiff | null>(null);
   let diffError = $state<string | null>(null);
   let diffToken = 0;
+  let refs = $state<RefSnapshot | null>(null);
+  let commitsLive = $state<CommitRow[]>([]);
+  let progress = $state<InProgress | null>(null);
+  let selectedCommit = $state<string | null>(null);
+  let commitFiles = $state<StatusFile[]>([]);
+  let historyFile = $state<string | null>(null);
+  let historyDiff = $state<FileDiff | null>(null);
+  let historyFilter = $state("");
+  let historyTop = $state(0);
+  let blameLines = $state<BlameLine[] | null>(null);
+  let settings = $state<Settings>({ ...defaultSettings });
+  let repos = $state<string[]>([]);
+  let dialog = $state<Dialog>(null);
+  let draft = $state("");
+  let draftExtra = $state("");
+  let launch = $state("");
+  let launchOpen = $state(false);
+  let expanded = $state<"tags" | "stashes" | "submodules" | "worktrees" | null>(null);
 
   const summaryTooLong = $derived(summary.length > 72);
   const selectedDiff = $derived(mode === "sample" && selectedPath ? (diffs[selectedPath] ?? []) : []);
@@ -51,6 +95,33 @@
       !busy &&
       (mode !== "live" || staged.length > 0 || amend),
   );
+  const historyStart = $derived(commitsLive.length > 80 ? Math.max(0, Math.floor(historyTop / 24) - 8) : 0);
+  const historyRows = $derived(
+    commitsLive.slice(historyStart, commitsLive.length > 80 ? Math.min(commitsLive.length, historyStart + 48) : commitsLive.length),
+  );
+  const matches = $derived.by(() => {
+    const query = launch.trim().toLowerCase();
+    if (!query || mode !== "live") return [];
+    if (query.startsWith("!")) {
+      return [{ label: `Run ${query.slice(1)}`, run: () => mutate({ action: "custom", command: query.slice(1) }) }];
+    }
+    const items = [
+      { label: "Fetch", run: () => doFetch() },
+      { label: "Pull", run: () => doPull() },
+      { label: "Push", run: () => doPush() },
+      { label: "Stash", run: () => mutate({ action: "stash", message: "" }) },
+      { label: "Pop stash", run: () => mutate({ action: "stashPop" }) },
+      ...(refs?.branches ?? []).map((branch) => ({
+        label: `Checkout ${branch.name}`,
+        run: () => mutate({ action: "checkout", name: branch.name }),
+      })),
+    ];
+    return items.filter((item) => item.label.toLowerCase().includes(query)).slice(0, 8);
+  });
+
+  function inApp() {
+    return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  }
 
   function repoPath() {
     return snapshot?.path;
@@ -63,6 +134,7 @@
   function applySnapshot(value: StatusSnapshot) {
     snapshot = value;
     mode = "live";
+    if (value.path && !repos.includes(value.path)) repos = [...repos, value.path];
     const sameSide = (selectedSide === "staged" ? value.staged : value.unstaged).some(
       (file) => file.path === selectedPath,
     );
@@ -92,9 +164,9 @@
     }
     const token = ++diffToken;
     const file = selectedPath;
-    const staged = selectedSide === "staged";
+    const stagedSide = selectedSide === "staged";
     try {
-      const value = await invoke<FileDiff>("file_diff", { path: repoPath(), file, staged });
+      const value = await invoke<FileDiff>("file_diff", { path: repoPath(), file, staged: stagedSide });
       if (token === diffToken) {
         diff = value;
         diffError = null;
@@ -107,9 +179,32 @@
     }
   }
 
+  async function loadContext() {
+    const path = repoPath();
+    if (historyFilter) {
+      commitsLive = await invoke<CommitRow[]>("file_history", { path, file: historyFilter, limit: 200 });
+    } else {
+      commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: 500 });
+    }
+    refs = await invoke<RefSnapshot>("repository_refs", { path });
+    progress = await invoke<InProgress | null>("in_progress", { path });
+  }
+
+  async function refresh() {
+    if (!inApp() || busy) return;
+    try {
+      applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path: repoPath() }));
+      await loadContext();
+      await loadDiff();
+    } catch (error) {
+      actionError = message(error);
+    }
+  }
+
   function selectFile(path: string, side: Side) {
     selectedPath = path;
     selectedSide = side;
+    blameLines = null;
     if (mode === "live") void loadDiff();
   }
 
@@ -126,6 +221,156 @@
     } finally {
       busy = false;
     }
+  }
+
+  async function mutate(request: Record<string, unknown>) {
+    if (!inApp() || busy) return;
+    busy = true;
+    actionError = null;
+    try {
+      const value = await invoke<StatusSnapshot>("mutate", { path: repoPath(), request });
+      applySnapshot(value);
+      await loadContext();
+      await loadDiff();
+      dialog = null;
+    } catch (error) {
+      actionError = message(error);
+      try {
+        applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path: repoPath() }));
+        await loadContext();
+      } catch {
+        /* keep the action error */
+      }
+    } finally {
+      busy = false;
+    }
+  }
+
+  function doFetch() {
+    const remote = refs?.remotes[0]?.name;
+    return mutate({ action: "fetch", remote: remote ?? null, prune: settings.fetchPrune, tags: false });
+  }
+
+  function doPull() {
+    return mutate({ action: "pull", rebase: settings.pullRebase });
+  }
+
+  function doPush() {
+    const current = refs?.branches.find((branch) => branch.current);
+    const remote = refs?.remotes[0]?.name ?? null;
+    return mutate({
+      action: "push",
+      remote,
+      setUpstream: !current?.upstream,
+      tags: false,
+      forceWithLease: false,
+    });
+  }
+
+  async function submitCommit() {
+    if (mode !== "live" || !canCommit) return;
+    await runChange("commit_changes", { summary, description, amend, signOff });
+    if (!actionError) {
+      summary = "";
+      description = "";
+      amend = false;
+      await loadContext();
+    }
+  }
+
+  async function suggestMessage() {
+    if (mode !== "live" || busy) return;
+    busy = true;
+    actionError = null;
+    try {
+      const value = await invoke<Suggestion>("suggest_commit_message", { path: repoPath() });
+      summary = value.summary;
+      description = value.description;
+    } catch (error) {
+      actionError = message(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function selectCommit(id: string) {
+    selectedCommit = id;
+    blameLines = null;
+    try {
+      commitFiles = await invoke<StatusFile[]>("commit_files", { path: repoPath(), id });
+      historyFile = commitFiles[0]?.path ?? null;
+      historyDiff = historyFile
+        ? await invoke<FileDiff>("show_commit_file", { path: repoPath(), id, file: historyFile })
+        : null;
+    } catch (error) {
+      actionError = message(error);
+    }
+  }
+
+  async function pickCommitFile(file: string) {
+    if (!selectedCommit) return;
+    historyFile = file;
+    try {
+      historyDiff = await invoke<FileDiff>("show_commit_file", {
+        path: repoPath(),
+        id: selectedCommit,
+        file,
+      });
+    } catch (error) {
+      actionError = message(error);
+    }
+  }
+
+  async function showFileHistory(file: string) {
+    historyFilter = file;
+    section = "history";
+    try {
+      commitsLive = await invoke<CommitRow[]>("file_history", { path: repoPath(), file, limit: 200 });
+    } catch (error) {
+      actionError = message(error);
+    }
+  }
+
+  async function showBlame(file: string) {
+    blameLines = null;
+    try {
+      blameLines = await invoke<BlameLine[]>("blame_file", { path: repoPath(), file });
+    } catch (error) {
+      actionError = message(error);
+    }
+  }
+
+  async function openRepo(path: string) {
+    if (!inApp() || busy || !path.trim()) return;
+    busy = true;
+    actionError = null;
+    try {
+      applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
+      historyFilter = "";
+      await loadContext();
+      await loadDiff();
+      await invoke("watch_repository", { path: repoPath() });
+      dialog = null;
+    } catch (error) {
+      actionError = message(error);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function savePrefs() {
+    settings = await invoke<Settings>("save_settings", { values: settings });
+    dialog = null;
+  }
+
+  function removeBranch(name: string) {
+    if (!confirm(`Delete branch ${name}?`)) return;
+    void mutate({ action: "deleteBranch", name });
+  }
+
+  function hardReset() {
+    if (!confirm("Hard reset discards uncommitted work. Continue?")) return;
+    void mutate({ action: "reset", rev: draft || "HEAD", mode: "hard" });
   }
 
   function toRow(file: StatusFile): Row {
@@ -149,80 +394,212 @@
     return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
   }
 
+  function progressLabel(value: InProgress) {
+    if (value === "cherryPick") return "Cherry-pick";
+    if (value === "rebase") return "Rebase";
+    if (value === "revert") return "Revert";
+    return "Merge";
+  }
+
+  $effect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    if (!settings.theme || settings.theme === "system") root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", settings.theme);
+  });
+
   onMount(() => {
-    if (!("__TAURI_INTERNALS__" in window)) return;
+    if (!inApp()) return;
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        void submitCommit();
+      } else if (event.key === "F5") {
+        event.preventDefault();
+        void refresh();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    let unlisten = () => {};
     mode = "loading";
     selectedPath = null;
+    invoke<Settings>("load_settings")
+      .then((value) => {
+        settings = value;
+      })
+      .catch(() => {});
     invoke<StatusSnapshot>("workspace_status")
       .then(async (value) => {
         applySnapshot(value);
+        await loadContext();
         await loadDiff();
+        await invoke("watch_repository", { path: repoPath() });
+        unlisten = await listen("repo-changed", () => {
+          if (!busy) void refresh();
+        });
       })
       .catch((error: unknown) => {
         loadError = message(error);
         mode = "error";
       });
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      unlisten();
+    };
   });
 </script>
 
 <div class="shell">
   <header class="chrome">
     <div class="tabs">
-      <button class="tab" type="button">Default</button>
-      <button class="tab active" type="button">{tabLabel}</button>
+      <button class="tab" type="button" onclick={() => (dialog = "open")}>Open</button>
+      {#each repos as repo (repo)}
+        <button class="tab" class:active={snapshot?.path === repo} type="button" onclick={() => openRepo(repo)}>
+          {folderName(repo)}
+        </button>
+      {:else}
+        <button class="tab active" type="button">{tabLabel}</button>
+      {/each}
     </div>
     <div class="toolbar">
-      <button class="tool" type="button"><span class="glyph">↓</span>Fetch</button>
-      <button class="tool" type="button"><span class="glyph">↓</span>Pull</button>
-      <button class="tool" type="button"><span class="glyph">↑</span>Push</button>
-      <button class="tool" type="button"><span class="glyph">▣</span>Stash</button>
-      <button class="tool" type="button"><span class="glyph">▢</span>Pop</button>
-      <button class="tool" type="button"><span class="glyph">⑂</span>Git Flow</button>
+      <button class="tool" type="button" disabled={busy} onclick={() => doFetch()}><span class="glyph">↓</span>Fetch</button>
+      <button class="tool" type="button" disabled={busy} onclick={() => doPull()}><span class="glyph">↓</span>Pull</button>
+      <button class="tool" type="button" disabled={busy} onclick={() => doPush()}><span class="glyph">↑</span>Push</button>
+      <button class="tool" type="button" disabled={busy} onclick={() => mutate({ action: "stash", message: "" })}><span class="glyph">▣</span>Stash</button>
+      <button class="tool" type="button" disabled={busy} onclick={() => mutate({ action: "stashPop" })}><span class="glyph">▢</span>Pop</button>
+      <button class="tool" type="button" disabled={busy} onclick={() => { draft = ""; dialog = "flow"; }}><span class="glyph">⑂</span>Git Flow</button>
       <div class="spacer"></div>
-      <input class="launch" placeholder="Quick Launch" aria-label="Quick Launch" />
-      <button class="tool" type="button"><span class="glyph">▹</span>Terminal</button>
-      <button class="tool" type="button"><span class="glyph">▤</span>Explorer</button>
-      <button class="tool" type="button"><span class="glyph">⚙</span>Preferences</button>
+      <div class="launch-wrap">
+        <input
+          class="launch"
+          placeholder="Quick Launch"
+          aria-label="Quick Launch"
+          bind:value={launch}
+          onfocus={() => (launchOpen = true)}
+          onblur={() => setTimeout(() => (launchOpen = false), 150)}
+          onkeydown={(event) => {
+            if (event.key === "Enter" && matches[0]) {
+              event.preventDefault();
+              const run = matches[0].run;
+              launch = "";
+              launchOpen = false;
+              void run();
+            }
+          }}
+        />
+        {#if launchOpen && matches.length > 0}
+          <div class="launch-menu">
+            {#each matches as item (item.label)}
+              <button type="button" onclick={() => { launch = ""; launchOpen = false; void item.run(); }}>{item.label}</button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <button class="tool" type="button" onclick={() => invoke("open_terminal", { path: repoPath() })}><span class="glyph">▹</span>Terminal</button>
+      <button class="tool" type="button" onclick={() => snapshot && openPath(snapshot.path)}><span class="glyph">▤</span>Explorer</button>
+      <button class="tool" type="button" onclick={() => (dialog = "prefs")}><span class="glyph">⚙</span>Preferences</button>
     </div>
   </header>
 
+  {#if mode === "live" && progress}
+    <div class="banner">
+      <span>{progressLabel(progress)} in progress</span>
+      <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "abort" })}>Abort</button>
+      <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "continue" })}>Continue</button>
+      <button class="text-button" type="button" disabled={busy || progress === "merge"} onclick={() => mutate({ action: "skip" })}>Skip</button>
+    </div>
+  {/if}
+  {#if actionError}
+    <p class="banner error">{actionError}</p>
+  {/if}
+
   <div class="body">
     <aside class="sidebar">
-      <button
-        class="side"
-        class:selected={section === "changes"}
-        type="button"
-        onclick={() => (section = "changes")}
-      >
+      <button class="side" class:selected={section === "changes"} type="button" onclick={() => (section = "changes")}>
         <span>Local Changes</span>
         <span class="count">{changeCount}</span>
       </button>
-      <button
-        class="side"
-        class:selected={section === "history"}
-        type="button"
-        onclick={() => (section = "history")}
-      >
+      <button class="side" class:selected={section === "history"} type="button" onclick={() => (section = "history")}>
         <span>All Commits</span>
+        {#if mode === "live"}<span class="count">{commitsLive.length}</span>{/if}
       </button>
 
-      <div class="group">Local branches</div>
-      <div class="side current">
-        <span class="dot"></span>
-        <span class="name">{branchLabel}</span>
-        {#if mode === "sample"}
-          <span class="ahead">↑5</span>
+      <div class="group">
+        Local branches
+        {#if mode === "live"}
+          <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "branch"; }}>New</button>
         {/if}
       </div>
-      <div class="group">Remotes</div>
-      <div class="side quiet"><span class="name">origin</span></div>
-      <div class="side nested quiet"><span class="name">HEAD</span></div>
-      <div class="side nested quiet"><span class="name">main</span></div>
+      {#if mode === "live" && refs}
+        {#each refs.branches as branch (branch.name)}
+          <div class="side" class:current={branch.current}>
+            <button class="file-select" type="button" onclick={() => mutate({ action: "checkout", name: branch.name })}>
+              {#if branch.current}<span class="dot"></span>{/if}
+              <span class="name">{branch.name}</span>
+              {#if branch.ahead > 0}<span class="ahead">↑{branch.ahead}</span>{/if}
+              {#if branch.behind > 0}<span class="ahead">↓{branch.behind}</span>{/if}
+            </button>
+            {#if !branch.current}
+              <button class="text-button row-action" type="button" onclick={() => removeBranch(branch.name)}>Delete</button>
+            {/if}
+          </div>
+        {/each}
+        <div class="group">Remotes</div>
+        {#each refs.remotes as remote (remote.name)}
+          <div class="side quiet"><span class="name">{remote.name}</span></div>
+          {#if remote.head}<div class="side nested quiet"><span class="name">HEAD</span></div>{/if}
+          {#each remote.branches as branch (remote.name + branch)}
+            <div class="side nested quiet"><span class="name">{branch}</span></div>
+          {/each}
+        {/each}
+      {:else}
+        <div class="side current">
+          <span class="dot"></span>
+          <span class="name">{branchLabel}</span>
+          {#if mode === "sample"}<span class="ahead">↑5</span>{/if}
+        </div>
+        <div class="group">Remotes</div>
+        <div class="side quiet"><span class="name">origin</span></div>
+        <div class="side nested quiet"><span class="name">HEAD</span></div>
+        <div class="side nested quiet"><span class="name">main</span></div>
+      {/if}
       <div class="group">More</div>
-      <div class="side quiet"><span>Tags</span><span class="count">0</span></div>
-      <div class="side quiet"><span>Stashes</span><span class="count">0</span></div>
-      <div class="side quiet"><span>Submodules</span><span class="count">0</span></div>
-      <div class="side quiet"><span>Worktrees</span><span class="count">1</span></div>
+      <button class="side quiet" type="button" onclick={() => (expanded = expanded === "tags" ? null : "tags")}>
+        <span>Tags</span><span class="count">{refs?.tags.length ?? 0}</span>
+      </button>
+      {#if expanded === "tags"}
+        {#each refs?.tags ?? [] as tag (tag.name)}
+          <div class="side nested quiet"><span class="name">{tag.name}</span></div>
+        {/each}
+      {/if}
+      <button class="side quiet" type="button" onclick={() => (expanded = expanded === "stashes" ? null : "stashes")}>
+        <span>Stashes</span><span class="count">{refs?.stashes.length ?? 0}</span>
+      </button>
+      {#if expanded === "stashes"}
+        {#each refs?.stashes ?? [] as stash (stash.name)}
+          <button class="side nested quiet" type="button" onclick={() => mutate({ action: "stashApply", name: stash.name })}>
+            <span class="name">{stash.summary}</span>
+          </button>
+        {/each}
+      {/if}
+      <button class="side quiet" type="button" onclick={() => (expanded = expanded === "submodules" ? null : "submodules")}>
+        <span>Submodules</span><span class="count">{refs?.submodules.length ?? 0}</span>
+      </button>
+      {#if expanded === "submodules"}
+        {#each refs?.submodules ?? [] as row (row.path)}
+          <div class="side nested quiet"><span class="name">{row.path}</span></div>
+        {/each}
+      {/if}
+      <button class="side quiet" type="button" onclick={() => (expanded = expanded === "worktrees" ? null : "worktrees")}>
+        <span>Worktrees</span><span class="count">{refs?.worktrees.length ?? (mode === "sample" ? 1 : 0)}</span>
+      </button>
+      {#if expanded === "worktrees"}
+        {#each refs?.worktrees ?? [] as row (row.path)}
+          <button class="side nested quiet" type="button" onclick={() => openRepo(row.path)}>
+            <span class="name">{row.branch ?? folderName(row.path)}</span>
+          </button>
+        {/each}
+      {/if}
     </aside>
 
     {#if section === "changes"}
@@ -230,12 +607,7 @@
         <div class="pane-head">
           <span>Staged</span>
           <span class="count">{staged.length}</span>
-          <button
-            class="text-button"
-            type="button"
-            disabled={mode !== "live" || busy || staged.length === 0}
-            onclick={() => runChange("unstage_all")}
-          >Unstage all</button>
+          <button class="text-button" type="button" disabled={mode !== "live" || busy || staged.length === 0} onclick={() => runChange("unstage_all")}>Unstage all</button>
         </div>
         {#if staged.length === 0}
           <p class="empty">No staged changes</p>
@@ -250,12 +622,7 @@
         <div class="pane-head">
           <span>Unstaged</span>
           <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : unstaged.length}</span>
-          <button
-            class="text-button"
-            type="button"
-            disabled={mode !== "live" || busy || unstaged.length === 0}
-            onclick={() => runChange("stage_all")}
-          >Stage all</button>
+          <button class="text-button" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>Stage all</button>
         </div>
         <div class="file-list">
           {#if mode === "loading"}
@@ -279,69 +646,69 @@
               <span class="file-dir">{parentDir(file.path)}</span>
             </button>
             {#if mode === "live"}
-              <button
-                class="text-button row-action"
-                type="button"
-                disabled={busy}
-                onclick={() => runChange(side === "staged" ? "unstage_path" : "stage_path", { file: file.path })}
-              >{side === "staged" ? "Unstage" : "Stage"}</button>
+              <button class="text-button row-action" type="button" disabled={busy} onclick={() => runChange(side === "staged" ? "unstage_path" : "stage_path", { file: file.path })}>{side === "staged" ? "Unstage" : "Stage"}</button>
+              {#if side === "unstaged"}
+                <button class="text-button row-action" type="button" disabled={busy} onclick={() => mutate({ action: "discard", file: file.path })}>Discard</button>
+              {/if}
             {/if}
           </div>
         {/snippet}
 
-        <form
-          class="composer"
-          onsubmit={(event) => {
-            event.preventDefault();
-            if (mode !== "live" || !canCommit) return;
-            void runChange("commit_changes", { summary, description, amend, signOff }).then(() => {
-              if (!actionError) {
-                summary = "";
-                description = "";
-                amend = false;
-              }
-            });
-          }}
-        >
+        <form class="composer" onsubmit={(event) => { event.preventDefault(); void submitCommit(); }}>
           <label class="field">
-            <input
-              placeholder="Summary"
-              bind:value={summary}
-              maxlength="200"
-              aria-invalid={summaryTooLong}
-            />
+            <input placeholder="Summary" bind:value={summary} maxlength="200" aria-invalid={summaryTooLong} />
             <span class="counter" class:over={summaryTooLong}>{summary.length}/72</span>
           </label>
           <textarea placeholder="Description" rows="3" bind:value={description}></textarea>
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={amend} /> Amend</label>
             <label class="check"><input type="checkbox" bind:checked={signOff} /> Sign-off</label>
+            <button class="text-button" type="button" disabled={mode !== "live" || busy} onclick={() => suggestMessage()}>Suggest</button>
             <button class="commit" type="submit" disabled={!canCommit}>{busy ? "Working…" : "Commit"}</button>
           </div>
-          {#if actionError}
-            <p class="empty">{actionError}</p>
-          {/if}
         </form>
       </section>
     {:else if mode !== "sample"}
-      <section class="history">
-        <p class="empty">History is not loaded yet</p>
+      <section class="history" onscroll={(event) => (historyTop = (event.currentTarget as HTMLElement).scrollTop)}>
+        {#if historyFilter}
+          <div class="pane-head">
+            <span>{historyFilter}</span>
+            <button class="text-button" type="button" onclick={() => { historyFilter = ""; void loadContext(); }}>All commits</button>
+          </div>
+        {/if}
+        {#if commitsLive.length === 0}
+          <p class="empty">No commits yet</p>
+        {:else}
+          <div class="commit-window" style:height="{commitsLive.length * 24}px">
+            {#each historyRows as commit, index (commit.id)}
+              <button
+                class="commit-row virtual"
+                class:selected={selectedCommit === commit.id}
+                style:top="{(historyStart + index) * 24}px"
+                type="button"
+                onclick={() => selectCommit(commit.id)}
+              >
+                <span class="lane" style:margin-left="{commit.lane * 10}px"></span>
+                <span class="subject">{commit.summary}</span>
+                <span class="badges">
+                  {#each commit.refs as label (label)}<span class="ref">{label}</span>{/each}
+                </span>
+                <span class="meta">{commit.author}</span>
+                <span class="meta sha">{commit.shortId}</span>
+                <span class="meta">{commit.when}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       </section>
     {:else}
       <section class="history">
         {#each commits as commit (commit.id)}
-          <button
-            class="commit-row"
-            class:selected={selectedPath === commit.id}
-            type="button"
-            onclick={() => (selectedPath = commit.id)}
-          >
+          <button class="commit-row" class:selected={selectedPath === commit.id} type="button" onclick={() => (selectedPath = commit.id)}>
             <span class="lane" aria-hidden="true"></span>
             <span class="subject">{commit.summary}</span>
             <span class="badges">
-              {#each commit.badges as label (label)}
-                <span class="ref">{label}</span>
-              {/each}
+              {#each commit.badges as label (label)}<span class="ref">{label}</span>{/each}
             </span>
             <span class="meta">{commit.author}</span>
             <span class="meta sha">{commit.id}</span>
@@ -352,8 +719,25 @@
     {/if}
 
     <section class="diff">
-      {#if mode === "live" && section === "changes" && selectedPath}
-        <header class="diff-head">{selectedPath}</header>
+      {#if blameLines}
+        <header class="diff-head">
+          <span>Blame {selectedPath}</span>
+          <button class="text-button" type="button" onclick={() => (blameLines = null)}>Close</button>
+        </header>
+        <pre class="diff-body">{#each blameLines as line (`${line.line}-${line.id}`)}<span>{line.shortId} {line.author} {line.text + "\n"}</span>{/each}</pre>
+      {:else if mode === "live" && section === "changes" && selectedPath}
+        <header class="diff-head">
+          <span>{selectedPath}</span>
+          <button class="text-button" type="button" onclick={() => showBlame(selectedPath!)}>Blame</button>
+          <button class="text-button" type="button" onclick={() => showFileHistory(selectedPath!)}>History</button>
+          {#if diff}
+            {#each { length: diff.hunks } as _, index (index)}
+              <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index, unstage: selectedSide === "staged" })}>
+                {selectedSide === "staged" ? "Unstage" : "Stage"} {index + 1}
+              </button>
+            {/each}
+          {/if}
+        </header>
         {#if diffError}
           <p class="diff-empty">{diffError}</p>
         {:else if !diff}
@@ -363,20 +747,36 @@
         {:else if diff.lines.length === 0}
           <p class="diff-empty">No changes in this view</p>
         {:else}
-          <pre class="diff-body">{#each diff.lines as line, index (index)}<span
-                class:add={line.kind === "add"}
-                class:del={line.kind === "delete"}
-                class:hunk={line.kind === "hunk"}
-                class:meta={line.kind === "meta"}>{line.text + "\n"}</span>{/each}{#if diff.truncated}<span class="meta">Diff truncated.</span>{/if}</pre>
+          <pre class="diff-body">{#each diff.lines as line, index (index)}<span class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"}>{line.text + "\n"}</span>{/each}{#if diff.truncated}<span class="meta">Diff truncated.</span>{/if}</pre>
         {/if}
       {:else if section === "changes" && selectedPath && selectedDiff.length > 0}
         <header class="diff-head">{selectedPath}</header>
-        <pre class="diff-body">{#each selectedDiff as line, index (index)}<span
-              class:add={line.startsWith("+") && !line.startsWith("+++")}
-              class:del={line.startsWith("-") && !line.startsWith("---")}
-              class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
-      {:else if mode !== "sample" && section === "history"}
-        <p class="diff-empty">History is not loaded yet</p>
+        <pre class="diff-body">{#each selectedDiff as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+      {:else if mode === "live" && section === "history"}
+        <header class="diff-head">
+          <span>{commitsLive.find((row) => row.id === selectedCommit)?.summary ?? "History"}</span>
+          {#if selectedCommit}
+            <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "checkout", name: selectedCommit })}>Checkout</button>
+            <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "cherryPick", rev: selectedCommit })}>Cherry-pick</button>
+            <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "revert", rev: selectedCommit })}>Revert</button>
+            <button class="text-button" type="button" onclick={() => { draft = selectedCommit ?? "HEAD"; dialog = "reset"; }}>Reset</button>
+          {/if}
+        </header>
+        <div class="file-list staged-list">
+          {#each commitFiles as file (file.path)}
+            {@const mark = badge(file.kind)}
+            <button class="file" class:selected={historyFile === file.path} type="button" onclick={() => pickCommitFile(file.path)}>
+              <span class="badge {mark.tone}">{mark.letter}</span>
+              <span class="file-name">{fileName(file.path)}</span>
+              <span class="file-dir">{parentDir(file.path)}</span>
+            </button>
+          {/each}
+        </div>
+        {#if historyDiff && historyDiff.lines.length > 0}
+          <pre class="diff-body">{#each historyDiff.lines as line, index (index)}<span class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"}>{line.text + "\n"}</span>{/each}</pre>
+        {:else}
+          <p class="diff-empty">Select a file in this commit to see changes</p>
+        {/if}
       {:else if section === "history" && selectedPath}
         <header class="diff-head">{commits.find((row) => row.id === selectedPath)?.summary}</header>
         <p class="diff-empty">Select a file in this commit to see changes</p>
@@ -385,6 +785,85 @@
       {/if}
     </section>
   </div>
+
+  {#if dialog}
+    <div class="scrim" role="presentation" onclick={() => (dialog = null)}>
+      <div class="dialog" role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+      <form
+        onsubmit={(event) => {
+          event.preventDefault();
+          if (dialog === "branch") void mutate({ action: "createBranch", name: draft, start: draftExtra || null });
+          else if (dialog === "clone") void mutate({ action: "clone", url: draft, destination: draftExtra });
+          else if (dialog === "open") void openRepo(draft);
+          else if (dialog === "command") void mutate({ action: "custom", command: draft });
+          else if (dialog === "prefs") void savePrefs();
+        }}
+      >
+        {#if dialog === "prefs"}
+          <h2>Preferences</h2>
+          <label>Theme
+            <select bind:value={settings.theme}>
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" bind:checked={settings.pullRebase} /> Pull with rebase</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.fetchPrune} /> Prune on fetch</label>
+          <label>Proxy <input bind:value={settings.proxy} placeholder="http://host:port" /></label>
+          <label>Terminal <input bind:value={settings.terminal} placeholder="empty opens cmd" /></label>
+          <label>AI base URL <input bind:value={settings.aiBaseUrl} /></label>
+          <label>AI model <input bind:value={settings.aiModel} /></label>
+          <label>AI API key <input type="password" bind:value={settings.aiApiKey} placeholder="or set XAI_API_KEY" /></label>
+          <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => mutate({ action: "lfsPull" })}>LFS pull</button>
+            <button class="text-button" type="button" onclick={() => mutate({ action: "lfsPush" })}>LFS push</button>
+            <button class="text-button" type="button" onclick={() => (dialog = "command")}>Custom command</button>
+            <button class="commit" type="submit">Save</button>
+          </div>
+        {:else if dialog === "reset"}
+          <h2>Reset to {draft}</h2>
+          <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => mutate({ action: "reset", rev: draft, mode: "soft" })}>Soft</button>
+            <button class="text-button" type="button" onclick={() => mutate({ action: "reset", rev: draft, mode: "mixed" })}>Mixed</button>
+            <button class="text-button" type="button" onclick={hardReset}>Hard</button>
+          </div>
+        {:else if dialog === "flow"}
+          <h2>Git Flow</h2>
+          <input placeholder="Feature name" bind:value={draft} />
+          <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => mutate({ action: "gitFlowStart", name: draft })}>Start</button>
+            <button class="text-button" type="button" onclick={() => mutate({ action: "gitFlowFinish", name: draft })}>Finish</button>
+          </div>
+        {:else if dialog === "branch"}
+          <h2>New branch</h2>
+          <input placeholder="Name" bind:value={draft} />
+          <input placeholder="Start point (optional)" bind:value={draftExtra} />
+          <button class="commit" type="submit">Create</button>
+        {:else if dialog === "clone"}
+          <h2>Clone</h2>
+          <input placeholder="URL" bind:value={draft} />
+          <input placeholder="Destination folder" bind:value={draftExtra} />
+          <div class="composer-row">
+            <button class="commit" type="submit">Clone</button>
+            <button class="text-button" type="button" onclick={() => mutate({ action: "init", destination: draftExtra })}>Init</button>
+          </div>
+        {:else if dialog === "open"}
+          <h2>Open repository</h2>
+          <input placeholder="Path" bind:value={draft} />
+          <div class="composer-row">
+            <button class="commit" type="submit">Open</button>
+            <button class="text-button" type="button" onclick={() => (dialog = "clone")}>Clone</button>
+          </div>
+        {:else}
+          <h2>Custom command</h2>
+          <input placeholder="git status" bind:value={draft} />
+          <button class="commit" type="submit">Run</button>
+        {/if}
+      </form>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -472,6 +951,10 @@
     flex: 1;
   }
 
+  .launch-wrap {
+    position: relative;
+  }
+
   .launch {
     width: 220px;
     height: 26px;
@@ -482,6 +965,35 @@
     background: var(--field);
     color: var(--text);
     font: inherit;
+  }
+
+  .launch-menu {
+    position: absolute;
+    z-index: 2;
+    top: 30px;
+    left: 0;
+    width: 220px;
+    background: var(--canvas);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 4px;
+  }
+
+  .launch-menu button {
+    display: block;
+    width: 100%;
+    height: 24px;
+    text-align: left;
+    padding: 0 8px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    border-radius: var(--radius);
+  }
+
+  .launch-menu button:hover {
+    background: var(--hover);
   }
 
   .launch:focus-visible,
@@ -496,6 +1008,20 @@
   .text-button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
+  }
+
+  .banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    padding: 0 12px;
+    background: var(--selection);
+  }
+
+  .banner.error {
+    color: var(--deleted);
+    background: transparent;
   }
 
   .body {
@@ -554,6 +1080,8 @@
     font-size: 11px;
     font-weight: 600;
     color: var(--text-secondary);
+    display: flex;
+    align-items: center;
   }
 
   .current .name {
@@ -565,6 +1093,7 @@
     height: 6px;
     border-radius: 50%;
     background: var(--accent);
+    flex: none;
   }
 
   .changes,
@@ -641,6 +1170,11 @@
     align-items: center;
     gap: 8px;
     text-align: left;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    padding: 0;
   }
 
   .row-action {
@@ -660,21 +1194,11 @@
     font-weight: 700;
   }
 
-  .added {
-    color: var(--added);
-  }
+  .added { color: var(--added); }
+  .deleted { color: var(--deleted); }
+  .modified { color: var(--modified); }
 
-  .deleted {
-    color: var(--deleted);
-  }
-
-  .modified {
-    color: var(--modified);
-  }
-
-  .file-name {
-    flex: none;
-  }
+  .file-name { flex: none; }
 
   .file-dir {
     flex: 1;
@@ -704,7 +1228,9 @@
   }
 
   .field input,
-  textarea {
+  textarea,
+  .dialog input,
+  .dialog select {
     border: 0;
     background: transparent;
     color: inherit;
@@ -731,9 +1257,7 @@
     color: var(--text-secondary);
   }
 
-  .counter.over {
-    color: var(--deleted);
-  }
+  .counter.over { color: var(--deleted); }
 
   .composer-row {
     display: flex;
@@ -757,13 +1281,18 @@
     color: var(--on-accent);
   }
 
-  .commit:disabled {
-    opacity: 0.4;
-  }
+  .commit:disabled { opacity: 0.4; }
+
+  .commit-window { position: relative; }
 
   .commit-row {
     height: var(--row-commit);
     padding: 0 8px;
+  }
+
+  .commit-row.virtual {
+    position: absolute;
+    left: 0;
   }
 
   .lane {
@@ -772,7 +1301,6 @@
     flex: none;
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 12px 0 0 var(--accent);
   }
 
   .subject {
@@ -782,10 +1310,7 @@
     white-space: nowrap;
   }
 
-  .badges {
-    display: flex;
-    gap: 4px;
-  }
+  .badges { display: flex; gap: 4px; }
 
   .ref {
     height: 16px;
@@ -796,9 +1321,7 @@
     line-height: 16px;
   }
 
-  .sha {
-    font-family: var(--mono);
-  }
+  .sha { font-family: var(--mono); }
 
   .diff {
     flex: 1;
@@ -811,11 +1334,18 @@
     height: 28px;
     display: flex;
     align-items: center;
+    gap: 8px;
     padding: 0 12px;
     border-bottom: 1px solid var(--line);
     font-family: var(--mono);
     font-size: 12px;
     font-weight: 400;
+  }
+
+  .diff-head span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .diff-body {
@@ -834,20 +1364,60 @@
     white-space: pre;
   }
 
-  .diff-body .add {
-    background: var(--diff-add);
-  }
-
-  .diff-body .del {
-    background: var(--diff-del);
-  }
+  .diff-body .add { background: var(--diff-add); }
+  .diff-body .del { background: var(--diff-del); }
 
   .diff-body .hunk,
-  .diff-body .meta {
+  .diff-body .meta { color: var(--text-secondary); }
+
+  .diff-empty { margin: auto; }
+
+  .scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.28);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .dialog {
+    width: 420px;
+    max-width: calc(100vw - 32px);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 16px;
+    border-radius: 12px;
+    background: var(--canvas);
+    border: 1px solid var(--line);
+  }
+
+  .dialog h2 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .dialog input,
+  .dialog select {
+    height: 28px;
+    padding: 0 8px;
+    border-radius: var(--radius);
+    background: var(--field);
+  }
+
+  .dialog label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
     color: var(--text-secondary);
   }
 
-  .diff-empty {
-    margin: auto;
+  .name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 </style>

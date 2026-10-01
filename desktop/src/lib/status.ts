@@ -27,6 +27,7 @@ export type FileDiff = {
   binary: boolean;
   truncated: boolean;
   lines: DiffLine[];
+  hunks: number;
 };
 
 export type BadgeTone = "added" | "modified" | "deleted";
@@ -48,3 +49,71 @@ export function badge(kind: ChangeKind): { letter: string; tone: BadgeTone } {
       return { letter: "?", tone: "added" };
   }
 }
+
+export type CommitRow = {
+  id: string;
+  shortId: string;
+  summary: string;
+  author: string;
+  when: string;
+  parents: string[];
+  refs: string[];
+  lane: number;
+};
+
+export type BranchRow = {
+  name: string;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  current: boolean;
+};
+
+export type RemoteRow = {
+  name: string;
+  url: string | null;
+  head: string | null;
+  branches: string[];
+};
+
+export type TagRow = { name: string; id: string };
+export type StashRow = { name: string; summary: string };
+export type SubmoduleRow = { path: string; id: string; ready: boolean };
+export type WorktreeRow = { path: string; branch: string | null; detached: boolean };
+
+export type RefSnapshot = {
+  branches: BranchRow[];
+  remotes: RemoteRow[];
+  tags: TagRow[];
+  stashes: StashRow[];
+  submodules: SubmoduleRow[];
+  worktrees: WorktreeRow[];
+};
+
+export type InProgress = "merge" | "rebase" | "cherryPick" | "revert";
+
+export type BlameLine = {
+  id: string;
+  shortId: string;
+  summary: string;
+  author: string;
+  line: number;
+  text: string;
+};
+
+export type Settings = {
+  theme: string;
+  pullRebase: boolean;
+  fetchPrune: boolean;
+  diffStyle: string;
+  proxy: string;
+  aiBaseUrl: string;
+  aiModel: string;
+  aiApiKey: string;
+  terminal: string;
+};
+
+export type Suggestion = {
+  summary: string;
+  description: string;
+};

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde::Serialize;
 
-use crate::cli::{check_path, run};
+use crate::cli::{check_path, run, run_stdin};
 use crate::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,10 +108,67 @@ pub struct FileDiff {
     pub binary: bool,
     pub truncated: bool,
     pub lines: Vec<DiffLine>,
+    /// How many zero-context hunks can be staged one at a time.
+    pub hunks: u32,
 }
 
 const MAX_DIFF_LINES: usize = 4_000;
 const MAX_UNTRACKED_BYTES: u64 = 1_048_576;
+
+/// Stage or unstage a single hunk. Hunks come from a zero-context diff, so adjacent edits stay separate.
+pub fn stage_hunk(repo: &Path, path: &str, index: u32, unstage: bool) -> Result<(), Error> {
+    let path = check_path(path)?;
+    let mut args = vec!["diff", "--no-ext-diff", "--no-color", "--unified=0"];
+    if unstage {
+        args.push("--cached");
+    }
+    args.push("--");
+    args.push(path);
+    let output = run(repo, &args)?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (preamble, hunks) = split_hunks(&text);
+    if hunks.is_empty() {
+        if !unstage && index == 0 && !in_index(repo, path)? {
+            return stage_paths(repo, &[path.to_string()]);
+        }
+        return Err(Error::Git(format!("hunk {index} is not in {path}")));
+    }
+    let hunk = hunks.get(index as usize).ok_or_else(|| Error::Git(format!("hunk {index} is not in {path}")))?;
+    let mut patch = preamble;
+    patch.push_str(hunk);
+    if !patch.ends_with('\n') {
+        patch.push('\n');
+    }
+    let mut apply = vec!["apply", "--cached", "--unidiff-zero"];
+    if unstage {
+        apply.push("--reverse");
+    }
+    run_stdin(repo, &apply, patch.as_bytes()).map(|_| ())
+}
+
+fn split_hunks(text: &str) -> (String, Vec<String>) {
+    let mut preamble = String::new();
+    let mut hunks = Vec::new();
+    let mut current = String::new();
+    let mut in_hunk = false;
+    for line in text.split_inclusive('\n') {
+        if line.starts_with("@@") {
+            if in_hunk {
+                hunks.push(std::mem::take(&mut current));
+            }
+            in_hunk = true;
+        }
+        if in_hunk {
+            current.push_str(line);
+        } else {
+            preamble.push_str(line);
+        }
+    }
+    if in_hunk && !current.is_empty() {
+        hunks.push(current);
+    }
+    (preamble, hunks)
+}
 
 /// Unified diff for one path. `staged` selects the index rather than the work tree.
 pub fn file_diff(repo: &Path, path: &str, staged: bool) -> Result<FileDiff, Error> {
@@ -127,7 +184,41 @@ pub fn file_diff(repo: &Path, path: &str, staged: bool) -> Result<FileDiff, Erro
     if !staged && text.trim().is_empty() && !in_index(repo, path)? {
         return diff_untracked(repo, path);
     }
-    Ok(parse_diff(path, staged, &text))
+    let mut parsed = parse_diff(path, staged, &text);
+    parsed.hunks = zero_hunks(repo, path, staged).unwrap_or(0);
+    Ok(parsed)
+}
+
+fn zero_hunks(repo: &Path, path: &str, staged: bool) -> Result<u32, Error> {
+    let mut args = vec!["diff", "--no-ext-diff", "--no-color", "--unified=0"];
+    if staged {
+        args.push("--cached");
+    }
+    args.push("--");
+    args.push(path);
+    let output = run(repo, &args)?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(text.lines().filter(|line| line.starts_with("@@")).count() as u32)
+}
+
+/// Staged and unstaged diffs, capped, for a commit-message suggestion.
+pub fn workspace_diff(repo: &Path) -> Result<String, Error> {
+    let staged = run(repo, &["diff", "--cached", "--no-color", "--no-ext-diff"])?;
+    let work = run(repo, &["diff", "--no-color", "--no-ext-diff"])?;
+    let mut text = String::new();
+    if !staged.stdout.is_empty() {
+        text.push_str("STAGED\n");
+        text.push_str(&String::from_utf8_lossy(&staged.stdout));
+    }
+    if !work.stdout.is_empty() {
+        text.push_str("UNSTAGED\n");
+        text.push_str(&String::from_utf8_lossy(&work.stdout));
+    }
+    const LIMIT: usize = 12_000;
+    if text.len() > LIMIT {
+        text.truncate(LIMIT);
+    }
+    Ok(text)
 }
 
 fn in_index(repo: &Path, path: &str) -> Result<bool, Error> {
@@ -146,6 +237,7 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
                 binary: false,
                 truncated: false,
                 lines: Vec::new(),
+                hunks: 0,
             });
         }
         Err(source) => {
@@ -162,6 +254,7 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
             binary: true,
             truncated: metadata.len() > MAX_UNTRACKED_BYTES,
             lines: Vec::new(),
+            hunks: 0,
         });
     }
     let bytes = std::fs::read(&full).map_err(|source| Error::Read {
@@ -175,6 +268,7 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
             binary: true,
             truncated: false,
             lines: Vec::new(),
+            hunks: 0,
         });
     }
     let text = String::from_utf8_lossy(&bytes);
@@ -202,10 +296,11 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
         binary: false,
         truncated,
         lines,
+        hunks: 1,
     })
 }
 
-fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
+pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
     let mut lines = Vec::new();
     let mut binary = false;
     let mut truncated = false;
@@ -243,5 +338,6 @@ fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
         binary,
         truncated,
         lines,
+        hunks: 0,
     }
 }

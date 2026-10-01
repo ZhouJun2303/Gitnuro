@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-commit-log"
+description = "Enables the commit_log command without any pre-configured scope."
+commands.allow = ["commit_log"]
+
+[[permission]]
+identifier = "deny-commit-log"
+description = "Denies the commit_log command without any pre-configured scope."
+commands.deny = ["commit_log"]
