@@ -2540,8 +2540,10 @@
             {#each reflogRows as row (`${row.selector}-${row.id}`)}
               <button class="commit-row" type="button" oncontextmenu={(event) => openMenu(event, reflogMenu(row))}>
                 <span class="subject">{row.summary}</span>
-                <span class="meta">{row.selector}</span>
-                <span class="meta sha">{row.shortId}</span>
+                <span class="commit-side">
+                  <span class="meta selector" title={row.selector}>{row.selector}</span>
+                  <span class="meta sha">{row.shortId}</span>
+                </span>
               </button>
             {/each}
           {:else if mode !== "sample"}
@@ -2571,14 +2573,16 @@
                       {#each commit.refs as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
                     </span>
                     <span class="commit-side">
-                      {#if settings.gravatar && commit.email}
-                        <img class="avatar tile" alt="" src={gravatarUrl(commit.email)} />
-                      {:else}
-                        <span class="avatar tile" style:background={avatarColor(commit.author)} title={commit.author}>{commit.author.slice(0, 1).toUpperCase()}</span>
-                      {/if}
-                      <span class="meta">{commit.author}</span>
+                      <span class="commit-author">
+                        {#if settings.gravatar && commit.email}
+                          <img class="avatar tile" alt="" src={gravatarUrl(commit.email)} />
+                        {:else}
+                          <span class="avatar tile" style:background={avatarColor(commit.author)} title={commit.author}>{commit.author.slice(0, 1).toUpperCase()}</span>
+                        {/if}
+                        <span class="meta author" title={commit.author}>{commit.author}</span>
+                      </span>
                       <span class="meta sha">{commit.shortId}</span>
-                      <span class="meta">{commit.at ? forkWhen(commit.at) : commit.when}</span>
+                      <span class="meta date" title={commit.at ? forkWhen(commit.at) : commit.when}>{commit.at ? forkWhen(commit.at) : commit.when}</span>
                     </span>
                   </div>
                 {/each}
@@ -2598,8 +2602,10 @@
               {#each sampleReflog as row (row.selector)}
                 <button class="commit-row" type="button" oncontextmenu={(event) => openMenu(event, reflogMenu(row))}>
                   <span class="subject">{row.summary}</span>
-                  <span class="meta">{row.selector}</span>
-                  <span class="meta sha">{row.shortId}</span>
+                  <span class="commit-side">
+                    <span class="meta selector" title={row.selector}>{row.selector}</span>
+                    <span class="meta sha">{row.shortId}</span>
+                  </span>
                 </button>
               {/each}
             {:else}
@@ -2615,10 +2621,12 @@
                     {#each commit.badges as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
                   </span>
                   <span class="commit-side">
-                    <span class="avatar tile" style:background={avatarColor(commit.author || "?")}>{(commit.author || "?").slice(0, 1).toUpperCase()}</span>
-                    <span class="meta">{commit.author}</span>
+                    <span class="commit-author">
+                      <span class="avatar tile" style:background={avatarColor(commit.author || "?")}>{(commit.author || "?").slice(0, 1).toUpperCase()}</span>
+                      <span class="meta author" title={commit.author}>{commit.author}</span>
+                    </span>
                     <span class="meta sha">{commit.id}</span>
-                    <span class="meta">{commit.when}</span>
+                    <span class="meta date" title={commit.when}>{commit.when}</span>
                   </span>
                 </button>
               {/each}
@@ -4396,9 +4404,57 @@
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 12px;
     flex: none;
     color: var(--text-secondary);
+  }
+
+  .commit-author {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: 120px;
+    min-width: 0;
+    flex: none;
+  }
+
+  .commit-author .meta,
+  .commit-author .author {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .commit-side .meta {
+    line-height: 16px;
+  }
+
+  .commit-side .sha {
+    width: 64px;
+    flex: none;
+    font-family: var(--mono);
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .commit-side .date {
+    width: 120px;
+    flex: none;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .commit-side .selector {
+    width: 120px;
+    flex: none;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .avatar.tile { border-radius: 3px; color: white; }
