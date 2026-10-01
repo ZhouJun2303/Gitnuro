@@ -28,6 +28,9 @@ pub struct CommitRow {
     /// Author email from `%ae`, used only for an optional avatar.
     #[serde(default)]
     pub email: String,
+    /// Whether this commit has not been pushed to any remote.
+    #[serde(default)]
+    pub unpushed: bool,
 }
 
 /// Author, committer, and message body for the history detail pane.
@@ -187,7 +190,35 @@ fn log_with(repo: &Path, limit: usize, all: bool, path: &[&str], revs: &[&str], 
     let output = run(repo, &args)?;
     let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
     assign_lanes(&mut commits);
+    mark_unpushed(repo, &mut commits);
     Ok(commits)
+}
+
+fn mark_unpushed(repo: &Path, commits: &mut [CommitRow]) {
+    if commits.is_empty() {
+        return;
+    }
+    let has_remotes = run(repo, &["remote"])
+        .map(|out| !out.stdout.is_empty())
+        .unwrap_or(false);
+    if !has_remotes {
+        return;
+    }
+    if let Ok(output) = run(repo, &["rev-list", "--all", "--not", "--remotes"]) {
+        let text = String::from_utf8_lossy(&output.stdout);
+        let unpushed_set: std::collections::HashSet<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !unpushed_set.is_empty() {
+            for commit in commits.iter_mut() {
+                if unpushed_set.contains(commit.id.as_str()) {
+                    commit.unpushed = true;
+                }
+            }
+        }
+    }
 }
 
 fn parse_commits(text: &str) -> Vec<CommitRow> {
@@ -220,6 +251,7 @@ fn parse_commits(text: &str) -> Vec<CommitRow> {
             lane: 0,
             at,
             email,
+            unpushed: false,
         });
     }
     commits

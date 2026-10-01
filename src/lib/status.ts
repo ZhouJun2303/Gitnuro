@@ -75,6 +75,7 @@ export type CommitRow = {
   lane: number;
   at: number;
   email?: string;
+  unpushed?: boolean;
 };
 
 export type BranchRow = {

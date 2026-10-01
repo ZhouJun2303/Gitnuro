@@ -215,6 +215,7 @@
   let sideQuery = $state("");
   let fileQuery = $state("");
   let recentQuery = $state("");
+  let searchOpen = $state({ recent: false, side: false, commit: false, file: false });
   let historyDiffTop = $state(0);
   let picked = $state<string[]>([]);
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
@@ -822,6 +823,39 @@
   function matchesQuery(value: string, query: string) {
     const needle = query.trim().toLowerCase();
     return !needle || value.toLowerCase().includes(needle);
+  }
+
+  type SearchKey = keyof typeof searchOpen;
+
+  function searchQuery(key: SearchKey) {
+    return { recent: recentQuery, side: sideQuery, commit: commitQuery, file: fileQuery }[key];
+  }
+
+  function closeSearch(key: SearchKey) {
+    searchOpen[key] = false;
+    if (key === "recent") recentQuery = "";
+    else if (key === "side") sideQuery = "";
+    else if (key === "commit") commitQuery = "";
+    else fileQuery = "";
+  }
+
+  function toggleSearch(key: SearchKey) {
+    if (searchOpen[key]) closeSearch(key);
+    else searchOpen[key] = true;
+  }
+
+  function searchKeys(key: SearchKey, event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    closeSearch(key);
+  }
+
+  function searchBlur(key: SearchKey) {
+    if (!searchQuery(key).trim()) searchOpen[key] = false;
+  }
+
+  function focusOnMount(node: HTMLInputElement) {
+    node.focus();
   }
 
   function openMenu(event: MouseEvent, items: MenuItem[]) {
@@ -1793,6 +1827,7 @@
       void savePrefs(false);
     } else if (action === "search") {
       section = "history";
+      searchOpen.commit = true;
       queueMicrotask(() => searchEl?.focus());
     } else if (action === "stageToggle" && selectedPath) {
       void runChange(selectedSide === "staged" ? "unstage_path" : "stage_path", { file: selectedPath });
@@ -2099,7 +2134,12 @@
           <div class="recent-bar">
             <h3>{tr("chrome.recent")}</h3>
             {#if settings.recent.length > 2}
-              <input class="search recent-input" placeholder={tr("chrome.searchRecent")} bind:value={recentQuery} />
+              <div class="search-wrap">
+                {#if searchOpen.recent}
+                  <input class="search recent-input" placeholder={tr("chrome.searchRecent")} aria-label={tr("chrome.searchRecent")} bind:value={recentQuery} use:focusOnMount onkeydown={(event) => searchKeys("recent", event)} onblur={() => searchBlur("recent")} />
+                {/if}
+                {@render searchToggle("recent", tr("chrome.searchRecent"))}
+              </div>
             {/if}
           </div>
           <div class="recent-list">
@@ -2131,7 +2171,12 @@
       <button class="side nav" type="button" class:selected={section === "history"} onclick={() => (section = "history")}>
         <span class="name">{tr("chrome.allCommits")}</span>
       </button>
-      <input class="search side-filter" placeholder={tr("chrome.filterSidebar")} aria-label={tr("chrome.filterSidebar")} bind:value={sideQuery} />
+      <div class="side-search">
+        {#if searchOpen.side}
+          <input class="search" placeholder={tr("chrome.filterSidebar")} aria-label={tr("chrome.filterSidebar")} bind:value={sideQuery} use:focusOnMount onkeydown={(event) => searchKeys("side", event)} onblur={() => searchBlur("side")} />
+        {/if}
+        {@render searchToggle("side", tr("chrome.filterSidebar"))}
+      </div>
 
       {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void }[] = [], empty = count === 0)}
         <div class="side section" class:selected={sideSelected === key} role="group">
@@ -2549,7 +2594,12 @@
             </div>
           {/if}
           <div class="pane-head">
-            <input class="search" placeholder={tr("chrome.findCommits")} aria-label={tr("chrome.findCommits")} bind:this={searchEl} bind:value={commitQuery} />
+            {#if searchOpen.commit}
+              <input class="search" placeholder={tr("chrome.findCommits")} aria-label={tr("chrome.findCommits")} bind:this={searchEl} bind:value={commitQuery} use:focusOnMount onkeydown={(event) => searchKeys("commit", event)} onblur={() => searchBlur("commit")} />
+            {:else}
+              <span class="pane-title">{tr("chrome.allCommits")}</span>
+            {/if}
+            {@render searchToggle("commit", tr("chrome.findCommits"))}
             {#if historyFilter}
               <button class="text-button" type="button" onclick={() => { historyFilter = ""; void loadContext(); }}>{tr("chrome.allCommits")}</button>
             {/if}
@@ -2811,7 +2861,10 @@
       <div class="pane-head">
         <span class="pane-title">{tr("chrome.unstaged")}</span>
         <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : shownUnstaged.length}</span>
-        <input class="search pane-filter" placeholder={tr("chrome.filterFiles")} aria-label={tr("chrome.filterFiles")} bind:value={fileQuery} />
+        {#if searchOpen.file}
+          <input class="search pane-filter" placeholder={tr("chrome.filterFiles")} aria-label={tr("chrome.filterFiles")} bind:value={fileQuery} use:focusOnMount onkeydown={(event) => searchKeys("file", event)} onblur={() => searchBlur("file")} />
+        {/if}
+        {@render searchToggle("file", tr("chrome.filterFiles"))}
         <button class="text-button" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>{tr("chrome.stage")}</button>
       </div>
       <div class="file-list" onscroll={(event) => (fileTop = (event.currentTarget as HTMLElement).scrollTop)}>
@@ -2889,6 +2942,16 @@
         {#if after}<img class="over" alt="" src={after} style:opacity={imageMode === "onion" ? imagePos / 100 : 1} style:clip-path={imageMode === "swipe" ? `inset(0 ${100 - imagePos}% 0 0)` : "none"} />{/if}
       {/if}
     </div>
+  {/snippet}
+
+  {#snippet searchToggle(key: SearchKey, label: string)}
+    <button class="icon-btn search-toggle" class:on={searchOpen[key]} type="button" aria-label={label} aria-pressed={searchOpen[key]} title={label} onmousedown={(event) => event.preventDefault()} onclick={() => toggleSearch(key)}>
+      {#if searchOpen[key]}
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>
+      {:else}
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.25"/><path d="M10.25 10.25L13.5 13.5"/></svg>
+      {/if}
+    </button>
   {/snippet}
 
   {#snippet menuList(items: MenuItem[])}
@@ -3487,7 +3550,7 @@
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
   .shortcut { color: var(--text-secondary); font-size: 11px; }
   .menu button, .menu-dismiss { font: inherit; }
-  .menu-dismiss { position: fixed; inset: 0; z-index: 29; background: transparent; border: 0; }
+  .scrim.menu-dismiss { position: fixed; inset: 0; z-index: 29; background: transparent; border: 0; backdrop-filter: none; animation: none; }
   .shell {
     height: 100vh;
     display: flex;
@@ -3811,7 +3874,16 @@
   .file.selected,
   .commit-row.selected {
     background: var(--selection);
-    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+  .side.nav.selected,
+  .side.section.selected {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .side.nav.selected .count {
+    color: var(--accent);
   }
 
   .side.nested {
@@ -4262,9 +4334,10 @@
   .image-stage { position: relative; display: flex; gap: 12px; padding: 12px; min-height: 80px; }
   .image-stage img { max-width: 48%; background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
   .image-stage .under, .image-stage .over { position: absolute; left: 12px; top: 12px; max-width: calc(100% - 24px); }
-  .pref-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
-  .pref-tabs button { border: 0; background: transparent; color: var(--text-secondary); font: inherit; padding: 8px 10px; border-radius: 0; }
-  .pref-tabs button.on { color: #2f6fed; box-shadow: inset 0 -2px 0 #2f6fed; background: transparent; }
+  .pref-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--field); }
+  .pref-tabs button { flex: 1; height: 28px; border: 0; background: transparent; color: var(--text-secondary); font: inherit; padding: 0 10px; border-radius: 7px; white-space: nowrap; transition: background 120ms ease, color 120ms ease; }
+  .pref-tabs button:hover { color: var(--text); }
+  .pref-tabs button.on { color: var(--text); background: var(--elevated); font-weight: 500; box-shadow: 0 1px 2px rgba(24, 24, 27, 0.08), 0 0 0 1px var(--line); }
 
   .sha { font-family: var(--mono); }
 
@@ -4342,10 +4415,21 @@
   .scrim {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.28);
+    z-index: 50;
+    background: rgba(9, 9, 11, 0.32);
+    backdrop-filter: blur(2px);
     display: flex;
     align-items: center;
     justify-content: center;
+    animation: scrim-in 140ms ease-out;
+  }
+
+  @keyframes scrim-in {
+    from { opacity: 0; }
+  }
+
+  @keyframes dialog-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.98); }
   }
 
   .dialog.wide {
@@ -4360,41 +4444,235 @@
     overflow: auto;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 20px;
+    gap: 12px;
+    padding: 22px 24px 20px;
     border-radius: 14px;
     background: var(--elevated);
     border: 1px solid var(--line);
     box-shadow: var(--shadow);
+    animation: dialog-in 160ms ease-out;
+  }
+
+  .dialog form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 
   .dialog h2 {
-    margin: 0 0 4px;
+    margin: 0 0 2px;
     font-size: 16px;
     font-weight: 600;
   }
 
-  .dialog input,
-  .dialog select {
-    height: 32px;
-    padding: 0 8px;
-    border-radius: var(--radius);
-    border: 1px solid var(--line);
-    background: var(--elevated);
+  .dialog p {
+    margin: 0;
+    line-height: 1.5;
   }
 
-  .dialog input:focus,
-  .dialog select:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
+  .dialog .empty {
+    padding: 0;
+    font-size: 12px;
+  }
+
+  .dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  .dialog select {
+    height: 32px;
+    padding: 0 10px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: var(--canvas);
+    color: var(--text);
+    transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+  }
+
+  .dialog select {
+    appearance: none;
+    padding-right: 30px;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+    background-size: 14px;
+  }
+
+  .dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):hover,
+  .dialog select:hover {
+    border-color: color-mix(in srgb, var(--text-secondary) 40%, transparent);
+  }
+
+  .dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+  .dialog select:focus,
+  .dialog textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: var(--elevated);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+
+  .dialog input::placeholder,
+  .dialog textarea::placeholder,
+  .search::placeholder {
+    color: color-mix(in srgb, var(--text-secondary) 80%, transparent);
   }
 
   .dialog label {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     font-size: 12px;
     color: var(--text-secondary);
+  }
+
+  .dialog label.check {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    font-size: inherit;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .dialog label.pref-inline {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    font-size: inherit;
+    color: var(--text);
+  }
+
+  .dialog .pref-inline select,
+  .dialog .pref-inline input[type="number"] {
+    width: auto;
+    min-width: 88px;
+  }
+
+  .dialog .pref-inline > input:not([type="number"]) {
+    flex: 1;
+  }
+
+  .dialog .text-button {
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--elevated);
+    color: var(--text);
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+
+  .dialog .text-button:hover:not(:disabled) {
+    background: var(--hover);
+    border-color: color-mix(in srgb, var(--text-secondary) 35%, transparent);
+  }
+
+  .dialog .commit {
+    height: 30px;
+    padding: 0 16px;
+    font-weight: 500;
+    transition: filter 120ms ease;
+  }
+
+  .dialog .commit:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+
+  .dialog .composer-row {
+    gap: 8px;
+  }
+
+  .dialog .composer-row > :is(.text-button, .commit) {
+    margin-left: 0;
+  }
+
+  .dialog .composer-row > button:is(.text-button, .commit):first-of-type {
+    margin-left: auto;
+  }
+
+  .dialog .composer-row > select {
+    width: auto;
+  }
+
+  .dialog .pref-page > .text-button,
+  .dialog form > .text-button {
+    align-self: flex-start;
+    margin-left: 0;
+  }
+
+  .dialog .diff-body {
+    max-height: 50vh;
+    border-radius: var(--radius);
+    background: var(--canvas);
+    border: 1px solid var(--line);
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    flex: none;
+    display: inline-grid;
+    place-content: center;
+    border: 1.5px solid color-mix(in srgb, var(--text-secondary) 55%, transparent);
+    background: var(--elevated);
+    cursor: pointer;
+    transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  }
+
+  input[type="checkbox"] { border-radius: 4px; }
+  input[type="radio"] { border-radius: 50%; }
+
+  input[type="checkbox"]:hover,
+  input[type="radio"]:hover {
+    border-color: var(--accent);
+  }
+
+  input[type="checkbox"]::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    background: var(--on-accent);
+    clip-path: polygon(14% 44%, 0 59%, 39% 96%, 100% 22%, 85% 8%, 38% 66%);
+    transform: scale(0);
+    transition: transform 120ms ease;
+  }
+
+  input[type="radio"]::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    transform: scale(0);
+    transition: transform 120ms ease;
+  }
+
+  input[type="checkbox"]:checked {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  input[type="radio"]:checked {
+    border-color: var(--accent);
+  }
+
+  input[type="checkbox"]:checked::before,
+  input[type="radio"]:checked::before {
+    transform: scale(1);
+  }
+
+  input[type="checkbox"]:focus-visible,
+  input[type="radio"]:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+
+  input[type="checkbox"]:disabled,
+  input[type="radio"]:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   .name {
@@ -4416,17 +4694,70 @@
 
   .search {
     flex: 1;
-    height: 28px;
-    border: 1px solid var(--line);
+    min-width: 0;
+    height: 26px;
+    border: 1px solid transparent;
     border-radius: var(--radius);
-    background: var(--elevated);
+    background: var(--field);
     color: inherit;
+    font: inherit;
     padding: 0 8px;
+    transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    animation: search-in 140ms ease-out;
+  }
+
+  @keyframes search-in {
+    from { opacity: 0; transform: scaleX(0.92); transform-origin: right center; }
   }
 
   .search:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
+    outline: none;
+    border-color: var(--accent);
+    background: var(--elevated);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  .icon-btn.search-toggle {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    font-weight: 400;
+  }
+
+  .icon-btn.search-toggle svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .icon-btn.search-toggle.on {
+    color: var(--text);
+  }
+
+  .pane-head .search-toggle {
+    margin-left: auto;
+  }
+
+  .pane-head .search + .search-toggle {
+    margin-left: 0;
+  }
+
+  .pane-head .search-toggle + .text-button {
+    margin-left: 0;
+  }
+
+  .side-search {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    height: 30px;
+    margin: 2px 8px 2px;
+  }
+
+  .search-wrap {
+    display: flex;
+    align-items: center;
+    gap: 4px;
   }
 
   .preview {
@@ -4502,7 +4833,6 @@
     flex: none;
   }
 
-  .side-filter { margin: 6px 8px 8px; width: calc(100% - 16px); flex: none; }
   .side.nav { width: calc(100% - 12px); }
   .side.nav .count { margin-left: auto; }
 
@@ -4588,7 +4918,8 @@
 
   .detail-tabs { display: flex; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line); }
   .detail-tabs button { border: 0; background: transparent; font: inherit; padding: 8px 0; color: var(--text-secondary); }
-  .detail-tabs button.on { color: #2f6fed; box-shadow: inset 0 -2px 0 #2f6fed; }
+  .detail-tabs button:hover { color: var(--text); }
+  .detail-tabs button.on { color: var(--text); font-weight: 500; box-shadow: inset 0 -2px 0 var(--accent); }
   .detail-scroll { flex: 1; overflow: auto; padding: 12px 16px 16px; }
   .detail-people { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .person { display: flex; gap: 8px; align-items: flex-start; }
@@ -4596,7 +4927,7 @@
   .detail-line { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
   .detail-message { margin: 12px 0 4px; font-weight: 600; }
   .detail-body-text { margin: 0 0 12px; white-space: pre-wrap; font: inherit; }
-  .issue { color: #2f6fed; text-decoration: none; }
+  .issue { color: var(--accent); text-decoration: none; }
 
   .tree-dir { width: 100%; }
   .twist { width: 12px; flex: none; color: var(--text-secondary); }
@@ -4642,9 +4973,11 @@
   .diff-sample .add { background: var(--diff-add); }
   .diff-sample.plain .tok-word { color: inherit; }
   .tool-grid { display: grid; grid-template-columns: 180px 1fr; gap: 12px; }
-  .tool-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 4px; overflow: auto; max-height: 140px; }
-  .tool-list button { border: 0; background: transparent; text-align: left; padding: 6px 8px; font: inherit; color: inherit; }
-  .tool-list button.on { background: var(--selection); }
+  .tool-list { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; max-height: 140px; }
+  .tool-list button { border: 0; background: transparent; text-align: left; padding: 6px 8px; font: inherit; color: inherit; border-radius: 6px; }
+  .tool-list button:hover { background: var(--hover); }
+  .tool-list button.on { background: var(--selection); color: var(--accent); font-weight: 500; }
+  .image-toolbar button:hover { background: var(--hover); }
   .tool-fields { display: flex; flex-direction: column; gap: 8px; }
 
   .welcome-view {

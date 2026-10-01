@@ -11,6 +11,7 @@ export type CommitRow = {
   badges: string[];
   parents: string[];
   files: FileChange[];
+  unpushed?: boolean;
 };
 
 export const unstaged: FileChange[] = [
@@ -29,6 +30,7 @@ export const commits: CommitRow[] = [
     badges: ["main"],
     parents: ["b18de07"],
     files: [{ path: "app/src/main/kotlin/com/zhoujun/awegit/ui/status/StatusPane.kt", kind: "M" }],
+    unpushed: true,
   },
   {
     id: "b18de07",

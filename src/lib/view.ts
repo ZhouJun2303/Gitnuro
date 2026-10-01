@@ -2,35 +2,96 @@ import type { DiffLine } from "./status";
 
 export const laneColors = ["#e0a106", "#3b82f6", "#16a34a", "#7c3aed", "#e11d48", "#0d9488", "#db2777", "#64748b"];
 
-export type GraphCell = { color: number; role: "node" | "line" } | null;
+export type GraphCell = {
+  color: number;
+  role: string;
+  forkFromLeft?: boolean;
+  mergeToLeft?: boolean;
+} | null;
 
 /** One row of the commit graph. Columns line up across the list. */
 export function commitGraph(commits: { id: string; parents: string[] }[]): GraphCell[][] {
   const columns: Array<string | null> = [];
   const rows: GraphCell[][] = [];
-  for (const commit of commits) {
+
+  for (let i = 0; i < commits.length; i++) {
+    const commit = commits[i];
     let lane = columns.findIndex((id) => id === commit.id);
+    const hasUp = lane >= 0;
     if (lane < 0) {
       lane = columns.findIndex((id) => !id);
       if (lane < 0) {
         lane = columns.length;
         columns.push(commit.id);
-      } else columns[lane] = commit.id;
+      } else {
+        columns[lane] = commit.id;
+      }
     }
-    rows.push(
-      columns.map((id, index) => {
-        if (!id && index !== lane) return null;
-        if (index === lane) return { color: index % laneColors.length, role: "node" };
-        return id ? { color: index % laneColors.length, role: "line" } : null;
-      }),
-    );
-    columns[lane] = commit.parents[0] ?? null;
-    for (const extra of commit.parents.slice(1)) {
-      const free = columns.findIndex((id) => !id);
-      if (free < 0) columns.push(extra);
-      else columns[free] = extra;
+
+    const firstParent = commit.parents[0];
+    const hasDown = Boolean(firstParent);
+
+    const extraParents = commit.parents.slice(1);
+    const forkLanes: number[] = [];
+    for (const extra of extraParents) {
+      let free = columns.findIndex((id) => !id);
+      if (free < 0) {
+        free = columns.length;
+        columns.push(extra);
+      } else {
+        columns[free] = extra;
+      }
+      forkLanes.push(free);
+    }
+
+    let mergeTargetLane: number | null = null;
+    if (firstParent) {
+      const existingLane = columns.findIndex((id, idx) => idx !== lane && id === firstParent);
+      if (existingLane >= 0) {
+        mergeTargetLane = existingLane;
+      }
+    }
+
+    const rowCells: GraphCell[] = [];
+    for (let index = 0; index < columns.length; index++) {
+      const id = columns[index];
+      if (index === lane) {
+        const classes = ["node"];
+        if (hasUp) classes.push("line-up");
+        if (hasDown && mergeTargetLane === null) classes.push("line-down");
+        const cell: GraphCell = {
+          color: index % laneColors.length,
+          role: classes.join(" "),
+        };
+        if (mergeTargetLane !== null && mergeTargetLane < lane) {
+          cell.mergeToLeft = true;
+        }
+        rowCells.push(cell);
+      } else if (forkLanes.includes(index)) {
+        rowCells.push({
+          color: index % laneColors.length,
+          role: "line-down",
+          forkFromLeft: index > lane,
+        });
+      } else if (id) {
+        rowCells.push({
+          color: index % laneColors.length,
+          role: "line",
+        });
+      } else {
+        rowCells.push(null);
+      }
+    }
+
+    rows.push(rowCells);
+
+    if (mergeTargetLane !== null) {
+      columns[lane] = null;
+    } else {
+      columns[lane] = firstParent ?? null;
     }
   }
+
   const width = rows.reduce((max, row) => Math.max(max, row.length), 1);
   return rows.map((row) => {
     const next = row.slice();
