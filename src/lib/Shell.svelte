@@ -198,7 +198,6 @@
   let launchOpen = $state(false);
   let launchIndex = $state(0);
   let launchList = $state<HTMLElement | null>(null);
-  let expanded = $state<"tags" | "stashes" | "submodules" | "worktrees" | null>(null);
   let allBranches = $state(false);
   let commitQuery = $state("");
   let drops = $state<string[]>([]);
@@ -242,7 +241,8 @@
   let commitDetail = $state<CommitDetail | null>(null);
   let historyTab = $state<"commit" | "changes" | "tree">("commit");
   let collapsedDirs = $state<string[]>([]);
-  let collapsedSide = $state<string[]>([]);
+  let collapsedSide = $state<string[]>(["tags", "stashes", "submodules", "worktrees"]);
+  let sideSelected = $state<string | null>(null);
   let commitCollapsed = $state<string[]>([]);
   let aiFieldsOpen = $state(false);
   let dragStep = $state<number | null>(null);
@@ -336,7 +336,7 @@
     return translate(activeLocale, key, vars);
   }
   const sampleRows = $derived([
-    { id: "stash@{0}", summary: "WIP before the palette", author: "", when: "", badges: ["stash"], parents: [commits[0]?.id ?? ""], files: [] as (typeof commits)[number]["files"] },
+    { id: "stash@{0}", summary: "WIP before the palette", author: "", when: "", badges: ["stash"], parents: [commits[0]?.id ?? ""], files: [] as (typeof commits)[number]["files"], unpushed: true },
     ...commits,
   ]);
   const sampleGraph = $derived(commitGraph(sampleRows.map((commit) => ({ id: commit.id, parents: commit.parents }))));
@@ -357,7 +357,7 @@
     for (const stash of refs?.stashes ?? []) {
       const parent = stash.parent;
       if (!parent) continue;
-      const extra: CommitRow = { id: stash.id || stash.name, shortId: stash.name, summary: stash.summary, author: "", when: "", parents: [parent], refs: ["stash"], lane: 0, at: 0, email: "" };
+      const extra: CommitRow = { id: stash.id || stash.name, shortId: stash.name, summary: stash.summary, author: "", when: "", parents: [parent], refs: ["stash"], lane: 0, at: 0, email: "", unpushed: true };
       const at = rows.findIndex((row) => row.id === parent || row.id.startsWith(parent));
       if (at >= 0) rows.splice(at, 0, extra);
     }
@@ -846,6 +846,12 @@
     return "local";
   }
 
+  function isCommitUnpushed(commit: { unpushed?: boolean; refs?: string[]; badges?: string[]; id?: string }) {
+    if (commit.unpushed === true) return true;
+    if (commit.refs?.includes("stash") || commit.badges?.includes("stash") || commit.id?.startsWith("stash@")) return true;
+    return false;
+  }
+
   async function showReflog() {
     reflogOn = !reflogOn;
     treeOn = false;
@@ -1222,6 +1228,11 @@
 
   function toggleSide(key: string) {
     collapsedSide = collapsedSide.includes(key) ? collapsedSide.filter((item) => item !== key) : [...collapsedSide, key];
+  }
+
+  function pickSide(key: string) {
+    sideSelected = key;
+    toggleSide(key);
   }
 
   function refHidden(name: string) {
@@ -2122,22 +2133,39 @@
       </button>
       <input class="search side-filter" placeholder={tr("chrome.filterSidebar")} aria-label={tr("chrome.filterSidebar")} bind:value={sideQuery} />
 
-      <div class="group">
-        {tr("chrome.localBranches")}
-        {#if mode === "live"}
-          <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "branch"; }}>{tr("chrome.new")}</button>
-          <button class="text-button" type="button" onclick={showAllRefs}>{tr("chrome.showAll")}</button>
-        {/if}
-      </div>
+      {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void }[] = [])}
+        <div class="side section" class:selected={sideSelected === key} role="group">
+          <button class="file-select" type="button" aria-expanded={sideOpen(key)} onclick={() => pickSide(key)}>
+            <span class="twist">{sideOpen(key) ? "▾" : "▸"}</span>
+            <span class="name">{label}</span>
+            {#if count !== null}<span class="count">{count}</span>{/if}
+          </button>
+          {#each actions as action (action.label)}
+            <button class="text-button" type="button" onclick={action.run}>{action.label}</button>
+          {/each}
+        </div>
+      {/snippet}
+
       {#if mode === "live" && refs}
+        {@render sideHead("branches", tr("chrome.localBranches"), null, [
+          { label: tr("chrome.new"), run: () => { draft = ""; draftExtra = ""; dialog = "branch"; } },
+          { label: tr("chrome.showAll"), run: showAllRefs },
+        ])}
+        {#if sideOpen("branches")}
         {#each visibleBranches as branch, index (branch.name)}
-          {#if branchGroup(branch.name) && branchGroup(branch.name) !== branchGroup(visibleBranches[index - 1]?.name ?? "")}
-            <button class="side nested quiet" type="button" onclick={() => toggleGroup(branchGroup(branch.name))}>{branchGroup(branch.name)}</button>
+          {@const group = branchGroup(branch.name)}
+          {#if group && group !== branchGroup(visibleBranches[index - 1]?.name ?? "")}
+            <button class="side nested quiet" type="button" class:selected={sideSelected === `local:${group}/`} aria-expanded={groupOpen(branch.name)} onclick={() => { sideSelected = `local:${group}/`; toggleGroup(group); }}>
+              <span class="twist">{groupOpen(branch.name) ? "▾" : "▸"}</span>
+              <span class="name">{group}</span>
+            </button>
           {/if}
           {#if groupOpen(branch.name)}
           <div
-            class="side"
+            class="side nested"
+            class:deep={!!group}
             class:current={branch.current}
+            class:selected={sideSelected === `local:${branch.name}`}
             role="group"
             oncontextmenu={(event) => openMenu(event, [
               ...(!branch.current ? [
@@ -2154,51 +2182,50 @@
               ...commandItems("branch"),
             ])}
           >
-            <button class="file-select" type="button" onclick={() => mutate({ action: "checkout", name: branch.name })}>
-              {#if branch.current}<span class="dot"></span>{/if}
-              <span class="name">{branch.name}</span>
+            <button class="file-select" type="button" title={branch.name} onclick={() => (sideSelected = `local:${branch.name}`)} ondblclick={() => !branch.current && mutate({ action: "checkout", name: branch.name })}>
+              <span class="twist">{#if branch.current}<span class="dot"></span>{/if}</span>
+              <span class="name">{group ? branch.name.slice(group.length + 1) : branch.name}</span>
               {#if branch.ahead > 0}<span class="ahead">↑{branch.ahead}</span>{/if}
               {#if branch.behind > 0}<span class="ahead">↓{branch.behind}</span>{/if}
             </button>
           </div>
           {/if}
         {/each}
-        <div class="group">
-          <button class="group-toggle" type="button" aria-expanded={sideOpen("remotes")} onclick={() => toggleSide("remotes")}>
-            <span class="twist">{sideOpen("remotes") ? "▾" : "▸"}</span>{tr("chrome.remotes")}
-          </button>
-          <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "remote"; }}>{tr("chrome.add")}</button>
-        </div>
+        {/if}
+        {@render sideHead("remotes", tr("chrome.remotes"), null, [
+          { label: tr("chrome.add"), run: () => { draft = ""; draftExtra = ""; dialog = "remote"; } },
+        ])}
         {#if sideOpen("remotes")}
         {#each refs.remotes as remote (remote.name)}
           {#if matchesQuery(remote.name, sideQuery) || remote.branches.some((branch) => matchesQuery(branch, sideQuery))}
           {@const remoteKey = `remote:${remote.name}`}
-          <div class="side quiet" role="group" oncontextmenu={(event) => openMenu(event, [
+          <div class="side nested quiet" class:selected={sideSelected === remoteKey} role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("chrome.fetch"), run: () => mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: settings.fetchTags }) },
             { label: tr("dialog.url"), run: () => { draft = remote.name; draftExtra = remote.url ?? ""; dialog = "remote"; } },
             { label: tr("menu.remove"), run: () => mutate({ action: "removeRemote", name: remote.name }) },
           ])}>
-            <button class="file-select" type="button" aria-expanded={sideOpen(remoteKey)} title={remote.url ?? ""} onclick={() => toggleSide(remoteKey)}>
+            <button class="file-select" type="button" aria-expanded={sideOpen(remoteKey)} title={remote.url ?? ""} onclick={() => pickSide(remoteKey)}>
               <span class="twist">{sideOpen(remoteKey) ? "▾" : "▸"}</span>
               <span class="name">{remote.name}</span>
               <span class="count">{remote.branches.length}</span>
             </button>
           </div>
           {#if sideOpen(remoteKey)}
-          {#if remote.head && !sideQuery.trim()}<div class="side nested quiet"><span class="twist"></span><span class="name">HEAD → {remote.head}</span></div>{/if}
+          {#if remote.head && !sideQuery.trim()}<div class="side nested deep quiet"><span class="twist"></span><span class="name">HEAD → {remote.head}</span></div>{/if}
           {#each remote.branches as branch, index (remote.name + branch)}
             {@const folder = branchGroup(branch)}
             {@const folderKey = `${remoteKey}/${folder}`}
             {#if folder && folder !== branchGroup(remote.branches[index - 1] ?? "") && remote.branches.some((item) => branchGroup(item) === folder && matchesQuery(item, sideQuery))}
-              <button class="side nested quiet" type="button" aria-expanded={sideOpen(folderKey)} onclick={() => toggleSide(folderKey)}>
+              <button class="side nested deep quiet" type="button" class:selected={sideSelected === folderKey} aria-expanded={sideOpen(folderKey)} onclick={() => pickSide(folderKey)}>
                 <span class="twist">{sideOpen(folderKey) ? "▾" : "▸"}</span>
                 <span class="name">{folder}</span>
               </button>
             {/if}
             {#if matchesQuery(branch, sideQuery) && (!folder || sideOpen(folderKey))}
             <div
-              class="side nested quiet"
-              class:deep={!!folder}
+              class="side nested deep quiet"
+              class:deeper={!!folder}
+              class:selected={sideSelected === `${remoteKey}:${branch}`}
               role="group"
               oncontextmenu={(event) => openMenu(event, [
                 { label: tr("menu.checkout"), run: () => mutate({ action: "checkoutRemote", remote: remote.name, branch }) },
@@ -2208,7 +2235,7 @@
                 { label: tr("menu.copyName"), run: () => copyText(`${remote.name}/${branch}`) },
               ])}
             >
-              <button class="file-select" type="button" title={`${remote.name}/${branch}`} onclick={() => mutate({ action: "checkoutRemote", remote: remote.name, branch })}>
+              <button class="file-select" type="button" title={`${remote.name}/${branch}`} onclick={() => (sideSelected = `${remoteKey}:${branch}`)} ondblclick={() => mutate({ action: "checkoutRemote", remote: remote.name, branch })}>
                 <span class="twist"></span>
                 <span class="name">{folder ? branch.slice(folder.length + 1) : branch}</span>
               </button>
@@ -2220,8 +2247,11 @@
         {/each}
         {/if}
       {:else}
+        {@render sideHead("branches", tr("chrome.localBranches"))}
+        {#if sideOpen("branches")}
         <div
-          class="side current"
+          class="side nested current"
+          class:selected={sideSelected === `local:${branchLabel}`}
           role="group"
           oncontextmenu={(event) => openMenu(event, [
             { label: tr("menu.checkout"), disabled: true },
@@ -2235,28 +2265,28 @@
             { label: tr("menu.showOnly"), disabled: true },
           ])}
         >
-          <span class="dot"></span>
-          <span class="name">{branchLabel}</span>
-          {#if mode === "sample"}<span class="ahead">↑5</span>{/if}
-        </div>
-        {#if repoStats}<p class="empty">{repoStats.branch} · {repoStats.commits} {tr("chrome.commits")} · {repoStats.branches} {tr("chrome.branches")} · ↑{repoStats.ahead} ↓{repoStats.behind}</p>{/if}
-        <div class="group">
-          <button class="group-toggle" type="button" aria-expanded={sideOpen("remotes")} onclick={() => toggleSide("remotes")}>
-            <span class="twist">{sideOpen("remotes") ? "▾" : "▸"}</span>{tr("chrome.remotes")}
+          <button class="file-select" type="button" onclick={() => (sideSelected = `local:${branchLabel}`)}>
+            <span class="twist"><span class="dot"></span></span>
+            <span class="name">{branchLabel}</span>
+            {#if mode === "sample"}<span class="ahead">↑5</span>{/if}
           </button>
         </div>
+        {#if repoStats}<p class="empty">{repoStats.branch} · {repoStats.commits} {tr("chrome.commits")} · {repoStats.branches} {tr("chrome.branches")} · ↑{repoStats.ahead} ↓{repoStats.behind}</p>{/if}
+        {/if}
+        {@render sideHead("remotes", tr("chrome.remotes"))}
         {#if sideOpen("remotes")}
-        <div class="side quiet">
-          <button class="file-select" type="button" aria-expanded={sideOpen("remote:origin")} onclick={() => toggleSide("remote:origin")}>
+        <div class="side nested quiet" class:selected={sideSelected === "remote:origin"}>
+          <button class="file-select" type="button" aria-expanded={sideOpen("remote:origin")} onclick={() => pickSide("remote:origin")}>
             <span class="twist">{sideOpen("remote:origin") ? "▾" : "▸"}</span>
             <span class="name">origin</span>
             <span class="count">1</span>
           </button>
         </div>
         {#if sideOpen("remote:origin")}
-        <div class="side nested quiet"><span class="twist"></span><span class="name">HEAD → main</span></div>
+        <div class="side nested deep quiet"><span class="twist"></span><span class="name">HEAD → main</span></div>
         <div
-          class="side nested quiet"
+          class="side nested deep quiet"
+          class:selected={sideSelected === "remote:origin:main"}
           role="group"
           oncontextmenu={(event) => openMenu(event, [
             { label: tr("menu.checkout"), disabled: true },
@@ -2265,66 +2295,56 @@
             { label: tr("menu.deleteRemote"), run: () => ask(tr("menu.deleteRemote"), tr("dialog.deleteRemoteBody", { name: "origin/main" }), () => {}) },
             { label: tr("menu.copyName"), run: () => copyText("origin/main") },
           ])}
-        ><span class="twist"></span><span class="name">main</span></div>
+        ><button class="file-select" type="button" onclick={() => (sideSelected = "remote:origin:main")}><span class="twist"></span><span class="name">main</span></button></div>
         {/if}
         {/if}
       {/if}
-      <div class="side quiet">
-        <button class="file-select" type="button" onclick={() => (expanded = expanded === "tags" ? null : "tags")}>
-          <span>{tr("chrome.tags")}</span><span class="count">{visibleTags.length}</span>
-        </button>
-      </div>
-      {#if expanded === "tags"}
+      {@render sideHead("tags", tr("chrome.tags"), visibleTags.length)}
+      {#if sideOpen("tags")}
         {#each visibleTags as tag (tag.name)}
-          <div class="side nested quiet" role="group" oncontextmenu={(event) => openMenu(event, [
+          <div class="side nested quiet" class:selected={sideSelected === `tag:${tag.name}`} role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("menu.checkout"), disabled: mode !== "live", run: () => mutate({ action: "checkout", name: tag.name }) },
             { label: tr("menu.delete"), disabled: mode !== "live", run: () => ask(tr("menu.delete"), tag.name, () => void mutate({ action: "deleteTag", name: tag.name })) },
             { label: tr("menu.copyName"), run: () => copyText(tag.name) },
           ])}>
-            <button class="file-select" type="button" onclick={() => mutate({ action: "checkout", name: tag.name })}><span class="name">{tag.name}</span></button>
+            <button class="file-select" type="button" title={tag.name} onclick={() => (sideSelected = `tag:${tag.name}`)} ondblclick={() => mode === "live" && mutate({ action: "checkout", name: tag.name })}><span class="twist"></span><span class="name">{tag.name}</span></button>
           </div>
         {/each}
       {/if}
-      <button class="side quiet" type="button" onclick={() => (expanded = expanded === "stashes" ? null : "stashes")}>
-        <span>{tr("chrome.stashes")}</span><span class="count">{refs?.stashes.length ?? (mode === "sample" ? 1 : 0)}</span>
-      </button>
-      {#if expanded === "stashes"}
+      {@render sideHead("stashes", tr("chrome.stashes"), refs?.stashes.length ?? (mode === "sample" ? 1 : 0))}
+      {#if sideOpen("stashes")}
         {#each (refs?.stashes ?? (mode === "sample" ? [{ name: "stash@{0}", summary: "WIP before the palette" }] : [])) as stash (stash.name)}
-          <div class="side nested quiet" role="group" oncontextmenu={(event) => openMenu(event, [
+          <div class="side nested quiet" class:selected={sideSelected === `stash:${stash.name}`} role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("menu.apply"), disabled: mode !== "live", run: () => mutate({ action: "stashApply", name: stash.name }) },
             { label: tr("menu.pop"), disabled: mode !== "live", run: () => mutate({ action: "stashPop", name: stash.name }) },
             { label: tr("menu.drop"), disabled: mode !== "live", run: () => ask(tr("menu.drop"), stash.summary, () => void mutate({ action: "stashDrop", name: stash.name })) },
           ])}>
-            <span class="name">{stash.summary}</span>
+            <button class="file-select" type="button" title={stash.name} onclick={() => (sideSelected = `stash:${stash.name}`)}><span class="twist"></span><span class="name">{stash.summary}</span></button>
           </div>
         {/each}
       {/if}
-      <button class="side quiet" type="button" onclick={() => (expanded = expanded === "submodules" ? null : "submodules")}>
-        <span>{tr("chrome.submodules")}</span><span class="count">{refs?.submodules.length ?? 0}</span>
-      </button>
-      {#if expanded === "submodules"}
+      {@render sideHead("submodules", tr("chrome.submodules"), refs?.submodules.length ?? 0)}
+      {#if sideOpen("submodules")}
         {#each refs?.submodules ?? [] as row (row.path)}
-          <div class="side nested quiet" role="group" oncontextmenu={(event) => openMenu(event, [
+          <div class="side nested quiet" class:selected={sideSelected === `submodule:${row.path}`} role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("menu.initialize"), disabled: mode !== "live" || row.ready, run: () => mutate({ action: "submoduleInit", path: row.path }) },
             { label: tr("menu.openFile"), disabled: !row.ready, run: () => openRepo(fullPath(row.path)) },
             { label: tr("menu.sync"), disabled: mode !== "live" || !row.ready, run: () => mutate({ action: "submoduleSync", path: row.path }) },
             { label: tr("menu.update"), disabled: mode !== "live" || !row.ready, run: () => mutate({ action: "submoduleUpdate" }) },
             { label: tr("menu.delete"), disabled: mode !== "live", run: () => ask(tr("menu.delete"), row.path, () => void mutate({ action: "submoduleRemove", path: row.path })) },
           ])}>
-            <span class="name">{row.path}</span>
+            <button class="file-select" type="button" title={row.path} onclick={() => (sideSelected = `submodule:${row.path}`)} ondblclick={() => row.ready && openRepo(fullPath(row.path))}><span class="twist"></span><span class="name">{row.path}</span></button>
           </div>
         {/each}
       {/if}
-      <button class="side quiet" type="button" onclick={() => (expanded = expanded === "worktrees" ? null : "worktrees")}>
-        <span>{tr("chrome.worktrees")}</span><span class="count">{refs?.worktrees.length ?? (mode === "sample" ? 1 : 0)}</span>
-      </button>
-      {#if expanded === "worktrees"}
+      {@render sideHead("worktrees", tr("chrome.worktrees"), refs?.worktrees.length ?? (mode === "sample" ? 1 : 0))}
+      {#if sideOpen("worktrees")}
         {#each (refs?.worktrees ?? (mode === "sample" ? [{ path: "this repository", branch: "main" }] : [])) as row (row.path)}
-          <div class="side nested quiet" role="group" oncontextmenu={(event) => openMenu(event, [
+          <div class="side nested quiet" class:selected={sideSelected === `worktree:${row.path}`} role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("menu.openFile"), disabled: mode !== "live", run: () => openRepo(row.path) },
             { label: tr("menu.remove"), disabled: mode !== "live", run: () => ask(tr("menu.remove"), row.path, () => void mutate({ action: "removeWorktree", path: row.path })) },
           ])}>
-            <span class="name">{row.branch ?? folderName(row.path)}</span>
+            <button class="file-select" type="button" title={row.path} onclick={() => (sideSelected = `worktree:${row.path}`)} ondblclick={() => mode === "live" && openRepo(row.path)}><span class="twist"></span><span class="name">{row.branch ?? folderName(row.path)}</span></button>
           </div>
         {/each}
       {/if}
@@ -2555,6 +2575,7 @@
                   <div
                     class="commit-row virtual"
                     class:selected={selectedCommit === commit.id}
+                    class:unpushed={isCommitUnpushed(commit)}
                     style:top="{(historyStart + index) * rowCommit}px"
                     role="button"
                     tabindex="0"
@@ -2565,7 +2586,14 @@
                     <input class="drop-check" type="checkbox" checked={drops.includes(commit.id)} aria-label={tr("menu.drop")} onclick={(event) => event.stopPropagation()} onchange={() => toggleDrop(commit.id)} />
                     <span class="graph" aria-hidden="true">
                       {#each liveGraph[historyStart + index] ?? [] as cell, lane (`${commit.id}-${lane}`)}
-                        <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}></i>
+                        <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}>
+                          {#if cell?.forkFromLeft}
+                            <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M -6 14 C 0 14, 6 20, 6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
+                          {/if}
+                          {#if cell?.mergeToLeft}
+                            <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M 6 14 C 6 22, -6 28, -6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
+                          {/if}
+                        </i>
                       {/each}
                     </span>
                     <span class="subject">{@render linked(commit.summary)}</span>
@@ -2610,10 +2638,17 @@
               {/each}
             {:else}
               {#each sampleRows as commit, index (commit.id)}
-                <button class="commit-row" class:selected={selectedCommit === commit.id || selectedPath === commit.id} type="button" onclick={() => selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? openMenu(event, [{ label: tr("menu.apply"), disabled: true }, { label: tr("menu.pop"), disabled: true }, { label: tr("menu.drop"), disabled: true }]) : openMenu(event, commitMenu(commit))}>
+                <button class="commit-row" class:selected={selectedCommit === commit.id || selectedPath === commit.id} class:unpushed={isCommitUnpushed(commit)} type="button" onclick={() => selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? openMenu(event, [{ label: tr("menu.apply"), disabled: true }, { label: tr("menu.pop"), disabled: true }, { label: tr("menu.drop"), disabled: true }]) : openMenu(event, commitMenu(commit))}>
                   <span class="graph" aria-hidden="true">
                     {#each sampleGraph[index] ?? [] as cell, lane (`s-${commit.id}-${lane}`)}
-                      <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}></i>
+                      <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}>
+                        {#if cell?.forkFromLeft}
+                          <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M -6 14 C 0 14, 6 20, 6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
+                        {/if}
+                        {#if cell?.mergeToLeft}
+                          <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M 6 14 C 6 22, -6 28, -6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
+                        {/if}
+                      </i>
                     {/each}
                   </span>
                   <span class="subject">{@render linked(commit.summary)}</span>
@@ -3786,20 +3821,28 @@
     padding-left: 36px;
   }
 
+  .side.nested.deep.deeper {
+    padding-left: 50px;
+  }
+
   .side > .file-select {
     gap: 6px;
   }
 
-  .group-toggle {
-    display: flex;
+  .side.section {
+    margin-top: 6px;
+    color: var(--text);
+  }
+
+  .side.section .text-button {
+    margin-left: 0;
+    flex: none;
+  }
+
+  .twist {
+    display: inline-flex;
     align-items: center;
-    gap: 2px;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
+    justify-content: center;
   }
 
   .side.quiet,
@@ -4134,8 +4177,81 @@
   .ref.stash { background: var(--ref-stash-bg); color: var(--ref-stash); }
   .graph { display: flex; align-items: center; flex: none; height: 100%; }
   .graph-cell { width: 12px; height: 100%; position: relative; flex: none; }
-  .graph-cell.node::after { content: ""; position: absolute; left: 2px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: currentColor; }
-  .graph-cell.line::before { content: ""; position: absolute; left: 5px; top: -1px; bottom: -1px; width: 2px; background: currentColor; }
+  .graph-cell.node::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    margin-top: -4px;
+    border-radius: 50%;
+    background: currentColor;
+    z-index: 1;
+    transition: opacity 120ms ease;
+  }
+  .graph-cell.line::before,
+  .graph-cell.line-up::before,
+  .graph-cell.line-down::before {
+    content: "";
+    position: absolute;
+    left: 5px;
+    width: 2px;
+  }
+  .graph-cell.line::before {
+    top: -1px;
+    bottom: -1px;
+    background: currentColor;
+  }
+  .graph-cell.line-up.line-down::before {
+    top: -1px;
+    bottom: -1px;
+    background: linear-gradient(
+      to bottom,
+      currentColor calc(50% - 3px),
+      transparent calc(50% - 3px),
+      transparent calc(50% + 3px),
+      currentColor calc(50% + 3px)
+    );
+  }
+  .graph-cell.line-up:not(.line-down)::before {
+    top: -1px;
+    bottom: calc(50% + 3px);
+    background: currentColor;
+  }
+  .graph-cell.line-down:not(.line-up)::before {
+    top: calc(50% + 3px);
+    bottom: -1px;
+    background: currentColor;
+  }
+  .graph-curve {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 12px;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+  }
+  .commit-row.unpushed .subject,
+  .commit-row.unpushed .badges,
+  .commit-row.unpushed .commit-side {
+    opacity: 0.65;
+    transition: opacity 120ms ease;
+  }
+  .commit-row.unpushed .graph-cell.node::after {
+    opacity: 0.65;
+  }
+  .commit-row.unpushed:hover .subject,
+  .commit-row.unpushed:hover .badges,
+  .commit-row.unpushed:hover .commit-side,
+  .commit-row.unpushed:hover .graph-cell.node::after,
+  .commit-row.unpushed.selected .subject,
+  .commit-row.unpushed.selected .badges,
+  .commit-row.unpushed.selected .commit-side,
+  .commit-row.unpushed.selected .graph-cell.node::after {
+    opacity: 1;
+  }
   .drop-check { opacity: 0; }
   .commit-row:hover .drop-check, .drop-check:checked { opacity: 1; }
   .gutter { width: 32px; flex: none; text-align: right; color: var(--text-secondary); }
