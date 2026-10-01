@@ -10,14 +10,16 @@ mod ops;
 use std::path::{Path, PathBuf};
 
 pub use change::{
-    commit, conflict_sides, discard_hunk, discard_line, file_diff, file_diff_with, file_preview, resolve_conflict,
-    stage_all, stage_hunk, stage_line, stage_paths, staged_diff, unstage_all, unstage_paths, workspace_diff,
-    CommitRequest, ConflictSides, DiffLine, DiffLineKind, FileDiff, FilePreview,
+    blob_preview, blob_view, commit, conflict_sides, discard_hunk, discard_line, file_diff, file_diff_with, file_preview,
+    launch_diff_tool, launch_merge_tool, resolve_conflict, stage_all, stage_hunk, stage_line, stage_paths, staged_diff,
+    unstage_all, unstage_paths, workspace_diff, BlobView, CommitRequest, ConflictSides, DiffLine, DiffLineKind, FileDiff,
+    FilePreview,
 };
 pub use model::{
-    blame_file, branch_commits, commit_files, commit_log, compare_file, compare_files, file_history, in_progress,
-    prompt_facts, repo_sign_off_format, repository_refs, show_commit_file, show_commit_file_with, BlameLine, BranchRow,
-    CommitRow, InProgress, RefSnapshot, RemoteRow, StashRow, SubmoduleRow, TagRow, WorktreeRow,
+    blame_file, branch_commits, commit_files, commit_log, commit_tree, compare_file, compare_files, file_history,
+    in_progress, lfs_locks, prompt_facts, rebase_conflicts, reflog, repo_sign_off_format, repository_refs,
+    repository_summary, show_commit_file, show_commit_file_with, BlameLine, BranchRow, CommitRow, InProgress, LfsLockRow,
+    RefSnapshot, ReflogRow, RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
 pub use cli::{cancel_running, configure, set_http_proxy, set_passphrase, stop_process_tree, use_bundled_git, Session};
 pub use ops::{approve_credential, perform, set_repo_author, Mutation, RebaseStep, ResetMode};

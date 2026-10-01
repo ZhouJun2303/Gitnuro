@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::change::{parse_diff, FileDiff};
-use crate::cli::{check_path, check_rev, run};
+use crate::cli::{check_path, check_rev, run, run_output};
 use crate::{ChangeKind, Error, FileChange};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -61,6 +61,12 @@ pub struct TagRow {
 pub struct StashRow {
     pub name: String,
     pub summary: String,
+    /// Commit id of the stash. Empty when this Git does not print it.
+    #[serde(default)]
+    pub id: String,
+    /// First parent, the commit the stash was taken from.
+    #[serde(default)]
+    pub parent: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -817,15 +823,159 @@ fn tags(repo: &Path) -> Result<Vec<TagRow>, Error> {
 }
 
 fn stashes(repo: &Path) -> Result<Vec<StashRow>, Error> {
-    let output = run(repo, &["stash", "list", "--pretty=format:%gd%x09%gs"])?;
+    let output = run(repo, &["stash", "list", "--pretty=format:%H%x09%P%x09%gd%x09%gs"])?;
     let text = String::from_utf8_lossy(&output.stdout);
     Ok(text
         .lines()
         .filter_map(|line| {
-            let (name, summary) = line.split_once('\t')?;
-            Some(StashRow { name: name.to_string(), summary: summary.to_string() })
+            let mut parts = line.splitn(4, '\t');
+            let id = parts.next()?.to_string();
+            let parents = parts.next()?.to_string();
+            let name = parts.next()?.to_string();
+            let summary = parts.next()?.to_string();
+            let parent = parents.split_whitespace().next().unwrap_or("").to_string();
+            Some(StashRow { name, summary, id, parent })
         })
         .collect())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReflogRow {
+    pub id: String,
+    pub short_id: String,
+    pub selector: String,
+    pub summary: String,
+}
+
+/// Recent HEAD movements. `selector` is a name such as `HEAD@{0}`.
+pub fn reflog(repo: &Path, limit: usize) -> Result<Vec<ReflogRow>, Error> {
+    let limit = limit.clamp(1, 2000);
+    let output = run(repo, &["reflog", &format!("-n{limit}"), "--format=%H%x09%h%x09%gd%x09%gs"])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(text
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(4, '\t');
+            Some(ReflogRow {
+                id: parts.next()?.to_string(),
+                short_id: parts.next()?.to_string(),
+                selector: parts.next()?.to_string(),
+                summary: parts.next().unwrap_or("").to_string(),
+            })
+        })
+        .collect())
+}
+
+/// Paths in the tree of `rev`.
+pub fn commit_tree(repo: &Path, rev: &str) -> Result<Vec<String>, Error> {
+    let rev = check_rev(rev)?;
+    let output = run(repo, &["ls-tree", "-r", "--name-only", rev])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(text.lines().filter(|line| !line.is_empty()).map(str::to_string).collect())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoSummary {
+    pub path: String,
+    pub branch: String,
+    pub ahead: u32,
+    pub behind: u32,
+    pub commits: u32,
+    pub branches: u32,
+    pub last_summary: String,
+    pub last_when: String,
+}
+
+/// Lightweight facts for the repository list. Missing upstream leaves ahead and behind at zero.
+pub fn repository_summary(repo: &Path) -> Result<RepoSummary, Error> {
+    let branch = String::from_utf8_lossy(&run(repo, &["rev-parse", "--abbrev-ref", "HEAD"])?.stdout).trim().to_string();
+    let commits = parse_count(&run(repo, &["rev-list", "--count", "HEAD"])?.stdout);
+    let branches = run(repo, &["branch", "--list"])
+        .map(|output| String::from_utf8_lossy(&output.stdout).lines().filter(|line| !line.trim().is_empty()).count() as u32)
+        .unwrap_or(0);
+    let (ahead, behind) = run_output(repo, &["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            let text = String::from_utf8_lossy(&output.stdout);
+            let mut parts = text.split_whitespace();
+            (parse_count(parts.next().unwrap_or("0").as_bytes()), parse_count(parts.next().unwrap_or("0").as_bytes()))
+        })
+        .unwrap_or((0, 0));
+    let last = run(repo, &["log", "-1", "--format=%s%x09%ar"]).ok();
+    let last_text = last.map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string()).unwrap_or_default();
+    let (last_summary, last_when) = last_text.split_once('\t').unwrap_or((last_text.as_str(), ""));
+    Ok(RepoSummary {
+        path: repo.display().to_string(),
+        branch,
+        ahead,
+        behind,
+        commits,
+        branches,
+        last_summary: last_summary.to_string(),
+        last_when: last_when.to_string(),
+    })
+}
+
+fn parse_count(bytes: &[u8]) -> u32 {
+    String::from_utf8_lossy(bytes).trim().parse().unwrap_or(0)
+}
+
+/// Files that would conflict if HEAD were rebased onto `onto`. An empty list means a clean replay.
+pub fn rebase_conflicts(repo: &Path, onto: &str) -> Result<Vec<String>, Error> {
+    let onto = check_rev(onto)?;
+    let output = run_output(repo, &["merge-tree", "--write-tree", "--name-only", "HEAD", onto])?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("unknown option") || stderr.contains("usage:") {
+        return Err(Error::Git(stderr.trim().to_string()));
+    }
+    if output.status.success() {
+        return Ok(Vec::new());
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("CONFLICT") && !line.starts_with("Auto-merging") && !is_object_id(line))
+        .map(str::to_string)
+        .collect())
+}
+
+fn is_object_id(line: &str) -> bool {
+    line.len() == 40 && line.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LfsLockRow {
+    pub path: String,
+    pub owner: String,
+}
+
+/// Locked LFS paths. An unavailable `git lfs` is reported as not available rather than a failure.
+pub fn lfs_locks(repo: &Path) -> Result<(bool, Vec<LfsLockRow>), Error> {
+    let version = run_output(repo, &["lfs", "version"])?;
+    if !version.status.success() {
+        return Ok((false, Vec::new()));
+    }
+    let output = run_output(repo, &["lfs", "locks"])?;
+    if !output.status.success() {
+        return Ok((true, Vec::new()));
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let rows = text
+        .lines()
+        .filter(|line| !line.trim().is_empty() && !line.to_ascii_lowercase().starts_with("path"))
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let path = parts.next()?.to_string();
+            let owner = parts.next().unwrap_or("").to_string();
+            Some(LfsLockRow { path, owner })
+        })
+        .collect();
+    Ok((true, rows))
 }
 
 fn submodules(repo: &Path) -> Result<Vec<SubmoduleRow>, Error> {

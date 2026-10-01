@@ -5,10 +5,11 @@
   import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
-  import { commits, diffs, unstaged as sampleUnstaged } from "./sample";
+  import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, unstaged as sampleUnstaged } from "./sample";
   import { highlight } from "./highlight";
-  import { shortcut, typing } from "./keys";
-  import { branchGroup, formatWhen, gravatarUrl, splitDiff, windowSlice } from "./view";
+  import { resolveLocale, translate } from "./i18n";
+  import { shortcut, shortcutLabel, typing } from "./keys";
+  import { branchGroup, commitGraph, formatWhen, gravatarUrl, laneColors, numberedDiff, splitDiff, windowSlice } from "./view";
   import {
     badge,
     type BlameLine,
@@ -61,7 +62,8 @@
     | "repo"
     | "continue"
     | null;
-  type MenuItem = { label: string; run: () => void };
+  type MenuItem = { label: string; run?: () => void; disabled?: boolean; shortcut?: string; children?: MenuItem[]; sep?: boolean };
+  type ConfirmAsk = { title: string; body: string; run: () => void };
   type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row };
 
   const defaultSettings: Settings = {
@@ -122,6 +124,12 @@
     flowHotfix: "hotfix/",
     flowSupport: "support/",
     expandedGroups: [],
+    locale: "system",
+    diffTool: "",
+    mergeTool: "",
+    githubToken: "",
+    gitlabToken: "",
+    gitlabHost: "",
   };
 
   let section = $state<"changes" | "history">("changes");
@@ -130,6 +138,7 @@
   let description = $state("");
   let amend = $state(false);
   let signOff = $state(false);
+  let skipHooks = $state(false);
   let repoSignOff = $state(false);
   let selectedSide = $state<Side>("unstaged");
   let mode = $state<Mode>(
@@ -182,6 +191,29 @@
   let historyDiffTop = $state(0);
   let picked = $state<string[]>([]);
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  let submenu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  let confirmAsk = $state<ConfirmAsk | null>(null);
+  let imageMode = $state<"side" | "swipe" | "onion" | "pixel">("side");
+  let imagePos = $state(50);
+  let imageOld = $state<string | null>(null);
+  let imageNew = $state<string | null>(null);
+  let pixelUrl = $state("");
+  let reflogOn = $state(false);
+  let treeOn = $state(false);
+  let reflogRows = $state<{ id: string; shortId: string; selector: string; summary: string }[]>([]);
+  let treePaths = $state<string[]>([]);
+  let treeText = $state("");
+  let notices = $state<{ id: string; title: string; url: string; unread: boolean }[]>([]);
+  let pulls = $state<{ title: string; author: string; branch: string; url: string }[]>([]);
+  let forgeOpen = $state<"notes" | "pulls" | null>(null);
+  let repoStats = $state<{ branch: string; ahead: number; behind: number; commits: number; branches: number; lastSummary: string } | null>(null);
+  let rebaseConflictFiles = $state<string[]>([]);
+  let updateRefs = $state(false);
+  let lfsAvailable = $state(false);
+  let prefTab = $state<"appearance" | "git" | "diff" | "network" | "ai" | "account">("appearance");
+  let dragStep = $state<number | null>(null);
+  let rebasePicked = $state<string[]>([]);
+  let recentStats = $state<Record<string, { branch: string; ahead: number; behind: number; lastSummary: string }>>({});
   let commandOutput = $state("");
   let conflict = $state<ConflictSides | null>(null);
   let logLimit = $state(500);
@@ -204,7 +236,7 @@
   const branchLabel = $derived(
     mode === "sample" ? "main" : (snapshot?.branch ?? (mode === "loading" ? "…" : "HEAD")),
   );
-  const tabLabel = $derived(mode === "live" && snapshot ? folderName(snapshot.path) : "Gitnuro");
+  const tabLabel = $derived(mode === "live" && snapshot ? folderName(snapshot.path) : "AweGit");
   const changeCount = $derived(
     mode === "live" ? staged.length + unstaged.length : mode === "sample" ? unstaged.length : 0,
   );
@@ -220,6 +252,16 @@
   );
   const rowCommit = $derived(settings.linesHeight === "spaced" ? 32 : 24);
   const rowFile = $derived(settings.linesHeight === "spaced" ? 28 : 22);
+  const activeLocale = $derived(resolveLocale(settings.locale));
+  function tr(key: string, vars: Record<string, string> = {}) {
+    return translate(activeLocale, key, vars);
+  }
+  const sampleRows = $derived([
+    { id: "stash@{0}", summary: "WIP before the palette", author: "", when: "", badges: ["stash"], parents: [commits[0]?.id ?? ""], files: [] as (typeof commits)[number]["files"] },
+    ...commits,
+  ]);
+  const sampleGraph = $derived(commitGraph(sampleRows.map((commit) => ({ id: commit.id, parents: commit.parents }))));
+  const sampleTree = $derived([...new Set(commits.flatMap((commit) => commit.files.map((file) => file.path)))]);
   const shownCommits = $derived(
     commitsLive.filter((commit) => {
       const query = commitQuery.trim().toLowerCase();
@@ -231,7 +273,18 @@
       );
     }),
   );
-  const historyWindow = $derived(windowSlice(shownCommits, historyTop, rowCommit));
+  const historyItems = $derived.by(() => {
+    const rows = [...shownCommits];
+    for (const stash of refs?.stashes ?? []) {
+      const parent = stash.parent;
+      if (!parent) continue;
+      const extra: CommitRow = { id: stash.id || stash.name, shortId: stash.name, summary: stash.summary, author: "", when: "", parents: [parent], refs: ["stash"], lane: 0, at: 0, email: "" };
+      const at = rows.findIndex((row) => row.id === parent || row.id.startsWith(parent));
+      if (at >= 0) rows.splice(at, 0, extra);
+    }
+    return rows;
+  });
+  const historyWindow = $derived(windowSlice(historyItems, historyTop, rowCommit));
   const historyStart = $derived(historyWindow.start);
   const historyRows = $derived(historyWindow.rows);
   const shownUnstaged = $derived(unstaged.filter((file) => matchesQuery(file.path, fileQuery)));
@@ -239,6 +292,8 @@
   const unstagedTree = $derived(asTree(shownUnstaged));
   const fileWindow = $derived(windowSlice(unstagedTree, fileTop, rowFile));
   const diffLines = $derived(diff?.lines ?? []);
+  const shownDiffLines = $derived(numberedDiff(diffLines));
+  const liveGraph = $derived(commitGraph(historyItems.map((commit) => ({ id: commit.id, parents: commit.parents ?? [] }))));
   const diffWindow = $derived(windowSlice(diffLines, diffTop, 18));
   const blameWindow = $derived(windowSlice(blameLines ?? [], blameTop, 18));
   const historyDiffWindow = $derived(windowSlice(historyDiff?.lines ?? [], historyDiffTop, 18));
@@ -367,7 +422,16 @@
       if (token === diffToken) {
         diff = value;
         diffError = null;
-        preview = value.binary ? await invoke<FilePreview | null>("file_preview", { path: repoPath(), file }) : null;
+        if (value.binary) {
+          preview = await invoke<FilePreview | null>("file_preview", { path: repoPath(), file });
+          const older = await invoke<FilePreview | null>("revision_preview", { path: repoPath(), rev: "HEAD", file }).catch(() => null);
+          imageNew = preview?.dataUrl ?? null;
+          imageOld = older?.dataUrl ?? null;
+        } else {
+          preview = null;
+          imageNew = null;
+          imageOld = null;
+        }
       }
     } catch (error) {
       if (token === diffToken) {
@@ -385,6 +449,9 @@
       commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: logLimit, all: allBranches });
     }
     refs = await invoke<RefSnapshot>("repository_refs", { path });
+    repoStats = await invoke<NonNullable<typeof repoStats>>("repository_summary", { path }).catch(() => repoStats);
+    const locks = await invoke<{ available: boolean; locks: { path: string }[] }>("lfs_locks", { path }).catch(() => ({ available: false, locks: [] }));
+    lfsAvailable = locks.available;
     signOff = refs.signOffSet ? !!refs.signOff : settings.signOff;
     progress = await invoke<InProgress | null>("in_progress", { path });
   }
@@ -472,7 +539,158 @@
 
   function openMenu(event: MouseEvent, items: MenuItem[]) {
     event.preventDefault();
-    menu = { x: event.clientX, y: event.clientY, items };
+    event.stopPropagation();
+    submenu = null;
+    menu = { x: Math.min(event.clientX, window.innerWidth - 240), y: Math.min(event.clientY, window.innerHeight - 40), items };
+  }
+
+  function ask(title: string, body: string, run: () => void) {
+    confirmAsk = { title, body, run };
+  }
+
+  function liveOnly(run: () => void) {
+    return mode === "live" ? run : undefined;
+  }
+
+  function refKind(label: string) {
+    if (label === "stash" || label.startsWith("stash")) return "stash";
+    if (label.includes("/")) return "remote";
+    if (/^v?\d/.test(label)) return "tag";
+    return "local";
+  }
+
+  async function showReflog() {
+    reflogOn = !reflogOn;
+    treeOn = false;
+    if (!reflogOn || mode !== "live") return;
+    reflogRows = await invoke("reflog", { path: repoPath(), limit: 200 });
+  }
+
+  async function showTree() {
+    treeOn = !treeOn;
+    if (!treeOn || !selectedCommit || mode !== "live") return;
+    treePaths = await invoke<string[]>("commit_tree", { path: repoPath(), rev: selectedCommit });
+  }
+
+  async function openTreeFile(file: string) {
+    if (!selectedCommit) return;
+    historyFile = file;
+    const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null }>("blob_view", { path: repoPath(), rev: selectedCommit, file });
+    if (view.preview) {
+      imageOld = null;
+      imageNew = view.preview.dataUrl;
+      preview = view.preview;
+      treeText = "";
+    } else {
+      treeText = view.text;
+      preview = null;
+    }
+  }
+
+  async function openForge(kind: "notes" | "pulls") {
+    forgeOpen = forgeOpen === kind ? null : kind;
+    if (mode !== "live") {
+      notices = sampleNotices;
+      pulls = samplePulls;
+      return;
+    }
+    if (kind === "notes") notices = await invoke<typeof notices>("forge_notifications").catch(() => []);
+    else pulls = await invoke<typeof pulls>("forge_pulls", { path: repoPath() }).catch(() => []);
+  }
+
+  async function paintPixel(left: string, right: string) {
+    const load = (src: string) =>
+      new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("image"));
+        image.src = src;
+      });
+    try {
+      const [before, after] = await Promise.all([load(left), load(right)]);
+      const width = Math.max(before.width, after.width);
+      const height = Math.max(before.height, after.height);
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.drawImage(before, 0, 0);
+      const leftData = context.getImageData(0, 0, width, height);
+      context.clearRect(0, 0, width, height);
+      context.drawImage(after, 0, 0);
+      const rightData = context.getImageData(0, 0, width, height);
+      const out = context.createImageData(width, height);
+      for (let index = 0; index < out.data.length; index += 4) {
+        out.data[index] = Math.abs(leftData.data[index] - rightData.data[index]);
+        out.data[index + 1] = Math.abs(leftData.data[index + 1] - rightData.data[index + 1]);
+        out.data[index + 2] = Math.abs(leftData.data[index + 2] - rightData.data[index + 2]);
+        out.data[index + 3] = 255;
+      }
+      context.putImageData(out, 0, 0);
+      pixelUrl = canvas.toDataURL();
+    } catch {
+      pixelUrl = "";
+    }
+  }
+
+  function fileMenu(file: Row, side: Side): MenuItem[] {
+    const locked = mode !== "live";
+    return [
+      { label: tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked, shortcut: shortcutLabel("stageToggle"), run: () => runChange(side === "staged" ? "unstage_path" : "stage_path", { file: file.path }) },
+      { label: tr("menu.discard"), disabled: locked, shortcut: shortcutLabel("discard"), run: () => ask(tr("menu.discard"), tr("dialog.discardBody", { name: file.path }), () => void mutate({ action: "discard", file: file.path })) },
+      { label: tr("menu.deleteFile"), disabled: locked, run: () => ask(tr("menu.deleteFile"), tr("dialog.deleteBody", { name: file.path }), () => void mutate({ action: "delete", file: file.path })) },
+      { sep: true, label: "" },
+      { label: tr("menu.blame"), disabled: locked, run: () => showBlame(file.path) },
+      { label: tr("menu.history"), disabled: locked, run: () => showFileHistory(file.path) },
+      { label: tr("menu.externalDiff"), disabled: locked || !settings.diffTool, run: () => void invoke("launch_tool", { path: repoPath(), kind: "diff", file: file.path }) },
+      { label: tr("menu.externalMerge"), disabled: locked || file.letter !== "C" || !settings.mergeTool, run: () => void invoke("launch_tool", { path: repoPath(), kind: "merge", file: file.path }) },
+      { label: tr("menu.lfsLock"), disabled: locked || !lfsAvailable, run: () => void mutate({ action: "lfsLock", path: file.path }) },
+      { label: tr("menu.lfsUnlock"), disabled: locked || !lfsAvailable, run: () => void mutate({ action: "lfsUnlock", path: file.path }) },
+      { sep: true, label: "" },
+      { label: tr("menu.reveal"), disabled: locked, run: () => revealItemInDir(fullPath(file.path)) },
+      { label: tr("menu.openFile"), disabled: locked, run: () => openPath(fullPath(file.path)) },
+      { label: tr("menu.copyPath"), run: () => copyText(fullPath(file.path)) },
+      { label: tr("menu.copyRelative"), run: () => copyText(file.path) },
+      ...(file.letter === "C" ? [{ label: tr("menu.resolve"), disabled: locked, run: () => openResolve(file.path) }] : []),
+      ...commandItems("file"),
+    ];
+  }
+
+  function commitMenu(commit: { id: string; summary: string }): MenuItem[] {
+    const locked = mode !== "live";
+    return [
+      { label: tr("menu.checkout"), disabled: locked, run: () => mutate({ action: "checkout", name: commit.id }) },
+      { label: tr("menu.cherryPick"), disabled: locked, run: () => mutate({ action: "cherryPick", rev: commit.id }) },
+      { label: tr("menu.revert"), disabled: locked, run: () => mutate({ action: "revert", rev: commit.id }) },
+      {
+        label: tr("menu.reset"),
+        children: [
+          { label: tr("menu.soft"), disabled: locked, run: () => mutate({ action: "reset", rev: commit.id, mode: "soft" }) },
+          { label: tr("menu.mixed"), disabled: locked, run: () => mutate({ action: "reset", rev: commit.id, mode: "mixed" }) },
+          { label: tr("menu.hard"), disabled: locked, run: () => ask(tr("dialog.hardReset"), tr("dialog.hardResetBody"), () => void mutate({ action: "reset", rev: commit.id, mode: "hard" })) },
+        ],
+      },
+      { sep: true, label: "" },
+      { label: tr("menu.createBranch"), run: () => { draft = ""; draftExtra = commit.id; dialog = "branch"; } },
+      { label: tr("menu.createTag"), run: () => { draft = ""; draftExtra = commit.id; dialog = "tag"; } },
+      { label: tr("menu.editMessage"), disabled: locked, run: () => { draft = commit.summary; draftExtra = commit.id; dialog = "reword"; } },
+      { label: tr("menu.interactiveRebase"), run: () => { selectedCommit = commit.id; openRebase(); } },
+      { label: tr("menu.copySha"), run: () => copyText(commit.id) },
+      ...commandItems("commit"),
+    ];
+  }
+
+  function reflogMenu(row: { id: string; selector: string }): MenuItem[] {
+    return [
+      { label: tr("menu.checkout"), disabled: mode !== "live", run: () => mutate({ action: "checkout", name: row.selector || row.id }) },
+      { label: tr("menu.createBranch"), run: () => { draft = ""; draftExtra = row.id; dialog = "branch"; } },
+    ];
+  }
+
+  function setRebaseVerb(rev: string, verb: string) {
+    const targets = rebasePicked.includes(rev) && rebasePicked.length > 1 ? new Set(rebasePicked) : new Set([rev]);
+    rebaseSteps = rebaseSteps.map((step) => (targets.has(step.rev) ? { ...step, verb } : step));
   }
 
   function rememberRepo(path: string) {
@@ -503,11 +721,12 @@
 
   async function submitCommit(pushAfter = false) {
     if (mode !== "live" || !canCommit) return;
-    await runChange("commit_changes", { summary, description, amend, signOff });
+    await runChange("commit_changes", { summary, description, amend, signOff, skipHooks });
     if (!actionError) {
       summary = "";
       description = "";
       amend = false;
+      skipHooks = false;
       if (snapshot?.path) drafts.delete(snapshot.path);
       await loadContext();
       if (pushAfter) await doPush();
@@ -780,10 +999,16 @@
 
   function openRebase() {
     if (!selectedCommit) return;
-    const index = commitsLive.findIndex((commit) => commit.id === selectedCommit);
-    const newer = index > 0 ? commitsLive.slice(0, index).slice().reverse() : [];
+    const source = mode === "live" ? commitsLive : commits.map((commit) => ({ id: commit.id, summary: commit.summary }));
+    const index = source.findIndex((commit) => commit.id === selectedCommit);
+    const newer = index > 0 ? source.slice(0, index).slice().reverse() : source.slice(0, 3);
     rebaseSteps = newer.map((commit) => ({ verb: "pick", rev: commit.id, summary: commit.summary, message: commit.summary }));
+    rebasePicked = [];
+    rebaseConflictFiles = [];
     dialog = "rebase";
+    if (mode === "live") {
+      void invoke<string[]>("rebase_conflicts", { path: repoPath(), onto: selectedCommit }).then((files) => (rebaseConflictFiles = files)).catch(() => (rebaseConflictFiles = []));
+    }
   }
 
   function moveStep(index: number, delta: number) {
@@ -808,13 +1033,11 @@
   }
 
   function removeBranch(name: string) {
-    if (!confirm(`Delete branch ${name}?`)) return;
-    void mutate({ action: "deleteBranch", name });
+    ask(tr("dialog.deleteBranch"), tr("dialog.deleteBranchBody", { name }), () => void mutate({ action: "deleteBranch", name }));
   }
 
   function hardReset() {
-    if (!confirm("Hard reset discards uncommitted work. Continue?")) return;
-    void mutate({ action: "reset", rev: draft || "HEAD", mode: "hard" });
+    ask(tr("dialog.hardReset"), tr("dialog.hardResetBody"), () => void mutate({ action: "reset", rev: draft || "HEAD", mode: "hard" }));
   }
 
   function toRow(file: StatusFile): Row {
@@ -1025,7 +1248,7 @@
       void runChange(selectedSide === "staged" ? "unstage_path" : "stage_path", { file: selectedPath });
     } else if (action === "stageAll") void runChange(selectedSide === "staged" ? "unstage_all" : "stage_all");
     else if (action === "discard" && selectedPath && selectedSide === "unstaged") {
-      if (confirm(`Discard changes in ${selectedPath}?`)) void mutate({ action: "discard", file: selectedPath });
+      ask(tr("menu.discard"), tr("dialog.discardBody", { name: selectedPath }), () => void mutate({ action: "discard", file: selectedPath }));
     } else if (action === "explorer" && snapshot) void openPath(snapshot.path);
     else if (action === "terminal") void invoke("open_terminal", { path: repoPath() });
     else if (action === "filterBranch") {
@@ -1052,8 +1275,25 @@
     root.style.setProperty("--row-side", settings.linesHeight === "spaced" ? "28px" : "22px");
   });
 
+  $effect(() => {
+    if (mode !== "error" || !inApp()) return;
+    for (const path of settings.recent.slice(0, 12)) {
+      if (recentStats[path]) continue;
+      void invoke<{ branch: string; ahead: number; behind: number; lastSummary: string }>("repository_summary", { path })
+        .then((value) => {
+          recentStats = { ...recentStats, [path]: value };
+        })
+        .catch(() => {});
+    }
+  });
+
   onMount(() => {
-    if (!inApp()) return;
+    if (!inApp()) {
+      notices = sampleNotices;
+      pulls = samplePulls;
+      repoStats = { branch: "main", ahead: 5, behind: 0, commits: commits.length, branches: 2, lastSummary: commits[0]?.summary ?? "" };
+      return;
+    }
     window.addEventListener("keydown", onShortcut);
     let unlisten = () => {};
     let unmoved = () => {};
@@ -1138,8 +1378,8 @@
 <div class="shell">
   <header class="chrome">
     <div class="tabs">
-      <button class="tab" type="button" onclick={() => (dialog = "open")}>Open</button>
-      <button class="tab" type="button" onclick={() => { draft = ""; dialog = "workspace"; }}>Workspace</button>
+      <button class="tab" type="button" onclick={() => (dialog = "open")}>{tr("chrome.open")}</button>
+      <button class="tab" type="button" onclick={() => { draft = ""; dialog = "workspace"; }}>{tr("chrome.workspace")}</button>
       {#if settings.workspaces.length > 0}
         <select class="search" aria-label="Workspace" bind:value={settings.currentWorkspace} onchange={() => selectWorkspace()}>
           <option value="">All</option>
@@ -1151,26 +1391,37 @@
       {#each repos as repo (repo)}
         <div class="tab" class:active={snapshot?.path === repo}>
           <button class="file-select" type="button" onclick={() => openRepo(repo)}>{folderName(repo)}</button>
-          <button class="text-button row-action" type="button" onclick={() => closeTab(repo)} aria-label="Close tab">×</button>
+          <button class="text-button row-action tab-close" type="button" onclick={() => closeTab(repo)} aria-label={tr("chrome.close")}>×</button>
         </div>
       {:else}
         <button class="tab active" type="button">{tabLabel}</button>
       {/each}
     </div>
     <div class="toolbar">
-      <button class="tool" type="button" disabled={busy} onclick={(event) => quick(event, "fetch", doFetch)}><span class="glyph">↓</span>Fetch</button>
-      <button class="tool" type="button" disabled={busy} onclick={(event) => quick(event, "pull", doPull)}><span class="glyph">↓</span>Pull</button>
-      <button class="tool" type="button" disabled={busy} onclick={(event) => quick(event, "push", doPush)}><span class="glyph">↑</span>Push</button>
-      <button class="tool" type="button" disabled={busy} onclick={(event) => quick(event, "stash", () => mutate({ action: "stash", message: "" }))}><span class="glyph">▣</span>Stash</button>
-      <button class="tool" type="button" disabled={busy} onclick={() => mutate({ action: "stashPop" })}><span class="glyph">▢</span>Pop</button>
-      <button class="tool" type="button" disabled={busy} onclick={() => { draft = ""; dialog = "flow"; }}><span class="glyph">⑂</span>Git Flow</button>
-      <button class="tool" type="button" disabled={mode !== "live" || busy} onclick={openRepoSettings}><span class="glyph">⌂</span>Repository</button>
+      <button class="tool" type="button" disabled={busy} onclick={(event) => openMenu(event, [
+        { label: tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: mode !== "live", run: () => void doFetch() },
+        { label: tr("chrome.fetchAll"), disabled: mode !== "live", run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: false }) },
+      ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M5 7l3 3 3-3M3 13h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.fetch")}</button>
+      <button class="tool" type="button" disabled={busy} onclick={(event) => openMenu(event, [
+        { label: tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: mode !== "live", run: () => void doPull() },
+        { label: tr("dialog.fastForward"), disabled: mode !== "live", run: () => { settings.pullRebase = false; void doPull(); } },
+      ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V4M5 7l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.pull")}</button>
+      <button class="tool" type="button" disabled={busy} onclick={(event) => openMenu(event, [
+        { label: tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: mode !== "live", run: () => void doPush() },
+        { label: tr("menu.createTag"), disabled: mode !== "live", run: () => void mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: settings.forceWithLease }) },
+      ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14V5M5 8l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.push")}</button>
+      <button class="tool" type="button" disabled={busy} onclick={(event) => openMenu(event, [
+        { label: tr("chrome.stash"), shortcut: shortcutLabel("stash"), disabled: mode !== "live", run: () => { draft = ""; dialog = "stash"; } },
+        { label: tr("chrome.pop"), disabled: mode !== "live", run: () => void mutate({ action: "stashPop" }) },
+      ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5h10v8H3zM5 5V3h6v2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>{tr("chrome.stash")}</button>
+      <button class="tool" type="button" disabled={busy} onclick={() => { draft = ""; dialog = "flow"; }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h4v4H3zM9 9h4v4H9zM5 7v2h4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>{tr("chrome.flow")}</button>
+      <button class="tool icon-only" type="button" title={tr("chrome.notifications")} onclick={() => openForge("notes")}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a4 4 0 0 1 4 4v2l1 2H3l1-2V6a4 4 0 0 1 4-4zM6.5 12a1.5 1.5 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>{#if notices.some((item) => item.unread)}<span class="count badge-count">{notices.filter((item) => item.unread).length}</span>{/if}</button>
       <div class="spacer"></div>
       <div class="launch-wrap">
         <input
           class="launch"
-          placeholder="Quick Launch"
-          aria-label="Quick Launch"
+          placeholder={tr("chrome.quickLaunch")}
+          aria-label={tr("chrome.quickLaunch")}
           bind:this={launchEl}
           bind:value={launch}
           onfocus={() => (launchOpen = true)}
@@ -1193,33 +1444,33 @@
           </div>
         {/if}
       </div>
-      <button class="tool" type="button" onclick={() => invoke("open_terminal", { path: repoPath() })}><span class="glyph">▹</span>Terminal</button>
-      <button class="tool" type="button" onclick={() => snapshot && openPath(snapshot.path)}><span class="glyph">▤</span>Explorer</button>
-      <button class="tool" type="button" onclick={() => (dialog = "prefs")}><span class="glyph">⚙</span>Preferences</button>
-      <button class="tool" type="button" onclick={() => (dialog = "about")}><span class="glyph">i</span>About</button>
+      <button class="tool icon-only" type="button" title={tr("chrome.terminal")} onclick={() => invoke("open_terminal", { path: repoPath() })}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4l4 4-4 4M8 12h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+      <button class="tool icon-only" type="button" title={tr("chrome.explorer")} onclick={() => snapshot && openPath(snapshot.path)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h5l1 2h6v7H2z" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+      <button class="tool icon-only" type="button" title={tr("chrome.preferences")} onclick={() => (dialog = "prefs")}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+      <button class="tool icon-only" type="button" title={tr("chrome.pulls")} onclick={() => openForge("pulls")}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="4" r="1.4" fill="none" stroke="currentColor"/><circle cx="12" cy="12" r="1.4" fill="none" stroke="currentColor"/><path d="M4 5.5v5a2 2 0 0 0 2 2h4.2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
     </div>
   </header>
 
   {#if busy}
     <div class="banner">
-      <span>Working…</span>
-      <button class="text-button" type="button" onclick={() => invoke("cancel_operation")}>Cancel</button>
+      <span>{tr("chrome.working")}</span>
+      <button class="text-button" type="button" onclick={() => invoke("cancel_operation")}>{tr("chrome.cancel")}</button>
     </div>
   {/if}
   {#if updateNotice}
     <div class="banner">
-      <span>AweGit {updateNotice.appVersion} is available</span>
+      <span>{tr("chrome.updateAvailable", { name: `AweGit ${updateNotice.appVersion}` })}</span>
       {#if updateNotice.downloadUrl}
-        <button class="text-button" type="button" onclick={() => openUrl(updateNotice?.downloadUrl ?? "")}>Download</button>
+        <button class="text-button" type="button" onclick={() => openUrl(updateNotice?.downloadUrl ?? "")}>{tr("chrome.download")}</button>
       {/if}
     </div>
   {/if}
   {#if mode === "live" && progress}
     <div class="banner">
-      <span>{progressLabel(progress)} in progress</span>
-      <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "abort" })}>Abort</button>
-      <button class="text-button" type="button" disabled={busy || conflicted} onclick={() => { if (progress === "rebase") { draft = ""; dialog = "continue"; } else void mutate({ action: "continue" }); }}>Continue</button>
-      <button class="text-button" type="button" disabled={busy || progress === "merge"} onclick={() => mutate({ action: "skip" })}>Skip</button>
+      <span>{tr("chrome.inProgress", { name: progressLabel(progress) })}</span>
+      <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "abort" })}>{tr("chrome.abort")}</button>
+      <button class="text-button" type="button" disabled={busy || conflicted} onclick={() => { if (progress === "rebase") { draft = ""; dialog = "continue"; } else void mutate({ action: "continue" }); }}>{tr("chrome.continueAction")}</button>
+      <button class="text-button" type="button" disabled={busy || progress === "merge"} onclick={() => mutate({ action: "skip" })}>{tr("chrome.skip")}</button>
     </div>
   {/if}
   {#if actionError}
@@ -1229,23 +1480,23 @@
   <div class="body">
     <aside class="sidebar">
       <button class="side" class:selected={section === "changes"} type="button" onclick={() => (section = "changes")}>
-        <span>Local Changes</span>
+        <span>{tr("chrome.changes")}</span>
         <span class="count">{changeCount}</span>
       </button>
       <button class="side" class:selected={section === "history"} type="button" onclick={() => (section = "history")}>
-        <span>{allBranches ? "All Commits" : "Current branch"}</span>
+        <span>{allBranches ? tr("chrome.allCommits") : tr("chrome.currentBranch")}</span>
         {#if mode === "live"}<span class="count">{shownCommits.length}</span>{/if}
       </button>
 
       <div class="group">
-        Local branches
+        {tr("chrome.localBranches")}
         {#if mode === "live"}
-          <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "branch"; }}>New</button>
-          <button class="text-button" type="button" onclick={showAllRefs}>Show all</button>
+          <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "branch"; }}>{tr("chrome.new")}</button>
+          <button class="text-button" type="button" onclick={showAllRefs}>{tr("chrome.showAll")}</button>
         {/if}
       </div>
       {#if mode === "live"}
-        <input class="search" placeholder="Filter sidebar" aria-label="Filter sidebar" bind:value={sideQuery} />
+        <input class="search" placeholder={tr("chrome.filterSidebar")} aria-label={tr("chrome.filterSidebar")} bind:value={sideQuery} />
       {/if}
       {#if mode === "live" && refs}
         {#each visibleBranches as branch, index (branch.name)}
@@ -1259,16 +1510,16 @@
             role="group"
             oncontextmenu={(event) => openMenu(event, [
               ...(!branch.current ? [
-                { label: "Checkout", run: () => mutate({ action: "checkout", name: branch.name }) },
-                { label: "Merge", run: () => { draft = branch.name; draftExtra = settings.mergeNoFf ? "no-ff" : "ff"; dialog = "merge"; } },
-                { label: "Rebase", run: () => mutate({ action: "rebase", onto: branch.name, autostash: settings.mergeAutostash }) },
-                { label: "Delete", run: () => removeBranch(branch.name) },
+                { label: tr("menu.checkout"), run: () => mutate({ action: "checkout", name: branch.name }) },
+                { label: tr("menu.merge"), run: () => { draft = branch.name; draftExtra = settings.mergeNoFf ? "no-ff" : "ff"; dialog = "merge"; } },
+                { label: tr("menu.rebaseOnto"), run: () => mutate({ action: "rebase", onto: branch.name, autostash: settings.mergeAutostash }) },
+                { label: tr("menu.delete"), run: () => removeBranch(branch.name) },
               ] : []),
-              { label: "Rename", run: () => { draft = branch.name; draftExtra = branch.name; dialog = "rename"; } },
-              { label: "Set upstream", run: () => { draft = branch.name; draftExtra = branch.upstream ?? ""; dialog = "upstream"; } },
-              { label: "Copy name", run: () => copyText(branch.name) },
-              { label: "Hide", run: () => hideRef(branch.name) },
-              { label: "Show only this", run: () => showOnly(branch.name) },
+              { label: tr("menu.rename"), run: () => { draft = branch.name; draftExtra = branch.name; dialog = "rename"; } },
+              { label: tr("menu.setUpstream"), run: () => { draft = branch.name; draftExtra = branch.upstream ?? ""; dialog = "upstream"; } },
+              { label: tr("menu.copyName"), run: () => copyText(branch.name) },
+              { label: tr("menu.hide"), run: () => hideRef(branch.name) },
+              { label: tr("menu.showOnly"), run: () => showOnly(branch.name) },
               ...commandItems("branch"),
             ])}
           >
@@ -1282,17 +1533,17 @@
           {/if}
         {/each}
         <div class="group">
-          Remotes
-          <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "remote"; }}>Add</button>
-          <button class="text-button" type="button" onclick={() => mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: false })}>Fetch all</button>
+          {tr("chrome.remotes")}
+          <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "remote"; }}>{tr("chrome.add")}</button>
         </div>
         {#each refs.remotes as remote (remote.name)}
           {#if matchesQuery(remote.name, sideQuery)}
-          <div class="side quiet">
+          <div class="side quiet" role="group" oncontextmenu={(event) => openMenu(event, [
+            { label: tr("chrome.fetch"), run: () => mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: false }) },
+            { label: tr("dialog.url"), run: () => { draft = remote.name; draftExtra = remote.url ?? ""; dialog = "remote"; } },
+            { label: tr("menu.remove"), run: () => mutate({ action: "removeRemote", name: remote.name }) },
+          ])}>
             <span class="name">{remote.name}</span>
-            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: false })}>Fetch</button>
-            <button class="text-button row-action" type="button" onclick={() => { draft = remote.name; draftExtra = remote.url ?? ""; dialog = "remote"; }}>URL</button>
-            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "removeRemote", name: remote.name })}>Remove</button>
           </div>
           {#if remote.head}<div class="side nested quiet"><span class="name">HEAD</span></div>{/if}
           {#each remote.branches as branch (remote.name + branch)}
@@ -1301,11 +1552,11 @@
               class="side nested quiet"
               role="group"
               oncontextmenu={(event) => openMenu(event, [
-                { label: "Checkout", run: () => mutate({ action: "checkoutRemote", remote: remote.name, branch }) },
-                { label: "Pull into current", run: () => mutate({ action: "pullRef", remote: remote.name, branch, rebase: settings.pullRebase, autostash: settings.mergeAutostash }) },
-                { label: "Push current here", run: () => mutate({ action: "pushRef", remote: remote.name, branch, forceWithLease: settings.forceWithLease }) },
-                { label: "Delete on remote", run: () => { if (confirm(`Delete ${remote.name}/${branch}?`)) void mutate({ action: "deleteRemoteBranch", remote: remote.name, branch }); } },
-                { label: "Copy name", run: () => copyText(`${remote.name}/${branch}`) },
+                { label: tr("menu.checkout"), run: () => mutate({ action: "checkoutRemote", remote: remote.name, branch }) },
+                { label: tr("menu.pullInto"), run: () => mutate({ action: "pullRef", remote: remote.name, branch, rebase: settings.pullRebase, autostash: settings.mergeAutostash }) },
+                { label: tr("menu.pushHere"), run: () => mutate({ action: "pushRef", remote: remote.name, branch, forceWithLease: settings.forceWithLease }) },
+                { label: tr("menu.deleteRemote"), run: () => ask(tr("menu.deleteRemote"), tr("dialog.deleteRemoteBody", { name: `${remote.name}/${branch}` }), () => void mutate({ action: "deleteRemoteBranch", remote: remote.name, branch })) },
+                { label: tr("menu.copyName"), run: () => copyText(`${remote.name}/${branch}`) },
               ])}
             >
               <button class="file-select" type="button" onclick={() => mutate({ action: "checkoutRemote", remote: remote.name, branch })}>
@@ -1317,76 +1568,103 @@
           {/if}
         {/each}
       {:else}
-        <div class="side current">
+        <div
+          class="side current"
+          role="group"
+          oncontextmenu={(event) => openMenu(event, [
+            { label: tr("menu.checkout"), disabled: true },
+            { label: tr("menu.merge"), run: () => { draft = branchLabel; draftExtra = "ff"; dialog = "merge"; } },
+            { label: tr("menu.rebaseOnto"), disabled: true },
+            { label: tr("menu.rename"), run: () => { draft = branchLabel; draftExtra = branchLabel; dialog = "rename"; } },
+            { label: tr("menu.delete"), run: () => ask(tr("dialog.deleteBranch"), tr("dialog.deleteBranchBody", { name: branchLabel }), () => {}) },
+            { label: tr("menu.setUpstream"), run: () => { draft = branchLabel; draftExtra = "origin/main"; dialog = "upstream"; } },
+            { label: tr("menu.copyName"), run: () => copyText(branchLabel) },
+            { label: tr("menu.hide"), disabled: true },
+            { label: tr("menu.showOnly"), disabled: true },
+          ])}
+        >
           <span class="dot"></span>
           <span class="name">{branchLabel}</span>
           {#if mode === "sample"}<span class="ahead">↑5</span>{/if}
         </div>
-        <div class="group">Remotes</div>
+        {#if repoStats}<p class="empty">{repoStats.branch} · {repoStats.commits} {tr("chrome.commits")} · {repoStats.branches} {tr("chrome.branches")} · ↑{repoStats.ahead} ↓{repoStats.behind}</p>{/if}
+        <div class="group">{tr("chrome.remotes")}</div>
         <div class="side quiet"><span class="name">origin</span></div>
         <div class="side nested quiet"><span class="name">HEAD</span></div>
-        <div class="side nested quiet"><span class="name">main</span></div>
+        <div
+          class="side nested quiet"
+          role="group"
+          oncontextmenu={(event) => openMenu(event, [
+            { label: tr("menu.checkout"), disabled: true },
+            { label: tr("menu.pullInto"), disabled: true },
+            { label: tr("menu.pushHere"), disabled: true },
+            { label: tr("menu.deleteRemote"), run: () => ask(tr("menu.deleteRemote"), tr("dialog.deleteRemoteBody", { name: "origin/main" }), () => {}) },
+            { label: tr("menu.copyName"), run: () => copyText("origin/main") },
+          ])}
+        ><span class="name">main</span></div>
       {/if}
-      <div class="group">More</div>
+      <div class="group" role="group" oncontextmenu={(event) => openMenu(event, [
+        { label: tr("menu.createTag"), run: () => { draft = ""; draftExtra = "HEAD"; dialog = "tag"; } },
+        { label: tr("chrome.stash"), run: () => { draft = ""; dialog = "stash"; } },
+        { label: tr("chrome.add"), run: () => { draft = ""; draftExtra = ""; dialog = "submodule"; } },
+        { label: tr("chrome.worktrees"), run: () => { draft = ""; draftExtra = ""; dialog = "worktree"; } },
+      ])}>{tr("chrome.more")}</div>
       <div class="side quiet">
         <button class="file-select" type="button" onclick={() => (expanded = expanded === "tags" ? null : "tags")}>
-          <span>Tags</span><span class="count">{visibleTags.length}</span>
+          <span>{tr("chrome.tags")}</span><span class="count">{visibleTags.length}</span>
         </button>
-        <button class="text-button row-action" type="button" onclick={() => { draft = ""; draftExtra = "HEAD"; dialog = "tag"; }}>New</button>
       </div>
       {#if expanded === "tags"}
         {#each visibleTags as tag (tag.name)}
-          <div class="side nested quiet">
+          <div class="side nested quiet" role="group" oncontextmenu={(event) => openMenu(event, [
+            { label: tr("menu.checkout"), disabled: mode !== "live", run: () => mutate({ action: "checkout", name: tag.name }) },
+            { label: tr("menu.delete"), disabled: mode !== "live", run: () => ask(tr("menu.delete"), tag.name, () => void mutate({ action: "deleteTag", name: tag.name })) },
+            { label: tr("menu.copyName"), run: () => copyText(tag.name) },
+          ])}>
             <button class="file-select" type="button" onclick={() => mutate({ action: "checkout", name: tag.name })}><span class="name">{tag.name}</span></button>
-            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "deleteTag", name: tag.name })}>Delete</button>
           </div>
         {/each}
       {/if}
       <button class="side quiet" type="button" onclick={() => (expanded = expanded === "stashes" ? null : "stashes")}>
-        <span>Stashes</span><span class="count">{refs?.stashes.length ?? 0}</span>
+        <span>{tr("chrome.stashes")}</span><span class="count">{refs?.stashes.length ?? (mode === "sample" ? 1 : 0)}</span>
       </button>
       {#if expanded === "stashes"}
-        {#each refs?.stashes ?? [] as stash (stash.name)}
-          <div class="side nested quiet">
-            <button class="file-select" type="button" onclick={() => mutate({ action: "stashApply", name: stash.name })}>
-              <span class="name">{stash.summary}</span>
-            </button>
-            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "stashApply", name: stash.name })}>Apply</button>
-            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "stashPop", name: stash.name })}>Pop</button>
-            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "stashDrop", name: stash.name })}>Drop</button>
+        {#each (refs?.stashes ?? (mode === "sample" ? [{ name: "stash@{0}", summary: "WIP before the palette" }] : [])) as stash (stash.name)}
+          <div class="side nested quiet" role="group" oncontextmenu={(event) => openMenu(event, [
+            { label: tr("menu.apply"), disabled: mode !== "live", run: () => mutate({ action: "stashApply", name: stash.name }) },
+            { label: tr("menu.pop"), disabled: mode !== "live", run: () => mutate({ action: "stashPop", name: stash.name }) },
+            { label: tr("menu.drop"), disabled: mode !== "live", run: () => ask(tr("menu.drop"), stash.summary, () => void mutate({ action: "stashDrop", name: stash.name })) },
+          ])}>
+            <span class="name">{stash.summary}</span>
           </div>
         {/each}
       {/if}
       <button class="side quiet" type="button" onclick={() => (expanded = expanded === "submodules" ? null : "submodules")}>
-        <span>Submodules</span><span class="count">{refs?.submodules.length ?? 0}</span>
+        <span>{tr("chrome.submodules")}</span><span class="count">{refs?.submodules.length ?? 0}</span>
       </button>
       {#if expanded === "submodules"}
-        <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "submodule"; }}>Add</button>
         {#each refs?.submodules ?? [] as row (row.path)}
-          <div class="side nested quiet">
+          <div class="side nested quiet" role="group" oncontextmenu={(event) => openMenu(event, [
+            { label: tr("menu.initialize"), disabled: mode !== "live" || row.ready, run: () => mutate({ action: "submoduleInit", path: row.path }) },
+            { label: tr("menu.openFile"), disabled: !row.ready, run: () => openRepo(fullPath(row.path)) },
+            { label: tr("menu.sync"), disabled: mode !== "live" || !row.ready, run: () => mutate({ action: "submoduleSync", path: row.path }) },
+            { label: tr("menu.update"), disabled: mode !== "live" || !row.ready, run: () => mutate({ action: "submoduleUpdate" }) },
+            { label: tr("menu.delete"), disabled: mode !== "live", run: () => ask(tr("menu.delete"), row.path, () => void mutate({ action: "submoduleRemove", path: row.path })) },
+          ])}>
             <span class="name">{row.path}</span>
-            {#if !row.ready}
-              <button class="text-button row-action" type="button" onclick={() => mutate({ action: "submoduleInit", path: row.path })}>Initialize</button>
-            {:else}
-              <button class="text-button row-action" type="button" onclick={() => openRepo(fullPath(row.path))}>Open</button>
-              <button class="text-button row-action" type="button" onclick={() => mutate({ action: "submoduleSync", path: row.path })}>Sync</button>
-              <button class="text-button row-action" type="button" onclick={() => mutate({ action: "submoduleUpdate" })}>Update</button>
-              <button class="text-button row-action" type="button" onclick={() => { if (confirm(`Delete submodule ${row.path}?`)) void mutate({ action: "submoduleRemove", path: row.path }); }}>Delete</button>
-            {/if}
           </div>
         {/each}
       {/if}
       <button class="side quiet" type="button" onclick={() => (expanded = expanded === "worktrees" ? null : "worktrees")}>
-        <span>Worktrees</span><span class="count">{refs?.worktrees.length ?? (mode === "sample" ? 1 : 0)}</span>
+        <span>{tr("chrome.worktrees")}</span><span class="count">{refs?.worktrees.length ?? (mode === "sample" ? 1 : 0)}</span>
       </button>
       {#if expanded === "worktrees"}
-        <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "worktree"; }}>Add</button>
-        {#each refs?.worktrees ?? [] as row (row.path)}
-          <div class="side nested quiet">
-            <button class="file-select" type="button" onclick={() => openRepo(row.path)}>
-              <span class="name">{row.branch ?? folderName(row.path)}</span>
-            </button>
-            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "removeWorktree", path: row.path })}>Remove</button>
+        {#each (refs?.worktrees ?? (mode === "sample" ? [{ path: "this repository", branch: "main" }] : [])) as row (row.path)}
+          <div class="side nested quiet" role="group" oncontextmenu={(event) => openMenu(event, [
+            { label: tr("menu.openFile"), disabled: mode !== "live", run: () => openRepo(row.path) },
+            { label: tr("menu.remove"), disabled: mode !== "live", run: () => ask(tr("menu.remove"), row.path, () => void mutate({ action: "removeWorktree", path: row.path })) },
+          ])}>
+            <span class="name">{row.branch ?? folderName(row.path)}</span>
           </div>
         {/each}
       {/if}
@@ -1396,12 +1674,12 @@
       <section class="changes">
         <div class="status-pane" style:order={settings.swapPanes ? 2 : 1}>
         <div class="pane-head">
-          <span>Staged</span>
+          <span>{tr("chrome.staged")}</span>
           <span class="count">{staged.length}</span>
-          <button class="text-button" type="button" disabled={mode !== "live" || busy || staged.length === 0} onclick={() => runChange("unstage_all")}>Unstage all</button>
+          <button class="text-button" type="button" disabled={mode !== "live" || busy || staged.length === 0} onclick={() => runChange("unstage_all")}>{tr("chrome.unstageAll")}</button>
         </div>
         {#if shownStaged.length === 0}
-          <p class="empty">{staged.length === 0 ? "No staged changes" : "No matching files"}</p>
+          <p class="empty">{staged.length === 0 ? tr("chrome.noStaged") : tr("chrome.noMatch")}</p>
         {:else}
           <div class="file-list staged-list">
             {#each asTree(shownStaged) as entry (entry.key)}
@@ -1417,22 +1695,18 @@
 
         <div class="status-pane" style:order={settings.swapPanes ? 1 : 2}>
         <div class="pane-head">
-          <span>Unstaged</span>
+          <span>{tr("chrome.unstaged")}</span>
           <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : shownUnstaged.length}</span>
-          <input class="search" placeholder="Filter files" aria-label="Filter files" bind:value={fileQuery} />
-          <button class="text-button" type="button" disabled={picked.length === 0 || busy} onclick={() => mutate({ action: "stagePaths", files: picked, unstage: false })}>Stage selected</button>
-          <button class="text-button" type="button" disabled={picked.length === 0 || busy} onclick={() => unstagePicked()}>Unstage selected</button>
-          <button class="text-button" type="button" disabled={picked.length === 0 || busy} onclick={() => { if (confirm(`Discard ${picked.length} files?`)) void discardPicked(); }}>Discard selected</button>
-          <button class="text-button" type="button" disabled={picked.length === 0 || busy} onclick={() => { if (confirm(`Delete ${picked.length} files?`)) void deletePicked(); }}>Delete selected</button>
-          <button class="text-button" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>Stage all</button>
+          <input class="search" placeholder={tr("chrome.filterFiles")} aria-label={tr("chrome.filterFiles")} bind:value={fileQuery} />
+          <button class="text-button" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>{tr("chrome.stageAll")}</button>
         </div>
         <div class="file-list" onscroll={(event) => (fileTop = (event.currentTarget as HTMLElement).scrollTop)}>
           {#if mode === "loading"}
-            <p class="empty">Reading repository status…</p>
+            <p class="empty">{tr("chrome.readingStatus")}</p>
           {:else if mode === "error"}
             <p class="empty">{loadError}</p>
           {:else if shownUnstaged.length === 0}
-            <p class="empty">{unstaged.length === 0 ? "No unstaged changes" : "No matching files"}</p>
+            <p class="empty">{unstaged.length === 0 ? tr("chrome.noUnstaged") : tr("chrome.noMatch")}</p>
           {:else}
             <div class="commit-window" style:height="{unstagedTree.length * rowFile}px">
               {#each fileWindow.rows as entry, index (entry.key)}
@@ -1454,66 +1728,59 @@
             class="file"
             class:selected={selectedPath === file.path && (mode !== "live" || selectedSide === side)}
             role="group"
-            oncontextmenu={(event) => openMenu(event, [
-              { label: side === "staged" ? "Unstage" : "Stage", run: () => runChange(side === "staged" ? "unstage_path" : "stage_path", { file: file.path }) },
-              { label: "Discard", run: () => { if (confirm(`Discard changes in ${file.path}?`)) void mutate({ action: "discard", file: file.path }); } },
-              { label: "Delete", run: () => { if (confirm(`Delete ${file.path}?`)) void mutate({ action: "delete", file: file.path }); } },
-              { label: "Blame", run: () => showBlame(file.path) },
-              { label: "History", run: () => showFileHistory(file.path) },
-              { label: "Reveal", run: () => revealItemInDir(fullPath(file.path)) },
-              { label: "Open file", run: () => openPath(fullPath(file.path)) },
-              { label: "Copy path", run: () => copyText(fullPath(file.path)) },
-              { label: "Copy relative path", run: () => copyText(file.path) },
-              ...(file.letter === "C" ? [{ label: "Resolve", run: () => openResolve(file.path) }] : []),
-              ...commandItems("file"),
-            ])}
+            oncontextmenu={(event) => openMenu(event, fileMenu(file, side))}
           >
             <button class="file-select" type="button" onclick={(event) => selectFile(file.path, side, event)}>
               <span class="badge {file.tone}">{file.letter}</span>
               <span class="file-name">{fileName(file.path)}</span>
               <span class="file-dir">{parentDir(file.path)}</span>
             </button>
-            {#if mode === "live"}
-              <button class="text-button row-action" type="button" disabled={busy} onclick={() => runChange(side === "staged" ? "unstage_path" : "stage_path", { file: file.path })}>{side === "staged" ? "Unstage" : "Stage"}</button>
-              {#if side === "unstaged"}
-                <button class="text-button row-action" type="button" disabled={busy} onclick={() => mutate({ action: "discard", file: file.path })}>Discard</button>
-              {/if}
-            {/if}
           </div>
         {/snippet}
 
         <form class="composer" style:order="3" onsubmit={(event) => { event.preventDefault(); void submitCommit(false); }}>
           <label class="field">
-            <input placeholder="Summary" bind:value={summary} maxlength="200" aria-invalid={summaryTooLong} />
+            <input placeholder={tr("chrome.summary")} bind:value={summary} maxlength="200" aria-invalid={summaryTooLong} />
             <span class="counter" class:over={summaryTooLong}>{summary.length}/72</span>
           </label>
-          <textarea placeholder="Description" rows="3" bind:value={description}></textarea>
+          <textarea placeholder={tr("chrome.description")} rows="3" bind:value={description}></textarea>
           <div class="composer-row">
-            <label class="check"><input type="checkbox" bind:checked={amend} /> Amend</label>
-            <label class="check"><input type="checkbox" bind:checked={signOff} onchange={() => { if (mode === "live") void mutate({ action: "setSignOff", enabled: signOff, format: refs?.signOffFormat || settings.signOffFormat }); }} /> Sign-off</label>
-            <button class="text-button" type="button" disabled={mode !== "live" || busy} onclick={() => suggestMessage()}>Suggest</button>
-            <button class="text-button" type="button" disabled={!canCommit} onclick={() => submitCommit(true)}>Commit and push</button>
-            <button class="commit" type="submit" disabled={!canCommit}>{busy ? "Working…" : "Commit"}</button>
+            <label class="check"><input type="checkbox" bind:checked={amend} /> {tr("chrome.amend")}</label>
+            <label class="check"><input type="checkbox" bind:checked={signOff} onchange={() => { if (mode === "live") void mutate({ action: "setSignOff", enabled: signOff, format: refs?.signOffFormat || settings.signOffFormat }); }} /> {tr("chrome.signOff")}</label>
+            <label class="check"><input type="checkbox" bind:checked={skipHooks} /> {tr("chrome.skipHooks")}</label>
+            <button class="text-button" type="button" disabled={mode !== "live" || busy} onclick={() => suggestMessage()}>{tr("chrome.suggest")}</button>
+            <button class="text-button" type="button" disabled={!canCommit} onclick={() => submitCommit(true)}>{tr("chrome.commitAndPush")}</button>
+            <button class="commit" type="submit" disabled={!canCommit}>{busy ? tr("chrome.working") : tr("chrome.commit")}</button>
           </div>
         </form>
       </section>
     {:else if mode !== "sample"}
       <section class="history" bind:this={historyEl} onscroll={(event) => (historyTop = (event.currentTarget as HTMLElement).scrollTop)}>
         <div class="pane-head">
-          <input class="search" placeholder="Find commits" aria-label="Find commits" bind:this={searchEl} bind:value={commitQuery} />
+          <input class="search" placeholder={tr("chrome.findCommits")} aria-label={tr("chrome.findCommits")} bind:this={searchEl} bind:value={commitQuery} />
+          <button class="text-button" type="button" onclick={showReflog}>{tr("chrome.reflog")}</button>
+          <button class="text-button" type="button" disabled={!selectedCommit} onclick={showTree}>{tr("chrome.fileTree")}</button>
           {#if historyFilter}
-            <button class="text-button" type="button" onclick={() => { historyFilter = ""; void loadContext(); }}>All commits</button>
+            <button class="text-button" type="button" onclick={() => { historyFilter = ""; void loadContext(); }}>{tr("chrome.allCommits")}</button>
           {/if}
-          <button class="text-button" type="button" disabled={drops.length === 0 || busy} onclick={dropCommits}>Drop</button>
-          <button class="text-button" type="button" disabled={!selectedCommit || busy} onclick={() => { draft = "Squashed commits"; dialog = "squash"; }}>Squash</button>
-          <button class="text-button" type="button" disabled={drops.length !== 2} onclick={() => compareDrops()}>Compare</button>
-          <button class="text-button" type="button" onclick={() => { logLimit += 200; void loadContext(); }}>Load more</button>
+          <button class="text-button" type="button" disabled={drops.length === 0 || busy} onclick={dropCommits}>{tr("menu.drop")}</button>
+          <button class="text-button" type="button" disabled={!selectedCommit || busy} onclick={() => { draft = ""; dialog = "squash"; }}>{tr("dialog.squash")}</button>
+          <button class="text-button" type="button" disabled={drops.length !== 2} onclick={() => compareDrops()}>{tr("chrome.compare")}</button>
+          <button class="text-button" type="button" onclick={() => { logLimit += 200; void loadContext(); }}>{tr("chrome.loadMore")}</button>
         </div>
         {#if historyFilter}
           <div class="pane-head"><span>{historyFilter}</span></div>
         {/if}
-        {#if shownCommits.length === 0}
-          <p class="empty">No commits yet</p>
+        {#if reflogOn}
+          {#each reflogRows as row (`${row.selector}-${row.id}`)}
+            <button class="commit-row" type="button" oncontextmenu={(event) => openMenu(event, reflogMenu(row))}>
+              <span class="subject">{row.summary}</span>
+              <span class="meta">{row.selector}</span>
+              <span class="meta sha">{row.shortId}</span>
+            </button>
+          {/each}
+        {:else if shownCommits.length === 0}
+          <p class="empty">{tr("chrome.noCommits")}</p>
         {:else}
           <div class="commit-window" style:height="{shownCommits.length * rowCommit}px">
             {#each historyRows as commit, index (commit.id)}
@@ -1525,21 +1792,14 @@
                 tabindex="0"
                 onclick={(event) => selectCommit(commit.id, event)}
                 onkeydown={(event) => { if (event.key === "Enter") void selectCommit(commit.id); }}
-                oncontextmenu={(event) => openMenu(event, [
-                  ...(commitsLive[0]?.id === commit.id ? [{ label: "Amend", run: () => { section = "changes"; amend = true; summary = commit.summary; } }] : []),
-                  { label: "Edit message", run: () => { draft = commit.summary; draftExtra = commit.id; dialog = "reword"; } },
-                  { label: "Checkout", run: () => mutate({ action: "checkout", name: commit.id }) },
-                  { label: "Create branch", run: () => { draft = ""; draftExtra = commit.id; dialog = "branch"; } },
-                  { label: "Create tag", run: () => { draft = ""; draftExtra = commit.id; dialog = "tag"; } },
-                  { label: "Rebase interactive", run: () => { selectedCommit = commit.id; openRebase(); } },
-                  { label: "Revert", run: () => mutate({ action: "revert", rev: commit.id }) },
-                  { label: "Cherry-pick", run: () => mutate({ action: "cherryPick", rev: commit.id }) },
-                  { label: "Reset", run: () => { draft = commit.id; dialog = "reset"; } },
-                  ...commandItems("commit"),
-                ])}
+                oncontextmenu={(event) => openMenu(event, commitMenu(commit))}
               >
-                <input type="checkbox" checked={drops.includes(commit.id)} aria-label="Drop commit" onclick={(event) => event.stopPropagation()} onchange={() => toggleDrop(commit.id)} />
-                <span class="lane" style:margin-left="{commit.lane * 10}px"></span>
+                <input class="drop-check" type="checkbox" checked={drops.includes(commit.id)} aria-label={tr("menu.drop")} onclick={(event) => event.stopPropagation()} onchange={() => toggleDrop(commit.id)} />
+                <span class="graph" aria-hidden="true">
+                  {#each liveGraph[historyStart + index] ?? [] as cell, lane (`${commit.id}-${lane}`)}
+                    <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}></i>
+                  {/each}
+                </span>
                 {#if settings.gravatar && commit.email}
                   <img class="avatar" alt="" src={gravatarUrl(commit.email)} />
                 {:else}
@@ -1547,7 +1807,7 @@
                 {/if}
                 <span class="subject">{commit.summary}</span>
                 <span class="badges">
-                  {#each commit.refs as label (label)}<span class="ref">{label}</span>{/each}
+                  {#each commit.refs as label (label)}<span class="ref {refKind(label)}">{label}</span>{/each}
                 </span>
                 <span class="meta">{commit.author}</span>
                 <span class="meta sha">{commit.shortId}</span>
@@ -1559,26 +1819,45 @@
       </section>
     {:else}
       <section class="history">
-        {#each commits as commit (commit.id)}
-          <button class="commit-row" class:selected={selectedPath === commit.id} type="button" onclick={() => (selectedPath = commit.id)}>
-            <span class="lane" aria-hidden="true"></span>
-            <span class="subject">{commit.summary}</span>
-            <span class="badges">
-              {#each commit.badges as label (label)}<span class="ref">{label}</span>{/each}
-            </span>
-            <span class="meta">{commit.author}</span>
-            <span class="meta sha">{commit.id}</span>
-            <span class="meta">{commit.when}</span>
-          </button>
-        {/each}
+        <div class="pane-head">
+          <button class="text-button" type="button" onclick={showReflog}>{tr("chrome.reflog")}</button>
+          <button class="text-button" type="button" onclick={showTree}>{tr("chrome.fileTree")}</button>
+          {#if repoStats}<span class="meta">{repoStats.lastSummary}</span>{/if}
+        </div>
+        {#if reflogOn}
+          {#each sampleReflog as row (row.selector)}
+            <button class="commit-row" type="button" oncontextmenu={(event) => openMenu(event, reflogMenu(row))}>
+              <span class="subject">{row.summary}</span>
+              <span class="meta">{row.selector}</span>
+              <span class="meta sha">{row.shortId}</span>
+            </button>
+          {/each}
+        {:else}
+          {#each sampleRows as commit, index (commit.id)}
+            <button class="commit-row" class:selected={selectedCommit === commit.id || selectedPath === commit.id} type="button" onclick={() => { selectedCommit = commit.id; selectedPath = commit.id; }} oncontextmenu={(event) => commit.badges.includes("stash") ? openMenu(event, [{ label: tr("menu.apply"), disabled: true }, { label: tr("menu.pop"), disabled: true }, { label: tr("menu.drop"), disabled: true }]) : openMenu(event, commitMenu(commit))}>
+              <span class="graph" aria-hidden="true">
+                {#each sampleGraph[index] ?? [] as cell, lane (`s-${commit.id}-${lane}`)}
+                  <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}></i>
+                {/each}
+              </span>
+              <span class="subject">{commit.summary}</span>
+              <span class="badges">
+                {#each commit.badges as label (label)}<span class="ref {refKind(label)}">{label}</span>{/each}
+              </span>
+              <span class="meta">{commit.author}</span>
+              <span class="meta sha">{commit.id}</span>
+              <span class="meta">{commit.when}</span>
+            </button>
+          {/each}
+        {/if}
       </section>
     {/if}
 
     <section class="diff">
       {#if blameLines}
         <header class="diff-head">
-          <span>Blame {selectedPath}</span>
-          <button class="text-button" type="button" onclick={() => (blameLines = null)}>Close</button>
+          <span>{tr("chrome.blameOf", { name: selectedPath ?? "" })}</span>
+          <button class="text-button" type="button" onclick={() => (blameLines = null)}>{tr("chrome.close")}</button>
         </header>
         <div class="diff-body" onscroll={(event) => (blameTop = (event.currentTarget as HTMLElement).scrollTop)}>
           <div class="commit-window" style:height="{(blameLines?.length ?? 0) * 18}px">
@@ -1590,36 +1869,19 @@
       {:else if mode === "live" && section === "changes" && selectedPath}
         <header class="diff-head">
           <span>{selectedPath}</span>
-          <button class="text-button" type="button" onclick={() => showBlame(selectedPath!)}>Blame</button>
-          <button class="text-button" type="button" onclick={() => showFileHistory(selectedPath!)}>History</button>
-          {#if snapshot?.unstaged.some((file) => file.path === selectedPath && file.kind === "conflict") || snapshot?.staged.some((file) => file.path === selectedPath && file.kind === "conflict")}
-            <button class="text-button" type="button" onclick={() => openResolve(selectedPath!)}>Resolve</button>
-          {/if}
-          {#if diff}
-            {#each { length: diff.hunks } as _, index (index)}
-              <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index, unstage: selectedSide === "staged" })}>
-                {selectedSide === "staged" ? "Unstage" : "Stage"} {index + 1}
-              </button>
-              {#if selectedSide === "unstaged"}
-                <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "discardHunk", file: selectedPath, index })}>Discard {index + 1}</button>
-              {/if}
-            {/each}
-          {/if}
         </header>
         {#if diffError}
           <p class="diff-empty">{diffError}</p>
         {:else if !diff}
-          <p class="diff-empty">Reading diff…</p>
+          <p class="diff-empty">{tr("chrome.reading")}</p>
         {:else if diff.binary}
-          {#if preview}
-            <img class="preview" alt="" src={preview.dataUrl} />
-            <button class="text-button" type="button" onclick={() => openPath(fullPath(selectedPath ?? ""))}>Open</button>
+          {#if imageOld || imageNew}
+            {@render imageCompare(imageOld, imageNew)}
           {:else}
-            <p class="diff-empty">Binary file</p>
-            <button class="text-button" type="button" onclick={() => openPath(fullPath(selectedPath ?? ""))}>Open</button>
+            <p class="diff-empty">{tr("chrome.binary")}</p>
           {/if}
         {:else if diff.lines.length === 0}
-          <p class="diff-empty">No changes in this view</p>
+          <p class="diff-empty">{tr("chrome.noChanges")}</p>
         {:else if settings.diffStyle === "split"}
           <div class="diff-body split">
             {#each splitRows as row, index (index)}
@@ -1634,17 +1896,25 @@
             <div class="commit-window" style:height="{diffLines.length * 18}px">
               {#each diffWindow.rows as line, index (`${diffWindow.start}-${index}`)}
                 <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{(diffWindow.start + index) * 18}px">
+                  <span class="gutter">{shownDiffLines[diffWindow.start + index]?.oldNo ?? ""}</span>
+                  <span class="gutter">{shownDiffLines[diffWindow.start + index]?.newNo ?? ""}</span>
                   {#each highlight(line.text, selectedPath ?? "") as token, tokenIndex (`${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
+                  {#if line.kind === "hunk"}
+                    <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index: shownDiffLines.slice(0, diffWindow.start + index + 1).filter((item) => item.kind === "hunk").length - 1, unstage: selectedSide === "staged" })}>{selectedSide === "staged" ? tr("menu.unstageHunk") : tr("menu.stageHunk")}</button>
+                    {#if selectedSide === "unstaged"}
+                      <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardHunk", file: selectedPath, index: shownDiffLines.slice(0, diffWindow.start + index + 1).filter((item) => item.kind === "hunk").length - 1 })}>{tr("menu.discardHunk")}</button>
+                    {/if}
+                  {/if}
                   {#if line.stageAt != null && (line.kind === "add" || line.kind === "delete")}
-                    <button class="text-button line-action" type="button" disabled={busy} onclick={() => stageOne(line)}>{selectedSide === "staged" ? "Unstage line" : "Stage line"}</button>
+                    <button class="text-button line-action" type="button" disabled={busy} onclick={() => stageOne(line)}>{selectedSide === "staged" ? tr("menu.unstageLine") : tr("menu.stageLine")}</button>
                     {#if selectedSide === "unstaged" && line.workAt != null}
-                      <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardLine", file: selectedPath, text: lineText(line), addition: line.kind === "add", at: line.workAt })}>Discard line</button>
+                      <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardLine", file: selectedPath, text: lineText(line), addition: line.kind === "add", at: line.workAt })}>{tr("menu.discardLine")}</button>
                     {/if}
                   {/if}
                 </span>
               {/each}
             </div>
-            {#if diff.truncated}<span class="meta">Diff truncated.</span>{/if}
+            {#if diff.truncated}<span class="meta">{tr("chrome.truncated")}</span>{/if}
           </div>
         {/if}
       {:else if section === "changes" && selectedPath && selectedDiff.length > 0}
@@ -1652,19 +1922,16 @@
         <pre class="diff-body">{#each selectedDiff as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
       {:else if mode === "live" && section === "history"}
         <header class="diff-head">
-          <span>{commitsLive.find((row) => row.id === selectedCommit)?.summary ?? "History"}</span>
-          {#if selectedCommit}
-            <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "checkout", name: selectedCommit })}>Checkout</button>
-            <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "cherryPick", rev: selectedCommit })}>Cherry-pick</button>
-            <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "revert", rev: selectedCommit })}>Revert</button>
-            <button class="text-button" type="button" onclick={() => { draft = selectedCommit ?? "HEAD"; dialog = "reset"; }}>Reset</button>
-            <button class="text-button" type="button" disabled={busy} onclick={() => { draft = selectedCommit ?? ""; dialog = "squash"; }}>Squash to HEAD</button>
-            <button class="text-button" type="button" disabled={busy} onclick={() => { draft = commitsLive.find((row) => row.id === selectedCommit)?.summary ?? ""; draftExtra = selectedCommit ?? ""; dialog = "reword"; }}>Reword</button>
-            <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = selectedCommit ?? ""; dialog = "branch"; }}>Branch</button>
-            <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = selectedCommit ?? "HEAD"; dialog = "tag"; }}>Tag</button>
-            <button class="text-button" type="button" disabled={busy} onclick={openRebase}>Rebase interactive</button>
-          {/if}
+          <span>{commitsLive.find((row) => row.id === selectedCommit)?.summary ?? tr("chrome.commits")}</span>
         </header>
+        {#if treeOn}
+          <div class="file-list staged-list">
+            {#each treePaths as file (file)}
+              <button class="file" type="button" onclick={() => openTreeFile(file)}><span class="file-name">{file}</span></button>
+            {/each}
+          </div>
+          {#if treeText}<pre class="diff-body">{treeText}</pre>{/if}
+        {/if}
         <div class="file-list staged-list">
           {#each commitFiles as file (file.path)}
             {@const mark = badge(file.kind)}
@@ -1675,8 +1942,10 @@
             </button>
           {/each}
         </div>
-        {#if historyDiff && historyDiff.binary}
-          <p class="diff-empty">Binary file</p>
+        {#if imageOld || imageNew}
+          {@render imageCompare(imageOld, imageNew)}
+        {:else if historyDiff && historyDiff.binary}
+          <p class="diff-empty">{tr("chrome.binary")}</p>
         {:else if historyDiff && historyDiff.lines.length > 0}
           <div class="diff-body" onscroll={(event) => (historyDiffTop = (event.currentTarget as HTMLElement).scrollTop)}>
             <div class="commit-window" style:height="{historyDiff.lines.length * 18}px">
@@ -1688,39 +1957,145 @@
             </div>
           </div>
         {:else}
-          <p class="diff-empty">Select a file in this commit to see changes</p>
+          <p class="diff-empty">{tr("chrome.selectCommitFile")}</p>
         {/if}
-      {:else if section === "history" && selectedPath}
-        <header class="diff-head">{commits.find((row) => row.id === selectedPath)?.summary}</header>
-        <p class="diff-empty">Select a file in this commit to see changes</p>
+      {:else if section === "history" && treeOn}
+        {@const sampleCommit = sampleRows.find((row) => row.id === (selectedCommit || selectedPath))}
+        <header class="diff-head">{tr("chrome.fileTree")}</header>
+        <div class="file-list staged-list">
+          {#each (sampleCommit && sampleCommit.files.length > 0 ? sampleCommit.files.map((file) => file.path) : sampleTree) as file (file)}
+            <button class="file" class:selected={historyFile === file} type="button" onclick={() => (historyFile = file)}><span class="file-name">{file}</span></button>
+          {/each}
+        </div>
+        {#if historyFile === "art/mark.png"}
+          {@render imageCompare(sampleImages.before, sampleImages.after)}
+        {:else if historyFile && diffs[historyFile]}
+          <pre class="diff-body">{#each diffs[historyFile] as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+        {/if}
+      {:else if section === "history" && (selectedCommit || selectedPath)}
+        {@const sampleCommit = sampleRows.find((row) => row.id === (selectedCommit || selectedPath))}
+        <header class="diff-head">{sampleCommit?.summary}</header>
+        <div class="file-list staged-list">
+          {#each sampleCommit?.files ?? [] as file (file.path)}
+            <button class="file" class:selected={historyFile === file.path} type="button" onclick={() => (historyFile = file.path)}>
+              <span class="badge {file.kind === "A" ? "added" : file.kind === "D" ? "deleted" : "modified"}">{file.kind}</span>
+              <span class="file-name">{fileName(file.path)}</span>
+            </button>
+          {/each}
+        </div>
+        {#if historyFile === "art/mark.png"}
+          {@render imageCompare(sampleImages.before, sampleImages.after)}
+        {:else if historyFile && diffs[historyFile]}
+          <pre class="diff-body">{#each diffs[historyFile] as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+        {:else}
+          <p class="diff-empty">{tr("chrome.selectCommitFile")}</p>
+        {/if}
+      {:else if selectedPath === "art/mark.png"}
+        {@render imageCompare(sampleImages.before, sampleImages.after)}
       {:else}
-        <p class="diff-empty">Select a file to see changes</p>
+        <p class="diff-empty">{tr("chrome.selectFile")}</p>
       {/if}
     </section>
   </div>
 
   {#if mode === "error"}
     <section class="changes">
-      <h2>Open a repository</h2>
-      <p class="empty">{loadError || "Open, clone, or create a repository."}</p>
-      <input class="search" placeholder="Search recent repositories" aria-label="Search recent repositories" bind:value={recentQuery} />
+      <h2>{tr("chrome.openRepo")}</h2>
+      <p class="empty">{loadError || tr("chrome.recent")}</p>
+      {#if repoStats}
+        <p class="empty">{repoStats.branch} · {repoStats.commits} {tr("chrome.commits")} · ↑{repoStats.ahead} ↓{repoStats.behind} · {repoStats.lastSummary}</p>
+      {/if}
+      <input class="search" placeholder={tr("chrome.searchRecent")} aria-label={tr("chrome.searchRecent")} bind:value={recentQuery} />
       {#each settings.recent.filter((path) => matchesQuery(path, recentQuery)) as path (path)}
-        <button class="side" type="button" onclick={() => openRepo(path)}>{path}</button>
+        <button class="side" type="button" onclick={() => openRepo(path)}>
+          <span class="name">{folderName(path)}</span>
+          {#if recentStats[path]}<span class="meta">{recentStats[path].branch} · ↑{recentStats[path].ahead} ↓{recentStats[path].behind} · {recentStats[path].lastSummary}</span>{/if}
+        </button>
       {/each}
       <div class="composer-row">
-        <button class="commit" type="button" onclick={() => (dialog = "open")}>Open</button>
-        <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; }}>Clone</button>
-        <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; }}>New repository</button>
+        <button class="commit" type="button" onclick={() => (dialog = "open")}>{tr("chrome.open")}</button>
+        <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; }}>{tr("chrome.clone")}</button>
+        <button class="text-button" type="button" onclick={() => { draft = ""; dialog = "clone"; }}>{tr("chrome.newRepo")}</button>
       </div>
     </section>
   {/if}
+  {#snippet imageCompare(before: string | null, after: string | null)}
+    <div class="image-toolbar">
+      <button type="button" class:on={imageMode === "side"} onclick={() => (imageMode = "side")}>{tr("dialog.imageSide")}</button>
+      <button type="button" class:on={imageMode === "swipe"} onclick={() => (imageMode = "swipe")}>{tr("dialog.imageSwipe")}</button>
+      <button type="button" class:on={imageMode === "onion"} onclick={() => (imageMode = "onion")}>{tr("dialog.imageOnion")}</button>
+      <button type="button" class:on={imageMode === "pixel"} onclick={() => { imageMode = "pixel"; if (before && after) void paintPixel(before, after); }}>{tr("dialog.imagePixel")}</button>
+      {#if imageMode === "swipe" || imageMode === "onion"}
+        <input type="range" min="0" max="100" bind:value={imagePos} aria-label={imageMode} />
+      {/if}
+    </div>
+    <div class="image-stage">
+      {#if imageMode === "pixel" && pixelUrl}
+        <img alt="" src={pixelUrl} />
+      {:else if imageMode === "side"}
+        {#if before}<img alt="" src={before} />{/if}
+        {#if after}<img alt="" src={after} />{/if}
+      {:else}
+        {#if before}<img class="under" alt="" src={before} />{/if}
+        {#if after}<img class="over" alt="" src={after} style:opacity={imageMode === "onion" ? imagePos / 100 : 1} style:clip-path={imageMode === "swipe" ? `inset(0 ${100 - imagePos}% 0 0)` : "none"} />{/if}
+      {/if}
+    </div>
+  {/snippet}
+
+  {#snippet menuList(items: MenuItem[])}
+    {#each items as item, index (`${item.sep ? "sep" : item.label}-${index}`)}
+      {#if item.sep}
+        <hr />
+      {:else}
+        <button type="button" disabled={item.disabled} onmouseenter={(event) => { if (!item.children) { submenu = null; return; } const rect = (event.currentTarget as HTMLElement).getBoundingClientRect(); submenu = { x: rect.right - 4, y: rect.top, items: item.children }; }} onclick={() => { if (item.disabled || item.children || !item.run) return; menu = null; submenu = null; void item.run(); }}>
+          <span>{item.label}</span>
+          {#if item.shortcut}<span class="shortcut">{item.shortcut}</span>{/if}
+          {#if item.children}<span class="shortcut">›</span>{/if}
+        </button>
+      {/if}
+    {/each}
+  {/snippet}
+
   {#if menu}
     <div class="menu" style:left="{menu.x}px" style:top="{menu.y}px" role="menu">
-      {#each menu.items as item (item.label)}
-        <button type="button" onclick={() => { menu = null; void item.run(); }}>{item.label}</button>
-      {/each}
+      {@render menuList(menu.items)}
     </div>
-    <button class="scrim menu-dismiss" type="button" aria-label="Close menu" onclick={() => (menu = null)}></button>
+    {#if submenu}
+      <div class="menu" style:left="{submenu.x}px" style:top="{submenu.y}px" role="menu">
+        {@render menuList(submenu.items)}
+      </div>
+    {/if}
+    <button class="scrim menu-dismiss" type="button" aria-label={tr("chrome.close")} onclick={() => { menu = null; submenu = null; }}></button>
+  {/if}
+  {#if confirmAsk}
+    <div class="scrim" role="presentation">
+      <div class="dialog" role="dialog">
+        <h2>{confirmAsk.title}</h2>
+        <p>{confirmAsk.body}</p>
+        <div class="composer-row">
+          <button class="text-button" type="button" onclick={() => (confirmAsk = null)}>{tr("dialog.cancel")}</button>
+          <button class="commit" type="button" onclick={() => { const run = confirmAsk?.run; confirmAsk = null; run?.(); }}>{tr("dialog.confirm")}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+  {#if forgeOpen}
+    <div class="scrim" role="presentation" onclick={() => (forgeOpen = null)} onkeydown={() => {}}>
+      <div class="dialog" role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+        <h2>{forgeOpen === "notes" ? tr("chrome.notifications") : tr("chrome.pulls")}</h2>
+        {#if forgeOpen === "notes"}
+          {#if notices.length === 0}<p class="empty">{tr("dialog.noToken")}</p>{/if}
+          {#each notices as notice (notice.id)}
+            <div class="composer-row"><span>{notice.title}</span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{tr("dialog.openBrowser")}</button></div>
+          {/each}
+        {:else}
+          {#if pulls.length === 0}<p class="empty">{settings.githubToken || settings.gitlabToken || mode !== "live" ? tr("dialog.noPulls") : tr("dialog.noToken")}</p>{/if}
+          {#each pulls as pull (pull.url)}
+            <div class="composer-row"><span>{pull.title}</span><span class="meta">{pull.author}</span><button class="text-button" type="button" disabled={mode !== "live"} onclick={() => mutate({ action: "checkout", name: pull.branch })}>{tr("dialog.checkoutBranch")}</button></div>
+          {/each}
+        {/if}
+      </div>
+    </div>
   {/if}
   {#if dialog}
     <div class="scrim" role="presentation" onclick={() => (dialog = null)}>
@@ -1742,7 +2117,7 @@
           else if (dialog === "rename") void mutate({ action: "renameBranch", name: draft, to: draftExtra });
           else if (dialog === "upstream") void mutate({ action: "setUpstream", branch: draft, upstream: draftExtra });
           else if (dialog === "reword") void mutate({ action: "reword", rev: draftExtra || "HEAD", summary: draft });
-          else if (dialog === "rebase" && selectedCommit) void mutate({ action: "rebaseInteractive", onto: selectedCommit, drop: [], steps: rebaseSteps.map((step) => ({ verb: step.verb, rev: step.rev, message: step.verb === "reword" || step.verb === "squash" ? step.message : "" })), autostash: settings.mergeAutostash });
+          else if (dialog === "rebase" && selectedCommit) void mutate({ action: "rebaseInteractive", onto: selectedCommit, drop: [], steps: rebaseSteps.map((step) => ({ verb: step.verb, rev: step.rev, message: step.verb === "reword" || step.verb === "squash" ? step.message : "" })), autostash: settings.mergeAutostash, updateRefs });
           else if (dialog === "merge") void mutate({ action: "merge", name: draft, squash: draftExtra === "squash", noFf: draftExtra === "no-ff", autostash: settings.mergeAutostash });
           else if (dialog === "continue") void mutate({ action: "continue", message: draft });
           else if (dialog === "repo") {
@@ -1786,46 +2161,52 @@
         }}
       >
         {#if dialog === "prefs"}
-          <h2>Preferences</h2>
-          <label>Theme
+          <h2>{tr("dialog.preferences")}</h2>
+          <div class="pref-tabs">
+            {#each ["appearance", "git", "diff", "network", "ai", "account"] as tab (tab)}
+              <button type="button" class:on={prefTab === tab} onclick={() => (prefTab = tab as typeof prefTab)}>{tr(`dialog.${tab}`)}</button>
+            {/each}
+          </div>
+          {#if prefTab === "appearance"}
+          <label>{tr("dialog.language")}
+            <select bind:value={settings.locale}>
+              <option value="system">{tr("dialog.followSystem")}</option>
+              <option value="zh">{tr("dialog.chinese")}</option>
+              <option value="en">{tr("dialog.english")}</option>
+            </select>
+          </label>
+          <label>{tr("dialog.theme")}
             <select bind:value={settings.theme}>
-              <option value="system">System</option>
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
+              <option value="system">{tr("dialog.system")}</option>
+              <option value="light">{tr("dialog.light")}</option>
+              <option value="dark">{tr("dialog.dark")}</option>
             </select>
           </label>
-          <label class="check"><input type="checkbox" bind:checked={settings.pullRebase} /> Pull with rebase</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.fetchPrune} /> Prune on fetch</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.swapPanes} /> Show unstaged above staged</label>
+          {/if}
+          {#if prefTab === "account"}
+          <label>{tr("dialog.githubToken")} <input type="password" bind:value={settings.githubToken} /></label>
+          <label>{tr("dialog.gitlabToken")} <input type="password" bind:value={settings.gitlabToken} /></label>
+          <label>{tr("dialog.gitlabHost")} <input bind:value={settings.gitlabHost} placeholder="gitlab.com" /></label>
+          {:else if prefTab === "diff"}
+          <label>{tr("dialog.diffTool")} <input bind:value={settings.diffTool} /></label>
+          <label>{tr("dialog.mergeTool")} <input bind:value={settings.mergeTool} /></label>
+          <p class="empty">{tr("dialog.toolHint")}</p>
           <label class="check"><input type="checkbox" bind:checked={settings.showEntireFile} /> Show the whole file in diffs</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.mergeNoFf} /> Merge with --no-ff</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.mergeAutostash} /> Autostash before merge</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.signCommits} /> Sign commits with git</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.signOff} onchange={() => (signOff = settings.signOff)} /> Sign-off by default</label>
-          <label>Sign-off format <input bind:value={settings.signOffFormat} /></label>
-          <label class="check"><input type="checkbox" bind:checked={settings.forceWithLease} /> Push with --force-with-lease</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.treeFiles} /> Group changed files by folder</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.gravatar} /> Gravatar avatars</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.sslVerify} /> Verify SSL</label>
-          {#if !settings.sslVerify}<p class="empty">SSL verification is off. Connections can be intercepted.</p>{/if}
-          <label class="check"><input type="checkbox" bind:checked={settings.dateRelative} /> Relative dates</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.date24h} /> 24-hour clock</label>
-          <label>Date pattern <input bind:value={settings.dateFormat} placeholder="dd MMM yyyy" /></label>
-          <label>Line height
-            <select bind:value={settings.linesHeight}>
-              <option value="compact">Compact</option>
-              <option value="spaced">Spaced</option>
-            </select>
-          </label>
           <label>Diff
             <select bind:value={settings.diffStyle}>
               <option value="unified">Unified</option>
               <option value="split">Split</option>
             </select>
           </label>
-          <p class="empty">Hidden branches are stored in this repository. Use Hide, Show only this, or Show all in the sidebar. The current branch stays visible.</p>
-          <label>Author name <input bind:value={settings.authorName} placeholder="uses git config when empty" /></label>
-          <label>Author email <input bind:value={settings.authorEmail} /></label>
+          <label>Line height
+            <select bind:value={settings.linesHeight}>
+              <option value="compact">Compact</option>
+              <option value="spaced">Spaced</option>
+            </select>
+          </label>
+          {:else if prefTab === "network"}
+          <label class="check"><input type="checkbox" bind:checked={settings.sslVerify} /> Verify SSL</label>
+          {#if !settings.sslVerify}<p class="empty">SSL verification is off. Connections can be intercepted.</p>{/if}
           <label class="check"><input type="checkbox" bind:checked={settings.proxyEnabled} /> Use proxy host</label>
           <label>Proxy type
             <select bind:value={settings.proxyType}>
@@ -1841,6 +2222,7 @@
           <label>CA file <input bind:value={settings.sslCaFile} placeholder="path to a CA bundle" /></label>
           <label>Clone directory <input bind:value={settings.cloneDirectory} /></label>
           <label>Terminal <input bind:value={settings.terminal} placeholder="empty opens cmd" /></label>
+          {:else if prefTab === "ai"}
           <label>AI base URL <input bind:value={settings.aiBaseUrl} /></label>
           <label>AI model <input bind:value={settings.aiModel} /></label>
           <label class="check"><input type="checkbox" bind:checked={settings.aiEnabled} /> AI commit messages</label>
@@ -1849,6 +2231,24 @@
           <label>AI prompt <input bind:value={settings.aiPrompt} placeholder={'{diff} {files} {branch} {recent_commits} {language}'} /></label>
           <label>AI temperature <input type="number" step="0.1" bind:value={settings.aiTemperature} /></label>
           <label>AI API key <input type="password" bind:value={settings.aiApiKey} placeholder="or set XAI_API_KEY or OPENAI_API_KEY" /></label>
+          {:else if prefTab === "git"}
+          <label class="check"><input type="checkbox" bind:checked={settings.pullRebase} /> Pull with rebase</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.fetchPrune} /> Prune on fetch</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.swapPanes} /> Show unstaged above staged</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.mergeNoFf} /> Merge with --no-ff</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.mergeAutostash} /> Autostash before merge</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.signCommits} /> Sign commits with git</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.signOff} onchange={() => (signOff = settings.signOff)} /> Sign-off by default</label>
+          <label>Sign-off format <input bind:value={settings.signOffFormat} /></label>
+          <label class="check"><input type="checkbox" bind:checked={settings.forceWithLease} /> Push with --force-with-lease</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.treeFiles} /> Group changed files by folder</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.gravatar} /> Gravatar avatars</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.dateRelative} /> Relative dates</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.date24h} /> 24-hour clock</label>
+          <label>Date pattern <input bind:value={settings.dateFormat} placeholder="dd MMM yyyy" /></label>
+          <p class="empty">Hidden branches are stored in this repository. Use Hide, Show only this, or Show all in the sidebar. The current branch stays visible.</p>
+          <label>Author name <input bind:value={settings.authorName} placeholder="uses git config when empty" /></label>
+          <label>Author email <input bind:value={settings.authorEmail} /></label>
           <label>Log directory <input bind:value={settings.logDirectory} placeholder="action name, branch, and path" /></label>
           <label>Signing passphrase <input type="password" bind:value={passphrase} placeholder="kept in memory for this session" /></label>
           <label>Askpass user <input bind:value={passUser} /></label>
@@ -1861,7 +2261,10 @@
             <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = "repository"; draftUser = ""; dialog = "command"; }}>Custom command</button>
             <button class="text-button" type="button" onclick={() => (dialog = "patch")}>Apply patch</button>
             <button class="text-button" type="button" onclick={() => invoke("set_repo_author", { path: repoPath(), name: settings.authorName, email: settings.authorEmail })}>Save author in this repo</button>
-            <button class="commit" type="submit">Save</button>
+          </div>
+          {/if}
+          <div class="composer-row">
+            <button class="commit" type="submit">{tr("dialog.save")}</button>
           </div>
         {:else if dialog === "reset"}
           <h2>Reset to {draft}</h2>
@@ -1885,10 +2288,10 @@
             <button class="text-button" type="button" onclick={() => mutate({ action: "gitFlowFinish", name: draft })}>Finish</button>
           </div>
         {:else if dialog === "branch"}
-          <h2>New branch</h2>
-          <input placeholder="Name" bind:value={draft} />
-          <input placeholder="Start point (optional)" bind:value={draftExtra} />
-          <button class="commit" type="submit">Create</button>
+          <h2>{tr("dialog.newBranch")}</h2>
+          <input placeholder={tr("dialog.name")} bind:value={draft} />
+          <input placeholder={tr("dialog.startPoint")} bind:value={draftExtra} />
+          <button class="commit" type="submit">{tr("dialog.create")}</button>
         {:else if dialog === "clone"}
           <h2>Clone</h2>
           <input placeholder="URL" bind:value={draft} />
@@ -1944,10 +2347,13 @@
           <input placeholder="Summary" bind:value={draft} />
           <button class="commit" type="submit">Reword</button>
         {:else if dialog === "rebase"}
-          <h2>Interactive rebase onto {selectedCommit?.slice(0, 7)}</h2>
+          <h2>{tr("dialog.rebase")}</h2>
+          <p class="empty">{rebaseConflictFiles.length === 0 ? tr("dialog.conflictNone") : tr("dialog.conflictSome", { name: rebaseConflictFiles.join(", ") })}</p>
+          <label class="check"><input type="checkbox" bind:checked={updateRefs} /> {tr("dialog.updateRefs")}</label>
           {#each rebaseSteps as step, index (step.rev)}
-            <div class="composer-row">
-              <select bind:value={step.verb}>
+            <div class="composer-row" role="listitem" draggable="true" ondragstart={() => (dragStep = index)} ondragover={(event) => event.preventDefault()} ondrop={() => { if (dragStep == null || dragStep === index) return; const copy = [...rebaseSteps]; const [item] = copy.splice(dragStep, 1); copy.splice(index, 0, item); rebaseSteps = copy; dragStep = null; }}>
+              <input type="checkbox" checked={rebasePicked.includes(step.rev)} aria-label={step.summary} onchange={() => { rebasePicked = rebasePicked.includes(step.rev) ? rebasePicked.filter((rev) => rev !== step.rev) : [...rebasePicked, step.rev]; }} />
+              <select value={step.verb} onchange={(event) => setRebaseVerb(step.rev, event.currentTarget.value)}>
                 <option value="pick">pick</option>
                 <option value="reword">reword</option>
                 <option value="squash">squash</option>
@@ -1955,14 +2361,12 @@
                 <option value="drop">drop</option>
               </select>
               <span>{step.summary}</span>
-              <button class="text-button" type="button" onclick={() => moveStep(index, -1)}>Up</button>
-              <button class="text-button" type="button" onclick={() => moveStep(index, 1)}>Down</button>
             </div>
             {#if step.verb === "reword" || step.verb === "squash"}
               <input placeholder="Message" bind:value={step.message} />
             {/if}
           {/each}
-          <button class="commit" type="submit">Start rebase</button>
+          <button class="commit" type="submit" disabled={mode !== "live"}>{tr("dialog.startRebase")}</button>
         {:else if dialog === "patch"}
           <h2>Apply patch</h2>
           <textarea rows="8" placeholder="Patch text" bind:value={draft}></textarea>
@@ -2077,14 +2481,33 @@
   .menu {
     position: fixed;
     z-index: 30;
-    min-width: 180px;
+    min-width: 220px;
     padding: 4px;
     background: var(--canvas);
-    border: 1px solid var(--separator);
+    border: 1px solid var(--line);
     border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
     display: flex;
     flex-direction: column;
   }
+  .menu button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    border-radius: 4px;
+  }
+  .menu button:disabled { opacity: 0.4; }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
+  .shortcut { color: var(--text-secondary); font-size: 11px; }
   .menu button, .menu-dismiss { font: inherit; }
   .menu-dismiss { position: fixed; inset: 0; z-index: 29; background: transparent; border: 0; }
   .shell {
@@ -2145,8 +2568,11 @@
   }
 
   .tool {
-    width: 58px;
-    height: 40px;
+    position: relative;
+    width: auto;
+    min-width: 28px;
+    height: 36px;
+    padding: 0 6px;
     border-radius: var(--radius);
     display: flex;
     flex-direction: column;
@@ -2165,6 +2591,23 @@
     background: var(--hover);
   }
 
+  .tool svg { width: 16px; height: 16px; }
+  .tool.icon-only { width: 32px; padding: 0; position: relative; }
+  .badge-count {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    border-radius: 7px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 10px;
+    line-height: 14px;
+  }
+  .tab-close { opacity: 0; }
+  .tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
   .glyph {
     font-size: 13px;
     line-height: 1;
@@ -2301,8 +2744,10 @@
 
   .group {
     margin: 10px 14px 2px;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
     color: var(--text-secondary);
     display: flex;
     align-items: center;
@@ -2322,8 +2767,9 @@
 
   .changes,
   .history {
-    width: 42%;
-    min-width: 300px;
+    width: 340px;
+    flex: none;
+    min-width: 280px;
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--line);
@@ -2335,17 +2781,22 @@
     flex-direction: column;
     min-height: 0;
     flex: 1;
+    overflow: hidden;
   }
 
   .history {
+    width: auto;
+    flex: 1.1;
+    min-width: 320px;
     overflow: auto;
   }
 
   .pane-head {
-    height: 28px;
+    min-height: 28px;
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-wrap: wrap;
     padding: 0 12px;
     font-weight: 600;
   }
@@ -2441,6 +2892,8 @@
   }
 
   .composer {
+    flex: none;
+    background: var(--canvas);
     border-top: 1px solid var(--line);
     padding: 8px;
     display: flex;
@@ -2494,6 +2947,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    flex-wrap: wrap;
   }
 
   .check {
@@ -2551,6 +3005,26 @@
     font-size: 11px;
     line-height: 16px;
   }
+  .ref.local { background: #dbeafe; color: #1d4ed8; }
+  .ref.remote { background: #e5e7eb; color: #374151; }
+  .ref.tag { background: #dcfce7; color: #166534; }
+  .ref.stash { background: #fef3c7; color: #92400e; }
+  .graph { display: flex; align-items: center; flex: none; height: 100%; }
+  .graph-cell { width: 12px; height: 100%; position: relative; flex: none; }
+  .graph-cell.node::after { content: ""; position: absolute; left: 2px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: currentColor; }
+  .graph-cell.line::before { content: ""; position: absolute; left: 5px; top: -1px; bottom: -1px; width: 2px; background: currentColor; }
+  .drop-check { opacity: 0; }
+  .commit-row:hover .drop-check, .drop-check:checked { opacity: 1; }
+  .gutter { width: 32px; flex: none; text-align: right; color: var(--text-secondary); }
+  .image-toolbar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; }
+  .image-toolbar button { border: 0; background: transparent; font: inherit; color: inherit; padding: 2px 8px; border-radius: 6px; }
+  .image-toolbar button.on { background: var(--selection); }
+  .image-stage { position: relative; display: flex; gap: 12px; padding: 12px; min-height: 80px; }
+  .image-stage img { max-width: 48%; background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
+  .image-stage .under, .image-stage .over { position: absolute; left: 12px; top: 12px; max-width: calc(100% - 24px); }
+  .pref-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+  .pref-tabs button { border: 0; background: transparent; color: inherit; font: inherit; padding: 4px 8px; border-radius: 6px; }
+  .pref-tabs button.on { background: var(--selection); }
 
   .sha { font-family: var(--mono); }
 

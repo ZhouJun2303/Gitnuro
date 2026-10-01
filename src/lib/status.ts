@@ -81,7 +81,7 @@ export type RemoteRow = {
 };
 
 export type TagRow = { name: string; id: string };
-export type StashRow = { name: string; summary: string };
+export type StashRow = { name: string; summary: string; id?: string; parent?: string };
 export type SubmoduleRow = { path: string; id: string; ready: boolean };
 export type WorktreeRow = { path: string; branch: string | null; detached: boolean };
 
@@ -168,6 +168,12 @@ export type Settings = {
   flowHotfix: string;
   flowSupport: string;
   expandedGroups: string[];
+  locale: string;
+  diffTool: string;
+  mergeTool: string;
+  githubToken: string;
+  gitlabToken: string;
+  gitlabHost: string;
 };
 
 export type WorkspaceRecord = {

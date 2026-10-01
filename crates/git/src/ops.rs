@@ -94,6 +94,9 @@ pub enum Mutation {
         steps: Vec<RebaseStep>,
         #[serde(default)]
         autostash: bool,
+        /// Pass `--update-refs` so branches that point at rewritten commits move with them.
+        #[serde(default)]
+        update_refs: bool,
     },
     Abort,
     Continue {
@@ -264,6 +267,8 @@ pub enum Mutation {
     },
     LfsPull,
     LfsPush,
+    LfsLock { path: String },
+    LfsUnlock { path: String },
     /// Replace the repository's hidden branch list. An empty list shows every branch.
     SetHidden { names: Vec<String> },
     /// Open branch-group names for this repository. An empty list opens every group.
@@ -331,8 +336,8 @@ fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             autostash,
         } => merge(repo, &name, squash, no_ff, autostash),
         Mutation::Rebase { onto, autostash } => rebase_onto(repo, &onto, autostash),
-        Mutation::RebaseInteractive { onto, drop, steps, autostash } => {
-            rebase_interactive(repo, &onto, &drop, &steps, autostash)
+        Mutation::RebaseInteractive { onto, drop, steps, autostash, update_refs } => {
+            rebase_interactive(repo, &onto, &drop, &steps, autostash, update_refs)
         }
         Mutation::Abort => flow(repo, "abort"),
         Mutation::Continue { message } => continue_with(repo, &message),
@@ -427,6 +432,8 @@ fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::Init { destination } => init_repo(&destination),
         Mutation::LfsPull => lfs(repo, &["lfs", "pull"]),
         Mutation::LfsPush => lfs(repo, &["lfs", "push", "--all"]),
+        Mutation::LfsLock { path } => lfs(repo, &["lfs", "lock", crate::cli::check_path(&path)?]),
+        Mutation::LfsUnlock { path } => lfs(repo, &["lfs", "unlock", crate::cli::check_path(&path)?]),
         Mutation::SetHidden { names } => crate::model::write_hidden_refs(repo, &names),
         Mutation::SetExpanded { names } => crate::model::write_expanded_groups(repo, &names),
         Mutation::SetSignOff { enabled, format } => crate::model::write_sign_off(repo, enabled, &format),
@@ -617,6 +624,7 @@ fn reword(repo: &Path, rev: &str, summary: &str) -> Result<(), Error> {
                 amend: true,
                 sign_off: false,
                 sign_off_format: String::new(),
+                skip_hooks: false,
             },
         )
     } else {
@@ -822,6 +830,7 @@ fn squash(repo: &Path, from: &str, to: &str, summary: &str) -> Result<(), Error>
             amend: false,
             sign_off: false,
             sign_off_format: String::new(),
+            skip_hooks: false,
         },
     )?;
     for id in later {
@@ -836,9 +845,10 @@ fn rebase_interactive(
     drop: &[String],
     steps: &[RebaseStep],
     autostash: bool,
+    update_refs: bool,
 ) -> Result<(), Error> {
     if !steps.is_empty() {
-        return rebase_steps(repo, onto, steps, autostash);
+        return rebase_steps(repo, onto, steps, autostash, update_refs);
     }
     let onto = check_rev(onto)?;
     for id in drop {
@@ -867,6 +877,9 @@ fn rebase_interactive(
     if autostash {
         args.push("--autostash");
     }
+    if update_refs {
+        args.push("--update-refs");
+    }
     args.push("-i");
     args.push(onto);
     let result = run_env(
@@ -892,7 +905,7 @@ fn rebase_interactive(
     }
 }
 
-fn rebase_steps(repo: &Path, onto: &str, steps: &[RebaseStep], autostash: bool) -> Result<(), Error> {
+fn rebase_steps(repo: &Path, onto: &str, steps: &[RebaseStep], autostash: bool, update_refs: bool) -> Result<(), Error> {
     let onto = check_rev(onto)?;
     let mut todo = String::new();
     let mut messages = Vec::new();
@@ -925,6 +938,9 @@ fn rebase_steps(repo: &Path, onto: &str, steps: &[RebaseStep], autostash: bool) 
     let mut args = vec!["rebase"];
     if autostash {
         args.push("--autostash");
+    }
+    if update_refs {
+        args.push("--update-refs");
     }
     args.push("-i");
     args.push(onto);

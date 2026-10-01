@@ -51,6 +51,7 @@ fn stage_commit_and_diff_round_trip() {
             amend: false,
             sign_off: false,
             sign_off_format: String::new(),
+            skip_hooks: false,
         },
     );
     assert!(error.is_err());
@@ -64,6 +65,7 @@ fn stage_commit_and_diff_round_trip() {
             amend: false,
             sign_off: true,
             sign_off_format: String::new(),
+            skip_hooks: false,
         },
     )
     .unwrap();

@@ -327,6 +327,7 @@ fn interactive_rebase_drops_a_commit() {
             drop: vec![drop],
             steps: Vec::new(),
             autostash: false,
+            update_refs: false,
         },
     )
     .unwrap();
@@ -523,6 +524,7 @@ fn rename_and_reword_during_rebase() {
                 message: "new-subject".into(),
             }],
             autostash: false,
+            update_refs: false,
         },
     )
     .unwrap();
@@ -697,6 +699,85 @@ fn named_stash_pop_restores_that_stash() {
     let left = repository_refs(&repo.path).unwrap().stashes;
     assert!(left.iter().any(|stash| stash.summary.contains("second")), "{left:?}");
     assert!(!left.iter().any(|stash| stash.summary.contains("first")), "{left:?}");
+}
+
+#[test]
+fn reflog_and_tree_list_the_commit() {
+    let repo = repo();
+    commit_file(&repo, "note.txt", "hello\n", "note");
+    let rows = awegit_git::reflog(&repo.path, 20).unwrap();
+    assert!(rows.iter().any(|row| row.summary.contains("note")), "{rows:?}");
+    let tree = awegit_git::commit_tree(&repo.path, "HEAD").unwrap();
+    assert_eq!(tree, vec!["note.txt".to_string()]);
+}
+
+#[test]
+fn merge_tree_names_the_conflict() {
+    let repo = repo();
+    commit_file(&repo, "same.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "other"]);
+    fs::write(repo.path.join("same.txt"), "other\n").unwrap();
+    repo.git(&["commit", "-am", "other"]);
+    repo.git(&["checkout", "main"]);
+    fs::write(repo.path.join("same.txt"), "main\n").unwrap();
+    repo.git(&["commit", "-am", "main"]);
+    let files = awegit_git::rebase_conflicts(&repo.path, "other").unwrap();
+    assert!(files.iter().any(|file| file.contains("same.txt")), "{files:?}");
+}
+
+#[test]
+fn skip_hooks_commits_past_a_failing_hook() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    repo.git(&["config", "core.hooksPath", ".git/hooks"]);
+    let hook = repo.path.join(".git").join("hooks").join("pre-commit");
+    fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&hook).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&hook, permissions).unwrap();
+    }
+    fs::write(repo.path.join("a.txt"), "two\n").unwrap();
+    repo.git(&["add", "--", "a.txt"]);
+    let blocked = awegit_git::commit(
+        &repo.path,
+        awegit_git::CommitRequest {
+            summary: "blocked".into(),
+            description: String::new(),
+            amend: false,
+            sign_off: false,
+            sign_off_format: String::new(),
+            skip_hooks: false,
+        },
+    );
+    assert!(blocked.is_err(), "hook should reject the commit");
+    awegit_git::commit(
+        &repo.path,
+        awegit_git::CommitRequest {
+            summary: "skipped".into(),
+            description: String::new(),
+            amend: false,
+            sign_off: false,
+            sign_off_format: String::new(),
+            skip_hooks: true,
+        },
+    )
+    .unwrap();
+    assert!(repo.output(&["log", "-1", "--format=%s"]).contains("skipped"));
+}
+
+#[test]
+fn stash_records_its_parent() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    let parent = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+    fs::write(repo.path.join("a.txt"), "dirty\n").unwrap();
+    perform(&repo.path, Mutation::Stash { message: "keep".into() }).unwrap();
+    let stash = repository_refs(&repo.path).unwrap().stashes.into_iter().next().expect("stash");
+    assert!(stash.summary.contains("keep"), "{}", stash.summary);
+    assert_eq!(stash.parent, parent);
 }
 
 #[test]

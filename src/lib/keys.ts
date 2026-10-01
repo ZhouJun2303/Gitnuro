@@ -142,6 +142,19 @@ export function shortcut(event: KeyboardEvent): Shortcut | null {
   return null;
 }
 
+export function shortcutLabel(action: Shortcut) {
+  const binding = bindings.find((item) => item.action === action);
+  const chord = binding?.items[0];
+  if (!chord) return "";
+  const parts: string[] = [];
+  if (chord.meta) parts.push("⌘");
+  if (chord.ctrl) parts.push("Ctrl");
+  if (chord.alt) parts.push("Alt");
+  if (chord.shift) parts.push("Shift");
+  parts.push(chord.key.length === 1 ? chord.key.toUpperCase() : chord.key);
+  return parts.join("+");
+}
+
 export function typing(event: KeyboardEvent) {
   const tag = (event.target as HTMLElement | null)?.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (event.target as HTMLElement | null)?.isContentEditable === true;

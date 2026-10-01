@@ -1,5 +1,75 @@
 import type { DiffLine } from "./status";
 
+export const laneColors = ["#3b82f6", "#16a34a", "#d97706", "#7c3aed", "#e11d48", "#0d9488", "#db2777", "#64748b"];
+
+export type GraphCell = { color: number; role: "node" | "line" } | null;
+
+/** One row of the commit graph. Columns line up across the list. */
+export function commitGraph(commits: { id: string; parents: string[] }[]): GraphCell[][] {
+  const columns: Array<string | null> = [];
+  const rows: GraphCell[][] = [];
+  for (const commit of commits) {
+    let lane = columns.findIndex((id) => id === commit.id);
+    if (lane < 0) {
+      lane = columns.findIndex((id) => !id);
+      if (lane < 0) {
+        lane = columns.length;
+        columns.push(commit.id);
+      } else columns[lane] = commit.id;
+    }
+    rows.push(
+      columns.map((id, index) => {
+        if (!id && index !== lane) return null;
+        if (index === lane) return { color: index % laneColors.length, role: "node" };
+        return id ? { color: index % laneColors.length, role: "line" } : null;
+      }),
+    );
+    columns[lane] = commit.parents[0] ?? null;
+    for (const extra of commit.parents.slice(1)) {
+      const free = columns.findIndex((id) => !id);
+      if (free < 0) columns.push(extra);
+      else columns[free] = extra;
+    }
+  }
+  const width = rows.reduce((max, row) => Math.max(max, row.length), 1);
+  return rows.map((row) => {
+    const next = row.slice();
+    while (next.length < width) next.push(null);
+    return next;
+  });
+}
+
+export function numberedDiff(lines: DiffLine[]) {
+  let oldNo = 0;
+  let newNo = 0;
+  return lines.map((line) => {
+    const hunk = line.kind === "hunk" ? line.text.match(/@@ -(\d+)(?:,\d+)? \+(\d+)/) : null;
+    if (hunk) {
+      oldNo = Number(hunk[1]);
+      newNo = Number(hunk[2]);
+      return { ...line, oldNo: "", newNo: "" };
+    }
+    if (line.kind === "add") {
+      const current = newNo;
+      newNo += 1;
+      return { ...line, oldNo: "", newNo: String(current) };
+    }
+    if (line.kind === "delete") {
+      const current = oldNo;
+      oldNo += 1;
+      return { ...line, oldNo: String(current), newNo: "" };
+    }
+    if (line.kind === "context") {
+      const left = oldNo;
+      const right = newNo;
+      oldNo += 1;
+      newNo += 1;
+      return { ...line, oldNo: String(left), newNo: String(right) };
+    }
+    return { ...line, oldNo: "", newNo: "" };
+  });
+}
+
 export function windowSlice<T>(items: T[], scrollTop: number, rowHeight: number, limit = 80) {
   if (items.length <= limit) return { start: 0, rows: items };
   const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 8);

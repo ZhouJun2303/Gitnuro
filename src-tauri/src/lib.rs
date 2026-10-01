@@ -1,4 +1,5 @@
 mod ai;
+mod forge;
 mod settings;
 mod updates;
 
@@ -151,6 +152,7 @@ fn commit_changes(
     description: String,
     amend: bool,
     sign_off: bool,
+    skip_hooks: Option<bool>,
 ) -> Result<awegit_git::StatusSnapshot, String> {
     let repo = repo_from(path)?;
     let sign_off_format = if sign_off {
@@ -172,6 +174,7 @@ fn commit_changes(
                 amend,
                 sign_off,
                 sign_off_format,
+                skip_hooks: skip_hooks.unwrap_or(false),
             },
         )
     })
@@ -337,6 +340,8 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::Init { .. } => "init",
         awegit_git::Mutation::LfsPull => "lfsPull",
         awegit_git::Mutation::LfsPush => "lfsPush",
+        awegit_git::Mutation::LfsLock { .. } => "lfsLock",
+        awegit_git::Mutation::LfsUnlock { .. } => "lfsUnlock",
         awegit_git::Mutation::SetHidden { .. } => "setHidden",
         awegit_git::Mutation::SetExpanded { .. } => "setExpanded",
         awegit_git::Mutation::SetSignOff { .. } => "setSignOff",
@@ -362,8 +367,8 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
             join([scrub(name), flag("squash", *squash), flag("noFf", *no_ff), flag("autostash", *autostash)])
         }
         Mutation::Rebase { onto, autostash } => join([scrub(onto), flag("autostash", *autostash)]),
-        Mutation::RebaseInteractive { onto, drop, steps, autostash } => {
-            join([scrub(onto), format!("drop={}", drop.len()), format!("steps={}", steps.len()), flag("autostash", *autostash)])
+        Mutation::RebaseInteractive { onto, drop, steps, autostash, update_refs } => {
+            join([scrub(onto), format!("drop={}", drop.len()), format!("steps={}", steps.len()), flag("autostash", *autostash), flag("updateRefs", *update_refs)])
         }
         Mutation::Reset { rev, mode } => join([scrub(rev), format!("{mode:?}")]),
         Mutation::CherryPick { rev } | Mutation::Revert { rev } => scrub(rev),
@@ -399,6 +404,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::SetSignOff { enabled, .. } => flag("enabled", *enabled),
         Mutation::Continue { message } => bytes("message", message),
         Mutation::Custom { .. } => String::new(),
+        Mutation::LfsLock { path } | Mutation::LfsUnlock { path } => scrub(path),
         Mutation::Abort | Mutation::Skip | Mutation::SubmoduleUpdate | Mutation::LfsPull | Mutation::LfsPush => String::new(),
     };
     text.replace(['\n', '\r', '\t', '\0'], " ")
@@ -542,6 +548,88 @@ fn compare_file(path: Option<String>, from: String, to: String, file: String, un
 }
 
 #[tauri::command]
+fn revision_preview(path: Option<String>, rev: String, file: String) -> Result<Option<awegit_git::FilePreview>, String> {
+    let repo = repo_from(path)?;
+    awegit_git::blob_preview(&repo, &rev, &file).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn blob_view(path: Option<String>, rev: String, file: String) -> Result<awegit_git::BlobView, String> {
+    let repo = repo_from(path)?;
+    awegit_git::blob_view(&repo, &rev, &file).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn reflog(path: Option<String>, limit: Option<usize>) -> Result<Vec<awegit_git::ReflogRow>, String> {
+    let repo = repo_from(path)?;
+    awegit_git::reflog(&repo, limit.unwrap_or(200)).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn commit_tree(path: Option<String>, rev: String) -> Result<Vec<String>, String> {
+    let repo = repo_from(path)?;
+    awegit_git::commit_tree(&repo, &rev).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn repository_summary(path: String) -> Result<awegit_git::RepoSummary, String> {
+    awegit_git::repository_summary(std::path::Path::new(&path)).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn rebase_conflicts(path: Option<String>, onto: String) -> Result<Vec<String>, String> {
+    let repo = repo_from(path)?;
+    awegit_git::rebase_conflicts(&repo, &onto).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn lfs_locks(path: Option<String>) -> Result<LfsLockReport, String> {
+    let repo = repo_from(path)?;
+    let (available, locks) = awegit_git::lfs_locks(&repo).map_err(|error| error.to_string())?;
+    Ok(LfsLockReport { available, locks })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LfsLockReport {
+    available: bool,
+    locks: Vec<awegit_git::LfsLockRow>,
+}
+
+#[tauri::command]
+fn launch_tool(path: Option<String>, kind: String, file: String) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let values = settings::load()?;
+    let result = if kind == "merge" {
+        awegit_git::launch_merge_tool(&repo, &values.merge_tool, &file)
+    } else {
+        awegit_git::launch_diff_tool(&repo, &values.diff_tool, &file, false)
+    };
+    result.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn forge_notifications() -> Result<Vec<forge::Notice>, String> {
+    let values = settings::load()?;
+    forge::notifications(&values.github_token)
+}
+
+#[tauri::command]
+fn forge_pulls(path: Option<String>) -> Result<Vec<forge::PullRequest>, String> {
+    let repo = repo_from(path)?;
+    let values = settings::load()?;
+    let url = std::process::Command::new("git")
+        .current_dir(&repo)
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .unwrap_or_default();
+    forge::pulls(&url, &values.github_token, &values.gitlab_token, &values.gitlab_host)
+}
+
+#[tauri::command]
 fn set_repo_author(path: Option<String>, name: String, email: String) -> Result<(), String> {
     let repo = repo_from(path)?;
     let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
@@ -598,7 +686,17 @@ pub fn run() {
             conflict_sides,
             compare_files,
             compare_file,
-            set_repo_author
+            set_repo_author,
+            revision_preview,
+            blob_view,
+            reflog,
+            commit_tree,
+            repository_summary,
+            rebase_conflicts,
+            lfs_locks,
+            launch_tool,
+            forge_notifications,
+            forge_pulls
         ])
         .run(tauri::generate_context!())
         .expect("error while running AweGit");

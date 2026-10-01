@@ -15,6 +15,8 @@ pub struct CommitRequest {
     pub sign_off: bool,
     /// Empty keeps Git's own `Signed-off-by` line. `%user` and `%email` are replaced otherwise.
     pub sign_off_format: String,
+    /// When true, `git commit` gets `--no-verify` for this commit only.
+    pub skip_hooks: bool,
 }
 
 /// Stage the given work-tree paths, including new files.
@@ -85,6 +87,9 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
     }
     if git_signoff {
         args.push("--signoff".to_string());
+    }
+    if request.skip_hooks {
+        args.push("--no-verify".to_string());
     }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     if crate::cli::has_local_author(repo) {
@@ -687,6 +692,141 @@ pub struct FilePreview {
     pub mime: String,
     pub data_url: String,
     pub animated: bool,
+}
+
+/// Image stored at `rev:path`, using the same formats as [`file_preview`].
+pub fn blob_preview(repo: &Path, rev: &str, path: &str) -> Result<Option<FilePreview>, Error> {
+    let bytes = blob_bytes(repo, rev, path)?;
+    Ok(preview_from_bytes(&bytes))
+}
+
+/// Text or image at `rev:path`. Text is capped so a huge blob does not fill the window.
+pub fn blob_view(repo: &Path, rev: &str, path: &str) -> Result<BlobView, Error> {
+    let bytes = blob_bytes(repo, rev, path)?;
+    if let Some(preview) = preview_from_bytes(&bytes) {
+        return Ok(BlobView { binary: true, text: String::new(), preview: Some(preview) });
+    }
+    if bytes.iter().take(800).any(|byte| *byte == 0) {
+        return Ok(BlobView { binary: true, text: String::new(), preview: None });
+    }
+    let end = bytes.len().min(200_000);
+    Ok(BlobView {
+        binary: false,
+        text: String::from_utf8_lossy(&bytes[..end]).into_owned(),
+        preview: None,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlobView {
+    pub binary: bool,
+    pub text: String,
+    pub preview: Option<FilePreview>,
+}
+
+fn blob_bytes(repo: &Path, rev: &str, path: &str) -> Result<Vec<u8>, Error> {
+    let rev = crate::cli::check_rev(rev)?;
+    let path = check_path(path)?;
+    let spec = format!("{rev}:{path}");
+    let output = crate::cli::run(repo, &["cat-file", "-p", &spec])?;
+    Ok(output.stdout)
+}
+
+fn preview_from_bytes(bytes: &[u8]) -> Option<FilePreview> {
+    if bytes.len() > 8_000_000 {
+        return None;
+    }
+    let (mime, animated) = image_kind(bytes)?;
+    Some(FilePreview {
+        mime: mime.into(),
+        data_url: format!("data:{mime};base64,{}", base64_encode(bytes)),
+        animated,
+    })
+}
+
+/// Write the two sides of a file into temporary files and expand `{left}` `{right}` `{file}`.
+pub fn launch_diff_tool(repo: &Path, template: &str, file: &str, staged: bool) -> Result<(), Error> {
+    let path = check_path(file)?;
+    let left_spec = if staged { format!("HEAD:{path}") } else { format!(":{path}") };
+    let left_bytes = crate::cli::run(repo, &["cat-file", "-p", &left_spec]).map(|output| output.stdout).unwrap_or_default();
+    let right_bytes = if staged {
+        crate::cli::run(repo, &["cat-file", "-p", &format!(":{path}")]).map(|output| output.stdout).unwrap_or_default()
+    } else {
+        std::fs::read(repo.join(path)).unwrap_or_default()
+    };
+    let dir = std::env::temp_dir().join("awegit-tool");
+    std::fs::create_dir_all(&dir).map_err(|source| Error::Read { path: "tool".into(), source })?;
+    let left = dir.join("left");
+    let right = dir.join("right");
+    std::fs::write(&left, left_bytes).map_err(|source| Error::Read { path: "left".into(), source })?;
+    std::fs::write(&right, right_bytes).map_err(|source| Error::Read { path: "right".into(), source })?;
+    launch_template(template, &[
+        ("{left}", &left.display().to_string()),
+        ("{right}", &right.display().to_string()),
+        ("{file}", path),
+    ])
+}
+
+/// Write ours, theirs, and the working copy, then expand `{ours}` `{theirs}` `{working}` `{file}`.
+pub fn launch_merge_tool(repo: &Path, template: &str, file: &str) -> Result<(), Error> {
+    let sides = conflict_sides(repo, file)?;
+    let dir = std::env::temp_dir().join("awegit-tool");
+    std::fs::create_dir_all(&dir).map_err(|source| Error::Read { path: "tool".into(), source })?;
+    let ours = dir.join("ours");
+    let theirs = dir.join("theirs");
+    let working = dir.join("working");
+    std::fs::write(&ours, sides.ours).map_err(|source| Error::Read { path: "ours".into(), source })?;
+    std::fs::write(&theirs, sides.theirs).map_err(|source| Error::Read { path: "theirs".into(), source })?;
+    std::fs::write(&working, sides.working).map_err(|source| Error::Read { path: "working".into(), source })?;
+    launch_template(template, &[
+        ("{ours}", &ours.display().to_string()),
+        ("{theirs}", &theirs.display().to_string()),
+        ("{working}", &working.display().to_string()),
+        ("{base}", &ours.display().to_string()),
+        ("{file}", file),
+    ])
+}
+
+fn launch_template(template: &str, vars: &[(&str, &str)]) -> Result<(), Error> {
+    let mut text = template.trim().to_string();
+    if text.is_empty() {
+        return Err(Error::Git("external tool is empty".into()));
+    }
+    for (key, value) in vars {
+        text = text.replace(key, value);
+    }
+    let args = split_command(&text);
+    let Some((program, rest)) = args.split_first() else {
+        return Err(Error::Git("external tool is empty".into()));
+    };
+    std::process::Command::new(program)
+        .args(rest)
+        .spawn()
+        .map_err(|source| Error::Git(source.to_string()))?;
+    Ok(())
+}
+
+fn split_command(text: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    for ch in text.chars() {
+        match (quote, ch) {
+            (None, '"' | '\'') => quote = Some(ch),
+            (Some(mark), ch) if ch == mark => quote = None,
+            (None, ' ' | '\t') => {
+                if !current.is_empty() {
+                    args.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(ch),
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
 }
 
 fn image_kind(bytes: &[u8]) -> Option<(&'static str, bool)> {

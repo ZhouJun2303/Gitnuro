@@ -123,6 +123,19 @@ pub struct Settings {
     pub flow_support: String,
     #[serde(default)]
     pub expanded_groups: Vec<String>,
+    /// `system`, `zh`, or `en`. Empty is treated as system.
+    #[serde(default = "locale_default")]
+    pub locale: String,
+    #[serde(default)]
+    pub diff_tool: String,
+    #[serde(default)]
+    pub merge_tool: String,
+    #[serde(default)]
+    pub github_token: String,
+    #[serde(default)]
+    pub gitlab_token: String,
+    #[serde(default)]
+    pub gitlab_host: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,6 +203,9 @@ fn hotfix_prefix() -> String {
 fn support_prefix() -> String {
     "support/".into()
 }
+fn locale_default() -> String {
+    "system".into()
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -251,6 +267,12 @@ impl Default for Settings {
             flow_hotfix: hotfix_prefix(),
             flow_support: support_prefix(),
             expanded_groups: Vec::new(),
+            locale: locale_default(),
+            diff_tool: String::new(),
+            merge_tool: String::new(),
+            github_token: String::new(),
+            gitlab_token: String::new(),
+            gitlab_host: String::new(),
         }
     }
 }

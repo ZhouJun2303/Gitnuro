@@ -116,20 +116,25 @@ pub fn stop_process_tree(pid: u32) {
 }
 
 pub fn run(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, &[], None, true)
+    run_prepared(repo, args, &[], None, true, false)
+}
+
+/// Like `run`, but a non-zero exit still returns the output. Spawn failures stay errors.
+pub fn run_output(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
+    run_prepared(repo, args, &[], None, true, true)
 }
 
 pub fn run_env(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, env, None, true)
+    run_prepared(repo, args, env, None, true, false)
 }
 
 pub fn run_stdin(repo: &Path, args: &[&str], stdin: &[u8]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, &[], Some(stdin), true)
+    run_prepared(repo, args, &[], Some(stdin), true, false)
 }
 
 /// Run git without replacing a repository-local `user.name`.
 pub(crate) fn run_repo_author(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, &[], None, false)
+    run_prepared(repo, args, &[], None, false, false)
 }
 
 /// True when this repository has its own `user.name`.
@@ -161,6 +166,7 @@ fn run_prepared(
     env: &[(&str, &str)],
     stdin_bytes: Option<&[u8]>,
     apply_author: bool,
+    allow_failure: bool,
 ) -> Result<std::process::Output, Error> {
     let mut command = Command::new("git");
     command
@@ -232,7 +238,7 @@ fn run_prepared(
     }
     let output = child.wait_with_output().map_err(Error::GitMissing)?;
     untrack(pid);
-    if output.status.success() {
+    if output.status.success() || allow_failure {
         return Ok(output);
     }
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
