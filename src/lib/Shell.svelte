@@ -7,6 +7,7 @@
   import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, unstaged as sampleUnstaged } from "./sample";
   import { highlight } from "./highlight";
+  import SplitHandle from "./SplitHandle.svelte";
   import { resolveLocale, translate } from "./i18n";
   import { shortcut, shortcutLabel, typing } from "./keys";
   import { branchGroup, commitGraph, formatWhen, gravatarUrl, laneColors, numberedDiff, splitDiff, windowSlice } from "./view";
@@ -252,6 +253,48 @@
   let rebaseSteps = $state<{ verb: string; rev: string; summary: string; message: string }[]>([]);
   let comparePair = $state<[string, string] | null>(null);
   const drafts = new Map<string, { summary: string; description: string }>();
+
+  const LAYOUT_KEY = "awegit.layout.settings";
+  function getStoredLayout(): {
+    sidebarWidth?: number;
+    sidebarCollapsed?: boolean;
+    changesWidth?: number;
+    unstagedHeight?: number;
+    composerHeight?: number;
+    historyDetailHeight?: number;
+  } {
+    try {
+      const raw = typeof localStorage !== "undefined" ? localStorage.getItem(LAYOUT_KEY) : null;
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return {};
+  }
+
+  function saveLayoutState(partial: Record<string, unknown>) {
+    try {
+      const cur = getStoredLayout();
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify({ ...cur, ...partial }));
+    } catch {}
+  }
+
+  const initialLayout = getStoredLayout();
+  let sidebarWidth = $state<number>(initialLayout.sidebarWidth ?? 240);
+  let sidebarCollapsed = $state<boolean>(initialLayout.sidebarCollapsed ?? false);
+  let changesWidth = $state<number>(initialLayout.changesWidth ?? 300);
+  let unstagedHeight = $state<number>(initialLayout.unstagedHeight ?? 280);
+  let composerHeight = $state<number>(initialLayout.composerHeight ?? 170);
+  let historyDetailHeight = $state<number>(initialLayout.historyDetailHeight ?? 280);
+
+  function handleLayoutChange() {
+    saveLayoutState({
+      sidebarWidth,
+      sidebarCollapsed,
+      changesWidth,
+      unstagedHeight,
+      composerHeight,
+      historyDetailHeight,
+    });
+  }
 
   const messageHigh = $derived(settings.messageHigh > 0 ? settings.messageHigh : 70);
   const messageLow = $derived(settings.messageLow > 0 ? settings.messageLow : 50);
@@ -1985,8 +2028,82 @@
     <p class="banner error">{actionError}</p>
   {/if}
 
+  {#if !snapshot && mode !== "sample"}
+    <div class="welcome-view">
+      <div class="welcome-card">
+        <div class="welcome-brand">
+          <svg class="welcome-logo" viewBox="0 0 32 32" fill="none">
+            <circle cx="16" cy="16" r="14" stroke="var(--accent)" stroke-width="2.5" />
+            <circle cx="11" cy="11" r="3" fill="var(--accent)" />
+            <circle cx="21" cy="14" r="3" fill="var(--accent)" />
+            <circle cx="11" cy="21" r="3" fill="var(--accent)" />
+            <path d="M11 11v10M11 16c4 0 10-2 10-2" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" />
+          </svg>
+          <div class="welcome-titles">
+            <h1>AweGit</h1>
+            <p>{tr("chrome.openRepo")}</p>
+          </div>
+        </div>
+
+        {#if loadError}
+          <div class="welcome-error">
+            <span>⚠️ {loadError}</span>
+          </div>
+        {/if}
+
+        <div class="welcome-actions">
+          <button class="welcome-btn" type="button" onclick={() => (dialog = "open")}>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4a1 1 0 0 1 1-1h3.5l1.5 2H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4z"/></svg>
+            <div class="btn-meta">
+              <strong>{tr("chrome.open")}</strong>
+              <span>{tr("chrome.openRepo")}</span>
+            </div>
+          </button>
+          <button class="welcome-btn" type="button" onclick={() => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; }}>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 11V4a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7M6 14h7M10 11l3 3-3 3"/></svg>
+            <div class="btn-meta">
+              <strong>{tr("chrome.clone")}</strong>
+              <span>{tr("chrome.clone")}</span>
+            </div>
+          </button>
+          <button class="welcome-btn" type="button" onclick={() => { draft = ""; dialog = "clone"; }}>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>
+            <div class="btn-meta">
+              <strong>{tr("chrome.newRepo")}</strong>
+              <span>{tr("chrome.new")}</span>
+            </div>
+          </button>
+        </div>
+
+        <div class="welcome-recent">
+          <div class="recent-bar">
+            <h3>{tr("chrome.recent")}</h3>
+            {#if settings.recent.length > 2}
+              <input class="search recent-input" placeholder={tr("chrome.searchRecent")} bind:value={recentQuery} />
+            {/if}
+          </div>
+          <div class="recent-list">
+            {#each settings.recent.filter((path) => matchesQuery(path, recentQuery)) as path (path)}
+              <button class="recent-card" type="button" onclick={() => openRepo(path)}>
+                <div class="recent-main">
+                  <span class="recent-title">{folderName(path)}</span>
+                  <span class="recent-path" title={path}>{path}</span>
+                </div>
+                {#if recentStats[path]}
+                  <span class="recent-stats">{recentStats[path].branch} · ↑{recentStats[path].ahead} ↓{recentStats[path].behind} · {recentStats[path].lastSummary}</span>
+                {/if}
+              </button>
+            {:else}
+              <p class="empty">{tr("chrome.noMatch")}</p>
+            {/each}
+          </div>
+        </div>
+      </div>
+    </div>
+  {:else}
   <div class="body">
-    <aside class="sidebar">
+    {#if !sidebarCollapsed}
+    <aside class="sidebar" style:width="{sidebarWidth}px">
       <button class="side nav" type="button" class:selected={section === "changes"} onclick={() => (section = "changes")}>
         <span class="name">{tr("chrome.localChanges")}</span>
         {#if changeCount > 0}<span class="count">{changeCount}</span>{/if}
@@ -2168,189 +2285,487 @@
         {/each}
       {/if}
     </aside>
+    {/if}
 
-    <div class="stage" class:history-mode={section === "history"}>
+    <SplitHandle
+      direction="vertical"
+      bind:size={sidebarWidth}
+      min={180}
+      max={480}
+      defaultSize={240}
+      collapsible
+      bind:collapsed={sidebarCollapsed}
+      onchange={handleLayoutChange}
+    />
+
     {#if section === "changes"}
-      <section class="changes">
-        <div class="status-pane" style:order={settings.swapPanes ? 1 : 2}>
-        <div class="pane-head">
-          <span>{tr("chrome.staged")}</span>
-          <span class="count">{staged.length}</span>
-          <button class="text-button" type="button" disabled={mode !== "live" || busy || staged.length === 0} onclick={() => runChange("unstage_all")}>{tr("chrome.unstageAll")}</button>
-        </div>
-        {#if shownStaged.length === 0}
-          <p class="empty">{staged.length === 0 ? tr("chrome.noStaged") : tr("chrome.noMatch")}</p>
+      <section class="changes-column" style:width="{changesWidth}px">
+        {#if !settings.swapPanes}
+          <div class="status-pane unstaged-pane" style:height="{unstagedHeight}px">
+            {@render unstagedPane()}
+          </div>
+
+          <SplitHandle
+            direction="horizontal"
+            bind:size={unstagedHeight}
+            min={100}
+            max={650}
+            defaultSize={280}
+            onchange={handleLayoutChange}
+          />
+
+          <div class="status-pane staged-pane flex-fill">
+            {@render stagedPane()}
+          </div>
         {:else}
-          <div class="file-list staged-list">
-            {#each asTree(shownStaged) as entry (entry.key)}
-              {#if entry.kind === "dir"}
-                <button class="side tree-dir" type="button" style:padding-left="{8 + entry.depth * 14}px" onclick={() => toggleDir(entry.path)}>
-                  <span class="twist">{collapsedDirs.includes(entry.path) ? "▸" : "▾"}</span>
-                  <span class="name">{fileName(entry.path)}</span>
-                </button>
-              {:else if entry.file}
-                {@render fileRow(entry.file, "staged", entry.depth)}
-              {/if}
-            {/each}
+          <div class="status-pane staged-pane" style:height="{unstagedHeight}px">
+            {@render stagedPane()}
+          </div>
+
+          <SplitHandle
+            direction="horizontal"
+            bind:size={unstagedHeight}
+            min={100}
+            max={650}
+            defaultSize={280}
+            onchange={handleLayoutChange}
+          />
+
+          <div class="status-pane unstaged-pane flex-fill">
+            {@render unstagedPane()}
           </div>
         {/if}
-        </div>
+      </section>
 
-        <div class="status-pane" style:order={settings.swapPanes ? 2 : 1}>
-        <div class="pane-head">
-          <span>{tr("chrome.unstaged")}</span>
-          <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : shownUnstaged.length}</span>
-          <input class="search" placeholder={tr("chrome.filterFiles")} aria-label={tr("chrome.filterFiles")} bind:value={fileQuery} />
-          <button class="text-button" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>{tr("chrome.stage")}</button>
-        </div>
-        <div class="file-list" onscroll={(event) => (fileTop = (event.currentTarget as HTMLElement).scrollTop)}>
-          {#if mode === "loading"}
-            <p class="empty">{tr("chrome.readingStatus")}</p>
-          {:else if mode === "error"}
-            <p class="empty">{loadError}</p>
-          {:else if shownUnstaged.length === 0}
-            <p class="empty">{unstaged.length === 0 ? tr("chrome.noUnstaged") : tr("chrome.noMatch")}</p>
-          {:else}
-            <div class="commit-window" style:height="{unstagedTree.length * rowFile}px">
-              {#each fileWindow.rows as entry, index (entry.key)}
-                <div class="virtual-row" style:top="{(fileWindow.start + index) * rowFile}px">
-                  {#if entry.kind === "dir"}
-                    <button class="side tree-dir" type="button" style:padding-left="{8 + entry.depth * 14}px" onclick={() => toggleDir(entry.path)}>
-                      <span class="twist">{collapsedDirs.includes(entry.path) ? "▸" : "▾"}</span>
-                      <span class="name">{fileName(entry.path)}</span>
-                    </button>
-                  {:else if entry.file}
-                    {@render fileRow(entry.file, "unstaged", entry.depth)}
-                  {/if}
+      <SplitHandle
+        direction="vertical"
+        bind:size={changesWidth}
+        min={220}
+        max={650}
+        defaultSize={300}
+        onchange={handleLayoutChange}
+      />
+
+      <div class="right-stage flex-fill">
+        <section class="diff flex-fill">
+          {#if blameLines}
+            <header class="diff-head">
+              <span>{tr("chrome.blameOf", { name: selectedPath ?? "" })}</span>
+              <button class="text-button" type="button" onclick={() => (blameLines = null)}>{tr("chrome.close")}</button>
+            </header>
+            <div class="diff-body" onscroll={(event) => (blameTop = (event.currentTarget as HTMLElement).scrollTop)}>
+              <div class="commit-window" style:height="{(blameLines?.length ?? 0) * 18}px">
+                {#each blameWindow.rows as line, index (`${line.line}-${line.id}`)}
+                  <button class="virtual-row" type="button" style:top="{(blameWindow.start + index) * 18}px" title={line.summary} onclick={() => { section = "history"; void selectCommit(line.id); }}>{line.line} {line.shortId} {line.author} {line.summary} {line.text}</button>
+                {/each}
+              </div>
+            </div>
+          {:else if mode === "live" && section === "changes" && selectedPath}
+            <header class="diff-head">
+              <span>{selectedPath}</span>
+              <button class="text-button" type="button" disabled={busy} onclick={() => runChange(selectedSide === "staged" ? "unstage_path" : "stage_path", { file: selectedPath })}>{selectedSide === "staged" ? tr("menu.unstage") : tr("chrome.stage")}</button>
+              <button class="text-button" type="button" disabled={busy} onclick={() => ask(tr("menu.discard"), tr("dialog.discardBody", { name: selectedPath ?? "" }), () => void mutate({ action: "discard", file: selectedPath }))}>{tr("menu.discard")}</button>
+            </header>
+            {#if diffError}
+              <p class="diff-empty">{diffError}</p>
+            {:else if !diff}
+              <p class="diff-empty">{tr("chrome.reading")}</p>
+            {:else if diff.binary}
+              {#if imageOld || imageNew}
+                {@render imageCompare(imageOld, imageNew)}
+              {:else}
+                <p class="diff-empty">{tr("chrome.binary")}</p>
+              {/if}
+            {:else if diff.lines.length === 0}
+              <p class="diff-empty">{tr("chrome.noChanges")}</p>
+            {:else if settings.diffStyle === "split"}
+              <div class="diff-body split">
+                {#each splitRows as row, index (index)}
+                  <div class="split-row actionable">
+                    <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, selectedPath ?? "") as token, tokenIndex (`l${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                    <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, selectedPath ?? "") as token, tokenIndex (`r${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                    <span class="split-actions">
+                      {#if row.hunkIndex != null}
+                        <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index: row.hunkIndex, unstage: selectedSide === "staged" })}>{selectedSide === "staged" ? tr("menu.unstageHunk") : tr("menu.stageHunk")}</button>
+                        {#if selectedSide === "unstaged"}
+                          <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardHunk", file: selectedPath, index: row.hunkIndex })}>{tr("menu.discardHunk")}</button>
+                        {/if}
+                      {:else if row.leftLine?.stageAt != null || row.rightLine?.stageAt != null}
+                        {@const line = row.rightLine?.stageAt != null ? row.rightLine : row.leftLine}
+                        {#if line}
+                          <button class="text-button line-action" type="button" disabled={busy} onclick={() => stageOne(line)}>{selectedSide === "staged" ? tr("menu.unstageLine") : tr("menu.stageLine")}</button>
+                          {#if selectedSide === "unstaged" && line.workAt != null}
+                            <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardLine", file: selectedPath, text: lineText(line), addition: line.kind === "add", at: line.workAt })}>{tr("menu.discardLine")}</button>
+                          {/if}
+                        {/if}
+                      {/if}
+                    </span>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <div class="diff-body" onscroll={(event) => (diffTop = (event.currentTarget as HTMLElement).scrollTop)}>
+                <div class="commit-window" style:height="{diffLines.length * 18}px">
+                  {#each diffWindow.rows as line, index (`${diffWindow.start}-${index}`)}
+                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{(diffWindow.start + index) * 18}px">
+                      <span class="gutter">{shownDiffLines[diffWindow.start + index]?.oldNo ?? ""}</span>
+                      <span class="gutter">{shownDiffLines[diffWindow.start + index]?.newNo ?? ""}</span>
+                      {#each paint(line.text, selectedPath ?? "") as token, tokenIndex (`${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
+                      {#if line.kind === "hunk"}
+                        <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index: shownDiffLines.slice(0, diffWindow.start + index + 1).filter((item) => item.kind === "hunk").length - 1, unstage: selectedSide === "staged" })}>{selectedSide === "staged" ? tr("menu.unstageHunk") : tr("menu.stageHunk")}</button>
+                        {#if selectedSide === "unstaged"}
+                          <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardHunk", file: selectedPath, index: shownDiffLines.slice(0, diffWindow.start + index + 1).filter((item) => item.kind === "hunk").length - 1 })}>{tr("menu.discardHunk")}</button>
+                        {/if}
+                      {/if}
+                      {#if line.stageAt != null && (line.kind === "add" || line.kind === "delete")}
+                        <button class="text-button line-action" type="button" disabled={busy} onclick={() => stageOne(line)}>{selectedSide === "staged" ? tr("menu.unstageLine") : tr("menu.stageLine")}</button>
+                        {#if selectedSide === "unstaged" && line.workAt != null}
+                          <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardLine", file: selectedPath, text: lineText(line), addition: line.kind === "add", at: line.workAt })}>{tr("menu.discardLine")}</button>
+                        {/if}
+                      {/if}
+                    </span>
+                  {/each}
                 </div>
-              {/each}
+                {#if diff.truncated}<span class="meta">{tr("chrome.truncated")}</span>{/if}
+              </div>
+            {/if}
+          {:else if section === "changes" && selectedPath && selectedDiff.length > 0}
+            <header class="diff-head">
+              <span>{selectedPath}</span>
+              <button class="text-button" type="button" disabled>{tr("chrome.stage")}</button>
+              <button class="text-button" type="button" disabled>{tr("menu.discard")}</button>
+            </header>
+            {#if settings.diffStyle === "split"}
+              <div class="diff-body split">
+                {#each sampleSplit as row, index (index)}
+                  <div class="split-row">
+                    <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, selectedPath ?? "") as token, tokenIndex (`sl${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                    <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, selectedPath ?? "") as token, tokenIndex (`sr${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <pre class="diff-body">{#each selectedDiff as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+            {/if}
+          {:else if selectedPath === "art/mark.png"}
+            {@render imageCompare(sampleImages.before, sampleImages.after)}
+          {:else}
+            <p class="diff-empty">{tr("chrome.selectFile")}</p>
+          {/if}
+        </section>
+
+        <SplitHandle
+          direction="horizontal"
+          bind:size={composerHeight}
+          min={120}
+          max={450}
+          defaultSize={170}
+          reverse
+          onchange={handleLayoutChange}
+        />
+
+        <form class="composer" style:height="{composerHeight}px" onsubmit={(event) => { event.preventDefault(); void submitCommit(false); }}>
+          <input class="summary-input {summaryTone} guided" placeholder={tr("chrome.commitSubject")} bind:value={summary} maxlength="200" aria-invalid={summaryTooLong} spellcheck={settings.spellChecking === "enable"} />
+          <textarea class="guided composer-desc flex-fill" placeholder={tr("chrome.description")} bind:value={description} spellcheck={settings.spellChecking === "enable"}></textarea>
+          <div class="composer-row">
+            <label class="check"><input type="checkbox" bind:checked={amend} /> {tr("chrome.amend")}</label>
+            <button class="text-button more" type="button" onclick={(event) => openBar(event, commitExtras())}>⋯</button>
+            <button class="commit" type="submit" disabled={!canCommit}>{busy ? tr("chrome.working") : tr("chrome.commit")}</button>
+          </div>
+        </form>
+      </div>
+    {:else}
+      <div class="history-stage flex-fill">
+        <section class="history flex-fill" bind:this={historyEl} onscroll={(event) => (historyTop = (event.currentTarget as HTMLElement).scrollTop)}>
+          {#if filterNames.length > 0}
+            <div class="filter-bar">
+              <span>{tr("chrome.filteredBy", { name: filterNames.map((name) => `'${name}'`).join(", ") })}</span>
+              <button class="text-button" type="button" onclick={() => { allBranches = true; historyFilter = ""; void loadContext(); }}>{tr("chrome.clearFilter")}</button>
             </div>
           {/if}
-        </div>
-        </div>
-
-        {#snippet fileRow(file: Row, side: Side, depth = 0)}
-          <div
-            class="file"
-            style:padding-left="{8 + depth * 14}px"
-            class:selected={selectedPath === file.path && (mode !== "live" || selectedSide === side)}
-            role="group"
-            oncontextmenu={(event) => openMenu(event, fileMenu(file, side))}
-          >
-            <button class="file-select" type="button" onclick={(event) => selectFile(file.path, side, event)}>
-              <span class="badge {file.tone}">{file.letter}</span>
-              <span class="file-name">{fileName(file.path)}</span>
-            </button>
+          <div class="pane-head">
+            <input class="search" placeholder={tr("chrome.findCommits")} aria-label={tr("chrome.findCommits")} bind:this={searchEl} bind:value={commitQuery} />
+            {#if historyFilter}
+              <button class="text-button" type="button" onclick={() => { historyFilter = ""; void loadContext(); }}>{tr("chrome.allCommits")}</button>
+            {/if}
           </div>
-        {/snippet}
-      </section>
-    {:else if mode !== "sample"}
-      <section class="history" bind:this={historyEl} onscroll={(event) => (historyTop = (event.currentTarget as HTMLElement).scrollTop)}>
-        {#if filterNames.length > 0}
-          <div class="filter-bar">
-            <span>{tr("chrome.filteredBy", { name: filterNames.map((name) => `'${name}'`).join(", ") })}</span>
-            <button class="text-button" type="button" onclick={() => { allBranches = true; historyFilter = ""; void loadContext(); }}>{tr("chrome.clearFilter")}</button>
-          </div>
-        {/if}
-        <div class="pane-head">
-          <input class="search" placeholder={tr("chrome.findCommits")} aria-label={tr("chrome.findCommits")} bind:this={searchEl} bind:value={commitQuery} />
           {#if historyFilter}
-            <button class="text-button" type="button" onclick={() => { historyFilter = ""; void loadContext(); }}>{tr("chrome.allCommits")}</button>
+            <div class="pane-head"><span>{historyFilter}</span></div>
           {/if}
-        </div>
-        {#if historyFilter}
-          <div class="pane-head"><span>{historyFilter}</span></div>
-        {/if}
-        {#if reflogOn}
-          {#each reflogRows as row (`${row.selector}-${row.id}`)}
-            <button class="commit-row" type="button" oncontextmenu={(event) => openMenu(event, reflogMenu(row))}>
-              <span class="subject">{row.summary}</span>
-              <span class="meta">{row.selector}</span>
-              <span class="meta sha">{row.shortId}</span>
-            </button>
-          {/each}
-        {:else if shownCommits.length === 0}
-          <p class="empty">{tr("chrome.noCommits")}</p>
-        {:else}
-          <div class="commit-window" style:height="{shownCommits.length * rowCommit}px">
-            {#each historyRows as commit, index (commit.id)}
-              <div
-                class="commit-row virtual"
-                class:selected={selectedCommit === commit.id}
-                style:top="{(historyStart + index) * rowCommit}px"
-                role="button"
-                tabindex="0"
-                onclick={(event) => selectCommit(commit.id, event)}
-                onkeydown={(event) => { if (event.key === "Enter") void selectCommit(commit.id); }}
-                oncontextmenu={(event) => openMenu(event, commitMenu(commit))}
-              >
-                <input class="drop-check" type="checkbox" checked={drops.includes(commit.id)} aria-label={tr("menu.drop")} onclick={(event) => event.stopPropagation()} onchange={() => toggleDrop(commit.id)} />
-                <span class="graph" aria-hidden="true">
-                  {#each liveGraph[historyStart + index] ?? [] as cell, lane (`${commit.id}-${lane}`)}
-                    <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}></i>
+          {#if reflogOn}
+            {#each reflogRows as row (`${row.selector}-${row.id}`)}
+              <button class="commit-row" type="button" oncontextmenu={(event) => openMenu(event, reflogMenu(row))}>
+                <span class="subject">{row.summary}</span>
+                <span class="meta">{row.selector}</span>
+                <span class="meta sha">{row.shortId}</span>
+              </button>
+            {/each}
+          {:else if mode !== "sample"}
+            {#if shownCommits.length === 0}
+              <p class="empty">{tr("chrome.noCommits")}</p>
+            {:else}
+              <div class="commit-window" style:height="{shownCommits.length * rowCommit}px">
+                {#each historyRows as commit, index (commit.id)}
+                  <div
+                    class="commit-row virtual"
+                    class:selected={selectedCommit === commit.id}
+                    style:top="{(historyStart + index) * rowCommit}px"
+                    role="button"
+                    tabindex="0"
+                    onclick={(event) => selectCommit(commit.id, event)}
+                    onkeydown={(event) => { if (event.key === "Enter") void selectCommit(commit.id); }}
+                    oncontextmenu={(event) => openMenu(event, commitMenu(commit))}
+                  >
+                    <input class="drop-check" type="checkbox" checked={drops.includes(commit.id)} aria-label={tr("menu.drop")} onclick={(event) => event.stopPropagation()} onchange={() => toggleDrop(commit.id)} />
+                    <span class="graph" aria-hidden="true">
+                      {#each liveGraph[historyStart + index] ?? [] as cell, lane (`${commit.id}-${lane}`)}
+                        <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}></i>
+                      {/each}
+                    </span>
+                    <span class="subject">{@render linked(commit.summary)}</span>
+                    <span class="badges">
+                      {#each commit.refs as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
+                    </span>
+                    <span class="commit-side">
+                      {#if settings.gravatar && commit.email}
+                        <img class="avatar tile" alt="" src={gravatarUrl(commit.email)} />
+                      {:else}
+                        <span class="avatar tile" style:background={avatarColor(commit.author)} title={commit.author}>{commit.author.slice(0, 1).toUpperCase()}</span>
+                      {/if}
+                      <span class="meta">{commit.author}</span>
+                      <span class="meta sha">{commit.shortId}</span>
+                      <span class="meta">{commit.at ? forkWhen(commit.at) : commit.when}</span>
+                    </span>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          {:else}
+            {#if filterNames.length > 0}
+              <div class="filter-bar">
+                <span>{tr("chrome.filteredBy", { name: filterNames.map((name) => `'${name}'`).join(", ") })}</span>
+                <button class="text-button" type="button" onclick={() => (allBranches = true)}>{tr("chrome.clearFilter")}</button>
+              </div>
+            {/if}
+            {#if repoStats}
+              <div class="pane-head"><span class="meta">{repoStats.lastSummary}</span></div>
+            {/if}
+            {#if reflogOn}
+              {#each sampleReflog as row (row.selector)}
+                <button class="commit-row" type="button" oncontextmenu={(event) => openMenu(event, reflogMenu(row))}>
+                  <span class="subject">{row.summary}</span>
+                  <span class="meta">{row.selector}</span>
+                  <span class="meta sha">{row.shortId}</span>
+                </button>
+              {/each}
+            {:else}
+              {#each sampleRows as commit, index (commit.id)}
+                <button class="commit-row" class:selected={selectedCommit === commit.id || selectedPath === commit.id} type="button" onclick={() => selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? openMenu(event, [{ label: tr("menu.apply"), disabled: true }, { label: tr("menu.pop"), disabled: true }, { label: tr("menu.drop"), disabled: true }]) : openMenu(event, commitMenu(commit))}>
+                  <span class="graph" aria-hidden="true">
+                    {#each sampleGraph[index] ?? [] as cell, lane (`s-${commit.id}-${lane}`)}
+                      <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}></i>
+                    {/each}
+                  </span>
+                  <span class="subject">{@render linked(commit.summary)}</span>
+                  <span class="badges">
+                    {#each commit.badges as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
+                  </span>
+                  <span class="commit-side">
+                    <span class="avatar tile" style:background={avatarColor(commit.author || "?")}>{(commit.author || "?").slice(0, 1).toUpperCase()}</span>
+                    <span class="meta">{commit.author}</span>
+                    <span class="meta sha">{commit.id}</span>
+                    <span class="meta">{commit.when}</span>
+                  </span>
+                </button>
+              {/each}
+            {/if}
+          {/if}
+        </section>
+
+        <SplitHandle
+          direction="horizontal"
+          bind:size={historyDetailHeight}
+          min={160}
+          max={650}
+          defaultSize={280}
+          reverse
+          onchange={handleLayoutChange}
+        />
+
+        <section class="detail" style:height="{historyDetailHeight}px">
+          <div class="detail-tabs">
+            <button type="button" class:on={historyTab === "commit"} onclick={() => (historyTab = "commit")}>{tr("chrome.commit")}</button>
+            <button type="button" class:on={historyTab === "changes"} onclick={() => (historyTab = "changes")}>{tr("chrome.changes")}</button>
+            <button type="button" class:on={historyTab === "tree"} onclick={() => openHistoryTab("tree")}>{tr("chrome.fileTree")}</button>
+          </div>
+          <div class="detail-scroll">
+            {#if !selectedCommit && !commitDetail}
+              <p class="empty">{tr("chrome.selectCommitFile")}</p>
+            {:else if historyTab === "commit"}
+              <div class="detail-people">
+                <div class="person">
+                  <span class="avatar tile" style:background={avatarColor(commitDetail?.author || "")}>{(commitDetail?.author || "?").slice(0, 1).toUpperCase()}</span>
+                  <div>
+                    <div class="k">{tr("chrome.author")}</div>
+                    <div>{commitDetail?.author}</div>
+                    <div class="meta">{commitDetail?.authorEmail}</div>
+                    <div class="meta">{commitDetail?.authorAt ? forkWhen(commitDetail.authorAt) : ""}</div>
+                  </div>
+                </div>
+                <div class="person">
+                  <span class="avatar tile" style:background={avatarColor(commitDetail?.committer || "")}>{(commitDetail?.committer || "?").slice(0, 1).toUpperCase()}</span>
+                  <div>
+                    <div class="k">{tr("chrome.committer")}</div>
+                    <div>{commitDetail?.committer}</div>
+                    <div class="meta">{commitDetail?.committerEmail}</div>
+                    <div class="meta">{commitDetail?.committerAt ? forkWhen(commitDetail.committerAt) : ""}</div>
+                  </div>
+                </div>
+              </div>
+              <div class="detail-line"><span class="k">{tr("chrome.refsLabel")}</span>
+                {#each (mode === "live" ? commitsLive.find((row) => row.id === selectedCommit)?.refs : sampleRows.find((row) => row.id === selectedCommit)?.badges) ?? [] as label (label)}
+                  <span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>
+                {/each}
+              </div>
+              <div class="detail-line"><span class="k">{tr("chrome.sha")}</span><button class="text-button sha" type="button" onclick={() => copyText(selectedCommit ?? "")}>{selectedCommit}</button></div>
+              <div class="detail-line"><span class="k">{tr("chrome.parents")}</span>
+                {#each commitDetail?.parents ?? [] as parent (parent)}
+                  <button class="text-button sha" type="button" onclick={() => { if (mode === "live") void selectCommit(parent); else selectSample(parent); }}>{parent.slice(0, 7)}</button>
+                {/each}
+              </div>
+              <p class="detail-message">{@render linked(mode === "live" ? (commitsLive.find((row) => row.id === selectedCommit)?.summary ?? "") : (sampleRows.find((row) => row.id === selectedCommit)?.summary ?? ""))}</p>
+              {#if commitDetail?.body}<pre class="detail-body-text">{@render linked(commitDetail.body)}</pre>{/if}
+              <div class="detail-line">
+                <button class="text-button" type="button" onclick={() => (commitCollapsed = [])}>{tr("chrome.expandAll")}</button>
+              </div>
+              {#each asTree(commitFiles.map((file) => toRow(file)), commitCollapsed) as entry (entry.key)}
+                {#if entry.kind === "dir"}
+                  <button class="side" type="button" style:padding-left="{8 + entry.depth * 14}px" onclick={() => toggleCommitDir(entry.path)}>
+                    <span class="twist">{commitCollapsed.includes(entry.path) ? "▸" : "▾"}</span>
+                    <span class="name">{fileName(entry.path)}</span>
+                  </button>
+                {:else if entry.file}
+                  <button class="side" class:selected={historyFile === entry.file.path} type="button" style:padding-left="{22 + entry.depth * 14}px" onclick={() => { const path = entry.file?.path; if (!path) return; historyFile = path; historyTab = "changes"; if (mode === "live") void pickCommitFile(path); }}>
+                    <span class="badge {entry.file.tone}">{entry.file.letter}</span>
+                    <span class="name">{fileName(entry.file.path)}</span>
+                  </button>
+                {/if}
+              {/each}
+            {:else if historyTab === "changes"}
+              <header class="diff-head"><span>{historyFile ?? ""}</span></header>
+              {#if mode === "live" && historyDiff && settings.diffStyle === "split"}
+                <div class="diff-body split">
+                  {#each historySplit as row, index (index)}
+                    <div class="split-row">
+                      <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, historyFile ?? "") as token, tokenIndex (`hd-l${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                      <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, historyFile ?? "") as token, tokenIndex (`hd-r${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                    </div>
                   {/each}
-                </span>
-                <span class="subject">{@render linked(commit.summary)}</span>
-                <span class="badges">
-                  {#each commit.refs as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
-                </span>
-                <span class="commit-side">
-                  {#if settings.gravatar && commit.email}
-                    <img class="avatar tile" alt="" src={gravatarUrl(commit.email)} />
-                  {:else}
-                    <span class="avatar tile" style:background={avatarColor(commit.author)} title={commit.author}>{commit.author.slice(0, 1).toUpperCase()}</span>
-                  {/if}
-                  <span class="meta">{commit.author}</span>
-                  <span class="meta sha">{commit.shortId}</span>
-                  <span class="meta">{commit.at ? forkWhen(commit.at) : commit.when}</span>
-                </span>
+                </div>
+              {:else if mode === "live" && historyDiff}
+                <div class="diff-body">
+                  {#each historyDiff.lines as line, index (index)}
+                    <span class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"}>{#each paint(line.text, historyFile ?? "") as token, tokenIndex (`hd-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                  {/each}
+                </div>
+              {:else if historyFile && diffs[historyFile]}
+                {#if settings.diffStyle === "split"}
+                  <div class="diff-body split">
+                    {#each sampleSplitOf(diffs[historyFile]) as row, index (`hf-${index}`)}
+                      <div class="split-row">
+                        <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, historyFile) as token, tokenIndex (`hfl-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                        <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, historyFile) as token, tokenIndex (`hfr-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                      </div>
+                    {/each}
+                  </div>
+                {:else}
+                  <pre class="diff-body">{#each diffs[historyFile] as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+                {/if}
+              {:else}
+                <p class="diff-empty">{tr("chrome.selectCommitFile")}</p>
+              {/if}
+            {:else}
+              {#each (mode === "live" ? treePaths : sampleTree) as file (file)}
+                <button class="side" type="button" class:selected={historyFile === file} onclick={() => { if (mode === "live") void openTreeFile(file); else historyFile = file; }}><span class="name">{file}</span></button>
+              {/each}
+              {#if treeText}<pre class="diff-body">{treeText}</pre>{/if}
+            {/if}
+          </div>
+        </section>
+      </div>
+    {/if}
+
+    {#snippet stagedPane()}
+      <div class="pane-head">
+        <span class="pane-title">{tr("chrome.staged")}</span>
+        <span class="count">{staged.length}</span>
+        <button class="text-button" type="button" disabled={mode !== "live" || busy || staged.length === 0} onclick={() => runChange("unstage_all")}>{tr("chrome.unstageAll")}</button>
+      </div>
+      {#if shownStaged.length === 0}
+        <p class="empty">{staged.length === 0 ? tr("chrome.noStaged") : tr("chrome.noMatch")}</p>
+      {:else}
+        <div class="file-list staged-list">
+          {#each asTree(shownStaged) as entry (entry.key)}
+            {#if entry.kind === "dir"}
+              <button class="side tree-dir" type="button" style:padding-left="{8 + entry.depth * 14}px" onclick={() => toggleDir(entry.path)}>
+                <span class="twist">{collapsedDirs.includes(entry.path) ? "▸" : "▾"}</span>
+                <span class="name">{fileName(entry.path)}</span>
+              </button>
+            {:else if entry.file}
+              {@render fileRow(entry.file, "staged", entry.depth)}
+            {/if}
+          {/each}
+        </div>
+      {/if}
+    {/snippet}
+
+    {#snippet unstagedPane()}
+      <div class="pane-head">
+        <span class="pane-title">{tr("chrome.unstaged")}</span>
+        <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : shownUnstaged.length}</span>
+        <input class="search pane-filter" placeholder={tr("chrome.filterFiles")} aria-label={tr("chrome.filterFiles")} bind:value={fileQuery} />
+        <button class="text-button" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>{tr("chrome.stage")}</button>
+      </div>
+      <div class="file-list" onscroll={(event) => (fileTop = (event.currentTarget as HTMLElement).scrollTop)}>
+        {#if mode === "loading"}
+          <p class="empty">{tr("chrome.readingStatus")}</p>
+        {:else if mode === "error"}
+          <p class="empty">{loadError}</p>
+        {:else if shownUnstaged.length === 0}
+          <p class="empty">{unstaged.length === 0 ? tr("chrome.noUnstaged") : tr("chrome.noMatch")}</p>
+        {:else}
+          <div class="commit-window" style:height="{unstagedTree.length * rowFile}px">
+            {#each fileWindow.rows as entry, index (entry.key)}
+              <div class="virtual-row" style:top="{(fileWindow.start + index) * rowFile}px">
+                {#if entry.kind === "dir"}
+                  <button class="side tree-dir" type="button" style:padding-left="{8 + entry.depth * 14}px" onclick={() => toggleDir(entry.path)}>
+                    <span class="twist">{collapsedDirs.includes(entry.path) ? "▸" : "▾"}</span>
+                    <span class="name">{fileName(entry.path)}</span>
+                  </button>
+                {:else if entry.file}
+                  {@render fileRow(entry.file, "unstaged", entry.depth)}
+                {/if}
               </div>
             {/each}
           </div>
         {/if}
-      </section>
-    {:else}
-      <section class="history">
-        {#if filterNames.length > 0}
-          <div class="filter-bar">
-            <span>{tr("chrome.filteredBy", { name: filterNames.map((name) => `'${name}'`).join(", ") })}</span>
-            <button class="text-button" type="button" onclick={() => (allBranches = true)}>{tr("chrome.clearFilter")}</button>
-          </div>
-        {/if}
-        {#if repoStats}
-          <div class="pane-head"><span class="meta">{repoStats.lastSummary}</span></div>
-        {/if}
-        {#if reflogOn}
-          {#each sampleReflog as row (row.selector)}
-            <button class="commit-row" type="button" oncontextmenu={(event) => openMenu(event, reflogMenu(row))}>
-              <span class="subject">{row.summary}</span>
-              <span class="meta">{row.selector}</span>
-              <span class="meta sha">{row.shortId}</span>
-            </button>
-          {/each}
-        {:else}
-          {#each sampleRows as commit, index (commit.id)}
-            <button class="commit-row" class:selected={selectedCommit === commit.id || selectedPath === commit.id} type="button" onclick={() => selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? openMenu(event, [{ label: tr("menu.apply"), disabled: true }, { label: tr("menu.pop"), disabled: true }, { label: tr("menu.drop"), disabled: true }]) : openMenu(event, commitMenu(commit))}>
-              <span class="graph" aria-hidden="true">
-                {#each sampleGraph[index] ?? [] as cell, lane (`s-${commit.id}-${lane}`)}
-                  <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}></i>
-                {/each}
-              </span>
-              <span class="subject">{@render linked(commit.summary)}</span>
-              <span class="badges">
-                {#each commit.badges as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
-              </span>
-              <span class="commit-side">
-                <span class="avatar tile" style:background={avatarColor(commit.author || "?")}>{(commit.author || "?").slice(0, 1).toUpperCase()}</span>
-                <span class="meta">{commit.author}</span>
-                <span class="meta sha">{commit.id}</span>
-                <span class="meta">{commit.when}</span>
-              </span>
-            </button>
-          {/each}
-        {/if}
-      </section>
-    {/if}
+      </div>
+    {/snippet}
+
+    {#snippet fileRow(file: Row, side: Side, depth = 0)}
+      <div
+        class="file"
+        style:padding-left="{8 + depth * 14}px"
+        class:selected={selectedPath === file.path && (mode !== "live" || selectedSide === side)}
+        role="group"
+        oncontextmenu={(event) => openMenu(event, fileMenu(file, side))}
+      >
+        <button class="file-select" type="button" onclick={(event) => selectFile(file.path, side, event)}>
+          <span class="badge {file.tone}">{file.letter}</span>
+          <span class="file-name">{fileName(file.path)}</span>
+        </button>
+      </div>
+    {/snippet}
 
     {#snippet linked(text: string)}
       {#each linkParts(text) as part, index (`${index}-${part.text}`)}
@@ -2363,320 +2778,7 @@
         {/if}
       {/each}
     {/snippet}
-
-    {#if section === "history"}
-      <section class="detail">
-        <div class="detail-tabs">
-          <button type="button" class:on={historyTab === "commit"} onclick={() => (historyTab = "commit")}>{tr("chrome.commit")}</button>
-          <button type="button" class:on={historyTab === "changes"} onclick={() => (historyTab = "changes")}>{tr("chrome.changes")}</button>
-          <button type="button" class:on={historyTab === "tree"} onclick={() => openHistoryTab("tree")}>{tr("chrome.fileTree")}</button>
-        </div>
-        <div class="detail-scroll">
-          {#if !selectedCommit && !commitDetail}
-            <p class="empty">{tr("chrome.selectCommitFile")}</p>
-          {:else if historyTab === "commit"}
-            <div class="detail-people">
-              <div class="person">
-                <span class="avatar tile" style:background={avatarColor(commitDetail?.author || "")}>{(commitDetail?.author || "?").slice(0, 1).toUpperCase()}</span>
-                <div>
-                  <div class="k">{tr("chrome.author")}</div>
-                  <div>{commitDetail?.author}</div>
-                  <div class="meta">{commitDetail?.authorEmail}</div>
-                  <div class="meta">{commitDetail?.authorAt ? forkWhen(commitDetail.authorAt) : ""}</div>
-                </div>
-              </div>
-              <div class="person">
-                <span class="avatar tile" style:background={avatarColor(commitDetail?.committer || "")}>{(commitDetail?.committer || "?").slice(0, 1).toUpperCase()}</span>
-                <div>
-                  <div class="k">{tr("chrome.committer")}</div>
-                  <div>{commitDetail?.committer}</div>
-                  <div class="meta">{commitDetail?.committerEmail}</div>
-                  <div class="meta">{commitDetail?.committerAt ? forkWhen(commitDetail.committerAt) : ""}</div>
-                </div>
-              </div>
-            </div>
-            <div class="detail-line"><span class="k">{tr("chrome.refsLabel")}</span>
-              {#each (mode === "live" ? commitsLive.find((row) => row.id === selectedCommit)?.refs : sampleRows.find((row) => row.id === selectedCommit)?.badges) ?? [] as label (label)}
-                <span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>
-              {/each}
-            </div>
-            <div class="detail-line"><span class="k">{tr("chrome.sha")}</span><button class="text-button sha" type="button" onclick={() => copyText(selectedCommit ?? "")}>{selectedCommit}</button></div>
-            <div class="detail-line"><span class="k">{tr("chrome.parents")}</span>
-              {#each commitDetail?.parents ?? [] as parent (parent)}
-                <button class="text-button sha" type="button" onclick={() => { if (mode === "live") void selectCommit(parent); else selectSample(parent); }}>{parent.slice(0, 7)}</button>
-              {/each}
-            </div>
-            <p class="detail-message">{@render linked(mode === "live" ? (commitsLive.find((row) => row.id === selectedCommit)?.summary ?? "") : (sampleRows.find((row) => row.id === selectedCommit)?.summary ?? ""))}</p>
-            {#if commitDetail?.body}<pre class="detail-body-text">{@render linked(commitDetail.body)}</pre>{/if}
-            <div class="detail-line">
-              <button class="text-button" type="button" onclick={() => (commitCollapsed = [])}>{tr("chrome.expandAll")}</button>
-            </div>
-            {#each asTree(commitFiles.map((file) => toRow(file)), commitCollapsed) as entry (entry.key)}
-              {#if entry.kind === "dir"}
-                <button class="side" type="button" style:padding-left="{8 + entry.depth * 14}px" onclick={() => toggleCommitDir(entry.path)}>
-                  <span class="twist">{commitCollapsed.includes(entry.path) ? "▸" : "▾"}</span>
-                  <span class="name">{fileName(entry.path)}</span>
-                </button>
-              {:else if entry.file}
-                <button class="side" class:selected={historyFile === entry.file.path} type="button" style:padding-left="{22 + entry.depth * 14}px" onclick={() => { const path = entry.file?.path; if (!path) return; historyFile = path; historyTab = "changes"; if (mode === "live") void pickCommitFile(path); }}>
-                  <span class="badge {entry.file.tone}">{entry.file.letter}</span>
-                  <span class="name">{fileName(entry.file.path)}</span>
-                </button>
-              {/if}
-            {/each}
-          {:else if historyTab === "changes"}
-            <header class="diff-head"><span>{historyFile ?? ""}</span></header>
-            {#if mode === "live" && historyDiff && settings.diffStyle === "split"}
-              <div class="diff-body split">
-                {#each historySplit as row, index (index)}
-                  <div class="split-row">
-                    <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, historyFile ?? "") as token, tokenIndex (`hd-l${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                    <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, historyFile ?? "") as token, tokenIndex (`hd-r${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                  </div>
-                {/each}
-              </div>
-            {:else if mode === "live" && historyDiff}
-              <div class="diff-body">
-                {#each historyDiff.lines as line, index (index)}
-                  <span class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"}>{#each paint(line.text, historyFile ?? "") as token, tokenIndex (`hd-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                {/each}
-              </div>
-            {:else if historyFile && diffs[historyFile]}
-              {#if settings.diffStyle === "split"}
-                <div class="diff-body split">
-                  {#each sampleSplitOf(diffs[historyFile]) as row, index (`hf-${index}`)}
-                    <div class="split-row">
-                      <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, historyFile) as token, tokenIndex (`hfl-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                      <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, historyFile) as token, tokenIndex (`hfr-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                    </div>
-                  {/each}
-                </div>
-              {:else}
-                <pre class="diff-body">{#each diffs[historyFile] as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
-              {/if}
-            {:else}
-              <p class="diff-empty">{tr("chrome.selectCommitFile")}</p>
-            {/if}
-          {:else}
-            {#each (mode === "live" ? treePaths : sampleTree) as file (file)}
-              <button class="side" type="button" class:selected={historyFile === file} onclick={() => { if (mode === "live") void openTreeFile(file); else historyFile = file; }}><span class="name">{file}</span></button>
-            {/each}
-            {#if treeText}<pre class="diff-body">{treeText}</pre>{/if}
-          {/if}
-        </div>
-      </section>
-    {/if}
-
-    <section class="diff">
-      {#if blameLines}
-        <header class="diff-head">
-          <span>{tr("chrome.blameOf", { name: selectedPath ?? "" })}</span>
-          <button class="text-button" type="button" onclick={() => (blameLines = null)}>{tr("chrome.close")}</button>
-        </header>
-        <div class="diff-body" onscroll={(event) => (blameTop = (event.currentTarget as HTMLElement).scrollTop)}>
-          <div class="commit-window" style:height="{(blameLines?.length ?? 0) * 18}px">
-            {#each blameWindow.rows as line, index (`${line.line}-${line.id}`)}
-              <button class="virtual-row" type="button" style:top="{(blameWindow.start + index) * 18}px" title={line.summary} onclick={() => { section = "history"; void selectCommit(line.id); }}>{line.line} {line.shortId} {line.author} {line.summary} {line.text}</button>
-            {/each}
-          </div>
-        </div>
-      {:else if mode === "live" && section === "changes" && selectedPath}
-        <header class="diff-head">
-          <span>{selectedPath}</span>
-          <button class="text-button" type="button" disabled={busy} onclick={() => runChange(selectedSide === "staged" ? "unstage_path" : "stage_path", { file: selectedPath })}>{selectedSide === "staged" ? tr("menu.unstage") : tr("chrome.stage")}</button>
-          <button class="text-button" type="button" disabled={busy} onclick={() => ask(tr("menu.discard"), tr("dialog.discardBody", { name: selectedPath ?? "" }), () => void mutate({ action: "discard", file: selectedPath }))}>{tr("menu.discard")}</button>
-        </header>
-        {#if diffError}
-          <p class="diff-empty">{diffError}</p>
-        {:else if !diff}
-          <p class="diff-empty">{tr("chrome.reading")}</p>
-        {:else if diff.binary}
-          {#if imageOld || imageNew}
-            {@render imageCompare(imageOld, imageNew)}
-          {:else}
-            <p class="diff-empty">{tr("chrome.binary")}</p>
-          {/if}
-        {:else if diff.lines.length === 0}
-          <p class="diff-empty">{tr("chrome.noChanges")}</p>
-        {:else if settings.diffStyle === "split"}
-          <div class="diff-body split">
-            {#each splitRows as row, index (index)}
-              <div class="split-row actionable">
-                <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, selectedPath ?? "") as token, tokenIndex (`l${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, selectedPath ?? "") as token, tokenIndex (`r${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                <span class="split-actions">
-                  {#if row.hunkIndex != null}
-                    <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index: row.hunkIndex, unstage: selectedSide === "staged" })}>{selectedSide === "staged" ? tr("menu.unstageHunk") : tr("menu.stageHunk")}</button>
-                    {#if selectedSide === "unstaged"}
-                      <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardHunk", file: selectedPath, index: row.hunkIndex })}>{tr("menu.discardHunk")}</button>
-                    {/if}
-                  {:else if row.leftLine?.stageAt != null || row.rightLine?.stageAt != null}
-                    {@const line = row.rightLine?.stageAt != null ? row.rightLine : row.leftLine}
-                    {#if line}
-                      <button class="text-button line-action" type="button" disabled={busy} onclick={() => stageOne(line)}>{selectedSide === "staged" ? tr("menu.unstageLine") : tr("menu.stageLine")}</button>
-                      {#if selectedSide === "unstaged" && line.workAt != null}
-                        <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardLine", file: selectedPath, text: lineText(line), addition: line.kind === "add", at: line.workAt })}>{tr("menu.discardLine")}</button>
-                      {/if}
-                    {/if}
-                  {/if}
-                </span>
-              </div>
-            {/each}
-          </div>
-        {:else}
-          <div class="diff-body" onscroll={(event) => (diffTop = (event.currentTarget as HTMLElement).scrollTop)}>
-            <div class="commit-window" style:height="{diffLines.length * 18}px">
-              {#each diffWindow.rows as line, index (`${diffWindow.start}-${index}`)}
-                <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{(diffWindow.start + index) * 18}px">
-                  <span class="gutter">{shownDiffLines[diffWindow.start + index]?.oldNo ?? ""}</span>
-                  <span class="gutter">{shownDiffLines[diffWindow.start + index]?.newNo ?? ""}</span>
-                  {#each paint(line.text, selectedPath ?? "") as token, tokenIndex (`${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
-                  {#if line.kind === "hunk"}
-                    <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index: shownDiffLines.slice(0, diffWindow.start + index + 1).filter((item) => item.kind === "hunk").length - 1, unstage: selectedSide === "staged" })}>{selectedSide === "staged" ? tr("menu.unstageHunk") : tr("menu.stageHunk")}</button>
-                    {#if selectedSide === "unstaged"}
-                      <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardHunk", file: selectedPath, index: shownDiffLines.slice(0, diffWindow.start + index + 1).filter((item) => item.kind === "hunk").length - 1 })}>{tr("menu.discardHunk")}</button>
-                    {/if}
-                  {/if}
-                  {#if line.stageAt != null && (line.kind === "add" || line.kind === "delete")}
-                    <button class="text-button line-action" type="button" disabled={busy} onclick={() => stageOne(line)}>{selectedSide === "staged" ? tr("menu.unstageLine") : tr("menu.stageLine")}</button>
-                    {#if selectedSide === "unstaged" && line.workAt != null}
-                      <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardLine", file: selectedPath, text: lineText(line), addition: line.kind === "add", at: line.workAt })}>{tr("menu.discardLine")}</button>
-                    {/if}
-                  {/if}
-                </span>
-              {/each}
-            </div>
-            {#if diff.truncated}<span class="meta">{tr("chrome.truncated")}</span>{/if}
-          </div>
-        {/if}
-      {:else if section === "changes" && selectedPath && selectedDiff.length > 0}
-        <header class="diff-head">
-          <span>{selectedPath}</span>
-          <button class="text-button" type="button" disabled>{tr("chrome.stage")}</button>
-          <button class="text-button" type="button" disabled>{tr("menu.discard")}</button>
-        </header>
-        {#if settings.diffStyle === "split"}
-          <div class="diff-body split">
-            {#each sampleSplit as row, index (index)}
-              <div class="split-row">
-                <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, selectedPath ?? "") as token, tokenIndex (`sl${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, selectedPath ?? "") as token, tokenIndex (`sr${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-              </div>
-            {/each}
-          </div>
-        {:else}
-          <pre class="diff-body">{#each selectedDiff as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
-        {/if}
-      {:else if mode === "live" && section === "history"}
-        <header class="diff-head">
-          <span>{commitsLive.find((row) => row.id === selectedCommit)?.summary ?? tr("chrome.commits")}</span>
-        </header>
-        {#if treeOn}
-          <div class="file-list staged-list">
-            {#each treePaths as file (file)}
-              <button class="file" type="button" onclick={() => openTreeFile(file)}><span class="file-name">{file}</span></button>
-            {/each}
-          </div>
-          {#if treeText}<pre class="diff-body">{treeText}</pre>{/if}
-        {/if}
-        <div class="file-list staged-list">
-          {#each commitFiles as file (file.path)}
-            {@const mark = badge(file.kind)}
-            <button class="file" class:selected={historyFile === file.path} type="button" onclick={() => pickCommitFile(file.path)}>
-              <span class="badge {mark.tone}">{mark.letter}</span>
-              <span class="file-name">{fileName(file.path)}</span>
-              <span class="file-dir">{parentDir(file.path)}</span>
-            </button>
-          {/each}
-        </div>
-        {#if imageOld || imageNew}
-          {@render imageCompare(imageOld, imageNew)}
-        {:else if historyDiff && historyDiff.binary}
-          <p class="diff-empty">{tr("chrome.binary")}</p>
-        {:else if historyDiff && historyDiff.lines.length > 0}
-          <div class="diff-body" onscroll={(event) => (historyDiffTop = (event.currentTarget as HTMLElement).scrollTop)}>
-            <div class="commit-window" style:height="{historyDiff.lines.length * 18}px">
-              {#each historyDiffWindow.rows as line, index (`hd-${historyDiffWindow.start}-${index}`)}
-                <span class="virtual-row" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{(historyDiffWindow.start + index) * 18}px">
-                  {#each paint(line.text, historyFile ?? "") as token, tokenIndex (`h${historyDiffWindow.start}-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
-                </span>
-              {/each}
-            </div>
-          </div>
-        {:else}
-          <p class="diff-empty">{tr("chrome.selectCommitFile")}</p>
-        {/if}
-      {:else if section === "history" && treeOn}
-        {@const sampleCommit = sampleRows.find((row) => row.id === (selectedCommit || selectedPath))}
-        <header class="diff-head">{tr("chrome.fileTree")}</header>
-        <div class="file-list staged-list">
-          {#each (sampleCommit && sampleCommit.files.length > 0 ? sampleCommit.files.map((file) => file.path) : sampleTree) as file (file)}
-            <button class="file" class:selected={historyFile === file} type="button" onclick={() => (historyFile = file)}><span class="file-name">{file}</span></button>
-          {/each}
-        </div>
-        {#if historyFile === "art/mark.png"}
-          {@render imageCompare(sampleImages.before, sampleImages.after)}
-        {:else if historyFile && diffs[historyFile]}
-          <pre class="diff-body">{#each diffs[historyFile] as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
-        {/if}
-      {:else if section === "history" && (selectedCommit || selectedPath)}
-        {@const sampleCommit = sampleRows.find((row) => row.id === (selectedCommit || selectedPath))}
-        <header class="diff-head">{sampleCommit?.summary}</header>
-        <div class="file-list staged-list">
-          {#each sampleCommit?.files ?? [] as file (file.path)}
-            <button class="file" class:selected={historyFile === file.path} type="button" onclick={() => (historyFile = file.path)}>
-              <span class="badge {file.kind === "A" ? "added" : file.kind === "D" ? "deleted" : "modified"}">{file.kind}</span>
-              <span class="file-name">{fileName(file.path)}</span>
-            </button>
-          {/each}
-        </div>
-        {#if historyFile === "art/mark.png"}
-          {@render imageCompare(sampleImages.before, sampleImages.after)}
-        {:else if historyFile && diffs[historyFile]}
-          <pre class="diff-body">{#each diffs[historyFile] as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
-        {:else}
-          <p class="diff-empty">{tr("chrome.selectCommitFile")}</p>
-        {/if}
-      {:else if selectedPath === "art/mark.png"}
-        {@render imageCompare(sampleImages.before, sampleImages.after)}
-      {:else}
-        <p class="diff-empty">{tr("chrome.selectFile")}</p>
-      {/if}
-    </section>
-    {#if section === "changes"}
-      <form class="composer" onsubmit={(event) => { event.preventDefault(); void submitCommit(false); }}>
-        <input class="summary-input {summaryTone} guided" placeholder={tr("chrome.commitSubject")} bind:value={summary} maxlength="200" aria-invalid={summaryTooLong} spellcheck={settings.spellChecking === "enable"} />
-        <textarea class="guided" placeholder={tr("chrome.description")} rows="3" bind:value={description} spellcheck={settings.spellChecking === "enable"}></textarea>
-        <div class="composer-row">
-          <label class="check"><input type="checkbox" bind:checked={amend} /> {tr("chrome.amend")}</label>
-          <button class="text-button more" type="button" onclick={(event) => openBar(event, commitExtras())}>⋯</button>
-          <button class="commit" type="submit" disabled={!canCommit}>{busy ? tr("chrome.working") : tr("chrome.commit")}</button>
-        </div>
-      </form>
-    {/if}
-    </div>
   </div>
-
-  {#if mode === "error"}
-    <section class="changes">
-      <h2>{tr("chrome.openRepo")}</h2>
-      <p class="empty">{loadError || tr("chrome.recent")}</p>
-      {#if repoStats}
-        <p class="empty">{repoStats.branch} · {repoStats.commits} {tr("chrome.commits")} · ↑{repoStats.ahead} ↓{repoStats.behind} · {repoStats.lastSummary}</p>
-      {/if}
-      <input class="search" placeholder={tr("chrome.searchRecent")} aria-label={tr("chrome.searchRecent")} bind:value={recentQuery} />
-      {#each settings.recent.filter((path) => matchesQuery(path, recentQuery)) as path (path)}
-        <button class="side" type="button" onclick={() => openRepo(path)}>
-          <span class="name">{folderName(path)}</span>
-          {#if recentStats[path]}<span class="meta">{recentStats[path].branch} · ↑{recentStats[path].ahead} ↓{recentStats[path].behind} · {recentStats[path].lastSummary}</span>{/if}
-        </button>
-      {/each}
-      <div class="composer-row">
-        <button class="commit" type="button" onclick={() => (dialog = "open")}>{tr("chrome.open")}</button>
-        <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; }}>{tr("chrome.clone")}</button>
-        <button class="text-button" type="button" onclick={() => { draft = ""; dialog = "clone"; }}>{tr("chrome.newRepo")}</button>
-      </div>
-    </section>
   {/if}
   {#snippet imageCompare(before: string | null, after: string | null)}
     <div class="image-toolbar">
@@ -3306,6 +3408,7 @@
     color: var(--text);
     font-size: var(--ui-scale, 13px);
     user-select: none;
+    overflow: hidden;
   }
 
   .chrome {
@@ -3583,16 +3686,25 @@
   .body {
     flex: 1;
     min-height: 0;
+    min-width: 0;
     display: flex;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .flex-fill {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
   }
 
   .sidebar {
-    width: 260px;
     flex: none;
     background: var(--sidebar);
     border-right: 1px solid var(--line);
     padding: 8px 0;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .side {
@@ -3657,56 +3769,80 @@
     flex: none;
   }
 
-  .changes,
-  .history {
+  .changes-column {
+    flex: none;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    min-height: 0;
+    background: var(--canvas);
+    overflow: hidden;
   }
 
   .status-pane {
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .right-stage {
     flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--canvas);
+  }
+
+  .history-stage {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
   }
 
   .history {
-    overflow: auto;
-  }
-
-  .stage {
-    flex: 1;
     min-width: 0;
     min-height: 0;
-    display: grid;
-    grid-template-columns: 280px minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
-
-  .stage > .changes { grid-column: 1; grid-row: 1; border-right: 1px solid var(--line); }
-  .stage > .diff { grid-column: 2; grid-row: 1; min-height: 0; }
-  .stage > .composer { grid-column: 1 / -1; grid-row: 2; }
-
-  .stage.history-mode {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) 280px;
-  }
-
-  .stage.history-mode > .history { grid-column: 1; grid-row: 1; }
-  .stage.history-mode > .detail { grid-column: 1; grid-row: 2; }
-  .stage.history-mode > .diff { display: none; }
 
   .pane-head {
-    min-height: 28px;
+    height: 32px;
+    min-height: 32px;
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
-    padding: 0 12px;
+    flex-wrap: nowrap;
+    padding: 0 10px;
     font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    border-bottom: 1px solid var(--line);
+    background: var(--canvas);
+  }
+
+  .pane-title {
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .pane-filter {
+    flex: 1;
+    min-width: 60px;
+    height: 22px;
+    font-size: 11px;
+    padding: 0 6px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+    background: var(--elevated);
+    color: inherit;
   }
 
   .text-button {
@@ -3727,7 +3863,8 @@
 
   .file-list {
     flex: 1;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
     padding-bottom: 8px;
   }
 
@@ -3789,7 +3926,13 @@
   .deleted { color: var(--deleted); }
   .modified { color: var(--modified); }
 
-  .file-name { flex: none; }
+  .file-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .file-dir {
     flex: 1;
@@ -3804,10 +3947,17 @@
     flex: none;
     background: var(--canvas);
     border-top: 1px solid var(--line);
-    padding: 8px;
+    padding: 8px 10px;
     display: flex;
     flex-direction: column;
     gap: 6px;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
+  .composer-desc {
+    resize: none !important;
+    min-height: 0;
   }
 
   textarea,
@@ -4259,4 +4409,192 @@
   .tool-list button { border: 0; background: transparent; text-align: left; padding: 6px 8px; font: inherit; color: inherit; }
   .tool-list button.on { background: var(--selection); }
   .tool-fields { display: flex; flex-direction: column; gap: 8px; }
+
+  .welcome-view {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 20px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: var(--canvas);
+  }
+
+  .welcome-card {
+    width: 640px;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  .welcome-brand {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .welcome-logo {
+    width: 44px;
+    height: 44px;
+    flex: none;
+  }
+
+  .welcome-titles h1 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .welcome-titles p {
+    margin: 4px 0 0;
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+
+  .welcome-error {
+    padding: 8px 12px;
+    background: color-mix(in srgb, var(--deleted) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--deleted) 30%, transparent);
+    border-radius: var(--radius);
+    color: var(--deleted);
+    font-size: 13px;
+  }
+
+  .welcome-actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .welcome-btn {
+    border: 1px solid var(--line);
+    background: var(--elevated);
+    border-radius: 10px;
+    padding: 16px 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    color: var(--text);
+    cursor: pointer;
+    text-align: left;
+    transition: all 140ms ease;
+  }
+
+  .welcome-btn:hover {
+    border-color: var(--accent);
+    background: var(--selection);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  }
+
+  .welcome-btn svg {
+    width: 22px;
+    height: 22px;
+    color: var(--accent);
+  }
+
+  .btn-meta strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .btn-meta span {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .welcome-recent {
+    border: 1px solid var(--line);
+    background: var(--elevated);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .recent-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .recent-bar h3 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .recent-input {
+    width: 200px;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+
+  .recent-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 220px;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .recent-card {
+    border: 0;
+    background: transparent;
+    padding: 8px 10px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+
+  .recent-card:hover {
+    background: var(--hover);
+  }
+
+  .recent-main {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .recent-title {
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .recent-path {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .recent-stats {
+    font-size: 11px;
+    color: var(--text-secondary);
+    flex: none;
+  }
 </style>
