@@ -182,6 +182,78 @@ body {
   letter-spacing: 0;
 }
 
+:root :is(
+  button,
+  a[href],
+  summary,
+  select,
+  label:has(> input[type="checkbox"], > input[type="radio"]),
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  input[type="color"],
+  input[type="file"],
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"]
+) {
+  cursor: pointer;
+}
+
+:root :is(button, select, input):disabled,
+:root label:has(> input:disabled) {
+  cursor: not-allowed;
+}
+
+:root [draggable="true"] { cursor: grab; }
+:root [draggable="true"]:active { cursor: grabbing; }
+
+:root :is(.scrim, .palette-scrim, .menu-dismiss) { cursor: default; }
+
+:root .menu button:not(:disabled):hover {
+  background: var(--hover);
+}
+
+:root .commit:not(:disabled) {
+  transition: filter 120ms ease, transform 80ms ease;
+}
+
+:root .commit:not(:disabled):hover { filter: brightness(1.08); }
+:root .commit:not(:disabled):active { filter: brightness(0.94); transform: translateY(0.5px); }
+
+:root label.check:has(> input:not(:disabled)):hover { color: var(--text); }
+
+:root a.issue:hover { text-decoration: underline; }
+
+:root .diff-body .virtual-row:not(button):hover,
+:root .split-row:hover :is(.split-no, .split-code) {
+  box-shadow: inset 0 0 0 9999px var(--hover);
+}
+
+:root button.virtual-row:hover { background: var(--hover); }
+
+:root :is(
+  .icon-btn,
+  .text-button,
+  .segment button,
+  .tab,
+  .side,
+  .file,
+  .commit-row,
+  .menu button,
+  .menubar button,
+  .palette-list button,
+  .image-toolbar button,
+  .tool-list button,
+  .pref-tabs button,
+  .launch-trigger,
+  .recent-card,
+  button.virtual-row
+):not(:disabled):not(.on):not(.active):not(.selected):active {
+  background: var(--pressed);
+}
+
 @media print {
   .chrome,
   .sidebar,
