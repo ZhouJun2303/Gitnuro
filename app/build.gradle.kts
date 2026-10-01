@@ -186,7 +186,13 @@ val appInputDir = layout.buildDirectory.dir("compose/app-input")
 val stageAppInput = tasks.register<Copy>("stageAppInput") {
     dependsOn(tasks.named("jar"))
     from(tasks.named<Jar>("jar").map { it.archiveFile })
-    from(configurations.named("runtimeClasspath"))
+    from(configurations.named("runtimeClasspath")) {
+        eachFile {
+            val source = file ?: return@eachFile
+            val group = source.parentFile?.parentFile?.parentFile?.parentFile?.name ?: "lib"
+            name = "${group}__${source.name}"
+        }
+    }
     into(appInputDir)
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
@@ -214,6 +220,21 @@ tasks.register<Exec>("testExe") {
         "--runtime-image", javaHome.absolutePath,
         "--icon", rootProject.file("icons/icon.ico").absolutePath,
     )
+    doLast {
+        val outExe = destDir.resolve(projectName).resolve("$projectName.exe")
+        val csc = File(System.getenv("WINDIR") ?: "C:\\Windows", "Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe")
+        val code = ProcessBuilder(
+            csc.absolutePath,
+            "/nologo",
+            "/target:winexe",
+            "/win32icon:${rootProject.file("icons/icon.ico").absolutePath}",
+            "/out:${outExe.absolutePath}",
+            rootProject.file("app/packaging/AweGitLauncher.cs").absolutePath,
+        ).inheritIO().start().waitFor()
+        if (code != 0) {
+            error("Failed to compile AweGit.exe launcher, exit code $code")
+        }
+    }
 }
 
 
