@@ -4163,9 +4163,11 @@
     background: var(--elevated);
   }
 
-  textarea:focus {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
+  textarea:focus,
+  .summary-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
   }
 
   .counter {
@@ -4589,8 +4591,7 @@
     width: auto;
   }
 
-  .dialog .pref-page > .text-button,
-  .dialog form > .text-button {
+  .dialog .pref-page > .text-button {
     align-self: flex-start;
     margin-left: 0;
   }
