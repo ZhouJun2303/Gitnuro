@@ -218,7 +218,7 @@
   let searchOpen = $state({ recent: false, side: false, commit: false, file: false });
   let historyDiffTop = $state(0);
   let picked = $state<string[]>([]);
-  let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  let menu = $state<{ x: number; y: number; items: MenuItem[]; anchorTop?: number } | null>(null);
   let submenu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
   let confirmAsk = $state<ConfirmAsk | null>(null);
   let imageMode = $state<"side" | "swipe" | "onion" | "pixel">("side");
@@ -391,6 +391,50 @@
   function pickSplitSide(event: MouseEvent) {
     const side = (event.target as HTMLElement).closest("[data-side]")?.getAttribute("data-side");
     if (side === "left" || side === "right") splitPick = side;
+  }
+  function splitScroller(node: HTMLElement) {
+    const sides = ["left", "right"] as const;
+    const bar = (side: string) => node.querySelector<HTMLElement>(`.split-bar[data-bar="${side}"]`);
+    const measure = () => {
+      for (const side of sides) {
+        const track = bar(side);
+        if (!track?.firstElementChild) continue;
+        let width = 0;
+        for (const cell of node.querySelectorAll<HTMLElement>(`.split-code[data-side="${side}"]`)) width = Math.max(width, cell.scrollWidth);
+        (track.firstElementChild as HTMLElement).style.width = `${width}px`;
+        node.style.setProperty(`--sx-${side}`, `${track.scrollLeft}px`);
+      }
+    };
+    const onScroll = (event: Event) => {
+      const target = event.target as HTMLElement;
+      const side = target.dataset?.bar;
+      if (side) node.style.setProperty(`--sx-${side}`, `${target.scrollLeft}px`);
+    };
+    const onWheel = (event: WheelEvent) => {
+      const delta = event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX;
+      if (!delta || Math.abs(delta) < Math.abs(event.shiftKey ? 0 : event.deltaY)) return;
+      const hit = (event.target as HTMLElement).closest<HTMLElement>("[data-side], [data-bar]");
+      const side = hit?.dataset.side ?? hit?.dataset.bar ?? splitPick;
+      const track = bar(side);
+      if (!track) return;
+      event.preventDefault();
+      track.scrollLeft += delta;
+    };
+    const resize = new ResizeObserver(measure);
+    const mutate = new MutationObserver(measure);
+    resize.observe(node);
+    mutate.observe(node, { childList: true, subtree: true, characterData: true });
+    node.addEventListener("scroll", onScroll, true);
+    node.addEventListener("wheel", onWheel, { passive: false });
+    measure();
+    return {
+      destroy() {
+        resize.disconnect();
+        mutate.disconnect();
+        node.removeEventListener("scroll", onScroll, true);
+        node.removeEventListener("wheel", onWheel);
+      },
+    };
   }
   const historySplit = $derived(settings.diffStyle === "split" ? splitDiff(historyDiff?.lines ?? []) : []);
   const filterNames = $derived.by(() => {
@@ -861,6 +905,23 @@
 
   function focusOnMount(node: HTMLInputElement) {
     node.focus();
+  }
+
+  function fitMenu(node: HTMLElement, spot: { x: number; y: number; anchorTop?: number }) {
+    const place = (next: { x: number; y: number; anchorTop?: number }) => {
+      const margin = 8;
+      const { width, height } = node.getBoundingClientRect();
+      let left = next.x;
+      let top = next.y;
+      if (left + width > window.innerWidth - margin) left = window.innerWidth - width - margin;
+      if (top + height > window.innerHeight - margin) {
+        top = next.anchorTop !== undefined && next.anchorTop - height - 2 >= margin ? next.anchorTop - height - 2 : window.innerHeight - height - margin;
+      }
+      node.style.left = `${Math.max(margin, left)}px`;
+      node.style.top = `${Math.max(margin, top)}px`;
+    };
+    place(spot);
+    return { update: place };
   }
 
   function openMenu(event: MouseEvent, items: MenuItem[]) {
@@ -1397,7 +1458,7 @@
   function openBar(event: MouseEvent, items: MenuItem[]) {
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     submenu = null;
-    menu = { x: rect.left, y: rect.bottom + 2, items };
+    menu = { x: rect.left, y: rect.bottom + 2, items, anchorTop: rect.top };
   }
 
   function viewItems(): MenuItem[] {
@@ -2491,9 +2552,9 @@
             {:else if diff.lines.length === 0}
               <p class="diff-empty">{tr("chrome.noChanges")}</p>
             {:else if settings.diffStyle === "split"}
-              <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide}>
+              <div class="diff-body split actionable pick-{splitPick}" role="presentation" onmousedown={pickSplitSide} use:splitScroller>
                 {#each splitRows as row, index (index)}
-                  <div class="split-row actionable">
+                  <div class="split-row">
                     {@render splitCell(row, "left", selectedPath ?? "", `l${index}`)}
                     {@render splitCell(row, "right", selectedPath ?? "", `r${index}`)}
                     <span class="split-actions">
@@ -2514,6 +2575,7 @@
                     </span>
                   </div>
                 {/each}
+                {@render splitBar(true)}
               </div>
             {:else}
               <div class="diff-body" onscroll={(event) => (diffTop = (event.currentTarget as HTMLElement).scrollTop)}>
@@ -2548,13 +2610,14 @@
               <button class="text-button" type="button" disabled>{tr("menu.discard")}</button>
             </header>
             {#if settings.diffStyle === "split"}
-              <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide}>
+              <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide} use:splitScroller>
                 {#each sampleSplit as row, index (index)}
                   <div class="split-row">
                     {@render splitCell(row, "left", selectedPath ?? "", `sl${index}`)}
                     {@render splitCell(row, "right", selectedPath ?? "", `sr${index}`)}
                   </div>
                 {/each}
+                {@render splitBar()}
               </div>
             {:else}
               <pre class="diff-body">{#each selectedDiff as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
@@ -2794,13 +2857,14 @@
             {:else if historyTab === "changes"}
               <header class="diff-head"><span>{historyFile ?? ""}</span></header>
               {#if mode === "live" && historyDiff && settings.diffStyle === "split"}
-                <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide}>
+                <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide} use:splitScroller>
                   {#each historySplit as row, index (index)}
                     <div class="split-row">
                       {@render splitCell(row, "left", historyFile ?? "", `hd-l${index}`)}
                       {@render splitCell(row, "right", historyFile ?? "", `hd-r${index}`)}
                     </div>
                   {/each}
+                  {@render splitBar()}
                 </div>
               {:else if mode === "live" && historyDiff}
                 <div class="diff-body">
@@ -2810,13 +2874,14 @@
                 </div>
               {:else if historyFile && diffs[historyFile]}
                 {#if settings.diffStyle === "split"}
-                  <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide}>
+                  <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide} use:splitScroller>
                     {#each sampleSplitOf(diffs[historyFile]) as row, index (`hf-${index}`)}
                       <div class="split-row">
                         {@render splitCell(row, "left", historyFile, `hfl-${index}`)}
                         {@render splitCell(row, "right", historyFile, `hfr-${index}`)}
                       </div>
                     {/each}
+                    {@render splitBar()}
                   </div>
                 {:else}
                   <pre class="diff-body">{#each diffs[historyFile] as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
@@ -2950,7 +3015,14 @@
     {@const kind = side === "left" ? row.leftKind : row.rightKind}
     {@const mark = side === "left" ? "delete" : "add"}
     <span class="split-no" class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}>{(side === "left" ? row.leftNo : row.rightNo) ?? ""}</span>
-    <span class="split-code" data-side={side} class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}>{#if settings.showDiffMarks && kind === mark}{side === "left" ? "-" : "+"}{/if}{#each paint(side === "left" ? row.left : row.right, file) as token, tokenIndex (`${key}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+    <span class="split-code" data-side={side} class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}><span class="split-text">{#if settings.showDiffMarks && kind === mark}{side === "left" ? "-" : "+"}{/if}{#each paint(side === "left" ? row.left : row.right, file) as token, tokenIndex (`${key}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span></span>
+  {/snippet}
+  {#snippet splitBar(actions = false)}
+    <span class="split-bar-pad"></span>
+    <div class="split-bar" data-bar="left"><div></div></div>
+    <span class="split-bar-pad"></span>
+    <div class="split-bar" data-bar="right"><div></div></div>
+    {#if actions}<span class="split-bar-pad"></span>{/if}
   {/snippet}
   {#snippet searchToggle(key: SearchKey, label: string)}
     <button class="icon-btn search-toggle" class:on={searchOpen[key]} type="button" aria-label={label} aria-pressed={searchOpen[key]} title={label} onmousedown={(event) => event.preventDefault()} onclick={() => toggleSearch(key)}>
@@ -2977,11 +3049,11 @@
   {/snippet}
 
   {#if menu}
-    <div class="menu" style:left="{menu.x}px" style:top="{menu.y}px" role="menu">
+    <div class="menu" use:fitMenu={menu} role="menu">
       {@render menuList(menu.items)}
     </div>
     {#if submenu}
-      <div class="menu" style:left="{submenu.x}px" style:top="{submenu.y}px" role="menu">
+      <div class="menu" use:fitMenu={submenu} role="menu">
         {@render menuList(submenu.items)}
       </div>
     {/if}
@@ -3668,6 +3740,22 @@
   .icon-btn svg,
   .segment svg { width: 16px; height: 16px; }
 
+  .line-icon {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .chrome-divider {
+    width: 1px;
+    height: 16px;
+    margin: 0 2px;
+    background: var(--separator);
+    flex: none;
+  }
+
   .segment {
     display: flex;
     align-items: center;
@@ -3727,22 +3815,6 @@
 
   .tab-close { opacity: 0; }
   .tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
-  .line-icon {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.8;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-
-  .chrome-divider {
-    width: 1px;
-    height: 16px;
-    margin: 0 2px;
-    background: var(--separator);
-    flex: none;
-  }
-
   .glyph {
     font-size: 13px;
     line-height: 1;
@@ -4776,11 +4848,15 @@
     margin: 12px auto;
   }
 
-  .split-row {
+  .diff-body.split {
     --split-no: calc(5ch + 12px);
     display: grid;
     grid-template-columns: var(--split-no) minmax(0, 1fr) var(--split-no) minmax(0, 1fr);
+    align-content: start;
+    overflow-x: hidden;
   }
+  .diff-body.split.actionable { grid-template-columns: var(--split-no) minmax(0, 1fr) var(--split-no) minmax(0, 1fr) auto; }
+  .split-row { display: contents; }
 
   .split-row > span {
     display: block;
@@ -4792,7 +4868,17 @@
 
   .split-row > span.del { background: var(--diff-del); }
   .split-row > span.add { background: var(--diff-add); }
-  .split-row.actionable { grid-template-columns: var(--split-no) minmax(0, 1fr) var(--split-no) minmax(0, 1fr) auto; }
+  .split-code > .split-text { display: inline-block; }
+  .split-code[data-side="left"] > .split-text { transform: translateX(calc(-1 * var(--sx-left, 0px))); }
+  .split-code[data-side="right"] > .split-text { transform: translateX(calc(-1 * var(--sx-right, 0px))); }
+  .split-bar,
+  .split-bar-pad {
+    position: sticky;
+    bottom: -8px;
+  }
+  .split-bar { overflow-x: auto; overflow-y: hidden; }
+  .split-bar > div { height: 1px; }
+  .split-bar-pad + .split-bar + .split-bar-pad { border-left: 1px solid var(--line); }
   .split-row > .split-no {
     padding: 0 6px;
     text-align: right;
