@@ -1220,8 +1220,13 @@
 
   async function savePrefs(close = true) {
     applyToolSettings();
-    settings = await invoke<Settings>("save_settings", { values: settings });
     if (close) dialog = null;
+    if (!inApp()) return;
+    try {
+      settings = await invoke<Settings>("save_settings", { values: settings });
+    } catch (error) {
+      actionError = message(error);
+    }
   }
 
   async function pickFolder() {
