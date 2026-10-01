@@ -2322,7 +2322,6 @@
             {#if mode === "sample"}<span class="ahead">↑5</span>{/if}
           </button>
         </div>
-        {#if repoStats}<p class="empty">{repoStats.branch} · {repoStats.commits} {tr("chrome.commits")} · {repoStats.branches} {tr("chrome.branches")} · ↑{repoStats.ahead} ↓{repoStats.behind}</p>{/if}
         {/if}
         {@render sideHead("remotes", tr("chrome.remotes"))}
         {#if sideOpen("remotes")}
