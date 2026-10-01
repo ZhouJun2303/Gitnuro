@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-merged-branches"
+description = "Enables the merged_branches command without any pre-configured scope."
+commands.allow = ["merged_branches"]
+
+[[permission]]
+identifier = "deny-merged-branches"
+description = "Denies the merged_branches command without any pre-configured scope."
+commands.deny = ["merged_branches"]

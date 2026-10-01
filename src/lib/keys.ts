@@ -36,7 +36,9 @@ export type Shortcut =
   | "discard"
   | "explorer"
   | "terminal"
-  | "filterBranch";
+  | "filterBranch"
+  | "reopen"
+  | "pastePatch";
 
 type Chord = { key: string; ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean };
 
@@ -75,6 +77,8 @@ const commandOnMac = new Set<Shortcut>([
   "explorer",
   "terminal",
   "filterBranch",
+  "reopen",
+  "pastePatch",
 ]);
 
 const base: Array<[Shortcut, Chord[]]> = [
@@ -100,7 +104,7 @@ const base: Array<[Shortcut, Chord[]]> = [
   ["quickFetch", [{ key: "f", ctrl: true, alt: true, shift: true }]],
   ["quickPull", [{ key: "l", ctrl: true, alt: true, shift: true }]],
   ["quickPush", [{ key: "p", ctrl: true, alt: true, shift: true }]],
-  ["tag", [{ key: "t", ctrl: true, shift: true }]],
+  ["tag", [{ key: "t", ctrl: true, alt: true }]],
   ["clone", [{ key: "n", ctrl: true }]],
   ["init", [{ key: "n", ctrl: true, shift: true }]],
   ["changes", [{ key: "1", ctrl: true }]],
@@ -116,6 +120,8 @@ const base: Array<[Shortcut, Chord[]]> = [
   ["explorer", [{ key: "o", ctrl: true, alt: true }]],
   ["terminal", [{ key: "t", ctrl: true, alt: true }]],
   ["filterBranch", [{ key: "a", ctrl: true, shift: true }]],
+  ["reopen", [{ key: "t", ctrl: true, shift: true }]],
+  ["pastePatch", [{ key: "v", ctrl: true, shift: true }]],
 ];
 
 function chords(action: Shortcut, items: Chord[]): Chord[] {

@@ -3,7 +3,7 @@
 //! Lines go to `<settings dir>/logs/awegit-perf.log`. Arguments that may carry
 //! paths, messages, or secrets are not written; only command names, flags, and times.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
@@ -26,6 +26,7 @@ static ON_MAIN: Mutex<Option<(String, Instant)>> = Mutex::new(None);
 static STALLS: AtomicU64 = AtomicU64::new(0);
 static STALL_MAX: AtomicU64 = AtomicU64::new(0);
 static STALL_TOTAL: AtomicU64 = AtomicU64::new(0);
+static ACTIVITY: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,6 +121,14 @@ pub fn write(level: &str, target: &str, message: &str) {
     let line = format!("{now} +{:>9.3}s {level:<5} {target:<6} {message}\n", uptime().as_secs_f64());
     if cfg!(debug_assertions) {
         eprint!("{line}");
+    }
+    if matches!(target, "git" | "cmd" | "stall") {
+        if let Ok(mut activity) = ACTIVITY.lock() {
+            activity.push_back(format!("{level} {target} {message}"));
+            while activity.len() > 80 {
+                activity.pop_front();
+            }
+        }
     }
     if let Ok(mut slot) = FILE.lock() {
         if let Some(handle) = slot.as_mut() {
@@ -276,6 +285,10 @@ pub fn watch_main_thread(app: tauri::AppHandle) {
             }
         })
         .ok();
+}
+
+pub fn activity() -> Vec<String> {
+    ACTIVITY.lock().map(|items| items.iter().cloned().collect()).unwrap_or_default()
 }
 
 pub fn snapshot() -> Snapshot {

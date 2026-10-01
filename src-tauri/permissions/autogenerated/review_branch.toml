@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-review-branch"
+description = "Enables the review_branch command without any pre-configured scope."
+commands.allow = ["review_branch"]
+
+[[permission]]
+identifier = "deny-review-branch"
+description = "Denies the review_branch command without any pre-configured scope."
+commands.deny = ["review_branch"]

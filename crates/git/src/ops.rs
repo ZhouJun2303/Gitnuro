@@ -46,6 +46,9 @@ pub enum Mutation {
         tags: bool,
         #[serde(default)]
         force_with_lease: bool,
+        /// Bare `--force`. Lease stays the default when this is false.
+        #[serde(default)]
+        force: bool,
     },
     Stash {
         #[serde(default)]
@@ -76,6 +79,14 @@ pub enum Mutation {
     /// `git stash show -p`. The patch text is returned to the caller.
     StashPatch {
         name: String,
+    },
+    /// Stash only the listed paths.
+    StashPaths {
+        files: Vec<String>,
+        #[serde(default)]
+        message: String,
+        #[serde(default)]
+        include_untracked: bool,
     },
     Checkout {
         name: String,
@@ -166,6 +177,9 @@ pub enum Mutation {
     WriteGitignore {
         text: String,
     },
+    WriteMailmap {
+        text: String,
+    },
     StageHunk {
         file: String,
         index: u32,
@@ -224,6 +238,11 @@ pub enum Mutation {
         branch: String,
         #[serde(default)]
         force_with_lease: bool,
+        #[serde(default)]
+        force: bool,
+        /// When set, push `branch` to this remote branch name.
+        #[serde(default)]
+        remote_branch: String,
     },
     PullRef {
         remote: String,
@@ -370,7 +389,8 @@ fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             set_upstream,
             tags,
             force_with_lease,
-        } => push(repo, remote, set_upstream, tags, force_with_lease),
+            force,
+        } => push(repo, remote, set_upstream, tags, force_with_lease, force),
         Mutation::Stash { message, include_untracked } => stash(repo, &message, include_untracked),
         Mutation::StashPop { name } => stash_pop(repo, &name),
         Mutation::StashApply { name } => run(repo, &["stash", "apply", check_rev(&name)?]).map(|_| ()),
@@ -380,6 +400,7 @@ fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             run(repo, &["stash", "branch", check_name(&branch)?, check_rev(&name)?]).map(|_| ())
         }
         Mutation::StashPatch { .. } => Ok(()),
+        Mutation::StashPaths { files, message, include_untracked } => stash_paths(repo, &files, &message, include_untracked),
         Mutation::Checkout { name } => run(repo, &["checkout", check_rev(&name)?]).map(|_| ()),
         Mutation::CreateBranch { name, start } => create_branch(repo, &name, start.as_deref()),
         Mutation::DeleteBranch { name, force } => {
@@ -420,6 +441,7 @@ fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         }
         Mutation::Bisect { verb, rev } => bisect(repo, &verb, &rev),
         Mutation::WriteGitignore { text } => write_gitignore(repo, &text),
+        Mutation::WriteMailmap { text } => write_mailmap(repo, &text),
         Mutation::StageHunk { file, index, unstage } => stage_hunk(repo, &file, index, unstage),
         Mutation::StageLine {
             file,
@@ -455,7 +477,9 @@ fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             remote,
             branch,
             force_with_lease,
-        } => push_ref(repo, &remote, &branch, force_with_lease),
+            force,
+            remote_branch,
+        } => push_ref(repo, &remote, &branch, force_with_lease, force, &remote_branch),
         Mutation::PullRef {
             remote,
             branch,
@@ -545,6 +569,7 @@ fn push(
     set_upstream: bool,
     tags: bool,
     force_with_lease: bool,
+    force: bool,
 ) -> Result<(), Error> {
     let remote = optional_name(remote)?;
     let mut args = vec!["push"];
@@ -554,7 +579,9 @@ fn push(
     if tags {
         args.push("--tags");
     }
-    if force_with_lease {
+    if force {
+        args.push("--force");
+    } else if force_with_lease {
         args.push("--force-with-lease");
     }
     if let Some(remote) = remote.as_deref() {
@@ -652,6 +679,40 @@ fn write_gitignore(repo: &Path, text: &str) -> Result<(), Error> {
         path: ".gitignore".into(),
         source,
     })
+}
+
+fn write_mailmap(repo: &Path, text: &str) -> Result<(), Error> {
+    if text.contains('\0') {
+        return Err(Error::Git("mailmap contains a null".into()));
+    }
+    std::fs::write(repo.join(".mailmap"), text).map_err(|source| Error::Read {
+        path: ".mailmap".into(),
+        source,
+    })
+}
+
+fn stash_paths(repo: &Path, files: &[String], message: &str, include_untracked: bool) -> Result<(), Error> {
+    if files.is_empty() {
+        return Err(Error::Git("stash needs a path".into()));
+    }
+    let message = message.trim();
+    if !message.is_empty() && (message.starts_with('-') || message.contains(['\n', '\r'])) {
+        return Err(Error::Rev(message.to_string()));
+    }
+    let mut owned = vec!["stash".to_string(), "push".to_string()];
+    if include_untracked {
+        owned.push("--include-untracked".into());
+    }
+    if !message.is_empty() {
+        owned.push("-m".into());
+        owned.push(message.to_string());
+    }
+    owned.push("--".into());
+    for file in files {
+        owned.push(check_path(file)?.to_string());
+    }
+    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
+    run(repo, &args).map(|_| ())
 }
 
 fn create_branch(repo: &Path, name: &str, start: Option<&str>) -> Result<(), Error> {
@@ -853,20 +914,17 @@ fn flow_kind(kind: &str) -> &'static str {
     match kind {
         "release" => "release",
         "hotfix" => "hotfix",
+        "support" => "support",
         _ => "feature",
     }
 }
 
 fn git_flow_start(repo: &Path, name: &str, kind: &str) -> Result<(), Error> {
     let kind = flow_kind(kind);
-    let (prefix_key, default_prefix) = match kind {
-        "release" => ("gitflow.prefix.release", "release/"),
-        "hotfix" => ("gitflow.prefix.hotfix", "hotfix/"),
-        _ => ("gitflow.prefix.feature", "feature/"),
-    };
+    let (prefix_key, default_prefix) = flow_prefix(kind);
     let prefix = config_get(repo, prefix_key, default_prefix);
     let branch = prefixed_branch(&prefix, name)?;
-    let base_name = if kind == "hotfix" {
+    let base_name = if kind == "hotfix" || kind == "support" {
         config_get(repo, "gitflow.branch.master", "main")
     } else {
         config_get(repo, "gitflow.branch.develop", "develop")
@@ -881,13 +939,15 @@ fn git_flow_start(repo: &Path, name: &str, kind: &str) -> Result<(), Error> {
 
 fn git_flow_finish(repo: &Path, name: &str, kind: &str) -> Result<(), Error> {
     let kind = flow_kind(kind);
-    let (prefix_key, default_prefix) = match kind {
-        "release" => ("gitflow.prefix.release", "release/"),
-        "hotfix" => ("gitflow.prefix.hotfix", "hotfix/"),
-        _ => ("gitflow.prefix.feature", "feature/"),
-    };
+    let (prefix_key, default_prefix) = flow_prefix(kind);
     let prefix = config_get(repo, prefix_key, default_prefix);
     let branch = prefixed_branch(&prefix, name)?;
+    if kind == "support" {
+        let master = config_get(repo, "gitflow.branch.master", "main");
+        run(repo, &["checkout", &master])?;
+        with_editor(repo, &["merge", "--no-ff", "--no-edit", &branch])?;
+        return run(repo, &["branch", "-d", &branch]).map(|_| ());
+    }
     if kind == "feature" {
         let develop = config_get(repo, "gitflow.branch.develop", "develop");
         run(repo, &["checkout", &develop])?;
@@ -907,6 +967,15 @@ fn git_flow_finish(repo: &Path, name: &str, kind: &str) -> Result<(), Error> {
         with_editor(repo, &["merge", "--no-ff", "--no-edit", &branch])?;
     }
     run(repo, &["branch", "-d", &branch]).map(|_| ())
+}
+
+fn flow_prefix(kind: &str) -> (&'static str, &'static str) {
+    match kind {
+        "release" => ("gitflow.prefix.release", "release/"),
+        "hotfix" => ("gitflow.prefix.hotfix", "hotfix/"),
+        "support" => ("gitflow.prefix.support", "support/"),
+        _ => ("gitflow.prefix.feature", "feature/"),
+    }
 }
 
 fn prefixed_branch(prefix: &str, name: &str) -> Result<String, Error> {
@@ -1272,12 +1341,19 @@ fn checkout_remote(repo: &Path, remote: &str, branch: &str) -> Result<(), Error>
     }
 }
 
-fn push_ref(repo: &Path, remote: &str, branch: &str, force_with_lease: bool) -> Result<(), Error> {
+fn push_ref(repo: &Path, remote: &str, branch: &str, force_with_lease: bool, force: bool, remote_branch: &str) -> Result<(), Error> {
     let remote = check_name(remote)?;
     let branch = check_name(branch)?;
-    let spec = format!("HEAD:{branch}");
+    let remote_branch = remote_branch.trim();
+    let spec = if remote_branch.is_empty() {
+        format!("HEAD:{branch}")
+    } else {
+        format!("{branch}:{}", check_name(remote_branch)?)
+    };
     let mut args = vec!["push"];
-    if force_with_lease {
+    if force {
+        args.push("--force");
+    } else if force_with_lease {
         args.push("--force-with-lease");
     }
     args.push(remote);
@@ -1444,6 +1520,15 @@ pub struct RepoFacts {
     pub weekday: Vec<u32>,
     pub hour: Vec<u32>,
     pub lfs: String,
+    pub hot: Vec<HotPath>,
+}
+
+/// A path that shows up often in recent history. Used by the statistics treemap.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HotPath {
+    pub path: String,
+    pub count: u32,
 }
 
 pub fn repo_facts(repo: &Path) -> Result<RepoFacts, Error> {
@@ -1454,6 +1539,7 @@ pub fn repo_facts(repo: &Path) -> Result<RepoFacts, Error> {
     let head_message = text_of(repo, &["log", "-1", "--format=%B"]);
     let (weekday, hour) = activity(repo);
     let lfs = text_of(repo, &["lfs", "ls-files"]);
+    let hot = hot_paths(repo);
     Ok(RepoFacts {
         ignored,
         bisect_active,
@@ -1463,7 +1549,93 @@ pub fn repo_facts(repo: &Path) -> Result<RepoFacts, Error> {
         weekday,
         hour,
         lfs,
+        hot,
     })
+}
+
+fn hot_paths(repo: &Path) -> Vec<HotPath> {
+    let mut counts = std::collections::BTreeMap::<String, u32>::new();
+    for line in text_of(repo, &["log", "-n", "400", "--name-only", "--pretty=format:"]).lines() {
+        let path = line.trim();
+        if path.is_empty() {
+            continue;
+        }
+        *counts.entry(path.to_string()).or_default() += 1;
+    }
+    let mut hot: Vec<HotPath> = counts.into_iter().map(|(path, count)| HotPath { path, count }).collect();
+    hot.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.path.cmp(&b.path)));
+    hot.truncate(24);
+    hot
+}
+
+/// `-S` or `-G` search. The needle is one argv token, not a shell string.
+pub fn search_commits(repo: &Path, kind: &str, needle: &str) -> Result<Vec<SearchHit>, Error> {
+    let flag = if kind == "G" || kind == "g" { "-G" } else { "-S" };
+    let needle = needle.trim();
+    if needle.is_empty() || needle.starts_with('-') || needle.contains(['\n', '\r', '\0']) {
+        return Err(Error::Rev(needle.to_string()));
+    }
+    let output = run(repo, &["log", "-n", "80", "--format=%H%x09%h%x09%s", flag, needle])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(text
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.splitn(3, '\t');
+            Some(SearchHit {
+                id: parts.next()?.to_string(),
+                short_id: parts.next()?.to_string(),
+                summary: parts.next().unwrap_or("").to_string(),
+            })
+        })
+        .collect())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    pub id: String,
+    pub short_id: String,
+    pub summary: String,
+}
+
+/// `git merge-tree` for a cherry-pick. A conflict still returns the name list.
+pub fn cherry_preview(repo: &Path, rev: &str) -> Result<String, Error> {
+    let rev = check_rev(rev)?;
+    let output = run_output(repo, &["merge-tree", "--write-tree", "--name-only", "HEAD", rev])?;
+    let mut text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if !err.is_empty() {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&err);
+        }
+    }
+    Ok(text)
+}
+
+/// Local branches already contained in `HEAD`, excluding the current one.
+pub fn merged_branches(repo: &Path) -> Result<Vec<String>, Error> {
+    let output = run(repo, &["branch", "--merged", "HEAD"])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('*'))
+        .map(|line| line.trim_start_matches("+ ").to_string())
+        .collect())
+}
+
+/// Commits whose patch introduces or removes `text` in one file.
+pub fn pick_history(repo: &Path, file: &str, text: &str) -> Result<String, Error> {
+    let file = check_path(file)?;
+    let text = text.trim();
+    if text.is_empty() || text.starts_with('-') || text.contains(['\n', '\r', '\0']) {
+        return Err(Error::Git("pick a single line".into()));
+    }
+    let output = run_output(repo, &["log", "-n", "40", "--format=%h %s", "-S", text, "--", file])?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 fn lines_of(repo: &Path, args: &[&str], limit: usize) -> Vec<String> {

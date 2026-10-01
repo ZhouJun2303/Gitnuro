@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 pub use change::{
     blob_preview, blob_view, commit, conflict_sides, discard_hunk, discard_line, file_diff, file_diff_with, file_preview,
-    launch_diff_tool, launch_merge_tool, resolve_conflict, stage_all, stage_hunk, stage_line, stage_paths, staged_diff,
+    launch_diff_tool, launch_merge_tool, range_diff, resolve_conflict, stage_all, stage_hunk, stage_line, stage_paths, staged_diff,
     unstage_all, unstage_paths, workspace_diff, BlobView, CommitRequest, ConflictSides, DiffLine, DiffLineKind, FileDiff,
     FilePreview,
 };
@@ -23,7 +23,10 @@ pub use model::{
     RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
 pub use cli::{cancel_running, configure, set_http_proxy, set_passphrase, set_trace, stop_process_tree, use_bundled_git, Session, Trace};
-pub use ops::{approve_credential, perform, repo_facts, scan_repositories, set_repo_author, Mutation, RebaseStep, RepoFacts, ResetMode};
+pub use ops::{
+    approve_credential, cherry_preview, merged_branches, perform, pick_history, repo_facts, scan_repositories, search_commits,
+    set_repo_author, HotPath, Mutation, RebaseStep, RepoFacts, ResetMode, SearchHit,
+};
 
 use gix::bstr::BStr;
 use serde::Serialize;

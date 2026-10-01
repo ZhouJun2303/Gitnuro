@@ -91,6 +91,62 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
     Ok(split_message(&answer))
 }
 
+/// Review the diff of `HEAD` against `base` with the same model as commit messages.
+pub fn review(repo: &std::path::Path, settings: &Settings, base: &str) -> Result<String, String> {
+    if !settings.ai_enabled {
+        return Err("AI commit messages are turned off.".into());
+    }
+    let base = if base.trim().is_empty() { "HEAD~1" } else { base.trim() };
+    if base.contains(['\n', '\r', '\0']) || base.starts_with('-') {
+        return Err("base revision is missing".into());
+    }
+    let output = awegit_git::range_diff(repo, base).map_err(|error| error.to_string())?;
+    if output.trim().is_empty() {
+        return Err("That range has no diff.".into());
+    }
+    let limit = if settings.ai_max_chars == 0 { 12_000 } else { settings.ai_max_chars as usize };
+    let diff = if output.len() > limit { output[..limit].to_string() } else { output };
+    let key = ai_key(settings)?;
+    let base_url = settings.ai_base_url.trim().trim_end_matches('/').to_string();
+    let model = if settings.ai_model.trim().is_empty() { "grok-4.7".to_string() } else { settings.ai_model.trim().to_string() };
+    let prompt = format!("Review this git diff. List real bugs, risky changes, and missing tests. Be concise.\n\n{diff}");
+    let body = if base_url.contains("api.x.ai") {
+        serde_json::json!({ "model": model, "input": prompt })
+    } else {
+        serde_json::json!({
+            "model": model,
+            "messages": [
+                { "role": "system", "content": "You review git diffs. Mention concrete risks only." },
+                { "role": "user", "content": prompt }
+            ]
+        })
+    };
+    let url = if base_url.contains("api.x.ai") { format!("{base_url}/responses") } else { format!("{base_url}/chat/completions") };
+    let payload = serde_json::to_string(&body).map_err(|error| error.to_string())?;
+    let text = post_json(&url, &key, &payload)?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| text.clone())?;
+    if let Some(message) = value.pointer("/error/message").and_then(|item| item.as_str()) {
+        return Err(message.to_string());
+    }
+    let answer = extract_text(&value);
+    if answer.trim().is_empty() {
+        return Err("The model returned an empty review.".into());
+    }
+    Ok(answer)
+}
+
+fn ai_key(settings: &Settings) -> Result<String, String> {
+    let key = if settings.ai_api_key.trim().is_empty() {
+        std::env::var("XAI_API_KEY").or_else(|_| std::env::var("OPENAI_API_KEY")).unwrap_or_default()
+    } else {
+        settings.ai_api_key.trim().to_string()
+    };
+    if key.is_empty() {
+        return Err("Add an API key in Preferences, or set XAI_API_KEY or OPENAI_API_KEY.".into());
+    }
+    Ok(key)
+}
+
 fn post_json(url: &str, key: &str, payload: &str) -> Result<String, String> {
     let mut child = std::process::Command::new("curl")
         .args([

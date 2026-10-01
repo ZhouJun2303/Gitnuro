@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    file_diff, file_preview, in_progress, perform, repository_refs, stage_hunk, stage_line, status, stop_process_tree,
+    file_diff, file_preview, in_progress, perform, repository_refs, search_commits, stage_hunk, stage_line, status, stop_process_tree,
     InProgress, Mutation, RebaseStep, ResetMode,
 };
 
@@ -99,6 +99,7 @@ fn fetch_push_and_fast_forward() {
             set_upstream: true,
             tags: false,
             force_with_lease: false,
+            force: false,
         },
     )
     .unwrap();
@@ -126,6 +127,7 @@ fn fetch_push_and_fast_forward() {
             set_upstream: false,
             tags: false,
             force_with_lease: false,
+            force: false,
         },
     )
     .unwrap();
@@ -555,6 +557,7 @@ fn deletes_a_remote_branch() {
             set_upstream: true,
             tags: false,
             force_with_lease: false,
+            force: false,
         },
     )
     .unwrap();
@@ -800,6 +803,45 @@ fn restore_file_checks_out_one_path() {
     .unwrap();
     let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
     assert!(text.contains("base"), "{text}");
+}
+
+#[test]
+fn write_mailmap_replaces_the_root_file() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    perform(&repo.path, Mutation::WriteMailmap { text: "Alice <a@ex> <b@ex>\n".into() }).unwrap();
+    let text = fs::read_to_string(repo.path.join(".mailmap")).unwrap();
+    assert_eq!(text, "Alice <a@ex> <b@ex>\n");
+}
+
+#[test]
+fn stash_paths_keeps_the_other_file() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    commit_file(&repo, "b.txt", "b\n", "base b");
+    fs::write(repo.path.join("a.txt"), "changed\n").unwrap();
+    fs::write(repo.path.join("b.txt"), "changed b\n").unwrap();
+    perform(
+        &repo.path,
+        Mutation::StashPaths {
+            files: vec!["a.txt".into()],
+            message: "only a".into(),
+            include_untracked: false,
+        },
+    )
+    .unwrap();
+    let a = fs::read_to_string(repo.path.join("a.txt")).unwrap();
+    let b = fs::read_to_string(repo.path.join("b.txt")).unwrap();
+    assert!(a.contains("a\n") || a == "a\n", "{a}");
+    assert!(b.contains("changed"), "{b}");
+}
+
+#[test]
+fn search_commits_finds_added_text() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "needle-token\n", "base");
+    let hits = search_commits(&repo.path, "S", "needle-token").unwrap();
+    assert!(hits.iter().any(|hit| hit.summary == "base"), "{hits:?}");
 }
 
 #[test]

@@ -142,11 +142,8 @@ pub fn mark_read(github_token: &str, id: &str) -> Result<(), String> {
 }
 
 pub fn create_repo(github_token: &str, name: &str, private_repo: bool) -> Result<String, String> {
-    let name = name.trim();
-    let safe = !name.is_empty()
-        && !name.starts_with('-')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-    if github_token.trim().is_empty() || !safe {
+    let name = repo_name(name)?;
+    if github_token.trim().is_empty() {
         return Err("repository name is missing".into());
     }
     let body = format!(r#"{{"name":"{name}","private":{private_repo}}}"#);
@@ -162,6 +159,182 @@ pub fn create_repo(github_token: &str, name: &str, private_repo: bool) -> Result
     )?;
     let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
     value.get("html_url").and_then(|item| item.as_str()).map(str::to_string).ok_or_else(|| "GitHub did not return a repository".into())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceStart {
+    pub verification_uri: String,
+    pub user_code: String,
+}
+
+#[derive(Clone)]
+struct PendingDevice {
+    forge: String,
+    client_id: String,
+    host: String,
+    device_code: String,
+}
+
+static PENDING: std::sync::Mutex<Option<PendingDevice>> = std::sync::Mutex::new(None);
+
+pub fn create_hosted(forge: &str, token: &str, host: &str, name: &str, private_repo: bool, org: &str) -> Result<String, String> {
+    let name = repo_name(name)?;
+    let token = token.trim();
+    if token.is_empty() {
+        return Err("token is missing".into());
+    }
+    match forge {
+        "gitlab" => {
+            let host = if host.trim().is_empty() { "gitlab.com".to_string() } else { host.trim().to_string() };
+            let visibility = if private_repo { "private" } else { "public" };
+            let body = format!(r#"{{"name":"{name}","visibility":"{visibility}"}}"#);
+            let text = http_send(
+                "POST",
+                &format!("https://{host}/api/v4/projects"),
+                &[("PRIVATE-TOKEN", token), ("Content-Type", "application/json")],
+                Some(&body),
+            )?;
+            json_url(&text, &["web_url"])
+        }
+        "bitbucket" => {
+            let workspace = org.trim();
+            if !repo_name(workspace).is_ok() {
+                return Err("Bitbucket needs a workspace".into());
+            }
+            let body = format!(r#"{{"scm":"git","is_private":{private_repo}}}"#);
+            let text = http_send(
+                "POST",
+                &format!("https://api.bitbucket.org/2.0/repositories/{workspace}/{name}"),
+                &[("Authorization", &format!("Bearer {token}")), ("Content-Type", "application/json")],
+                Some(&body),
+            )?;
+            let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+            value
+                .pointer("/links/html/href")
+                .and_then(|item| item.as_str())
+                .map(str::to_string)
+                .ok_or_else(|| "Bitbucket did not return a repository".into())
+        }
+        "azure" => {
+            let org = org.trim();
+            let project = if host.trim().is_empty() { name.as_str() } else { host.trim() };
+            if repo_name(org).is_err() || repo_name(project).is_err() {
+                return Err("Azure needs an organization and a project".into());
+            }
+            let body = format!(r#"{{"name":"{name}"}}"#);
+            let url = format!("https://dev.azure.com/{org}/{project}/_apis/git/repositories?api-version=7.1");
+            let text = http_send(
+                "POST",
+                &url,
+                &[("Authorization", &format!("Basic {}", basic_token(token))), ("Content-Type", "application/json")],
+                Some(&body),
+            )?;
+            json_url(&text, &["webUrl", "remoteUrl"])
+        }
+        _ => create_repo(token, &name, private_repo),
+    }
+}
+
+pub fn device_start(forge: &str, client_id: &str, host: &str) -> Result<DeviceStart, String> {
+    let client_id = client_id.trim();
+    if client_id.is_empty() || client_id.contains(['\n', ' ', '&']) {
+        return Err("OAuth client id is missing".into());
+    }
+    let host = if host.trim().is_empty() {
+        if forge == "gitlab" { "gitlab.com" } else { "github.com" }
+    } else {
+        host.trim()
+    };
+    let (url, body) = if forge == "gitlab" {
+        (format!("https://{host}/oauth/authorize_device"), format!("client_id={client_id}&scope=api"))
+    } else {
+        ("https://github.com/login/device/code".into(), format!("client_id={client_id}&scope=repo"))
+    };
+    let text = http_send("POST", &url, &[("Accept", "application/json"), ("Content-Type", "application/x-www-form-urlencoded")], Some(&body))?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let device_code = value.get("device_code").and_then(|item| item.as_str()).unwrap_or("").to_string();
+    let user_code = value.get("user_code").and_then(|item| item.as_str()).unwrap_or("").to_string();
+    let verification_uri = value
+        .get("verification_uri")
+        .or_else(|| value.get("verification_url"))
+        .and_then(|item| item.as_str())
+        .unwrap_or("")
+        .to_string();
+    if device_code.is_empty() || user_code.is_empty() {
+        return Err(text);
+    }
+    if let Ok(mut slot) = PENDING.lock() {
+        *slot = Some(PendingDevice { forge: forge.to_string(), client_id: client_id.to_string(), host: host.to_string(), device_code });
+    }
+    Ok(DeviceStart { verification_uri, user_code })
+}
+
+/// Returns the access token, or `pending` while the user has not finished the browser step.
+pub fn device_poll() -> Result<String, String> {
+    let pending = PENDING.lock().map_err(|_| "device login was interrupted".to_string())?.clone();
+    let Some(pending) = pending else {
+        return Err("start a device login first".into());
+    };
+    let body = format!(
+        "client_id={}&device_code={}&grant_type=urn:ietf:params:oauth:grant-type:device_code",
+        pending.client_id, pending.device_code
+    );
+    let url = if pending.forge == "gitlab" {
+        format!("https://{}/oauth/token", pending.host)
+    } else {
+        "https://github.com/login/oauth/access_token".into()
+    };
+    let text = http_send("POST", &url, &[("Accept", "application/json"), ("Content-Type", "application/x-www-form-urlencoded")], Some(&body))?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| text.clone())?;
+    if let Some(token) = value.get("access_token").and_then(|item| item.as_str()) {
+        if let Ok(mut slot) = PENDING.lock() {
+            *slot = None;
+        }
+        return Ok(token.to_string());
+    }
+    let error = value.get("error").and_then(|item| item.as_str()).unwrap_or("");
+    if error == "authorization_pending" || error == "slow_down" {
+        return Ok("pending".into());
+    }
+    Err(if error.is_empty() { text } else { error.to_string() })
+}
+
+fn repo_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    let safe = !name.is_empty() && !name.starts_with('-') && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if safe { Ok(name.to_string()) } else { Err("repository name is missing".into()) }
+}
+
+fn json_url(text: &str, keys: &[&str]) -> Result<String, String> {
+    let value: serde_json::Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
+    for key in keys {
+        if let Some(url) = value.get(*key).and_then(|item| item.as_str()) {
+            return Ok(url.to_string());
+        }
+    }
+    Err("the host did not return a repository".into())
+}
+
+fn basic_token(token: &str) -> String {
+    let raw = format!(":{token}");
+    base64_encode(raw.as_bytes())
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0] as u32;
+        let second = chunk.get(1).copied().unwrap_or(0) as u32;
+        let third = chunk.get(2).copied().unwrap_or(0) as u32;
+        let value = (first << 16) | (second << 8) | third;
+        out.push(TABLE[((value >> 18) & 63) as usize] as char);
+        out.push(TABLE[((value >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 { TABLE[((value >> 6) & 63) as usize] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TABLE[(value & 63) as usize] as char } else { '=' });
+    }
+    out
 }
 
 fn http_get(url: &str, headers: &[(&str, &str)]) -> Result<String, String> {

@@ -203,6 +203,28 @@ pub struct Settings {
     /// `folder<TAB>label` names for repository-manager groups.
     #[serde(default)]
     pub group_names: Vec<String>,
+    #[serde(default)]
+    pub show_whitespace: bool,
+    /// `tree`, `list`, or `combined`. Empty follows `tree_files`.
+    #[serde(default)]
+    pub file_layout: String,
+    /// `path<TAB>label` names shown on tabs.
+    #[serde(default)]
+    pub tab_labels: Vec<String>,
+    /// `path<TAB>#rrggbb` colors shown on tabs.
+    #[serde(default)]
+    pub tab_colors: Vec<String>,
+    #[serde(default)]
+    pub accounts: Vec<Account>,
+    #[serde(default)]
+    pub bitbucket_token: String,
+    #[serde(default)]
+    pub azure_token: String,
+    #[serde(default)]
+    pub azure_org: String,
+    /// OAuth client id for a device-code login. Empty keeps token paste.
+    #[serde(default)]
+    pub oauth_client_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,6 +248,25 @@ pub struct CommandRecord {
     /// repository, commit, branch, or file.
     pub target: String,
     pub command: String,
+    /// Shown before the command runs. The answer replaces `${input}`.
+    #[serde(default)]
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Account {
+    pub id: String,
+    /// `github`, `gitlab`, `bitbucket`, or `azure`.
+    pub forge: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub token: String,
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub client_id: String,
 }
 
 fn theme_default() -> String {
@@ -394,6 +435,15 @@ impl Default for Settings {
             pinned_refs: Vec::new(),
             source_directories: Vec::new(),
             group_names: Vec::new(),
+            show_whitespace: false,
+            file_layout: String::new(),
+            tab_labels: Vec::new(),
+            tab_colors: Vec::new(),
+            accounts: Vec::new(),
+            bitbucket_token: String::new(),
+            azure_token: String::new(),
+            azure_org: String::new(),
+            oauth_client_id: String::new(),
         }
     }
 }

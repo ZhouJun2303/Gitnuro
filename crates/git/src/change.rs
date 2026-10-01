@@ -426,6 +426,23 @@ pub fn file_diff(repo: &Path, path: &str, staged: bool) -> Result<FileDiff, Erro
 /// `context` is the number of unchanged lines around each hunk. A large value shows the whole file.
 pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignore_space: bool) -> Result<FileDiff, Error> {
     let path = check_path(path)?;
+    if let Ok(meta) = std::fs::metadata(repo.join(path)) {
+        if meta.is_file() && meta.len() > 2_000_000 {
+            return Ok(FileDiff {
+                path: path.to_string(),
+                staged,
+                binary: true,
+                truncated: true,
+                lines: vec![DiffLine {
+                    kind: DiffLineKind::Meta,
+                    text: "large file skipped".into(),
+                    stage_at: None,
+                    work_at: None,
+                }],
+                hunks: 0,
+            });
+        }
+    }
     let unified = format!("--unified={}", context.min(1_000_000));
     let mut args = vec!["diff", "--no-ext-diff", "--no-color", unified.as_str()];
     if ignore_space {
@@ -443,6 +460,17 @@ pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignor
     }
     let mut parsed = parse_diff(path, staged, &text);
     parsed.hunks = zero_hunks(repo, path, staged).unwrap_or(0);
+    if text.contains("git-lfs.github.com/spec") {
+        parsed.lines.insert(
+            0,
+            DiffLine {
+                kind: DiffLineKind::Meta,
+                text: "Git LFS pointer".into(),
+                stage_at: None,
+                work_at: None,
+            },
+        );
+    }
     Ok(parsed)
 }
 
@@ -456,6 +484,17 @@ fn zero_hunks(repo: &Path, path: &str, staged: bool) -> Result<u32, Error> {
     let output = run(repo, &args)?;
     let text = String::from_utf8_lossy(&output.stdout);
     Ok(text.lines().filter(|line| line.starts_with("@@")).count() as u32)
+}
+
+/// Diff from `base` to `HEAD` using the three-dot form.
+pub fn range_diff(repo: &Path, base: &str) -> Result<String, Error> {
+    let base = base.trim();
+    if base.is_empty() || base.starts_with('-') || base.contains(['\n', '\r', '\0', ' ']) {
+        return Err(Error::Rev(base.to_string()));
+    }
+    let spec = format!("{base}...HEAD");
+    let output = run(repo, &["diff", "--no-color", "--no-ext-diff", &spec])?;
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Staged diff only. Commit suggestions must not describe unstaged work.
@@ -751,6 +790,13 @@ fn preview_from_bytes(bytes: &[u8]) -> Option<FilePreview> {
     if bytes.len() > 8_000_000 {
         return None;
     }
+    if let Some(bmp) = tga_to_bmp(bytes) {
+        return Some(FilePreview {
+            mime: "image/bmp".into(),
+            data_url: format!("data:image/bmp;base64,{}", base64_encode(&bmp)),
+            animated: false,
+        });
+    }
     let (mime, animated) = image_kind(bytes)?;
     Some(FilePreview {
         mime: mime.into(),
@@ -861,7 +907,57 @@ fn image_kind(bytes: &[u8]) -> Option<(&'static str, bool)> {
     if bytes.starts_with(b"BM") {
         return Some(("image/bmp", false));
     }
+    if bytes.starts_with(b"%PDF") {
+        return Some(("application/pdf", false));
+    }
     None
+}
+
+/// Uncompressed true-color TGA (type 2, 24 or 32 bits) as a bottom-up BMP.
+fn tga_to_bmp(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() < 18 || bytes[2] != 2 {
+        return None;
+    }
+    let id_len = bytes[0] as usize;
+    let bpp = bytes[16];
+    if bpp != 24 && bpp != 32 {
+        return None;
+    }
+    let width = u16::from_le_bytes(bytes.get(12..14)?.try_into().ok()?) as usize;
+    let height = u16::from_le_bytes(bytes.get(14..16)?.try_into().ok()?) as usize;
+    if width == 0 || height == 0 || width > 4096 || height > 4096 {
+        return None;
+    }
+    let pixel = (bpp / 8) as usize;
+    let start = 18 + id_len;
+    let need = width.checked_mul(height)?.checked_mul(pixel)?;
+    let pixels = bytes.get(start..start + need)?;
+    let top_origin = bytes[17] & 0x20 != 0;
+    let row_stride = (width * 3 + 3) & !3;
+    let pixel_bytes = row_stride * height;
+    let mut bmp = vec![0u8; 54 + pixel_bytes];
+    bmp[0] = b'B';
+    bmp[1] = b'M';
+    let size = bmp.len() as u32;
+    bmp[2..6].copy_from_slice(&size.to_le_bytes());
+    bmp[10..14].copy_from_slice(&54u32.to_le_bytes());
+    bmp[14..18].copy_from_slice(&40u32.to_le_bytes());
+    bmp[18..22].copy_from_slice(&(width as u32).to_le_bytes());
+    bmp[22..26].copy_from_slice(&(height as u32).to_le_bytes());
+    bmp[26..28].copy_from_slice(&1u16.to_le_bytes());
+    bmp[28..30].copy_from_slice(&24u16.to_le_bytes());
+    bmp[34..38].copy_from_slice(&(pixel_bytes as u32).to_le_bytes());
+    for y in 0..height {
+        let src_y = if top_origin { height - 1 - y } else { y };
+        for x in 0..width {
+            let src = (src_y * width + x) * pixel;
+            let dst = 54 + y * row_stride + x * 3;
+            bmp[dst] = pixels[src];
+            bmp[dst + 1] = pixels.get(src + 1).copied()?;
+            bmp[dst + 2] = pixels.get(src + 2).copied()?;
+        }
+    }
+    Some(bmp)
 }
 
 fn base64_encode(bytes: &[u8]) -> String {

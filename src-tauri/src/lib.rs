@@ -312,6 +312,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::StashRename { .. } => "stashRename",
         awegit_git::Mutation::StashBranch { .. } => "stashBranch",
         awegit_git::Mutation::StashPatch { .. } => "stashPatch",
+        awegit_git::Mutation::StashPaths { .. } => "stashPaths",
         awegit_git::Mutation::Checkout { .. } => "checkout",
         awegit_git::Mutation::CreateBranch { .. } => "createBranch",
         awegit_git::Mutation::DeleteBranch { .. } => "deleteBranch",
@@ -331,6 +332,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::RestoreFile { .. } => "restoreFile",
         awegit_git::Mutation::Bisect { .. } => "bisect",
         awegit_git::Mutation::WriteGitignore { .. } => "writeGitignore",
+        awegit_git::Mutation::WriteMailmap { .. } => "writeMailmap",
         awegit_git::Mutation::StageHunk { .. } => "stageHunk",
         awegit_git::Mutation::StageLine { .. } => "stageLine",
         awegit_git::Mutation::StagePaths { .. } => "stagePaths",
@@ -379,14 +381,17 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
     let text = match request {
         Mutation::Fetch { remote, prune, tags } => join([opt(remote), flag("prune", *prune), flag("tags", *tags)]),
         Mutation::Pull { rebase, autostash } => join([flag("rebase", *rebase), flag("autostash", *autostash)]),
-        Mutation::Push { remote, set_upstream, tags, force_with_lease } => {
-            join([opt(remote), flag("setUpstream", *set_upstream), flag("tags", *tags), flag("forceWithLease", *force_with_lease)])
+        Mutation::Push { remote, set_upstream, tags, force_with_lease, force } => {
+            join([opt(remote), flag("setUpstream", *set_upstream), flag("tags", *tags), flag("forceWithLease", *force_with_lease), flag("force", *force)])
         }
         Mutation::Stash { message, include_untracked } => join([bytes("message", message), flag("untracked", *include_untracked)]),
         Mutation::StashPop { name } => scrub(name),
         Mutation::StashApply { name } | Mutation::StashDrop { name } | Mutation::StashPatch { name } => scrub(name),
         Mutation::StashRename { name, message } => join([scrub(name), bytes("message", message)]),
         Mutation::StashBranch { name, branch } => join([scrub(name), scrub(branch)]),
+        Mutation::StashPaths { files, message, include_untracked } => {
+            join([files.iter().cloned().map(|file| scrub(&file)).collect::<Vec<_>>().join(","), bytes("message", message), flag("untracked", *include_untracked)])
+        }
         Mutation::Checkout { name } => scrub(name),
         Mutation::DeleteBranch { name, force } => join([scrub(name), flag("force", *force)]),
         Mutation::CreateBranch { name, start } => join([scrub(name), opt(start)]),
@@ -406,7 +411,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::DeleteRemoteTag { remote, name } => join([scrub(remote), scrub(name)]),
         Mutation::RestoreFile { rev, file } => join([scrub(rev), scrub(file)]),
         Mutation::Bisect { verb, rev } => join([scrub(verb), scrub(rev)]),
-        Mutation::WriteGitignore { text } => format!("bytes={}", text.len()),
+        Mutation::WriteGitignore { text } | Mutation::WriteMailmap { text } => format!("bytes={}", text.len()),
         Mutation::StageHunk { file, index, unstage } => join([scrub(file), format!("hunk={index}"), flag("unstage", *unstage)]),
         Mutation::StageLine { file, unstage, .. } => join([scrub(file), flag("unstage", *unstage)]),
         Mutation::StagePaths { files, unstage } => join([files.iter().cloned().map(|file| scrub(&file)).collect::<Vec<_>>().join(","), flag("unstage", *unstage)]),
@@ -715,9 +720,22 @@ fn launch_tool(path: Option<String>, kind: String, file: String) -> Result<(), S
 }
 
 #[tauri::command]
+fn account_token(values: &settings::Settings, forge_name: &str, fallback: &str) -> String {
+    if !fallback.trim().is_empty() {
+        return fallback.to_string();
+    }
+    values
+        .accounts
+        .iter()
+        .find(|item| item.forge == forge_name && !item.token.trim().is_empty())
+        .map(|item| item.token.clone())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
 fn forge_notifications() -> Result<Vec<forge::Notice>, String> {
     let values = settings::load()?;
-    forge::notifications(&values.github_token)
+    forge::notifications(&account_token(&values, "github", &values.github_token))
 }
 
 #[tauri::command]
@@ -732,7 +750,12 @@ fn forge_pulls(path: Option<String>) -> Result<Vec<forge::PullRequest>, String> 
         .filter(|output| output.status.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .unwrap_or_default();
-    forge::pulls(&url, &values.github_token, &values.gitlab_token, &values.gitlab_host)
+    forge::pulls(
+        &url,
+        &account_token(&values, "github", &values.github_token),
+        &account_token(&values, "gitlab", &values.gitlab_token),
+        &values.gitlab_host,
+    )
 }
 
 #[tauri::command]
@@ -749,13 +772,13 @@ fn scan_repositories(root: String) -> Result<Vec<String>, String> {
 #[tauri::command]
 fn mark_notification(id: String) -> Result<(), String> {
     let values = settings::load()?;
-    forge::mark_read(&values.github_token, &id)
+    forge::mark_read(&account_token(&values, "github", &values.github_token), &id)
 }
 
 #[tauri::command]
 fn create_github_repo(name: String, private_repo: bool) -> Result<String, String> {
     let values = settings::load()?;
-    forge::create_repo(&values.github_token, &name, private_repo)
+    forge::create_repo(&account_token(&values, "github", &values.github_token), &name, private_repo)
 }
 
 #[tauri::command]
@@ -784,6 +807,146 @@ fn set_repo_author(path: Option<String>, name: String, email: String) -> Result<
     let repo = repo_from(path)?;
     let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
     awegit_git::set_repo_author(&repo, &name, &email).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn search_commits(path: Option<String>, kind: String, needle: String) -> Result<Vec<awegit_git::SearchHit>, String> {
+    let repo = repo_from(path)?;
+    awegit_git::search_commits(&repo, &kind, &needle).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn cherry_preview(path: Option<String>, rev: String) -> Result<String, String> {
+    let repo = repo_from(path)?;
+    awegit_git::cherry_preview(&repo, &rev).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn merged_branches(path: Option<String>) -> Result<Vec<String>, String> {
+    let repo = repo_from(path)?;
+    awegit_git::merged_branches(&repo).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn pick_history(path: Option<String>, file: String, text: String) -> Result<String, String> {
+    let repo = repo_from(path)?;
+    awegit_git::pick_history(&repo, &file, &text).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn activity_log() -> Vec<String> {
+    perf::activity()
+}
+
+#[tauri::command]
+fn create_hosted_repo(forge_name: String, name: String, private_repo: bool, host: String, org: String) -> Result<String, String> {
+    let values = settings::load()?;
+    let fallback = match forge_name.as_str() {
+        "gitlab" => values.gitlab_token.clone(),
+        "bitbucket" => values.bitbucket_token.clone(),
+        "azure" => values.azure_token.clone(),
+        _ => values.github_token.clone(),
+    };
+    let token = account_token(&values, &forge_name, &fallback);
+    forge::create_hosted(&forge_name, &token, &host, &name, private_repo, &org)
+}
+
+#[tauri::command]
+fn device_start(forge_name: String, client_id: String, host: String) -> Result<forge::DeviceStart, String> {
+    forge::device_start(&forge_name, &client_id, &host)
+}
+
+#[tauri::command]
+fn device_poll() -> Result<String, String> {
+    forge::device_poll()
+}
+
+#[tauri::command]
+fn review_branch(path: Option<String>, base: String) -> Result<String, String> {
+    let repo = repo_from(path)?;
+    let values = settings::load()?;
+    ai::review(&repo, &values, &base)
+}
+
+#[tauri::command]
+fn read_ssh_config() -> Result<String, String> {
+    let path = ssh_config_path()?;
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    std::fs::read_to_string(path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn write_ssh_config(text: String) -> Result<(), String> {
+    if text.contains('\0') {
+        return Err("ssh config contains a null".into());
+    }
+    let path = ssh_config_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::write(path, text).map_err(|error| error.to_string())
+}
+
+fn ssh_config_path() -> Result<std::path::PathBuf, String> {
+    let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).map_err(|_| "home directory is missing".to_string())?;
+    Ok(std::path::PathBuf::from(home).join(".ssh").join("config"))
+}
+
+#[tauri::command]
+fn open_editor(path: Option<String>, file: String, line: u32) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let full = repo.join(&file);
+    let spec = format!("{}:{line}", full.display());
+    for bin in ["cursor", "code"] {
+        if std::process::Command::new(bin).arg("-g").arg(&spec).spawn().is_ok() {
+            return Ok(());
+        }
+    }
+    std::process::Command::new("notepad").arg(&full).spawn().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>, file: Option<String>) -> Result<(), String> {
+    let label = match view.as_deref() {
+        Some("blame") => "blame",
+        Some("history") => "history",
+        _ => "desk",
+    };
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    let mut query = String::new();
+    if let Some(view) = view.as_deref() {
+        query.push_str(&format!("view={}&", encode_query(view)));
+    }
+    if let Some(repo) = repo.as_deref() {
+        query.push_str(&format!("repo={}&", encode_query(repo)));
+    }
+    if let Some(file) = file.as_deref() {
+        query.push_str(&format!("file={}", encode_query(file)));
+    }
+    let url = if query.is_empty() { "index.html".to_string() } else { format!("index.html?{query}") };
+    tauri::webview::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
+        .title("AweGit")
+        .inner_size(1100.0, 720.0)
+        .build()
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn encode_query(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 #[tauri::command]
@@ -864,6 +1027,19 @@ pub fn run() {
             mark_notification,
             create_github_repo,
             generate_ssh_key,
+            search_commits,
+            cherry_preview,
+            merged_branches,
+            pick_history,
+            activity_log,
+            create_hosted_repo,
+            device_start,
+            device_poll,
+            review_branch,
+            read_ssh_config,
+            write_ssh_config,
+            open_editor,
+            open_window,
             log_client,
             perf_snapshot,
             open_log_folder

@@ -217,6 +217,24 @@ export type Settings = {
   pinnedRefs: string[];
   sourceDirectories: string[];
   groupNames: string[];
+  showWhitespace: boolean;
+  fileLayout: string;
+  tabLabels: string[];
+  tabColors: string[];
+  accounts: Account[];
+  bitbucketToken: string;
+  azureToken: string;
+  azureOrg: string;
+  oauthClientId: string;
+};
+
+export type Account = {
+  id: string;
+  forge: string;
+  label: string;
+  token: string;
+  host: string;
+  clientId: string;
 };
 
 export type WorkspaceRecord = {
@@ -232,6 +250,7 @@ export type CommandRecord = {
   name: string;
   target: string;
   command: string;
+  prompt: string;
 };
 
 export type ConflictSides = {

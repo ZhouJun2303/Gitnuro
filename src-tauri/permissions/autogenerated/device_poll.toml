@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-device-poll"
+description = "Enables the device_poll command without any pre-configured scope."
+commands.allow = ["device_poll"]
+
+[[permission]]
+identifier = "deny-device-poll"
+description = "Denies the device_poll command without any pre-configured scope."
+commands.deny = ["device_poll"]

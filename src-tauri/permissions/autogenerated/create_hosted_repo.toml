@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-hosted-repo"
+description = "Enables the create_hosted_repo command without any pre-configured scope."
+commands.allow = ["create_hosted_repo"]
+
+[[permission]]
+identifier = "deny-create-hosted-repo"
+description = "Denies the create_hosted_repo command without any pre-configured scope."
+commands.deny = ["create_hosted_repo"]

@@ -120,6 +120,15 @@ export type Messages = {
     scan: string;
     pin: string;
     githubRepo: string;
+    activity: string;
+    contentSearch: string;
+    stale: string;
+    mailmap: string;
+    accounts: string;
+    newWindow: string;
+    review: string;
+    sshConfig: string;
+    combined: string;
   };
   menu: {
     checkout: string;
@@ -188,6 +197,19 @@ export type Messages = {
     prevHunk: string;
     nextHunk: string;
     copyPatch: string;
+    fold: string;
+    compareBranches: string;
+    stashSelected: string;
+    pushAs: string;
+    openWeb: string;
+    showLine: string;
+    lineHistory: string;
+    renameTab: string;
+    tabColor: string;
+    pastePatch: string;
+    bareForce: string;
+    popBlame: string;
+    popHistory: string;
   };
   dialog: {
     confirm: string;
@@ -321,5 +343,15 @@ export type Messages = {
     useBoth: string;
     result: string;
     verticalTabs: string;
+    showSpace: string;
+    bringChanges: string;
+    stashFirst: string;
+    discardChanges: string;
+    spaceHint: string;
+    clientId: string;
+    deviceLogin: string;
+    commandPrompt: string;
+    remoteBranch: string;
+    pending: string;
   };
 };
