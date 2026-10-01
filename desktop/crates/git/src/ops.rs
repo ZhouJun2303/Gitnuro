@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cli::{check_name, check_path, check_rev, run, run_env, run_stdin};
 use crate::model::in_progress;
-use crate::{commit, stage_hunk, stage_line, CommitRequest, Error, InProgress};
+use crate::{commit, discard_hunk, discard_line, resolve_conflict, stage_hunk, stage_line, stage_paths, unstage_paths, CommitRequest, Error, InProgress};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +83,8 @@ pub enum Mutation {
         onto: String,
         #[serde(default)]
         drop: Vec<String>,
+        #[serde(default)]
+        steps: Vec<RebaseStep>,
     },
     Abort,
     Continue,
@@ -125,6 +127,56 @@ pub enum Mutation {
         #[serde(default)]
         unstage: bool,
     },
+    StagePaths {
+        files: Vec<String>,
+        #[serde(default)]
+        unstage: bool,
+    },
+    DiscardHunk {
+        file: String,
+        index: u32,
+    },
+    DiscardLine {
+        file: String,
+        text: String,
+        addition: bool,
+        at: u32,
+    },
+    Resolve {
+        file: String,
+        side: String,
+    },
+    RenameBranch {
+        name: String,
+        to: String,
+    },
+    SetUpstream {
+        branch: String,
+        #[serde(default)]
+        upstream: String,
+    },
+    DeleteRemoteBranch {
+        remote: String,
+        branch: String,
+    },
+    CheckoutRemote {
+        remote: String,
+        branch: String,
+    },
+    PushRef {
+        remote: String,
+        branch: String,
+        #[serde(default)]
+        force_with_lease: bool,
+    },
+    PullRef {
+        remote: String,
+        branch: String,
+        #[serde(default)]
+        rebase: bool,
+        #[serde(default)]
+        autostash: bool,
+    },
     Discard {
         file: String,
     },
@@ -157,6 +209,29 @@ pub enum Mutation {
         url: String,
         path: String,
     },
+    SubmoduleInit {
+        path: String,
+    },
+    SubmoduleSync {
+        path: String,
+    },
+    SubmoduleRemove {
+        path: String,
+    },
+    GitFlowInit {
+        #[serde(default)]
+        master: String,
+        #[serde(default)]
+        develop: String,
+        #[serde(default)]
+        feature: String,
+        #[serde(default)]
+        release: String,
+        #[serde(default)]
+        hotfix: String,
+        #[serde(default)]
+        support: String,
+    },
     GitFlowStart {
         name: String,
     },
@@ -177,12 +252,46 @@ pub enum Mutation {
     },
     LfsPull,
     LfsPush,
+    /// Replace the repository's hidden branch list. An empty list shows every branch.
+    SetHidden { names: Vec<String> },
     Custom {
         command: String,
+        #[serde(default)]
+        repo: String,
+        #[serde(default)]
+        sha: String,
+        #[serde(default)]
+        branch: String,
+        #[serde(default)]
+        file: String,
     },
 }
 
-pub fn perform(repo: &Path, mutation: Mutation) -> Result<(), Error> {
+/// One instruction in an interactive rebase. `verb` is pick, reword, squash, fixup, or drop.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebaseStep {
+    pub verb: String,
+    pub rev: String,
+    #[serde(default)]
+    pub message: String,
+}
+
+pub fn perform(repo: &Path, mutation: Mutation) -> Result<String, Error> {
+    if let Mutation::Custom {
+        command,
+        repo: marked,
+        sha,
+        branch,
+        file,
+    } = &mutation
+    {
+        return custom(repo, command, marked, sha, branch, file);
+    }
+    apply(repo, mutation).map(|_| String::new())
+}
+
+fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
     match mutation {
         Mutation::Fetch { remote, prune, tags } => fetch(repo, remote, prune, tags),
         Mutation::Pull { rebase } => pull(repo, rebase),
@@ -206,7 +315,7 @@ pub fn perform(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             autostash,
         } => merge(repo, &name, squash, no_ff, autostash),
         Mutation::Rebase { onto } => with_editor(repo, &["rebase", check_rev(&onto)?]),
-        Mutation::RebaseInteractive { onto, drop } => rebase_interactive(repo, &onto, &drop),
+        Mutation::RebaseInteractive { onto, drop, steps } => rebase_interactive(repo, &onto, &drop, &steps),
         Mutation::Abort => flow(repo, "abort"),
         Mutation::Continue => flow(repo, "continue"),
         Mutation::Skip => flow(repo, "skip"),
@@ -224,6 +333,40 @@ pub fn perform(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             at,
             unstage,
         } => stage_line(repo, &file, &text, addition, at, unstage),
+        Mutation::StagePaths { files, unstage } => {
+            if unstage {
+                unstage_paths(repo, &files)
+            } else {
+                stage_paths(repo, &files)
+            }
+        }
+        Mutation::DiscardHunk { file, index } => discard_hunk(repo, &file, index),
+        Mutation::DiscardLine {
+            file,
+            text,
+            addition,
+            at,
+        } => discard_line(repo, &file, &text, addition, at),
+        Mutation::Resolve { file, side } => resolve_conflict(repo, &file, &side),
+        Mutation::RenameBranch { name, to } => {
+            run(repo, &["branch", "-m", check_name(&name)?, check_name(&to)?]).map(|_| ())
+        }
+        Mutation::SetUpstream { branch, upstream } => set_upstream(repo, &branch, &upstream),
+        Mutation::DeleteRemoteBranch { remote, branch } => {
+            run(repo, &["push", check_name(&remote)?, "--delete", check_name(&branch)?]).map(|_| ())
+        }
+        Mutation::CheckoutRemote { remote, branch } => checkout_remote(repo, &remote, &branch),
+        Mutation::PushRef {
+            remote,
+            branch,
+            force_with_lease,
+        } => push_ref(repo, &remote, &branch, force_with_lease),
+        Mutation::PullRef {
+            remote,
+            branch,
+            rebase,
+            autostash,
+        } => pull_ref(repo, &remote, &branch, rebase, autostash),
         Mutation::Discard { file } => discard(repo, &file),
         Mutation::Delete { file } => delete_path(repo, &file),
         Mutation::ApplyPatch { patch } => run_stdin(repo, &["apply", "--index"], patch.as_bytes()).map(|_| ()),
@@ -244,14 +387,30 @@ pub fn perform(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::SubmoduleAdd { url, path } => {
             run(repo, &["submodule", "add", check_url(&url)?, check_path(&path)?]).map(|_| ())
         }
+        Mutation::SubmoduleInit { path } => {
+            run(repo, &["submodule", "update", "--init", "--", check_path(&path)?]).map(|_| ())
+        }
+        Mutation::SubmoduleSync { path } => {
+            run(repo, &["submodule", "sync", "--", check_path(&path)?]).map(|_| ())
+        }
+        Mutation::SubmoduleRemove { path } => remove_submodule(repo, &path),
+        Mutation::GitFlowInit {
+            master,
+            develop,
+            feature,
+            release,
+            hotfix,
+            support,
+        } => git_flow_init(repo, &master, &develop, &feature, &release, &hotfix, &support),
         Mutation::GitFlowStart { name } => git_flow_start(repo, &name),
         Mutation::GitFlowFinish { name } => git_flow_finish(repo, &name),
         Mutation::Squash { from, to, summary } => squash(repo, &from, &to, &summary),
         Mutation::Clone { url, destination } => clone_repo(&url, &destination),
         Mutation::Init { destination } => init_repo(&destination),
-        Mutation::LfsPull => run(repo, &["lfs", "pull"]).map(|_| ()),
-        Mutation::LfsPush => run(repo, &["lfs", "push", "--all"]).map(|_| ()),
-        Mutation::Custom { command } => custom(repo, &command),
+        Mutation::LfsPull => lfs(repo, &["lfs", "pull"]),
+        Mutation::LfsPush => lfs(repo, &["lfs", "push", "--all"]),
+        Mutation::SetHidden { names } => crate::model::write_hidden_refs(repo, &names),
+        Mutation::Custom { .. } => Ok(()),
     }
 }
 
@@ -402,6 +561,7 @@ fn reword(repo: &Path, rev: &str, summary: &str) -> Result<(), Error> {
                 description: String::new(),
                 amend: true,
                 sign_off: false,
+                sign_off_format: String::new(),
             },
         )
     } else {
@@ -464,27 +624,83 @@ fn add_worktree(repo: &Path, path: &str, branch: &str) -> Result<(), Error> {
     }
 }
 
-fn git_flow_start(repo: &Path, name: &str) -> Result<(), Error> {
-    let feature = feature_branch(name)?;
-    let base = integration_base(repo)?;
-    if run(repo, &["rev-parse", "--verify", "--quiet", "refs/heads/develop"]).is_err() {
-        run(repo, &["branch", "develop", &base])?;
+fn git_flow_init(
+    repo: &Path,
+    master: &str,
+    develop: &str,
+    feature: &str,
+    release: &str,
+    hotfix: &str,
+    support: &str,
+) -> Result<(), Error> {
+    let master = flow_value(master, "main");
+    let develop = flow_value(develop, "develop");
+    let feature = flow_value(feature, "feature/");
+    let release = flow_value(release, "release/");
+    let hotfix = flow_value(hotfix, "hotfix/");
+    let support = flow_value(support, "support/");
+    config_local(repo, "gitflow.branch.master", &master)?;
+    config_local(repo, "gitflow.branch.develop", &develop)?;
+    config_local(repo, "gitflow.prefix.feature", &feature)?;
+    config_local(repo, "gitflow.prefix.release", &release)?;
+    config_local(repo, "gitflow.prefix.hotfix", &hotfix)?;
+    config_local(repo, "gitflow.prefix.support", &support)?;
+    if run(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{develop}")]).is_err() {
+        let base = if run(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{master}")]).is_ok() {
+            master
+        } else {
+            integration_base(repo)?
+        };
+        run(repo, &["branch", &develop, &base])?;
     }
-    run(repo, &["checkout", "develop"])?;
+    Ok(())
+}
+
+fn git_flow_start(repo: &Path, name: &str) -> Result<(), Error> {
+    let prefix = config_get(repo, "gitflow.prefix.feature", "feature/");
+    let develop = config_get(repo, "gitflow.branch.develop", "develop");
+    let feature = prefixed_branch(&prefix, name)?;
+    let base = integration_base(repo)?;
+    if run(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{develop}")]).is_err() {
+        run(repo, &["branch", &develop, &base])?;
+    }
+    run(repo, &["checkout", &develop])?;
     run(repo, &["checkout", "-b", &feature]).map(|_| ())
 }
 
 fn git_flow_finish(repo: &Path, name: &str) -> Result<(), Error> {
-    let feature = feature_branch(name)?;
-    run(repo, &["checkout", "develop"])?;
+    let prefix = config_get(repo, "gitflow.prefix.feature", "feature/");
+    let develop = config_get(repo, "gitflow.branch.develop", "develop");
+    let feature = prefixed_branch(&prefix, name)?;
+    run(repo, &["checkout", &develop])?;
     with_editor(repo, &["merge", "--no-edit", &feature])?;
     run(repo, &["branch", "-d", &feature]).map(|_| ())
 }
 
-fn feature_branch(name: &str) -> Result<String, Error> {
-    let name = name.trim().trim_start_matches("feature/");
+fn prefixed_branch(prefix: &str, name: &str) -> Result<String, Error> {
+    let name = name.trim().trim_start_matches(prefix);
     let name = check_name(name)?;
-    Ok(format!("feature/{name}"))
+    Ok(format!("{prefix}{name}"))
+}
+
+fn flow_value(value: &str, default: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() { default.to_string() } else { value.to_string() }
+}
+
+fn config_local(repo: &Path, key: &str, value: &str) -> Result<(), Error> {
+    if value.contains(['\n', '\r', '\0']) || value.starts_with('-') {
+        return Err(Error::Rev(value.to_string()));
+    }
+    run(repo, &["config", "--local", key, value]).map(|_| ())
+}
+
+fn config_get(repo: &Path, key: &str, default: &str) -> String {
+    run(repo, &["config", "--local", "--get", key])
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| default.to_string())
 }
 
 fn integration_base(repo: &Path) -> Result<String, Error> {
@@ -526,11 +742,15 @@ fn squash(repo: &Path, from: &str, to: &str, summary: &str) -> Result<(), Error>
             description: String::new(),
             amend: false,
             sign_off: false,
+            sign_off_format: String::new(),
         },
     )
 }
 
-fn rebase_interactive(repo: &Path, onto: &str, drop: &[String]) -> Result<(), Error> {
+fn rebase_interactive(repo: &Path, onto: &str, drop: &[String], steps: &[RebaseStep]) -> Result<(), Error> {
+    if !steps.is_empty() {
+        return rebase_steps(repo, onto, steps);
+    }
     let onto = check_rev(onto)?;
     for id in drop {
         check_rev(id)?;
@@ -554,12 +774,13 @@ fn rebase_interactive(repo: &Path, onto: &str, drop: &[String]) -> Result<(), Er
         todo.push('\n');
     }
     let editor = SequenceEditor::new(&todo)?;
-    let noop = editor.noop.clone();
-    let sequence = editor.sequence.clone();
     let result = run_env(
         repo,
         &["rebase", "-i", onto],
-        &[("GIT_SEQUENCE_EDITOR", sequence.as_str()), ("GIT_EDITOR", noop.as_str())],
+        &[
+            ("GIT_SEQUENCE_EDITOR", editor.sequence.as_str()),
+            ("GIT_EDITOR", editor.editor.as_str()),
+        ],
     );
     match result {
         Ok(_) => Ok(()),
@@ -574,6 +795,52 @@ fn rebase_interactive(repo: &Path, onto: &str, drop: &[String]) -> Result<(), Er
             }
         }
     }
+}
+
+fn rebase_steps(repo: &Path, onto: &str, steps: &[RebaseStep]) -> Result<(), Error> {
+    let onto = check_rev(onto)?;
+    let mut todo = String::new();
+    let mut messages = Vec::new();
+    for step in steps {
+        let verb = match step.verb.as_str() {
+            "pick" | "reword" | "squash" | "fixup" | "drop" => step.verb.as_str(),
+            other => return Err(Error::Git(format!("unknown rebase action {other}"))),
+        };
+        let rev = check_rev(&step.rev)?;
+        todo.push_str(verb);
+        todo.push(' ');
+        todo.push_str(rev);
+        todo.push('\n');
+        if verb == "reword" || verb == "squash" {
+            let message = if step.message.trim().is_empty() {
+                commit_subject(repo, rev)?
+            } else {
+                step.message.replace("\r\n", "\n")
+            };
+            if message.contains('\0') {
+                return Err(Error::Git("rebase message contains a null".into()));
+            }
+            messages.push(message);
+        }
+    }
+    if todo.is_empty() {
+        return Err(Error::Git("nothing to rebase".into()));
+    }
+    let editor = SequenceEditor::with_messages(&todo, &messages)?;
+    run_env(
+        repo,
+        &["rebase", "-i", onto],
+        &[
+            ("GIT_SEQUENCE_EDITOR", editor.sequence.as_str()),
+            ("GIT_EDITOR", editor.editor.as_str()),
+        ],
+    )
+    .map(|_| ())
+}
+
+fn commit_subject(repo: &Path, rev: &str) -> Result<String, Error> {
+    let output = run(repo, &["log", "-1", "--format=%s", rev])?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn dropped(id: &str, drop: &[String]) -> bool {
@@ -616,40 +883,139 @@ fn init_repo(destination: &str) -> Result<(), Error> {
     run(Path::new(destination), &["init", "-b", "main"]).map(|_| ())
 }
 
-fn custom(repo: &Path, command: &str) -> Result<(), Error> {
+fn custom(repo: &Path, command: &str, marked: &str, sha: &str, branch: &str, file: &str) -> Result<String, Error> {
     let command = command.trim();
     if command.is_empty() || command.contains('\0') {
         return Err(Error::Rev(command.to_string()));
     }
+    let repo_text = if marked.trim().is_empty() { repo.display().to_string() } else { marked.to_string() };
+    for value in [&repo_text, sha, branch, file] {
+        if cfg!(windows) && (value.contains('"') || value.contains('%')) {
+            return Err(Error::Git("refusing a command value that contains \" or %".into()));
+        }
+    }
+    let expanded = command
+        .replace("${repo}", if cfg!(windows) { "%AWEGIT_REPO%" } else { "\"$AWEGIT_REPO\"" })
+        .replace("${sha}", if cfg!(windows) { "%AWEGIT_SHA%" } else { "\"$AWEGIT_SHA\"" })
+        .replace("${branch}", if cfg!(windows) { "%AWEGIT_BRANCH%" } else { "\"$AWEGIT_BRANCH\"" })
+        .replace("${file}", if cfg!(windows) { "%AWEGIT_FILE%" } else { "\"$AWEGIT_FILE\"" });
     let mut process = if cfg!(windows) {
         let mut process = std::process::Command::new("cmd");
-        process.arg("/C").arg(command);
+        process.arg("/C").arg(expanded);
         process
     } else {
         let mut process = std::process::Command::new("sh");
-        process.arg("-c").arg(command);
+        process.arg("-c").arg(expanded);
         process
     };
     let output = process
         .current_dir(repo)
         .env("GIT_TERMINAL_PROMPT", "0")
+        .env("AWEGIT_REPO", &repo_text)
+        .env("AWEGIT_SHA", sha)
+        .env("AWEGIT_BRANCH", branch)
+        .env("AWEGIT_FILE", file)
         .output()
         .map_err(Error::GitMissing)?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if output.status.success() {
-        Ok(())
+        Ok(if stdout.is_empty() { stderr } else { stdout })
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         Err(Error::Git(if stderr.is_empty() {
-            "custom command failed".into()
+            if stdout.is_empty() { "custom command failed".into() } else { stdout }
         } else {
             stderr
         }))
     }
 }
 
+fn lfs(repo: &Path, args: &[&str]) -> Result<(), Error> {
+    match run(repo, args) {
+        Ok(_) => Ok(()),
+        Err(Error::Git(message))
+            if message.contains("not a git command") || message.contains("git-lfs") || message.contains("'lfs'") =>
+        {
+            Err(Error::Git(
+                "git lfs is not installed. Install Git LFS, then pull or push again.".into(),
+            ))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn set_upstream(repo: &Path, branch: &str, upstream: &str) -> Result<(), Error> {
+    let branch = check_name(branch)?;
+    if upstream.trim().is_empty() {
+        run(repo, &["branch", "--unset-upstream", branch]).map(|_| ())
+    } else {
+        let upstream = check_rev(upstream)?;
+        run(repo, &["branch", &format!("--set-upstream-to={upstream}"), branch]).map(|_| ())
+    }
+}
+
+fn checkout_remote(repo: &Path, remote: &str, branch: &str) -> Result<(), Error> {
+    let remote = check_name(remote)?;
+    let branch = check_name(branch)?;
+    let local = run(repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")]);
+    if local.is_ok() {
+        run(repo, &["checkout", branch]).map(|_| ())
+    } else {
+        let tracked = format!("{remote}/{branch}");
+        run(repo, &["checkout", "--track", &tracked]).map(|_| ())
+    }
+}
+
+fn push_ref(repo: &Path, remote: &str, branch: &str, force_with_lease: bool) -> Result<(), Error> {
+    let remote = check_name(remote)?;
+    let branch = check_name(branch)?;
+    let spec = format!("HEAD:{branch}");
+    let mut args = vec!["push"];
+    if force_with_lease {
+        args.push("--force-with-lease");
+    }
+    args.push(remote);
+    args.push(&spec);
+    run(repo, &args).map(|_| ())
+}
+
+fn pull_ref(repo: &Path, remote: &str, branch: &str, rebase: bool, autostash: bool) -> Result<(), Error> {
+    let remote = check_name(remote)?;
+    let branch = check_name(branch)?;
+    let mut args = vec!["pull"];
+    if autostash {
+        args.push("--autostash");
+    }
+    args.push(if rebase { "--rebase" } else { "--no-rebase" });
+    args.push(remote);
+    args.push(branch);
+    with_editor(repo, &args)
+}
+
+fn remove_submodule(repo: &Path, path: &str) -> Result<(), Error> {
+    let path = check_path(path)?;
+    let _ = run(repo, &["submodule", "deinit", "-f", "--", path]);
+    run(repo, &["rm", "-f", "--", path]).map(|_| ())
+}
+
+pub fn set_repo_author(repo: &Path, name: &str, email: &str) -> Result<(), Error> {
+    for value in [name, email] {
+        if value.contains(['\n', '\r', '\0']) {
+            return Err(Error::Rev("author".into()));
+        }
+    }
+    if !name.trim().is_empty() {
+        config_local(repo, "user.name", name.trim())?;
+    }
+    if !email.trim().is_empty() {
+        config_local(repo, "user.email", email.trim())?;
+    }
+    Ok(())
+}
+
 fn with_editor(repo: &Path, args: &[&str]) -> Result<(), Error> {
     let editor = SequenceEditor::noop_only()?;
-    run_env(repo, args, &[("GIT_EDITOR", editor.noop.as_str())]).map(|_| ())
+    run_env(repo, args, &[("GIT_EDITOR", editor.editor.as_str())]).map(|_| ())
 }
 
 fn optional_name(value: Option<String>) -> Result<Option<String>, Error> {
@@ -691,7 +1057,7 @@ fn rev_parse(repo: &Path, rev: &str) -> Result<String, Error> {
 struct SequenceEditor {
     _dir: PathBuf,
     sequence: String,
-    noop: String,
+    editor: String,
 }
 
 impl SequenceEditor {
@@ -721,7 +1087,36 @@ impl SequenceEditor {
             let unix = todo_path.display().to_string().replace('\\', "/");
             write_script(&dir, "edit.sh", &format!("#!/bin/sh\ncp \"{unix}\" \"$1\"\n"))?
         };
-        Ok(Self { _dir: dir, sequence, noop })
+        Ok(Self {
+            _dir: dir,
+            sequence,
+            editor: noop,
+        })
+    }
+
+    fn with_messages(todo: &str, messages: &[String]) -> Result<Self, Error> {
+        let mut editor = Self::new(todo)?;
+        let unix = editor._dir.display().to_string().replace('\\', "/");
+        std::fs::write(editor._dir.join("index"), "0").map_err(|source| Error::Read {
+            path: editor._dir.display().to_string(),
+            source,
+        })?;
+        for (index, message) in messages.iter().enumerate() {
+            let path = editor._dir.join(format!("msg-{index}"));
+            let mut body = message.clone();
+            if !body.ends_with('\n') {
+                body.push('\n');
+            }
+            std::fs::write(&path, body.replace("\r\n", "\n")).map_err(|source| Error::Read {
+                path: path.display().to_string(),
+                source,
+            })?;
+        }
+        let script = format!(
+            "#!/bin/sh\nn=$(cat \"{unix}/index\" 2>/dev/null || echo 0)\nprintf '%s\\n' \"$((n + 1))\" > \"{unix}/index\"\nif [ -f \"{unix}/msg-$n\" ]; then\n  cp \"{unix}/msg-$n\" \"$1\"\nfi\nexit 0\n"
+        );
+        editor.editor = write_script(&editor._dir, "message.sh", &script)?;
+        Ok(editor)
     }
 }
 

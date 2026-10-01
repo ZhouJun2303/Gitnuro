@@ -75,3 +75,64 @@ export function hiddenName(name: string, pattern: string) {
     .filter(Boolean)
     .some((token) => name === token || name.startsWith(token.endsWith("/") ? token : `${token}/`));
 }
+
+/** First path segment used as a sidebar group. A name without `/` stays on its own. */
+export function branchGroup(name: string) {
+  const slash = name.indexOf("/");
+  return slash > 0 ? name.slice(0, slash) : "";
+}
+
+export function gravatarUrl(email: string) {
+  const hash = md5(email.trim().toLowerCase());
+  return `https://www.gravatar.com/avatar/${hash}?s=32&d=blank`;
+}
+
+function md5(value: string) {
+  const bytes = new TextEncoder().encode(value);
+  const words = new Uint32Array((((bytes.length + 8) >>> 6) + 1) * 16);
+  for (let index = 0; index < bytes.length; index += 1) words[index >> 2] |= bytes[index] << ((index % 4) * 8);
+  words[bytes.length >> 2] |= 0x80 << ((bytes.length % 4) * 8);
+  words[words.length - 2] = bytes.length * 8;
+  let a = 0x67452301;
+  let b = 0xefcdab89;
+  let c = 0x98badcfe;
+  let d = 0x10325476;
+  const s = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+  const k = new Uint32Array(64);
+  for (let index = 0; index < 64; index += 1) k[index] = Math.floor(Math.abs(Math.sin(index + 1)) * 2 ** 32);
+  for (let offset = 0; offset < words.length; offset += 16) {
+    let aa = a;
+    let bb = b;
+    let cc = c;
+    let dd = d;
+    for (let index = 0; index < 64; index += 1) {
+      let f = 0;
+      let g = 0;
+      if (index < 16) {
+        f = (bb & cc) | (~bb & dd);
+        g = index;
+      } else if (index < 32) {
+        f = (dd & bb) | (~dd & cc);
+        g = (5 * index + 1) % 16;
+      } else if (index < 48) {
+        f = bb ^ cc ^ dd;
+        g = (3 * index + 5) % 16;
+      } else {
+        f = cc ^ (bb | ~dd);
+        g = (7 * index) % 16;
+      }
+      const turn = (aa + f + k[index] + words[offset + g]) >>> 0;
+      const shift = s[(index >> 4) * 4 + (index % 4)];
+      const next = bb + ((turn << shift) | (turn >>> (32 - shift)));
+      aa = dd;
+      dd = cc;
+      cc = bb;
+      bb = next >>> 0;
+    }
+    a = (a + aa) >>> 0;
+    b = (b + bb) >>> 0;
+    c = (c + cc) >>> 0;
+    d = (d + dd) >>> 0;
+  }
+  return [a, b, c, d].map((word) => [word & 255, (word >>> 8) & 255, (word >>> 16) & 255, (word >>> 24) & 255].map((byte) => byte.toString(16).padStart(2, "0")).join("")).join("");
+}

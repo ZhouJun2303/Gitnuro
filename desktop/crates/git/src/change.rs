@@ -13,6 +13,8 @@ pub struct CommitRequest {
     pub description: String,
     pub amend: bool,
     pub sign_off: bool,
+    /// Empty keeps Git's own `Signed-off-by` line. `%user` and `%email` are replaced otherwise.
+    pub sign_off_format: String,
 }
 
 /// Stage the given work-tree paths, including new files.
@@ -54,23 +56,63 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
     if summary.is_empty() {
         return Err(Error::EmptySummary);
     }
-    let description = request.description.trim();
+    let mut description = request.description.trim().to_string();
+    let mut git_signoff = false;
+    if request.sign_off {
+        let format = request.sign_off_format.trim();
+        if format.is_empty() || format == "Signed-off-by: %user <%email>" {
+            git_signoff = true;
+        } else {
+            let line = sign_off_line(repo, format);
+            if !description.contains(&line) {
+                if !description.is_empty() {
+                    description.push_str("\n\n");
+                }
+                description.push_str(&line);
+            }
+        }
+    }
     let mut args = commit_config(repo);
     args.push("commit".to_string());
     args.push("-m".to_string());
     args.push(summary.to_string());
     if !description.is_empty() {
         args.push("-m".to_string());
-        args.push(description.to_string());
+        args.push(description);
     }
     if request.amend {
         args.push("--amend".to_string());
     }
-    if request.sign_off {
+    if git_signoff {
         args.push("--signoff".to_string());
     }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
-    run(repo, &borrowed).map(|_| ())
+    if crate::cli::has_local_author(repo) {
+        crate::cli::run_repo_author(repo, &borrowed).map(|_| ())
+    } else {
+        run(repo, &borrowed).map(|_| ())
+    }
+}
+
+fn sign_off_line(repo: &Path, format: &str) -> String {
+    let (session, _) = crate::cli::session_snapshot();
+    let user = if session.author_name.is_empty() {
+        config_value(repo, "user.name").unwrap_or_else(|| "AweGit".into())
+    } else {
+        session.author_name
+    };
+    let email = if session.author_email.is_empty() {
+        config_value(repo, "user.email").unwrap_or_else(|| "awegit@localhost".into())
+    } else {
+        session.author_email
+    };
+    format.replace("%user", &user).replace("%email", &email)
+}
+
+fn config_value(repo: &Path, key: &str) -> Option<String> {
+    let output = run(repo, &["config", "--get", key]).ok()?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
 }
 
 fn git_paths(repo: &Path, prefix: &[&str], paths: &[String]) -> Result<(), Error> {
@@ -94,6 +136,9 @@ pub struct DiffLine {
     /// Index into the file that `stage_line` edits. Absent for context and headers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage_at: Option<u32>,
+    /// Index into the worktree file that `discard_line` edits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_at: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -176,6 +221,118 @@ pub fn stage_line(repo: &Path, path: &str, text: &str, addition: bool, at: u32, 
         body.push('\n');
     }
     write_index(repo, path, &body)
+}
+
+/// Drop one unstaged hunk from the work tree. The index is left alone.
+pub fn discard_hunk(repo: &Path, path: &str, index: u32) -> Result<(), Error> {
+    let path = check_path(path)?;
+    let output = run(repo, &["diff", "--no-ext-diff", "--no-color", "--unified=0", "--", path])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (preamble, hunks) = split_hunks(&text);
+    let hunk = hunks.get(index as usize).ok_or_else(|| Error::Git(format!("hunk {index} is not in {path}")))?;
+    let mut patch = preamble;
+    patch.push_str(hunk);
+    if !patch.ends_with('\n') {
+        patch.push('\n');
+    }
+    run_stdin(repo, &["apply", "--reverse", "--unidiff-zero"], patch.as_bytes()).map(|_| ())
+}
+
+/// Drop or restore one unstaged line in the work tree.
+pub fn discard_line(repo: &Path, path: &str, text: &str, addition: bool, at: u32) -> Result<(), Error> {
+    let path = check_path(path)?;
+    if text.contains(['\n', '\r', '\0']) {
+        return Err(Error::Git("a discarded line cannot contain a newline".into()));
+    }
+    let full = repo.join(path);
+    if !full.starts_with(repo) {
+        return Err(Error::Path(path.to_string()));
+    }
+    let current = std::fs::read_to_string(&full).unwrap_or_default();
+    let (mut lines, trailing) = split_lines(&current);
+    if addition {
+        let index = at as usize;
+        if lines.get(index).map(String::as_str) != Some(text) {
+            return Err(Error::Git(format!("line {at} is not in {path}")));
+        }
+        lines.remove(index);
+    } else {
+        let index = (at as usize).min(lines.len());
+        lines.insert(index, text.to_string());
+    }
+    let mut body = lines.join("\n");
+    if trailing || !body.is_empty() {
+        body.push('\n');
+    }
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| Error::Read {
+            path: path.to_string(),
+            source,
+        })?;
+    }
+    std::fs::write(&full, body).map_err(|source| Error::Read {
+        path: path.to_string(),
+        source,
+    })
+}
+
+/// The two conflict stages plus the working tree text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictSides {
+    pub ours: String,
+    pub theirs: String,
+    pub working: String,
+}
+
+pub fn conflict_sides(repo: &Path, path: &str) -> Result<ConflictSides, Error> {
+    let path = check_path(path)?;
+    Ok(ConflictSides {
+        ours: show_stage(repo, path, 2),
+        theirs: show_stage(repo, path, 3),
+        working: std::fs::read_to_string(repo.join(path)).unwrap_or_default(),
+    })
+}
+
+fn show_stage(repo: &Path, path: &str, stage: u8) -> String {
+    match run(repo, &["show", &format!(":{stage}:{path}")]) {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
+        Err(_) => String::new(),
+    }
+}
+
+pub fn resolve_conflict(repo: &Path, path: &str, side: &str) -> Result<(), Error> {
+    let path = check_path(path)?;
+    match side {
+        "ours" => {
+            run(repo, &["checkout", "--ours", "--", path])?;
+            run(repo, &["add", "--", path]).map(|_| ())
+        }
+        "theirs" => {
+            run(repo, &["checkout", "--theirs", "--", path])?;
+            run(repo, &["add", "--", path]).map(|_| ())
+        }
+        "both" => {
+            let ours = show_stage(repo, path, 2);
+            let theirs = show_stage(repo, path, 3);
+            let mut body = ours;
+            if !body.is_empty() && !body.ends_with('\n') {
+                body.push('\n');
+            }
+            body.push_str(&theirs);
+            if !body.is_empty() && !body.ends_with('\n') {
+                body.push('\n');
+            }
+            let full = repo.join(path);
+            std::fs::write(&full, body).map_err(|source| Error::Read {
+                path: path.to_string(),
+                source,
+            })?;
+            run(repo, &["add", "--", path]).map(|_| ())
+        }
+        "mark" => run(repo, &["add", "--", path]).map(|_| ()),
+        other => Err(Error::Git(format!("unknown conflict side {other}"))),
+    }
 }
 
 fn index_blob(repo: &Path, path: &str) -> Result<String, Error> {
@@ -282,6 +439,12 @@ fn zero_hunks(repo: &Path, path: &str, staged: bool) -> Result<u32, Error> {
     Ok(text.lines().filter(|line| line.starts_with("@@")).count() as u32)
 }
 
+/// Staged diff only. Commit suggestions must not describe unstaged work.
+pub fn staged_diff(repo: &Path) -> Result<String, Error> {
+    let staged = run(repo, &["diff", "--cached", "--no-color", "--no-ext-diff"])?;
+    Ok(String::from_utf8_lossy(&staged.stdout).into_owned())
+}
+
 /// Staged and unstaged diffs, capped, for a commit-message suggestion.
 pub fn workspace_diff(repo: &Path) -> Result<String, Error> {
     let staged = run(repo, &["diff", "--cached", "--no-color", "--no-ext-diff"])?;
@@ -364,6 +527,7 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
             kind: DiffLineKind::Add,
             text: format!("+{line}"),
             stage_at: Some(index as u32),
+            work_at: Some(index as u32),
         })
         .collect();
     let truncated = body.len() > MAX_DIFF_LINES;
@@ -372,6 +536,7 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
         kind: DiffLineKind::Hunk,
         text: format!("@@ -0,0 +1,{} @@", body.len()),
         stage_at: None,
+        work_at: None,
     }];
     lines.append(&mut body);
     Ok(FileDiff {
@@ -417,6 +582,7 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
                 kind: DiffLineKind::Hunk,
                 text: raw.to_string(),
                 stage_at: None,
+                work_at: None,
             });
             continue;
         }
@@ -430,6 +596,7 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
             DiffLineKind::Meta
         };
         let mut stage_at = None;
+        let mut work_at = None;
         if in_hunk {
             match kind {
                 DiffLineKind::Context => {
@@ -441,10 +608,12 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
                 DiffLineKind::Delete => {
                     let unstage_at = if last_keep < 0 { 0 } else { last_keep as u32 + 1 };
                     stage_at = Some(if staged { unstage_at } else { old_i });
+                    work_at = Some(new_i);
                     old_i += 1;
                 }
                 DiffLineKind::Add => {
                     stage_at = Some(if staged { new_i } else { insert_at });
+                    work_at = Some(new_i);
                     last_keep = new_i as i32;
                     new_i += 1;
                 }
@@ -455,6 +624,7 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
             kind,
             text: raw.to_string(),
             stage_at,
+            work_at,
         });
     }
     FileDiff {

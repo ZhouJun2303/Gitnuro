@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-conflict-sides"
+description = "Enables the conflict_sides command without any pre-configured scope."
+commands.allow = ["conflict_sides"]
+
+[[permission]]
+identifier = "deny-conflict-sides"
+description = "Denies the conflict_sides command without any pre-configured scope."
+commands.deny = ["conflict_sides"]

@@ -10,16 +10,18 @@ mod ops;
 use std::path::{Path, PathBuf};
 
 pub use change::{
-    commit, file_diff, file_diff_with, file_preview, stage_all, stage_hunk, stage_line, stage_paths, unstage_all,
-    unstage_paths, workspace_diff, CommitRequest, DiffLine, DiffLineKind, FileDiff, FilePreview,
+    commit, conflict_sides, discard_hunk, discard_line, file_diff, file_diff_with, file_preview, resolve_conflict,
+    stage_all, stage_hunk, stage_line, stage_paths, staged_diff, unstage_all, unstage_paths, workspace_diff,
+    CommitRequest, ConflictSides, DiffLine, DiffLineKind, FileDiff, FilePreview,
 };
 pub use model::{
-    blame_file, branch_commits, commit_files, commit_log, file_history, in_progress, repository_refs, show_commit_file,
-    show_commit_file_with, BlameLine, BranchRow, CommitRow, InProgress, RefSnapshot, RemoteRow, StashRow, SubmoduleRow,
-    TagRow, WorktreeRow,
+    blame_file, branch_commits, commit_files, commit_log, compare_file, compare_files, file_history, in_progress,
+    prompt_facts, repository_refs, show_commit_file, show_commit_file_with, BlameLine, BranchRow, CommitRow, InProgress,
+    RefSnapshot,
+    RemoteRow, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
 pub use cli::{cancel_running, configure, set_http_proxy, set_passphrase, stop_process_tree, use_bundled_git, Session};
-pub use ops::{approve_credential, perform, Mutation, ResetMode};
+pub use ops::{approve_credential, perform, set_repo_author, Mutation, RebaseStep, ResetMode};
 
 use gix::bstr::BStr;
 use serde::Serialize;

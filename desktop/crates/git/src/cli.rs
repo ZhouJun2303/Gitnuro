@@ -116,15 +116,43 @@ pub fn stop_process_tree(pid: u32) {
 }
 
 pub fn run(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, &[], None)
+    run_prepared(repo, args, &[], None, true)
 }
 
 pub fn run_env(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, env, None)
+    run_prepared(repo, args, env, None, true)
 }
 
 pub fn run_stdin(repo: &Path, args: &[&str], stdin: &[u8]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, &[], Some(stdin))
+    run_prepared(repo, args, &[], Some(stdin), true)
+}
+
+/// Run git without replacing a repository-local `user.name`.
+pub(crate) fn run_repo_author(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
+    run_prepared(repo, args, &[], None, false)
+}
+
+/// True when this repository has its own `user.name`.
+pub(crate) fn has_local_author(repo: &Path) -> bool {
+    let mut command = Command::new("git");
+    command
+        .current_dir(repo)
+        .args(["config", "--local", "--get", "user.name"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if let Some(dir) = BUNDLED_GIT.get() {
+        let mut path = std::ffi::OsString::from(dir);
+        path.push(";");
+        if let Some(current) = std::env::var_os("PATH") {
+            path.push(current);
+        }
+        command.env("PATH", path);
+    }
+    match command.output() {
+        Ok(output) => output.status.success() && output.stdout.iter().any(|byte| !byte.is_ascii_whitespace()),
+        Err(_) => false,
+    }
 }
 
 fn run_prepared(
@@ -132,6 +160,7 @@ fn run_prepared(
     args: &[&str],
     env: &[(&str, &str)],
     stdin_bytes: Option<&[u8]>,
+    apply_author: bool,
 ) -> Result<std::process::Output, Error> {
     let mut command = Command::new("git");
     command
@@ -156,11 +185,11 @@ fn run_prepared(
         command.env("HTTP_PROXY", &session.proxy);
         command.env("HTTPS_PROXY", &session.proxy);
     }
-    if !session.author_name.is_empty() {
+    if apply_author && !session.author_name.is_empty() {
         command.env("GIT_AUTHOR_NAME", &session.author_name);
         command.env("GIT_COMMITTER_NAME", &session.author_name);
     }
-    if !session.author_email.is_empty() {
+    if apply_author && !session.author_email.is_empty() {
         command.env("GIT_AUTHOR_EMAIL", &session.author_email);
         command.env("GIT_COMMITTER_EMAIL", &session.author_email);
     }

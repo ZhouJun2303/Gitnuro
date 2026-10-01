@@ -130,6 +130,11 @@ fn commit_changes(
     sign_off: bool,
 ) -> Result<awegit_git::StatusSnapshot, String> {
     let repo = repo_from(path)?;
+    let sign_off_format = if sign_off {
+        settings::load().map(|values| values.sign_off_format).unwrap_or_default()
+    } else {
+        String::new()
+    };
     write_then_status(&repo, |repo| {
         awegit_git::commit(
             repo,
@@ -138,6 +143,7 @@ fn commit_changes(
                 description,
                 amend,
                 sign_off,
+                sign_off_format,
             },
         )
     })
@@ -197,19 +203,109 @@ fn blame_file(path: Option<String>, file: String) -> Result<Vec<awegit_git::Blam
     awegit_git::blame_file(&repo, &file).map_err(|error| error.to_string())
 }
 
+#[derive(serde::Serialize)]
+struct MutationReport {
+    #[serde(flatten)]
+    status: awegit_git::StatusSnapshot,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    output: String,
+}
+
 #[tauri::command]
-fn mutate(path: Option<String>, request: awegit_git::Mutation) -> Result<awegit_git::StatusSnapshot, String> {
+fn mutate(path: Option<String>, request: awegit_git::Mutation) -> Result<MutationReport, String> {
     let repo = repo_from(path)?;
     let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
     apply_session();
+    record_action(&request);
     let next = match &request {
         awegit_git::Mutation::Clone { destination, .. } | awegit_git::Mutation::Init { destination } => {
             PathBuf::from(destination)
         }
         _ => repo.clone(),
     };
-    awegit_git::perform(&repo, request).map_err(|error| error.to_string())?;
-    read_status(&next)
+    let output = awegit_git::perform(&repo, request).map_err(|error| error.to_string())?;
+    Ok(MutationReport {
+        status: read_status(&next)?,
+        output,
+    })
+}
+
+fn record_action(request: &awegit_git::Mutation) {
+    let Ok(values) = settings::load() else { return };
+    let directory = values.log_directory.trim();
+    if directory.is_empty() {
+        return;
+    }
+    let label = action_label(request);
+    let _ = std::fs::create_dir_all(directory);
+    let path = PathBuf::from(directory).join("awegit.log");
+    let line = format!("{}\t{label}\n", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        use std::io::Write;
+        let _ = file.write_all(line.as_bytes());
+    }
+}
+
+fn action_label(request: &awegit_git::Mutation) -> &'static str {
+    match request {
+        awegit_git::Mutation::Fetch { .. } => "fetch",
+        awegit_git::Mutation::Pull { .. } => "pull",
+        awegit_git::Mutation::Push { .. } => "push",
+        awegit_git::Mutation::Stash { .. } => "stash",
+        awegit_git::Mutation::StashPop => "stashPop",
+        awegit_git::Mutation::StashApply { .. } => "stashApply",
+        awegit_git::Mutation::StashDrop { .. } => "stashDrop",
+        awegit_git::Mutation::Checkout { .. } => "checkout",
+        awegit_git::Mutation::CreateBranch { .. } => "createBranch",
+        awegit_git::Mutation::DeleteBranch { .. } => "deleteBranch",
+        awegit_git::Mutation::Merge { .. } => "merge",
+        awegit_git::Mutation::Rebase { .. } => "rebase",
+        awegit_git::Mutation::RebaseInteractive { .. } => "rebaseInteractive",
+        awegit_git::Mutation::Abort => "abort",
+        awegit_git::Mutation::Continue => "continue",
+        awegit_git::Mutation::Skip => "skip",
+        awegit_git::Mutation::Reset { .. } => "reset",
+        awegit_git::Mutation::CherryPick { .. } => "cherryPick",
+        awegit_git::Mutation::Revert { .. } => "revert",
+        awegit_git::Mutation::Reword { .. } => "reword",
+        awegit_git::Mutation::Tag { .. } => "tag",
+        awegit_git::Mutation::DeleteTag { .. } => "deleteTag",
+        awegit_git::Mutation::StageHunk { .. } => "stageHunk",
+        awegit_git::Mutation::StageLine { .. } => "stageLine",
+        awegit_git::Mutation::StagePaths { .. } => "stagePaths",
+        awegit_git::Mutation::DiscardHunk { .. } => "discardHunk",
+        awegit_git::Mutation::DiscardLine { .. } => "discardLine",
+        awegit_git::Mutation::Resolve { .. } => "resolve",
+        awegit_git::Mutation::RenameBranch { .. } => "renameBranch",
+        awegit_git::Mutation::SetUpstream { .. } => "setUpstream",
+        awegit_git::Mutation::DeleteRemoteBranch { .. } => "deleteRemoteBranch",
+        awegit_git::Mutation::CheckoutRemote { .. } => "checkoutRemote",
+        awegit_git::Mutation::PushRef { .. } => "pushRef",
+        awegit_git::Mutation::PullRef { .. } => "pullRef",
+        awegit_git::Mutation::Discard { .. } => "discard",
+        awegit_git::Mutation::Delete { .. } => "delete",
+        awegit_git::Mutation::ApplyPatch { .. } => "applyPatch",
+        awegit_git::Mutation::AddRemote { .. } => "addRemote",
+        awegit_git::Mutation::RemoveRemote { .. } => "removeRemote",
+        awegit_git::Mutation::SetRemoteUrl { .. } => "setRemoteUrl",
+        awegit_git::Mutation::AddWorktree { .. } => "addWorktree",
+        awegit_git::Mutation::RemoveWorktree { .. } => "removeWorktree",
+        awegit_git::Mutation::SubmoduleUpdate => "submoduleUpdate",
+        awegit_git::Mutation::SubmoduleAdd { .. } => "submoduleAdd",
+        awegit_git::Mutation::SubmoduleInit { .. } => "submoduleInit",
+        awegit_git::Mutation::SubmoduleSync { .. } => "submoduleSync",
+        awegit_git::Mutation::SubmoduleRemove { .. } => "submoduleRemove",
+        awegit_git::Mutation::GitFlowInit { .. } => "gitFlowInit",
+        awegit_git::Mutation::GitFlowStart { .. } => "gitFlowStart",
+        awegit_git::Mutation::GitFlowFinish { .. } => "gitFlowFinish",
+        awegit_git::Mutation::Squash { .. } => "squash",
+        awegit_git::Mutation::Clone { .. } => "clone",
+        awegit_git::Mutation::Init { .. } => "init",
+        awegit_git::Mutation::LfsPull => "lfsPull",
+        awegit_git::Mutation::LfsPush => "lfsPush",
+        awegit_git::Mutation::SetHidden { .. } => "setHidden",
+        awegit_git::Mutation::Custom { .. } => "custom",
+    }
 }
 
 #[tauri::command]
@@ -304,6 +400,31 @@ fn check_for_update() -> Result<Option<updates::UpdateNotice>, String> {
 }
 
 #[tauri::command]
+fn conflict_sides(path: Option<String>, file: String) -> Result<awegit_git::ConflictSides, String> {
+    let repo = repo_from(path)?;
+    awegit_git::conflict_sides(&repo, &file).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn compare_files(path: Option<String>, from: String, to: String) -> Result<Vec<awegit_git::FileChange>, String> {
+    let repo = repo_from(path)?;
+    awegit_git::compare_files(&repo, &from, &to).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn compare_file(path: Option<String>, from: String, to: String, file: String, unified: Option<u32>) -> Result<awegit_git::FileDiff, String> {
+    let repo = repo_from(path)?;
+    awegit_git::compare_file(&repo, &from, &to, &file, unified.unwrap_or(3)).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_repo_author(path: Option<String>, name: String, email: String) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
+    awegit_git::set_repo_author(&repo, &name, &email).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn suggest_commit_message(path: Option<String>) -> Result<ai::Suggestion, String> {
     let repo = repo_from(path)?;
     let values = settings::load()?;
@@ -349,7 +470,11 @@ pub fn run() {
             cancel_operation,
             set_passphrase,
             approve_credential,
-            check_for_update
+            check_for_update,
+            conflict_sides,
+            compare_files,
+            compare_file,
+            set_repo_author
         ])
         .run(tauri::generate_context!())
         .expect("error while running AweGit");

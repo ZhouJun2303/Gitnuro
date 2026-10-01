@@ -4,15 +4,17 @@
   import { listen } from "@tauri-apps/api/event";
   import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+  import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { commits, diffs, unstaged as sampleUnstaged } from "./sample";
   import { highlight } from "./highlight";
   import { shortcut, typing } from "./keys";
-  import { formatWhen, hiddenName, splitDiff, windowSlice } from "./view";
+  import { branchGroup, formatWhen, gravatarUrl, splitDiff, windowSlice } from "./view";
   import {
     badge,
     type BlameLine,
+    type CommandRecord,
     type CommitRow,
+    type ConflictSides,
     type DiffLine,
     type FileDiff,
     type FilePreview,
@@ -28,7 +30,36 @@
   type Mode = "sample" | "loading" | "live" | "error";
   type Side = "staged" | "unstaged";
   type Row = { path: string; letter: string; tone: "added" | "modified" | "deleted" };
-  type Dialog = "branch" | "flow" | "clone" | "open" | "prefs" | "reset" | "command" | "tag" | "remote" | "squash" | "credential" | null;
+  type Dialog =
+    | "branch"
+    | "flow"
+    | "clone"
+    | "open"
+    | "prefs"
+    | "reset"
+    | "command"
+    | "tag"
+    | "remote"
+    | "squash"
+    | "credential"
+    | "fetch"
+    | "pull"
+    | "push"
+    | "stash"
+    | "rename"
+    | "upstream"
+    | "resolve"
+    | "rebase"
+    | "patch"
+    | "about"
+    | "submodule"
+    | "worktree"
+    | "output"
+    | "workspace"
+    | "reword"
+    | null;
+  type MenuItem = { label: string; run: () => void };
+  type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row };
 
   const defaultSettings: Settings = {
     theme: "system",
@@ -62,6 +93,28 @@
     windowY: 0,
     windowWidth: 0,
     windowHeight: 0,
+    treeFiles: false,
+    gravatar: false,
+    signOff: false,
+    signOffFormat: "Signed-off-by: %user <%email>",
+    forceWithLease: true,
+    aiEnabled: true,
+    aiLanguage: "",
+    aiMaxChars: 12000,
+    aiPrompt: "",
+    aiTemperature: 0,
+    logDirectory: "",
+    recent: [],
+    workspaces: [],
+    currentWorkspace: "",
+    commands: [],
+    flowMaster: "main",
+    flowDevelop: "develop",
+    flowFeature: "feature/",
+    flowRelease: "release/",
+    flowHotfix: "hotfix/",
+    flowSupport: "support/",
+    expandedGroups: [],
   };
 
   let section = $state<"changes" | "history">("changes");
@@ -115,6 +168,18 @@
   let launchEl = $state<HTMLInputElement | null>(null);
   let historyEl = $state<HTMLElement | null>(null);
   let selectedIndex = $state(0);
+  let sideQuery = $state("");
+  let fileQuery = $state("");
+  let recentQuery = $state("");
+  let historyDiffTop = $state(0);
+  let picked = $state<string[]>([]);
+  let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  let commandOutput = $state("");
+  let conflict = $state<ConflictSides | null>(null);
+  let logLimit = $state(500);
+  let rebaseSteps = $state<{ verb: string; rev: string; summary: string; message: string }[]>([]);
+  let comparePair = $state<[string, string] | null>(null);
+  const drafts = new Map<string, { summary: string; description: string }>();
 
   const summaryTooLong = $derived(summary.length > 72);
   const selectedDiff = $derived(mode === "sample" && selectedPath ? (diffs[selectedPath] ?? []) : []);
@@ -135,10 +200,14 @@
   const changeCount = $derived(
     mode === "live" ? staged.length + unstaged.length : mode === "sample" ? unstaged.length : 0,
   );
+  const conflicted = $derived(
+    [...(snapshot?.staged ?? []), ...(snapshot?.unstaged ?? [])].some((file) => file.kind === "conflict"),
+  );
   const canCommit = $derived(
     summary.trim().length > 0 &&
       !summaryTooLong &&
       !busy &&
+      !conflicted &&
       (mode !== "live" || staged.length > 0 || amend),
   );
   const rowCommit = $derived(settings.linesHeight === "spaced" ? 32 : 24);
@@ -157,13 +226,21 @@
   const historyWindow = $derived(windowSlice(shownCommits, historyTop, rowCommit));
   const historyStart = $derived(historyWindow.start);
   const historyRows = $derived(historyWindow.rows);
-  const fileWindow = $derived(windowSlice(unstaged, fileTop, rowFile));
+  const shownUnstaged = $derived(unstaged.filter((file) => matchesQuery(file.path, fileQuery)));
+  const shownStaged = $derived(staged.filter((file) => matchesQuery(file.path, fileQuery)));
+  const unstagedTree = $derived(asTree(shownUnstaged));
+  const fileWindow = $derived(windowSlice(unstagedTree, fileTop, rowFile));
   const diffLines = $derived(diff?.lines ?? []);
   const diffWindow = $derived(windowSlice(diffLines, diffTop, 18));
   const blameWindow = $derived(windowSlice(blameLines ?? [], blameTop, 18));
+  const historyDiffWindow = $derived(windowSlice(historyDiff?.lines ?? [], historyDiffTop, 18));
   const splitRows = $derived(settings.diffStyle === "split" ? splitDiff(diffLines) : []);
-  const visibleBranches = $derived((refs?.branches ?? []).filter((branch) => !hiddenName(branch.name, settings.hiddenRefs)));
-  const visibleTags = $derived((refs?.tags ?? []).filter((tag) => !hiddenName(tag.name, settings.hiddenRefs)));
+  const visibleBranches = $derived(
+    (refs?.branches ?? []).filter((branch) => (branch.current || !refHidden(branch.name)) && matchesQuery(branch.name, sideQuery)),
+  );
+  const visibleTags = $derived(
+    (refs?.tags ?? []).filter((tag) => !refHidden(tag.name) && matchesQuery(tag.name, sideQuery)),
+  );
   const matches = $derived.by(() => {
     const query = launch.trim().toLowerCase();
     if (!query || mode !== "live") return [];
@@ -176,6 +253,7 @@
       { label: "Push", run: () => doPush() },
       { label: "Stash", run: () => mutate({ action: "stash", message: "" }) },
       { label: "Pop stash", run: () => mutate({ action: "stashPop" }) },
+      ...settings.commands.map((command) => ({ label: command.name, run: () => runCommand(command) })),
       ...(refs?.branches ?? []).map((branch) => ({
         label: `Checkout ${branch.name}`,
         run: () => mutate({ action: "checkout", name: branch.name }),
@@ -255,7 +333,7 @@
     if (historyFilter) {
       commitsLive = await invoke<CommitRow[]>("file_history", { path, file: historyFilter, limit: 200 });
     } else {
-      commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: 500, all: allBranches });
+      commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: logLimit, all: allBranches });
     }
     refs = await invoke<RefSnapshot>("repository_refs", { path });
     progress = await invoke<InProgress | null>("in_progress", { path });
@@ -270,13 +348,6 @@
     } catch (error) {
       actionError = message(error);
     }
-  }
-
-  function selectFile(path: string, side: Side) {
-    selectedPath = path;
-    selectedSide = side;
-    blameLines = null;
-    if (mode === "live") void loadDiff();
   }
 
   async function runChange(command: string, extra: Record<string, unknown> = {}) {
@@ -299,11 +370,17 @@
     busy = true;
     actionError = null;
     try {
-      const value = await invoke<StatusSnapshot>("mutate", { path: repoPath(), request });
+      const value = await invoke<StatusSnapshot & { output?: string }>("mutate", { path: repoPath(), request });
       applySnapshot(value);
+      const output = value.output ?? "";
       await loadContext();
       await loadDiff();
-      dialog = null;
+      if (output) {
+        commandOutput = output;
+        dialog = "output";
+      } else {
+        dialog = null;
+      }
     } catch (error) {
       actionError = message(error);
       try {
@@ -334,8 +411,42 @@
       remote,
       setUpstream: !current?.upstream,
       tags: false,
-      forceWithLease: false,
+      forceWithLease: settings.forceWithLease,
     });
+  }
+
+  function matchesQuery(value: string, query: string) {
+    const needle = query.trim().toLowerCase();
+    return !needle || value.toLowerCase().includes(needle);
+  }
+
+  function openMenu(event: MouseEvent, items: MenuItem[]) {
+    event.preventDefault();
+    menu = { x: event.clientX, y: event.clientY, items };
+  }
+
+  function rememberRepo(path: string) {
+    const recent = [path, ...settings.recent.filter((item) => item !== path)].slice(0, 12);
+    const currentId = settings.currentWorkspace;
+    const workspaces = settings.workspaces.map((workspace) => {
+      if (!currentId || workspace.id !== currentId) return workspace;
+      return {
+        ...workspace,
+        repositories: workspace.repositories.includes(path) ? workspace.repositories : [...workspace.repositories, path],
+        openTabs: workspace.openTabs.includes(path) ? workspace.openTabs : [...workspace.openTabs, path],
+      };
+    });
+    settings = { ...settings, recent, workspaces };
+    void invoke("save_settings", { values: settings });
+  }
+
+  function quick(event: MouseEvent, dialogName: Dialog, run: () => void) {
+    if (event.ctrlKey || event.metaKey) void run();
+    else {
+      draft = "";
+      draftExtra = "";
+      dialog = dialogName;
+    }
   }
 
   async function submitCommit(pushAfter = false) {
@@ -345,6 +456,7 @@
       summary = "";
       description = "";
       amend = false;
+      if (snapshot?.path) drafts.delete(snapshot.path);
       await loadContext();
       if (pushAfter) await doPush();
     }
@@ -365,7 +477,30 @@
     }
   }
 
-  async function selectCommit(id: string) {
+  async function compareDrops() {
+    if (drops.length !== 2) return;
+    comparePair = [drops[0], drops[1]];
+    try {
+      commitFiles = await invoke<StatusFile[]>("compare_files", { path: repoPath(), from: drops[0], to: drops[1] });
+      selectedCommit = drops[1];
+      historyFile = commitFiles[0]?.path ?? null;
+      if (historyFile) await pickCommitFile(historyFile);
+    } catch (error) {
+      actionError = message(error);
+    }
+  }
+
+  async function selectCommit(id: string, event?: MouseEvent) {
+    if (event?.shiftKey && selectedCommit) {
+      const ids = shownCommits.map((commit) => commit.id);
+      const start = ids.indexOf(selectedCommit);
+      const end = ids.indexOf(id);
+      if (start >= 0 && end >= 0) {
+        const [from, to] = start < end ? [start, end] : [end, start];
+        drops = ids.slice(from, to + 1);
+      }
+    }
+    comparePair = null;
     selectedCommit = id;
     blameLines = null;
     try {
@@ -385,6 +520,21 @@
   }
 
   async function pickCommitFile(file: string) {
+    if (comparePair) {
+      historyFile = file;
+      try {
+        historyDiff = await invoke<FileDiff>("compare_file", {
+          path: repoPath(),
+          from: comparePair[0],
+          to: comparePair[1],
+          file,
+          unified: settings.showEntireFile ? 100000 : 3,
+        });
+      } catch (error) {
+        actionError = message(error);
+      }
+      return;
+    }
     if (!selectedCommit) return;
     historyFile = file;
     try {
@@ -420,14 +570,19 @@
 
   async function openRepo(path: string) {
     if (!inApp() || busy || !path.trim()) return;
+    if (snapshot?.path) drafts.set(snapshot.path, { summary, description });
     busy = true;
     actionError = null;
     try {
       applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
+      const saved = drafts.get(path);
+      summary = saved?.summary ?? "";
+      description = saved?.description ?? "";
       historyFilter = "";
       await loadContext();
       await loadDiff();
       await invoke("watch_repository", { path: repoPath() });
+      rememberRepo(path);
       dialog = null;
     } catch (error) {
       actionError = message(error);
@@ -439,6 +594,151 @@
   async function savePrefs(close = true) {
     settings = await invoke<Settings>("save_settings", { values: settings });
     if (close) dialog = null;
+  }
+
+  function groupOpen(name: string) {
+    const group = branchGroup(name);
+    if (!group || settings.expandedGroups.length === 0) return true;
+    return settings.expandedGroups.includes(group);
+  }
+
+  function toggleGroup(group: string) {
+    const groups = [...new Set(visibleBranches.map((branch) => branchGroup(branch.name)).filter(Boolean))];
+    const current = settings.expandedGroups.length === 0 ? groups : [...settings.expandedGroups];
+    const next = current.includes(group) ? current.filter((item) => item !== group) : [...current, group];
+    settings = { ...settings, expandedGroups: next };
+    void savePrefs(false);
+  }
+
+  function refHidden(name: string) {
+    return (refs?.hiddenRefs ?? []).some((token) => name === token || (token.endsWith("/") && name.startsWith(token)));
+  }
+
+  function hideRef(name: string) {
+    const names = [...(refs?.hiddenRefs ?? [])];
+    if (!names.includes(name)) names.push(name);
+    void mutate({ action: "setHidden", names });
+  }
+
+  function showOnly(name: string) {
+    const names = (refs?.branches ?? []).map((branch) => branch.name).filter((item) => item !== name);
+    void mutate({ action: "setHidden", names });
+  }
+
+  function showAllRefs() {
+    void mutate({ action: "setHidden", names: [] });
+  }
+
+  function asTree(files: Row[]): TreeEntry[] {
+    if (!settings.treeFiles) return files.map((file) => ({ key: file.path, kind: "file", path: file.path, file }));
+    const groups = new Map<string, Row[]>();
+    for (const file of files) {
+      const dir = parentDir(file.path);
+      const list = groups.get(dir) ?? [];
+      list.push(file);
+      groups.set(dir, list);
+    }
+    const entries: TreeEntry[] = [];
+    for (const dir of [...groups.keys()].sort()) {
+      if (dir) entries.push({ key: `dir:${dir}`, kind: "dir", path: dir });
+      for (const file of groups.get(dir) ?? []) entries.push({ key: file.path, kind: "file", path: file.path, file });
+    }
+    return entries;
+  }
+
+  async function discardPicked() {
+    const files = [...picked];
+    for (const file of files) await mutate({ action: "discard", file });
+    picked = [];
+  }
+
+  function stageFolder(dir: string, unstage: boolean) {
+    const source = unstage ? shownStaged : shownUnstaged;
+    const files = source
+      .filter((file) => file.path === dir || file.path.startsWith(`${dir}/`) || file.path.startsWith(`${dir}\\`))
+      .map((file) => file.path);
+    if (files.length > 0) void mutate({ action: "stagePaths", files, unstage });
+  }
+
+  function runCommand(command: Pick<CommandRecord, "command">) {
+    void mutate({
+      action: "custom",
+      command: command.command,
+      repo: snapshot?.path ?? "",
+      sha: selectedCommit ?? "",
+      branch: snapshot?.branch ?? "",
+      file: selectedPath ?? historyFile ?? "",
+    });
+  }
+
+  function saveCommand() {
+    const name = draft.trim();
+    const command = draftUser.trim();
+    if (!name || !command) return;
+    const record: CommandRecord = { id: `cmd-${Date.now()}`, name, target: draftExtra || "repository", command };
+    settings = { ...settings, commands: [...settings.commands, record] };
+    draft = "";
+    draftUser = "";
+    void savePrefs(false);
+  }
+
+  function removeCommand(id: string) {
+    settings = { ...settings, commands: settings.commands.filter((command) => command.id !== id) };
+    void savePrefs(false);
+  }
+
+  function commandItems(target: string): MenuItem[] {
+    return settings.commands.filter((command) => command.target === target).map((command) => ({ label: command.name, run: () => runCommand(command) }));
+  }
+
+  function copyText(text: string) {
+    void navigator.clipboard?.writeText(text);
+  }
+
+  function fullPath(file: string) {
+    const root = snapshot?.path ?? "";
+    const sep = root.includes("\\") ? "\\" : "/";
+    const relative = sep === "\\" ? file.replaceAll("/", "\\") : file.replaceAll("\\", "/");
+    return root ? `${root.replace(/[\\/]+$/, "")}${sep}${relative}` : relative;
+  }
+
+  async function openResolve(file: string) {
+    try {
+      conflict = await invoke<ConflictSides>("conflict_sides", { path: repoPath(), file });
+      draft = file;
+      dialog = "resolve";
+    } catch (error) {
+      actionError = message(error);
+    }
+  }
+
+  function openRebase() {
+    if (!selectedCommit) return;
+    const index = commitsLive.findIndex((commit) => commit.id === selectedCommit);
+    const newer = index > 0 ? commitsLive.slice(0, index).slice().reverse() : [];
+    rebaseSteps = newer.map((commit) => ({ verb: "pick", rev: commit.id, summary: commit.summary, message: commit.summary }));
+    dialog = "rebase";
+  }
+
+  function moveStep(index: number, delta: number) {
+    const next = index + delta;
+    if (next < 0 || next >= rebaseSteps.length) return;
+    const copy = [...rebaseSteps];
+    const [item] = copy.splice(index, 1);
+    copy.splice(next, 0, item);
+    rebaseSteps = copy;
+  }
+
+  function selectFile(path: string, side: Side, event?: MouseEvent) {
+    selectedPath = path;
+    selectedSide = side;
+    blameLines = null;
+    if (event?.shiftKey || event?.ctrlKey || event?.metaKey) {
+      picked = picked.includes(path) ? picked.filter((item) => item !== path) : [...picked, path];
+    } else {
+      picked = [path];
+    }
+    if (mode === "live") void loadDiff();
   }
 
   function removeBranch(name: string) {
@@ -514,7 +814,14 @@
   function closeTab(path: string) {
     const next = repos.filter((repo) => repo !== path);
     repos = next;
-    if (snapshot?.path === path && next[0]) void openRepo(next[0]);
+    if (snapshot?.path !== path) return;
+    if (next[0]) void openRepo(next[0]);
+    else {
+      snapshot = null;
+      refs = null;
+      mode = "error";
+      loadError = "";
+    }
   }
 
   function revealHead() {
@@ -657,7 +964,8 @@
     selectedPath = null;
     invoke<Settings>("load_settings")
       .then(async (value) => {
-        settings = { ...defaultSettings, ...value };
+        settings = { ...defaultSettings, ...value, recent: value.recent ?? [], workspaces: value.workspaces ?? [], commands: value.commands ?? [], expandedGroups: value.expandedGroups ?? [] };
+        signOff = settings.signOff;
         if (value.windowWidth > 200 && value.windowHeight > 200) {
           const win = getCurrentWindow();
           await win.setPosition(new LogicalPosition(value.windowX, value.windowY));
@@ -709,6 +1017,15 @@
   <header class="chrome">
     <div class="tabs">
       <button class="tab" type="button" onclick={() => (dialog = "open")}>Open</button>
+      <button class="tab" type="button" onclick={() => { draft = ""; dialog = "workspace"; }}>Workspace</button>
+      {#if settings.workspaces.length > 0}
+        <select class="search" aria-label="Workspace" bind:value={settings.currentWorkspace} onchange={() => savePrefs(false)}>
+          <option value="">All</option>
+          {#each settings.workspaces as workspace (workspace.id)}
+            <option value={workspace.id}>{workspace.name}</option>
+          {/each}
+        </select>
+      {/if}
       {#each repos as repo (repo)}
         <div class="tab" class:active={snapshot?.path === repo}>
           <button class="file-select" type="button" onclick={() => openRepo(repo)}>{folderName(repo)}</button>
@@ -719,10 +1036,10 @@
       {/each}
     </div>
     <div class="toolbar">
-      <button class="tool" type="button" disabled={busy} onclick={() => doFetch()}><span class="glyph">↓</span>Fetch</button>
-      <button class="tool" type="button" disabled={busy} onclick={() => doPull()}><span class="glyph">↓</span>Pull</button>
-      <button class="tool" type="button" disabled={busy} onclick={() => doPush()}><span class="glyph">↑</span>Push</button>
-      <button class="tool" type="button" disabled={busy} onclick={() => mutate({ action: "stash", message: "" })}><span class="glyph">▣</span>Stash</button>
+      <button class="tool" type="button" disabled={busy} onclick={(event) => quick(event, "fetch", doFetch)}><span class="glyph">↓</span>Fetch</button>
+      <button class="tool" type="button" disabled={busy} onclick={(event) => quick(event, "pull", doPull)}><span class="glyph">↓</span>Pull</button>
+      <button class="tool" type="button" disabled={busy} onclick={(event) => quick(event, "push", doPush)}><span class="glyph">↑</span>Push</button>
+      <button class="tool" type="button" disabled={busy} onclick={(event) => quick(event, "stash", () => mutate({ action: "stash", message: "" }))}><span class="glyph">▣</span>Stash</button>
       <button class="tool" type="button" disabled={busy} onclick={() => mutate({ action: "stashPop" })}><span class="glyph">▢</span>Pop</button>
       <button class="tool" type="button" disabled={busy} onclick={() => { draft = ""; dialog = "flow"; }}><span class="glyph">⑂</span>Git Flow</button>
       <div class="spacer"></div>
@@ -756,6 +1073,7 @@
       <button class="tool" type="button" onclick={() => invoke("open_terminal", { path: repoPath() })}><span class="glyph">▹</span>Terminal</button>
       <button class="tool" type="button" onclick={() => snapshot && openPath(snapshot.path)}><span class="glyph">▤</span>Explorer</button>
       <button class="tool" type="button" onclick={() => (dialog = "prefs")}><span class="glyph">⚙</span>Preferences</button>
+      <button class="tool" type="button" onclick={() => (dialog = "about")}><span class="glyph">i</span>About</button>
     </div>
   </header>
 
@@ -777,7 +1095,7 @@
     <div class="banner">
       <span>{progressLabel(progress)} in progress</span>
       <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "abort" })}>Abort</button>
-      <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "continue" })}>Continue</button>
+      <button class="text-button" type="button" disabled={busy || conflicted} onclick={() => mutate({ action: "continue" })}>Continue</button>
       <button class="text-button" type="button" disabled={busy || progress === "merge"} onclick={() => mutate({ action: "skip" })}>Skip</button>
     </div>
   {/if}
@@ -800,36 +1118,80 @@
         Local branches
         {#if mode === "live"}
           <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "branch"; }}>New</button>
+          <button class="text-button" type="button" onclick={showAllRefs}>Show all</button>
         {/if}
       </div>
+      {#if mode === "live"}
+        <input class="search" placeholder="Filter sidebar" aria-label="Filter sidebar" bind:value={sideQuery} />
+      {/if}
       {#if mode === "live" && refs}
-        {#each visibleBranches as branch (branch.name)}
-          <div class="side" class:current={branch.current}>
+        {#each visibleBranches as branch, index (branch.name)}
+          {#if branchGroup(branch.name) && branchGroup(branch.name) !== branchGroup(visibleBranches[index - 1]?.name ?? "")}
+            <button class="side nested quiet" type="button" onclick={() => toggleGroup(branchGroup(branch.name))}>{branchGroup(branch.name)}</button>
+          {/if}
+          {#if groupOpen(branch.name)}
+          <div
+            class="side"
+            class:current={branch.current}
+            role="group"
+            oncontextmenu={(event) => openMenu(event, [
+              ...(!branch.current ? [
+                { label: "Checkout", run: () => mutate({ action: "checkout", name: branch.name }) },
+                { label: "Merge", run: () => mutate({ action: "merge", name: branch.name, squash: false, noFf: settings.mergeNoFf, autostash: settings.mergeAutostash }) },
+                { label: "Rebase", run: () => mutate({ action: "rebase", onto: branch.name }) },
+                { label: "Delete", run: () => removeBranch(branch.name) },
+              ] : []),
+              { label: "Rename", run: () => { draft = branch.name; draftExtra = branch.name; dialog = "rename"; } },
+              { label: "Set upstream", run: () => { draft = branch.name; draftExtra = branch.upstream ?? ""; dialog = "upstream"; } },
+              { label: "Copy name", run: () => copyText(branch.name) },
+              { label: "Hide", run: () => hideRef(branch.name) },
+              { label: "Show only this", run: () => showOnly(branch.name) },
+              ...commandItems("branch"),
+            ])}
+          >
             <button class="file-select" type="button" onclick={() => mutate({ action: "checkout", name: branch.name })}>
               {#if branch.current}<span class="dot"></span>{/if}
               <span class="name">{branch.name}</span>
               {#if branch.ahead > 0}<span class="ahead">↑{branch.ahead}</span>{/if}
               {#if branch.behind > 0}<span class="ahead">↓{branch.behind}</span>{/if}
             </button>
-            {#if !branch.current}
-              <button class="text-button row-action" type="button" onclick={() => mutate({ action: "merge", name: branch.name, squash: false, noFf: settings.mergeNoFf, autostash: settings.mergeAutostash })}>Merge</button>
-              <button class="text-button row-action" type="button" onclick={() => removeBranch(branch.name)}>Delete</button>
-            {/if}
           </div>
+          {/if}
         {/each}
         <div class="group">
           Remotes
           <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "remote"; }}>Add</button>
+          <button class="text-button" type="button" onclick={() => mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: false })}>Fetch all</button>
         </div>
         {#each refs.remotes as remote (remote.name)}
+          {#if matchesQuery(remote.name, sideQuery)}
           <div class="side quiet">
             <span class="name">{remote.name}</span>
+            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: false })}>Fetch</button>
+            <button class="text-button row-action" type="button" onclick={() => { draft = remote.name; draftExtra = remote.url ?? ""; dialog = "remote"; }}>URL</button>
             <button class="text-button row-action" type="button" onclick={() => mutate({ action: "removeRemote", name: remote.name })}>Remove</button>
           </div>
           {#if remote.head}<div class="side nested quiet"><span class="name">HEAD</span></div>{/if}
           {#each remote.branches as branch (remote.name + branch)}
-            <div class="side nested quiet"><span class="name">{branch}</span></div>
+            {#if matchesQuery(branch, sideQuery)}
+            <div
+              class="side nested quiet"
+              role="group"
+              oncontextmenu={(event) => openMenu(event, [
+                { label: "Checkout", run: () => mutate({ action: "checkoutRemote", remote: remote.name, branch }) },
+                { label: "Pull into current", run: () => mutate({ action: "pullRef", remote: remote.name, branch, rebase: settings.pullRebase, autostash: settings.mergeAutostash }) },
+                { label: "Push current here", run: () => mutate({ action: "pushRef", remote: remote.name, branch, forceWithLease: settings.forceWithLease }) },
+                { label: "Delete on remote", run: () => { if (confirm(`Delete ${remote.name}/${branch}?`)) void mutate({ action: "deleteRemoteBranch", remote: remote.name, branch }); } },
+                { label: "Copy name", run: () => copyText(`${remote.name}/${branch}`) },
+              ])}
+            >
+              <button class="file-select" type="button" onclick={() => mutate({ action: "checkoutRemote", remote: remote.name, branch })}>
+                <span class="name">{branch}</span>
+              </button>
+            </div>
+            {/if}
           {/each}
+          {/if}
         {/each}
       {:else}
         <div class="side current">
@@ -852,7 +1214,7 @@
       {#if expanded === "tags"}
         {#each visibleTags as tag (tag.name)}
           <div class="side nested quiet">
-            <span class="name">{tag.name}</span>
+            <button class="file-select" type="button" onclick={() => mutate({ action: "checkout", name: tag.name })}><span class="name">{tag.name}</span></button>
             <button class="text-button row-action" type="button" onclick={() => mutate({ action: "deleteTag", name: tag.name })}>Delete</button>
           </div>
         {/each}
@@ -862,27 +1224,45 @@
       </button>
       {#if expanded === "stashes"}
         {#each refs?.stashes ?? [] as stash (stash.name)}
-          <button class="side nested quiet" type="button" onclick={() => mutate({ action: "stashApply", name: stash.name })}>
-            <span class="name">{stash.summary}</span>
-          </button>
+          <div class="side nested quiet">
+            <button class="file-select" type="button" onclick={() => mutate({ action: "stashApply", name: stash.name })}>
+              <span class="name">{stash.summary}</span>
+            </button>
+            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "stashDrop", name: stash.name })}>Drop</button>
+          </div>
         {/each}
       {/if}
       <button class="side quiet" type="button" onclick={() => (expanded = expanded === "submodules" ? null : "submodules")}>
         <span>Submodules</span><span class="count">{refs?.submodules.length ?? 0}</span>
       </button>
       {#if expanded === "submodules"}
+        <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "submodule"; }}>Add</button>
         {#each refs?.submodules ?? [] as row (row.path)}
-          <div class="side nested quiet"><span class="name">{row.path}</span></div>
+          <div class="side nested quiet">
+            <span class="name">{row.path}</span>
+            {#if !row.ready}
+              <button class="text-button row-action" type="button" onclick={() => mutate({ action: "submoduleInit", path: row.path })}>Initialize</button>
+            {:else}
+              <button class="text-button row-action" type="button" onclick={() => openRepo(fullPath(row.path))}>Open</button>
+              <button class="text-button row-action" type="button" onclick={() => mutate({ action: "submoduleSync", path: row.path })}>Sync</button>
+              <button class="text-button row-action" type="button" onclick={() => mutate({ action: "submoduleUpdate" })}>Update</button>
+              <button class="text-button row-action" type="button" onclick={() => { if (confirm(`Delete submodule ${row.path}?`)) void mutate({ action: "submoduleRemove", path: row.path }); }}>Delete</button>
+            {/if}
+          </div>
         {/each}
       {/if}
       <button class="side quiet" type="button" onclick={() => (expanded = expanded === "worktrees" ? null : "worktrees")}>
         <span>Worktrees</span><span class="count">{refs?.worktrees.length ?? (mode === "sample" ? 1 : 0)}</span>
       </button>
       {#if expanded === "worktrees"}
+        <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "worktree"; }}>Add</button>
         {#each refs?.worktrees ?? [] as row (row.path)}
-          <button class="side nested quiet" type="button" onclick={() => openRepo(row.path)}>
-            <span class="name">{row.branch ?? folderName(row.path)}</span>
-          </button>
+          <div class="side nested quiet">
+            <button class="file-select" type="button" onclick={() => openRepo(row.path)}>
+              <span class="name">{row.branch ?? folderName(row.path)}</span>
+            </button>
+            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "removeWorktree", path: row.path })}>Remove</button>
+          </div>
         {/each}
       {/if}
     </aside>
@@ -895,12 +1275,16 @@
           <span class="count">{staged.length}</span>
           <button class="text-button" type="button" disabled={mode !== "live" || busy || staged.length === 0} onclick={() => runChange("unstage_all")}>Unstage all</button>
         </div>
-        {#if staged.length === 0}
-          <p class="empty">No staged changes</p>
+        {#if shownStaged.length === 0}
+          <p class="empty">{staged.length === 0 ? "No staged changes" : "No matching files"}</p>
         {:else}
           <div class="file-list staged-list">
-            {#each staged as file (file.path)}
-              {@render fileRow(file, "staged")}
+            {#each asTree(shownStaged) as entry (entry.key)}
+              {#if entry.kind === "dir"}
+                <button class="text-button" type="button" onclick={() => stageFolder(entry.path, true)}>{entry.path}</button>
+              {:else if entry.file}
+                {@render fileRow(entry.file, "staged")}
+              {/if}
             {/each}
           </div>
         {/if}
@@ -909,7 +1293,10 @@
         <div class="status-pane" style:order={settings.swapPanes ? 1 : 2}>
         <div class="pane-head">
           <span>Unstaged</span>
-          <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : unstaged.length}</span>
+          <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : shownUnstaged.length}</span>
+          <input class="search" placeholder="Filter files" aria-label="Filter files" bind:value={fileQuery} />
+          <button class="text-button" type="button" disabled={picked.length === 0 || busy} onclick={() => mutate({ action: "stagePaths", files: picked, unstage: false })}>Stage selected</button>
+          <button class="text-button" type="button" disabled={picked.length === 0 || busy} onclick={() => { if (confirm(`Discard ${picked.length} files?`)) void discardPicked(); }}>Discard selected</button>
           <button class="text-button" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>Stage all</button>
         </div>
         <div class="file-list" onscroll={(event) => (fileTop = (event.currentTarget as HTMLElement).scrollTop)}>
@@ -917,13 +1304,17 @@
             <p class="empty">Reading repository status…</p>
           {:else if mode === "error"}
             <p class="empty">{loadError}</p>
-          {:else if unstaged.length === 0}
-            <p class="empty">No unstaged changes</p>
+          {:else if shownUnstaged.length === 0}
+            <p class="empty">{unstaged.length === 0 ? "No unstaged changes" : "No matching files"}</p>
           {:else}
-            <div class="commit-window" style:height="{unstaged.length * rowFile}px">
-              {#each fileWindow.rows as file, index (file.path)}
+            <div class="commit-window" style:height="{unstagedTree.length * rowFile}px">
+              {#each fileWindow.rows as entry, index (entry.key)}
                 <div class="virtual-row" style:top="{(fileWindow.start + index) * rowFile}px">
-                  {@render fileRow(file, "unstaged")}
+                  {#if entry.kind === "dir"}
+                    <button class="text-button" type="button" onclick={() => stageFolder(entry.path, false)}>{entry.path}</button>
+                  {:else if entry.file}
+                    {@render fileRow(entry.file, "unstaged")}
+                  {/if}
                 </div>
               {/each}
             </div>
@@ -932,8 +1323,25 @@
         </div>
 
         {#snippet fileRow(file: Row, side: Side)}
-          <div class="file" class:selected={selectedPath === file.path && (mode !== "live" || selectedSide === side)}>
-            <button class="file-select" type="button" onclick={() => selectFile(file.path, side)}>
+          <div
+            class="file"
+            class:selected={selectedPath === file.path && (mode !== "live" || selectedSide === side)}
+            role="group"
+            oncontextmenu={(event) => openMenu(event, [
+              { label: side === "staged" ? "Unstage" : "Stage", run: () => runChange(side === "staged" ? "unstage_path" : "stage_path", { file: file.path }) },
+              { label: "Discard", run: () => { if (confirm(`Discard changes in ${file.path}?`)) void mutate({ action: "discard", file: file.path }); } },
+              { label: "Delete", run: () => { if (confirm(`Delete ${file.path}?`)) void mutate({ action: "delete", file: file.path }); } },
+              { label: "Blame", run: () => showBlame(file.path) },
+              { label: "History", run: () => showFileHistory(file.path) },
+              { label: "Reveal", run: () => revealItemInDir(fullPath(file.path)) },
+              { label: "Open file", run: () => openPath(fullPath(file.path)) },
+              { label: "Copy path", run: () => copyText(fullPath(file.path)) },
+              { label: "Copy relative path", run: () => copyText(file.path) },
+              ...(file.letter === "C" ? [{ label: "Resolve", run: () => openResolve(file.path) }] : []),
+              ...commandItems("file"),
+            ])}
+          >
+            <button class="file-select" type="button" onclick={(event) => selectFile(file.path, side, event)}>
               <span class="badge {file.tone}">{file.letter}</span>
               <span class="file-name">{fileName(file.path)}</span>
               <span class="file-dir">{parentDir(file.path)}</span>
@@ -971,6 +1379,8 @@
           {/if}
           <button class="text-button" type="button" disabled={drops.length === 0 || busy} onclick={dropCommits}>Drop</button>
           <button class="text-button" type="button" disabled={!selectedCommit || busy} onclick={() => { draft = "Squashed commits"; dialog = "squash"; }}>Squash</button>
+          <button class="text-button" type="button" disabled={drops.length !== 2} onclick={() => compareDrops()}>Compare</button>
+          <button class="text-button" type="button" onclick={() => { logLimit += 200; void loadContext(); }}>Load more</button>
         </div>
         {#if historyFilter}
           <div class="pane-head"><span>{historyFilter}</span></div>
@@ -986,12 +1396,28 @@
                 style:top="{(historyStart + index) * rowCommit}px"
                 role="button"
                 tabindex="0"
-                onclick={() => selectCommit(commit.id)}
+                onclick={(event) => selectCommit(commit.id, event)}
                 onkeydown={(event) => { if (event.key === "Enter") void selectCommit(commit.id); }}
+                oncontextmenu={(event) => openMenu(event, [
+                  ...(commitsLive[0]?.id === commit.id ? [{ label: "Amend", run: () => { section = "changes"; amend = true; summary = commit.summary; } }] : []),
+                  { label: "Edit message", run: () => { draft = commit.summary; draftExtra = commit.id; dialog = "reword"; } },
+                  { label: "Checkout", run: () => mutate({ action: "checkout", name: commit.id }) },
+                  { label: "Create branch", run: () => { draft = ""; draftExtra = commit.id; dialog = "branch"; } },
+                  { label: "Create tag", run: () => { draft = ""; draftExtra = commit.id; dialog = "tag"; } },
+                  { label: "Rebase interactive", run: () => { selectedCommit = commit.id; openRebase(); } },
+                  { label: "Revert", run: () => mutate({ action: "revert", rev: commit.id }) },
+                  { label: "Cherry-pick", run: () => mutate({ action: "cherryPick", rev: commit.id }) },
+                  { label: "Reset", run: () => { draft = commit.id; dialog = "reset"; } },
+                  ...commandItems("commit"),
+                ])}
               >
                 <input type="checkbox" checked={drops.includes(commit.id)} aria-label="Drop commit" onclick={(event) => event.stopPropagation()} onchange={() => toggleDrop(commit.id)} />
                 <span class="lane" style:margin-left="{commit.lane * 10}px"></span>
-                <span class="avatar" title={commit.author}>{commit.author.slice(0, 1).toUpperCase()}</span>
+                {#if settings.gravatar && commit.email}
+                  <img class="avatar" alt="" src={gravatarUrl(commit.email)} />
+                {:else}
+                  <span class="avatar" title={commit.author}>{commit.author.slice(0, 1).toUpperCase()}</span>
+                {/if}
                 <span class="subject">{commit.summary}</span>
                 <span class="badges">
                   {#each commit.refs as label (label)}<span class="ref">{label}</span>{/each}
@@ -1030,7 +1456,7 @@
         <div class="diff-body" onscroll={(event) => (blameTop = (event.currentTarget as HTMLElement).scrollTop)}>
           <div class="commit-window" style:height="{(blameLines?.length ?? 0) * 18}px">
             {#each blameWindow.rows as line, index (`${line.line}-${line.id}`)}
-              <span class="virtual-row" style:top="{(blameWindow.start + index) * 18}px">{line.shortId} {line.author} {line.text}</span>
+              <button class="virtual-row" type="button" style:top="{(blameWindow.start + index) * 18}px" onclick={() => { section = "history"; void selectCommit(line.id); }}>{line.shortId} {line.author} {line.text}</button>
             {/each}
           </div>
         </div>
@@ -1039,11 +1465,17 @@
           <span>{selectedPath}</span>
           <button class="text-button" type="button" onclick={() => showBlame(selectedPath!)}>Blame</button>
           <button class="text-button" type="button" onclick={() => showFileHistory(selectedPath!)}>History</button>
+          {#if snapshot?.unstaged.some((file) => file.path === selectedPath && file.kind === "conflict") || snapshot?.staged.some((file) => file.path === selectedPath && file.kind === "conflict")}
+            <button class="text-button" type="button" onclick={() => openResolve(selectedPath!)}>Resolve</button>
+          {/if}
           {#if diff}
             {#each { length: diff.hunks } as _, index (index)}
               <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index, unstage: selectedSide === "staged" })}>
                 {selectedSide === "staged" ? "Unstage" : "Stage"} {index + 1}
               </button>
+              {#if selectedSide === "unstaged"}
+                <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "discardHunk", file: selectedPath, index })}>Discard {index + 1}</button>
+              {/if}
             {/each}
           {/if}
         </header>
@@ -1054,8 +1486,10 @@
         {:else if diff.binary}
           {#if preview}
             <img class="preview" alt="" src={preview.dataUrl} />
+            <button class="text-button" type="button" onclick={() => openPath(fullPath(selectedPath ?? ""))}>Open</button>
           {:else}
             <p class="diff-empty">Binary file</p>
+            <button class="text-button" type="button" onclick={() => openPath(fullPath(selectedPath ?? ""))}>Open</button>
           {/if}
         {:else if diff.lines.length === 0}
           <p class="diff-empty">No changes in this view</p>
@@ -1063,8 +1497,8 @@
           <div class="diff-body split">
             {#each splitRows as row, index (index)}
               <div class="split-row">
-                <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{row.left}</span>
-                <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{row.right}</span>
+                <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#each highlight(row.left, selectedPath ?? "") as token, tokenIndex (`l${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#each highlight(row.right, selectedPath ?? "") as token, tokenIndex (`r${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
               </div>
             {/each}
           </div>
@@ -1076,6 +1510,9 @@
                   {#each highlight(line.text, selectedPath ?? "") as token, tokenIndex (`${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
                   {#if line.stageAt != null && (line.kind === "add" || line.kind === "delete")}
                     <button class="text-button line-action" type="button" disabled={busy} onclick={() => stageOne(line)}>{selectedSide === "staged" ? "Unstage line" : "Stage line"}</button>
+                    {#if selectedSide === "unstaged" && line.workAt != null}
+                      <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardLine", file: selectedPath, text: lineText(line), addition: line.kind === "add", at: line.workAt })}>Discard line</button>
+                    {/if}
                   {/if}
                 </span>
               {/each}
@@ -1095,6 +1532,10 @@
             <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "revert", rev: selectedCommit })}>Revert</button>
             <button class="text-button" type="button" onclick={() => { draft = selectedCommit ?? "HEAD"; dialog = "reset"; }}>Reset</button>
             <button class="text-button" type="button" disabled={busy} onclick={() => { draft = selectedCommit ?? ""; dialog = "squash"; }}>Squash to HEAD</button>
+            <button class="text-button" type="button" disabled={busy} onclick={() => { draft = commitsLive.find((row) => row.id === selectedCommit)?.summary ?? ""; draftExtra = selectedCommit ?? ""; dialog = "reword"; }}>Reword</button>
+            <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = selectedCommit ?? ""; dialog = "branch"; }}>Branch</button>
+            <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = selectedCommit ?? "HEAD"; dialog = "tag"; }}>Tag</button>
+            <button class="text-button" type="button" disabled={busy} onclick={openRebase}>Rebase interactive</button>
           {/if}
         </header>
         <div class="file-list staged-list">
@@ -1110,12 +1551,14 @@
         {#if historyDiff && historyDiff.binary}
           <p class="diff-empty">Binary file</p>
         {:else if historyDiff && historyDiff.lines.length > 0}
-          <div class="diff-body">
-            {#each historyDiff.lines as line, index (index)}
-              <span class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"}>
-                {#each highlight(line.text, historyFile ?? "") as token, tokenIndex (`h${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
-              </span>
-            {/each}
+          <div class="diff-body" onscroll={(event) => (historyDiffTop = (event.currentTarget as HTMLElement).scrollTop)}>
+            <div class="commit-window" style:height="{historyDiff.lines.length * 18}px">
+              {#each historyDiffWindow.rows as line, index (`hd-${historyDiffWindow.start}-${index}`)}
+                <span class="virtual-row" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{(historyDiffWindow.start + index) * 18}px">
+                  {#each highlight(line.text, historyFile ?? "") as token, tokenIndex (`h${historyDiffWindow.start}-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
+                </span>
+              {/each}
+            </div>
           </div>
         {:else}
           <p class="diff-empty">Select a file in this commit to see changes</p>
@@ -1129,6 +1572,29 @@
     </section>
   </div>
 
+  {#if mode === "error"}
+    <section class="changes">
+      <h2>Open a repository</h2>
+      <p class="empty">{loadError || "Open, clone, or create a repository."}</p>
+      <input class="search" placeholder="Search recent repositories" aria-label="Search recent repositories" bind:value={recentQuery} />
+      {#each settings.recent.filter((path) => matchesQuery(path, recentQuery)) as path (path)}
+        <button class="side" type="button" onclick={() => openRepo(path)}>{path}</button>
+      {/each}
+      <div class="composer-row">
+        <button class="commit" type="button" onclick={() => (dialog = "open")}>Open</button>
+        <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; }}>Clone</button>
+        <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; }}>New repository</button>
+      </div>
+    </section>
+  {/if}
+  {#if menu}
+    <div class="menu" style:left="{menu.x}px" style:top="{menu.y}px" role="menu">
+      {#each menu.items as item (item.label)}
+        <button type="button" onclick={() => { menu = null; void item.run(); }}>{item.label}</button>
+      {/each}
+    </div>
+    <button class="scrim menu-dismiss" type="button" aria-label="Close menu" onclick={() => (menu = null)}></button>
+  {/if}
   {#if dialog}
     <div class="scrim" role="presentation" onclick={() => (dialog = null)}>
       <div class="dialog" role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
@@ -1138,10 +1604,27 @@
           if (dialog === "branch") void mutate({ action: "createBranch", name: draft, start: draftExtra || null });
           else if (dialog === "clone") void mutate({ action: "clone", url: draft, destination: draftExtra });
           else if (dialog === "open") void openRepo(draft);
-          else if (dialog === "command") void mutate({ action: "custom", command: draft });
+          else if (dialog === "command") void runCommand({ command: draftUser || draft });
           else if (dialog === "prefs") void savePrefs();
-          else if (dialog === "tag") void mutate({ action: "tag", name: draft, rev: "HEAD", message: draftExtra });
+          else if (dialog === "tag") void mutate({ action: "tag", name: draft, rev: draftExtra || "HEAD", message: draftUser });
           else if (dialog === "remote") void mutate({ action: "addRemote", name: draft, url: draftExtra });
+          else if (dialog === "fetch") void mutate({ action: "fetch", remote: draft || null, prune: settings.fetchPrune, tags: draftExtra === "tags" });
+          else if (dialog === "pull") void mutate({ action: "pullRef", remote: draft || (refs?.remotes[0]?.name ?? "origin"), branch: draftExtra || snapshot?.branch || "HEAD", rebase: settings.pullRebase, autostash: settings.mergeAutostash });
+          else if (dialog === "push") void mutate({ action: "push", remote: draft || null, setUpstream: true, tags: draftExtra === "tags", forceWithLease: settings.forceWithLease });
+          else if (dialog === "stash") void mutate({ action: "stash", message: draft });
+          else if (dialog === "rename") void mutate({ action: "renameBranch", name: draft, to: draftExtra });
+          else if (dialog === "upstream") void mutate({ action: "setUpstream", branch: draft, upstream: draftExtra });
+          else if (dialog === "reword") void mutate({ action: "reword", rev: draftExtra || "HEAD", summary: draft });
+          else if (dialog === "rebase" && selectedCommit) void mutate({ action: "rebaseInteractive", onto: selectedCommit, drop: [], steps: rebaseSteps.map((step) => ({ verb: step.verb, rev: step.rev, message: step.verb === "reword" || step.verb === "squash" ? step.message : "" })) });
+          else if (dialog === "patch") void mutate({ action: "applyPatch", patch: draft });
+          else if (dialog === "submodule") void mutate({ action: "submoduleAdd", url: draft, path: draftExtra });
+          else if (dialog === "worktree") void mutate({ action: "addWorktree", path: draft, branch: draftExtra });
+          else if (dialog === "workspace") {
+            const id = `ws-${Date.now()}`;
+            settings = { ...settings, currentWorkspace: id, workspaces: [...settings.workspaces, { id, name: draft || "Workspace", repositories: repos, openTabs: repos, selectedTab: 0 }] };
+            void savePrefs();
+          }
+          else if (dialog === "resolve") void mutate({ action: "resolve", file: draft, side: draftExtra || "mark" });
           else if (dialog === "squash" && selectedCommit) void mutate({ action: "squash", from: selectedCommit, to: "HEAD", summary: draft });
           else if (dialog === "credential") {
             try {
@@ -1176,7 +1659,13 @@
           <label class="check"><input type="checkbox" bind:checked={settings.mergeNoFf} /> Merge with --no-ff</label>
           <label class="check"><input type="checkbox" bind:checked={settings.mergeAutostash} /> Autostash before merge</label>
           <label class="check"><input type="checkbox" bind:checked={settings.signCommits} /> Sign commits with git</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.signOff} onchange={() => (signOff = settings.signOff)} /> Sign-off by default</label>
+          <label>Sign-off format <input bind:value={settings.signOffFormat} /></label>
+          <label class="check"><input type="checkbox" bind:checked={settings.forceWithLease} /> Push with --force-with-lease</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.treeFiles} /> Group changed files by folder</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.gravatar} /> Gravatar avatars</label>
           <label class="check"><input type="checkbox" bind:checked={settings.sslVerify} /> Verify SSL</label>
+          {#if !settings.sslVerify}<p class="empty">SSL verification is off. Connections can be intercepted.</p>{/if}
           <label class="check"><input type="checkbox" bind:checked={settings.dateRelative} /> Relative dates</label>
           <label class="check"><input type="checkbox" bind:checked={settings.date24h} /> 24-hour clock</label>
           <label>Date pattern <input bind:value={settings.dateFormat} placeholder="yyyy-MM-dd HH:mm" /></label>
@@ -1192,7 +1681,7 @@
               <option value="split">Split</option>
             </select>
           </label>
-          <label>Hidden refs <input bind:value={settings.hiddenRefs} placeholder="origin/backup, wip/" /></label>
+          <p class="empty">Hidden branches are stored in this repository. Use Hide, Show only this, or Show all in the sidebar. The current branch stays visible.</p>
           <label>Author name <input bind:value={settings.authorName} placeholder="uses git config when empty" /></label>
           <label>Author email <input bind:value={settings.authorEmail} /></label>
           <label>Proxy <input bind:value={settings.proxy} placeholder="http://host:port" /></label>
@@ -1203,7 +1692,13 @@
           <label>Terminal <input bind:value={settings.terminal} placeholder="empty opens cmd" /></label>
           <label>AI base URL <input bind:value={settings.aiBaseUrl} /></label>
           <label>AI model <input bind:value={settings.aiModel} /></label>
+          <label class="check"><input type="checkbox" bind:checked={settings.aiEnabled} /> AI commit messages</label>
+          <label>AI language <input bind:value={settings.aiLanguage} placeholder="English" /></label>
+          <label>AI max characters <input type="number" bind:value={settings.aiMaxChars} /></label>
+          <label>AI prompt <input bind:value={settings.aiPrompt} placeholder={'{diff} {files} {branch} {recent_commits} {language}'} /></label>
+          <label>AI temperature <input type="number" step="0.1" bind:value={settings.aiTemperature} /></label>
           <label>AI API key <input type="password" bind:value={settings.aiApiKey} placeholder="or set XAI_API_KEY" /></label>
+          <label>Log directory <input bind:value={settings.logDirectory} placeholder="records action names only" /></label>
           <label>Signing passphrase <input type="password" bind:value={passphrase} placeholder="kept in memory for this session" /></label>
           <label>Askpass user <input bind:value={passUser} /></label>
           <div class="composer-row">
@@ -1212,7 +1707,9 @@
             <button class="text-button" type="button" onclick={() => invoke("check_for_update").then((value) => (updateNotice = value as UpdateNotice | null))}>Check for updates</button>
             <button class="text-button" type="button" onclick={() => mutate({ action: "lfsPull" })}>LFS pull</button>
             <button class="text-button" type="button" onclick={() => mutate({ action: "lfsPush" })}>LFS push</button>
-            <button class="text-button" type="button" onclick={() => (dialog = "command")}>Custom command</button>
+            <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = "repository"; draftUser = ""; dialog = "command"; }}>Custom command</button>
+            <button class="text-button" type="button" onclick={() => (dialog = "patch")}>Apply patch</button>
+            <button class="text-button" type="button" onclick={() => invoke("set_repo_author", { path: repoPath(), name: settings.authorName, email: settings.authorEmail })}>Save author in this repo</button>
             <button class="commit" type="submit">Save</button>
           </div>
         {:else if dialog === "reset"}
@@ -1225,7 +1722,14 @@
         {:else if dialog === "flow"}
           <h2>Git Flow</h2>
           <input placeholder="Feature name" bind:value={draft} />
+          <input placeholder="master branch" bind:value={settings.flowMaster} />
+          <input placeholder="develop branch" bind:value={settings.flowDevelop} />
+          <input placeholder="feature prefix" bind:value={settings.flowFeature} />
+          <input placeholder="release prefix" bind:value={settings.flowRelease} />
+          <input placeholder="hotfix prefix" bind:value={settings.flowHotfix} />
+          <input placeholder="support prefix" bind:value={settings.flowSupport} />
           <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => mutate({ action: "gitFlowInit", master: settings.flowMaster, develop: settings.flowDevelop, feature: settings.flowFeature, release: settings.flowRelease, hotfix: settings.flowHotfix, support: settings.flowSupport })}>Init</button>
             <button class="text-button" type="button" onclick={() => mutate({ action: "gitFlowStart", name: draft })}>Start</button>
             <button class="text-button" type="button" onclick={() => mutate({ action: "gitFlowFinish", name: draft })}>Finish</button>
           </div>
@@ -1252,8 +1756,100 @@
         {:else if dialog === "tag"}
           <h2>New tag</h2>
           <input placeholder="Name" bind:value={draft} />
-          <input placeholder="Message (empty makes a lightweight tag)" bind:value={draftExtra} />
+          <input placeholder="Revision" bind:value={draftExtra} />
+          <input placeholder="Message (empty makes a lightweight tag)" bind:value={draftUser} />
           <button class="commit" type="submit">Create</button>
+        {:else if dialog === "fetch"}
+          <h2>Fetch</h2>
+          <input placeholder="Remote (empty fetches all)" bind:value={draft} />
+          <label class="check"><input type="checkbox" checked={draftExtra === "tags"} onchange={(event) => (draftExtra = event.currentTarget.checked ? "tags" : "")} /> Tags</label>
+          <button class="commit" type="submit">Fetch</button>
+        {:else if dialog === "pull"}
+          <h2>Pull</h2>
+          <input placeholder="Remote" bind:value={draft} />
+          <input placeholder="Branch" bind:value={draftExtra} />
+          <button class="commit" type="submit">Pull</button>
+        {:else if dialog === "push"}
+          <h2>Push</h2>
+          <input placeholder="Remote" bind:value={draft} />
+          <label class="check"><input type="checkbox" checked={draftExtra === "tags"} onchange={(event) => (draftExtra = event.currentTarget.checked ? "tags" : "")} /> Tags</label>
+          <p class="empty">{settings.forceWithLease ? "Uses --force-with-lease." : "Does not force."}</p>
+          <button class="commit" type="submit">Push</button>
+        {:else if dialog === "stash"}
+          <h2>Stash</h2>
+          <input placeholder="Message (optional)" bind:value={draft} />
+          <button class="commit" type="submit">Stash</button>
+        {:else if dialog === "rename"}
+          <h2>Rename branch</h2>
+          <input placeholder="Current name" bind:value={draft} />
+          <input placeholder="New name" bind:value={draftExtra} />
+          <button class="commit" type="submit">Rename</button>
+        {:else if dialog === "upstream"}
+          <h2>Upstream for {draft}</h2>
+          <input placeholder="origin/main (empty clears it)" bind:value={draftExtra} />
+          <button class="commit" type="submit">Save</button>
+        {:else if dialog === "reword"}
+          <h2>Reword {draftExtra.slice(0, 7)}</h2>
+          <input placeholder="Summary" bind:value={draft} />
+          <button class="commit" type="submit">Reword</button>
+        {:else if dialog === "rebase"}
+          <h2>Interactive rebase onto {selectedCommit?.slice(0, 7)}</h2>
+          {#each rebaseSteps as step, index (step.rev)}
+            <div class="composer-row">
+              <select bind:value={step.verb}>
+                <option value="pick">pick</option>
+                <option value="reword">reword</option>
+                <option value="squash">squash</option>
+                <option value="fixup">fixup</option>
+                <option value="drop">drop</option>
+              </select>
+              <span>{step.summary}</span>
+              <button class="text-button" type="button" onclick={() => moveStep(index, -1)}>Up</button>
+              <button class="text-button" type="button" onclick={() => moveStep(index, 1)}>Down</button>
+            </div>
+            {#if step.verb === "reword" || step.verb === "squash"}
+              <input placeholder="Message" bind:value={step.message} />
+            {/if}
+          {/each}
+          <button class="commit" type="submit">Start rebase</button>
+        {:else if dialog === "patch"}
+          <h2>Apply patch</h2>
+          <textarea rows="8" placeholder="Patch text" bind:value={draft}></textarea>
+          <button class="commit" type="submit">Apply</button>
+        {:else if dialog === "submodule"}
+          <h2>Add submodule</h2>
+          <input placeholder="URL" bind:value={draft} />
+          <input placeholder="Path" bind:value={draftExtra} />
+          <button class="commit" type="submit">Add</button>
+        {:else if dialog === "worktree"}
+          <h2>Add worktree</h2>
+          <input placeholder="Path" bind:value={draft} />
+          <input placeholder="Branch" bind:value={draftExtra} />
+          <button class="commit" type="submit">Add</button>
+        {:else if dialog === "workspace"}
+          <h2>New workspace</h2>
+          <input placeholder="Name" bind:value={draft} />
+          <button class="commit" type="submit">Create</button>
+        {:else if dialog === "resolve"}
+          <h2>Resolve {draft}</h2>
+          <p class="empty">Ours and theirs are the two stages. Mark resolved keeps the working tree file.</p>
+          <textarea rows="4" readonly value={conflict?.ours ?? ""}></textarea>
+          <textarea rows="4" readonly value={conflict?.theirs ?? ""}></textarea>
+          <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => { draftExtra = "ours"; }}>Ours</button>
+            <button class="text-button" type="button" onclick={() => { draftExtra = "theirs"; }}>Theirs</button>
+            <button class="text-button" type="button" onclick={() => { draftExtra = "both"; }}>Keep both</button>
+            <button class="commit" type="button" onclick={() => { draftExtra = draftExtra || "mark"; }}>Use {draftExtra || "mark"}</button>
+          </div>
+          <button class="commit" type="submit">Apply</button>
+        {:else if dialog === "about"}
+          <h2>AweGit 2.0.0</h2>
+          <p class="empty">com.zhoujun.awegit. Windows builds include MinGit 2.56.0. macOS uses the system Git.</p>
+          <button class="commit" type="button" onclick={() => (dialog = null)}>Close</button>
+        {:else if dialog === "output"}
+          <h2>Command output</h2>
+          <pre class="diff-body">{commandOutput}</pre>
+          <button class="commit" type="button" onclick={() => (dialog = null)}>Close</button>
         {:else if dialog === "remote"}
           <h2>Remote</h2>
           <input placeholder="Name" bind:value={draft} />
@@ -1275,9 +1871,27 @@
           <input placeholder="Password" type="password" bind:value={draftSecret} />
           <button class="commit" type="submit">Save in Git</button>
         {:else}
-          <h2>Custom command</h2>
-          <input placeholder="git status" bind:value={draft} />
-          <button class="commit" type="submit">Run</button>
+          <h2>Custom commands</h2>
+          {#each settings.commands as command (command.id)}
+            <div class="composer-row">
+              <span>{command.name}</span>
+              <span class="meta">{command.target}</span>
+              <button class="text-button" type="button" onclick={() => runCommand(command)}>Run</button>
+              <button class="text-button" type="button" onclick={() => removeCommand(command.id)}>Delete</button>
+            </div>
+          {/each}
+          <input placeholder="Name" bind:value={draft} />
+          <select bind:value={draftExtra}>
+            <option value="repository">Repository</option>
+            <option value="commit">Commit</option>
+            <option value="branch">Branch</option>
+            <option value="file">File</option>
+          </select>
+          <input placeholder={"Template. Placeholders: ${repo} ${sha} ${branch} ${file}"} bind:value={draftUser} />
+          <div class="composer-row">
+            <button class="text-button" type="button" onclick={saveCommand}>Save</button>
+            <button class="commit" type="submit">Run</button>
+          </div>
         {/if}
       </form>
       </div>
@@ -1286,6 +1900,19 @@
 </div>
 
 <style>
+  .menu {
+    position: fixed;
+    z-index: 30;
+    min-width: 180px;
+    padding: 4px;
+    background: var(--canvas);
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+  }
+  .menu button, .menu-dismiss { font: inherit; }
+  .menu-dismiss { position: fixed; inset: 0; z-index: 29; background: transparent; border: 0; }
   .shell {
     height: 100vh;
     display: flex;

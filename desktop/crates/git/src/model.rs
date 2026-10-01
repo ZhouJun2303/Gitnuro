@@ -25,6 +25,9 @@ pub struct CommitRow {
     /// Unix seconds from `%at`. Zero when the log line has no timestamp.
     #[serde(default)]
     pub at: i64,
+    /// Author email from `%ae`, used only for an optional avatar.
+    #[serde(default)]
+    pub email: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -85,6 +88,10 @@ pub struct RefSnapshot {
     pub stashes: Vec<StashRow>,
     pub submodules: Vec<SubmoduleRow>,
     pub worktrees: Vec<WorktreeRow>,
+    /// Branch names hidden in the sidebar. Stored in `.git/awegit` as `awegit.hiddenRef`,
+    /// the same file the Kotlin client writes. The current branch is still shown.
+    #[serde(default)]
+    pub hidden_refs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -121,7 +128,7 @@ fn log_with(repo: &Path, limit: usize, all: bool, path: &[&str]) -> Result<Vec<C
         &limit,
         "--date-order",
         "-z",
-        "--pretty=format:%H%x1f%P%x1f%an%x1f%ar%x1f%s%x1f%D%x1f%at",
+        "--pretty=format:%H%x1f%P%x1f%an%x1f%ar%x1f%s%x1f%D%x1f%at%x1f%ae",
     ];
     if path.is_empty() && all {
         args.insert(1, "--all");
@@ -152,6 +159,7 @@ fn parse_commits(text: &str) -> Vec<CommitRow> {
         let summary = fields.next().unwrap_or("").to_string();
         let refs = parse_decoration(fields.next().unwrap_or(""));
         let at = fields.next().unwrap_or("").trim().parse().unwrap_or(0);
+        let email = fields.next().unwrap_or("").trim().to_string();
         let short_id = id.chars().take(7).collect();
         commits.push(CommitRow {
             id,
@@ -163,6 +171,7 @@ fn parse_commits(text: &str) -> Vec<CommitRow> {
             refs,
             lane: 0,
             at,
+            email,
         });
     }
     commits
@@ -176,7 +185,155 @@ pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
         stashes: stashes(repo)?,
         submodules: submodules(repo)?,
         worktrees: worktrees(repo)?,
+        hidden_refs: hidden_refs(repo),
     })
+}
+
+/// Names listed under `[awegit] hiddenRef` in `.git/awegit`, or the legacy `.git/gitnuro` file.
+pub fn hidden_refs(repo: &Path) -> Vec<String> {
+    let Ok(dir) = absolute_git_dir(repo) else {
+        return Vec::new();
+    };
+    if let Ok(text) = std::fs::read_to_string(dir.join("awegit")) {
+        return parse_hidden_refs(&text);
+    }
+    std::fs::read_to_string(dir.join("gitnuro"))
+        .map(|text| parse_hidden_refs(&text))
+        .unwrap_or_default()
+}
+
+/// Replace the `hiddenRef` list in `.git/awegit` and leave every other key in that file alone.
+pub fn write_hidden_refs(repo: &Path, names: &[String]) -> Result<(), Error> {
+    for name in names {
+        if name.is_empty() || name.contains(['\n', '\r', '\0']) {
+            return Err(Error::Rev(name.clone()));
+        }
+    }
+    let dir = absolute_git_dir(repo)?;
+    let path = dir.join("awegit");
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let next = rewrite_hidden_refs(&existing, names);
+    std::fs::write(&path, next).map_err(|source| Error::Read {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+fn absolute_git_dir(repo: &Path) -> Result<PathBuf, Error> {
+    let output = run(repo, &["rev-parse", "--absolute-git-dir"])?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() {
+        return Err(Error::Git("could not find the git directory".into()));
+    }
+    Ok(PathBuf::from(text))
+}
+
+fn parse_hidden_refs(text: &str) -> Vec<String> {
+    let mut section = String::new();
+    let mut names = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(name) = section_name(line) {
+            section = name;
+            continue;
+        }
+        if section != "awegit" {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() == "hiddenRef" {
+            let value = unquote_config(value.trim());
+            if !value.is_empty() {
+                names.push(value);
+            }
+        }
+    }
+    names
+}
+
+fn rewrite_hidden_refs(text: &str, names: &[String]) -> String {
+    let mut out = String::new();
+    let mut section = String::new();
+    let mut saw = false;
+    let mut inserted = false;
+    for raw in text.lines() {
+        let trimmed = raw.trim();
+        if let Some(name) = section_name(trimmed) {
+            if section == "awegit" && !inserted {
+                push_hidden(&mut out, names);
+                inserted = true;
+            }
+            section = name;
+            if section == "awegit" {
+                saw = true;
+            }
+            out.push_str(raw);
+            out.push('\n');
+            continue;
+        }
+        if section == "awegit" {
+            if let Some((key, _)) = trimmed.split_once('=') {
+                if key.trim() == "hiddenRef" {
+                    continue;
+                }
+            }
+        }
+        out.push_str(raw);
+        out.push('\n');
+    }
+    if section == "awegit" && !inserted {
+        push_hidden(&mut out, names);
+        inserted = true;
+    }
+    if !saw {
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str("[awegit]\n");
+        push_hidden(&mut out, names);
+    }
+    let _ = inserted;
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+fn section_name(line: &str) -> Option<String> {
+    let rest = line.strip_prefix('[')?;
+    let end = rest.find(']')?;
+    Some(rest[..end].split_whitespace().next().unwrap_or("").to_string())
+}
+
+fn push_hidden(out: &mut String, names: &[String]) {
+    for name in names {
+        out.push_str("\thiddenRef = ");
+        out.push_str(&quote_config(name));
+        out.push('\n');
+    }
+}
+
+fn quote_config(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '_' | '-' | '.' | '@'))
+    {
+        value.to_string()
+    } else {
+        format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+}
+
+fn unquote_config(value: &str) -> String {
+    let Some(inner) = value.strip_prefix('"').and_then(|text| text.strip_suffix('"')) else {
+        return value.to_string();
+    };
+    inner.replace("\\\"", "\"").replace("\\\\", "\\")
 }
 
 pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
@@ -282,6 +439,67 @@ pub fn show_commit_file_with(repo: &Path, id: &str, path: &str, context: u32) ->
             "--",
             path,
         ],
+    )?;
+    Ok(parse_diff(path, false, &String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Files that differ between two revisions.
+pub fn compare_files(repo: &Path, from: &str, to: &str) -> Result<Vec<FileChange>, Error> {
+    let from = check_rev(from)?;
+    let to = check_rev(to)?;
+    let output = run(repo, &["diff", "--name-status", "-r", "-M", from, to])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut files = Vec::new();
+    for line in text.lines() {
+        let mut parts = line.split('\t');
+        let status = parts.next().unwrap_or("");
+        let first = parts.next().unwrap_or("");
+        if first.is_empty() {
+            continue;
+        }
+        let (kind, path) = if status.starts_with('R') || status.starts_with('C') {
+            (ChangeKind::Renamed, parts.next().unwrap_or(first))
+        } else {
+            let kind = match status.chars().next().unwrap_or('M') {
+                'A' => ChangeKind::Added,
+                'D' => ChangeKind::Deleted,
+                _ => ChangeKind::Modified,
+            };
+            (kind, first)
+        };
+        files.push(FileChange {
+            path: path.to_string(),
+            kind,
+            previous_path: None,
+        });
+    }
+    Ok(files)
+}
+
+/// Diff of one path between two revisions.
+/// Staged file names, the current branch, and the last five subjects. Used to fill a prompt.
+pub fn prompt_facts(repo: &Path) -> (String, String, String) {
+    let files = run(repo, &["diff", "--cached", "--name-only"])
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .unwrap_or_default();
+    let branch = run(repo, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .unwrap_or_default();
+    let branch = if branch.is_empty() { "HEAD".to_string() } else { branch };
+    let recent = run(repo, &["log", "-5", "--format=%s"])
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .unwrap_or_default();
+    (files, branch, recent)
+}
+
+pub fn compare_file(repo: &Path, from: &str, to: &str, path: &str, context: u32) -> Result<FileDiff, Error> {
+    let from = check_rev(from)?;
+    let to = check_rev(to)?;
+    let path = check_path(path)?;
+    let unified = format!("--unified={}", context.min(1_000_000));
+    let output = run(
+        repo,
+        &["diff", "--no-ext-diff", "--no-color", &unified, from, to, "--", path],
     )?;
     Ok(parse_diff(path, false, &String::from_utf8_lossy(&output.stdout)))
 }

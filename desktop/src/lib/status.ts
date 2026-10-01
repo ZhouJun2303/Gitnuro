@@ -20,6 +20,7 @@ export type DiffLine = {
   kind: DiffLineKind;
   text: string;
   stageAt?: number;
+  workAt?: number;
 };
 
 export type FileDiff = {
@@ -61,6 +62,7 @@ export type CommitRow = {
   refs: string[];
   lane: number;
   at: number;
+  email?: string;
 };
 
 export type BranchRow = {
@@ -90,6 +92,7 @@ export type RefSnapshot = {
   stashes: StashRow[];
   submodules: SubmoduleRow[];
   worktrees: WorktreeRow[];
+  hiddenRefs?: string[];
 };
 
 export type InProgress = "merge" | "rebase" | "cherryPick" | "revert";
@@ -135,6 +138,49 @@ export type Settings = {
   windowY: number;
   windowWidth: number;
   windowHeight: number;
+  treeFiles: boolean;
+  gravatar: boolean;
+  signOff: boolean;
+  signOffFormat: string;
+  forceWithLease: boolean;
+  aiEnabled: boolean;
+  aiLanguage: string;
+  aiMaxChars: number;
+  aiPrompt: string;
+  aiTemperature: number;
+  logDirectory: string;
+  recent: string[];
+  workspaces: WorkspaceRecord[];
+  currentWorkspace: string;
+  commands: CommandRecord[];
+  flowMaster: string;
+  flowDevelop: string;
+  flowFeature: string;
+  flowRelease: string;
+  flowHotfix: string;
+  flowSupport: string;
+  expandedGroups: string[];
+};
+
+export type WorkspaceRecord = {
+  id: string;
+  name: string;
+  repositories: string[];
+  openTabs: string[];
+  selectedTab: number;
+};
+
+export type CommandRecord = {
+  id: string;
+  name: string;
+  target: string;
+  command: string;
+};
+
+export type ConflictSides = {
+  ours: string;
+  theirs: string;
+  working: string;
 };
 
 export type FilePreview = {

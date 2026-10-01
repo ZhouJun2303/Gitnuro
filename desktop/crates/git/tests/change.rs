@@ -50,6 +50,7 @@ fn stage_commit_and_diff_round_trip() {
             description: String::new(),
             amend: false,
             sign_off: false,
+            sign_off_format: String::new(),
         },
     );
     assert!(error.is_err());
@@ -62,6 +63,7 @@ fn stage_commit_and_diff_round_trip() {
             description: "body".to_string(),
             amend: false,
             sign_off: true,
+            sign_off_format: String::new(),
         },
     )
     .unwrap();

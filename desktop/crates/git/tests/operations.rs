@@ -6,7 +6,7 @@ use std::process::Command;
 
 use awegit_git::{
     file_diff, file_preview, in_progress, perform, repository_refs, stage_hunk, stage_line, status, stop_process_tree,
-    InProgress, Mutation, ResetMode,
+    InProgress, Mutation, RebaseStep, ResetMode,
 };
 
 fn repo() -> common::TempRepo {
@@ -325,6 +325,7 @@ fn interactive_rebase_drops_a_commit() {
         Mutation::RebaseInteractive {
             onto: onto.clone(),
             drop: vec![drop],
+            steps: Vec::new(),
         },
     )
     .unwrap();
@@ -401,6 +402,203 @@ fn git_flow_start_and_finish() {
     let log = repo.output(&["log", "--format=%s"]);
     assert!(log.contains("feature work"), "{log}");
     assert!(!repo.output(&["branch"]).contains("feature/demo"));
+}
+
+#[test]
+fn discard_hunk_keeps_the_other_change() {
+    let repo = repo();
+    fs::write(repo.path.join("a.txt"), "1\n2\n3\n4\n5\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    repo.git(&["commit", "-m", "base"]);
+    fs::write(repo.path.join("a.txt"), "1\n2-changed\n3\n4\n5-changed\n").unwrap();
+    perform(
+        &repo.path,
+        Mutation::DiscardHunk {
+            file: "a.txt".into(),
+            index: 0,
+        },
+    )
+    .unwrap();
+    let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
+    assert!(text.contains("\n2\n"), "{text}");
+    assert!(text.contains("5-changed"), "{text}");
+}
+
+#[test]
+fn resolve_conflict_keeps_ours() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main");
+    let merge = perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+        },
+    );
+    assert!(merge.is_err(), "expected a conflict");
+    perform(
+        &repo.path,
+        Mutation::Resolve {
+            file: "a.txt".into(),
+            side: "ours".into(),
+        },
+    )
+    .unwrap();
+    let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
+    assert!(text.contains("main"), "{text}");
+    assert!(!text.contains("<<<<<<<"), "{text}");
+}
+
+#[test]
+fn rename_and_reword_during_rebase() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    let onto = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+    commit_file(&repo, "b.txt", "b\n", "old-subject");
+    let rev = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+    repo.git(&["branch", "side"]);
+    perform(
+        &repo.path,
+        Mutation::RenameBranch {
+            name: "side".into(),
+            to: "renamed".into(),
+        },
+    )
+    .unwrap();
+    assert!(repo.output(&["branch"]).contains("renamed"));
+    perform(
+        &repo.path,
+        Mutation::RebaseInteractive {
+            onto,
+            drop: Vec::new(),
+            steps: vec![RebaseStep {
+                verb: "reword".into(),
+                rev,
+                message: "new-subject".into(),
+            }],
+        },
+    )
+    .unwrap();
+    let log = repo.output(&["log", "--format=%s"]);
+    assert!(log.contains("new-subject"), "{log}");
+    assert!(!log.contains("old-subject"), "{log}");
+}
+
+#[test]
+fn deletes_a_remote_branch() {
+    let origin = bare();
+    let local = repo();
+    commit_file(&local, "a.txt", "one\n", "first");
+    perform(
+        &local.path,
+        Mutation::AddRemote {
+            name: "origin".into(),
+            url: file_url(&origin.path),
+        },
+    )
+    .unwrap();
+    local.git(&["checkout", "-b", "topic"]);
+    perform(
+        &local.path,
+        Mutation::Push {
+            remote: Some("origin".into()),
+            set_upstream: true,
+            tags: false,
+            force_with_lease: false,
+        },
+    )
+    .unwrap();
+    perform(
+        &local.path,
+        Mutation::DeleteRemoteBranch {
+            remote: "origin".into(),
+            branch: "topic".into(),
+        },
+    )
+    .unwrap();
+    let remote = local.output(&["ls-remote", "--heads", "origin"]);
+    assert!(!remote.contains("topic"), "{remote}");
+}
+
+#[test]
+fn git_flow_init_writes_local_config() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    perform(
+        &repo.path,
+        Mutation::GitFlowInit {
+            master: "main".into(),
+            develop: "develop".into(),
+            feature: "feature/".into(),
+            release: "release/".into(),
+            hotfix: "hotfix/".into(),
+            support: "support/".into(),
+        },
+    )
+    .unwrap();
+    let prefix = repo.output(&["config", "--local", "--get", "gitflow.prefix.feature"]);
+    assert!(prefix.contains("feature/"), "{prefix}");
+    assert!(repo.output(&["branch"]).contains("develop"));
+}
+
+#[test]
+fn hidden_refs_stay_in_the_repository_file() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    fs::write(
+        repo.path.join(".git").join("awegit"),
+        "[signoff]\n\tenabled = false\n[awegit]\n\thiddenRef = old\n",
+    )
+    .unwrap();
+    assert_eq!(repository_refs(&repo.path).unwrap().hidden_refs, vec!["old".to_string()]);
+    perform(
+        &repo.path,
+        Mutation::SetHidden {
+            names: vec!["feature/a".into(), "wip".into()],
+        },
+    )
+    .unwrap();
+    let refs = repository_refs(&repo.path).unwrap();
+    assert_eq!(refs.hidden_refs, vec!["feature/a".to_string(), "wip".to_string()]);
+    let text = fs::read_to_string(repo.path.join(".git").join("awegit")).unwrap();
+    assert!(text.contains("enabled = false"), "{text}");
+    assert!(text.contains("hiddenRef = feature/a"), "{text}");
+    assert!(!text.contains("hiddenRef = old"), "{text}");
+}
+
+#[test]
+fn custom_command_expands_placeholders() {
+    let repo = repo();
+    let output = perform(
+        &repo.path,
+        Mutation::Custom {
+            command: "echo ${sha}".into(),
+            repo: String::new(),
+            sha: "abc123".into(),
+            branch: String::new(),
+            file: String::new(),
+        },
+    )
+    .unwrap();
+    assert!(output.contains("abc123"), "{output}");
+    let error = perform(
+        &repo.path,
+        Mutation::Custom {
+            command: "echo ${repo}".into(),
+            repo: "bad\"name".into(),
+            sha: String::new(),
+            branch: String::new(),
+            file: String::new(),
+        },
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("refusing"), "{error}");
 }
 
 #[test]

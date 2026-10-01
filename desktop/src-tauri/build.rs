@@ -26,6 +26,10 @@ fn main() {
             "set_passphrase",
             "approve_credential",
             "check_for_update",
+            "conflict_sides",
+            "compare_files",
+            "compare_file",
+            "set_repo_author",
         ]),
     );
     tauri_build::try_build(attributes).expect("failed to run tauri-build");

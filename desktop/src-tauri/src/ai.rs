@@ -12,12 +12,21 @@ pub struct Suggestion {
 }
 
 pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion, String> {
-    let diff = awegit_git::workspace_diff(repo).map_err(|error| error.to_string())?;
+    if !settings.ai_enabled {
+        return Err("AI commit messages are turned off.".into());
+    }
+    let mut diff = awegit_git::staged_diff(repo).map_err(|error| error.to_string())?;
     if diff.trim().is_empty() {
-        return Err("There is no diff to describe.".into());
+        return Err("Stage changes before asking for a message.".into());
+    }
+    let limit = if settings.ai_max_chars == 0 { 12_000 } else { settings.ai_max_chars as usize };
+    if diff.len() > limit {
+        diff.truncate(limit);
     }
     let key = if settings.ai_api_key.trim().is_empty() {
-        std::env::var("XAI_API_KEY").unwrap_or_default()
+        std::env::var("XAI_API_KEY")
+            .or_else(|_| std::env::var("OPENAI_API_KEY"))
+            .unwrap_or_default()
     } else {
         settings.ai_api_key.trim().to_string()
     };
@@ -30,11 +39,30 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
     } else {
         settings.ai_model.trim().to_string()
     };
-    let prompt = format!(
-        "Write a git commit message for this diff. The first line is the subject and must be at most 72 characters. Then a blank line and a short body. Use only the diff.\n\n{diff}"
-    );
+    let (files, branch, recent) = awegit_git::prompt_facts(repo);
+    let language = if settings.ai_language.trim().is_empty() {
+        "English".to_string()
+    } else {
+        settings.ai_language.trim().to_string()
+    };
+    let template = if settings.ai_prompt.trim().is_empty() {
+        "Write a git commit message in {language}. The first line is the subject and must be at most 72 characters. Then a blank line and a short body. Branch: {branch}. Files: {files}. Recent commits: {recent_commits}. Use only this staged diff:\n\n{diff}".to_string()
+    } else {
+        settings.ai_prompt.clone()
+    };
+    let prompt = template
+        .replace("{diff}", &diff)
+        .replace("${diff}", &diff)
+        .replace("{files}", &files)
+        .replace("${files}", &files)
+        .replace("{branch}", &branch)
+        .replace("${branch}", &branch)
+        .replace("{recent_commits}", &recent)
+        .replace("${recent_commits}", &recent)
+        .replace("{language}", &language)
+        .replace("${language}", &language);
     let xai = base.contains("api.x.ai");
-    let (url, body) = if xai {
+    let (url, mut body) = if xai {
         let body = serde_json::json!({ "model": model, "input": prompt });
         (format!("{base}/responses"), body)
     } else {
@@ -47,6 +75,9 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
         });
         (format!("{base}/chat/completions"), body)
     };
+    if settings.ai_temperature > 0.0 {
+        body["temperature"] = serde_json::json!(settings.ai_temperature);
+    }
     let payload = serde_json::to_string(&body).map_err(|error| error.to_string())?;
     let text = post_json(&url, &key, &payload)?;
     let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| text.clone())?;

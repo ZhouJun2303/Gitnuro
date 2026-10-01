@@ -69,6 +69,73 @@ pub struct Settings {
     pub window_width: u32,
     #[serde(default)]
     pub window_height: u32,
+    #[serde(default)]
+    pub tree_files: bool,
+    #[serde(default)]
+    pub gravatar: bool,
+    #[serde(default)]
+    pub sign_off: bool,
+    #[serde(default = "sign_off_format")]
+    pub sign_off_format: String,
+    #[serde(default = "default_true")]
+    pub force_with_lease: bool,
+    #[serde(default = "default_true")]
+    pub ai_enabled: bool,
+    #[serde(default)]
+    pub ai_language: String,
+    #[serde(default = "ai_max")]
+    pub ai_max_chars: u32,
+    #[serde(default)]
+    pub ai_prompt: String,
+    #[serde(default)]
+    pub ai_temperature: f32,
+    #[serde(default)]
+    pub log_directory: String,
+    #[serde(default)]
+    pub recent: Vec<String>,
+    #[serde(default)]
+    pub workspaces: Vec<WorkspaceRecord>,
+    #[serde(default)]
+    pub current_workspace: String,
+    #[serde(default)]
+    pub commands: Vec<CommandRecord>,
+    #[serde(default)]
+    pub flow_master: String,
+    #[serde(default = "develop_name")]
+    pub flow_develop: String,
+    #[serde(default = "feature_prefix")]
+    pub flow_feature: String,
+    #[serde(default = "release_prefix")]
+    pub flow_release: String,
+    #[serde(default = "hotfix_prefix")]
+    pub flow_hotfix: String,
+    #[serde(default = "support_prefix")]
+    pub flow_support: String,
+    #[serde(default)]
+    pub expanded_groups: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceRecord {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub repositories: Vec<String>,
+    #[serde(default)]
+    pub open_tabs: Vec<String>,
+    #[serde(default)]
+    pub selected_tab: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandRecord {
+    pub id: String,
+    pub name: String,
+    /// repository, commit, branch, or file.
+    pub target: String,
+    pub command: String,
 }
 
 fn theme_default() -> String {
@@ -91,6 +158,27 @@ fn compact() -> String {
 }
 fn scale_default() -> u32 {
     13
+}
+fn sign_off_format() -> String {
+    "Signed-off-by: %user <%email>".into()
+}
+fn ai_max() -> u32 {
+    12_000
+}
+fn develop_name() -> String {
+    "develop".into()
+}
+fn feature_prefix() -> String {
+    "feature/".into()
+}
+fn release_prefix() -> String {
+    "release/".into()
+}
+fn hotfix_prefix() -> String {
+    "hotfix/".into()
+}
+fn support_prefix() -> String {
+    "support/".into()
 }
 
 impl Default for Settings {
@@ -127,6 +215,28 @@ impl Default for Settings {
             window_y: 0,
             window_width: 0,
             window_height: 0,
+            tree_files: false,
+            gravatar: false,
+            sign_off: false,
+            sign_off_format: sign_off_format(),
+            force_with_lease: true,
+            ai_enabled: true,
+            ai_language: String::new(),
+            ai_max_chars: ai_max(),
+            ai_prompt: String::new(),
+            ai_temperature: 0.0,
+            log_directory: String::new(),
+            recent: Vec::new(),
+            workspaces: Vec::new(),
+            current_workspace: String::new(),
+            commands: Vec::new(),
+            flow_master: String::new(),
+            flow_develop: develop_name(),
+            flow_feature: feature_prefix(),
+            flow_release: release_prefix(),
+            flow_hotfix: hotfix_prefix(),
+            flow_support: support_prefix(),
+            expanded_groups: Vec::new(),
         }
     }
 }
