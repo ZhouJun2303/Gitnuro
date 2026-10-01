@@ -92,6 +92,16 @@ pub struct RefSnapshot {
     /// the same file the Kotlin client writes. The current branch is still shown.
     #[serde(default)]
     pub hidden_refs: Vec<String>,
+    /// Open branch groups for this repository. An empty list means every group is open.
+    #[serde(default)]
+    pub expanded_groups: Vec<String>,
+    /// True when `.git/awegit` has a `signoff.enabled` key.
+    #[serde(default)]
+    pub sign_off_set: bool,
+    #[serde(default)]
+    pub sign_off: bool,
+    #[serde(default)]
+    pub sign_off_format: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -186,6 +196,10 @@ pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
         submodules: submodules(repo)?,
         worktrees: worktrees(repo)?,
         hidden_refs: hidden_refs(repo),
+        expanded_groups: list_key(repo, "awegit", "expandedGroup"),
+        sign_off_set: !value_key(repo, "signoff", "enabled").is_empty(),
+        sign_off: value_key(repo, "signoff", "enabled").eq_ignore_ascii_case("true"),
+        sign_off_format: value_key(repo, "signoff", "format"),
     })
 }
 
@@ -334,6 +348,209 @@ fn unquote_config(value: &str) -> String {
         return value.to_string();
     };
     inner.replace("\\\"", "\"").replace("\\\\", "\\")
+}
+
+fn local_text(repo: &Path) -> String {
+    let Ok(dir) = absolute_git_dir(repo) else {
+        return String::new();
+    };
+    if let Ok(text) = std::fs::read_to_string(dir.join("awegit")) {
+        return text;
+    }
+    std::fs::read_to_string(dir.join("gitnuro")).unwrap_or_default()
+}
+
+fn list_key(repo: &Path, section: &str, key: &str) -> Vec<String> {
+    values_in(&local_text(repo), section, key)
+}
+
+fn value_key(repo: &Path, section: &str, key: &str) -> String {
+    values_in(&local_text(repo), section, key).into_iter().next().unwrap_or_default()
+}
+
+fn values_in(text: &str, want_section: &str, want_key: &str) -> Vec<String> {
+    let mut section = String::new();
+    let mut values = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some(name) = section_name(line) {
+            section = name;
+            continue;
+        }
+        if section != want_section {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() == want_key {
+            let value = unquote_config(value.trim());
+            if !value.is_empty() {
+                values.push(value);
+            }
+        }
+    }
+    values
+}
+
+pub fn write_expanded_groups(repo: &Path, names: &[String]) -> Result<(), Error> {
+    for name in names {
+        if name.is_empty() || name.contains(['\n', '\r', '\0']) {
+            return Err(Error::Rev(name.clone()));
+        }
+    }
+    rewrite_local_key(repo, "awegit", "expandedGroup", names)
+}
+
+/// `signoff.format` from `.git/awegit`. Empty when this repository has not set one.
+pub fn repo_sign_off_format(repo: &Path) -> String {
+    value_key(repo, "signoff", "format")
+}
+
+pub fn write_sign_off(repo: &Path, enabled: bool, format: &str) -> Result<(), Error> {
+    if format.contains(['\n', '\r', '\0']) {
+        return Err(Error::Rev(format.to_string()));
+    }
+    let dir = absolute_git_dir(repo)?;
+    let path = dir.join("awegit");
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let next = rewrite_sign_off(&existing, enabled, format);
+    std::fs::write(&path, next).map_err(|source| Error::Read {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+fn rewrite_local_key(repo: &Path, section: &str, key: &str, names: &[String]) -> Result<(), Error> {
+    let dir = absolute_git_dir(repo)?;
+    let path = dir.join("awegit");
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let next = rewrite_key(&existing, section, key, names);
+    std::fs::write(&path, next).map_err(|source| Error::Read {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+fn rewrite_key(text: &str, want_section: &str, want_key: &str, names: &[String]) -> String {
+    let mut out = String::new();
+    let mut section = String::new();
+    let mut saw = false;
+    let mut inserted = false;
+    for raw in text.lines() {
+        let trimmed = raw.trim();
+        if let Some(name) = section_name(trimmed) {
+            if section == want_section && !inserted {
+                push_key(&mut out, want_key, names);
+                inserted = true;
+            }
+            section = name;
+            if section == want_section {
+                saw = true;
+            }
+            out.push_str(raw);
+            out.push('\n');
+            continue;
+        }
+        if section == want_section {
+            if let Some((key, _)) = trimmed.split_once('=') {
+                if key.trim() == want_key {
+                    continue;
+                }
+            }
+        }
+        out.push_str(raw);
+        out.push('\n');
+    }
+    if section == want_section && !inserted {
+        push_key(&mut out, want_key, names);
+        inserted = true;
+    }
+    if !saw {
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push('[');
+        out.push_str(want_section);
+        out.push_str("]\n");
+        push_key(&mut out, want_key, names);
+    }
+    let _ = inserted;
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+fn push_key(out: &mut String, key: &str, names: &[String]) {
+    for name in names {
+        out.push('\t');
+        out.push_str(key);
+        out.push_str(" = ");
+        out.push_str(&quote_config(name));
+        out.push('\n');
+    }
+}
+
+fn rewrite_sign_off(text: &str, enabled: bool, format: &str) -> String {
+    let mut out = String::new();
+    let mut section = String::new();
+    let mut saw = false;
+    let mut inserted = false;
+    for raw in text.lines() {
+        let trimmed = raw.trim();
+        if let Some(name) = section_name(trimmed) {
+            if section == "signoff" && !inserted {
+                push_sign_off(&mut out, enabled, format);
+                inserted = true;
+            }
+            section = name;
+            if section == "signoff" {
+                saw = true;
+            }
+            out.push_str(raw);
+            out.push('\n');
+            continue;
+        }
+        if section == "signoff" {
+            if let Some((key, _)) = trimmed.split_once('=') {
+                let key = key.trim();
+                if key == "enabled" || key == "format" {
+                    continue;
+                }
+            }
+        }
+        out.push_str(raw);
+        out.push('\n');
+    }
+    if section == "signoff" && !inserted {
+        push_sign_off(&mut out, enabled, format);
+        inserted = true;
+    }
+    if !saw {
+        if !out.is_empty() && !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push_str("[signoff]\n");
+        push_sign_off(&mut out, enabled, format);
+    }
+    let _ = inserted;
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+fn push_sign_off(out: &mut String, enabled: bool, format: &str) {
+    out.push_str(if enabled { "\tenabled = true\n" } else { "\tenabled = false\n" });
+    if !format.is_empty() {
+        out.push_str("\tformat = ");
+        out.push_str(&quote_config(format));
+        out.push('\n');
+    }
 }
 
 pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {

@@ -130,7 +130,7 @@ fn fetch_push_and_fast_forward() {
     )
     .unwrap();
 
-    perform(&other, Mutation::Pull { rebase: false }).unwrap();
+    perform(&other, Mutation::Pull { rebase: false, autostash: false }).unwrap();
     let log = git_at(&other, &["log", "--format=%s"]);
     assert!(log.contains("second"), "{log}");
     assert!(log.contains("first"), "{log}");
@@ -146,7 +146,7 @@ fn merge_conflict_rebase_abort_stash_and_tag() {
     assert!(clean.staged.is_empty() && clean.unstaged.is_empty(), "{clean:?}");
     let stashed = repository_refs(&repo.path).unwrap();
     assert!(stashed.stashes.iter().any(|stash| stash.summary.contains("wip")), "{:?}", stashed.stashes);
-    perform(&repo.path, Mutation::StashPop).unwrap();
+    perform(&repo.path, Mutation::StashPop { name: String::new() }).unwrap();
     assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "dirty\n");
     fs::write(repo.path.join("a.txt"), "one\n").unwrap();
 
@@ -181,7 +181,7 @@ fn merge_conflict_rebase_abort_stash_and_tag() {
 
     repo.git(&["checkout", "-b", "side", "HEAD~1"]);
     commit_file(&repo, "a.txt", "side\n", "side");
-    let rebase = perform(&repo.path, Mutation::Rebase { onto: "main".into() });
+    let rebase = perform(&repo.path, Mutation::Rebase { onto: "main".into(), autostash: false });
     assert!(rebase.is_err(), "rebase should conflict");
     assert_eq!(in_progress(&repo.path).unwrap(), Some(InProgress::Rebase));
     perform(&repo.path, Mutation::Abort).unwrap();
@@ -326,6 +326,7 @@ fn interactive_rebase_drops_a_commit() {
             onto: onto.clone(),
             drop: vec![drop],
             steps: Vec::new(),
+            autostash: false,
         },
     )
     .unwrap();
@@ -521,6 +522,7 @@ fn rename_and_reword_during_rebase() {
                 rev,
                 message: "new-subject".into(),
             }],
+            autostash: false,
         },
     )
     .unwrap();
@@ -638,6 +640,63 @@ fn custom_command_expands_placeholders() {
     )
     .unwrap_err();
     assert!(error.to_string().contains("refusing"), "{error}");
+}
+
+#[test]
+fn repository_file_keeps_hidden_refs_signoff_and_groups() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    fs::write(
+        repo.path.join(".git").join("awegit"),
+        "[signoff]\n\tenabled = false\n[awegit]\n\thiddenRef = old\n",
+    )
+    .unwrap();
+    perform(
+        &repo.path,
+        Mutation::SetHidden { names: vec!["feature/a".into()] },
+    )
+    .unwrap();
+    perform(
+        &repo.path,
+        Mutation::SetSignOff {
+            enabled: true,
+            format: "Reviewed-by: %user <%email>".into(),
+        },
+    )
+    .unwrap();
+    perform(
+        &repo.path,
+        Mutation::SetExpanded { names: vec!["feature".into()] },
+    )
+    .unwrap();
+    let refs = repository_refs(&repo.path).unwrap();
+    assert_eq!(refs.hidden_refs, vec!["feature/a".to_string()]);
+    assert!(refs.sign_off_set);
+    assert!(refs.sign_off);
+    assert_eq!(refs.sign_off_format, "Reviewed-by: %user <%email>");
+    assert_eq!(refs.expanded_groups, vec!["feature".to_string()]);
+    let text = fs::read_to_string(repo.path.join(".git").join("awegit")).unwrap();
+    assert!(text.contains("hiddenRef = feature/a"), "{text}");
+    assert!(!text.contains("hiddenRef = old"), "{text}");
+    assert!(text.contains("enabled = true"), "{text}");
+    assert!(text.contains("expandedGroup = feature"), "{text}");
+}
+
+#[test]
+fn named_stash_pop_restores_that_stash() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    fs::write(repo.path.join("a.txt"), "first\n").unwrap();
+    perform(&repo.path, Mutation::Stash { message: "first".into() }).unwrap();
+    fs::write(repo.path.join("a.txt"), "second\n").unwrap();
+    perform(&repo.path, Mutation::Stash { message: "second".into() }).unwrap();
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    let older = stashes.iter().find(|stash| stash.summary.contains("first")).expect("older stash");
+    perform(&repo.path, Mutation::StashPop { name: older.name.clone() }).unwrap();
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "first\n");
+    let left = repository_refs(&repo.path).unwrap().stashes;
+    assert!(left.iter().any(|stash| stash.summary.contains("second")), "{left:?}");
+    assert!(!left.iter().any(|stash| stash.summary.contains("first")), "{left:?}");
 }
 
 #[test]

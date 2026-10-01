@@ -45,6 +45,29 @@ fn read_status(repo: &Path) -> Result<awegit_git::StatusSnapshot, String> {
 }
 
 fn compose_proxy(settings: &settings::Settings) -> String {
+    let host = settings.proxy_host.trim();
+    if settings.proxy_enabled && !host.is_empty() {
+        let scheme = if settings.proxy_type.eq_ignore_ascii_case("socks") {
+            "socks5"
+        } else {
+            "http"
+        };
+        let port = if settings.proxy_port > 0 {
+            format!(":{}", settings.proxy_port)
+        } else {
+            String::new()
+        };
+        let auth = if settings.proxy_user.trim().is_empty() {
+            String::new()
+        } else {
+            format!(
+                "{}:{}@",
+                encode_userinfo(settings.proxy_user.trim()),
+                encode_userinfo(&settings.proxy_password)
+            )
+        };
+        return format!("{scheme}://{auth}{host}{port}");
+    }
     let proxy = settings.proxy.trim();
     if proxy.is_empty() {
         return String::new();
@@ -131,7 +154,12 @@ fn commit_changes(
 ) -> Result<awegit_git::StatusSnapshot, String> {
     let repo = repo_from(path)?;
     let sign_off_format = if sign_off {
-        settings::load().map(|values| values.sign_off_format).unwrap_or_default()
+        let local = awegit_git::repo_sign_off_format(&repo);
+        if local.trim().is_empty() {
+            settings::load().map(|values| values.sign_off_format).unwrap_or_default()
+        } else {
+            local
+        }
     } else {
         String::new()
     };
@@ -237,9 +265,15 @@ fn record_action(request: &awegit_git::Mutation) {
         return;
     }
     let label = action_label(request);
+    let detail = action_detail(request);
     let _ = std::fs::create_dir_all(directory);
     let path = PathBuf::from(directory).join("awegit.log");
-    let line = format!("{}\t{label}\n", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
+    let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let line = if detail.is_empty() {
+        format!("{unix}\t{label}\n")
+    } else {
+        format!("{unix}\t{label}\t{detail}\n")
+    };
     if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
         use std::io::Write;
         let _ = file.write_all(line.as_bytes());
@@ -252,7 +286,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::Pull { .. } => "pull",
         awegit_git::Mutation::Push { .. } => "push",
         awegit_git::Mutation::Stash { .. } => "stash",
-        awegit_git::Mutation::StashPop => "stashPop",
+        awegit_git::Mutation::StashPop { .. } => "stashPop",
         awegit_git::Mutation::StashApply { .. } => "stashApply",
         awegit_git::Mutation::StashDrop { .. } => "stashDrop",
         awegit_git::Mutation::Checkout { .. } => "checkout",
@@ -262,7 +296,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::Rebase { .. } => "rebase",
         awegit_git::Mutation::RebaseInteractive { .. } => "rebaseInteractive",
         awegit_git::Mutation::Abort => "abort",
-        awegit_git::Mutation::Continue => "continue",
+        awegit_git::Mutation::Continue { .. } => "continue",
         awegit_git::Mutation::Skip => "skip",
         awegit_git::Mutation::Reset { .. } => "reset",
         awegit_git::Mutation::CherryPick { .. } => "cherryPick",
@@ -304,8 +338,98 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::LfsPull => "lfsPull",
         awegit_git::Mutation::LfsPush => "lfsPush",
         awegit_git::Mutation::SetHidden { .. } => "setHidden",
+        awegit_git::Mutation::SetExpanded { .. } => "setExpanded",
+        awegit_git::Mutation::SetSignOff { .. } => "setSignOff",
         awegit_git::Mutation::Custom { .. } => "custom",
     }
+}
+
+/// Names, paths, and verbs only. Passwords, command text, and patch bodies stay out.
+fn action_detail(request: &awegit_git::Mutation) -> String {
+    use awegit_git::Mutation;
+    let text = match request {
+        Mutation::Fetch { remote, prune, tags } => join([opt(remote), flag("prune", *prune), flag("tags", *tags)]),
+        Mutation::Pull { rebase, autostash } => join([flag("rebase", *rebase), flag("autostash", *autostash)]),
+        Mutation::Push { remote, set_upstream, tags, force_with_lease } => {
+            join([opt(remote), flag("setUpstream", *set_upstream), flag("tags", *tags), flag("forceWithLease", *force_with_lease)])
+        }
+        Mutation::Stash { message } => bytes("message", message),
+        Mutation::StashPop { name } => scrub(name),
+        Mutation::StashApply { name } | Mutation::StashDrop { name } => scrub(name),
+        Mutation::Checkout { name } | Mutation::DeleteBranch { name } => scrub(name),
+        Mutation::CreateBranch { name, start } => join([scrub(name), opt(start)]),
+        Mutation::Merge { name, squash, no_ff, autostash } => {
+            join([scrub(name), flag("squash", *squash), flag("noFf", *no_ff), flag("autostash", *autostash)])
+        }
+        Mutation::Rebase { onto, autostash } => join([scrub(onto), flag("autostash", *autostash)]),
+        Mutation::RebaseInteractive { onto, drop, steps, autostash } => {
+            join([scrub(onto), format!("drop={}", drop.len()), format!("steps={}", steps.len()), flag("autostash", *autostash)])
+        }
+        Mutation::Reset { rev, mode } => join([scrub(rev), format!("{mode:?}")]),
+        Mutation::CherryPick { rev } | Mutation::Revert { rev } => scrub(rev),
+        Mutation::Reword { rev, summary } => join([scrub(rev), bytes("summary", summary)]),
+        Mutation::Tag { name, rev, message } => join([scrub(name), scrub(rev), bytes("message", message)]),
+        Mutation::DeleteTag { name } | Mutation::RemoveRemote { name } => scrub(name),
+        Mutation::StageHunk { file, index, unstage } => join([scrub(file), format!("hunk={index}"), flag("unstage", *unstage)]),
+        Mutation::StageLine { file, unstage, .. } => join([scrub(file), flag("unstage", *unstage)]),
+        Mutation::StagePaths { files, unstage } => join([files.iter().cloned().map(|file| scrub(&file)).collect::<Vec<_>>().join(","), flag("unstage", *unstage)]),
+        Mutation::DiscardHunk { file, index } => join([scrub(file), format!("hunk={index}")]),
+        Mutation::DiscardLine { file, .. } | Mutation::Discard { file } | Mutation::Delete { file } => scrub(file),
+        Mutation::Resolve { file, side } => join([scrub(file), scrub(side)]),
+        Mutation::RenameBranch { name, to } => join([scrub(name), scrub(to)]),
+        Mutation::SetUpstream { branch, upstream } => join([scrub(branch), scrub(upstream)]),
+        Mutation::DeleteRemoteBranch { remote, branch }
+        | Mutation::CheckoutRemote { remote, branch }
+        | Mutation::PushRef { remote, branch, .. }
+        | Mutation::PullRef { remote, branch, .. } => join([scrub(remote), scrub(branch)]),
+        Mutation::ApplyPatch { patch } => format!("bytes={}", patch.len()),
+        Mutation::AddRemote { name, url } | Mutation::SetRemoteUrl { name, url } => join([scrub(name), public_url(url)]),
+        Mutation::AddWorktree { path, branch } => join([scrub(path), scrub(branch)]),
+        Mutation::RemoveWorktree { path } => scrub(path),
+        Mutation::SubmoduleAdd { url, path } => join([scrub(path), public_url(url)]),
+        Mutation::SubmoduleInit { path } | Mutation::SubmoduleSync { path } | Mutation::SubmoduleRemove { path } => scrub(path),
+        Mutation::GitFlowStart { name } | Mutation::GitFlowFinish { name } => scrub(name),
+        Mutation::GitFlowInit { master, develop, feature, release, hotfix, support } => {
+            join([scrub(master), scrub(develop), scrub(feature), scrub(release), scrub(hotfix), scrub(support)])
+        }
+        Mutation::Squash { from, to, summary } => join([scrub(from), scrub(to), bytes("summary", summary)]),
+        Mutation::Clone { url, destination } => join([public_url(url), scrub(destination)]),
+        Mutation::Init { destination } => scrub(destination),
+        Mutation::SetHidden { names } | Mutation::SetExpanded { names } => names.iter().cloned().map(|name| scrub(&name)).collect::<Vec<_>>().join(","),
+        Mutation::SetSignOff { enabled, .. } => flag("enabled", *enabled),
+        Mutation::Continue { message } => bytes("message", message),
+        Mutation::Custom { .. } => String::new(),
+        Mutation::Abort | Mutation::Skip | Mutation::SubmoduleUpdate | Mutation::LfsPull | Mutation::LfsPush => String::new(),
+    };
+    text.replace(['\n', '\r', '\t', '\0'], " ")
+}
+
+fn join(parts: impl IntoIterator<Item = String>) -> String {
+    parts.into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" ")
+}
+
+fn scrub(value: &str) -> String {
+    value.replace(['\n', '\r', '\t', '\0'], " ")
+}
+
+fn opt(value: &Option<String>) -> String {
+    value.as_deref().map(scrub).unwrap_or_default()
+}
+
+fn flag(name: &str, on: bool) -> String {
+    if on { name.to_string() } else { String::new() }
+}
+
+fn bytes(name: &str, value: &str) -> String {
+    if value.is_empty() { String::new() } else { format!("{name}Bytes={}", value.len()) }
+}
+
+fn public_url(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return scrub(url.split_once('@').map(|(_, host)| host).unwrap_or(url));
+    };
+    let host = rest.split_once('@').map(|(_, host)| host).unwrap_or(rest);
+    scrub(&format!("{scheme}://{host}"))
 }
 
 #[tauri::command]

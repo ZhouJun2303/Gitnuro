@@ -53,6 +53,16 @@ pub struct Settings {
     pub proxy_user: String,
     #[serde(default)]
     pub proxy_password: String,
+    /// When true and `proxy_host` is set, that host is used instead of `proxy`.
+    #[serde(default)]
+    pub proxy_enabled: bool,
+    /// `http` or `socks`. Empty means HTTP.
+    #[serde(default)]
+    pub proxy_type: String,
+    #[serde(default)]
+    pub proxy_host: String,
+    #[serde(default)]
+    pub proxy_port: u32,
     #[serde(default)]
     pub sign_commits: bool,
     #[serde(default)]
@@ -207,6 +217,10 @@ impl Default for Settings {
             ssl_ca_file: String::new(),
             proxy_user: String::new(),
             proxy_password: String::new(),
+            proxy_enabled: false,
+            proxy_type: String::new(),
+            proxy_host: String::new(),
+            proxy_port: 0,
             sign_commits: false,
             merge_no_ff: false,
             merge_autostash: false,

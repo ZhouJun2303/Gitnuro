@@ -16,9 +16,8 @@ pub use change::{
 };
 pub use model::{
     blame_file, branch_commits, commit_files, commit_log, compare_file, compare_files, file_history, in_progress,
-    prompt_facts, repository_refs, show_commit_file, show_commit_file_with, BlameLine, BranchRow, CommitRow, InProgress,
-    RefSnapshot,
-    RemoteRow, StashRow, SubmoduleRow, TagRow, WorktreeRow,
+    prompt_facts, repo_sign_off_format, repository_refs, show_commit_file, show_commit_file_with, BlameLine, BranchRow,
+    CommitRow, InProgress, RefSnapshot, RemoteRow, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
 pub use cli::{cancel_running, configure, set_http_proxy, set_passphrase, stop_process_tree, use_bundled_git, Session};
 pub use ops::{approve_credential, perform, set_repo_author, Mutation, RebaseStep, ResetMode};

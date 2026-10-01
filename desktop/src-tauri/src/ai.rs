@@ -1,4 +1,4 @@
-//! Commit-message suggestion. The key stays in the local settings file or `XAI_API_KEY`.
+//! Commit-message suggestion. The key stays in the local settings file, `XAI_API_KEY`, or `OPENAI_API_KEY`.
 
 use serde::Serialize;
 
@@ -31,7 +31,7 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
         settings.ai_api_key.trim().to_string()
     };
     if key.is_empty() {
-        return Err("Add an API key in Preferences, or set XAI_API_KEY.".into());
+        return Err("Add an API key in Preferences, or set XAI_API_KEY or OPENAI_API_KEY.".into());
     }
     let base = settings.ai_base_url.trim().trim_end_matches('/').to_string();
     let model = if settings.ai_model.trim().is_empty() {

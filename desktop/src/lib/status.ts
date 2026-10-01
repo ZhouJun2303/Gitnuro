@@ -93,6 +93,10 @@ export type RefSnapshot = {
   submodules: SubmoduleRow[];
   worktrees: WorktreeRow[];
   hiddenRefs?: string[];
+  expandedGroups?: string[];
+  signOffSet?: boolean;
+  signOff?: boolean;
+  signOffFormat?: string;
 };
 
 export type InProgress = "merge" | "rebase" | "cherryPick" | "revert";
@@ -130,6 +134,10 @@ export type Settings = {
   sslCaFile: string;
   proxyUser: string;
   proxyPassword: string;
+  proxyEnabled: boolean;
+  proxyType: string;
+  proxyHost: string;
+  proxyPort: number;
   signCommits: boolean;
   mergeNoFf: boolean;
   mergeAutostash: boolean;

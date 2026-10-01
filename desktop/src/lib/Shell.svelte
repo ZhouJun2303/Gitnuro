@@ -57,6 +57,9 @@
     | "output"
     | "workspace"
     | "reword"
+    | "merge"
+    | "repo"
+    | "continue"
     | null;
   type MenuItem = { label: string; run: () => void };
   type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row };
@@ -76,7 +79,7 @@
     linesHeight: "compact",
     uiScale: 13,
     dateRelative: true,
-    dateFormat: "",
+    dateFormat: "dd MMM yyyy",
     date24h: true,
     hiddenRefs: "",
     authorName: "",
@@ -85,6 +88,10 @@
     sslCaFile: "",
     proxyUser: "",
     proxyPassword: "",
+    proxyEnabled: false,
+    proxyType: "http",
+    proxyHost: "",
+    proxyPort: 0,
     signCommits: false,
     mergeNoFf: false,
     mergeAutostash: false,
@@ -123,6 +130,7 @@
   let description = $state("");
   let amend = $state(false);
   let signOff = $state(false);
+  let repoSignOff = $state(false);
   let selectedSide = $state<Side>("unstaged");
   let mode = $state<Mode>(
     typeof window !== "undefined" && "__TAURI_INTERNALS__" in window ? "loading" : "sample",
@@ -247,20 +255,61 @@
     if (query.startsWith("!")) {
       return [{ label: `Run ${query.slice(1)}`, run: () => mutate({ action: "custom", command: query.slice(1) }) }];
     }
+    const reposToOpen = [...new Set([...repos, ...settings.recent])];
     const items = [
       { label: "Fetch", run: () => doFetch() },
       { label: "Pull", run: () => doPull() },
       { label: "Push", run: () => doPush() },
       { label: "Stash", run: () => mutate({ action: "stash", message: "" }) },
       { label: "Pop stash", run: () => mutate({ action: "stashPop" }) },
+      { label: "Refresh", run: () => refresh() },
+      { label: "Stage all", run: () => runChange("stage_all") },
+      { label: "Commit", run: () => submitCommit(false) },
+      { label: "Settings", run: () => { dialog = "prefs"; } },
+      { label: "Terminal", run: () => invoke("open_terminal", { path: repoPath() }) },
+      { label: "Explorer", run: () => { if (snapshot) void openPath(snapshot.path); } },
+      { label: "Git Flow", run: () => { draft = ""; dialog = "flow"; } },
+      { label: "About", run: () => { dialog = "about"; } },
       ...settings.commands.map((command) => ({ label: command.name, run: () => runCommand(command) })),
+      ...reposToOpen.map((path) => ({ label: `Repository ${path}`, run: () => openRepo(path) })),
       ...(refs?.branches ?? []).map((branch) => ({
         label: `Checkout ${branch.name}`,
         run: () => mutate({ action: "checkout", name: branch.name }),
       })),
+      ...(refs?.tags ?? []).map((tag) => ({
+        label: `Tag ${tag.name}`,
+        run: () => mutate({ action: "checkout", name: tag.name }),
+      })),
+      ...(refs?.remotes ?? []).map((remote) => ({
+        label: `Remote ${remote.name}`,
+        run: () => mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: false }),
+      })),
+      ...(refs?.stashes ?? []).map((stash) => ({
+        label: `Stash ${stash.summary}`,
+        run: () => mutate({ action: "stashPop", name: stash.name }),
+      })),
     ];
-    return items.filter((item) => item.label.toLowerCase().includes(query)).slice(0, 8);
+    const seen = new Set<string>();
+    return items
+      .filter((item) => {
+        if (seen.has(item.label) || !fuzzy(query, item.label)) return false;
+        seen.add(item.label);
+        return true;
+      })
+      .slice(0, 12);
   });
+
+  function fuzzy(query: string, label: string) {
+    const text = label.toLowerCase();
+    if (text.includes(query)) return true;
+    let at = 0;
+    for (const char of query) {
+      const found = text.indexOf(char, at);
+      if (found < 0) return false;
+      at = found + 1;
+    }
+    return query.length > 0;
+  }
 
   function inApp() {
     return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -336,6 +385,7 @@
       commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: logLimit, all: allBranches });
     }
     refs = await invoke<RefSnapshot>("repository_refs", { path });
+    signOff = refs.signOffSet ? !!refs.signOff : settings.signOff;
     progress = await invoke<InProgress | null>("in_progress", { path });
   }
 
@@ -400,7 +450,7 @@
   }
 
   function doPull() {
-    return mutate({ action: "pull", rebase: settings.pullRebase });
+    return mutate({ action: "pull", rebase: settings.pullRebase, autostash: settings.mergeAutostash });
   }
 
   function doPush() {
@@ -430,10 +480,12 @@
     const currentId = settings.currentWorkspace;
     const workspaces = settings.workspaces.map((workspace) => {
       if (!currentId || workspace.id !== currentId) return workspace;
+      const openTabs = workspace.openTabs.includes(path) ? workspace.openTabs : [...workspace.openTabs, path];
       return {
         ...workspace,
         repositories: workspace.repositories.includes(path) ? workspace.repositories : [...workspace.repositories, path],
-        openTabs: workspace.openTabs.includes(path) ? workspace.openTabs : [...workspace.openTabs, path],
+        openTabs,
+        selectedTab: Math.max(0, openTabs.indexOf(path)),
       };
     });
     settings = { ...settings, recent, workspaces };
@@ -598,16 +650,18 @@
 
   function groupOpen(name: string) {
     const group = branchGroup(name);
-    if (!group || settings.expandedGroups.length === 0) return true;
-    return settings.expandedGroups.includes(group);
+    const saved = refs?.expandedGroups ?? [];
+    if (!group || saved.length === 0) return true;
+    return saved.includes(group);
   }
 
   function toggleGroup(group: string) {
     const groups = [...new Set(visibleBranches.map((branch) => branchGroup(branch.name)).filter(Boolean))];
-    const current = settings.expandedGroups.length === 0 ? groups : [...settings.expandedGroups];
+    const saved = refs?.expandedGroups ?? [];
+    const current = saved.length === 0 ? groups : [...saved];
     const next = current.includes(group) ? current.filter((item) => item !== group) : [...current, group];
-    settings = { ...settings, expandedGroups: next };
-    void savePrefs(false);
+    const names = next.length === groups.length ? [] : next;
+    void mutate({ action: "setExpanded", names });
   }
 
   function refHidden(name: string) {
@@ -649,6 +703,18 @@
   async function discardPicked() {
     const files = [...picked];
     for (const file of files) await mutate({ action: "discard", file });
+    picked = [];
+  }
+
+  async function unstagePicked() {
+    const files = [...picked];
+    for (const file of files) await mutate({ action: "stagePaths", files: [file], unstage: true });
+    picked = [];
+  }
+
+  async function deletePicked() {
+    const files = [...picked];
+    for (const file of files) await mutate({ action: "delete", file });
     picked = [];
   }
 
@@ -774,7 +840,7 @@
 
   function whenLabel(commit: CommitRow) {
     if (settings.dateRelative) return commit.when;
-    return formatWhen(commit.at, settings.dateFormat, settings.date24h) || commit.when;
+    return formatWhen(commit.at, settings.dateFormat.trim() || "dd MMM yyyy", settings.date24h) || commit.when;
   }
 
   function lineText(line: DiffLine) {
@@ -814,14 +880,47 @@
   function closeTab(path: string) {
     const next = repos.filter((repo) => repo !== path);
     repos = next;
-    if (snapshot?.path !== path) return;
+    const currentId = settings.currentWorkspace;
+    if (currentId) {
+      settings = {
+        ...settings,
+        workspaces: settings.workspaces.map((workspace) => {
+          if (workspace.id !== currentId) return workspace;
+          const openTabs = workspace.openTabs.filter((item) => item !== path);
+          return { ...workspace, openTabs, selectedTab: Math.min(workspace.selectedTab, Math.max(0, openTabs.length - 1)) };
+        }),
+      };
+    }
+    if (snapshot?.path !== path) {
+      if (currentId) void savePrefs(false);
+      return;
+    }
     if (next[0]) void openRepo(next[0]);
     else {
       snapshot = null;
       refs = null;
       mode = "error";
       loadError = "";
+      if (currentId) void savePrefs(false);
     }
+  }
+
+  async function selectWorkspace() {
+    await savePrefs(false);
+    const workspace = settings.workspaces.find((item) => item.id === settings.currentWorkspace);
+    if (!workspace) return;
+    const tabs = workspace.openTabs.length > 0 ? [...workspace.openTabs] : [...workspace.repositories];
+    repos = tabs;
+    const path = tabs[Math.min(workspace.selectedTab, Math.max(0, tabs.length - 1))] ?? tabs[0];
+    if (path) await openRepo(path);
+  }
+
+  function openRepoSettings() {
+    draft = settings.authorName;
+    draftExtra = settings.authorEmail;
+    draftUser = refs?.signOffFormat || settings.signOffFormat;
+    repoSignOff = refs?.signOffSet ? !!refs.signOff : settings.signOff;
+    dialog = "repo";
   }
 
   function revealHead() {
@@ -843,7 +942,7 @@
       return;
     }
     drops = [];
-    void mutate({ action: "rebaseInteractive", onto: parent, drop: chosen.map((commit) => commit.id) });
+    void mutate({ action: "rebaseInteractive", onto: parent, drop: chosen.map((commit) => commit.id), autostash: settings.mergeAutostash });
   }
 
   function toggleDrop(id: string) {
@@ -960,33 +1059,38 @@
     let unmoved = () => {};
     let unresized = () => {};
     let placeTimer = 0;
+    let stopped = false;
     mode = "loading";
     selectedPath = null;
-    invoke<Settings>("load_settings")
-      .then(async (value) => {
-        settings = { ...defaultSettings, ...value, recent: value.recent ?? [], workspaces: value.workspaces ?? [], commands: value.commands ?? [], expandedGroups: value.expandedGroups ?? [] };
-        signOff = settings.signOff;
-        if (value.windowWidth > 200 && value.windowHeight > 200) {
-          const win = getCurrentWindow();
-          await win.setPosition(new LogicalPosition(value.windowX, value.windowY));
-          await win.setSize(new LogicalSize(value.windowWidth, value.windowHeight));
-        }
-      })
-      .catch(() => {});
     invoke<UpdateNotice | null>("check_for_update")
       .then((value) => {
         updateNotice = value;
       })
       .catch(() => {});
-    invoke<StatusSnapshot>("workspace_status")
-      .then(async (value) => {
-        applySnapshot(value);
-        await loadContext();
-        await loadDiff();
-        await invoke("watch_repository", { path: repoPath() });
-        unlisten = await listen("repo-changed", () => {
-          if (!busy) void refresh();
-        });
+    void (async () => {
+      try {
+        const value = await invoke<Settings>("load_settings");
+        if (stopped) return;
+        settings = { ...defaultSettings, ...value, recent: value.recent ?? [], workspaces: value.workspaces ?? [], commands: value.commands ?? [], expandedGroups: value.expandedGroups ?? [] };
+        if (!settings.dateFormat.trim()) settings = { ...settings, dateFormat: "dd MMM yyyy" };
+        if (!settings.proxyType) settings = { ...settings, proxyType: "http" };
+        signOff = settings.signOff;
+        if (value.windowWidth > 200 && value.windowHeight > 200) {
+          try {
+            const win = getCurrentWindow();
+            await win.setPosition(new LogicalPosition(value.windowX, value.windowY));
+            await win.setSize(new LogicalSize(value.windowWidth, value.windowHeight));
+          } catch {
+            /* a saved position can sit off the current desktop */
+          }
+        }
+        try {
+          unlisten = await listen("repo-changed", () => {
+            if (!busy) void refresh();
+          });
+        } catch {
+          /* the watcher is optional until a repository is open */
+        }
         try {
           const win = getCurrentWindow();
           const remember = () => {
@@ -998,12 +1102,30 @@
         } catch {
           /* placement events are optional */
         }
-      })
-      .catch((error: unknown) => {
-        loadError = message(error);
-        mode = "error";
-      });
+        const workspace = settings.workspaces.find((item) => item.id === settings.currentWorkspace);
+        if (workspace) {
+          repos = workspace.openTabs.length > 0 ? [...workspace.openTabs] : [...workspace.repositories];
+        }
+        const recent = settings.recent[0];
+        if (!recent) {
+          mode = "error";
+          loadError = "";
+          return;
+        }
+        await openRepo(recent);
+        if (!snapshot) {
+          loadError = actionError || "Could not open the last repository.";
+          mode = "error";
+        }
+      } catch (error) {
+        if (!stopped) {
+          loadError = message(error);
+          mode = "error";
+        }
+      }
+    })();
     return () => {
+      stopped = true;
       window.removeEventListener("keydown", onShortcut);
       window.clearTimeout(placeTimer);
       unlisten();
@@ -1019,7 +1141,7 @@
       <button class="tab" type="button" onclick={() => (dialog = "open")}>Open</button>
       <button class="tab" type="button" onclick={() => { draft = ""; dialog = "workspace"; }}>Workspace</button>
       {#if settings.workspaces.length > 0}
-        <select class="search" aria-label="Workspace" bind:value={settings.currentWorkspace} onchange={() => savePrefs(false)}>
+        <select class="search" aria-label="Workspace" bind:value={settings.currentWorkspace} onchange={() => selectWorkspace()}>
           <option value="">All</option>
           {#each settings.workspaces as workspace (workspace.id)}
             <option value={workspace.id}>{workspace.name}</option>
@@ -1042,6 +1164,7 @@
       <button class="tool" type="button" disabled={busy} onclick={(event) => quick(event, "stash", () => mutate({ action: "stash", message: "" }))}><span class="glyph">▣</span>Stash</button>
       <button class="tool" type="button" disabled={busy} onclick={() => mutate({ action: "stashPop" })}><span class="glyph">▢</span>Pop</button>
       <button class="tool" type="button" disabled={busy} onclick={() => { draft = ""; dialog = "flow"; }}><span class="glyph">⑂</span>Git Flow</button>
+      <button class="tool" type="button" disabled={mode !== "live" || busy} onclick={openRepoSettings}><span class="glyph">⌂</span>Repository</button>
       <div class="spacer"></div>
       <div class="launch-wrap">
         <input
@@ -1095,7 +1218,7 @@
     <div class="banner">
       <span>{progressLabel(progress)} in progress</span>
       <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "abort" })}>Abort</button>
-      <button class="text-button" type="button" disabled={busy || conflicted} onclick={() => mutate({ action: "continue" })}>Continue</button>
+      <button class="text-button" type="button" disabled={busy || conflicted} onclick={() => { if (progress === "rebase") { draft = ""; dialog = "continue"; } else void mutate({ action: "continue" }); }}>Continue</button>
       <button class="text-button" type="button" disabled={busy || progress === "merge"} onclick={() => mutate({ action: "skip" })}>Skip</button>
     </div>
   {/if}
@@ -1137,8 +1260,8 @@
             oncontextmenu={(event) => openMenu(event, [
               ...(!branch.current ? [
                 { label: "Checkout", run: () => mutate({ action: "checkout", name: branch.name }) },
-                { label: "Merge", run: () => mutate({ action: "merge", name: branch.name, squash: false, noFf: settings.mergeNoFf, autostash: settings.mergeAutostash }) },
-                { label: "Rebase", run: () => mutate({ action: "rebase", onto: branch.name }) },
+                { label: "Merge", run: () => { draft = branch.name; draftExtra = settings.mergeNoFf ? "no-ff" : "ff"; dialog = "merge"; } },
+                { label: "Rebase", run: () => mutate({ action: "rebase", onto: branch.name, autostash: settings.mergeAutostash }) },
                 { label: "Delete", run: () => removeBranch(branch.name) },
               ] : []),
               { label: "Rename", run: () => { draft = branch.name; draftExtra = branch.name; dialog = "rename"; } },
@@ -1228,6 +1351,8 @@
             <button class="file-select" type="button" onclick={() => mutate({ action: "stashApply", name: stash.name })}>
               <span class="name">{stash.summary}</span>
             </button>
+            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "stashApply", name: stash.name })}>Apply</button>
+            <button class="text-button row-action" type="button" onclick={() => mutate({ action: "stashPop", name: stash.name })}>Pop</button>
             <button class="text-button row-action" type="button" onclick={() => mutate({ action: "stashDrop", name: stash.name })}>Drop</button>
           </div>
         {/each}
@@ -1296,7 +1421,9 @@
           <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : shownUnstaged.length}</span>
           <input class="search" placeholder="Filter files" aria-label="Filter files" bind:value={fileQuery} />
           <button class="text-button" type="button" disabled={picked.length === 0 || busy} onclick={() => mutate({ action: "stagePaths", files: picked, unstage: false })}>Stage selected</button>
+          <button class="text-button" type="button" disabled={picked.length === 0 || busy} onclick={() => unstagePicked()}>Unstage selected</button>
           <button class="text-button" type="button" disabled={picked.length === 0 || busy} onclick={() => { if (confirm(`Discard ${picked.length} files?`)) void discardPicked(); }}>Discard selected</button>
+          <button class="text-button" type="button" disabled={picked.length === 0 || busy} onclick={() => { if (confirm(`Delete ${picked.length} files?`)) void deletePicked(); }}>Delete selected</button>
           <button class="text-button" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>Stage all</button>
         </div>
         <div class="file-list" onscroll={(event) => (fileTop = (event.currentTarget as HTMLElement).scrollTop)}>
@@ -1363,7 +1490,7 @@
           <textarea placeholder="Description" rows="3" bind:value={description}></textarea>
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={amend} /> Amend</label>
-            <label class="check"><input type="checkbox" bind:checked={signOff} /> Sign-off</label>
+            <label class="check"><input type="checkbox" bind:checked={signOff} onchange={() => { if (mode === "live") void mutate({ action: "setSignOff", enabled: signOff, format: refs?.signOffFormat || settings.signOffFormat }); }} /> Sign-off</label>
             <button class="text-button" type="button" disabled={mode !== "live" || busy} onclick={() => suggestMessage()}>Suggest</button>
             <button class="text-button" type="button" disabled={!canCommit} onclick={() => submitCommit(true)}>Commit and push</button>
             <button class="commit" type="submit" disabled={!canCommit}>{busy ? "Working…" : "Commit"}</button>
@@ -1456,7 +1583,7 @@
         <div class="diff-body" onscroll={(event) => (blameTop = (event.currentTarget as HTMLElement).scrollTop)}>
           <div class="commit-window" style:height="{(blameLines?.length ?? 0) * 18}px">
             {#each blameWindow.rows as line, index (`${line.line}-${line.id}`)}
-              <button class="virtual-row" type="button" style:top="{(blameWindow.start + index) * 18}px" onclick={() => { section = "history"; void selectCommit(line.id); }}>{line.shortId} {line.author} {line.text}</button>
+              <button class="virtual-row" type="button" style:top="{(blameWindow.start + index) * 18}px" title={line.summary} onclick={() => { section = "history"; void selectCommit(line.id); }}>{line.line} {line.shortId} {line.author} {line.summary} {line.text}</button>
             {/each}
           </div>
         </div>
@@ -1615,7 +1742,17 @@
           else if (dialog === "rename") void mutate({ action: "renameBranch", name: draft, to: draftExtra });
           else if (dialog === "upstream") void mutate({ action: "setUpstream", branch: draft, upstream: draftExtra });
           else if (dialog === "reword") void mutate({ action: "reword", rev: draftExtra || "HEAD", summary: draft });
-          else if (dialog === "rebase" && selectedCommit) void mutate({ action: "rebaseInteractive", onto: selectedCommit, drop: [], steps: rebaseSteps.map((step) => ({ verb: step.verb, rev: step.rev, message: step.verb === "reword" || step.verb === "squash" ? step.message : "" })) });
+          else if (dialog === "rebase" && selectedCommit) void mutate({ action: "rebaseInteractive", onto: selectedCommit, drop: [], steps: rebaseSteps.map((step) => ({ verb: step.verb, rev: step.rev, message: step.verb === "reword" || step.verb === "squash" ? step.message : "" })), autostash: settings.mergeAutostash });
+          else if (dialog === "merge") void mutate({ action: "merge", name: draft, squash: draftExtra === "squash", noFf: draftExtra === "no-ff", autostash: settings.mergeAutostash });
+          else if (dialog === "continue") void mutate({ action: "continue", message: draft });
+          else if (dialog === "repo") {
+            try {
+              await invoke("set_repo_author", { path: repoPath(), name: draft, email: draftExtra });
+              await mutate({ action: "setSignOff", enabled: repoSignOff, format: draftUser || settings.signOffFormat });
+            } catch (error) {
+              actionError = message(error);
+            }
+          }
           else if (dialog === "patch") void mutate({ action: "applyPatch", patch: draft });
           else if (dialog === "submodule") void mutate({ action: "submoduleAdd", url: draft, path: draftExtra });
           else if (dialog === "worktree") void mutate({ action: "addWorktree", path: draft, branch: draftExtra });
@@ -1673,7 +1810,7 @@
           {#if !settings.sslVerify}<p class="empty">SSL verification is off. Connections can be intercepted.</p>{/if}
           <label class="check"><input type="checkbox" bind:checked={settings.dateRelative} /> Relative dates</label>
           <label class="check"><input type="checkbox" bind:checked={settings.date24h} /> 24-hour clock</label>
-          <label>Date pattern <input bind:value={settings.dateFormat} placeholder="yyyy-MM-dd HH:mm" /></label>
+          <label>Date pattern <input bind:value={settings.dateFormat} placeholder="dd MMM yyyy" /></label>
           <label>Line height
             <select bind:value={settings.linesHeight}>
               <option value="compact">Compact</option>
@@ -1689,9 +1826,18 @@
           <p class="empty">Hidden branches are stored in this repository. Use Hide, Show only this, or Show all in the sidebar. The current branch stays visible.</p>
           <label>Author name <input bind:value={settings.authorName} placeholder="uses git config when empty" /></label>
           <label>Author email <input bind:value={settings.authorEmail} /></label>
-          <label>Proxy <input bind:value={settings.proxy} placeholder="http://host:port" /></label>
+          <label class="check"><input type="checkbox" bind:checked={settings.proxyEnabled} /> Use proxy host</label>
+          <label>Proxy type
+            <select bind:value={settings.proxyType}>
+              <option value="http">HTTP</option>
+              <option value="socks">SOCKS</option>
+            </select>
+          </label>
+          <label>Proxy host <input bind:value={settings.proxyHost} placeholder="proxy.example" /></label>
+          <label>Proxy port <input type="number" bind:value={settings.proxyPort} /></label>
           <label>Proxy user <input bind:value={settings.proxyUser} /></label>
           <label>Proxy password <input type="password" bind:value={settings.proxyPassword} /></label>
+          <label>Proxy URL <input bind:value={settings.proxy} placeholder="used when host is empty" /></label>
           <label>CA file <input bind:value={settings.sslCaFile} placeholder="path to a CA bundle" /></label>
           <label>Clone directory <input bind:value={settings.cloneDirectory} /></label>
           <label>Terminal <input bind:value={settings.terminal} placeholder="empty opens cmd" /></label>
@@ -1702,8 +1848,8 @@
           <label>AI max characters <input type="number" bind:value={settings.aiMaxChars} /></label>
           <label>AI prompt <input bind:value={settings.aiPrompt} placeholder={'{diff} {files} {branch} {recent_commits} {language}'} /></label>
           <label>AI temperature <input type="number" step="0.1" bind:value={settings.aiTemperature} /></label>
-          <label>AI API key <input type="password" bind:value={settings.aiApiKey} placeholder="or set XAI_API_KEY" /></label>
-          <label>Log directory <input bind:value={settings.logDirectory} placeholder="records action names only" /></label>
+          <label>AI API key <input type="password" bind:value={settings.aiApiKey} placeholder="or set XAI_API_KEY or OPENAI_API_KEY" /></label>
+          <label>Log directory <input bind:value={settings.logDirectory} placeholder="action name, branch, and path" /></label>
           <label>Signing passphrase <input type="password" bind:value={passphrase} placeholder="kept in memory for this session" /></label>
           <label>Askpass user <input bind:value={passUser} /></label>
           <div class="composer-row">
@@ -1847,6 +1993,28 @@
             <button class="commit" type="button" onclick={() => { draftExtra = draftExtra || "mark"; }}>Use {draftExtra || "mark"}</button>
           </div>
           <button class="commit" type="submit">Apply</button>
+        {:else if dialog === "merge"}
+          <h2>Merge {draft}</h2>
+          <select bind:value={draftExtra}>
+            <option value="ff">Fast-forward when possible</option>
+            <option value="no-ff">No fast-forward</option>
+            <option value="squash">Squash</option>
+          </select>
+          <p class="empty">{settings.mergeAutostash ? "Stashes local changes first." : "Local changes must be clean."}</p>
+          <button class="commit" type="submit">Merge</button>
+        {:else if dialog === "repo"}
+          <h2>Repository</h2>
+          <label>Author name <input bind:value={draft} placeholder="uses git config when empty" /></label>
+          <label>Author email <input bind:value={draftExtra} /></label>
+          <label class="check"><input type="checkbox" bind:checked={repoSignOff} /> Sign-off in this repository</label>
+          <label>Sign-off format <input bind:value={draftUser} /></label>
+          <p class="empty">Author and sign-off are stored in this repository. Preferences still holds the default for new repositories.</p>
+          <button class="commit" type="submit">Save</button>
+        {:else if dialog === "continue"}
+          <h2>Continue rebase</h2>
+          <p class="empty">Leave this empty to keep the current message. A message is applied when this step is a reword.</p>
+          <input placeholder="New message (optional)" bind:value={draft} />
+          <button class="commit" type="submit">Continue</button>
         {:else if dialog === "about"}
           <h2>AweGit 2.0.0</h2>
           <p class="empty">com.zhoujun.awegit. Windows builds include MinGit 2.56.0. macOS uses the system Git.</p>

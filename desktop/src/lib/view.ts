@@ -53,15 +53,17 @@ export function formatWhen(at: number, pattern: string, hour24: boolean) {
   const date = new Date(at * 1000);
   if (!pattern.trim()) return date.toLocaleString();
   const hours = date.getHours();
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const map: Record<string, string> = {
     yyyy: String(date.getFullYear()),
+    MMM: months[date.getMonth()] ?? "",
     MM: pad(date.getMonth() + 1),
     dd: pad(date.getDate()),
     HH: pad(hour24 ? hours : hours % 12 || 12),
     mm: pad(date.getMinutes()),
     ss: pad(date.getSeconds()),
   };
-  return pattern.replace(/yyyy|MM|dd|HH|mm|ss/g, (token) => map[token] ?? token);
+  return pattern.replace(/yyyy|MMM|MM|dd|HH|mm|ss/g, (token) => map[token] ?? token);
 }
 
 function pad(value: number) {
