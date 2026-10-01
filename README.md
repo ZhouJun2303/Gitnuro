@@ -127,7 +127,9 @@ pnpm package:mac
 | 关闭标签页 | `Ctrl+W` |
 | 上一个 / 下一个标签 | `Ctrl+Shift+Tab` / `Ctrl+Tab` |
 | 变更 / 历史 | `Ctrl+1` / `Ctrl+2` |
-| 快速启动 | `Ctrl+P` |
+| 快速启动 | `Ctrl+K` |
+| 后退 / 前进 | `Alt+Left` / `Alt+Right` |
+| 打印 | `Ctrl+P` |
 | 搜索 | `Ctrl+F` |
 | 设置 | `Ctrl+,` |
 | 在文件管理器中显示 | `Ctrl+Alt+O` |

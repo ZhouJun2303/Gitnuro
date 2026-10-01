@@ -15,6 +15,8 @@ export type Shortcut =
   | "tabRight"
   | "settings"
   | "launch"
+  | "back"
+  | "forward"
   | "fetch"
   | "quickFetch"
   | "quickPull"
@@ -91,7 +93,9 @@ const base: Array<[Shortcut, Chord[]]> = [
   ["tabLeft", [{ key: "Tab", ctrl: true, shift: true }]],
   ["tabRight", [{ key: "Tab", ctrl: true }]],
   ["settings", [{ key: ",", ctrl: true }]],
-  ["launch", [{ key: "p", ctrl: true }]],
+  ["launch", [{ key: "k", ctrl: true }]],
+  ["back", [{ key: "ArrowLeft", alt: true }]],
+  ["forward", [{ key: "ArrowRight", alt: true }]],
   ["fetch", [{ key: "f", ctrl: true, shift: true }]],
   ["quickFetch", [{ key: "f", ctrl: true, alt: true, shift: true }]],
   ["quickPull", [{ key: "l", ctrl: true, alt: true, shift: true }]],

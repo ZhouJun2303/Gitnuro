@@ -16,6 +16,14 @@ export type Messages = {
     preferences: string;
     about: string;
     quickLaunch: string;
+    paletteHint: string;
+    refresh: string;
+    groupAction: string;
+    groupRepo: string;
+    groupBranch: string;
+    groupTag: string;
+    groupRemote: string;
+    groupStash: string;
     changes: string;
     allCommits: string;
     currentBranch: string;

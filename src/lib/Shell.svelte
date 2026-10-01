@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
@@ -132,8 +132,9 @@
     gitlabHost: "",
   };
 
+  const desktopApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   let section = $state<"changes" | "history">("changes");
-  let selectedPath = $state<string | null>(sampleUnstaged[0]?.path ?? null);
+  let selectedPath = $state<string | null>(desktopApp ? null : (sampleUnstaged[0]?.path ?? null));
   let summary = $state("");
   let description = $state("");
   let amend = $state(false);
@@ -141,9 +142,7 @@
   let skipHooks = $state(false);
   let repoSignOff = $state(false);
   let selectedSide = $state<Side>("unstaged");
-  let mode = $state<Mode>(
-    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window ? "loading" : "sample",
-  );
+  let mode = $state<Mode>(desktopApp ? "loading" : "sample");
   let snapshot = $state<StatusSnapshot | null>(null);
   let loadError = $state<string | null>(null);
   let actionError = $state<string | null>(null);
@@ -170,6 +169,8 @@
   let draftSecret = $state("");
   let launch = $state("");
   let launchOpen = $state(false);
+  let launchIndex = $state(0);
+  let launchList = $state<HTMLElement | null>(null);
   let expanded = $state<"tags" | "stashes" | "submodules" | "worktrees" | null>(null);
   let allBranches = $state(true);
   let commitQuery = $state("");
@@ -250,8 +251,8 @@
       !conflicted &&
       (mode !== "live" || staged.length > 0 || amend),
   );
-  const rowCommit = $derived(settings.linesHeight === "spaced" ? 32 : 24);
-  const rowFile = $derived(settings.linesHeight === "spaced" ? 28 : 22);
+  const rowCommit = $derived(settings.linesHeight === "spaced" ? 36 : 28);
+  const rowFile = $derived(settings.linesHeight === "spaced" ? 32 : 28);
   const activeLocale = $derived(resolveLocale(settings.locale));
   function tr(key: string, vars: Record<string, string> = {}) {
     return translate(activeLocale, key, vars);
@@ -304,54 +305,105 @@
   const visibleTags = $derived(
     (refs?.tags ?? []).filter((tag) => !refHidden(tag.name) && matchesQuery(tag.name, sideQuery)),
   );
+  type LaunchItem = { label: string; group: string; run: () => void };
+  type Place = {
+    section: "changes" | "history";
+    path: string | null;
+    side: Side;
+    commit: string | null;
+    blame: boolean;
+    tree: boolean;
+    historyFilter: string;
+  };
+  let navBack: Place[] = [];
+  let navForward: Place[] = [];
+  let navLock = 0;
+  let lastPlace: Place | null = null;
+  let navStamp = 0;
+
   const matches = $derived.by(() => {
     const query = launch.trim().toLowerCase();
-    if (!query || mode !== "live") return [];
+    const action = tr("chrome.groupAction");
+    const repoGroup = tr("chrome.groupRepo");
     if (query.startsWith("!")) {
-      return [{ label: `Run ${query.slice(1)}`, run: () => mutate({ action: "custom", command: query.slice(1) }) }];
+      const command = query.slice(1);
+      return [{ label: command ? `! ${command}` : "!", group: action, run: () => mutate({ action: "custom", command }) }];
     }
-    const reposToOpen = [...new Set([...repos, ...settings.recent])];
-    const items = [
-      { label: "Fetch", run: () => doFetch() },
-      { label: "Pull", run: () => doPull() },
-      { label: "Push", run: () => doPush() },
-      { label: "Stash", run: () => mutate({ action: "stash", message: "" }) },
-      { label: "Pop stash", run: () => mutate({ action: "stashPop" }) },
-      { label: "Refresh", run: () => refresh() },
-      { label: "Stage all", run: () => runChange("stage_all") },
-      { label: "Commit", run: () => submitCommit(false) },
-      { label: "Settings", run: () => { dialog = "prefs"; } },
-      { label: "Terminal", run: () => invoke("open_terminal", { path: repoPath() }) },
-      { label: "Explorer", run: () => { if (snapshot) void openPath(snapshot.path); } },
-      { label: "Git Flow", run: () => { draft = ""; dialog = "flow"; } },
-      { label: "About", run: () => { dialog = "about"; } },
-      ...settings.commands.map((command) => ({ label: command.name, run: () => runCommand(command) })),
-      ...reposToOpen.map((path) => ({ label: `Repository ${path}`, run: () => openRepo(path) })),
-      ...(refs?.branches ?? []).map((branch) => ({
-        label: `Checkout ${branch.name}`,
-        run: () => mutate({ action: "checkout", name: branch.name }),
+    const items: LaunchItem[] = [
+      { label: tr("chrome.fetch"), group: action, run: () => void doFetch() },
+      { label: tr("chrome.fetchAll"), group: action, run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: false }) },
+      { label: tr("chrome.pull"), group: action, run: () => void doPull() },
+      { label: tr("dialog.fastForward"), group: action, run: () => { settings.pullRebase = false; void doPull(); } },
+      { label: tr("chrome.push"), group: action, run: () => void doPush() },
+      { label: tr("menu.createTag"), group: action, run: () => void mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: settings.forceWithLease }) },
+      { label: tr("chrome.stash"), group: action, run: () => { draft = ""; dialog = "stash"; } },
+      { label: tr("chrome.pop"), group: action, run: () => void mutate({ action: "stashPop" }) },
+      { label: tr("chrome.refresh"), group: action, run: () => void refresh() },
+      { label: tr("chrome.stageAll"), group: action, run: () => void runChange("stage_all") },
+      { label: tr("chrome.commit"), group: action, run: () => void submitCommit(false) },
+      { label: tr("chrome.commitAndPush"), group: action, run: () => void submitCommit(true) },
+      { label: tr("chrome.preferences"), group: action, run: () => { dialog = "prefs"; } },
+      { label: tr("chrome.terminal"), group: action, run: () => void invoke("open_terminal", { path: repoPath() }) },
+      { label: tr("chrome.explorer"), group: action, run: () => { if (snapshot) void openPath(snapshot.path); } },
+      { label: tr("chrome.flow"), group: action, run: () => { draft = ""; dialog = "flow"; } },
+      { label: tr("chrome.about"), group: action, run: () => { dialog = "about"; } },
+      { label: tr("chrome.open"), group: action, run: () => { draft = ""; dialog = "open"; } },
+      { label: tr("chrome.workspace"), group: action, run: () => { draft = ""; dialog = "workspace"; } },
+      { label: tr("chrome.clone"), group: action, run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
+      { label: tr("chrome.newRepo"), group: action, run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
+      { label: tr("chrome.notifications"), group: action, run: () => openForge("notes") },
+      { label: tr("chrome.pulls"), group: action, run: () => openForge("pulls") },
+      { label: tr("chrome.changes"), group: action, run: () => { section = "changes"; } },
+      { label: tr("chrome.commits"), group: action, run: () => { section = "history"; } },
+      ...settings.workspaces.map((workspace) => ({
+        label: workspace.name,
+        group: tr("chrome.workspace"),
+        run: () => {
+          settings.currentWorkspace = workspace.id;
+          void selectWorkspace();
+        },
       })),
-      ...(refs?.tags ?? []).map((tag) => ({
-        label: `Tag ${tag.name}`,
-        run: () => mutate({ action: "checkout", name: tag.name }),
-      })),
-      ...(refs?.remotes ?? []).map((remote) => ({
-        label: `Remote ${remote.name}`,
-        run: () => mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: false }),
-      })),
-      ...(refs?.stashes ?? []).map((stash) => ({
-        label: `Stash ${stash.summary}`,
-        run: () => mutate({ action: "stashPop", name: stash.name }),
+      ...[...new Set([...repos, ...settings.recent])].map((path) => ({
+        label: folderName(path),
+        group: repoGroup,
+        run: () => void openRepo(path),
       })),
     ];
+    if (mode === "live") {
+      items.push(
+        ...settings.commands.map((command) => ({ label: command.name, group: action, run: () => runCommand(command) })),
+        ...(refs?.branches ?? []).map((branch) => ({
+          label: `${tr("menu.checkout")} ${branch.name}`,
+          group: tr("chrome.groupBranch"),
+          run: () => void mutate({ action: "checkout", name: branch.name }),
+        })),
+        ...(refs?.tags ?? []).map((tag) => ({
+          label: tag.name,
+          group: tr("chrome.groupTag"),
+          run: () => void mutate({ action: "checkout", name: tag.name }),
+        })),
+        ...(refs?.remotes ?? []).map((remote) => ({
+          label: remote.name,
+          group: tr("chrome.groupRemote"),
+          run: () => void mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: false }),
+        })),
+        ...(refs?.stashes ?? []).map((stash) => ({
+          label: stash.summary || stash.name,
+          group: tr("chrome.groupStash"),
+          run: () => void mutate({ action: "stashPop", name: stash.name }),
+        })),
+      );
+    }
     const seen = new Set<string>();
-    return items
-      .filter((item) => {
-        if (seen.has(item.label) || !fuzzy(query, item.label)) return false;
-        seen.add(item.label);
-        return true;
-      })
-      .slice(0, 12);
+    const unique: LaunchItem[] = [];
+    for (const item of items) {
+      const key = `${item.group}\0${item.label}`;
+      if (seen.has(key)) continue;
+      if (query && !fuzzy(query, item.label)) continue;
+      seen.add(key);
+      unique.push(item);
+    }
+    return unique.slice(0, query ? 30 : 60);
   });
 
   function fuzzy(query: string, label: string) {
@@ -364,6 +416,122 @@
       at = found + 1;
     }
     return query.length > 0;
+  }
+
+  async function openLaunch() {
+    launch = "";
+    launchIndex = 0;
+    launchOpen = true;
+    await tick();
+    launchEl?.focus();
+  }
+
+  function closeLaunch() {
+    launchOpen = false;
+    launch = "";
+    launchIndex = 0;
+  }
+
+  function runLaunch(item: LaunchItem) {
+    closeLaunch();
+    item.run();
+  }
+
+  function onLaunchKey(event: KeyboardEvent) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      event.stopPropagation();
+      launchIndex = Math.min(matches.length - 1, launchIndex + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      event.stopPropagation();
+      launchIndex = Math.max(0, launchIndex - 1);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      const item = matches[launchIndex] ?? matches[0];
+      if (item) runLaunch(item);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeLaunch();
+    }
+  }
+
+  function snapshotPlace(): Place {
+    return {
+      section,
+      path: selectedPath,
+      side: selectedSide,
+      commit: selectedCommit,
+      blame: blameLines != null,
+      tree: treeOn,
+      historyFilter,
+    };
+  }
+
+  function samePlace(a: Place, b: Place) {
+    return (
+      a.section === b.section &&
+      a.path === b.path &&
+      a.side === b.side &&
+      a.commit === b.commit &&
+      a.blame === b.blame &&
+      a.tree === b.tree &&
+      a.historyFilter === b.historyFilter
+    );
+  }
+
+  async function restorePlace(place: Place) {
+    navLock += 1;
+    section = place.section;
+    selectedSide = place.side;
+    selectedPath = place.path;
+    selectedCommit = place.commit;
+    treeOn = place.tree;
+    const filterChanged = historyFilter !== place.historyFilter;
+    historyFilter = place.historyFilter;
+    if (!place.blame) blameLines = null;
+    try {
+      if (mode === "live" && filterChanged) {
+        if (place.historyFilter) {
+          commitsLive = await invoke<CommitRow[]>("file_history", { path: repoPath(), file: place.historyFilter, limit: 200 });
+        } else {
+          await loadContext();
+        }
+      }
+      if (mode === "live" && place.section === "history" && place.commit) await selectCommit(place.commit);
+      if (place.blame && place.path && mode === "live") await showBlame(place.path);
+      if (place.tree && place.commit && mode === "live") {
+        treePaths = await invoke<string[]>("commit_tree", { path: repoPath(), rev: place.commit });
+      }
+      if (mode === "live" && place.section === "changes" && place.path) await loadDiff();
+    } finally {
+      lastPlace = snapshotPlace();
+      navLock -= 1;
+    }
+  }
+
+  function goBack() {
+    const now = Date.now();
+    if (now - navStamp < 150) return;
+    navStamp = now;
+    if (navBack.length === 0) return;
+    const previous = navBack[navBack.length - 1];
+    navForward = [snapshotPlace(), ...navForward].slice(0, 50);
+    navBack = navBack.slice(0, -1);
+    void restorePlace(previous);
+  }
+
+  function goForward() {
+    const now = Date.now();
+    if (now - navStamp < 150) return;
+    navStamp = now;
+    if (navForward.length === 0) return;
+    const next = navForward[0];
+    navBack = [...navBack, snapshotPlace()].slice(-50);
+    navForward = navForward.slice(1);
+    void restorePlace(next);
   }
 
   function inApp() {
@@ -1194,15 +1362,22 @@
     const action = shortcut(event);
     if (!action) return;
     const editor = typing(event);
-    if (editor && action !== "commit" && action !== "commitPush" && action !== "exit") return;
+    if (launchOpen && (action === "up" || action === "down" || action === "exit")) {
+      event.preventDefault();
+      if (action === "exit") closeLaunch();
+      else if (action === "down") launchIndex = Math.min(matches.length - 1, launchIndex + 1);
+      else launchIndex = Math.max(0, launchIndex - 1);
+      return;
+    }
+    if (editor && action !== "commit" && action !== "commitPush" && action !== "exit" && action !== "launch") return;
     if (action === "exit") {
       dialog = null;
-      launchOpen = false;
+      closeLaunch();
       blameLines = null;
       return;
     }
     event.preventDefault();
-    if (mode !== "live" && action !== "settings" && action !== "zoomIn" && action !== "zoomOut") return;
+    if (mode !== "live" && action !== "settings" && action !== "zoomIn" && action !== "zoomOut" && action !== "launch" && action !== "back" && action !== "forward" && action !== "open" && action !== "clone" && action !== "init") return;
     if (action === "refresh") void refresh();
     else if (action === "commit") void submitCommit(false);
     else if (action === "commitPush") void submitCommit(true);
@@ -1223,7 +1398,9 @@
     else if (action === "tabLeft") cycleTab(-1);
     else if (action === "tabRight") cycleTab(1);
     else if (action === "settings") dialog = "prefs";
-    else if (action === "launch") launchEl?.focus();
+    else if (action === "launch") void openLaunch();
+    else if (action === "back") goBack();
+    else if (action === "forward") goForward();
     else if (action === "tag") {
       draft = "";
       draftExtra = snapshot?.branch ?? "HEAD";
@@ -1270,9 +1447,36 @@
     if (!settings.theme || settings.theme === "system") root.removeAttribute("data-theme");
     else root.setAttribute("data-theme", settings.theme);
     root.style.setProperty("--ui-scale", `${settings.uiScale || 13}px`);
-    root.style.setProperty("--row-file", settings.linesHeight === "spaced" ? "28px" : "22px");
-    root.style.setProperty("--row-commit", settings.linesHeight === "spaced" ? "32px" : "24px");
-    root.style.setProperty("--row-side", settings.linesHeight === "spaced" ? "28px" : "22px");
+    root.style.setProperty("--row-file", settings.linesHeight === "spaced" ? "32px" : "28px");
+    root.style.setProperty("--row-commit", settings.linesHeight === "spaced" ? "36px" : "28px");
+    root.style.setProperty("--row-side", settings.linesHeight === "spaced" ? "32px" : "28px");
+  });
+
+  $effect(() => {
+    const next = snapshotPlace();
+    if (navLock > 0) {
+      lastPlace = next;
+      return;
+    }
+    if (!lastPlace) {
+      lastPlace = next;
+      return;
+    }
+    if (samePlace(lastPlace, next)) return;
+    navBack = [...navBack, lastPlace].slice(-50);
+    navForward = [];
+    lastPlace = next;
+  });
+
+  $effect(() => {
+    const max = Math.max(0, matches.length - 1);
+    if (launchIndex > max) launchIndex = max;
+  });
+
+  $effect(() => {
+    if (!launchOpen) return;
+    launchIndex;
+    queueMicrotask(() => launchList?.querySelector(".on")?.scrollIntoView({ block: "nearest" }));
   });
 
   $effect(() => {
@@ -1288,13 +1492,33 @@
   });
 
   onMount(() => {
+    const onMouseNav = (event: MouseEvent) => {
+      if (event.button !== 3 && event.button !== 4) return;
+      event.preventDefault();
+      if (event.button === 3) goBack();
+      else goForward();
+    };
+    const onPop = () => {
+      history.pushState({ awegit: 1 }, "");
+      goBack();
+    };
+    window.addEventListener("keydown", onShortcut);
+    window.addEventListener("mousedown", onMouseNav);
+    window.addEventListener("mouseup", onMouseNav);
+    history.pushState({ awegit: 1 }, "");
+    window.addEventListener("popstate", onPop);
+    const detachNav = () => {
+      window.removeEventListener("keydown", onShortcut);
+      window.removeEventListener("mousedown", onMouseNav);
+      window.removeEventListener("mouseup", onMouseNav);
+      window.removeEventListener("popstate", onPop);
+    };
     if (!inApp()) {
       notices = sampleNotices;
       pulls = samplePulls;
       repoStats = { branch: "main", ahead: 5, behind: 0, commits: commits.length, branches: 2, lastSummary: commits[0]?.summary ?? "" };
-      return;
+      return detachNav;
     }
-    window.addEventListener("keydown", onShortcut);
     let unlisten = () => {};
     let unmoved = () => {};
     let unresized = () => {};
@@ -1366,7 +1590,7 @@
     })();
     return () => {
       stopped = true;
-      window.removeEventListener("keydown", onShortcut);
+      detachNav();
       window.clearTimeout(placeTimer);
       unlisten();
       unmoved();
@@ -1377,17 +1601,7 @@
 
 <div class="shell">
   <header class="chrome">
-    <div class="tabs">
-      <button class="tab" type="button" onclick={() => (dialog = "open")}>{tr("chrome.open")}</button>
-      <button class="tab" type="button" onclick={() => { draft = ""; dialog = "workspace"; }}>{tr("chrome.workspace")}</button>
-      {#if settings.workspaces.length > 0}
-        <select class="search" aria-label="Workspace" bind:value={settings.currentWorkspace} onchange={() => selectWorkspace()}>
-          <option value="">All</option>
-          {#each settings.workspaces as workspace (workspace.id)}
-            <option value={workspace.id}>{workspace.name}</option>
-          {/each}
-        </select>
-      {/if}
+    <div class="chrome-side tabs">
       {#each repos as repo (repo)}
         <div class="tab" class:active={snapshot?.path === repo}>
           <button class="file-select" type="button" onclick={() => openRepo(repo)}>{folderName(repo)}</button>
@@ -1397,57 +1611,35 @@
         <button class="tab active" type="button">{tabLabel}</button>
       {/each}
     </div>
-    <div class="toolbar">
-      <button class="tool" type="button" disabled={busy} onclick={(event) => openMenu(event, [
-        { label: tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: mode !== "live", run: () => void doFetch() },
-        { label: tr("chrome.fetchAll"), disabled: mode !== "live", run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: false }) },
-      ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M5 7l3 3 3-3M3 13h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.fetch")}</button>
-      <button class="tool" type="button" disabled={busy} onclick={(event) => openMenu(event, [
-        { label: tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: mode !== "live", run: () => void doPull() },
-        { label: tr("dialog.fastForward"), disabled: mode !== "live", run: () => { settings.pullRebase = false; void doPull(); } },
-      ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V4M5 7l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.pull")}</button>
-      <button class="tool" type="button" disabled={busy} onclick={(event) => openMenu(event, [
-        { label: tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: mode !== "live", run: () => void doPush() },
-        { label: tr("menu.createTag"), disabled: mode !== "live", run: () => void mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: settings.forceWithLease }) },
-      ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14V5M5 8l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.push")}</button>
-      <button class="tool" type="button" disabled={busy} onclick={(event) => openMenu(event, [
+    <button class="launch-trigger" type="button" onclick={() => void openLaunch()}>
+      <span>{tr("chrome.quickLaunch")}</span>
+      <kbd>{shortcutLabel("launch")}</kbd>
+    </button>
+    <div class="chrome-side end">
+      <div class="segment">
+        <button type="button" disabled={busy} onclick={() => void doFetch()} oncontextmenu={(event) => openMenu(event, [
+          { label: tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: mode !== "live", run: () => void doFetch() },
+          { label: tr("chrome.fetchAll"), disabled: mode !== "live", run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: false }) },
+        ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M5 7l3 3 3-3M3 13h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.fetch")}</button>
+        <button type="button" disabled={busy} onclick={() => void doPull()} oncontextmenu={(event) => openMenu(event, [
+          { label: tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: mode !== "live", run: () => void doPull() },
+          { label: tr("dialog.fastForward"), disabled: mode !== "live", run: () => { settings.pullRebase = false; void doPull(); } },
+        ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V4M5 7l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.pull")}</button>
+        <button type="button" disabled={busy} onclick={() => void doPush()} oncontextmenu={(event) => openMenu(event, [
+          { label: tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: mode !== "live", run: () => void doPush() },
+          { label: tr("menu.createTag"), disabled: mode !== "live", run: () => void mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: settings.forceWithLease }) },
+        ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 14V5M5 8l3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.push")}</button>
+      </div>
+      <button class="icon-btn" type="button" disabled={busy} title={tr("chrome.stash")} onclick={() => { draft = ""; dialog = "stash"; }} oncontextmenu={(event) => openMenu(event, [
         { label: tr("chrome.stash"), shortcut: shortcutLabel("stash"), disabled: mode !== "live", run: () => { draft = ""; dialog = "stash"; } },
         { label: tr("chrome.pop"), disabled: mode !== "live", run: () => void mutate({ action: "stashPop" }) },
-      ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5h10v8H3zM5 5V3h6v2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>{tr("chrome.stash")}</button>
-      <button class="tool" type="button" disabled={busy} onclick={() => { draft = ""; dialog = "flow"; }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h4v4H3zM9 9h4v4H9zM5 7v2h4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>{tr("chrome.flow")}</button>
-      <button class="tool icon-only" type="button" title={tr("chrome.notifications")} onclick={() => openForge("notes")}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a4 4 0 0 1 4 4v2l1 2H3l1-2V6a4 4 0 0 1 4-4zM6.5 12a1.5 1.5 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>{#if notices.some((item) => item.unread)}<span class="count badge-count">{notices.filter((item) => item.unread).length}</span>{/if}</button>
-      <div class="spacer"></div>
-      <div class="launch-wrap">
-        <input
-          class="launch"
-          placeholder={tr("chrome.quickLaunch")}
-          aria-label={tr("chrome.quickLaunch")}
-          bind:this={launchEl}
-          bind:value={launch}
-          onfocus={() => (launchOpen = true)}
-          onblur={() => setTimeout(() => (launchOpen = false), 150)}
-          onkeydown={(event) => {
-            if (event.key === "Enter" && matches[0]) {
-              event.preventDefault();
-              const run = matches[0].run;
-              launch = "";
-              launchOpen = false;
-              void run();
-            }
-          }}
-        />
-        {#if launchOpen && matches.length > 0}
-          <div class="launch-menu">
-            {#each matches as item (item.label)}
-              <button type="button" onclick={() => { launch = ""; launchOpen = false; void item.run(); }}>{item.label}</button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-      <button class="tool icon-only" type="button" title={tr("chrome.terminal")} onclick={() => invoke("open_terminal", { path: repoPath() })}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4l4 4-4 4M8 12h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
-      <button class="tool icon-only" type="button" title={tr("chrome.explorer")} onclick={() => snapshot && openPath(snapshot.path)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h5l1 2h6v7H2z" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
-      <button class="tool icon-only" type="button" title={tr("chrome.preferences")} onclick={() => (dialog = "prefs")}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
-      <button class="tool icon-only" type="button" title={tr("chrome.pulls")} onclick={() => openForge("pulls")}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="4" r="1.4" fill="none" stroke="currentColor"/><circle cx="12" cy="12" r="1.4" fill="none" stroke="currentColor"/><path d="M4 5.5v5a2 2 0 0 0 2 2h4.2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
+      ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5h10v8H3zM5 5V3h6v2" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+      <button class="icon-btn" type="button" disabled={busy} title={tr("chrome.flow")} onclick={() => { draft = ""; dialog = "flow"; }}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3h4v4H3zM9 9h4v4H9zM5 7v2h4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+      <button class="icon-btn" type="button" title={tr("chrome.notifications")} onclick={() => openForge("notes")}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a4 4 0 0 1 4 4v2l1 2H3l1-2V6a4 4 0 0 1 4-4zM6.5 12a1.5 1.5 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>{#if notices.some((item) => item.unread)}<span class="count badge-count">{notices.filter((item) => item.unread).length}</span>{/if}</button>
+      <button class="icon-btn" type="button" title={tr("chrome.terminal")} onclick={() => invoke("open_terminal", { path: repoPath() })}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4l4 4-4 4M8 12h5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+      <button class="icon-btn" type="button" title={tr("chrome.explorer")} onclick={() => snapshot && openPath(snapshot.path)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h5l1 2h6v7H2z" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+      <button class="icon-btn" type="button" title={tr("chrome.preferences")} onclick={() => (dialog = "prefs")}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></button>
+      <button class="icon-btn" type="button" title={tr("chrome.pulls")} onclick={() => openForge("pulls")}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="4" cy="4" r="1.4" fill="none" stroke="currentColor"/><circle cx="12" cy="12" r="1.4" fill="none" stroke="currentColor"/><path d="M4 5.5v5a2 2 0 0 0 2 2h4.2" fill="none" stroke="currentColor" stroke-width="1.3"/></svg></button>
     </div>
   </header>
 
@@ -1479,14 +1671,16 @@
 
   <div class="body">
     <aside class="sidebar">
-      <button class="side" class:selected={section === "changes"} type="button" onclick={() => (section = "changes")}>
-        <span>{tr("chrome.changes")}</span>
-        <span class="count">{changeCount}</span>
-      </button>
-      <button class="side" class:selected={section === "history"} type="button" onclick={() => (section = "history")}>
-        <span>{allBranches ? tr("chrome.allCommits") : tr("chrome.currentBranch")}</span>
-        {#if mode === "live"}<span class="count">{shownCommits.length}</span>{/if}
-      </button>
+      <div class="segment side-switch">
+        <button type="button" class:on={section === "changes"} onclick={() => (section = "changes")}>
+          <span>{tr("chrome.changes")}</span>
+          <span class="count">{changeCount}</span>
+        </button>
+        <button type="button" class:on={section === "history"} onclick={() => (section = "history")}>
+          <span>{allBranches ? tr("chrome.allCommits") : tr("chrome.currentBranch")}</span>
+          {#if mode === "live"}<span class="count">{shownCommits.length}</span>{/if}
+        </button>
+      </div>
 
       <div class="group">
         {tr("chrome.localBranches")}
@@ -2475,6 +2669,32 @@
       </div>
     </div>
   {/if}
+  {#if launchOpen}
+    <div class="palette-scrim" role="presentation" onclick={() => closeLaunch()}>
+      <div class="palette" role="dialog" tabindex="-1" aria-label={tr("chrome.quickLaunch")} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+        <input
+          class="palette-input"
+          placeholder={tr("chrome.quickLaunch")}
+          aria-label={tr("chrome.quickLaunch")}
+          bind:this={launchEl}
+          bind:value={launch}
+          oninput={() => (launchIndex = 0)}
+          onkeydown={onLaunchKey}
+        />
+        <div class="palette-list" bind:this={launchList}>
+          {#each matches as item, index (`${item.group}-${item.label}`)}
+            <button type="button" class:on={index === launchIndex} onmouseenter={() => (launchIndex = index)} onclick={() => runLaunch(item)}>
+              <span class="name">{item.label}</span>
+              <span class="meta">{item.group}</span>
+            </button>
+          {:else}
+            <p class="empty">{tr("chrome.noMatch")}</p>
+          {/each}
+        </div>
+        <div class="palette-hint">{tr("chrome.paletteHint")}</div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -2483,10 +2703,10 @@
     z-index: 30;
     min-width: 220px;
     padding: 4px;
-    background: var(--canvas);
+    background: var(--elevated);
     border: 1px solid var(--line);
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
     display: flex;
     flex-direction: column;
   }
@@ -2503,7 +2723,8 @@
     color: inherit;
     font: inherit;
     text-align: left;
-    border-radius: 4px;
+    border-radius: 6px;
+    transition: background 120ms ease, color 120ms ease;
   }
   .menu button:disabled { opacity: 0.4; }
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
@@ -2521,23 +2742,45 @@
   }
 
   .chrome {
+    height: 48px;
+    display: grid;
+    grid-template-columns: auto minmax(140px, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px;
     background: var(--sidebar);
     border-bottom: 1px solid var(--line);
   }
 
-  .tabs {
+  .chrome-side {
     display: flex;
-    gap: 4px;
-    padding: 6px 8px 0;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
   }
 
+  .chrome-side.end {
+    justify-content: flex-end;
+    min-width: max-content;
+  }
+
+  .tabs {
+    max-width: 320px;
+    overflow: auto;
+    scrollbar-width: none;
+  }
+
+  .tabs::-webkit-scrollbar { display: none; }
+
   .tab,
-  .tool,
   .text-button,
   .side,
   .file,
   .commit-row,
-  .commit {
+  .commit,
+  .icon-btn,
+  .segment button,
+  .launch-trigger {
     font: inherit;
     color: inherit;
     background: transparent;
@@ -2545,54 +2788,132 @@
   }
 
   .tab {
-    height: 26px;
+    height: 28px;
     padding: 0 10px;
-    border-radius: var(--radius) var(--radius) 0 0;
+    border-radius: 8px;
     color: var(--text-secondary);
     display: flex;
     align-items: center;
     gap: 4px;
+    flex: none;
+    transition: background 120ms ease, color 120ms ease;
   }
 
   .tab.active {
-    background: var(--canvas);
+    background: var(--elevated);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(24, 24, 27, 0.06);
+  }
+
+  .text-button:hover:not(:disabled),
+  .side:hover,
+  .file:hover,
+  .commit-row:hover,
+  .tab:hover {
+    background: var(--hover);
+  }
+
+  .tab.active:hover { background: var(--elevated); }
+
+  .icon-btn {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 8px;
+    color: var(--text-secondary);
+    display: grid;
+    place-items: center;
+    flex: none;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .icon-btn:hover:not(:disabled) {
+    background: var(--hover);
     color: var(--text);
   }
 
-  .toolbar {
+  .icon-btn:disabled,
+  .segment button:disabled { opacity: 0.4; }
+
+  .icon-btn svg,
+  .segment svg { width: 16px; height: 16px; }
+
+  .segment {
     display: flex;
     align-items: center;
+    height: 28px;
+    padding: 2px;
     gap: 2px;
-    min-height: 44px;
-    padding: 0 6px 4px;
+    border-radius: 8px;
+    background: var(--field);
+    flex: none;
   }
 
-  .tool {
-    position: relative;
-    width: auto;
-    min-width: 28px;
-    height: 36px;
-    padding: 0 6px;
-    border-radius: var(--radius);
+  .segment button {
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 6px;
+    color: var(--text-secondary);
     display: flex;
-    flex-direction: column;
     align-items: center;
+    gap: 6px;
+    transition: background 120ms ease, color 120ms ease;
+  }
+
+  .segment button:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+  }
+
+  .segment button.on {
+    background: var(--elevated);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(24, 24, 27, 0.06);
+  }
+
+  .side-switch {
+    margin: 4px 10px 8px;
+  }
+
+  .side-switch button {
+    flex: 1;
     justify-content: center;
-    gap: 1px;
+    min-width: 0;
+  }
+
+  .side-switch .count { margin-left: 6px; }
+
+  .launch-trigger {
+    justify-self: center;
+    height: 32px;
+    width: min(100%, 480px);
+    padding: 0 12px;
+    border-radius: 10px;
+    background: var(--field);
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    transition: background 120ms ease;
+  }
+
+  .launch-trigger:hover { background: var(--hover); }
+
+  .launch-trigger span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .launch-trigger kbd {
+    flex: none;
+    font: inherit;
     font-size: 11px;
     color: var(--text-secondary);
   }
 
-  .tool:hover,
-  .text-button:hover:not(:disabled),
-  .side:hover,
-  .file:hover,
-  .commit-row:hover {
-    background: var(--hover);
-  }
-
-  .tool svg { width: 16px; height: 16px; }
-  .tool.icon-only { width: 32px; padding: 0; position: relative; }
   .badge-count {
     position: absolute;
     top: 1px;
@@ -2602,7 +2923,7 @@
     padding: 0 3px;
     border-radius: 7px;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
     font-size: 10px;
     line-height: 14px;
   }
@@ -2614,65 +2935,85 @@
     color: var(--text);
   }
 
-  .spacer {
-    flex: 1;
+  .palette-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background: rgba(24, 24, 27, 0.28);
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
-  .launch-wrap {
-    position: relative;
+  .palette {
+    width: 520px;
+    max-width: calc(100vw - 32px);
+    border-radius: 12px;
+    background: var(--elevated);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow);
+    overflow: hidden;
   }
 
-  .launch {
-    width: 220px;
-    height: 26px;
-    margin-right: 8px;
-    padding: 0 12px;
+  .palette-input {
+    width: 100%;
+    height: 44px;
     border: 0;
-    border-radius: 13px;
-    background: var(--field);
+    background: transparent;
     color: var(--text);
     font: inherit;
+    font-size: 15px;
+    padding: 0 16px;
+    outline: none;
   }
 
-  .launch-menu {
-    position: absolute;
-    z-index: 2;
-    top: 30px;
-    left: 0;
-    width: 220px;
-    background: var(--canvas);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
+  .palette-list {
+    max-height: 360px;
+    overflow: auto;
     padding: 4px;
+    border-top: 1px solid var(--line);
   }
 
-  .launch-menu button {
-    display: block;
+  .palette-list button {
     width: 100%;
-    height: 24px;
-    text-align: left;
-    padding: 0 8px;
+    height: 36px;
     border: 0;
     background: transparent;
     color: inherit;
     font: inherit;
-    border-radius: var(--radius);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 10px;
+    text-align: left;
   }
 
-  .launch-menu button:hover {
-    background: var(--hover);
+  .palette-list button.on { background: var(--selection); }
+
+  .palette-hint {
+    height: 32px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    border-top: 1px solid var(--line);
+    color: var(--text-secondary);
+    font-size: 12px;
   }
 
-  .launch:focus-visible,
   .field input:focus-visible,
   textarea:focus-visible,
   .commit:focus-visible,
-  .tool:focus-visible,
+  .icon-btn:focus-visible,
+  .segment button:focus-visible,
   .side:focus-visible,
   .file:focus-visible,
   .commit-row:focus-visible,
   .tab:focus-visible,
-  .text-button:focus-visible {
+  .text-button:focus-visible,
+  .launch-trigger:focus-visible,
+  .palette-list button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
@@ -2698,7 +3039,7 @@
   }
 
   .sidebar {
-    width: 248px;
+    width: 260px;
     flex: none;
     background: var(--sidebar);
     border-right: 1px solid var(--line);
@@ -2718,8 +3059,11 @@
     text-align: left;
   }
 
-  .side.selected {
+  .side.selected,
+  .file.selected,
+  .commit-row.selected {
     background: var(--selection);
+    box-shadow: inset 2px 0 0 var(--accent);
   }
 
   .side.nested {
@@ -2743,11 +3087,11 @@
   }
 
   .group {
-    margin: 10px 14px 2px;
-    font-size: 10px;
+    margin: 14px 12px 4px;
+    font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--text-secondary);
     display: flex;
     align-items: center;
@@ -2864,11 +3208,6 @@
     flex: none;
   }
 
-  .file.selected,
-  .commit-row.selected {
-    background: var(--selection);
-  }
-
   .badge {
     width: 14px;
     flex: none;
@@ -2905,10 +3244,16 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 28px;
+    height: 32px;
     padding: 0 8px;
     border-radius: var(--radius);
-    background: var(--field);
+    background: var(--elevated);
+    border: 1px solid var(--line);
+  }
+
+  .field:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
 
   .field input,
@@ -2927,12 +3272,13 @@
     min-height: 64px;
     padding: 6px 8px;
     border-radius: var(--radius);
-    background: var(--field);
+    border: 1px solid var(--line);
+    background: var(--elevated);
   }
 
-  .field input:focus,
   textarea:focus {
-    outline: none;
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
 
   .counter {
@@ -2959,7 +3305,7 @@
 
   .commit {
     margin-left: auto;
-    height: 28px;
+    height: 32px;
     padding: 0 14px;
     border-radius: 8px;
     background: var(--accent);
@@ -2995,6 +3341,8 @@
     white-space: nowrap;
   }
 
+  .commit-row .subject { font-weight: 600; }
+
   .badges { display: flex; gap: 4px; }
 
   .ref {
@@ -3005,10 +3353,10 @@
     font-size: 11px;
     line-height: 16px;
   }
-  .ref.local { background: #dbeafe; color: #1d4ed8; }
-  .ref.remote { background: #e5e7eb; color: #374151; }
-  .ref.tag { background: #dcfce7; color: #166534; }
-  .ref.stash { background: #fef3c7; color: #92400e; }
+  .ref.local { background: var(--ref-local-bg); color: var(--ref-local); }
+  .ref.remote { background: var(--ref-remote-bg); color: var(--ref-remote); }
+  .ref.tag { background: var(--ref-tag-bg); color: var(--ref-tag); }
+  .ref.stash { background: var(--ref-stash-bg); color: var(--ref-stash); }
   .graph { display: flex; align-items: center; flex: none; height: 100%; }
   .graph-cell { width: 12px; height: 100%; position: relative; flex: none; }
   .graph-cell.node::after { content: ""; position: absolute; left: 2px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: currentColor; }
@@ -3109,24 +3457,32 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 16px;
-    border-radius: 12px;
-    background: var(--canvas);
+    padding: 20px;
+    border-radius: 14px;
+    background: var(--elevated);
     border: 1px solid var(--line);
+    box-shadow: var(--shadow);
   }
 
   .dialog h2 {
     margin: 0 0 4px;
-    font-size: 15px;
+    font-size: 16px;
     font-weight: 600;
   }
 
   .dialog input,
   .dialog select {
-    height: 28px;
+    height: 32px;
     padding: 0 8px;
     border-radius: var(--radius);
-    background: var(--field);
+    border: 1px solid var(--line);
+    background: var(--elevated);
+  }
+
+  .dialog input:focus,
+  .dialog select:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
 
   .dialog label {
@@ -3156,12 +3512,17 @@
 
   .search {
     flex: 1;
-    height: 22px;
-    border: 0;
+    height: 28px;
+    border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: var(--field);
+    background: var(--elevated);
     color: inherit;
     padding: 0 8px;
+  }
+
+  .search:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
 
   .preview {
