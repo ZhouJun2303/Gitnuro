@@ -187,15 +187,31 @@ fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u
 }
 
 #[tauri::command]
-fn commit_log(path: Option<String>, limit: Option<usize>, all: Option<bool>) -> Result<Vec<awegit_git::CommitRow>, String> {
+fn commit_log(
+    path: Option<String>,
+    limit: Option<usize>,
+    all: Option<bool>,
+    order: Option<String>,
+    revs: Option<Vec<String>>,
+) -> Result<Vec<awegit_git::CommitRow>, String> {
     let repo = repo_from(path)?;
     let limit = limit.unwrap_or(500);
+    let topo = order.as_deref() == Some("topo");
+    if let Some(revs) = revs.as_ref().filter(|items| !items.is_empty()) {
+        return awegit_git::commits_from(&repo, limit, revs, topo).map_err(|error| error.to_string());
+    }
     let rows = if all.unwrap_or(true) {
-        awegit_git::commit_log(&repo, limit)
+        awegit_git::commit_log_sorted(&repo, limit, topo)
     } else {
-        awegit_git::branch_commits(&repo, limit)
+        awegit_git::branch_commits_sorted(&repo, limit, topo)
     };
     rows.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn commit_detail(path: Option<String>, id: String) -> Result<awegit_git::CommitDetail, String> {
+    let repo = repo_from(path)?;
+    awegit_git::commit_detail(&repo, &id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -487,7 +503,18 @@ fn ignored_path(path: &Path) -> bool {
 #[tauri::command]
 fn open_terminal(path: Option<String>) -> Result<(), String> {
     let repo = repo_from(path)?;
-    let configured = settings::load().map(|settings| settings.terminal).unwrap_or_default();
+    let loaded = settings::load().ok();
+    if let Some(values) = loaded.as_ref() {
+        if values.shell_kind != "default" && !values.shell_path.trim().is_empty() {
+            let mut command = std::process::Command::new(&values.shell_path);
+            if !values.shell_args.trim().is_empty() {
+                command.args(split_command_args(&values.shell_args));
+            }
+            command.current_dir(&repo).spawn().map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+    }
+    let configured = loaded.map(|settings| settings.terminal).unwrap_or_default();
     let mut command = std::process::Command::new("cmd");
     if configured.trim().is_empty() {
         command.args(["/C", "start", "cmd"]);
@@ -496,6 +523,64 @@ fn open_terminal(path: Option<String>) -> Result<(), String> {
     }
     command.current_dir(&repo).spawn().map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn split_command_args(text: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    for ch in text.chars() {
+        match (quote, ch) {
+            (None, ' ' | '\t') => {
+                if !current.is_empty() {
+                    args.push(std::mem::take(&mut current));
+                }
+            }
+            (None, '"' | '\'') => quote = Some(ch),
+            (Some(mark), found) if found == mark => quote = None,
+            (_, found) => current.push(found),
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
+}
+
+#[tauri::command]
+fn pick_directory() -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    {
+        let script = r#"
+Add-Type -AssemblyName System.Windows.Forms | Out-Null
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.ShowNewFolderButton = $true
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }
+"#;
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-STA", "-Command", script])
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if err.is_empty() { "Could not open the folder picker.".into() } else { err });
+        }
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(if text.is_empty() { None } else { Some(text) });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("osascript")
+            .args(["-e", "try", "-e", "POSIX path of (choose folder)", "-e", "on error number -128", "-e", "\"\"", "-e", "end try"])
+            .output()
+            .map_err(|error| error.to_string())?;
+        let text = String::from_utf8_lossy(&output.stdout).trim().trim_end_matches('/').to_string();
+        return Ok(if text.is_empty() { None } else { Some(text) });
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        Err("This system has no folder picker.".into())
+    }
 }
 
 #[tauri::command]
@@ -666,6 +751,7 @@ pub fn run() {
             commit_changes,
             file_diff,
             commit_log,
+            commit_detail,
             repository_refs,
             commit_files,
             show_commit_file,
@@ -677,6 +763,7 @@ pub fn run() {
             save_settings,
             watch_repository,
             open_terminal,
+            pick_directory,
             suggest_commit_message,
             file_preview,
             cancel_operation,

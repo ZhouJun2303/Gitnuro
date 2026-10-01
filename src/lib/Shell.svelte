@@ -14,6 +14,7 @@
     badge,
     type BlameLine,
     type CommandRecord,
+    type CommitDetail,
     type CommitRow,
     type ConflictSides,
     type DiffLine,
@@ -64,13 +65,13 @@
     | null;
   type MenuItem = { label: string; run?: () => void; disabled?: boolean; shortcut?: string; children?: MenuItem[]; sep?: boolean };
   type ConfirmAsk = { title: string; body: string; run: () => void };
-  type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row };
+  type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row; depth: number };
 
   const defaultSettings: Settings = {
     theme: "system",
     pullRebase: false,
     fetchPrune: true,
-    diffStyle: "unified",
+    diffStyle: "split",
     proxy: "",
     aiBaseUrl: "https://api.x.ai/v1",
     aiModel: "grok-4.7",
@@ -130,6 +131,31 @@
     githubToken: "",
     gitlabToken: "",
     gitlabHost: "",
+    showDiffMarks: false,
+    diffFontSize: 13,
+    disableSyntaxHighlight: false,
+    commitSort: "date",
+    fetchAutomatically: false,
+    fetchTags: false,
+    tabIndicator: true,
+    updateSubmodulesOnCheckout: false,
+    branchSpace: "-",
+    pushOnCommit: false,
+    compactBranchLabels: false,
+    messageLow: 50,
+    messageHigh: 70,
+    spellChecking: "disable",
+    pageGuide: 72,
+    highlightIssues: true,
+    shellKind: "default",
+    shellPath: "",
+    shellArgs: "",
+    diffToolName: "",
+    diffToolPath: "",
+    diffToolArgs: "",
+    mergeToolName: "",
+    mergeToolPath: "",
+    mergeToolArgs: "",
   };
 
   const desktopApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -172,7 +198,7 @@
   let launchIndex = $state(0);
   let launchList = $state<HTMLElement | null>(null);
   let expanded = $state<"tags" | "stashes" | "submodules" | "worktrees" | null>(null);
-  let allBranches = $state(true);
+  let allBranches = $state(false);
   let commitQuery = $state("");
   let drops = $state<string[]>([]);
   let fileTop = $state(0);
@@ -211,7 +237,12 @@
   let rebaseConflictFiles = $state<string[]>([]);
   let updateRefs = $state(false);
   let lfsAvailable = $state(false);
-  let prefTab = $state<"appearance" | "git" | "diff" | "network" | "ai" | "account">("appearance");
+  let prefTab = $state<"general" | "commit" | "git" | "integration" | "commands" | "updates">("general");
+  let commitDetail = $state<CommitDetail | null>(null);
+  let historyTab = $state<"commit" | "changes" | "tree">("commit");
+  let collapsedDirs = $state<string[]>([]);
+  let commitCollapsed = $state<string[]>([]);
+  let aiFieldsOpen = $state(false);
   let dragStep = $state<number | null>(null);
   let rebasePicked = $state<string[]>([]);
   let recentStats = $state<Record<string, { branch: string; ahead: number; behind: number; lastSummary: string }>>({});
@@ -222,7 +253,10 @@
   let comparePair = $state<[string, string] | null>(null);
   const drafts = new Map<string, { summary: string; description: string }>();
 
-  const summaryTooLong = $derived(summary.length > 72);
+  const messageHigh = $derived(settings.messageHigh > 0 ? settings.messageHigh : 70);
+  const messageLow = $derived(settings.messageLow > 0 ? settings.messageLow : 50);
+  const summaryTooLong = $derived(summary.length > messageHigh);
+  const summaryTone = $derived(summary.length > messageHigh ? "over" : summary.length >= messageLow && summary.length > 0 ? "warn" : "");
   const selectedDiff = $derived(mode === "sample" && selectedPath ? (diffs[selectedPath] ?? []) : []);
   const staged = $derived<Row[]>(mode === "live" ? (snapshot?.staged ?? []).map(toRow) : []);
   const unstaged = $derived<Row[]>(
@@ -290,7 +324,7 @@
   const historyRows = $derived(historyWindow.rows);
   const shownUnstaged = $derived(unstaged.filter((file) => matchesQuery(file.path, fileQuery)));
   const shownStaged = $derived(staged.filter((file) => matchesQuery(file.path, fileQuery)));
-  const unstagedTree = $derived(asTree(shownUnstaged));
+  const unstagedTree = $derived(asTree(shownUnstaged, collapsedDirs));
   const fileWindow = $derived(windowSlice(unstagedTree, fileTop, rowFile));
   const diffLines = $derived(diff?.lines ?? []);
   const shownDiffLines = $derived(numberedDiff(diffLines));
@@ -299,6 +333,26 @@
   const blameWindow = $derived(windowSlice(blameLines ?? [], blameTop, 18));
   const historyDiffWindow = $derived(windowSlice(historyDiff?.lines ?? [], historyDiffTop, 18));
   const splitRows = $derived(settings.diffStyle === "split" ? splitDiff(diffLines) : []);
+  function sampleSplitOf(lines: string[]) {
+    return splitDiff(
+      lines.map((text) => ({
+        kind: text.startsWith("@@") ? "hunk" as const : text.startsWith("+") && !text.startsWith("+++") ? "add" as const : text.startsWith("-") && !text.startsWith("---") ? "delete" as const : "context" as const,
+        text,
+      })),
+    );
+  }
+  const sampleSplit = $derived(sampleSplitOf(selectedDiff));
+  const historySplit = $derived(settings.diffStyle === "split" ? splitDiff(historyDiff?.lines ?? []) : []);
+  const filterNames = $derived.by(() => {
+    if (historyFilter) return [historyFilter];
+    if (allBranches) return [];
+    if (mode === "sample") return ["main", "origin/main"];
+    const current = refs?.branches.find((branch) => branch.current);
+    if (!current) return [];
+    const names = [current.name];
+    if (current.upstream && !names.includes(current.upstream)) names.push(current.upstream);
+    return names;
+  });
   const visibleBranches = $derived(
     (refs?.branches ?? []).filter((branch) => (branch.current || !refHidden(branch.name)) && matchesQuery(branch.name, sideQuery)),
   );
@@ -331,7 +385,7 @@
     }
     const items: LaunchItem[] = [
       { label: tr("chrome.fetch"), group: action, run: () => void doFetch() },
-      { label: tr("chrome.fetchAll"), group: action, run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: false }) },
+      { label: tr("chrome.fetchAll"), group: action, run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: settings.fetchTags }) },
       { label: tr("chrome.pull"), group: action, run: () => void doPull() },
       { label: tr("dialog.fastForward"), group: action, run: () => { settings.pullRebase = false; void doPull(); } },
       { label: tr("chrome.push"), group: action, run: () => void doPush() },
@@ -385,7 +439,7 @@
         ...(refs?.remotes ?? []).map((remote) => ({
           label: remote.name,
           group: tr("chrome.groupRemote"),
-          run: () => void mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: false }),
+          run: () => void mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: settings.fetchTags }),
         })),
         ...(refs?.stashes ?? []).map((stash) => ({
           label: stash.summary || stash.name,
@@ -609,14 +663,29 @@
     }
   }
 
+  function currentFilterRefs() {
+    const current = refs?.branches.find((branch) => branch.current);
+    if (!current) return [];
+    const names = [current.name];
+    if (current.upstream && !names.includes(current.upstream)) names.push(current.upstream);
+    return names;
+  }
+
   async function loadContext() {
     const path = repoPath();
+    refs = await invoke<RefSnapshot>("repository_refs", { path });
+    const order = settings.commitSort === "topo" ? "topo" : "date";
     if (historyFilter) {
       commitsLive = await invoke<CommitRow[]>("file_history", { path, file: historyFilter, limit: 200 });
+    } else if (!allBranches && currentFilterRefs().length > 0) {
+      try {
+        commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: logLimit, order, revs: currentFilterRefs() });
+      } catch {
+        commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: logLimit, all: false, order });
+      }
     } else {
-      commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: logLimit, all: allBranches });
+      commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: logLimit, all: allBranches || currentFilterRefs().length === 0, order });
     }
-    refs = await invoke<RefSnapshot>("repository_refs", { path });
     repoStats = await invoke<NonNullable<typeof repoStats>>("repository_summary", { path }).catch(() => repoStats);
     const locks = await invoke<{ available: boolean; locks: { path: string }[] }>("lfs_locks", { path }).catch(() => ({ available: false, locks: [] }));
     lfsAvailable = locks.available;
@@ -660,6 +729,12 @@
       const output = value.output ?? "";
       await loadContext();
       await loadDiff();
+      const action = String(request.action ?? "");
+      if (settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (refs?.submodules.length ?? 0) > 0) {
+        const follow = await invoke<StatusSnapshot & { output?: string }>("mutate", { path: repoPath(), request: { action: "submoduleUpdate" } });
+        applySnapshot(follow);
+        await loadContext();
+      }
       if (output) {
         commandOutput = output;
         dialog = "output";
@@ -681,7 +756,7 @@
 
   function doFetch() {
     const remote = refs?.remotes[0]?.name;
-    return mutate({ action: "fetch", remote: remote ?? null, prune: settings.fetchPrune, tags: false });
+    return mutate({ action: "fetch", remote: remote ?? null, prune: settings.fetchPrune, tags: settings.fetchTags });
   }
 
   function doPull() {
@@ -732,12 +807,6 @@
     treeOn = false;
     if (!reflogOn || mode !== "live") return;
     reflogRows = await invoke("reflog", { path: repoPath(), limit: 200 });
-  }
-
-  async function showTree() {
-    treeOn = !treeOn;
-    if (!treeOn || !selectedCommit || mode !== "live") return;
-    treePaths = await invoke<string[]>("commit_tree", { path: repoPath(), rev: selectedCommit });
   }
 
   async function openTreeFile(file: string) {
@@ -897,7 +966,7 @@
       skipHooks = false;
       if (snapshot?.path) drafts.delete(snapshot.path);
       await loadContext();
-      if (pushAfter) await doPush();
+      if (pushAfter || settings.pushOnCommit) await doPush();
     }
   }
 
@@ -942,6 +1011,24 @@
     comparePair = null;
     selectedCommit = id;
     blameLines = null;
+    historyTab = "commit";
+    const row = commitsLive.find((commit) => commit.id === id);
+    commitDetail = {
+      id,
+      body: "",
+      author: row?.author ?? "",
+      authorEmail: row?.email ?? "",
+      authorAt: row?.at ?? 0,
+      committer: row?.author ?? "",
+      committerEmail: row?.email ?? "",
+      committerAt: row?.at ?? 0,
+      parents: row?.parents ?? [],
+    };
+    try {
+      commitDetail = await invoke<CommitDetail>("commit_detail", { path: repoPath(), id });
+    } catch (error) {
+      actionError = message(error);
+    }
     try {
       commitFiles = await invoke<StatusFile[]>("commit_files", { path: repoPath(), id });
       historyFile = commitFiles[0]?.path ?? null;
@@ -1028,11 +1115,45 @@
     } finally {
       busy = false;
     }
+    if (settings.fetchAutomatically && snapshot?.path === path) void doFetch();
+  }
+
+  function composeTool(path: string, args: string) {
+    const file = path.trim();
+    const rest = args.trim();
+    if (!file) return rest;
+    const quoted = file.includes(" ") ? `"${file}"` : file;
+    return rest ? `${quoted} ${rest}` : quoted;
+  }
+
+  function applyToolSettings() {
+    settings.diffTool = composeTool(settings.diffToolPath, settings.diffToolArgs);
+    settings.mergeTool = composeTool(settings.mergeToolPath, settings.mergeToolArgs);
+    if (settings.shellKind === "custom" && settings.shellPath.trim()) {
+      settings.terminal = composeTool(settings.shellPath, settings.shellArgs);
+    }
   }
 
   async function savePrefs(close = true) {
+    applyToolSettings();
     settings = await invoke<Settings>("save_settings", { values: settings });
     if (close) dialog = null;
+  }
+
+  async function pickFolder() {
+    if (!inApp()) return;
+    try {
+      const folder = await invoke<string | null>("pick_directory");
+      if (folder) settings = { ...settings, cloneDirectory: folder };
+    } catch (error) {
+      actionError = message(error);
+    }
+  }
+
+  function branchName(name: string) {
+    const space = settings.branchSpace ?? "-";
+    const trimmed = name.trim();
+    return space ? trimmed.replaceAll(" ", space) : trimmed;
   }
 
   function groupOpen(name: string) {
@@ -1070,21 +1191,210 @@
     void mutate({ action: "setHidden", names: [] });
   }
 
-  function asTree(files: Row[]): TreeEntry[] {
-    if (!settings.treeFiles) return files.map((file) => ({ key: file.path, kind: "file", path: file.path, file }));
-    const groups = new Map<string, Row[]>();
+  function asTree(files: Row[], collapsed = collapsedDirs): TreeEntry[] {
+    type Node = { name: string; path: string; kind: "dir" | "file"; file?: Row; children: Node[] };
+    const root: Node = { name: "", path: "", kind: "dir", children: [] };
     for (const file of files) {
-      const dir = parentDir(file.path);
-      const list = groups.get(dir) ?? [];
-      list.push(file);
-      groups.set(dir, list);
+      const parts = file.path.split(/[/\\]/);
+      let node = root;
+      let acc = "";
+      parts.forEach((part, index) => {
+        acc = acc ? `${acc}/${part}` : part;
+        const last = index === parts.length - 1;
+        let child = node.children.find((item) => item.name === part);
+        if (!child) {
+          child = { name: part, path: acc, kind: last ? "file" : "dir", file: last ? file : undefined, children: [] };
+          node.children.push(child);
+        } else if (last) {
+          child.kind = "file";
+          child.file = file;
+        }
+        node = child;
+      });
     }
-    const entries: TreeEntry[] = [];
-    for (const dir of [...groups.keys()].sort()) {
-      if (dir) entries.push({ key: `dir:${dir}`, kind: "dir", path: dir });
-      for (const file of groups.get(dir) ?? []) entries.push({ key: file.path, kind: "file", path: file.path, file });
+    const sortNodes = (nodes: Node[]) => {
+      nodes.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "dir" ? -1 : 1));
+      for (const node of nodes) sortNodes(node.children);
+    };
+    sortNodes(root.children);
+    const hidden = new Set(collapsed);
+    const flat: TreeEntry[] = [];
+    const walk = (nodes: Node[], depth: number) => {
+      for (const node of nodes) {
+        flat.push({ key: `${node.kind}:${node.path}`, kind: node.kind, path: node.path, file: node.file, depth });
+        if (node.kind === "dir" && !hidden.has(node.path)) walk(node.children, depth + 1);
+      }
+    };
+    walk(root.children, 0);
+    return flat;
+  }
+
+  function toggleDir(path: string) {
+    collapsedDirs = collapsedDirs.includes(path) ? collapsedDirs.filter((item) => item !== path) : [...collapsedDirs, path];
+  }
+
+  function toggleCommitDir(path: string) {
+    commitCollapsed = commitCollapsed.includes(path) ? commitCollapsed.filter((item) => item !== path) : [...commitCollapsed, path];
+  }
+
+  function paint(text: string, path: string) {
+    if (settings.disableSyntaxHighlight) return [{ text, cls: "" }];
+    return highlight(text, path);
+  }
+
+  function forkWhen(at: number) {
+    if (!at) return "";
+    const date = new Date(at * 1000);
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    if (activeLocale === "zh") return `${date.getDate()} ${date.getMonth() + 1}月 ${date.getFullYear()} ${hours}:${minutes}`;
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()} ${hours}:${minutes}`;
+  }
+
+  function avatarColor(name: string) {
+    const colors = ["#5b8def", "#e07a3d", "#3aa76d", "#c45b8a", "#7a6ad8", "#c9a227", "#d16464"];
+    let hash = 0;
+    for (const ch of name) hash = (hash + ch.charCodeAt(0)) % colors.length;
+    return colors[hash] ?? colors[0];
+  }
+
+  function issueHref(token: string) {
+    if (token.startsWith("http")) return token;
+    if (!token.startsWith("#")) return "";
+    const remote = refs?.remotes.find((item) => item.url)?.url ?? "";
+    const number = token.slice(1);
+    const github = remote.match(/github\.com[:/]([^/\s]+\/[^/\s.]+)/i);
+    if (github) return `https://github.com/${github[1].replace(/\.git$/, "")}/issues/${number}`;
+    const gitlab = remote.match(/gitlab[^/:]*[:/]([^/\s]+\/[^/\s.]+)/i);
+    if (gitlab) return `https://gitlab.com/${gitlab[1].replace(/\.git$/, "")}/-/issues/${number}`;
+    return "";
+  }
+
+  function linkParts(text: string) {
+    if (!settings.highlightIssues) return [{ text, href: "" }];
+    const parts: { text: string; href: string }[] = [];
+    const pattern = /https?:\/\/[^\s]+|#\d+/g;
+    let cursor = 0;
+    for (const match of text.matchAll(pattern)) {
+      const index = match.index ?? 0;
+      if (index > cursor) parts.push({ text: text.slice(cursor, index), href: "" });
+      const token = match[0];
+      parts.push({ text: token, href: issueHref(token) });
+      cursor = index + token.length;
     }
-    return entries;
+    if (cursor < text.length) parts.push({ text: text.slice(cursor), href: "" });
+    return parts.length > 0 ? parts : [{ text, href: "" }];
+  }
+
+  function openBar(event: MouseEvent, items: MenuItem[]) {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    submenu = null;
+    menu = { x: rect.left, y: rect.bottom + 2, items };
+  }
+
+  function viewItems(): MenuItem[] {
+    return [
+      { label: tr("chrome.localChanges"), run: () => (section = "changes") },
+      { label: tr("chrome.allCommits"), run: () => (section = "history") },
+      { label: tr("chrome.fileTree"), disabled: !selectedCommit, run: () => { section = "history"; void openHistoryTab("tree"); } },
+      { label: tr("chrome.reflog"), run: () => { section = "history"; void showReflog(); } },
+      { label: tr("chrome.loadMore"), disabled: mode !== "live", run: () => { section = "history"; logLimit += 200; void loadContext(); } },
+      { label: tr("menu.drop"), disabled: mode !== "live" || drops.length === 0 || busy, run: () => dropCommits() },
+      { label: tr("dialog.squash"), disabled: mode !== "live" || !selectedCommit || busy, run: () => { draft = ""; dialog = "squash"; } },
+      { label: tr("chrome.compare"), disabled: mode !== "live" || drops.length !== 2, run: () => compareDrops() },
+      { label: tr("chrome.refresh"), shortcut: shortcutLabel("refresh"), run: () => void refresh() },
+      { label: tr("chrome.preferences"), shortcut: shortcutLabel("settings"), run: () => (dialog = "prefs") },
+    ];
+  }
+
+  function repositoryItems(): MenuItem[] {
+    const locked = mode !== "live";
+    return [
+      { label: tr("chrome.fetch"), disabled: locked || busy, run: () => void doFetch() },
+      { label: tr("chrome.pull"), disabled: locked || busy, run: () => void doPull() },
+      { label: tr("chrome.push"), disabled: locked || busy, run: () => void doPush() },
+      { label: tr("chrome.stash"), disabled: locked || busy, run: () => { draft = ""; dialog = "stash"; } },
+      { sep: true, label: "" },
+      { label: tr("menu.createBranch"), run: () => { draft = ""; draftExtra = ""; dialog = "branch"; } },
+      { label: tr("menu.createTag"), run: () => { draft = ""; draftExtra = "HEAD"; dialog = "tag"; } },
+      { sep: true, label: "" },
+      { label: tr("chrome.clone"), run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
+      { label: tr("chrome.open"), run: () => { draft = ""; dialog = "open"; } },
+      { label: tr("chrome.newRepo"), run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
+      { sep: true, label: "" },
+      { label: tr("chrome.terminal"), disabled: locked, run: () => void invoke("open_terminal", { path: repoPath() }) },
+      { label: tr("chrome.explorer"), disabled: !snapshot, run: () => snapshot && openPath(snapshot.path) },
+    ];
+  }
+
+  function windowItems(): MenuItem[] {
+    return [
+      { label: tr("chrome.close"), disabled: !snapshot, run: () => snapshot && closeTab(snapshot.path) },
+      { label: tr("chrome.notifications"), run: () => void openForge("notes") },
+      { label: tr("chrome.pulls"), run: () => void openForge("pulls") },
+    ];
+  }
+
+  function helpItems(): MenuItem[] {
+    return [
+      { label: tr("chrome.about"), run: () => (dialog = "about") },
+      { label: tr("chrome.download"), run: () => void invoke("check_for_update").then((value) => (updateNotice = value as UpdateNotice | null)) },
+    ];
+  }
+
+  function commitExtras(): MenuItem[] {
+    return [
+      { label: `${signOff ? "✓ " : ""}${tr("chrome.signOff")}`, run: () => { signOff = !signOff; if (mode === "live") void mutate({ action: "setSignOff", enabled: signOff, format: refs?.signOffFormat || settings.signOffFormat }); } },
+      { label: `${skipHooks ? "✓ " : ""}${tr("chrome.skipHooks")}`, run: () => (skipHooks = !skipHooks) },
+      { label: tr("chrome.suggest"), disabled: mode !== "live" || busy, run: () => void suggestMessage() },
+      { label: tr("chrome.commitAndPush"), disabled: !canCommit, run: () => void submitCommit(true) },
+    ];
+  }
+
+  const toolPresets = [
+    { name: "Araxis Merge", mergeArgs: "-wait -merge -3 -a1 {ours} {theirs} {working} {file}", diffArgs: "{left} {right}" },
+    { name: "Beyond Compare", mergeArgs: "{ours} {theirs} {working} {file}", diffArgs: "{left} {right}" },
+    { name: "CodeBuddy", mergeArgs: "{ours} {theirs} {working} {file}", diffArgs: "{left} {right}" },
+    { name: "Cursor", mergeArgs: "{working}", diffArgs: "{right}" },
+  ];
+
+  function useMergePreset(name: string) {
+    const preset = toolPresets.find((item) => item.name === name);
+    if (!preset) return;
+    settings = { ...settings, mergeToolName: preset.name, mergeToolArgs: preset.mergeArgs };
+  }
+
+  function useDiffPreset(name: string) {
+    const preset = toolPresets.find((item) => item.name === name);
+    if (!preset) return;
+    settings = { ...settings, diffToolName: preset.name, diffToolArgs: preset.diffArgs };
+  }
+
+  async function openHistoryTab(tab: "commit" | "changes" | "tree") {
+    historyTab = tab;
+    if (tab !== "tree" || !selectedCommit || mode !== "live" || treePaths.length > 0) return;
+    treePaths = await invoke<string[]>("commit_tree", { path: repoPath(), rev: selectedCommit });
+  }
+
+  function selectSample(id: string) {
+    const commit = sampleRows.find((row) => row.id === id);
+    selectedCommit = id;
+    selectedPath = id;
+    historyTab = "commit";
+    historyFile = commit?.files[0]?.path ?? null;
+    commitFiles = (commit?.files ?? []).map((file) => ({ path: file.path, kind: file.kind === "A" ? "added" : file.kind === "D" ? "deleted" : "modified", previousPath: null }));
+    commitDetail = {
+      id,
+      body: "",
+      author: commit?.author ?? "",
+      authorEmail: "",
+      authorAt: 0,
+      committer: commit?.author ?? "",
+      committerEmail: "",
+      committerAt: 0,
+      parents: commit?.parents ?? [],
+    };
   }
 
   async function discardPicked() {
@@ -1599,11 +1909,17 @@
   });
 </script>
 
-<div class="shell">
+<div class="shell" style:--diff-font="{settings.diffFontSize || 13}px" style:--guide="{settings.pageGuide || 72}">
+  <nav class="menubar">
+    <button type="button" onclick={(event) => openBar(event, viewItems())}>{tr("chrome.view")}</button>
+    <button type="button" onclick={(event) => openBar(event, repositoryItems())}>{tr("chrome.repository")}</button>
+    <button type="button" onclick={(event) => openBar(event, windowItems())}>{tr("chrome.window")}</button>
+    <button type="button" onclick={(event) => openBar(event, helpItems())}>{tr("chrome.help")}</button>
+  </nav>
   <header class="chrome">
     <div class="chrome-side tabs">
       {#each repos as repo (repo)}
-        <div class="tab" class:active={snapshot?.path === repo}>
+        <div class="tab" class:active={snapshot?.path === repo} class:dirty={settings.tabIndicator && snapshot?.path === repo && changeCount > 0}>
           <button class="file-select" type="button" onclick={() => openRepo(repo)}>{folderName(repo)}</button>
           <button class="text-button row-action tab-close" type="button" onclick={() => closeTab(repo)} aria-label={tr("chrome.close")}>×</button>
         </div>
@@ -1619,7 +1935,7 @@
       <div class="segment">
         <button type="button" disabled={busy} onclick={() => void doFetch()} oncontextmenu={(event) => openMenu(event, [
           { label: tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: mode !== "live", run: () => void doFetch() },
-          { label: tr("chrome.fetchAll"), disabled: mode !== "live", run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: false }) },
+          { label: tr("chrome.fetchAll"), disabled: mode !== "live", run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: settings.fetchTags }) },
         ])}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8M5 7l3 3 3-3M3 13h10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>{tr("chrome.fetch")}</button>
         <button type="button" disabled={busy} onclick={() => void doPull()} oncontextmenu={(event) => openMenu(event, [
           { label: tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: mode !== "live", run: () => void doPull() },
@@ -1671,16 +1987,14 @@
 
   <div class="body">
     <aside class="sidebar">
-      <div class="segment side-switch">
-        <button type="button" class:on={section === "changes"} onclick={() => (section = "changes")}>
-          <span>{tr("chrome.changes")}</span>
-          <span class="count">{changeCount}</span>
-        </button>
-        <button type="button" class:on={section === "history"} onclick={() => (section = "history")}>
-          <span>{allBranches ? tr("chrome.allCommits") : tr("chrome.currentBranch")}</span>
-          {#if mode === "live"}<span class="count">{shownCommits.length}</span>{/if}
-        </button>
-      </div>
+      <button class="side nav" type="button" class:selected={section === "changes"} onclick={() => (section = "changes")}>
+        <span class="name">{tr("chrome.localChanges")}</span>
+        {#if changeCount > 0}<span class="count">{changeCount}</span>{/if}
+      </button>
+      <button class="side nav" type="button" class:selected={section === "history"} onclick={() => (section = "history")}>
+        <span class="name">{tr("chrome.allCommits")}</span>
+      </button>
+      <input class="search side-filter" placeholder={tr("chrome.filterSidebar")} aria-label={tr("chrome.filterSidebar")} bind:value={sideQuery} />
 
       <div class="group">
         {tr("chrome.localBranches")}
@@ -1689,9 +2003,6 @@
           <button class="text-button" type="button" onclick={showAllRefs}>{tr("chrome.showAll")}</button>
         {/if}
       </div>
-      {#if mode === "live"}
-        <input class="search" placeholder={tr("chrome.filterSidebar")} aria-label={tr("chrome.filterSidebar")} bind:value={sideQuery} />
-      {/if}
       {#if mode === "live" && refs}
         {#each visibleBranches as branch, index (branch.name)}
           {#if branchGroup(branch.name) && branchGroup(branch.name) !== branchGroup(visibleBranches[index - 1]?.name ?? "")}
@@ -1733,7 +2044,7 @@
         {#each refs.remotes as remote (remote.name)}
           {#if matchesQuery(remote.name, sideQuery)}
           <div class="side quiet" role="group" oncontextmenu={(event) => openMenu(event, [
-            { label: tr("chrome.fetch"), run: () => mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: false }) },
+            { label: tr("chrome.fetch"), run: () => mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: settings.fetchTags }) },
             { label: tr("dialog.url"), run: () => { draft = remote.name; draftExtra = remote.url ?? ""; dialog = "remote"; } },
             { label: tr("menu.remove"), run: () => mutate({ action: "removeRemote", name: remote.name }) },
           ])}>
@@ -1797,12 +2108,6 @@
           ])}
         ><span class="name">main</span></div>
       {/if}
-      <div class="group" role="group" oncontextmenu={(event) => openMenu(event, [
-        { label: tr("menu.createTag"), run: () => { draft = ""; draftExtra = "HEAD"; dialog = "tag"; } },
-        { label: tr("chrome.stash"), run: () => { draft = ""; dialog = "stash"; } },
-        { label: tr("chrome.add"), run: () => { draft = ""; draftExtra = ""; dialog = "submodule"; } },
-        { label: tr("chrome.worktrees"), run: () => { draft = ""; draftExtra = ""; dialog = "worktree"; } },
-      ])}>{tr("chrome.more")}</div>
       <div class="side quiet">
         <button class="file-select" type="button" onclick={() => (expanded = expanded === "tags" ? null : "tags")}>
           <span>{tr("chrome.tags")}</span><span class="count">{visibleTags.length}</span>
@@ -1864,9 +2169,10 @@
       {/if}
     </aside>
 
+    <div class="stage" class:history-mode={section === "history"}>
     {#if section === "changes"}
       <section class="changes">
-        <div class="status-pane" style:order={settings.swapPanes ? 2 : 1}>
+        <div class="status-pane" style:order={settings.swapPanes ? 1 : 2}>
         <div class="pane-head">
           <span>{tr("chrome.staged")}</span>
           <span class="count">{staged.length}</span>
@@ -1878,21 +2184,24 @@
           <div class="file-list staged-list">
             {#each asTree(shownStaged) as entry (entry.key)}
               {#if entry.kind === "dir"}
-                <button class="text-button" type="button" onclick={() => stageFolder(entry.path, true)}>{entry.path}</button>
+                <button class="side tree-dir" type="button" style:padding-left="{8 + entry.depth * 14}px" onclick={() => toggleDir(entry.path)}>
+                  <span class="twist">{collapsedDirs.includes(entry.path) ? "▸" : "▾"}</span>
+                  <span class="name">{fileName(entry.path)}</span>
+                </button>
               {:else if entry.file}
-                {@render fileRow(entry.file, "staged")}
+                {@render fileRow(entry.file, "staged", entry.depth)}
               {/if}
             {/each}
           </div>
         {/if}
         </div>
 
-        <div class="status-pane" style:order={settings.swapPanes ? 1 : 2}>
+        <div class="status-pane" style:order={settings.swapPanes ? 2 : 1}>
         <div class="pane-head">
           <span>{tr("chrome.unstaged")}</span>
           <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : shownUnstaged.length}</span>
           <input class="search" placeholder={tr("chrome.filterFiles")} aria-label={tr("chrome.filterFiles")} bind:value={fileQuery} />
-          <button class="text-button" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>{tr("chrome.stageAll")}</button>
+          <button class="text-button" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>{tr("chrome.stage")}</button>
         </div>
         <div class="file-list" onscroll={(event) => (fileTop = (event.currentTarget as HTMLElement).scrollTop)}>
           {#if mode === "loading"}
@@ -1906,9 +2215,12 @@
               {#each fileWindow.rows as entry, index (entry.key)}
                 <div class="virtual-row" style:top="{(fileWindow.start + index) * rowFile}px">
                   {#if entry.kind === "dir"}
-                    <button class="text-button" type="button" onclick={() => stageFolder(entry.path, false)}>{entry.path}</button>
+                    <button class="side tree-dir" type="button" style:padding-left="{8 + entry.depth * 14}px" onclick={() => toggleDir(entry.path)}>
+                      <span class="twist">{collapsedDirs.includes(entry.path) ? "▸" : "▾"}</span>
+                      <span class="name">{fileName(entry.path)}</span>
+                    </button>
                   {:else if entry.file}
-                    {@render fileRow(entry.file, "unstaged")}
+                    {@render fileRow(entry.file, "unstaged", entry.depth)}
                   {/if}
                 </div>
               {/each}
@@ -1917,9 +2229,10 @@
         </div>
         </div>
 
-        {#snippet fileRow(file: Row, side: Side)}
+        {#snippet fileRow(file: Row, side: Side, depth = 0)}
           <div
             class="file"
+            style:padding-left="{8 + depth * 14}px"
             class:selected={selectedPath === file.path && (mode !== "live" || selectedSide === side)}
             role="group"
             oncontextmenu={(event) => openMenu(event, fileMenu(file, side))}
@@ -1927,40 +2240,23 @@
             <button class="file-select" type="button" onclick={(event) => selectFile(file.path, side, event)}>
               <span class="badge {file.tone}">{file.letter}</span>
               <span class="file-name">{fileName(file.path)}</span>
-              <span class="file-dir">{parentDir(file.path)}</span>
             </button>
           </div>
         {/snippet}
-
-        <form class="composer" style:order="3" onsubmit={(event) => { event.preventDefault(); void submitCommit(false); }}>
-          <label class="field">
-            <input placeholder={tr("chrome.summary")} bind:value={summary} maxlength="200" aria-invalid={summaryTooLong} />
-            <span class="counter" class:over={summaryTooLong}>{summary.length}/72</span>
-          </label>
-          <textarea placeholder={tr("chrome.description")} rows="3" bind:value={description}></textarea>
-          <div class="composer-row">
-            <label class="check"><input type="checkbox" bind:checked={amend} /> {tr("chrome.amend")}</label>
-            <label class="check"><input type="checkbox" bind:checked={signOff} onchange={() => { if (mode === "live") void mutate({ action: "setSignOff", enabled: signOff, format: refs?.signOffFormat || settings.signOffFormat }); }} /> {tr("chrome.signOff")}</label>
-            <label class="check"><input type="checkbox" bind:checked={skipHooks} /> {tr("chrome.skipHooks")}</label>
-            <button class="text-button" type="button" disabled={mode !== "live" || busy} onclick={() => suggestMessage()}>{tr("chrome.suggest")}</button>
-            <button class="text-button" type="button" disabled={!canCommit} onclick={() => submitCommit(true)}>{tr("chrome.commitAndPush")}</button>
-            <button class="commit" type="submit" disabled={!canCommit}>{busy ? tr("chrome.working") : tr("chrome.commit")}</button>
-          </div>
-        </form>
       </section>
     {:else if mode !== "sample"}
       <section class="history" bind:this={historyEl} onscroll={(event) => (historyTop = (event.currentTarget as HTMLElement).scrollTop)}>
+        {#if filterNames.length > 0}
+          <div class="filter-bar">
+            <span>{tr("chrome.filteredBy", { name: filterNames.map((name) => `'${name}'`).join(", ") })}</span>
+            <button class="text-button" type="button" onclick={() => { allBranches = true; historyFilter = ""; void loadContext(); }}>{tr("chrome.clearFilter")}</button>
+          </div>
+        {/if}
         <div class="pane-head">
           <input class="search" placeholder={tr("chrome.findCommits")} aria-label={tr("chrome.findCommits")} bind:this={searchEl} bind:value={commitQuery} />
-          <button class="text-button" type="button" onclick={showReflog}>{tr("chrome.reflog")}</button>
-          <button class="text-button" type="button" disabled={!selectedCommit} onclick={showTree}>{tr("chrome.fileTree")}</button>
           {#if historyFilter}
             <button class="text-button" type="button" onclick={() => { historyFilter = ""; void loadContext(); }}>{tr("chrome.allCommits")}</button>
           {/if}
-          <button class="text-button" type="button" disabled={drops.length === 0 || busy} onclick={dropCommits}>{tr("menu.drop")}</button>
-          <button class="text-button" type="button" disabled={!selectedCommit || busy} onclick={() => { draft = ""; dialog = "squash"; }}>{tr("dialog.squash")}</button>
-          <button class="text-button" type="button" disabled={drops.length !== 2} onclick={() => compareDrops()}>{tr("chrome.compare")}</button>
-          <button class="text-button" type="button" onclick={() => { logLimit += 200; void loadContext(); }}>{tr("chrome.loadMore")}</button>
         </div>
         {#if historyFilter}
           <div class="pane-head"><span>{historyFilter}</span></div>
@@ -1994,18 +2290,20 @@
                     <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}></i>
                   {/each}
                 </span>
-                {#if settings.gravatar && commit.email}
-                  <img class="avatar" alt="" src={gravatarUrl(commit.email)} />
-                {:else}
-                  <span class="avatar" title={commit.author}>{commit.author.slice(0, 1).toUpperCase()}</span>
-                {/if}
-                <span class="subject">{commit.summary}</span>
+                <span class="subject">{@render linked(commit.summary)}</span>
                 <span class="badges">
-                  {#each commit.refs as label (label)}<span class="ref {refKind(label)}">{label}</span>{/each}
+                  {#each commit.refs as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
                 </span>
-                <span class="meta">{commit.author}</span>
-                <span class="meta sha">{commit.shortId}</span>
-                <span class="meta">{whenLabel(commit)}</span>
+                <span class="commit-side">
+                  {#if settings.gravatar && commit.email}
+                    <img class="avatar tile" alt="" src={gravatarUrl(commit.email)} />
+                  {:else}
+                    <span class="avatar tile" style:background={avatarColor(commit.author)} title={commit.author}>{commit.author.slice(0, 1).toUpperCase()}</span>
+                  {/if}
+                  <span class="meta">{commit.author}</span>
+                  <span class="meta sha">{commit.shortId}</span>
+                  <span class="meta">{commit.at ? forkWhen(commit.at) : commit.when}</span>
+                </span>
               </div>
             {/each}
           </div>
@@ -2013,11 +2311,15 @@
       </section>
     {:else}
       <section class="history">
-        <div class="pane-head">
-          <button class="text-button" type="button" onclick={showReflog}>{tr("chrome.reflog")}</button>
-          <button class="text-button" type="button" onclick={showTree}>{tr("chrome.fileTree")}</button>
-          {#if repoStats}<span class="meta">{repoStats.lastSummary}</span>{/if}
-        </div>
+        {#if filterNames.length > 0}
+          <div class="filter-bar">
+            <span>{tr("chrome.filteredBy", { name: filterNames.map((name) => `'${name}'`).join(", ") })}</span>
+            <button class="text-button" type="button" onclick={() => (allBranches = true)}>{tr("chrome.clearFilter")}</button>
+          </div>
+        {/if}
+        {#if repoStats}
+          <div class="pane-head"><span class="meta">{repoStats.lastSummary}</span></div>
+        {/if}
         {#if reflogOn}
           {#each sampleReflog as row (row.selector)}
             <button class="commit-row" type="button" oncontextmenu={(event) => openMenu(event, reflogMenu(row))}>
@@ -2028,22 +2330,140 @@
           {/each}
         {:else}
           {#each sampleRows as commit, index (commit.id)}
-            <button class="commit-row" class:selected={selectedCommit === commit.id || selectedPath === commit.id} type="button" onclick={() => { selectedCommit = commit.id; selectedPath = commit.id; }} oncontextmenu={(event) => commit.badges.includes("stash") ? openMenu(event, [{ label: tr("menu.apply"), disabled: true }, { label: tr("menu.pop"), disabled: true }, { label: tr("menu.drop"), disabled: true }]) : openMenu(event, commitMenu(commit))}>
+            <button class="commit-row" class:selected={selectedCommit === commit.id || selectedPath === commit.id} type="button" onclick={() => selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? openMenu(event, [{ label: tr("menu.apply"), disabled: true }, { label: tr("menu.pop"), disabled: true }, { label: tr("menu.drop"), disabled: true }]) : openMenu(event, commitMenu(commit))}>
               <span class="graph" aria-hidden="true">
                 {#each sampleGraph[index] ?? [] as cell, lane (`s-${commit.id}-${lane}`)}
                   <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}></i>
                 {/each}
               </span>
-              <span class="subject">{commit.summary}</span>
+              <span class="subject">{@render linked(commit.summary)}</span>
               <span class="badges">
-                {#each commit.badges as label (label)}<span class="ref {refKind(label)}">{label}</span>{/each}
+                {#each commit.badges as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
               </span>
-              <span class="meta">{commit.author}</span>
-              <span class="meta sha">{commit.id}</span>
-              <span class="meta">{commit.when}</span>
+              <span class="commit-side">
+                <span class="avatar tile" style:background={avatarColor(commit.author || "?")}>{(commit.author || "?").slice(0, 1).toUpperCase()}</span>
+                <span class="meta">{commit.author}</span>
+                <span class="meta sha">{commit.id}</span>
+                <span class="meta">{commit.when}</span>
+              </span>
             </button>
           {/each}
         {/if}
+      </section>
+    {/if}
+
+    {#snippet linked(text: string)}
+      {#each linkParts(text) as part, index (`${index}-${part.text}`)}
+        {#if part.href}
+          <a class="issue" href={part.href} onclick={(event) => { event.preventDefault(); event.stopPropagation(); void openUrl(part.href); }}>{part.text}</a>
+        {:else if settings.highlightIssues && (/^#\d+$/.test(part.text) || part.text.startsWith("http"))}
+          <span class="issue">{part.text}</span>
+        {:else}
+          {part.text}
+        {/if}
+      {/each}
+    {/snippet}
+
+    {#if section === "history"}
+      <section class="detail">
+        <div class="detail-tabs">
+          <button type="button" class:on={historyTab === "commit"} onclick={() => (historyTab = "commit")}>{tr("chrome.commit")}</button>
+          <button type="button" class:on={historyTab === "changes"} onclick={() => (historyTab = "changes")}>{tr("chrome.changes")}</button>
+          <button type="button" class:on={historyTab === "tree"} onclick={() => openHistoryTab("tree")}>{tr("chrome.fileTree")}</button>
+        </div>
+        <div class="detail-scroll">
+          {#if !selectedCommit && !commitDetail}
+            <p class="empty">{tr("chrome.selectCommitFile")}</p>
+          {:else if historyTab === "commit"}
+            <div class="detail-people">
+              <div class="person">
+                <span class="avatar tile" style:background={avatarColor(commitDetail?.author || "")}>{(commitDetail?.author || "?").slice(0, 1).toUpperCase()}</span>
+                <div>
+                  <div class="k">{tr("chrome.author")}</div>
+                  <div>{commitDetail?.author}</div>
+                  <div class="meta">{commitDetail?.authorEmail}</div>
+                  <div class="meta">{commitDetail?.authorAt ? forkWhen(commitDetail.authorAt) : ""}</div>
+                </div>
+              </div>
+              <div class="person">
+                <span class="avatar tile" style:background={avatarColor(commitDetail?.committer || "")}>{(commitDetail?.committer || "?").slice(0, 1).toUpperCase()}</span>
+                <div>
+                  <div class="k">{tr("chrome.committer")}</div>
+                  <div>{commitDetail?.committer}</div>
+                  <div class="meta">{commitDetail?.committerEmail}</div>
+                  <div class="meta">{commitDetail?.committerAt ? forkWhen(commitDetail.committerAt) : ""}</div>
+                </div>
+              </div>
+            </div>
+            <div class="detail-line"><span class="k">{tr("chrome.refsLabel")}</span>
+              {#each (mode === "live" ? commitsLive.find((row) => row.id === selectedCommit)?.refs : sampleRows.find((row) => row.id === selectedCommit)?.badges) ?? [] as label (label)}
+                <span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>
+              {/each}
+            </div>
+            <div class="detail-line"><span class="k">{tr("chrome.sha")}</span><button class="text-button sha" type="button" onclick={() => copyText(selectedCommit ?? "")}>{selectedCommit}</button></div>
+            <div class="detail-line"><span class="k">{tr("chrome.parents")}</span>
+              {#each commitDetail?.parents ?? [] as parent (parent)}
+                <button class="text-button sha" type="button" onclick={() => { if (mode === "live") void selectCommit(parent); else selectSample(parent); }}>{parent.slice(0, 7)}</button>
+              {/each}
+            </div>
+            <p class="detail-message">{@render linked(mode === "live" ? (commitsLive.find((row) => row.id === selectedCommit)?.summary ?? "") : (sampleRows.find((row) => row.id === selectedCommit)?.summary ?? ""))}</p>
+            {#if commitDetail?.body}<pre class="detail-body-text">{@render linked(commitDetail.body)}</pre>{/if}
+            <div class="detail-line">
+              <button class="text-button" type="button" onclick={() => (commitCollapsed = [])}>{tr("chrome.expandAll")}</button>
+            </div>
+            {#each asTree(commitFiles.map((file) => toRow(file)), commitCollapsed) as entry (entry.key)}
+              {#if entry.kind === "dir"}
+                <button class="side" type="button" style:padding-left="{8 + entry.depth * 14}px" onclick={() => toggleCommitDir(entry.path)}>
+                  <span class="twist">{commitCollapsed.includes(entry.path) ? "▸" : "▾"}</span>
+                  <span class="name">{fileName(entry.path)}</span>
+                </button>
+              {:else if entry.file}
+                <button class="side" class:selected={historyFile === entry.file.path} type="button" style:padding-left="{22 + entry.depth * 14}px" onclick={() => { const path = entry.file?.path; if (!path) return; historyFile = path; historyTab = "changes"; if (mode === "live") void pickCommitFile(path); }}>
+                  <span class="badge {entry.file.tone}">{entry.file.letter}</span>
+                  <span class="name">{fileName(entry.file.path)}</span>
+                </button>
+              {/if}
+            {/each}
+          {:else if historyTab === "changes"}
+            <header class="diff-head"><span>{historyFile ?? ""}</span></header>
+            {#if mode === "live" && historyDiff && settings.diffStyle === "split"}
+              <div class="diff-body split">
+                {#each historySplit as row, index (index)}
+                  <div class="split-row">
+                    <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, historyFile ?? "") as token, tokenIndex (`hd-l${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                    <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, historyFile ?? "") as token, tokenIndex (`hd-r${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                  </div>
+                {/each}
+              </div>
+            {:else if mode === "live" && historyDiff}
+              <div class="diff-body">
+                {#each historyDiff.lines as line, index (index)}
+                  <span class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"}>{#each paint(line.text, historyFile ?? "") as token, tokenIndex (`hd-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                {/each}
+              </div>
+            {:else if historyFile && diffs[historyFile]}
+              {#if settings.diffStyle === "split"}
+                <div class="diff-body split">
+                  {#each sampleSplitOf(diffs[historyFile]) as row, index (`hf-${index}`)}
+                    <div class="split-row">
+                      <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, historyFile) as token, tokenIndex (`hfl-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                      <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, historyFile) as token, tokenIndex (`hfr-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                    </div>
+                  {/each}
+                </div>
+              {:else}
+                <pre class="diff-body">{#each diffs[historyFile] as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+              {/if}
+            {:else}
+              <p class="diff-empty">{tr("chrome.selectCommitFile")}</p>
+            {/if}
+          {:else}
+            {#each (mode === "live" ? treePaths : sampleTree) as file (file)}
+              <button class="side" type="button" class:selected={historyFile === file} onclick={() => { if (mode === "live") void openTreeFile(file); else historyFile = file; }}><span class="name">{file}</span></button>
+            {/each}
+            {#if treeText}<pre class="diff-body">{treeText}</pre>{/if}
+          {/if}
+        </div>
       </section>
     {/if}
 
@@ -2063,6 +2483,8 @@
       {:else if mode === "live" && section === "changes" && selectedPath}
         <header class="diff-head">
           <span>{selectedPath}</span>
+          <button class="text-button" type="button" disabled={busy} onclick={() => runChange(selectedSide === "staged" ? "unstage_path" : "stage_path", { file: selectedPath })}>{selectedSide === "staged" ? tr("menu.unstage") : tr("chrome.stage")}</button>
+          <button class="text-button" type="button" disabled={busy} onclick={() => ask(tr("menu.discard"), tr("dialog.discardBody", { name: selectedPath ?? "" }), () => void mutate({ action: "discard", file: selectedPath }))}>{tr("menu.discard")}</button>
         </header>
         {#if diffError}
           <p class="diff-empty">{diffError}</p>
@@ -2079,9 +2501,25 @@
         {:else if settings.diffStyle === "split"}
           <div class="diff-body split">
             {#each splitRows as row, index (index)}
-              <div class="split-row">
-                <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#each highlight(row.left, selectedPath ?? "") as token, tokenIndex (`l${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#each highlight(row.right, selectedPath ?? "") as token, tokenIndex (`r${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+              <div class="split-row actionable">
+                <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, selectedPath ?? "") as token, tokenIndex (`l${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, selectedPath ?? "") as token, tokenIndex (`r${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                <span class="split-actions">
+                  {#if row.hunkIndex != null}
+                    <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index: row.hunkIndex, unstage: selectedSide === "staged" })}>{selectedSide === "staged" ? tr("menu.unstageHunk") : tr("menu.stageHunk")}</button>
+                    {#if selectedSide === "unstaged"}
+                      <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardHunk", file: selectedPath, index: row.hunkIndex })}>{tr("menu.discardHunk")}</button>
+                    {/if}
+                  {:else if row.leftLine?.stageAt != null || row.rightLine?.stageAt != null}
+                    {@const line = row.rightLine?.stageAt != null ? row.rightLine : row.leftLine}
+                    {#if line}
+                      <button class="text-button line-action" type="button" disabled={busy} onclick={() => stageOne(line)}>{selectedSide === "staged" ? tr("menu.unstageLine") : tr("menu.stageLine")}</button>
+                      {#if selectedSide === "unstaged" && line.workAt != null}
+                        <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardLine", file: selectedPath, text: lineText(line), addition: line.kind === "add", at: line.workAt })}>{tr("menu.discardLine")}</button>
+                      {/if}
+                    {/if}
+                  {/if}
+                </span>
               </div>
             {/each}
           </div>
@@ -2092,7 +2530,7 @@
                 <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{(diffWindow.start + index) * 18}px">
                   <span class="gutter">{shownDiffLines[diffWindow.start + index]?.oldNo ?? ""}</span>
                   <span class="gutter">{shownDiffLines[diffWindow.start + index]?.newNo ?? ""}</span>
-                  {#each highlight(line.text, selectedPath ?? "") as token, tokenIndex (`${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
+                  {#each paint(line.text, selectedPath ?? "") as token, tokenIndex (`${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
                   {#if line.kind === "hunk"}
                     <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index: shownDiffLines.slice(0, diffWindow.start + index + 1).filter((item) => item.kind === "hunk").length - 1, unstage: selectedSide === "staged" })}>{selectedSide === "staged" ? tr("menu.unstageHunk") : tr("menu.stageHunk")}</button>
                     {#if selectedSide === "unstaged"}
@@ -2112,8 +2550,23 @@
           </div>
         {/if}
       {:else if section === "changes" && selectedPath && selectedDiff.length > 0}
-        <header class="diff-head">{selectedPath}</header>
-        <pre class="diff-body">{#each selectedDiff as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+        <header class="diff-head">
+          <span>{selectedPath}</span>
+          <button class="text-button" type="button" disabled>{tr("chrome.stage")}</button>
+          <button class="text-button" type="button" disabled>{tr("menu.discard")}</button>
+        </header>
+        {#if settings.diffStyle === "split"}
+          <div class="diff-body split">
+            {#each sampleSplit as row, index (index)}
+              <div class="split-row">
+                <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, selectedPath ?? "") as token, tokenIndex (`sl${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, selectedPath ?? "") as token, tokenIndex (`sr${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <pre class="diff-body">{#each selectedDiff as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+        {/if}
       {:else if mode === "live" && section === "history"}
         <header class="diff-head">
           <span>{commitsLive.find((row) => row.id === selectedCommit)?.summary ?? tr("chrome.commits")}</span>
@@ -2145,7 +2598,7 @@
             <div class="commit-window" style:height="{historyDiff.lines.length * 18}px">
               {#each historyDiffWindow.rows as line, index (`hd-${historyDiffWindow.start}-${index}`)}
                 <span class="virtual-row" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{(historyDiffWindow.start + index) * 18}px">
-                  {#each highlight(line.text, historyFile ?? "") as token, tokenIndex (`h${historyDiffWindow.start}-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
+                  {#each paint(line.text, historyFile ?? "") as token, tokenIndex (`h${historyDiffWindow.start}-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
                 </span>
               {/each}
             </div>
@@ -2190,6 +2643,18 @@
         <p class="diff-empty">{tr("chrome.selectFile")}</p>
       {/if}
     </section>
+    {#if section === "changes"}
+      <form class="composer" onsubmit={(event) => { event.preventDefault(); void submitCommit(false); }}>
+        <input class="summary-input {summaryTone} guided" placeholder={tr("chrome.commitSubject")} bind:value={summary} maxlength="200" aria-invalid={summaryTooLong} spellcheck={settings.spellChecking === "enable"} />
+        <textarea class="guided" placeholder={tr("chrome.description")} rows="3" bind:value={description} spellcheck={settings.spellChecking === "enable"}></textarea>
+        <div class="composer-row">
+          <label class="check"><input type="checkbox" bind:checked={amend} /> {tr("chrome.amend")}</label>
+          <button class="text-button more" type="button" onclick={(event) => openBar(event, commitExtras())}>⋯</button>
+          <button class="commit" type="submit" disabled={!canCommit}>{busy ? tr("chrome.working") : tr("chrome.commit")}</button>
+        </div>
+      </form>
+    {/if}
+    </div>
   </div>
 
   {#if mode === "error"}
@@ -2292,12 +2757,13 @@
     </div>
   {/if}
   {#if dialog}
-    <div class="scrim" role="presentation" onclick={() => (dialog = null)}>
-      <div class="dialog" role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+    <div class="scrim" role="presentation" onclick={() => { if (dialog === "prefs") void savePrefs(true); else dialog = null; }}>
+      <div class="dialog" class:wide={dialog === "prefs"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
       <form
+        onchange={() => { if (dialog === "prefs") void savePrefs(false); }}
         onsubmit={async (event) => {
           event.preventDefault();
-          if (dialog === "branch") void mutate({ action: "createBranch", name: draft, start: draftExtra || null });
+          if (dialog === "branch") void mutate({ action: "createBranch", name: branchName(draft), start: draftExtra || null });
           else if (dialog === "clone") void mutate({ action: "clone", url: draft, destination: draftExtra });
           else if (dialog === "open") void openRepo(draft);
           else if (dialog === "command") void runCommand({ command: draftUser || draft });
@@ -2355,110 +2821,211 @@
         }}
       >
         {#if dialog === "prefs"}
-          <h2>{tr("dialog.preferences")}</h2>
           <div class="pref-tabs">
-            {#each ["appearance", "git", "diff", "network", "ai", "account"] as tab (tab)}
-              <button type="button" class:on={prefTab === tab} onclick={() => (prefTab = tab as typeof prefTab)}>{tr(`dialog.${tab}`)}</button>
+            <button type="button" class:on={prefTab === "general"} onclick={() => (prefTab = "general")}>{tr("dialog.general")}</button>
+            <button type="button" class:on={prefTab === "commit"} onclick={() => (prefTab = "commit")}>{tr("dialog.commitPage")}</button>
+            <button type="button" class:on={prefTab === "git"} onclick={() => (prefTab = "git")}>{tr("dialog.git")}</button>
+            <button type="button" class:on={prefTab === "integration"} onclick={() => (prefTab = "integration")}>{tr("dialog.integration")}</button>
+            <button type="button" class:on={prefTab === "commands"} onclick={() => (prefTab = "commands")}>{tr("dialog.customCommands")}</button>
+            <button type="button" class:on={prefTab === "updates"} onclick={() => (prefTab = "updates")}>{tr("dialog.updates")}</button>
+          </div>
+          <div class="pref-page">
+          {#if prefTab === "general"}
+            <label>{tr("dialog.sourceFolder")}
+              <span class="pref-inline">
+                <input bind:value={settings.cloneDirectory} />
+                <button class="text-button" type="button" onclick={() => pickFolder()}>{tr("dialog.browse")}</button>
+              </span>
+            </label>
+            <div class="diff-sample" class:plain={settings.disableSyntaxHighlight}>
+              <div><span class="tok-word">public func</span> elementsEqual&lt;OtherSequence&gt;(</div>
+              <div class="del">{settings.showDiffMarks ? "- " : ""}isEquivalent isEquivalent: ({"{GElement}"}, {"{GElement}"})</div>
+              <div class="add">{settings.showDiffMarks ? "+ " : ""}isEquivalent: ({"{GElement}"}, {"{GElement}"}) thr</div>
+            </div>
+            <label class="check"><input type="checkbox" bind:checked={settings.showDiffMarks} /> {tr("dialog.showMarks")}</label>
+            <label class="pref-inline">{tr("dialog.fontSize")} <input type="number" min="8" max="32" bind:value={settings.diffFontSize} /></label>
+            <label class="check"><input type="checkbox" bind:checked={settings.disableSyntaxHighlight} /> {tr("dialog.disableHighlight")}</label>
+            <div class="pref-inline">{tr("dialog.sortCommits")}
+              <label class="check"><input type="radio" name="commit-sort" value="topo" checked={settings.commitSort === "topo"} onchange={() => { settings.commitSort = "topo"; if (mode === "live") void loadContext(); }} /> {tr("dialog.topologically")}</label>
+              <label class="check"><input type="radio" name="commit-sort" value="date" checked={settings.commitSort !== "topo"} onchange={() => { settings.commitSort = "date"; if (mode === "live") void loadContext(); }} /> {tr("dialog.byDate")}</label>
+            </div>
+            <label class="check"><input type="checkbox" bind:checked={settings.fetchAutomatically} /> {tr("dialog.fetchAuto")}</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.fetchTags} /> {tr("dialog.fetchTagsAlways")}</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.tabIndicator} /> {tr("dialog.tabIndicator")}</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.updateSubmodulesOnCheckout} /> {tr("dialog.submoduleCheckout")}</label>
+            <label class="pref-inline">{tr("dialog.branchSpace")}
+              <select bind:value={settings.branchSpace}>
+                <option value="-">-</option>
+                <option value="_">_</option>
+                <option value=".">.</option>
+                <option value="">{tr("dialog.keepSpace")}</option>
+              </select>
+            </label>
+            <label class="check"><input type="checkbox" bind:checked={settings.pushOnCommit} /> {tr("dialog.pushOnCommit")}</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.compactBranchLabels} /> {tr("dialog.compactLabels")}</label>
+          {:else if prefTab === "commit"}
+            <div class="pref-inline">{tr("dialog.lengthIndicator")}
+              <label>{tr("dialog.lowLimit")} <input type="number" min="1" bind:value={settings.messageLow} /></label>
+              <label>{tr("dialog.highLimit")} <input type="number" min="1" bind:value={settings.messageHigh} /></label>
+            </div>
+            <label class="pref-inline">{tr("dialog.spellChecking")}
+              <select bind:value={settings.spellChecking}>
+                <option value="disable">{tr("dialog.spellDisable")}</option>
+                <option value="enable">{tr("dialog.spellEnable")}</option>
+              </select>
+            </label>
+            <label class="pref-inline">{tr("dialog.pageGuide")} <input type="number" min="20" max="200" bind:value={settings.pageGuide} /></label>
+            <div class="k">{tr("dialog.generateMessage")}</div>
+            {#if settings.aiApiKey && !aiFieldsOpen}
+              <button class="text-button" type="button" disabled={mode !== "live" || busy} onclick={() => suggestMessage()}>{settings.aiModel || tr("chrome.suggest")}</button>
+            {:else}
+              <button class="text-button" type="button" onclick={() => (aiFieldsOpen = true)}>{tr("chrome.suggest")}</button>
+            {/if}
+            {#if aiFieldsOpen || !settings.aiApiKey}
+              <label>Base URL <input bind:value={settings.aiBaseUrl} /></label>
+              <label>Model <input bind:value={settings.aiModel} /></label>
+              <label>API key <input type="password" bind:value={settings.aiApiKey} /></label>
+            {/if}
+          {:else if prefTab === "integration"}
+            <label class="check"><input type="checkbox" bind:checked={settings.highlightIssues} /> {tr("dialog.issueLinks")}</label>
+            <div class="k">{tr("dialog.externalMerge")}</div>
+            <div class="tool-grid">
+              <div class="tool-list">
+                {#each toolPresets as preset (preset.name)}
+                  <button type="button" class:on={settings.mergeToolName === preset.name} onclick={() => useMergePreset(preset.name)}>{preset.name}</button>
+                {/each}
+              </div>
+              <div class="tool-fields">
+                <label>{tr("dialog.name")} <input bind:value={settings.mergeToolName} /></label>
+                <label>{tr("dialog.toolPath")} <input bind:value={settings.mergeToolPath} placeholder={tr("dialog.toolHint")} /></label>
+                <label>{tr("dialog.toolArguments")} <input bind:value={settings.mergeToolArgs} /></label>
+              </div>
+            </div>
+            <div class="k">{tr("dialog.externalDiff")}</div>
+            <div class="tool-grid">
+              <div class="tool-list">
+                {#each toolPresets as preset (`diff-${preset.name}`)}
+                  <button type="button" class:on={settings.diffToolName === preset.name} onclick={() => useDiffPreset(preset.name)}>{preset.name}</button>
+                {/each}
+              </div>
+              <div class="tool-fields">
+                <label>{tr("dialog.name")} <input bind:value={settings.diffToolName} /></label>
+                <label>{tr("dialog.toolPath")} <input bind:value={settings.diffToolPath} /></label>
+                <label>{tr("dialog.toolArguments")} <input bind:value={settings.diffToolArgs} /></label>
+              </div>
+            </div>
+            <div class="k">{tr("dialog.shell")}</div>
+            <label class="pref-inline">{tr("dialog.shell")}
+              <select bind:value={settings.shellKind}>
+                <option value="default">{tr("dialog.shellDefault")}</option>
+                <option value="custom">{tr("dialog.shellPath")}</option>
+              </select>
+            </label>
+            {#if settings.shellKind === "custom"}
+              <label>{tr("dialog.shellPath")} <input bind:value={settings.shellPath} /></label>
+              <label>{tr("dialog.shellArgs")} <input bind:value={settings.shellArgs} /></label>
+            {/if}
+            <p class="empty">{tr("dialog.toolHint")}</p>
+          {:else if prefTab === "commands"}
+            {#each settings.commands as command (command.id)}
+              <div class="composer-row">
+                <span>{command.name}</span>
+                <span class="meta">{command.target}</span>
+                <button class="text-button" type="button" onclick={() => runCommand(command)}>Run</button>
+                <button class="text-button" type="button" onclick={() => removeCommand(command.id)}>Delete</button>
+              </div>
             {/each}
-          </div>
-          {#if prefTab === "appearance"}
-          <label>{tr("dialog.language")}
-            <select bind:value={settings.locale}>
-              <option value="system">{tr("dialog.followSystem")}</option>
-              <option value="zh">{tr("dialog.chinese")}</option>
-              <option value="en">{tr("dialog.english")}</option>
+            <input placeholder="Name" bind:value={draft} />
+            <select bind:value={draftExtra}>
+              <option value="repository">Repository</option>
+              <option value="commit">Commit</option>
+              <option value="branch">Branch</option>
+              <option value="file">File</option>
             </select>
-          </label>
-          <label>{tr("dialog.theme")}
-            <select bind:value={settings.theme}>
-              <option value="system">{tr("dialog.system")}</option>
-              <option value="light">{tr("dialog.light")}</option>
-              <option value="dark">{tr("dialog.dark")}</option>
-            </select>
-          </label>
+            <input placeholder={"${repo} ${sha} ${branch} ${file}"} bind:value={draftUser} />
+            <button class="text-button" type="button" onclick={saveCommand}>Save</button>
+          {:else if prefTab === "updates"}
+            <label>{tr("dialog.language")}
+              <select bind:value={settings.locale}>
+                <option value="system">{tr("dialog.followSystem")}</option>
+                <option value="zh">{tr("dialog.chinese")}</option>
+                <option value="en">{tr("dialog.english")}</option>
+              </select>
+            </label>
+            <label>{tr("dialog.theme")}
+              <select bind:value={settings.theme}>
+                <option value="system">{tr("dialog.system")}</option>
+                <option value="light">{tr("dialog.light")}</option>
+                <option value="dark">{tr("dialog.dark")}</option>
+              </select>
+            </label>
+            <button class="text-button" type="button" onclick={() => invoke("check_for_update").then((value) => (updateNotice = value as UpdateNotice | null))}>{tr("chrome.download")}</button>
+          {:else}
+            <label class="check"><input type="checkbox" bind:checked={settings.pullRebase} /> Pull with rebase</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.fetchPrune} /> Prune on fetch</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.swapPanes} /> Show staged above unstaged</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.mergeNoFf} /> Merge with --no-ff</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.mergeAutostash} /> Autostash before merge</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.signCommits} /> Sign commits with git</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.signOff} onchange={() => (signOff = settings.signOff)} /> Sign-off by default</label>
+            <label>Sign-off format <input bind:value={settings.signOffFormat} /></label>
+            <label class="check"><input type="checkbox" bind:checked={settings.forceWithLease} /> Push with --force-with-lease</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.gravatar} /> Gravatar avatars</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.dateRelative} /> Relative dates</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.date24h} /> 24-hour clock</label>
+            <label>Date pattern <input bind:value={settings.dateFormat} placeholder="dd MMM yyyy" /></label>
+            <label>Diff
+              <select bind:value={settings.diffStyle}>
+                <option value="split">Split</option>
+                <option value="unified">Unified</option>
+              </select>
+            </label>
+            <label>Line height
+              <select bind:value={settings.linesHeight}>
+                <option value="compact">Compact</option>
+                <option value="spaced">Spaced</option>
+              </select>
+            </label>
+            <label class="check"><input type="checkbox" bind:checked={settings.showEntireFile} /> Show the whole file in diffs</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.aiEnabled} /> AI commit messages</label>
+            <label>AI language <input bind:value={settings.aiLanguage} placeholder="English" /></label>
+            <label>AI max characters <input type="number" bind:value={settings.aiMaxChars} /></label>
+            <label>AI prompt <input bind:value={settings.aiPrompt} /></label>
+            <label>AI temperature <input type="number" step="0.1" bind:value={settings.aiTemperature} /></label>
+            <label>Author name <input bind:value={settings.authorName} placeholder="uses git config when empty" /></label>
+            <label>Author email <input bind:value={settings.authorEmail} /></label>
+            <label>Log directory <input bind:value={settings.logDirectory} /></label>
+            <label class="check"><input type="checkbox" bind:checked={settings.sslVerify} /> Verify SSL</label>
+            <label class="check"><input type="checkbox" bind:checked={settings.proxyEnabled} /> Use proxy host</label>
+            <label>Proxy type
+              <select bind:value={settings.proxyType}>
+                <option value="http">HTTP</option>
+                <option value="socks">SOCKS</option>
+              </select>
+            </label>
+            <label>Proxy host <input bind:value={settings.proxyHost} /></label>
+            <label>Proxy port <input type="number" bind:value={settings.proxyPort} /></label>
+            <label>Proxy user <input bind:value={settings.proxyUser} /></label>
+            <label>Proxy password <input type="password" bind:value={settings.proxyPassword} /></label>
+            <label>Proxy URL <input bind:value={settings.proxy} /></label>
+            <label>CA file <input bind:value={settings.sslCaFile} /></label>
+            <label>{tr("dialog.githubToken")} <input type="password" bind:value={settings.githubToken} /></label>
+            <label>{tr("dialog.gitlabToken")} <input type="password" bind:value={settings.gitlabToken} /></label>
+            <label>{tr("dialog.gitlabHost")} <input bind:value={settings.gitlabHost} placeholder="gitlab.com" /></label>
+            <label>Signing passphrase <input type="password" bind:value={passphrase} /></label>
+            <label>Askpass user <input bind:value={passUser} /></label>
+            <div class="composer-row">
+              <button class="text-button" type="button" onclick={() => keepPassphrase()}>Use passphrase</button>
+              <button class="text-button" type="button" onclick={() => { draft = "https"; draftExtra = ""; draftUser = ""; draftSecret = ""; dialog = "credential"; }}>Save HTTPS login</button>
+              <button class="text-button" type="button" onclick={() => mutate({ action: "lfsPull" })}>LFS pull</button>
+              <button class="text-button" type="button" onclick={() => mutate({ action: "lfsPush" })}>LFS push</button>
+              <button class="text-button" type="button" onclick={() => (dialog = "patch")}>Apply patch</button>
+              <button class="text-button" type="button" onclick={() => invoke("set_repo_author", { path: repoPath(), name: settings.authorName, email: settings.authorEmail })}>Save author in this repo</button>
+            </div>
           {/if}
-          {#if prefTab === "account"}
-          <label>{tr("dialog.githubToken")} <input type="password" bind:value={settings.githubToken} /></label>
-          <label>{tr("dialog.gitlabToken")} <input type="password" bind:value={settings.gitlabToken} /></label>
-          <label>{tr("dialog.gitlabHost")} <input bind:value={settings.gitlabHost} placeholder="gitlab.com" /></label>
-          {:else if prefTab === "diff"}
-          <label>{tr("dialog.diffTool")} <input bind:value={settings.diffTool} /></label>
-          <label>{tr("dialog.mergeTool")} <input bind:value={settings.mergeTool} /></label>
-          <p class="empty">{tr("dialog.toolHint")}</p>
-          <label class="check"><input type="checkbox" bind:checked={settings.showEntireFile} /> Show the whole file in diffs</label>
-          <label>Diff
-            <select bind:value={settings.diffStyle}>
-              <option value="unified">Unified</option>
-              <option value="split">Split</option>
-            </select>
-          </label>
-          <label>Line height
-            <select bind:value={settings.linesHeight}>
-              <option value="compact">Compact</option>
-              <option value="spaced">Spaced</option>
-            </select>
-          </label>
-          {:else if prefTab === "network"}
-          <label class="check"><input type="checkbox" bind:checked={settings.sslVerify} /> Verify SSL</label>
-          {#if !settings.sslVerify}<p class="empty">SSL verification is off. Connections can be intercepted.</p>{/if}
-          <label class="check"><input type="checkbox" bind:checked={settings.proxyEnabled} /> Use proxy host</label>
-          <label>Proxy type
-            <select bind:value={settings.proxyType}>
-              <option value="http">HTTP</option>
-              <option value="socks">SOCKS</option>
-            </select>
-          </label>
-          <label>Proxy host <input bind:value={settings.proxyHost} placeholder="proxy.example" /></label>
-          <label>Proxy port <input type="number" bind:value={settings.proxyPort} /></label>
-          <label>Proxy user <input bind:value={settings.proxyUser} /></label>
-          <label>Proxy password <input type="password" bind:value={settings.proxyPassword} /></label>
-          <label>Proxy URL <input bind:value={settings.proxy} placeholder="used when host is empty" /></label>
-          <label>CA file <input bind:value={settings.sslCaFile} placeholder="path to a CA bundle" /></label>
-          <label>Clone directory <input bind:value={settings.cloneDirectory} /></label>
-          <label>Terminal <input bind:value={settings.terminal} placeholder="empty opens cmd" /></label>
-          {:else if prefTab === "ai"}
-          <label>AI base URL <input bind:value={settings.aiBaseUrl} /></label>
-          <label>AI model <input bind:value={settings.aiModel} /></label>
-          <label class="check"><input type="checkbox" bind:checked={settings.aiEnabled} /> AI commit messages</label>
-          <label>AI language <input bind:value={settings.aiLanguage} placeholder="English" /></label>
-          <label>AI max characters <input type="number" bind:value={settings.aiMaxChars} /></label>
-          <label>AI prompt <input bind:value={settings.aiPrompt} placeholder={'{diff} {files} {branch} {recent_commits} {language}'} /></label>
-          <label>AI temperature <input type="number" step="0.1" bind:value={settings.aiTemperature} /></label>
-          <label>AI API key <input type="password" bind:value={settings.aiApiKey} placeholder="or set XAI_API_KEY or OPENAI_API_KEY" /></label>
-          {:else if prefTab === "git"}
-          <label class="check"><input type="checkbox" bind:checked={settings.pullRebase} /> Pull with rebase</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.fetchPrune} /> Prune on fetch</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.swapPanes} /> Show unstaged above staged</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.mergeNoFf} /> Merge with --no-ff</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.mergeAutostash} /> Autostash before merge</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.signCommits} /> Sign commits with git</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.signOff} onchange={() => (signOff = settings.signOff)} /> Sign-off by default</label>
-          <label>Sign-off format <input bind:value={settings.signOffFormat} /></label>
-          <label class="check"><input type="checkbox" bind:checked={settings.forceWithLease} /> Push with --force-with-lease</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.treeFiles} /> Group changed files by folder</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.gravatar} /> Gravatar avatars</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.dateRelative} /> Relative dates</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.date24h} /> 24-hour clock</label>
-          <label>Date pattern <input bind:value={settings.dateFormat} placeholder="dd MMM yyyy" /></label>
-          <p class="empty">Hidden branches are stored in this repository. Use Hide, Show only this, or Show all in the sidebar. The current branch stays visible.</p>
-          <label>Author name <input bind:value={settings.authorName} placeholder="uses git config when empty" /></label>
-          <label>Author email <input bind:value={settings.authorEmail} /></label>
-          <label>Log directory <input bind:value={settings.logDirectory} placeholder="action name, branch, and path" /></label>
-          <label>Signing passphrase <input type="password" bind:value={passphrase} placeholder="kept in memory for this session" /></label>
-          <label>Askpass user <input bind:value={passUser} /></label>
-          <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => keepPassphrase()}>Use passphrase</button>
-            <button class="text-button" type="button" onclick={() => { draft = "https"; draftExtra = ""; draftUser = ""; draftSecret = ""; dialog = "credential"; }}>Save HTTPS login</button>
-            <button class="text-button" type="button" onclick={() => invoke("check_for_update").then((value) => (updateNotice = value as UpdateNotice | null))}>Check for updates</button>
-            <button class="text-button" type="button" onclick={() => mutate({ action: "lfsPull" })}>LFS pull</button>
-            <button class="text-button" type="button" onclick={() => mutate({ action: "lfsPush" })}>LFS push</button>
-            <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = "repository"; draftUser = ""; dialog = "command"; }}>Custom command</button>
-            <button class="text-button" type="button" onclick={() => (dialog = "patch")}>Apply patch</button>
-            <button class="text-button" type="button" onclick={() => invoke("set_repo_author", { path: repoPath(), name: settings.authorName, email: settings.authorEmail })}>Save author in this repo</button>
           </div>
-          {/if}
           <div class="composer-row">
-            <button class="commit" type="submit">{tr("dialog.save")}</button>
+            <button class="commit" type="button" onclick={() => savePrefs(true)}>{tr("chrome.close")}</button>
           </div>
         {:else if dialog === "reset"}
           <h2>Reset to {draft}</h2>
@@ -2866,24 +3433,6 @@
     color: var(--text);
   }
 
-  .segment button.on {
-    background: var(--elevated);
-    color: var(--text);
-    box-shadow: 0 1px 2px rgba(24, 24, 27, 0.06);
-  }
-
-  .side-switch {
-    margin: 4px 10px 8px;
-  }
-
-  .side-switch button {
-    flex: 1;
-    justify-content: center;
-    min-width: 0;
-  }
-
-  .side-switch .count { margin-left: 6px; }
-
   .launch-trigger {
     justify-self: center;
     height: 32px;
@@ -3002,7 +3551,6 @@
     font-size: 12px;
   }
 
-  .field input:focus-visible,
   textarea:focus-visible,
   .commit:focus-visible,
   .icon-btn:focus-visible,
@@ -3111,12 +3659,9 @@
 
   .changes,
   .history {
-    width: 340px;
-    flex: none;
-    min-width: 280px;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    border-right: 1px solid var(--line);
     min-height: 0;
   }
 
@@ -3129,11 +3674,30 @@
   }
 
   .history {
-    width: auto;
-    flex: 1.1;
-    min-width: 320px;
     overflow: auto;
   }
+
+  .stage {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .stage > .changes { grid-column: 1; grid-row: 1; border-right: 1px solid var(--line); }
+  .stage > .diff { grid-column: 2; grid-row: 1; min-height: 0; }
+  .stage > .composer { grid-column: 1 / -1; grid-row: 2; }
+
+  .stage.history-mode {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 280px;
+  }
+
+  .stage.history-mode > .history { grid-column: 1; grid-row: 1; }
+  .stage.history-mode > .detail { grid-column: 1; grid-row: 2; }
+  .stage.history-mode > .diff { display: none; }
 
   .pane-head {
     min-height: 28px;
@@ -3170,6 +3734,12 @@
   .staged-list {
     flex: none;
     max-height: 30%;
+  }
+
+  .changes .staged-list,
+  .changes .file-list {
+    flex: 1;
+    max-height: none;
   }
 
   .file,
@@ -3240,23 +3810,6 @@
     gap: 6px;
   }
 
-  .field {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 32px;
-    padding: 0 8px;
-    border-radius: var(--radius);
-    background: var(--elevated);
-    border: 1px solid var(--line);
-  }
-
-  .field:focus-within {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-  }
-
-  .field input,
   textarea,
   .dialog input,
   .dialog select {
@@ -3341,7 +3894,7 @@
     white-space: nowrap;
   }
 
-  .commit-row .subject { font-weight: 600; }
+  .commit-row .subject { font-weight: 400; flex: 1; min-width: 0; }
 
   .badges { display: flex; gap: 4px; }
 
@@ -3370,9 +3923,9 @@
   .image-stage { position: relative; display: flex; gap: 12px; padding: 12px; min-height: 80px; }
   .image-stage img { max-width: 48%; background: repeating-conic-gradient(#ddd 0 25%, #fff 0 50%) 0 0 / 16px 16px; }
   .image-stage .under, .image-stage .over { position: absolute; left: 12px; top: 12px; max-width: calc(100% - 24px); }
-  .pref-tabs { display: flex; flex-wrap: wrap; gap: 4px; }
-  .pref-tabs button { border: 0; background: transparent; color: inherit; font: inherit; padding: 4px 8px; border-radius: 6px; }
-  .pref-tabs button.on { background: var(--selection); }
+  .pref-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+  .pref-tabs button { border: 0; background: transparent; color: var(--text-secondary); font: inherit; padding: 8px 10px; border-radius: 0; }
+  .pref-tabs button.on { color: #2f6fed; box-shadow: inset 0 -2px 0 #2f6fed; background: transparent; }
 
   .sha { font-family: var(--mono); }
 
@@ -3396,9 +3949,16 @@
   }
 
   .diff-head span:first-child {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .diff-head .text-button {
+    margin-left: 0;
+    flex: none;
   }
 
   .diff-body {
@@ -3406,7 +3966,7 @@
     padding: 8px 0;
     overflow: auto;
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: var(--diff-font, 13px);
     line-height: 1.45;
     user-select: text;
   }
@@ -3447,6 +4007,11 @@
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+
+  .dialog.wide {
+    width: min(760px, calc(100vw - 32px));
+    min-height: 520px;
   }
 
   .dialog {
@@ -3537,6 +4102,24 @@
     grid-template-columns: 1fr 1fr;
   }
 
+  .split-row > span {
+    display: block;
+    min-height: 18px;
+    padding: 0 8px;
+    white-space: pre;
+    overflow: hidden;
+  }
+
+  .split-row > span.del { background: var(--diff-del); }
+  .split-row > span.add { background: var(--diff-add); }
+  .split-row.actionable { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .split-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .split-actions .line-action { margin-left: 0; }
+
   .line-action {
     margin-left: auto;
   }
@@ -3549,4 +4132,131 @@
   :global(:root[data-theme="dark"]) .tok-word { color: #c9a6ff; }
   :global(:root[data-theme="dark"]) .tok-string { color: #7ee787; }
   :global(:root[data-theme="dark"]) .tok-number { color: #e3b341; }
+
+  .menubar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 28px;
+    padding: 0 6px;
+    background: var(--sidebar);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .menubar button {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .menubar button:hover { background: var(--selection); }
+
+  .tab.dirty .file-select::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--modified);
+    flex: none;
+  }
+
+  .side-filter { margin: 6px 8px 8px; width: calc(100% - 16px); flex: none; }
+  .side.nav { width: calc(100% - 12px); }
+  .side.nav .count { margin-left: auto; }
+
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    padding: 0 12px;
+    color: var(--text-secondary);
+    background: var(--sidebar);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .commit-side {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+    color: var(--text-secondary);
+  }
+
+  .avatar.tile { border-radius: 3px; color: white; }
+  .ref.compact { max-width: 88px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: bottom; }
+
+  .detail {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--line);
+    background: var(--elevated);
+    overflow: hidden;
+  }
+
+  .detail-tabs { display: flex; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line); }
+  .detail-tabs button { border: 0; background: transparent; font: inherit; padding: 8px 0; color: var(--text-secondary); }
+  .detail-tabs button.on { color: #2f6fed; box-shadow: inset 0 -2px 0 #2f6fed; }
+  .detail-scroll { flex: 1; overflow: auto; padding: 12px 16px 16px; }
+  .detail-people { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .person { display: flex; gap: 8px; align-items: flex-start; }
+  .k { color: var(--text-secondary); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .detail-line { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .detail-message { margin: 12px 0 4px; font-weight: 600; }
+  .detail-body-text { margin: 0 0 12px; white-space: pre-wrap; font: inherit; }
+  .issue { color: #2f6fed; text-decoration: none; }
+
+  .tree-dir { width: 100%; }
+  .twist { width: 12px; flex: none; color: var(--text-secondary); }
+
+  .summary-input,
+  .composer textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--elevated);
+    color: inherit;
+    font: inherit;
+    padding: 6px 8px;
+  }
+
+  .summary-input { height: 32px; }
+  .summary-input.warn { color: var(--modified); }
+  .summary-input.over { color: var(--deleted); }
+
+  .guided {
+    font-family: var(--mono);
+    background-image: linear-gradient(90deg, transparent calc(var(--guide) * 1ch), #d4d4d8 calc(var(--guide) * 1ch), #d4d4d8 calc(var(--guide) * 1ch + 1px), transparent calc(var(--guide) * 1ch + 1px));
+    background-origin: content-box;
+    background-attachment: local;
+  }
+
+  .composer-row .more { margin-left: auto; }
+  .composer .commit { margin-left: 8px; }
+
+  .pref-page { display: flex; flex-direction: column; gap: 10px; padding: 14px 0; min-height: 360px; }
+  .pref-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pref-inline input[type="number"] { width: 72px; }
+  .diff-sample {
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow: auto;
+    font-family: var(--mono);
+    font-size: var(--diff-font, 13px);
+    line-height: 1.45;
+    padding: 8px;
+  }
+  .diff-sample .del { background: var(--diff-del); }
+  .diff-sample .add { background: var(--diff-add); }
+  .diff-sample.plain .tok-word { color: inherit; }
+  .tool-grid { display: grid; grid-template-columns: 180px 1fr; gap: 12px; }
+  .tool-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 4px; overflow: auto; max-height: 140px; }
+  .tool-list button { border: 0; background: transparent; text-align: left; padding: 6px 8px; font: inherit; color: inherit; }
+  .tool-list button.on { background: var(--selection); }
+  .tool-fields { display: flex; flex-direction: column; gap: 8px; }
 </style>

@@ -13,7 +13,7 @@ pub struct Settings {
     pub pull_rebase: bool,
     #[serde(default = "default_true")]
     pub fetch_prune: bool,
-    #[serde(default = "unified")]
+    #[serde(default = "split_style")]
     pub diff_style: String,
     #[serde(default)]
     pub proxy: String,
@@ -136,6 +136,60 @@ pub struct Settings {
     pub gitlab_token: String,
     #[serde(default)]
     pub gitlab_host: String,
+    #[serde(default)]
+    pub show_diff_marks: bool,
+    #[serde(default = "diff_font")]
+    pub diff_font_size: u32,
+    #[serde(default)]
+    pub disable_syntax_highlight: bool,
+    /// `date` or `topo`.
+    #[serde(default = "date_sort")]
+    pub commit_sort: String,
+    #[serde(default)]
+    pub fetch_automatically: bool,
+    #[serde(default)]
+    pub fetch_tags: bool,
+    #[serde(default = "default_true")]
+    pub tab_indicator: bool,
+    #[serde(default)]
+    pub update_submodules_on_checkout: bool,
+    /// Character used in place of spaces when creating a branch. Empty keeps the space.
+    #[serde(default = "dash")]
+    pub branch_space: String,
+    #[serde(default)]
+    pub push_on_commit: bool,
+    #[serde(default)]
+    pub compact_branch_labels: bool,
+    #[serde(default = "low_limit")]
+    pub message_low: u32,
+    #[serde(default = "high_limit")]
+    pub message_high: u32,
+    /// `disable` or `enable`.
+    #[serde(default = "spell_off")]
+    pub spell_checking: String,
+    #[serde(default = "guide_col")]
+    pub page_guide: u32,
+    #[serde(default = "default_true")]
+    pub highlight_issues: bool,
+    /// `default` or `custom`.
+    #[serde(default = "shell_default")]
+    pub shell_kind: String,
+    #[serde(default)]
+    pub shell_path: String,
+    #[serde(default)]
+    pub shell_args: String,
+    #[serde(default)]
+    pub diff_tool_name: String,
+    #[serde(default)]
+    pub diff_tool_path: String,
+    #[serde(default)]
+    pub diff_tool_args: String,
+    #[serde(default)]
+    pub merge_tool_name: String,
+    #[serde(default)]
+    pub merge_tool_path: String,
+    #[serde(default)]
+    pub merge_tool_args: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -167,8 +221,8 @@ fn theme_default() -> String {
 fn default_true() -> bool {
     true
 }
-fn unified() -> String {
-    "unified".into()
+fn split_style() -> String {
+    "split".into()
 }
 fn ai_base() -> String {
     "https://api.x.ai/v1".into()
@@ -206,6 +260,30 @@ fn support_prefix() -> String {
 fn locale_default() -> String {
     "system".into()
 }
+fn diff_font() -> u32 {
+    13
+}
+fn date_sort() -> String {
+    "date".into()
+}
+fn dash() -> String {
+    "-".into()
+}
+fn low_limit() -> u32 {
+    50
+}
+fn high_limit() -> u32 {
+    70
+}
+fn spell_off() -> String {
+    "disable".into()
+}
+fn guide_col() -> u32 {
+    72
+}
+fn shell_default() -> String {
+    "default".into()
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -213,7 +291,7 @@ impl Default for Settings {
             theme: theme_default(),
             pull_rebase: false,
             fetch_prune: true,
-            diff_style: unified(),
+            diff_style: split_style(),
             proxy: String::new(),
             ai_base_url: ai_base(),
             ai_model: ai_model(),
@@ -273,6 +351,31 @@ impl Default for Settings {
             github_token: String::new(),
             gitlab_token: String::new(),
             gitlab_host: String::new(),
+            show_diff_marks: false,
+            diff_font_size: diff_font(),
+            disable_syntax_highlight: false,
+            commit_sort: date_sort(),
+            fetch_automatically: false,
+            fetch_tags: false,
+            tab_indicator: true,
+            update_submodules_on_checkout: false,
+            branch_space: dash(),
+            push_on_commit: false,
+            compact_branch_labels: false,
+            message_low: low_limit(),
+            message_high: high_limit(),
+            spell_checking: spell_off(),
+            page_guide: guide_col(),
+            highlight_issues: true,
+            shell_kind: shell_default(),
+            shell_path: String::new(),
+            shell_args: String::new(),
+            diff_tool_name: String::new(),
+            diff_tool_path: String::new(),
+            diff_tool_args: String::new(),
+            merge_tool_name: String::new(),
+            merge_tool_path: String::new(),
+            merge_tool_args: String::new(),
         }
     }
 }

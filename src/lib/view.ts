@@ -1,6 +1,6 @@
 import type { DiffLine } from "./status";
 
-export const laneColors = ["#3b82f6", "#16a34a", "#d97706", "#7c3aed", "#e11d48", "#0d9488", "#db2777", "#64748b"];
+export const laneColors = ["#e0a106", "#3b82f6", "#16a34a", "#7c3aed", "#e11d48", "#0d9488", "#db2777", "#64748b"];
 
 export type GraphCell = { color: number; role: "node" | "line" } | null;
 
@@ -81,12 +81,16 @@ export type SplitRow = {
   right: string;
   leftKind: string;
   rightKind: string;
+  leftLine?: DiffLine;
+  rightLine?: DiffLine;
+  hunkIndex?: number;
 };
 
 /** Pair removed and added lines inside each hunk for a split diff. */
 export function splitDiff(lines: DiffLine[]): SplitRow[] {
   const rows: SplitRow[] = [];
   let pending: DiffLine[] = [];
+  let hunkIndex = -1;
   const flush = () => {
     const removed = pending.filter((line) => line.kind === "delete");
     const added = pending.filter((line) => line.kind === "add");
@@ -97,6 +101,8 @@ export function splitDiff(lines: DiffLine[]): SplitRow[] {
         right: added[index]?.text.slice(1) ?? "",
         leftKind: removed[index] ? "delete" : "",
         rightKind: added[index] ? "add" : "",
+        leftLine: removed[index],
+        rightLine: added[index],
       });
     }
     pending = [];
@@ -107,11 +113,18 @@ export function splitDiff(lines: DiffLine[]): SplitRow[] {
       continue;
     }
     flush();
+    if (line.kind === "hunk") hunkIndex += 1;
     if (line.kind === "context") {
       const text = line.text.startsWith(" ") ? line.text.slice(1) : line.text;
       rows.push({ left: text, right: text, leftKind: "", rightKind: "" });
     } else {
-      rows.push({ left: line.text, right: line.text, leftKind: "meta", rightKind: "meta" });
+      rows.push({
+        left: line.text,
+        right: line.text,
+        leftKind: "meta",
+        rightKind: "meta",
+        hunkIndex: line.kind === "hunk" ? hunkIndex : undefined,
+      });
     }
   }
   flush();

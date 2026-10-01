@@ -30,6 +30,21 @@ pub struct CommitRow {
     pub email: String,
 }
 
+/// Author, committer, and message body for the history detail pane.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDetail {
+    pub id: String,
+    pub body: String,
+    pub author: String,
+    pub author_email: String,
+    pub author_at: i64,
+    pub committer: String,
+    pub committer_email: String,
+    pub committer_at: i64,
+    pub parents: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BranchRow {
@@ -120,33 +135,50 @@ pub enum InProgress {
 }
 
 pub fn commit_log(repo: &Path, limit: usize) -> Result<Vec<CommitRow>, Error> {
-    log_with(repo, limit, true, &[])
+    log_with(repo, limit, true, &[], &[], false)
+}
+
+pub fn commit_log_sorted(repo: &Path, limit: usize, topo: bool) -> Result<Vec<CommitRow>, Error> {
+    log_with(repo, limit, true, &[], &[], topo)
 }
 
 /// Commits reachable from `HEAD` only, without `--all`.
 pub fn branch_commits(repo: &Path, limit: usize) -> Result<Vec<CommitRow>, Error> {
-    log_with(repo, limit, false, &[])
+    log_with(repo, limit, false, &[], &[], false)
+}
+
+pub fn branch_commits_sorted(repo: &Path, limit: usize, topo: bool) -> Result<Vec<CommitRow>, Error> {
+    log_with(repo, limit, false, &[], &[], topo)
+}
+
+/// Commits reachable from the named revisions, such as the current branch and its upstream.
+pub fn commits_from(repo: &Path, limit: usize, revs: &[String], topo: bool) -> Result<Vec<CommitRow>, Error> {
+    let checked: Vec<&str> = revs.iter().map(|rev| check_rev(rev)).collect::<Result<_, _>>()?;
+    log_with(repo, limit, false, &[], &checked, topo)
 }
 
 pub fn file_history(repo: &Path, path: &str, limit: usize) -> Result<Vec<CommitRow>, Error> {
     let path = check_path(path)?;
-    log_with(repo, limit, false, &[path])
+    log_with(repo, limit, false, &[path], &[], false)
 }
 
-fn log_with(repo: &Path, limit: usize, all: bool, path: &[&str]) -> Result<Vec<CommitRow>, Error> {
+fn log_with(repo: &Path, limit: usize, all: bool, path: &[&str], revs: &[&str], topo: bool) -> Result<Vec<CommitRow>, Error> {
     if run(repo, &["rev-parse", "--verify", "HEAD"]).is_err() {
         return Ok(Vec::new());
     }
     let limit = limit.clamp(1, 2000).to_string();
+    let order = if topo { "--topo-order" } else { "--date-order" };
     let mut args = vec![
         "log",
         "-n",
         &limit,
-        "--date-order",
+        order,
         "-z",
         "--pretty=format:%H%x1f%P%x1f%an%x1f%ar%x1f%s%x1f%D%x1f%at%x1f%ae",
     ];
-    if path.is_empty() && all {
+    if !revs.is_empty() {
+        args.extend_from_slice(revs);
+    } else if path.is_empty() && all {
         args.insert(1, "--all");
     } else if !path.is_empty() {
         args.push("--");
@@ -191,6 +223,44 @@ fn parse_commits(text: &str) -> Vec<CommitRow> {
         });
     }
     commits
+}
+
+pub fn commit_detail(repo: &Path, id: &str) -> Result<CommitDetail, Error> {
+    let id = check_rev(id)?;
+    let output = run(repo, &[
+        "show",
+        "-s",
+        "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%P%x1e%b",
+        id,
+    ])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (head, body) = text.split_once('\u{1e}').unwrap_or((text.as_ref(), ""));
+    let mut fields = head.split('\u{1f}');
+    let id = fields.next().unwrap_or("").trim().to_string();
+    let author = fields.next().unwrap_or("").trim().to_string();
+    let author_email = fields.next().unwrap_or("").trim().to_string();
+    let author_at = fields.next().unwrap_or("").trim().parse().unwrap_or(0);
+    let committer = fields.next().unwrap_or("").trim().to_string();
+    let committer_email = fields.next().unwrap_or("").trim().to_string();
+    let committer_at = fields.next().unwrap_or("").trim().parse().unwrap_or(0);
+    let parents = fields
+        .next()
+        .unwrap_or("")
+        .split_whitespace()
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect();
+    Ok(CommitDetail {
+        id,
+        body: body.trim().to_string(),
+        author,
+        author_email,
+        author_at,
+        committer,
+        committer_email,
+        committer_at,
+        parents,
+    })
 }
 
 pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {

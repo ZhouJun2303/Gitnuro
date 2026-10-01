@@ -52,6 +52,18 @@ export function badge(kind: ChangeKind): { letter: string; tone: BadgeTone } {
   }
 }
 
+export type CommitDetail = {
+  id: string;
+  body: string;
+  author: string;
+  authorEmail: string;
+  authorAt: number;
+  committer: string;
+  committerEmail: string;
+  committerAt: number;
+  parents: string[];
+};
+
 export type CommitRow = {
   id: string;
   shortId: string;
@@ -174,6 +186,31 @@ export type Settings = {
   githubToken: string;
   gitlabToken: string;
   gitlabHost: string;
+  showDiffMarks: boolean;
+  diffFontSize: number;
+  disableSyntaxHighlight: boolean;
+  commitSort: string;
+  fetchAutomatically: boolean;
+  fetchTags: boolean;
+  tabIndicator: boolean;
+  updateSubmodulesOnCheckout: boolean;
+  branchSpace: string;
+  pushOnCommit: boolean;
+  compactBranchLabels: boolean;
+  messageLow: number;
+  messageHigh: number;
+  spellChecking: string;
+  pageGuide: number;
+  highlightIssues: boolean;
+  shellKind: string;
+  shellPath: string;
+  shellArgs: string;
+  diffToolName: string;
+  diffToolPath: string;
+  diffToolArgs: string;
+  mergeToolName: string;
+  mergeToolPath: string;
+  mergeToolArgs: string;
 };
 
 export type WorkspaceRecord = {

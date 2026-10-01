@@ -2,7 +2,7 @@ mod common;
 
 use std::fs;
 
-use awegit_git::{blame_file, branch_commits, commit_files, commit_log, repository_refs, ChangeKind};
+use awegit_git::{blame_file, branch_commits, commit_detail, commit_files, commit_log, repository_refs, ChangeKind};
 
 fn repo() -> common::TempRepo {
     let repo = common::TempRepo::new();
@@ -49,6 +49,13 @@ fn log_lists_commits_branches_and_tags() {
     let blame = blame_file(&repo.path, "c.txt").unwrap();
     assert!(blame.iter().any(|line| line.text.contains("one")), "{blame:?}");
     assert!(log.iter().all(|commit| commit.at > 0), "{log:?}");
+
+    let detail = commit_detail(&repo.path, "HEAD").unwrap();
+    assert_eq!(detail.author, "Test");
+    assert_eq!(detail.committer, "Test");
+    assert_eq!(detail.committer_email, "test@example.com");
+    assert!(detail.author_at > 0, "{detail:?}");
+    assert!(detail.body.is_empty(), "{detail:?}");
 
     let refs = repository_refs(&repo.path).unwrap();
     assert!(refs.branches.iter().any(|branch| branch.name == "main" && branch.current));

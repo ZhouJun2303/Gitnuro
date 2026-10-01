@@ -16,10 +16,11 @@ pub use change::{
     FilePreview,
 };
 pub use model::{
-    blame_file, branch_commits, commit_files, commit_log, commit_tree, compare_file, compare_files, file_history,
-    in_progress, lfs_locks, prompt_facts, rebase_conflicts, reflog, repo_sign_off_format, repository_refs,
-    repository_summary, show_commit_file, show_commit_file_with, BlameLine, BranchRow, CommitRow, InProgress, LfsLockRow,
-    RefSnapshot, ReflogRow, RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow,
+    blame_file, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log, commit_log_sorted,
+    commit_tree, commits_from, compare_file, compare_files, file_history, in_progress, lfs_locks, prompt_facts,
+    rebase_conflicts, reflog, repo_sign_off_format, repository_refs, repository_summary, show_commit_file,
+    show_commit_file_with, BlameLine, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, RefSnapshot, ReflogRow,
+    RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
 pub use cli::{cancel_running, configure, set_http_proxy, set_passphrase, stop_process_tree, use_bundled_git, Session};
 pub use ops::{approve_credential, perform, set_repo_author, Mutation, RebaseStep, ResetMode};
