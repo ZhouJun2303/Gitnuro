@@ -716,24 +716,48 @@ fn integration_base(repo: &Path) -> Result<String, Error> {
 fn squash(repo: &Path, from: &str, to: &str, summary: &str) -> Result<(), Error> {
     let from = check_rev(from)?;
     let to = check_rev(to)?;
-    let range = format!("{from}..{to}");
+    let dirty = run(repo, &["status", "--porcelain"])?;
+    if !String::from_utf8_lossy(&dirty.stdout).trim().is_empty() {
+        return Err(Error::Git("squash needs a clean worktree".into()));
+    }
+    let parent = format!("{from}^");
+    let range = if run(repo, &["rev-parse", "--verify", "--quiet", &parent]).is_ok() {
+        format!("{parent}..{to}")
+    } else {
+        format!("{from}..{to}")
+    };
     let merges = run(repo, &["rev-list", "--merges", &range])?;
     if !String::from_utf8_lossy(&merges.stdout).trim().is_empty() {
         return Err(Error::Git("squash range contains a merge".into()));
     }
     if run(repo, &["rev-parse", "--verify", "--quiet", "@{upstream}"]).is_ok() {
+        let all = run(repo, &["rev-list", &range])?;
         let novel = run(repo, &["rev-list", &range, "--not", "@{upstream}"])?;
-        if String::from_utf8_lossy(&novel.stdout).trim().is_empty() {
+        if String::from_utf8_lossy(&all.stdout).trim() != String::from_utf8_lossy(&novel.stdout).trim() {
             return Err(Error::Git("squash range is already in upstream".into()));
         }
     }
+    run(repo, &["merge-base", "--is-ancestor", from, to])?;
     let head = rev_parse(repo, "HEAD")?;
     let target = rev_parse(repo, to)?;
-    if head != target {
-        return Err(Error::Git("squash target must be HEAD".into()));
+    run(repo, &["merge-base", "--is-ancestor", to, "HEAD"])?;
+    let later = if head == target {
+        Vec::new()
+    } else {
+        let listed = run(repo, &["rev-list", "--reverse", &format!("{to}..HEAD")])?;
+        String::from_utf8_lossy(&listed.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
+    if run(repo, &["rev-parse", "--verify", "--quiet", &parent]).is_err() {
+        return Err(Error::Git("the oldest commit has no parent".into()));
     }
-    run(repo, &["merge-base", "--is-ancestor", from, to])?;
-    let parent = format!("{from}^");
+    if head != target {
+        run(repo, &["reset", "--hard", to])?;
+    }
     run(repo, &["reset", "--soft", &parent])?;
     commit(
         repo,
@@ -744,7 +768,11 @@ fn squash(repo: &Path, from: &str, to: &str, summary: &str) -> Result<(), Error>
             sign_off: false,
             sign_off_format: String::new(),
         },
-    )
+    )?;
+    for id in later {
+        with_editor(repo, &["cherry-pick", &id])?;
+    }
+    Ok(())
 }
 
 fn rebase_interactive(repo: &Path, onto: &str, drop: &[String], steps: &[RebaseStep]) -> Result<(), Error> {

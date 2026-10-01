@@ -338,6 +338,45 @@ fn interactive_rebase_drops_a_commit() {
 }
 
 #[test]
+fn squash_replays_commits_after_the_range() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    commit_file(&repo, "b.txt", "b\n", "second");
+    let second = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+    commit_file(&repo, "c.txt", "c\n", "third");
+    let third = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+    commit_file(&repo, "d.txt", "d\n", "fourth");
+    fs::write(repo.path.join("dirty.txt"), "nope\n").unwrap();
+    let dirty = perform(
+        &repo.path,
+        Mutation::Squash {
+            from: second.clone(),
+            to: third.clone(),
+            summary: "squashed".into(),
+        },
+    )
+    .unwrap_err();
+    assert!(dirty.to_string().contains("clean"), "{dirty}");
+    fs::remove_file(repo.path.join("dirty.txt")).unwrap();
+    perform(
+        &repo.path,
+        Mutation::Squash {
+            from: second,
+            to: third,
+            summary: "squashed".into(),
+        },
+    )
+    .unwrap();
+    let log = repo.output(&["log", "--format=%s"]);
+    assert!(log.contains("base"), "{log}");
+    assert!(log.contains("squashed"), "{log}");
+    assert!(log.contains("fourth"), "{log}");
+    assert!(!log.contains("second"), "{log}");
+    assert!(!log.contains("third"), "{log}");
+    assert_eq!(fs::read_to_string(repo.path.join("d.txt")).unwrap(), "d\n");
+}
+
+#[test]
 fn squash_rejects_a_merge() {
     let repo = repo();
     commit_file(&repo, "a.txt", "a\n", "base");

@@ -1625,7 +1625,12 @@
             void savePrefs();
           }
           else if (dialog === "resolve") void mutate({ action: "resolve", file: draft, side: draftExtra || "mark" });
-          else if (dialog === "squash" && selectedCommit) void mutate({ action: "squash", from: selectedCommit, to: "HEAD", summary: draft });
+          else if (dialog === "squash" && selectedCommit) {
+            const chosen = shownCommits.filter((commit) => drops.includes(commit.id));
+            const from = chosen.length >= 2 ? chosen[chosen.length - 1].id : selectedCommit;
+            const to = chosen.length >= 2 ? chosen[0].id : "HEAD";
+            void mutate({ action: "squash", from, to, summary: draft });
+          }
           else if (dialog === "credential") {
             try {
               await invoke("approve_credential", {
@@ -1859,7 +1864,8 @@
             <button class="text-button" type="button" onclick={() => mutate({ action: "setRemoteUrl", name: draft, url: draftExtra })}>Set URL</button>
           </div>
         {:else if dialog === "squash"}
-          <h2>Squash through {selectedCommit?.slice(0, 7)} into HEAD</h2>
+          <h2>Squash</h2>
+          <p class="empty">Uses the selected commit through HEAD, or the consecutive commits you checked. Later commits are replayed. The range must contain no merge.</p>
           <input placeholder="Summary" bind:value={draft} />
           <button class="commit" type="submit">Squash</button>
         {:else if dialog === "credential"}
