@@ -78,6 +78,9 @@
     | "stale"
     | "pushAs"
     | "askInput"
+    | "renameTab"
+    | "colorTab"
+    | "groupRename"
     | null;
   type MergePiece =
     | { kind: "text"; text: string }
@@ -273,6 +276,10 @@
   let pendingCommand = $state<CommandRecord | null>(null);
   let commandPrompt = $state("");
   let hostForge = $state("github");
+  let editingAccount = $state("");
+  let commandShared = $state(true);
+  let sessionLog = $state<string[]>([]);
+  let fieldValues = $state<Record<string, string>>({});
   let scannedRoots = $state("");
   let includeUntracked = $state(false);
   let flowKind = $state("feature");
@@ -912,6 +919,7 @@
         applySnapshot(follow);
         await loadContext();
       }
+      noteActivity(`${action}${output ? " output" : " ok"}`);
       if (output) {
         commandOutput = output;
         dialog = "output";
@@ -920,6 +928,7 @@
       }
     } catch (error) {
       actionError = message(error);
+      noteActivity(`${String(request.action ?? "")} failed`);
       if (String(request.action ?? "") === "stageHunk" && settings.ignoreSpace) actionError = `${actionError} ${tr("dialog.spaceHint")}`;
       try {
         applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path: repoPath() }));
@@ -1861,7 +1870,7 @@
       { label: tr("chrome.activity"), run: () => void invoke<string[]>("activity_log").then((lines) => { activityLines = lines; dialog = "activity"; }) },
       { label: tr("chrome.contentSearch"), disabled: locked, run: () => { section = "history"; searchOpen.commit = true; commitQuery = "S:"; } },
       { label: tr("chrome.stale"), disabled: locked, run: () => void invoke<string[]>("merged_branches", { path: repoPath() }).then((names) => { staleNames = names; stalePicked = []; dialog = "stale"; }) },
-      { label: tr("chrome.mailmap"), disabled: locked, run: () => { draft = ""; dialog = "mailmap"; } },
+      { label: tr("chrome.mailmap"), disabled: locked, run: () => void invoke<{ text?: string }>("blob_view", { path: repoPath(), rev: "HEAD", file: ".mailmap" }).then((view) => { draft = view.text ?? ""; dialog = "mailmap"; }).catch(() => { draft = ""; dialog = "mailmap"; }) },
       { label: tr("chrome.review"), disabled: locked, run: () => void invoke<string>("review_branch", { path: repoPath(), base: snapshot?.branch ?? "HEAD~1" }).then((text) => { commandOutput = text; dialog = "output"; }).catch((error) => (actionError = message(error))) },
       { label: tr("menu.bareForce"), disabled: locked || busy, run: () => ask(tr("menu.bareForce"), snapshot?.branch ?? "", () => void mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: false, force: true })) },
       { sep: true, label: "" },
@@ -1994,10 +2003,31 @@
     if (files.length > 0) void mutate({ action: "stagePaths", files, unstage });
   }
 
+  function noteActivity(text: string) {
+    const at = new Date().toLocaleTimeString();
+    sessionLog = [`${at} ${text}`, ...sessionLog].slice(0, 100);
+  }
+
+  function fillCommand(template: string, answers: Record<string, string>) {
+    let text = template;
+    const entries = Object.entries(answers);
+    entries.forEach(([label, value], index) => {
+      text = text.replaceAll(`\${${label}}`, value).replaceAll(`\${${index + 1}}`, value);
+      if (index === 0) text = text.replaceAll("${input}", value);
+    });
+    return text;
+  }
+
   function sendCommand(command: string) {
+    const text = fillCommand(command, {});
+    if (/^https?:\/\//i.test(text.trim())) {
+      void openUrl(text.trim());
+      dialog = null;
+      return;
+    }
     void mutate({
       action: "custom",
-      command,
+      command: text,
       repo: snapshot?.path ?? "",
       sha: selectedCommit ?? "",
       branch: snapshot?.branch ?? "",
@@ -2006,9 +2036,11 @@
   }
 
   function runCommand(command: Pick<CommandRecord, "command" | "prompt">) {
-    if (command.prompt?.trim()) {
-      pendingCommand = { id: "", name: "", target: "", command: command.command, prompt: command.prompt };
+    const fields = command.prompt.split("\n").map((item) => item.trim()).filter(Boolean);
+    if (fields.length > 0) {
+      pendingCommand = { id: "", name: "", target: "", command: command.command, prompt: command.prompt, shared: true, repo: "" };
       draft = "";
+      fieldValues = Object.fromEntries(fields.map((label) => [label, ""]));
       dialog = "askInput";
       return;
     }
@@ -2019,7 +2051,7 @@
     const name = draft.trim();
     const command = draftUser.trim();
     if (!name || !command) return;
-    const record: CommandRecord = { id: `cmd-${Date.now()}`, name, target: draftExtra || "repository", command, prompt: commandPrompt.trim() };
+    const record: CommandRecord = { id: `cmd-${Date.now()}`, name, target: draftExtra || "repository", command, prompt: commandPrompt.trim(), shared: commandShared, repo: snapshot?.path ?? "" };
     settings = { ...settings, commands: [...settings.commands, record] };
     draft = "";
     draftUser = "";
@@ -2032,7 +2064,17 @@
   }
 
   function commandItems(target: string): MenuItem[] {
-    return settings.commands.filter((command) => command.target === target).map((command) => ({ label: command.name, run: () => runCommand(command) }));
+    return settings.commands
+      .filter((command) => command.target === target && (command.shared !== false || command.repo === snapshot?.path))
+      .map((command) => ({ label: command.name, run: () => runCommand(command) }));
+  }
+
+  function saveAccount() {
+    const account = { id: editingAccount || `acct-${Date.now()}`, forge: hostForge, label: draft || hostForge, token: draftUser, host: draftExtra, clientId: settings.oauthClientId };
+    const accounts = editingAccount ? settings.accounts.map((item) => (item.id === editingAccount ? account : item)) : [...settings.accounts, account];
+    settings = { ...settings, accounts };
+    editingAccount = account.id;
+    void savePrefs(false);
   }
 
   function copyText(text: string) {
@@ -2469,7 +2511,7 @@
       try {
         const value = await invoke<Settings>("load_settings");
         if (stopped) return;
-        settings = { ...defaultSettings, ...value, recent: value.recent ?? [], workspaces: value.workspaces ?? [], commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "" })), expandedGroups: value.expandedGroups ?? [], accounts: value.accounts ?? [], tabLabels: value.tabLabels ?? [], tabColors: value.tabColors ?? [], pinnedRefs: value.pinnedRefs ?? [], sourceDirectories: value.sourceDirectories ?? [], groupNames: value.groupNames ?? [] };
+        settings = { ...defaultSettings, ...value, recent: value.recent ?? [], workspaces: value.workspaces ?? [], commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })), expandedGroups: value.expandedGroups ?? [], accounts: value.accounts ?? [], tabLabels: value.tabLabels ?? [], tabColors: value.tabColors ?? [], pinnedRefs: value.pinnedRefs ?? [], sourceDirectories: value.sourceDirectories ?? [], groupNames: value.groupNames ?? [] };
         if (!settings.dateFormat.trim()) settings = { ...settings, dateFormat: "dd MMM yyyy" };
         if (!settings.proxyType) settings = { ...settings, proxyType: "http" };
         signOff = settings.signOff;
@@ -2558,8 +2600,8 @@
         <div class="tab" role="group" class:active={snapshot?.path === repo} class:dirty={settings.tabIndicator && snapshot?.path === repo && changeCount > 0} style:box-shadow={tabColor(repo) ? `inset 0 -2px 0 ${tabColor(repo)}` : ""} oncontextmenu={(event) => openMenu(event, [
           { label: tr("chrome.terminal"), disabled: mode !== "live", run: () => void invoke("open_terminal", { path: repo }) },
           { label: tr("chrome.explorer"), run: () => void openLocal(repo) },
-          { label: tr("menu.renameTab"), run: () => { const label = prompt(tr("menu.renameTab"), tabText(repo)) ?? ""; settings = { ...settings, tabLabels: pairSetting(settings.tabLabels, repo, label) }; void savePrefs(false); } },
-          { label: tr("menu.tabColor"), run: () => { const color = prompt(tr("menu.tabColor"), tabColor(repo) || "#5b8def") ?? ""; settings = { ...settings, tabColors: pairSetting(settings.tabColors, repo, color) }; void savePrefs(false); } },
+          { label: tr("menu.renameTab"), run: () => { draft = tabText(repo); draftExtra = repo; dialog = "renameTab"; } },
+          { label: tr("menu.tabColor"), run: () => { draft = tabColor(repo) || "#5b8def"; draftExtra = repo; dialog = "colorTab"; } },
           { label: tr("chrome.close"), run: () => closeTab(repo) },
         ])}>
           <button class="file-select" type="button" onclick={() => openRepo(repo)}>{tabText(repo)}</button>
@@ -2690,7 +2732,7 @@
           </div>
           {#each Object.entries(scanned.reduce<Record<string, string[]>>((groups, path) => { const folder = parentDir(path) || path; (groups[folder] ??= []).push(path); return groups; }, {})) as [folder, paths] (folder)}
             <div class="recent-bar">
-              <button class="text-button" type="button" onclick={() => { const label = prompt(tr("chrome.manager"), groupLabel(folder)) ?? ""; if (!label.trim()) return; const groupNames = [...settings.groupNames.filter((item) => !item.startsWith(`${folder}\t`)), `${folder}\t${label.trim()}`]; settings = { ...settings, groupNames }; void savePrefs(false); }}>{groupLabel(folder)}</button>
+              <button class="text-button" type="button" onclick={() => { draft = groupLabel(folder); draftExtra = folder; dialog = "groupRename"; }}>{groupLabel(folder)}</button>
               <button class="text-button" type="button" disabled={paths.filter((path) => managerPicked.includes(path)).length === 0} onclick={() => { for (const path of paths.filter((path) => managerPicked.includes(path))) void openRepo(path); }}>{tr("chrome.open")}</button>
             </div>
             {#each paths as path (path)}
@@ -3757,8 +3799,29 @@
           }
           else if (dialog === "pushAs") void mutate({ action: "pushRef", remote: draftExtra || "origin", branch: draft, remoteBranch: draftUser, forceWithLease: false, force: false });
           else if (dialog === "askInput" && pendingCommand) {
-            sendCommand(pendingCommand.command.replaceAll("${input}", draft));
+            const answers = Object.keys(fieldValues).length > 0 ? { ...fieldValues } : { input: draft };
+            const text = fillCommand(pendingCommand.command, answers);
             pendingCommand = null;
+            if (/^https?:\/\//i.test(text.trim())) {
+              dialog = null;
+              void openUrl(text.trim());
+            } else sendCommand(text);
+          }
+          else if (dialog === "renameTab") {
+            settings = { ...settings, tabLabels: pairSetting(settings.tabLabels, draftExtra, draft) };
+            void savePrefs(false);
+            dialog = null;
+          }
+          else if (dialog === "colorTab") {
+            settings = { ...settings, tabColors: pairSetting(settings.tabColors, draftExtra, draft) };
+            void savePrefs(false);
+            dialog = null;
+          }
+          else if (dialog === "groupRename" && draft.trim()) {
+            const folder = draftExtra;
+            settings = { ...settings, groupNames: [...settings.groupNames.filter((item) => !item.startsWith(`${folder}\t`)), `${folder}\t${draft.trim()}`] };
+            void savePrefs(false);
+            dialog = null;
           }
           else if (dialog === "checkoutDirty") {
             const name = pendingCheckout;
@@ -3923,8 +3986,9 @@
               <option value="branch">Branch</option>
               <option value="file">File</option>
             </select>
-            <input placeholder={"${repo} ${sha} ${branch} ${file} ${input}"} bind:value={draftUser} />
-            <input placeholder={tr("dialog.commandPrompt")} bind:value={commandPrompt} />
+            <input placeholder={"${repo} ${sha} ${branch} ${file} ${input} https://"} bind:value={draftUser} />
+            <textarea rows="3" placeholder={tr("dialog.commandPrompt")} bind:value={commandPrompt}></textarea>
+            <label class="check"><input type="checkbox" bind:checked={commandShared} /> {tr("chrome.shared")}</label>
             <button class="text-button" type="button" onclick={saveCommand}>Save</button>
           {:else if prefTab === "updates"}
             <label>{tr("dialog.language")}
@@ -4296,7 +4360,7 @@
           <button class="commit" type="submit">{draftExtra || tr("dialog.bringChanges")}</button>
         {:else if dialog === "activity"}
           <h2>{tr("chrome.activity")}</h2>
-          <pre class="diff-body">{activityLines.join("\n") || tr("chrome.noChanges")}</pre>
+          <pre class="diff-body">{[...sessionLog, ...activityLines].join("\n") || tr("chrome.noChanges")}</pre>
           <button class="commit" type="button" onclick={() => (dialog = null)}>{tr("chrome.close")}</button>
         {:else if dialog === "mailmap"}
           <h2>{tr("chrome.mailmap")}</h2>
@@ -4305,7 +4369,10 @@
         {:else if dialog === "accounts"}
           <h2>{tr("chrome.accounts")}</h2>
           {#each settings.accounts as account (account.id)}
-            <div class="composer-row"><span>{account.forge}</span><span class="meta">{account.label}</span><button class="text-button" type="button" onclick={() => { settings = { ...settings, accounts: settings.accounts.filter((item) => item.id !== account.id) }; void savePrefs(false); }}>{tr("menu.delete")}</button></div>
+            <div class="composer-row">
+              <button class="text-button" type="button" onclick={() => { editingAccount = account.id; hostForge = account.forge; draft = account.label; draftExtra = account.host; draftUser = account.token; settings.oauthClientId = account.clientId; }}>{account.forge} {account.label}</button>
+              <button class="text-button" type="button" onclick={() => { settings = { ...settings, accounts: settings.accounts.filter((item) => item.id !== account.id) }; if (editingAccount === account.id) editingAccount = ""; void savePrefs(false); }}>{tr("menu.delete")}</button>
+            </div>
           {/each}
           <select bind:value={hostForge}>
             <option value="github">GitHub</option>
@@ -4318,7 +4385,7 @@
           <input placeholder="token" bind:value={draftUser} />
           <input placeholder={tr("dialog.clientId")} bind:value={settings.oauthClientId} />
           <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => { const account = { id: `acct-${Date.now()}`, forge: hostForge, label: draft || hostForge, token: draftUser, host: draftExtra, clientId: settings.oauthClientId }; settings = { ...settings, accounts: [...settings.accounts, account] }; void savePrefs(false); }}>{tr("dialog.save")}</button>
+            <button class="text-button" type="button" onclick={saveAccount}>{editingAccount ? tr("menu.update") : tr("dialog.save")}</button>
             <button class="text-button" type="button" onclick={() => void invoke<{ verificationUri: string; userCode: string }>("device_start", { forgeName: hostForge, clientId: settings.oauthClientId, host: draftExtra }).then((value) => { commandOutput = `${value.userCode}\n${value.verificationUri}`; dialog = "output"; if (value.verificationUri) void openUrl(value.verificationUri); }).catch((error) => (actionError = message(error)))}>{tr("dialog.deviceLogin")}</button>
             <button class="text-button" type="button" onclick={() => void invoke<string>("device_poll").then((token) => { if (token === "pending") { actionError = tr("dialog.pending"); return; } draftUser = token; })}>{tr("dialog.pending")}</button>
           </div>
@@ -4339,9 +4406,30 @@
           <input placeholder={tr("dialog.remoteBranch")} bind:value={draftUser} />
           <button class="commit" type="submit">{tr("chrome.push")}</button>
         {:else if dialog === "askInput"}
-          <h2>{pendingCommand?.prompt}</h2>
-          <input bind:value={draft} />
+          <h2>{pendingCommand?.prompt.split("\n")[0]}</h2>
+          {#each Object.keys(fieldValues) as label (label)}
+            <label>{label}<input value={fieldValues[label] ?? ""} oninput={(event) => { fieldValues = { ...fieldValues, [label]: (event.currentTarget as HTMLInputElement).value }; }} /></label>
+          {:else}
+            <input bind:value={draft} />
+          {/each}
           <button class="commit" type="submit">{tr("chrome.commit")}</button>
+        {:else if dialog === "renameTab"}
+          <h2>{tr("menu.renameTab")}</h2>
+          <input bind:value={draft} />
+          <button class="commit" type="submit">{tr("dialog.save")}</button>
+        {:else if dialog === "colorTab"}
+          <h2>{tr("menu.tabColor")}</h2>
+          <div class="composer-row">
+            {#each ["#5b8def", "#e07a3d", "#3aa76d", "#c45b8a", "#7a6ad8", "#c9a227", "#d16464"] as color (color)}
+              <button class="swatch" type="button" style:background={color} aria-label={color} onclick={() => (draft = color)}></button>
+            {/each}
+            <input type="color" bind:value={draft} aria-label={tr("menu.tabColor")} />
+          </div>
+          <button class="commit" type="submit">{tr("dialog.save")}</button>
+        {:else if dialog === "groupRename"}
+          <h2>{tr("chrome.manager")}</h2>
+          <input bind:value={draft} />
+          <button class="commit" type="submit">{tr("dialog.save")}</button>
         {:else if dialog === "gitignore"}
           <h2>{tr("dialog.gitignore")}</h2>
           <div class="composer-row">
@@ -4417,8 +4505,9 @@
             <option value="branch">Branch</option>
             <option value="file">File</option>
           </select>
-          <input placeholder={"Template. Placeholders: ${repo} ${sha} ${branch} ${file} ${input}"} bind:value={draftUser} />
-          <input placeholder={tr("dialog.commandPrompt")} bind:value={commandPrompt} />
+          <input placeholder={"Template. Placeholders: ${repo} ${sha} ${branch} ${file} ${input} https://"} bind:value={draftUser} />
+          <textarea rows="3" placeholder={tr("dialog.commandPrompt")} bind:value={commandPrompt}></textarea>
+          <label class="check"><input type="checkbox" bind:checked={commandShared} /> {tr("chrome.shared")}</label>
           <div class="composer-row">
             <button class="text-button" type="button" onclick={saveCommand}>Save</button>
             <button class="commit" type="submit">Run</button>
@@ -4532,21 +4621,37 @@
 
   .tabs::-webkit-scrollbar { display: none; }
 
-  .vertical-tabs .chrome {
-    height: auto;
-    min-height: 48px;
-    align-items: start;
-  }
-
   .vertical-tabs .tabs {
+    position: fixed;
+    left: 0;
+    top: 76px;
+    bottom: 0;
+    width: 168px;
+    max-width: 168px;
+    max-height: none;
     flex-direction: column;
     align-items: stretch;
-    max-width: 220px;
-    max-height: 220px;
+    padding: 8px 6px;
+    background: var(--sidebar);
+    border-right: 1px solid var(--line);
+    z-index: 4;
   }
 
   .vertical-tabs .tab {
     width: 100%;
+  }
+
+  .vertical-tabs .body,
+  .vertical-tabs .welcome-view {
+    margin-left: 168px;
+  }
+
+  .swatch {
+    width: 18px;
+    height: 18px;
+    border: 0;
+    border-radius: 4px;
+    padding: 0;
   }
 
   .tab,

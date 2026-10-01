@@ -248,9 +248,14 @@ pub struct CommandRecord {
     /// repository, commit, branch, or file.
     pub target: String,
     pub command: String,
-    /// Shown before the command runs. The answer replaces `${input}`.
+    /// One label per line. Each label replaces `${label}` and the first also replaces `${input}`.
     #[serde(default)]
     pub prompt: String,
+    /// When false, the command is offered only in `repo`.
+    #[serde(default = "default_true")]
+    pub shared: bool,
+    #[serde(default)]
+    pub repo: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

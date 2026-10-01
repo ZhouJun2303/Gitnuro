@@ -129,6 +129,7 @@ export const en: Messages = {
     review: "Review branch",
     sshConfig: "SSH config",
     combined: "Combined",
+    shared: "All repositories",
   },
   menu: {
     checkout: "Checkout",

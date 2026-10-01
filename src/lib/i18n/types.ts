@@ -129,6 +129,7 @@ export type Messages = {
     review: string;
     sshConfig: string;
     combined: string;
+    shared: string;
   };
   menu: {
     checkout: string;

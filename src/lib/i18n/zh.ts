@@ -129,6 +129,7 @@ export const zh: Messages = {
     review: "审查分支",
     sshConfig: "SSH 配置",
     combined: "合并列表",
+    shared: "所有仓库",
   },
   menu: {
     checkout: "检出",

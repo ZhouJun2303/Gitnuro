@@ -471,7 +471,57 @@ pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignor
             },
         );
     }
+    if parsed.binary {
+        if let Some(lines) = lfs_pointer_diff(repo, path, staged) {
+            parsed.binary = false;
+            parsed.lines = lines;
+        }
+    }
     Ok(parsed)
+}
+
+fn lfs_pointer_diff(repo: &Path, path: &str, staged: bool) -> Option<Vec<DiffLine>> {
+    let left_spec = if staged { format!("HEAD:{path}") } else { format!(":{path}") };
+    let right_bytes = if staged {
+        run(repo, &["show", &format!(":{path}")]).ok().map(|output| output.stdout)
+    } else {
+        std::fs::read(repo.join(path)).ok()
+    };
+    let left_bytes = run(repo, &["show", &left_spec]).ok().map(|output| output.stdout).unwrap_or_default();
+    let right_bytes = right_bytes.unwrap_or_default();
+    let left = lfs_pointer(&left_bytes);
+    let right = lfs_pointer(&right_bytes);
+    if left.is_none() && right.is_none() {
+        return None;
+    }
+    let mut lines = vec![DiffLine {
+        kind: DiffLineKind::Meta,
+        text: "Git LFS pointer".into(),
+        stage_at: None,
+        work_at: None,
+    }];
+    if left == right {
+        for row in right.unwrap_or_default().lines() {
+            lines.push(DiffLine { kind: DiffLineKind::Context, text: format!(" {row}"), stage_at: None, work_at: None });
+        }
+        return Some(lines);
+    }
+    for row in left.unwrap_or_default().lines() {
+        lines.push(DiffLine { kind: DiffLineKind::Delete, text: format!("-{row}"), stage_at: None, work_at: None });
+    }
+    for row in right.unwrap_or_default().lines() {
+        lines.push(DiffLine { kind: DiffLineKind::Add, text: format!("+{row}"), stage_at: None, work_at: None });
+    }
+    Some(lines)
+}
+
+fn lfs_pointer(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?.trim();
+    if text.starts_with("version https://git-lfs.github.com/spec") {
+        Some(text.to_string())
+    } else {
+        None
+    }
 }
 
 fn zero_hunks(repo: &Path, path: &str, staged: bool) -> Result<u32, Error> {

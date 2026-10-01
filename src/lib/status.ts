@@ -251,6 +251,8 @@ export type CommandRecord = {
   target: string;
   command: string;
   prompt: string;
+  shared: boolean;
+  repo: string;
 };
 
 export type ConflictSides = {
