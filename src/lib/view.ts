@@ -142,6 +142,8 @@ export type SplitRow = {
   right: string;
   leftKind: string;
   rightKind: string;
+  leftNo?: number;
+  rightNo?: number;
   leftLine?: DiffLine;
   rightLine?: DiffLine;
   hunkIndex?: number;
@@ -152,6 +154,8 @@ export function splitDiff(lines: DiffLine[]): SplitRow[] {
   const rows: SplitRow[] = [];
   let pending: DiffLine[] = [];
   let hunkIndex = -1;
+  let oldNo = 0;
+  let newNo = 0;
   const flush = () => {
     const removed = pending.filter((line) => line.kind === "delete");
     const added = pending.filter((line) => line.kind === "add");
@@ -162,6 +166,8 @@ export function splitDiff(lines: DiffLine[]): SplitRow[] {
         right: added[index]?.text.slice(1) ?? "",
         leftKind: removed[index] ? "delete" : "",
         rightKind: added[index] ? "add" : "",
+        leftNo: removed[index] ? oldNo++ : undefined,
+        rightNo: added[index] ? newNo++ : undefined,
         leftLine: removed[index],
         rightLine: added[index],
       });
@@ -174,10 +180,17 @@ export function splitDiff(lines: DiffLine[]): SplitRow[] {
       continue;
     }
     flush();
-    if (line.kind === "hunk") hunkIndex += 1;
+    if (line.kind === "hunk") {
+      hunkIndex += 1;
+      const start = line.text.match(/@@ -(\d+)(?:,\d+)? \+(\d+)/);
+      if (start) {
+        oldNo = Number(start[1]);
+        newNo = Number(start[2]);
+      }
+    }
     if (line.kind === "context") {
       const text = line.text.startsWith(" ") ? line.text.slice(1) : line.text;
-      rows.push({ left: text, right: text, leftKind: "", rightKind: "" });
+      rows.push({ left: text, right: text, leftKind: "", rightKind: "", leftNo: oldNo++, rightNo: newNo++ });
     } else {
       rows.push({
         left: line.text,

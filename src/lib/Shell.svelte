@@ -10,7 +10,7 @@
   import SplitHandle from "./SplitHandle.svelte";
   import { resolveLocale, translate } from "./i18n";
   import { shortcut, shortcutLabel, typing } from "./keys";
-  import { branchGroup, commitGraph, formatWhen, gravatarUrl, laneColors, numberedDiff, splitDiff, windowSlice } from "./view";
+  import { branchGroup, commitGraph, formatWhen, gravatarUrl, laneColors, numberedDiff, splitDiff, windowSlice, type SplitRow } from "./view";
   import {
     badge,
     type BlameLine,
@@ -387,6 +387,11 @@
     );
   }
   const sampleSplit = $derived(sampleSplitOf(selectedDiff));
+  let splitPick = $state<"left" | "right">("left");
+  function pickSplitSide(event: MouseEvent) {
+    const side = (event.target as HTMLElement).closest("[data-side]")?.getAttribute("data-side");
+    if (side === "left" || side === "right") splitPick = side;
+  }
   const historySplit = $derived(settings.diffStyle === "split" ? splitDiff(historyDiff?.lines ?? []) : []);
   const filterNames = $derived.by(() => {
     if (historyFilter) return [historyFilter];
@@ -2493,11 +2498,11 @@
             {:else if diff.lines.length === 0}
               <p class="diff-empty">{tr("chrome.noChanges")}</p>
             {:else if settings.diffStyle === "split"}
-              <div class="diff-body split">
+              <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide}>
                 {#each splitRows as row, index (index)}
                   <div class="split-row actionable">
-                    <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, selectedPath ?? "") as token, tokenIndex (`l${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                    <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, selectedPath ?? "") as token, tokenIndex (`r${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                    {@render splitCell(row, "left", selectedPath ?? "", `l${index}`)}
+                    {@render splitCell(row, "right", selectedPath ?? "", `r${index}`)}
                     <span class="split-actions">
                       {#if row.hunkIndex != null}
                         <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index: row.hunkIndex, unstage: selectedSide === "staged" })}>{selectedSide === "staged" ? tr("menu.unstageHunk") : tr("menu.stageHunk")}</button>
@@ -2550,11 +2555,11 @@
               <button class="text-button" type="button" disabled>{tr("menu.discard")}</button>
             </header>
             {#if settings.diffStyle === "split"}
-              <div class="diff-body split">
+              <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide}>
                 {#each sampleSplit as row, index (index)}
                   <div class="split-row">
-                    <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, selectedPath ?? "") as token, tokenIndex (`sl${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                    <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, selectedPath ?? "") as token, tokenIndex (`sr${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                    {@render splitCell(row, "left", selectedPath ?? "", `sl${index}`)}
+                    {@render splitCell(row, "right", selectedPath ?? "", `sr${index}`)}
                   </div>
                 {/each}
               </div>
@@ -2796,11 +2801,11 @@
             {:else if historyTab === "changes"}
               <header class="diff-head"><span>{historyFile ?? ""}</span></header>
               {#if mode === "live" && historyDiff && settings.diffStyle === "split"}
-                <div class="diff-body split">
+                <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide}>
                   {#each historySplit as row, index (index)}
                     <div class="split-row">
-                      <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, historyFile ?? "") as token, tokenIndex (`hd-l${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                      <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, historyFile ?? "") as token, tokenIndex (`hd-r${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                      {@render splitCell(row, "left", historyFile ?? "", `hd-l${index}`)}
+                      {@render splitCell(row, "right", historyFile ?? "", `hd-r${index}`)}
                     </div>
                   {/each}
                 </div>
@@ -2812,11 +2817,11 @@
                 </div>
               {:else if historyFile && diffs[historyFile]}
                 {#if settings.diffStyle === "split"}
-                  <div class="diff-body split">
+                  <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide}>
                     {#each sampleSplitOf(diffs[historyFile]) as row, index (`hf-${index}`)}
                       <div class="split-row">
-                        <span class:del={row.leftKind === "delete"} class:meta={row.leftKind === "meta"}>{#if settings.showDiffMarks && row.leftKind === "delete"}-{/if}{#each paint(row.left, historyFile) as token, tokenIndex (`hfl-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                        <span class:add={row.rightKind === "add"} class:meta={row.rightKind === "meta"}>{#if settings.showDiffMarks && row.rightKind === "add"}+{/if}{#each paint(row.right, historyFile) as token, tokenIndex (`hfr-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                        {@render splitCell(row, "left", historyFile, `hfl-${index}`)}
+                        {@render splitCell(row, "right", historyFile, `hfr-${index}`)}
                       </div>
                     {/each}
                   </div>
@@ -2948,6 +2953,12 @@
     </div>
   {/snippet}
 
+  {#snippet splitCell(row: SplitRow, side: "left" | "right", file: string, key: string)}
+    {@const kind = side === "left" ? row.leftKind : row.rightKind}
+    {@const mark = side === "left" ? "delete" : "add"}
+    <span class="split-no" class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}>{(side === "left" ? row.leftNo : row.rightNo) ?? ""}</span>
+    <span class="split-code" data-side={side} class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}>{#if settings.showDiffMarks && kind === mark}{side === "left" ? "-" : "+"}{/if}{#each paint(side === "left" ? row.left : row.right, file) as token, tokenIndex (`${key}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+  {/snippet}
   {#snippet searchToggle(key: SearchKey, label: string)}
     <button class="icon-btn search-toggle" class:on={searchOpen[key]} type="button" aria-label={label} aria-pressed={searchOpen[key]} title={label} onmousedown={(event) => event.preventDefault()} onclick={() => toggleSearch(key)}>
       {#if searchOpen[key]}
@@ -4770,8 +4781,9 @@
   }
 
   .split-row {
+    --split-no: calc(5ch + 12px);
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: var(--split-no) minmax(0, 1fr) var(--split-no) minmax(0, 1fr);
   }
 
   .split-row > span {
@@ -4784,7 +4796,17 @@
 
   .split-row > span.del { background: var(--diff-del); }
   .split-row > span.add { background: var(--diff-add); }
-  .split-row.actionable { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; }
+  .split-row.actionable { grid-template-columns: var(--split-no) minmax(0, 1fr) var(--split-no) minmax(0, 1fr) auto; }
+  .split-row > .split-no {
+    padding: 0 6px;
+    text-align: right;
+    color: var(--text-secondary);
+    user-select: none;
+  }
+  .split-row > .split-no:nth-child(3) { border-left: 1px solid var(--line); }
+  .split.pick-left .split-code[data-side="right"],
+  .split.pick-right .split-code[data-side="left"],
+  .split-actions { user-select: none; }
   .split-actions {
     display: flex;
     align-items: center;
