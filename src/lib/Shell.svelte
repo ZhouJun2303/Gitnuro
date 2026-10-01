@@ -242,6 +242,7 @@
   let commitDetail = $state<CommitDetail | null>(null);
   let historyTab = $state<"commit" | "changes" | "tree">("commit");
   let collapsedDirs = $state<string[]>([]);
+  let collapsedSide = $state<string[]>([]);
   let commitCollapsed = $state<string[]>([]);
   let aiFieldsOpen = $state(false);
   let dragStep = $state<number | null>(null);
@@ -1215,6 +1216,14 @@
     void mutate({ action: "setExpanded", names });
   }
 
+  function sideOpen(key: string) {
+    return sideQuery.trim() !== "" || !collapsedSide.includes(key);
+  }
+
+  function toggleSide(key: string) {
+    collapsedSide = collapsedSide.includes(key) ? collapsedSide.filter((item) => item !== key) : [...collapsedSide, key];
+  }
+
   function refHidden(name: string) {
     return (refs?.hiddenRefs ?? []).some((token) => name === token || (token.endsWith("/") && name.startsWith(token)));
   }
@@ -2155,23 +2164,41 @@
           {/if}
         {/each}
         <div class="group">
-          {tr("chrome.remotes")}
+          <button class="group-toggle" type="button" aria-expanded={sideOpen("remotes")} onclick={() => toggleSide("remotes")}>
+            <span class="twist">{sideOpen("remotes") ? "▾" : "▸"}</span>{tr("chrome.remotes")}
+          </button>
           <button class="text-button" type="button" onclick={() => { draft = ""; draftExtra = ""; dialog = "remote"; }}>{tr("chrome.add")}</button>
         </div>
+        {#if sideOpen("remotes")}
         {#each refs.remotes as remote (remote.name)}
-          {#if matchesQuery(remote.name, sideQuery)}
+          {#if matchesQuery(remote.name, sideQuery) || remote.branches.some((branch) => matchesQuery(branch, sideQuery))}
+          {@const remoteKey = `remote:${remote.name}`}
           <div class="side quiet" role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("chrome.fetch"), run: () => mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: settings.fetchTags }) },
             { label: tr("dialog.url"), run: () => { draft = remote.name; draftExtra = remote.url ?? ""; dialog = "remote"; } },
             { label: tr("menu.remove"), run: () => mutate({ action: "removeRemote", name: remote.name }) },
           ])}>
-            <span class="name">{remote.name}</span>
+            <button class="file-select" type="button" aria-expanded={sideOpen(remoteKey)} title={remote.url ?? ""} onclick={() => toggleSide(remoteKey)}>
+              <span class="twist">{sideOpen(remoteKey) ? "▾" : "▸"}</span>
+              <span class="name">{remote.name}</span>
+              <span class="count">{remote.branches.length}</span>
+            </button>
           </div>
-          {#if remote.head}<div class="side nested quiet"><span class="name">HEAD</span></div>{/if}
-          {#each remote.branches as branch (remote.name + branch)}
-            {#if matchesQuery(branch, sideQuery)}
+          {#if sideOpen(remoteKey)}
+          {#if remote.head && !sideQuery.trim()}<div class="side nested quiet"><span class="twist"></span><span class="name">HEAD → {remote.head}</span></div>{/if}
+          {#each remote.branches as branch, index (remote.name + branch)}
+            {@const folder = branchGroup(branch)}
+            {@const folderKey = `${remoteKey}/${folder}`}
+            {#if folder && folder !== branchGroup(remote.branches[index - 1] ?? "") && remote.branches.some((item) => branchGroup(item) === folder && matchesQuery(item, sideQuery))}
+              <button class="side nested quiet" type="button" aria-expanded={sideOpen(folderKey)} onclick={() => toggleSide(folderKey)}>
+                <span class="twist">{sideOpen(folderKey) ? "▾" : "▸"}</span>
+                <span class="name">{folder}</span>
+              </button>
+            {/if}
+            {#if matchesQuery(branch, sideQuery) && (!folder || sideOpen(folderKey))}
             <div
               class="side nested quiet"
+              class:deep={!!folder}
               role="group"
               oncontextmenu={(event) => openMenu(event, [
                 { label: tr("menu.checkout"), run: () => mutate({ action: "checkoutRemote", remote: remote.name, branch }) },
@@ -2181,14 +2208,17 @@
                 { label: tr("menu.copyName"), run: () => copyText(`${remote.name}/${branch}`) },
               ])}
             >
-              <button class="file-select" type="button" onclick={() => mutate({ action: "checkoutRemote", remote: remote.name, branch })}>
-                <span class="name">{branch}</span>
+              <button class="file-select" type="button" title={`${remote.name}/${branch}`} onclick={() => mutate({ action: "checkoutRemote", remote: remote.name, branch })}>
+                <span class="twist"></span>
+                <span class="name">{folder ? branch.slice(folder.length + 1) : branch}</span>
               </button>
             </div>
             {/if}
           {/each}
           {/if}
+          {/if}
         {/each}
+        {/if}
       {:else}
         <div
           class="side current"
@@ -2210,9 +2240,21 @@
           {#if mode === "sample"}<span class="ahead">↑5</span>{/if}
         </div>
         {#if repoStats}<p class="empty">{repoStats.branch} · {repoStats.commits} {tr("chrome.commits")} · {repoStats.branches} {tr("chrome.branches")} · ↑{repoStats.ahead} ↓{repoStats.behind}</p>{/if}
-        <div class="group">{tr("chrome.remotes")}</div>
-        <div class="side quiet"><span class="name">origin</span></div>
-        <div class="side nested quiet"><span class="name">HEAD</span></div>
+        <div class="group">
+          <button class="group-toggle" type="button" aria-expanded={sideOpen("remotes")} onclick={() => toggleSide("remotes")}>
+            <span class="twist">{sideOpen("remotes") ? "▾" : "▸"}</span>{tr("chrome.remotes")}
+          </button>
+        </div>
+        {#if sideOpen("remotes")}
+        <div class="side quiet">
+          <button class="file-select" type="button" aria-expanded={sideOpen("remote:origin")} onclick={() => toggleSide("remote:origin")}>
+            <span class="twist">{sideOpen("remote:origin") ? "▾" : "▸"}</span>
+            <span class="name">origin</span>
+            <span class="count">1</span>
+          </button>
+        </div>
+        {#if sideOpen("remote:origin")}
+        <div class="side nested quiet"><span class="twist"></span><span class="name">HEAD → main</span></div>
         <div
           class="side nested quiet"
           role="group"
@@ -2223,7 +2265,9 @@
             { label: tr("menu.deleteRemote"), run: () => ask(tr("menu.deleteRemote"), tr("dialog.deleteRemoteBody", { name: "origin/main" }), () => {}) },
             { label: tr("menu.copyName"), run: () => copyText("origin/main") },
           ])}
-        ><span class="name">main</span></div>
+        ><span class="twist"></span><span class="name">main</span></div>
+        {/if}
+        {/if}
       {/if}
       <div class="side quiet">
         <button class="file-select" type="button" onclick={() => (expanded = expanded === "tags" ? null : "tags")}>
@@ -3728,6 +3772,26 @@
 
   .side.nested {
     padding-left: 22px;
+  }
+
+  .side.nested.deep {
+    padding-left: 36px;
+  }
+
+  .side > .file-select {
+    gap: 6px;
+  }
+
+  .group-toggle {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
   }
 
   .side.quiet,
