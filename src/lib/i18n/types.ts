@@ -266,5 +266,13 @@ export type Messages = {
     toolPath: string;
     toolArguments: string;
     keepSpace: string;
+    fetchBody: string;
+    pullBody: string;
+    pushBody: string;
+    allRemotes: string;
+    includeTags: string;
+    pruneOnFetch: string;
+    pullWithRebase: string;
+    forceWithLease: string;
   };
 };

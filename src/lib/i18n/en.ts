@@ -266,5 +266,13 @@ export const en: Messages = {
     toolPath: "Path",
     toolArguments: "Arguments",
     keepSpace: "Keep spaces",
+    fetchBody: "Download remote updates without changing local branches.",
+    pullBody: "Bring remote commits into the current branch.",
+    pushBody: "Send the current branch to the remote.",
+    allRemotes: "All remotes",
+    includeTags: "Include tags",
+    pruneOnFetch: "Prune deleted remote branches",
+    pullWithRebase: "Rebase instead of merge",
+    forceWithLease: "Use --force-with-lease",
   },
 };

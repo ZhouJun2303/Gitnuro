@@ -266,5 +266,13 @@ export const zh: Messages = {
     toolPath: "路径",
     toolArguments: "参数",
     keepSpace: "保留空格",
+    fetchBody: "从远程获取更新，不会改动本地分支。",
+    pullBody: "把远程提交拉到当前分支。",
+    pushBody: "把当前分支推送到远程。",
+    allRemotes: "全部远程",
+    includeTags: "包含标签",
+    pruneOnFetch: "清理已删除的远程分支",
+    pullWithRebase: "变基后再拉取",
+    forceWithLease: "使用 --force-with-lease",
   },
 };

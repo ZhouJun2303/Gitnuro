@@ -871,6 +871,24 @@
     });
   }
 
+  function confirmSync(kind: "fetch" | "pull" | "push") {
+    const current = refs?.branches.find((branch) => branch.current);
+    const upstream = current?.upstream ?? "";
+    const firstRemote = refs?.remotes[0]?.name ?? "";
+    const upstreamRemote = refs?.remotes.find((remote) => upstream.startsWith(`${remote.name}/`))?.name ?? "";
+    if (kind === "fetch") {
+      draft = firstRemote;
+      draftExtra = settings.fetchTags ? "tags" : "";
+    } else if (kind === "pull") {
+      draft = upstreamRemote || firstRemote;
+      draftExtra = upstreamRemote ? upstream.slice(upstreamRemote.length + 1) : snapshot?.branch ?? "";
+    } else {
+      draft = upstreamRemote || firstRemote;
+      draftExtra = "";
+    }
+    dialog = kind;
+  }
+
   function matchesQuery(value: string, query: string) {
     const needle = query.trim().toLowerCase();
     return !needle || value.toLowerCase().includes(needle);
@@ -1502,9 +1520,9 @@
   function repositoryItems(): MenuItem[] {
     const locked = mode !== "live";
     return [
-      { label: tr("chrome.fetch"), disabled: locked || busy, run: () => void doFetch() },
-      { label: tr("chrome.pull"), disabled: locked || busy, run: () => void doPull() },
-      { label: tr("chrome.push"), disabled: locked || busy, run: () => void doPush() },
+      { label: tr("chrome.fetch"), disabled: locked || busy, run: () => confirmSync("fetch") },
+      { label: tr("chrome.pull"), disabled: locked || busy, run: () => confirmSync("pull") },
+      { label: tr("chrome.push"), disabled: locked || busy, run: () => confirmSync("push") },
       { label: tr("chrome.stash"), disabled: locked || busy, run: () => { draft = ""; dialog = "stash"; } },
       { sep: true, label: "" },
       { label: tr("menu.createBranch"), run: () => { draft = ""; draftExtra = ""; dialog = "branch"; } },
@@ -2127,15 +2145,15 @@
     </button>
     <div class="chrome-side end">
       <div class="segment">
-        <button type="button" disabled={busy} onclick={() => void doFetch()} oncontextmenu={(event) => openMenu(event, [
+        <button type="button" disabled={busy} onclick={() => confirmSync("fetch")} oncontextmenu={(event) => openMenu(event, [
           { label: tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: mode !== "live", run: () => void doFetch() },
           { label: tr("chrome.fetchAll"), disabled: mode !== "live", run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: settings.fetchTags }) },
         ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>{tr("chrome.fetch")}</button>
-        <button type="button" disabled={busy} onclick={() => void doPull()} oncontextmenu={(event) => openMenu(event, [
+        <button type="button" disabled={busy} onclick={() => confirmSync("pull")} oncontextmenu={(event) => openMenu(event, [
           { label: tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: mode !== "live", run: () => void doPull() },
           { label: tr("dialog.fastForward"), disabled: mode !== "live", run: () => { settings.pullRebase = false; void doPull(); } },
         ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg>{tr("chrome.pull")}</button>
-        <button type="button" disabled={busy} onclick={() => void doPush()} oncontextmenu={(event) => openMenu(event, [
+        <button type="button" disabled={busy} onclick={() => confirmSync("push")} oncontextmenu={(event) => openMenu(event, [
           { label: tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: mode !== "live", run: () => void doPush() },
           { label: tr("menu.createTag"), disabled: mode !== "live", run: () => void mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: settings.forceWithLease }) },
         ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg>{tr("chrome.push")}</button>
@@ -3141,8 +3159,11 @@
           else if (dialog === "tag") void mutate({ action: "tag", name: draft, rev: draftExtra || "HEAD", message: draftUser });
           else if (dialog === "remote") void mutate({ action: "addRemote", name: draft, url: draftExtra });
           else if (dialog === "fetch") void mutate({ action: "fetch", remote: draft || null, prune: settings.fetchPrune, tags: draftExtra === "tags" });
-          else if (dialog === "pull") void mutate({ action: "pullRef", remote: draft || (refs?.remotes[0]?.name ?? "origin"), branch: draftExtra || snapshot?.branch || "HEAD", rebase: settings.pullRebase, autostash: settings.mergeAutostash });
-          else if (dialog === "push") void mutate({ action: "push", remote: draft || null, setUpstream: true, tags: draftExtra === "tags", forceWithLease: settings.forceWithLease });
+          else if (dialog === "pull") {
+            if (draft && draftExtra) void mutate({ action: "pullRef", remote: draft, branch: draftExtra, rebase: settings.pullRebase, autostash: settings.mergeAutostash });
+            else void doPull();
+          }
+          else if (dialog === "push") void mutate({ action: "push", remote: draft || null, setUpstream: !refs?.branches.some((branch) => branch.current && branch.upstream), tags: draftExtra === "tags", forceWithLease: settings.forceWithLease });
           else if (dialog === "stash") void mutate({ action: "stash", message: draft });
           else if (dialog === "rename") void mutate({ action: "renameBranch", name: draft, to: draftExtra });
           else if (dialog === "upstream") void mutate({ action: "setUpstream", branch: draft, upstream: draftExtra });
@@ -3451,21 +3472,79 @@
           <input placeholder="Message (empty makes a lightweight tag)" bind:value={draftUser} />
           <button class="commit" type="submit">Create</button>
         {:else if dialog === "fetch"}
-          <h2>Fetch</h2>
-          <input placeholder="Remote (empty fetches all)" bind:value={draft} />
-          <label class="check"><input type="checkbox" checked={draftExtra === "tags"} onchange={(event) => (draftExtra = event.currentTarget.checked ? "tags" : "")} /> Tags</label>
-          <button class="commit" type="submit">Fetch</button>
+          <h2>{tr("chrome.fetch")}</h2>
+          <p>{tr("dialog.fetchBody")}</p>
+          <label>{tr("dialog.remoteName")}
+            {#if (refs?.remotes.length ?? 0) > 0}
+              <select bind:value={draft}>
+                <option value="">{tr("dialog.allRemotes")}</option>
+                {#each refs?.remotes ?? [] as remote (remote.name)}
+                  <option value={remote.name}>{remote.name}</option>
+                {/each}
+              </select>
+            {:else}
+              <input placeholder={tr("dialog.remoteName")} bind:value={draft} />
+            {/if}
+          </label>
+          <label class="check"><input type="checkbox" bind:checked={settings.fetchPrune} /> {tr("dialog.pruneOnFetch")}</label>
+          <label class="check"><input type="checkbox" checked={draftExtra === "tags"} onchange={(event) => (draftExtra = event.currentTarget.checked ? "tags" : "")} /> {tr("dialog.includeTags")}</label>
+          <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => (dialog = null)}>{tr("dialog.cancel")}</button>
+            <button class="commit" type="submit">{tr("chrome.fetch")}</button>
+          </div>
         {:else if dialog === "pull"}
-          <h2>Pull</h2>
-          <input placeholder="Remote" bind:value={draft} />
-          <input placeholder="Branch" bind:value={draftExtra} />
-          <button class="commit" type="submit">Pull</button>
+          <h2>{tr("chrome.pull")}</h2>
+          <p>{tr("dialog.pullBody")}</p>
+          <label>{tr("dialog.remoteName")}
+            {#if (refs?.remotes.length ?? 0) > 0}
+              <select bind:value={draft}>
+                {#each refs?.remotes ?? [] as remote (remote.name)}
+                  <option value={remote.name}>{remote.name}</option>
+                {/each}
+              </select>
+            {:else}
+              <input placeholder={tr("dialog.remoteName")} bind:value={draft} />
+            {/if}
+          </label>
+          <label>{tr("dialog.branch")}
+            {#if (refs?.remotes.find((remote) => remote.name === draft)?.branches.length ?? 0) > 0}
+              <select bind:value={draftExtra}>
+                {#if draftExtra && !(refs?.remotes.find((remote) => remote.name === draft)?.branches.includes(draftExtra))}
+                  <option value={draftExtra}>{draftExtra}</option>
+                {/if}
+                {#each refs?.remotes.find((remote) => remote.name === draft)?.branches ?? [] as branch (branch)}
+                  <option value={branch}>{branch}</option>
+                {/each}
+              </select>
+            {:else}
+              <input placeholder={tr("dialog.branch")} bind:value={draftExtra} />
+            {/if}
+          </label>
+          <label class="check"><input type="checkbox" bind:checked={settings.pullRebase} /> {tr("dialog.pullWithRebase")}</label>
+          <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => (dialog = null)}>{tr("dialog.cancel")}</button>
+            <button class="commit" type="submit">{tr("chrome.pull")}</button>
+          </div>
         {:else if dialog === "push"}
-          <h2>Push</h2>
-          <input placeholder="Remote" bind:value={draft} />
-          <label class="check"><input type="checkbox" checked={draftExtra === "tags"} onchange={(event) => (draftExtra = event.currentTarget.checked ? "tags" : "")} /> Tags</label>
-          <p class="empty">{settings.forceWithLease ? "Uses --force-with-lease." : "Does not force."}</p>
-          <button class="commit" type="submit">Push</button>
+          <h2>{tr("chrome.push")}</h2>
+          <p>{tr("dialog.pushBody")}</p>
+          <label>{tr("dialog.remoteName")}
+            {#if (refs?.remotes.length ?? 0) > 0}
+              <select bind:value={draft}>
+                {#each refs?.remotes ?? [] as remote (remote.name)}
+                  <option value={remote.name}>{remote.name}</option>
+                {/each}
+              </select>
+            {:else}
+              <input placeholder={tr("dialog.remoteName")} bind:value={draft} />
+            {/if}
+          </label>
+          <label class="check"><input type="checkbox" checked={draftExtra === "tags"} onchange={(event) => (draftExtra = event.currentTarget.checked ? "tags" : "")} /> {tr("dialog.includeTags")}</label>
+          <label class="check"><input type="checkbox" bind:checked={settings.forceWithLease} /> {tr("dialog.forceWithLease")}</label>
+          <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => (dialog = null)}>{tr("dialog.cancel")}</button>
+            <button class="commit" type="submit">{tr("chrome.push")}</button>
+          </div>
         {:else if dialog === "stash"}
           <h2>Stash</h2>
           <input placeholder="Message (optional)" bind:value={draft} />
