@@ -290,7 +290,6 @@
   let commandShared = $state(true);
   let sessionLog = $state<string[]>([]);
   let fieldValues = $state<Record<string, string>>({});
-  let scannedRoots = $state("");
   let includeUntracked = $state(false);
   let flowKind = $state("feature");
   let privateRepo = $state(false);
@@ -299,8 +298,6 @@
   let closedTabs = $state<string[]>([]);
   let facts = $state<RepoFacts | null>(null);
   let factsPath = "";
-  let scanned = $state<string[]>([]);
-  let managerPicked = $state<string[]>([]);
   let showIgnored = $state(false);
   let hunkAt = $state(0);
   let menu = $state<{ x: number; y: number; items: MenuItem[]; anchorTop?: number } | null>(null);
@@ -1667,10 +1664,10 @@
     }
   }
 
-  async function browseFolder() {
+  async function browseFolder(initial = "") {
     if (!inApp()) return null;
     try {
-      return await invoke<string | null>("pick_directory");
+      return await invoke<string | null>("pick_directory", { initial: initial || null });
     } catch (error) {
       actionError = message(error);
       return null;
@@ -1735,9 +1732,8 @@
       settings = { ...settings, cloneDirectory: path };
       void savePrefs(false);
     }
-    dialog = null;
-    if (!inApp()) return;
-    await openLocal(path);
+    const folder = await browseFolder(path);
+    if (folder) void openRepo(folder);
   }
 
   async function browseSourceRoot() {
@@ -2479,21 +2475,6 @@
   }
 
   $effect(() => {
-    if (mode === "live" || !inApp()) return;
-    const roots = settings.sourceDirectories.join("\n");
-    if (!roots || roots === scannedRoots) return;
-    scannedRoots = roots;
-    void (async () => {
-      const found: string[] = [];
-      for (const root of settings.sourceDirectories) {
-        const paths = await invoke<string[]>("scan_repositories", { root }).catch(() => [] as string[]);
-        found.push(...paths);
-      }
-      scanned = [...new Set(found)];
-    })();
-  });
-
-  $effect(() => {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
     if (!settings.theme || settings.theme === "system") root.removeAttribute("data-theme");
@@ -2794,28 +2775,6 @@
           </button>
         </div>
 
-        <div class="welcome-recent">
-          <div class="recent-bar">
-            <h3>{tr("chrome.manager")}</h3>
-            <button class="text-button" type="button" onclick={async () => {
-              const folder = await browseFolder();
-              if (!folder) return;
-              addSourceRoot(folder);
-              const found = await invoke<string[]>("scan_repositories", { root: folder }).catch((error) => { actionError = message(error); return [] as string[]; });
-              scanned = [...new Set([...scanned, ...found])];
-              void savePrefs(false);
-            }}>{tr("chrome.scan")}</button>
-          </div>
-          {#each Object.entries(scanned.reduce<Record<string, string[]>>((groups, path) => { const folder = parentDir(path) || path; (groups[folder] ??= []).push(path); return groups; }, {})) as [folder, paths] (folder)}
-            <div class="recent-bar">
-              <button class="text-button" type="button" onclick={() => { draft = groupLabel(folder); draftExtra = folder; dialog = "groupRename"; }}>{groupLabel(folder)}</button>
-              <button class="text-button" type="button" disabled={paths.filter((path) => managerPicked.includes(path)).length === 0} onclick={() => { for (const path of paths.filter((path) => managerPicked.includes(path))) void openRepo(path); }}>{tr("chrome.open")}</button>
-            </div>
-            {#each paths as path (path)}
-              <label class="check recent-card"><input type="checkbox" checked={managerPicked.includes(path)} onchange={() => { managerPicked = managerPicked.includes(path) ? managerPicked.filter((item) => item !== path) : [...managerPicked, path]; }} /><span class="recent-title">{folderName(path)}</span></label>
-            {/each}
-          {/each}
-        </div>
         <div class="welcome-recent">
           <div class="recent-bar">
             <h3>{tr("chrome.recent")}</h3>

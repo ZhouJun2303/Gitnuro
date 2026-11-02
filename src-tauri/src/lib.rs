@@ -571,19 +571,23 @@ fn split_command_args(text: &str) -> Vec<String> {
 }
 
 #[tauri::command]
-fn pick_directory() -> Result<Option<String>, String> {
+fn pick_directory(initial: Option<String>) -> Result<Option<String>, String> {
+    let start = initial.unwrap_or_default();
     #[cfg(windows)]
     {
         let script = r#"
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $dialog.ShowNewFolderButton = $true
+$start = $env:AWEGIT_PICK_START
+if ($start -and (Test-Path -LiteralPath $start)) { $dialog.SelectedPath = $start }
 if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.SelectedPath }
 "#;
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let output = std::process::Command::new("powershell")
             .args(["-NoProfile", "-STA", "-Command", script])
+            .env("AWEGIT_PICK_START", &start)
             .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|error| error.to_string())?;
@@ -596,8 +600,16 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
     }
     #[cfg(target_os = "macos")]
     {
+        let choose = if start.is_empty() {
+            "POSIX path of (choose folder)".to_string()
+        } else {
+            format!(
+                "POSIX path of (choose folder default location POSIX file \"{}\")",
+                start.replace('"', "\\\"")
+            )
+        };
         let output = std::process::Command::new("osascript")
-            .args(["-e", "try", "-e", "POSIX path of (choose folder)", "-e", "on error number -128", "-e", "\"\"", "-e", "end try"])
+            .args(["-e", "try", "-e", &choose, "-e", "on error number -128", "-e", "\"\"", "-e", "end try"])
             .output()
             .map_err(|error| error.to_string())?;
         let text = String::from_utf8_lossy(&output.stdout).trim().trim_end_matches('/').to_string();
@@ -605,6 +617,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
+        let _ = start;
         Err("This system has no folder picker.".into())
     }
 }

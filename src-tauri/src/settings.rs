@@ -197,7 +197,7 @@ pub struct Settings {
     /// `repository<TAB>branch` pairs pinned in the sidebar.
     #[serde(default)]
     pub pinned_refs: Vec<String>,
-    /// Source folders, each with an alias in `group_names`. Choosing one opens it in the file manager.
+    /// Source folders, each with an alias in `group_names`. Choosing one opens the folder picker there.
     #[serde(default)]
     pub source_directories: Vec<String>,
     /// `folder<TAB>label` aliases, such as a source folder named 工作 or 个人.
