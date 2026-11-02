@@ -425,6 +425,7 @@
   );
   const rowCommit = $derived(settings.linesHeight === "spaced" ? 36 : 28);
   const rowFile = $derived(settings.linesHeight === "spaced" ? 32 : 28);
+  const rowTree = $derived(settings.linesHeight === "spaced" ? 28 : 24);
   const activeLocale = $derived(resolveLocale(settings.locale));
   function tr(key: string, vars: Record<string, string> = {}) {
     return translate(activeLocale, key, vars);
@@ -476,7 +477,8 @@
   const shownStaged = $derived(staged.filter((file) => matchesQuery(file.path, fileQuery)));
   const fileLayout = $derived(settings.fileLayout || (settings.treeFiles ? "tree" : "list"));
   const unstagedTree = $derived(fileLayout === "tree" ? asTree(shownUnstaged, collapsedDirs) : flatEntries(shownUnstaged));
-  const fileWindow = $derived(windowSlice(unstagedTree, fileTop, rowFile));
+  const fileStride = $derived(fileLayout === "tree" ? rowTree : rowFile);
+  const fileWindow = $derived(windowSlice(unstagedTree, fileTop, fileStride));
   const diffLines = $derived(diff?.lines ?? []);
   const shownDiffLines = $derived(numberedDiff(diffLines));
   const liveGraph = $derived(commitGraph(historyItems.map((commit) => ({ id: commit.id, parents: commit.parents ?? [] }))));
@@ -2045,11 +2047,16 @@
     return detail.author.trim().toLowerCase() !== detail.committer.trim().toLowerCase() || detail.authorEmail.trim().toLowerCase() !== detail.committerEmail.trim().toLowerCase();
   }
 
-  function toneGlyph(letter: string): "added" | "modified" | "deleted" | "file" {
-    if (letter === "A" || letter === "?") return "added";
-    if (letter === "D") return "deleted";
-    if (!letter) return "file";
-    return "modified";
+  function fileKind(path: string): "image" | "json" | "markup" | "text" | "code" | "file" {
+    const base = path.split(/[/\\]/).pop() ?? "";
+    const dot = base.lastIndexOf(".");
+    const ext = dot >= 0 ? base.slice(dot + 1).toLowerCase() : "";
+    if (["png", "jpg", "jpeg", "gif", "webp", "ico", "bmp", "avif"].includes(ext)) return "image";
+    if (ext === "json") return "json";
+    if (["xml", "html", "htm", "svg", "xaml", "plist", "prefab", "csproj", "uxml"].includes(ext)) return "markup";
+    if (["md", "txt", "rst", "adoc"].includes(ext)) return "text";
+    if (["cs", "kt", "kts", "java", "ts", "tsx", "js", "jsx", "mjs", "cjs", "rs", "py", "go", "c", "cc", "cpp", "h", "hpp", "svelte", "vue", "css", "scss", "less", "php", "rb", "swift", "lua", "dart", "scala", "sh", "ps1", "sql"].includes(ext)) return "code";
+    return "file";
   }
 
   function expandParents(path: string, collapsed: string[]) {
@@ -2753,6 +2760,7 @@
     root.style.setProperty("--row-file", settings.linesHeight === "spaced" ? "32px" : "28px");
     root.style.setProperty("--row-commit", settings.linesHeight === "spaced" ? "36px" : "28px");
     root.style.setProperty("--row-side", settings.linesHeight === "spaced" ? "32px" : "28px");
+    root.style.setProperty("--row-tree", settings.linesHeight === "spaced" ? "28px" : "24px");
   });
 
   $effect(() => {
@@ -3802,8 +3810,9 @@
                 {#each commitFiles as file, index (file.path)}
                   <div class="patch-head">
                     <button class="patch-toggle" type="button" onclick={() => togglePatch(file.path)}>
-                      <span class="twist">{openPatches.includes(file.path) ? "▾" : "▸"}</span>
-                      {@render treeGlyph(toneGlyph(toRow(file).letter))}
+                      {@render disclosure(openPatches.includes(file.path))}
+                      {@render statusBadge(toRow(file).letter)}
+                      {@render typeIcon(file.path)}
                       <span class="patch-path" title={file.path}>{file.path}</span>
                     </button>
                     {#if index === 0}
@@ -3845,7 +3854,7 @@
                 <SplitHandle direction="vertical" bind:size={detailTreeWidth} min={160} max={560} defaultSize={280} onchange={handleLayoutChange} />
                 <div class="detail-pane">
                   {#if historyFile}
-                    <div class="blob-tab">{@render treeGlyph("file")}<span>{fileName(historyFile)}</span></div>
+                    <div class="blob-tab">{@render typeIcon(historyFile)}<span>{fileName(historyFile)}</span></div>
                     {#if preview?.mime.startsWith("image/")}
                       <img class="blob-image" alt="" src={preview.dataUrl} />
                     {:else if preview?.mime === "application/pdf"}
@@ -3878,9 +3887,8 @@
     {/if}
 
     {#snippet dirRow(path: string, side: Side, depth: number)}
-      <button class="side tree-dir" type="button" style:padding-left="{8 + depth * 14}px" onclick={() => toggleDir(path)} oncontextmenu={(event) => openMenu(event, dirMenu(path, side))}>
-        <span class="twist">{collapsedDirs.includes(path) ? "▸" : "▾"}</span>
-        <span class="name">{fileName(path)}</span>
+      <button class="tree-row" type="button" style:padding-left="{8 + depth * 16}px" onclick={() => toggleDir(path)} oncontextmenu={(event) => openMenu(event, dirMenu(path, side))}>
+        {@render treeLine(true, !collapsedDirs.includes(path), path, "")}
       </button>
     {/snippet}
 
@@ -3967,9 +3975,9 @@
         {:else if shownUnstaged.length === 0}
           <p class="empty">{unstaged.length === 0 ? tr("chrome.noUnstaged") : tr("chrome.noMatch")}</p>
         {:else}
-          <div class="commit-window" style:height="{unstagedTree.length * rowFile}px">
+          <div class="commit-window" style:height="{unstagedTree.length * fileStride}px">
             {#each fileWindow.rows as entry, index (entry.key)}
-              <div class="virtual-row" style:top="{(fileWindow.start + index) * rowFile}px">
+              <div class="virtual-row" style:top="{(fileWindow.start + index) * fileStride}px">
                 {#if entry.kind === "dir"}
                   {@render dirRow(entry.path, "unstaged", entry.depth)}
                 {:else if entry.file}
@@ -3985,15 +3993,20 @@
     {#snippet fileRow(file: Row, side: Side, depth = 0)}
       <div
         class="file"
-        style:padding-left="{8 + depth * 14}px"
+        class:tree-row={fileLayout === "tree"}
+        style:padding-left="{fileLayout === "tree" ? 8 + depth * 16 : 8 + depth * 14}px"
         class:selected={selectedPath === file.path && (mode !== "live" || selectedSide === side)}
         class:picked={picked.includes(file.path) && !(selectedPath === file.path && (mode !== "live" || selectedSide === side))}
         role="group"
         oncontextmenu={(event) => openMenu(event, fileMenu(file, side))}
       >
         <button class="file-select" type="button" onclick={(event) => selectFile(file.path, side, event)}>
-          <span class="badge {file.tone}">{file.letter}</span>
-          <span class="file-name">{fileName(file.path)}</span>
+          {#if fileLayout === "tree"}
+            {@render treeLine(false, false, file.path, file.letter)}
+          {:else}
+            <span class="badge {file.tone}">{file.letter}</span>
+            <span class="file-name">{fileName(file.path)}</span>
+          {/if}
         </button>
       </div>
     {/snippet}
@@ -4067,32 +4080,65 @@
       </div>
     </div>
   {/snippet}
-  {#snippet treeGlyph(kind: "folder" | "file" | "added" | "modified" | "deleted")}
-    {#if kind === "folder"}
-      <svg class="tree-icon folder" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.6 4.2A1.4 1.4 0 0 1 3 2.8h3.1l1.2 1.3H13a1.4 1.4 0 0 1 1.4 1.4v7.1A1.4 1.4 0 0 1 13 14H3a1.4 1.4 0 0 1-1.4-1.4z"/></svg>
-    {:else if kind === "added"}
-      <svg class="tree-icon added" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="currentColor"/><path d="M8 5.1v5.8M5.1 8h5.8" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/></svg>
-    {:else if kind === "deleted"}
-      <svg class="tree-icon deleted" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="currentColor"/><path d="M5.1 8h5.8" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/></svg>
-    {:else if kind === "modified"}
-      <svg class="tree-icon modified" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="2.2" fill="currentColor"/></svg>
-    {:else}
-      <svg class="tree-icon file" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.2" d="M4 1.7h5.1L12.3 4.9v9.4H4z"/><path fill="none" stroke="currentColor" stroke-width="1.2" d="M9 1.7v3.3h3.3"/></svg>
+  {#snippet disclosure(open: boolean)}
+    <span class="twist" aria-hidden="true">
+      <svg class="twist-icon" viewBox="0 0 12 12">
+        <path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d={open ? "M2.2 4.2 6 8l3.8-3.8" : "M4.2 2.2 8 6l-3.8 3.8"} />
+      </svg>
+    </span>
+  {/snippet}
+  {#snippet folderIcon()}
+    <svg class="tree-icon folder" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.5 4.1A1.4 1.4 0 0 1 2.9 2.7h3.2l1.3 1.4H13a1.5 1.5 0 0 1 1.5 1.5v6.9A1.5 1.5 0 0 1 13 14H2.9a1.4 1.4 0 0 1-1.4-1.4z"/></svg>
+  {/snippet}
+  {#snippet statusBadge(letter: string)}
+    {#if letter === "A" || letter === "?"}
+      <svg class="tree-icon status added" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="currentColor"/><path d="M8 4.9v6.2M4.9 8h6.2" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>
+    {:else if letter === "D"}
+      <svg class="tree-icon status deleted" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" fill="currentColor"/><path d="M4.9 8h6.2" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/></svg>
+    {:else if letter}
+      <span class="tree-mark" class:alert={letter === "C"}>{letter}</span>
     {/if}
+  {/snippet}
+  {#snippet typeIcon(path: string)}
+    {@const kind = fileKind(path)}
+    <svg class="tree-icon type" class:code={kind === "code"} class:json={kind === "json"} class:markup={kind === "markup"} class:text={kind === "text"} class:image={kind === "image"} viewBox="0 0 16 16" aria-hidden="true">
+      {#if kind === "image"}
+        <rect x="1.8" y="3.1" width="12.4" height="9.8" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <circle cx="5.3" cy="6.3" r="1" fill="currentColor"/>
+        <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" d="M2.4 11.3 5.7 8.4l2 1.7 2.2-1.5 3.5 2.7"/>
+      {:else}
+        <path fill="none" stroke="currentColor" stroke-width="1.2" d="M3.2 1.5h6L12.8 5v9.5H3.2z"/>
+        <path fill="none" stroke="currentColor" stroke-width="1.2" d="M9.1 1.6V5.1h3.6"/>
+        {#if kind === "json"}
+          <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" d="M6.3 7.2c-.8.5-.8 1.1 0 1.6.8.5.8 1.1 0 1.6M9.7 7.2c.8.5.8 1.1 0 1.6-.8.5-.8 1.1 0 1.6"/>
+        {:else if kind === "markup"}
+          <path fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" d="M6.4 7.3 4.8 8.8l1.6 1.5M9.6 7.3l1.6 1.5-1.6 1.5M8.6 7.1 7.4 10.6"/>
+        {:else}
+          <path fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" d="M5.4 7.4h5.2M5.4 9.3h5.2M5.4 11.2h3.2"/>
+        {/if}
+      {/if}
+    </svg>
+  {/snippet}
+  {#snippet treeLine(dir: boolean, open: boolean, path: string, letter: string)}
+    {#if dir}
+      {@render disclosure(open)}
+      {@render folderIcon()}
+    {:else}
+      <span class="twist"></span>
+      {#if letter}{@render statusBadge(letter)}{/if}
+      {@render typeIcon(path)}
+    {/if}
+    <span class="name">{fileName(path)}</span>
   {/snippet}
   {#snippet detailTree(entries: TreeEntry[], collapsed: string[], onDir: (path: string) => void, onFile: (path: string) => void)}
     {#each entries as entry (entry.key)}
       {#if entry.kind === "dir"}
-        <button class="tree-row" type="button" style:padding-left="{4 + entry.depth * 16}px" onclick={() => onDir(entry.path)}>
-          <span class="twist">{collapsed.includes(entry.path) ? "▸" : "▾"}</span>
-          {@render treeGlyph("folder")}
-          <span class="name">{fileName(entry.path)}</span>
+        <button class="tree-row" type="button" style:padding-left="{8 + entry.depth * 16}px" onclick={() => onDir(entry.path)}>
+          {@render treeLine(true, !collapsed.includes(entry.path), entry.path, "")}
         </button>
       {:else if entry.file}
-        <button class="tree-row" class:selected={historyFile === entry.file.path} type="button" style:padding-left="{4 + entry.depth * 16}px" onclick={() => onFile(entry.file?.path ?? "")}>
-          <span class="twist"></span>
-          {@render treeGlyph(toneGlyph(entry.file.letter))}
-          <span class="name">{fileName(entry.file.path)}</span>
+        <button class="tree-row" class:selected={historyFile === entry.file.path} type="button" style:padding-left="{8 + entry.depth * 16}px" onclick={() => onFile(entry.file?.path ?? "")}>
+          {@render treeLine(false, false, entry.file.path, entry.file.letter)}
         </button>
       {/if}
     {/each}
@@ -6989,29 +7035,53 @@
   .detail-tree .empty { padding: 12px; }
   .tree-row {
     width: 100%;
-    height: 24px;
+    height: var(--row-tree);
+    margin: 0;
     border: 0;
+    border-radius: 0;
     background: transparent;
     color: inherit;
     font: inherit;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     text-align: left;
     padding-right: 8px;
   }
+  .file.tree-row { gap: 0; }
+  .tree-row > .file-select { gap: 6px; }
   .tree-row:hover:not(.selected) { background: var(--hover); }
-  .tree-row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tree-row.selected { background: var(--detail-accent); color: #fff; }
-  .tree-row.selected .twist { color: #fff; }
-  .tree-icon { width: 14px; height: 14px; flex: none; }
-  .tree-icon.folder { color: #e2a21a; }
+  .tree-row .name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .detail-tree .tree-row.selected { background: var(--detail-accent); color: #fff; }
+  .detail-tree .tree-row.selected .twist { color: #fff; }
+  .detail-tree .tree-row.selected .tree-icon.type { color: #fff; }
+  .twist-icon { width: 10px; height: 10px; display: block; }
+  .tree-icon { width: 16px; height: 16px; flex: none; }
+  .tree-icon.status { width: 14px; height: 14px; }
+  .tree-icon.folder { color: #e8b023; }
   .tree-icon.added { color: #2da44e; }
   .tree-icon.deleted { color: #cf222e; }
-  .tree-icon.modified { color: #3b82f6; }
-  .tree-icon.file { color: #6b7280; }
-  .tree-row.selected .tree-icon.file,
-  .tree-row.selected .tree-icon.modified { color: #fff; }
+  .tree-icon.type { color: #8a9099; }
+  .tree-icon.type.code { color: #6a7dff; }
+  .tree-icon.type.json { color: #c8962e; }
+  .tree-icon.type.markup { color: #d2693a; }
+  .tree-icon.type.text { color: #4c8dde; }
+  .tree-icon.type.image { color: #3c9a6a; }
+  .tree-mark {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #e8b023;
+    color: #3f2e00;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .tree-mark.alert { background: #cf222e; color: #fff; }
   .detail-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--elevated); }
   .detail-pane > .diff-body { flex: 1; min-height: 0; }
   .blob-tab {
@@ -7036,8 +7106,7 @@
   .diff-empty.slim { margin: 8px 16px; }
   .issue { color: var(--accent); text-decoration: none; }
 
-  .tree-dir { width: 100%; }
-  .twist { width: 14px; flex: none; color: var(--text-secondary); }
+  .twist { width: 14px; height: 14px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); }
 
   .summary-input,
   .composer textarea {
