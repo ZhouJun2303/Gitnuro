@@ -2695,9 +2695,16 @@
   }
 
   function clearTextSelection() {
+    const had = Boolean(heldText || textWhere || textFile);
     heldText = null;
     textWhere = null;
     textFile = null;
+    if (!had) return;
+    document.querySelectorAll<HTMLElement>(".select-all").forEach((node) => {
+      node.classList.remove("select-all");
+      node.removeAttribute("data-select-side");
+    });
+    window.getSelection()?.removeAllRanges();
   }
 
   function rememberPointer(event: MouseEvent) {
@@ -2776,13 +2783,18 @@
     return null;
   }
 
-  function selectAllFiles() {
-    clearTextSelection();
+  function fileTargetRows() {
     let target = keyTarget;
     if (target !== "staged" && target !== "unstaged" && target !== "combined") target = selectedSide === "staged" && shownStaged.length > 0 ? "staged" : "unstaged";
     if (target === "staged" && shownStaged.length === 0 && shownUnstaged.length > 0) target = fileLayout === "combined" ? "combined" : "unstaged";
     if (target === "unstaged" && shownUnstaged.length === 0 && shownStaged.length > 0) target = "staged";
     const rows = target === "staged" ? shownStaged : target === "combined" ? [...shownStaged, ...shownUnstaged] : shownUnstaged;
+    return { target, rows };
+  }
+
+  function selectAllFiles() {
+    clearTextSelection();
+    const { target, rows } = fileTargetRows();
     if (rows.length === 0) return;
     keyTarget = target;
     picked = [...new Set(rows.map((file) => file.path))];
@@ -2801,9 +2813,29 @@
     }
   }
 
+  function collapseFileSelection(rows: Row[]) {
+    const keep = rows.find((file) => file.path === selectedPath) ?? rows[0];
+    if (!keep) {
+      picked = [];
+      return;
+    }
+    picked = [keep.path];
+    if (selectedPath === keep.path) return;
+    selectedPath = keep.path;
+    if (keyTarget === "staged") selectedSide = "staged";
+    else if (keyTarget === "unstaged") selectedSide = "unstaged";
+    blameLines = null;
+    if (mode === "live") void loadDiff();
+  }
+
   function selectAllHere() {
+    const textZone = keyTarget === "diff" || keyTarget === "blob" || keyTarget === "detail";
+    if (textZone && (heldText || textWhere || textFile)) {
+      clearTextSelection();
+      return;
+    }
     const root = activeTextRoot();
-    if (root && (keyTarget === "diff" || keyTarget === "blob" || keyTarget === "detail")) {
+    if (root && textZone) {
       const side = diffSide(root);
       const text = blockText(root, side).replace(/\n$/, "");
       if (text.length > 0) {
@@ -2822,7 +2854,13 @@
         return;
       }
     }
-    if (section === "changes") selectAllFiles();
+    if (section !== "changes") return;
+    const { rows } = fileTargetRows();
+    if (rows.length > 1 && rows.every((file) => picked.includes(file.path))) {
+      collapseFileSelection(rows);
+      return;
+    }
+    selectAllFiles();
   }
 
   function pathsForCopy() {
