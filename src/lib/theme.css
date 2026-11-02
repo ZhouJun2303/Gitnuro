@@ -227,9 +227,14 @@ body {
 
 :root a.issue:hover { text-decoration: underline; }
 
-:root .diff-body .virtual-row:not(button):hover,
-:root .split-row:hover :is(.split-no, .split-code) {
+:root .diff-body .virtual-row:not(button):not(.picked):hover,
+:root .split-row:hover :is(.split-no, .split-code):not(.picked) {
   box-shadow: inset 0 0 0 9999px var(--hover);
+}
+
+:root .diff-body :is(.virtual-row, .split-no, .split-code).picked,
+:root .diff-body :is(.virtual-row, .split-no, .split-code).picked:hover {
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 999px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 :root button.virtual-row:hover { background: var(--hover); }

@@ -154,38 +154,46 @@ export type SplitRow = {
   rightNo?: number;
   leftLine?: DiffLine;
   rightLine?: DiffLine;
+  /** Index of this cell in the original unified diff. */
+  leftIndex?: number;
+  rightIndex?: number;
+  lineIndex?: number;
   hunkIndex?: number;
 };
 
 /** Pair removed and added lines inside each hunk for a split diff. */
 export function splitDiff(lines: DiffLine[]): SplitRow[] {
   const rows: SplitRow[] = [];
-  let pending: DiffLine[] = [];
+  let pending: { line: DiffLine; index: number }[] = [];
   let hunkIndex = -1;
   let oldNo = 0;
   let newNo = 0;
   const flush = () => {
-    const removed = pending.filter((line) => line.kind === "delete");
-    const added = pending.filter((line) => line.kind === "add");
+    const removed = pending.filter((item) => item.line.kind === "delete");
+    const added = pending.filter((item) => item.line.kind === "add");
     const count = Math.max(removed.length, added.length);
     for (let index = 0; index < count; index += 1) {
+      const left = removed[index];
+      const right = added[index];
       rows.push({
-        left: removed[index]?.text.slice(1) ?? "",
-        right: added[index]?.text.slice(1) ?? "",
-        leftKind: removed[index] ? "delete" : "",
-        rightKind: added[index] ? "add" : "",
-        leftNo: removed[index] ? oldNo++ : undefined,
-        rightNo: added[index] ? newNo++ : undefined,
-        leftLine: removed[index],
-        rightLine: added[index],
+        left: left?.line.text.slice(1) ?? "",
+        right: right?.line.text.slice(1) ?? "",
+        leftKind: left ? "delete" : "",
+        rightKind: right ? "add" : "",
+        leftNo: left ? oldNo++ : undefined,
+        rightNo: right ? newNo++ : undefined,
+        leftLine: left?.line,
+        rightLine: right?.line,
+        leftIndex: left?.index,
+        rightIndex: right?.index,
       });
     }
     pending = [];
   };
-  for (const line of lines) {
+  lines.forEach((line, index) => {
     if (line.kind === "add" || line.kind === "delete") {
-      pending.push(line);
-      continue;
+      pending.push({ line, index });
+      return;
     }
     flush();
     if (line.kind === "hunk") {
@@ -198,17 +206,18 @@ export function splitDiff(lines: DiffLine[]): SplitRow[] {
     }
     if (line.kind === "context") {
       const text = line.text.startsWith(" ") ? line.text.slice(1) : line.text;
-      rows.push({ left: text, right: text, leftKind: "", rightKind: "", leftNo: oldNo++, rightNo: newNo++ });
+      rows.push({ left: text, right: text, leftKind: "", rightKind: "", leftNo: oldNo++, rightNo: newNo++, lineIndex: index });
     } else {
       rows.push({
         left: line.text,
         right: line.text,
         leftKind: "meta",
         rightKind: "meta",
+        lineIndex: index,
         hunkIndex: line.kind === "hunk" ? hunkIndex : undefined,
       });
     }
-  }
+  });
   flush();
   return rows;
 }

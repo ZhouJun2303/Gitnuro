@@ -198,6 +198,9 @@ export type Messages = {
     stageLine: string;
     unstageLine: string;
     discardLine: string;
+    stageLines: string;
+    unstageLines: string;
+    discardLines: string;
     stageFolder: string;
     unstageFolder: string;
     forceDelete: string;
@@ -233,6 +236,7 @@ export type Messages = {
     deleteBranch: string;
     deleteBranchBody: string;
     discardBody: string;
+    discardLinesBody: string;
     deleteBody: string;
     hardReset: string;
     hardResetBody: string;

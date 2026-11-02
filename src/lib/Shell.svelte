@@ -324,6 +324,10 @@
   let factsPath = "";
   let showIgnored = $state(false);
   let hunkAt = $state(0);
+  let diffAnchor = 0;
+  let diffSelected = $state<number[]>([]);
+  let diffEl = $state<HTMLElement | null>(null);
+  const diffPicked = $derived(new Set(diffSelected));
   let menu = $state<{ x: number; y: number; items: MenuItem[]; anchorTop?: number } | null>(null);
   let submenu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
   let confirmAsk = $state<ConfirmAsk | null>(null);
@@ -1261,14 +1265,44 @@
   }
 
   function moveHunk(delta: number) {
-    const nodes = [...document.querySelectorAll<HTMLElement>(".diff-body .hunk")];
+    const nodes: number[] = [];
+    diffLines.forEach((line, index) => {
+      if (line.kind === "hunk") nodes.push(index);
+    });
     if (nodes.length === 0) return;
     hunkAt = (hunkAt + delta + nodes.length) % nodes.length;
-    nodes[hunkAt]?.scrollIntoView({ block: "center" });
+    const index = nodes[hunkAt] ?? 0;
+    diffAnchor = index;
+    diffSelected = [index];
+    if (settings.diffStyle === "split") {
+      diffEl?.querySelector(`[data-line="${index}"]`)?.scrollIntoView({ block: "center" });
+      return;
+    }
+    const top = Math.max(0, index * 18 - 36);
+    diffTop = top;
+    if (diffEl) diffEl.scrollTop = top;
   }
 
-  function copyPatch() {
-    const text = (diff?.lines ?? []).map((line) => line.text).join("\n");
+  function copyPatch(indexes?: number[]) {
+    const lines = diff?.lines ?? [];
+    const chosen = new Set(indexes && indexes.length > 0 ? indexes : lines.map((_, index) => index));
+    if (indexes && indexes.length > 0) {
+      for (const index of indexes) {
+        for (let cursor = index; cursor >= 0; cursor -= 1) {
+          const kind = lines[cursor]?.kind;
+          if (kind === "hunk") {
+            chosen.add(cursor);
+            break;
+          }
+          if (kind === "meta") break;
+        }
+      }
+    }
+    const text = [...chosen]
+      .sort((left, right) => left - right)
+      .map((index) => lines[index]?.text ?? "")
+      .filter((line) => line.length > 0)
+      .join("\n");
     if (text) copyText(text);
   }
 
@@ -2846,6 +2880,8 @@
     selectedPath = path;
     selectedSide = side;
     blameLines = null;
+    diffAnchor = 0;
+    diffSelected = [];
     if (event?.shiftKey || event?.ctrlKey || event?.metaKey) {
       picked = picked.includes(path) ? picked.filter((item) => item !== path) : [...picked, path];
     } else {
@@ -2894,16 +2930,262 @@
       : line.text;
   }
 
-  function stageOne(line: DiffLine) {
-    if (line.stageAt == null || !selectedPath) return;
-    void mutate({
-      action: "stageLine",
-      file: selectedPath,
-      text: lineText(line),
-      addition: line.kind === "add",
-      at: line.stageAt,
-      unstage: selectedSide === "staged",
-    });
+  function splitLineAt(row: SplitRow, side: "left" | "right") {
+    if (row.lineIndex != null) return row.lineIndex;
+    if (side === "left") return row.leftIndex ?? row.rightIndex ?? null;
+    return row.rightIndex ?? row.leftIndex ?? null;
+  }
+
+  function selectDiffRange(from: number, to: number) {
+    const start = Math.min(from, to);
+    const end = Math.max(from, to);
+    const next: number[] = [];
+    for (let index = start; index <= end; index += 1) next.push(index);
+    diffSelected = next;
+  }
+
+  function toggleDiffLine(index: number) {
+    diffAnchor = index;
+    diffSelected = diffSelected.includes(index) ? diffSelected.filter((item) => item !== index) : [...diffSelected, index].sort((left, right) => left - right);
+  }
+
+  function clickDiffLine(index: number, event: MouseEvent) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(".gutter, .split-no")) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed && selection.anchorNode && target?.contains(selection.anchorNode)) return;
+    if (event.shiftKey) selectDiffRange(diffAnchor, index);
+    else if (event.ctrlKey || event.metaKey) toggleDiffLine(index);
+    else {
+      diffAnchor = index;
+      diffSelected = [index];
+    }
+  }
+
+  function dragDiffLine(index: number, event: MouseEvent) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    if (event.ctrlKey || event.metaKey) {
+      toggleDiffLine(index);
+      return;
+    }
+    const anchor = event.shiftKey ? diffAnchor : index;
+    if (!event.shiftKey) diffAnchor = index;
+    selectDiffRange(anchor, index);
+    const move = (ev: MouseEvent) => {
+      const body = diffEl;
+      if (body) {
+        const rect = body.getBoundingClientRect();
+        if (ev.clientY < rect.top + 28) body.scrollTop -= 18;
+        else if (ev.clientY > rect.bottom - 28) body.scrollTop += 18;
+      }
+      const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-line]");
+      const next = Number(hit?.dataset.line);
+      if (Number.isInteger(next)) selectDiffRange(anchor, next);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }
+
+  function chosenDiffLines(clicked: number) {
+    const source = diffSelected.includes(clicked) ? diffSelected : [clicked];
+    let indexes = source.filter((index) => index >= 0 && index < diffLines.length);
+    if (indexes.length === 0 && clicked >= 0 && clicked < diffLines.length) indexes = [clicked];
+    indexes = [...indexes].sort((left, right) => left - right);
+    const same = indexes.length === diffSelected.length && indexes.every((index, at) => diffSelected[at] === index);
+    if (!same) {
+      diffAnchor = clicked;
+      diffSelected = indexes;
+    }
+    return indexes;
+  }
+
+  function hunkOf(index: number) {
+    let hunk = -1;
+    for (let cursor = 0; cursor <= index && cursor < diffLines.length; cursor += 1) {
+      if (diffLines[cursor]?.kind === "hunk") hunk += 1;
+    }
+    return hunk >= 0 ? hunk : null;
+  }
+
+  function editorLineNo(index: number) {
+    const row = shownDiffLines[index];
+    const number = Number(row?.newNo || row?.oldNo || 0);
+    return number > 0 ? number : 1;
+  }
+
+  function removesOnApply(line: DiffLine, action: "stageLine" | "discardLine", unstage: boolean) {
+    if (action === "discardLine") return line.kind === "add";
+    return unstage === (line.kind === "add");
+  }
+
+  async function applyLineOps(action: "stageLine" | "discardLine", entries: { line: DiffLine; index: number }[]) {
+    const file = selectedPath;
+    if (!file || entries.length === 0 || !inApp() || busy) return;
+    const unstage = selectedSide === "staged";
+    const ordered = [...entries]
+      .filter((entry) => (action === "stageLine" ? entry.line.stageAt : entry.line.workAt) != null)
+      .sort((left, right) => {
+        // Positions were computed against the current file. Apply from the bottom,
+        // and remove a line before inserting another at the same index.
+        const leftAt = (action === "stageLine" ? left.line.stageAt : left.line.workAt) ?? 0;
+        const rightAt = (action === "stageLine" ? right.line.stageAt : right.line.workAt) ?? 0;
+        if (leftAt !== rightAt) return rightAt - leftAt;
+        const leftRemove = removesOnApply(left.line, action, unstage);
+        const rightRemove = removesOnApply(right.line, action, unstage);
+        if (leftRemove !== rightRemove) return leftRemove ? -1 : 1;
+        return right.index - left.index;
+      });
+    if (ordered.length === 0) return;
+    busy = true;
+    actionError = null;
+    diffSelected = [];
+    try {
+      let value: (StatusSnapshot & { output?: string }) | null = null;
+      for (const entry of ordered) {
+        const at = action === "stageLine" ? entry.line.stageAt : entry.line.workAt;
+        if (at == null) continue;
+        value = await invoke<StatusSnapshot & { output?: string }>("mutate", {
+          path: repoPath(),
+          request: {
+            action,
+            file,
+            text: lineText(entry.line),
+            addition: entry.line.kind === "add",
+            at,
+            ...(action === "stageLine" ? { unstage } : {}),
+          },
+        });
+      }
+      if (value) applySnapshot(value);
+      await loadContext();
+      await loadDiff();
+    } catch (error) {
+      actionError = message(error);
+      if (action === "stageLine" && settings.ignoreSpace) actionError = `${actionError} ${tr("dialog.spaceHint")}`;
+      try {
+        applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path: repoPath() }));
+        await loadContext();
+        await loadDiff();
+      } catch {
+        /* keep the action error */
+      }
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function showLineHistory(line: DiffLine | undefined) {
+    const text = line ? lineText(line).trim() : "";
+    if (!selectedPath || !text) return;
+    commandOutput = await invoke<string>("pick_history", { path: repoPath(), file: selectedPath, text }).catch((error) => message(error));
+    dialog = "output";
+  }
+
+  function diffLineMenu(clicked: number): MenuItem[] {
+    const indexes = chosenDiffLines(clicked);
+    const entries = indexes
+      .map((index) => ({ line: diffLines[index], index }))
+      .filter((entry): entry is { line: DiffLine; index: number } => !!entry.line);
+    const stageable = entries.filter((entry) => entry.line.stageAt != null && (entry.line.kind === "add" || entry.line.kind === "delete"));
+    const discardable = selectedSide === "unstaged" ? entries.filter((entry) => entry.line.workAt != null && (entry.line.kind === "add" || entry.line.kind === "delete")) : [];
+    const hunks = new Set(indexes.map(hunkOf).filter((hunk): hunk is number => hunk != null));
+    const oneHunk = hunks.size === 1 ? [...hunks][0] : null;
+    const locked = busy || mode !== "live";
+    const file = selectedPath;
+    const items: MenuItem[] = [];
+    if (stageable.length > 0) {
+      const many = stageable.length > 1;
+      items.push({
+        label: selectedSide === "staged" ? tr(many ? "menu.unstageLines" : "menu.unstageLine") : tr(many ? "menu.stageLines" : "menu.stageLine"),
+        disabled: locked,
+        run: () => void applyLineOps("stageLine", stageable),
+      });
+    }
+    if (discardable.length > 0) {
+      const many = discardable.length > 1;
+      items.push({
+        label: tr(many ? "menu.discardLines" : "menu.discardLine"),
+        disabled: locked,
+        run: () => {
+          if (!many) {
+            void applyLineOps("discardLine", discardable);
+            return;
+          }
+          ask(tr("menu.discardLines"), tr("dialog.discardLinesBody", { count: String(discardable.length) }), () => void applyLineOps("discardLine", discardable));
+        },
+      });
+    }
+    if (oneHunk != null) {
+      const hunkIndex = oneHunk;
+      items.push({
+        label: selectedSide === "staged" ? tr("menu.unstageHunk") : tr("menu.stageHunk"),
+        disabled: locked,
+        run: () => {
+          diffSelected = [];
+          void mutate({ action: "stageHunk", file, index: hunkIndex, unstage: selectedSide === "staged" });
+        },
+      });
+      if (selectedSide === "unstaged") {
+        items.push({
+          label: tr("menu.discardHunk"),
+          disabled: locked,
+          run: () => {
+            diffSelected = [];
+            void mutate({ action: "discardHunk", file, index: hunkIndex });
+          },
+        });
+      }
+    }
+    items.push(
+      {
+        label: selectedSide === "staged" ? tr("menu.unstage") : tr("menu.stage"),
+        disabled: locked || !file,
+        run: () => void runChange(selectedSide === "staged" ? "unstage_path" : "stage_path", { file }),
+      },
+      {
+        label: tr("menu.discard"),
+        disabled: locked || !file,
+        run: () => ask(tr("menu.discard"), tr("dialog.discardBody", { name: file ?? "" }), () => void mutate({ action: "discard", file })),
+      },
+    );
+    items.push({ sep: true, label: "" });
+    const historyLine = diffLines[clicked];
+    const historyOk = !!historyLine && (historyLine.kind === "add" || historyLine.kind === "delete" || historyLine.kind === "context") && lineText(historyLine).trim().length > 0;
+    const hunkCount = diffLines.reduce((count, line) => count + (line.kind === "hunk" ? 1 : 0), 0);
+    items.push(
+      { label: tr("menu.copyPatch"), disabled: indexes.length === 0, run: () => copyPatch(indexes) },
+      { label: tr("menu.showLine"), disabled: !selectedPath, run: () => void invoke("open_editor", { path: repoPath(), file: selectedPath, line: editorLineNo(clicked) }) },
+      { label: tr("menu.lineHistory"), disabled: !historyOk || !selectedPath, run: () => void showLineHistory(historyLine) },
+      { label: tr("menu.popBlame"), disabled: !selectedPath, run: () => void invoke("open_window", { view: "blame", repo: repoPath(), file: selectedPath }) },
+      { sep: true, label: "" },
+      { label: tr("menu.prevHunk"), disabled: hunkCount === 0, run: () => moveHunk(-1) },
+      { label: tr("menu.nextHunk"), disabled: hunkCount === 0, run: () => moveHunk(1) },
+      { sep: true, label: "" },
+      {
+        label: tr("dialog.ignoreSpace"),
+        checked: settings.ignoreSpace,
+        run: () => {
+          settings.ignoreSpace = !settings.ignoreSpace;
+          diffSelected = [];
+          void savePrefs(false);
+          void loadDiff();
+        },
+      },
+      {
+        label: tr("dialog.showSpace"),
+        checked: settings.showWhitespace,
+        run: () => {
+          settings.showWhitespace = !settings.showWhitespace;
+          void savePrefs(false);
+        },
+      },
+    );
+    return items;
   }
 
   function moveSelection(delta: number) {
@@ -3876,16 +4158,6 @@
           {:else if mode === "live" && section === "changes" && selectedPath}
             <header class="diff-head">
               <span>{selectedPath}</span>
-              <button class="text-button" type="button" disabled={busy} onclick={() => runChange(selectedSide === "staged" ? "unstage_path" : "stage_path", { file: selectedPath })}>{selectedSide === "staged" ? tr("menu.unstage") : tr("chrome.stage")}</button>
-              <button class="text-button" type="button" disabled={busy} onclick={() => ask(tr("menu.discard"), tr("dialog.discardBody", { name: selectedPath ?? "" }), () => void mutate({ action: "discard", file: selectedPath }))}>{tr("menu.discard")}</button>
-              <button class="text-button" type="button" onclick={() => moveHunk(-1)}>{tr("menu.prevHunk")}</button>
-              <button class="text-button" type="button" onclick={() => moveHunk(1)}>{tr("menu.nextHunk")}</button>
-              <button class="text-button" type="button" onclick={copyPatch}>{tr("menu.copyPatch")}</button>
-              <label class="check"><input type="checkbox" checked={settings.ignoreSpace} onchange={() => { settings.ignoreSpace = !settings.ignoreSpace; void savePrefs(false); void loadDiff(); }} /> {tr("dialog.ignoreSpace")}</label>
-              <label class="check"><input type="checkbox" checked={settings.showWhitespace} onchange={() => { settings.showWhitespace = !settings.showWhitespace; void savePrefs(false); }} /> {tr("dialog.showSpace")}</label>
-              <button class="text-button" type="button" disabled={!selectedPath} onclick={() => void invoke("open_editor", { path: repoPath(), file: selectedPath, line: diff?.lines.find((line) => line.workAt)?.workAt ?? 1 })}>{tr("menu.showLine")}</button>
-              <button class="text-button" type="button" disabled={!selectedPath} onclick={() => void invoke("open_window", { view: "blame", repo: repoPath(), file: selectedPath })}>{tr("menu.popBlame")}</button>
-              <button class="text-button" type="button" onclick={async () => { const line = diff?.lines.find((item) => item.kind === "add" || item.kind === "context"); const text = line ? lineText(line) : ""; if (!selectedPath || !text.trim()) return; commandOutput = await invoke<string>("pick_history", { path: repoPath(), file: selectedPath, text }).catch((error) => message(error)); dialog = "output"; }}>{tr("menu.lineHistory")}</button>
             </header>
             {#if diff && diff.lines.length > 0}
               <div class="minimap">
@@ -3911,51 +4183,28 @@
             {:else if diff.lines.length === 0}
               <p class="diff-empty">{tr("chrome.noChanges")}</p>
             {:else if settings.diffStyle === "split"}
-              <div class="diff-body split actionable pick-{splitPick}" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined} role="presentation" onmousedown={pickSplitSide} use:splitScroller>
+              <div class="diff-body split pick-{splitPick}" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined} role="presentation" bind:this={diffEl} onmousedown={pickSplitSide} use:splitScroller>
                 {#each splitRows as row, index (index)}
                   <div class="split-row">
-                    {@render splitCell(row, "left", selectedPath ?? "", `l${index}`)}
-                    {@render splitCell(row, "right", selectedPath ?? "", `r${index}`)}
-                    <span class="split-actions">
-                      {#if row.hunkIndex != null}
-                        <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index: row.hunkIndex, unstage: selectedSide === "staged" })}>{selectedSide === "staged" ? tr("menu.unstageHunk") : tr("menu.stageHunk")}</button>
-                        {#if selectedSide === "unstaged"}
-                          <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardHunk", file: selectedPath, index: row.hunkIndex })}>{tr("menu.discardHunk")}</button>
-                        {/if}
-                      {:else if row.leftLine?.stageAt != null || row.rightLine?.stageAt != null}
-                        {@const line = row.rightLine?.stageAt != null ? row.rightLine : row.leftLine}
-                        {#if line}
-                          <button class="text-button line-action" type="button" disabled={busy} onclick={() => stageOne(line)}>{selectedSide === "staged" ? tr("menu.unstageLine") : tr("menu.stageLine")}</button>
-                          {#if selectedSide === "unstaged" && line.workAt != null}
-                            <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardLine", file: selectedPath, text: lineText(line), addition: line.kind === "add", at: line.workAt })}>{tr("menu.discardLine")}</button>
-                          {/if}
-                        {/if}
-                      {/if}
-                    </span>
+                    {@render splitCell(row, "left", selectedPath ?? "", `l${index}`, splitLineAt(row, "left"))}
+                    {@render splitCell(row, "right", selectedPath ?? "", `r${index}`, splitLineAt(row, "right"))}
                   </div>
                 {/each}
-                {@render splitBar(true)}
+                {@render splitBar()}
               </div>
             {:else}
-              <div class="diff-body" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined} onscroll={(event) => (diffTop = (event.currentTarget as HTMLElement).scrollTop)}>
+              <div class="diff-body" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined} bind:this={diffEl} onscroll={(event) => (diffTop = (event.currentTarget as HTMLElement).scrollTop)}>
                 <div class="commit-window" style:height="{diffLines.length * 18}px">
                   {#each diffWindow.rows as line, index (`${diffWindow.start}-${index}`)}
-                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{(diffWindow.start + index) * 18}px">
-                      <span class="gutter">{shownDiffLines[diffWindow.start + index]?.oldNo ?? ""}</span>
-                      <span class="gutter">{shownDiffLines[diffWindow.start + index]?.newNo ?? ""}</span>
+                    {@const at = diffWindow.start + index}
+                    <!-- svelte-ignore a11y_click_events_have_key_events -->
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={diffPicked.has(at)} data-line={at} style:top="{at * 18}px" onclick={(event) => clickDiffLine(at, event)} oncontextmenu={(event) => openMenu(event, diffLineMenu(at))}>
+                      <!-- svelte-ignore a11y_no_static_element_interactions -->
+                      <span class="gutter" onmousedown={(event) => dragDiffLine(at, event)}>{shownDiffLines[at]?.oldNo ?? ""}</span>
+                      <!-- svelte-ignore a11y_no_static_element_interactions -->
+                      <span class="gutter" onmousedown={(event) => dragDiffLine(at, event)}>{shownDiffLines[at]?.newNo ?? ""}</span>
                       {#each paint(line.text, selectedPath ?? "") as token, tokenIndex (`${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
-                      {#if line.kind === "hunk"}
-                        <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "stageHunk", file: selectedPath, index: shownDiffLines.slice(0, diffWindow.start + index + 1).filter((item) => item.kind === "hunk").length - 1, unstage: selectedSide === "staged" })}>{selectedSide === "staged" ? tr("menu.unstageHunk") : tr("menu.stageHunk")}</button>
-                        {#if selectedSide === "unstaged"}
-                          <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardHunk", file: selectedPath, index: shownDiffLines.slice(0, diffWindow.start + index + 1).filter((item) => item.kind === "hunk").length - 1 })}>{tr("menu.discardHunk")}</button>
-                        {/if}
-                      {/if}
-                      {#if line.stageAt != null && (line.kind === "add" || line.kind === "delete")}
-                        <button class="text-button line-action" type="button" disabled={busy} onclick={() => stageOne(line)}>{selectedSide === "staged" ? tr("menu.unstageLine") : tr("menu.stageLine")}</button>
-                        {#if selectedSide === "unstaged" && line.workAt != null}
-                          <button class="text-button line-action" type="button" disabled={busy} onclick={() => mutate({ action: "discardLine", file: selectedPath, text: lineText(line), addition: line.kind === "add", at: line.workAt })}>{tr("menu.discardLine")}</button>
-                        {/if}
-                      {/if}
                     </span>
                   {/each}
                 </div>
@@ -3965,8 +4214,6 @@
           {:else if section === "changes" && selectedPath && selectedDiff.length > 0}
             <header class="diff-head">
               <span>{selectedPath}</span>
-              <button class="text-button" type="button" disabled>{tr("chrome.stage")}</button>
-              <button class="text-button" type="button" disabled>{tr("menu.discard")}</button>
             </header>
             {#if settings.diffStyle === "split"}
               <div class="diff-body split pick-{splitPick}" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined} role="presentation" onmousedown={pickSplitSide} use:splitScroller>
@@ -4464,14 +4711,18 @@
     </div>
   {/snippet}
 
-  {#snippet splitCell(row: SplitRow, side: "left" | "right", file: string, key: string)}
+  {#snippet splitCell(row: SplitRow, side: "left" | "right", file: string, key: string, lineIndex: number | null = null)}
     {@const kind = side === "left" ? row.leftKind : row.rightKind}
     {@const mark = side === "left" ? "delete" : "add"}
     {@const text = side === "left" ? row.left : row.right}
     {@const other = side === "left" ? row.right : row.left}
     {@const paired = Boolean(row.left && row.right && row.left !== row.right && (row.leftKind === "delete" || row.rightKind === "add"))}
-    <span class="split-no" class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}>{(side === "left" ? row.leftNo : row.rightNo) ?? ""}</span>
-    <span class="split-code" data-side={side} class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}><span class="split-text">{#if settings.showDiffMarks && kind === mark}{side === "left" ? "-" : "+"}{/if}{#each markedLine(text, paired ? other : "", file) as token, tokenIndex (`${key}-${tokenIndex}`)}<span class={token.cls} class:intra={token.hot}>{token.text}</span>{/each}</span></span>
+    {@const picked = lineIndex != null && diffPicked.has(lineIndex)}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <span class="split-no" class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"} class:picked data-line={lineIndex ?? undefined} onmousedown={(event) => lineIndex != null && dragDiffLine(lineIndex, event)} oncontextmenu={(event) => lineIndex != null && openMenu(event, diffLineMenu(lineIndex))}>{(side === "left" ? row.leftNo : row.rightNo) ?? ""}</span>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <span class="split-code" data-side={side} data-line={lineIndex ?? undefined} class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"} class:picked onclick={(event) => lineIndex != null && clickDiffLine(lineIndex, event)} oncontextmenu={(event) => lineIndex != null && openMenu(event, diffLineMenu(lineIndex))}><span class="split-text">{#if settings.showDiffMarks && kind === mark}{side === "left" ? "-" : "+"}{/if}{#each markedLine(text, paired ? other : "", file) as token, tokenIndex (`${key}-${tokenIndex}`)}<span class={token.cls} class:intra={token.hot}>{token.text}</span>{/each}</span></span>
   {/snippet}
   {#snippet personBlock(label: string, name: string, email: string, at: number)}
     <div class="fork-person-wrap">
@@ -6561,7 +6812,7 @@
   }
   .drop-check { opacity: 0; }
   .commit-row:hover .drop-check, .drop-check:checked { opacity: 1; }
-  .gutter { width: 32px; flex: none; text-align: right; color: var(--text-secondary); }
+  .gutter { width: 32px; flex: none; text-align: right; color: var(--text-secondary); user-select: none; cursor: pointer; }
   .image-toolbar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; }
   .image-toolbar button { border: 0; background: transparent; font: inherit; color: inherit; padding: 2px 8px; border-radius: 6px; }
   .image-toolbar button.on { background: var(--selection); }
@@ -7224,7 +7475,6 @@
     min-width: 100%;
   }
   .diff-body.flow { overflow: visible; }
-  .diff-body.split.actionable { grid-template-columns: var(--split-no) minmax(0, 1fr) var(--split-no) minmax(0, 1fr) auto; }
   .split-row { display: contents; }
 
   .split-row > span {
@@ -7257,11 +7507,11 @@
     text-align: right;
     color: var(--text-secondary);
     user-select: none;
+    cursor: pointer;
   }
   .split-row > .split-no:nth-child(3) { border-left: 1px solid var(--line); }
   .split.pick-left .split-code[data-side="right"],
-  .split.pick-right .split-code[data-side="left"],
-  .split-actions { user-select: none; }
+  .split.pick-right .split-code[data-side="left"] { user-select: none; }
   .diff-body.select-all[data-select-side="all"] > span,
   .diff-body.select-all[data-select-side="all"] .virtual-row,
   .diff-body.select-all[data-select-side="left"] .split-code[data-side="left"],
@@ -7270,17 +7520,6 @@
   .fork-card.select-all {
     box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--accent) 28%, transparent);
   }
-  .split-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-  .split-actions .line-action { margin-left: 0; }
-
-  .line-action {
-    margin-left: auto;
-  }
-
   .tok-word { color: #7030c0; }
   .tok-string { color: #1a7f37; }
   .tok-comment { color: var(--text-secondary); }
