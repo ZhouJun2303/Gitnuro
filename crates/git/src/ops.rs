@@ -1728,24 +1728,37 @@ pub struct HotPath {
 }
 
 pub fn repo_facts(repo: &Path) -> Result<RepoFacts, Error> {
-    let ignored = lines_of(repo, &["ls-files", "-o", "-i", "--exclude-standard"], 500);
+    std::thread::scope(|scope| {
+        let ignored = scope.spawn(|| lines_of(repo, &["ls-files", "-o", "-i", "--exclude-standard"], 500));
+        let activity = scope.spawn(|| activity(repo));
+        let lfs = scope.spawn(|| text_of(repo, &["lfs", "ls-files"]));
+        let hot = scope.spawn(|| hot_paths(repo));
+        let brief = repo_facts_brief(repo)?;
+        let (weekday, hour) = activity.join().unwrap_or_default();
+        Ok(RepoFacts {
+            ignored: ignored.join().unwrap_or_default(),
+            weekday,
+            hour,
+            lfs: lfs.join().unwrap_or_default(),
+            hot: hot.join().unwrap_or_default(),
+            ..brief
+        })
+    })
+}
+
+/// Bisect state, the commit template, and the `HEAD` message. The lists and statistics stay empty.
+pub fn repo_facts_brief(repo: &Path) -> Result<RepoFacts, Error> {
     let bisect_log = text_of(repo, &["bisect", "log"]);
-    let bisect_active = bisect_log.contains("git bisect");
-    let template = commit_template(repo);
-    let head_message = text_of(repo, &["log", "-1", "--format=%B"]);
-    let (weekday, hour) = activity(repo);
-    let lfs = text_of(repo, &["lfs", "ls-files"]);
-    let hot = hot_paths(repo);
     Ok(RepoFacts {
-        ignored,
-        bisect_active,
+        ignored: Vec::new(),
+        bisect_active: bisect_log.contains("git bisect"),
         bisect_log,
-        template,
-        head_message,
-        weekday,
-        hour,
-        lfs,
-        hot,
+        template: commit_template(repo),
+        head_message: text_of(repo, &["log", "-1", "--format=%B"]),
+        weekday: Vec::new(),
+        hour: Vec::new(),
+        lfs: String::new(),
+        hot: Vec::new(),
     })
 }
 

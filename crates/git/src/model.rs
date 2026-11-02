@@ -3,13 +3,19 @@
 //! These reads go through `git` porcelain so decorations, ahead/behind, and submodule
 //! state match the Git the user already has installed.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::thread::ScopedJoinHandle;
 
 use serde::Serialize;
 
 use crate::change::{parse_diff, FileDiff};
-use crate::cli::{check_path, check_rev, run, run_output};
+use crate::cli::{check_path, check_rev, run, run_output, run_stdin_output};
 use crate::{ChangeKind, Error, FileChange};
+
+static GIT_DIRS: Mutex<BTreeMap<PathBuf, PathBuf>> = Mutex::new(BTreeMap::new());
+static LFS_INSTALLED: OnceLock<bool> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -299,19 +305,34 @@ pub fn commit_detail(repo: &Path, id: &str) -> Result<CommitDetail, Error> {
 }
 
 pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
-    Ok(RefSnapshot {
-        branches: local_branches(repo)?,
-        remotes: remotes(repo)?,
-        tags: tags(repo)?,
-        stashes: stashes(repo)?,
-        submodules: submodules(repo)?,
-        worktrees: worktrees(repo)?,
-        hidden_refs: hidden_refs(repo),
-        expanded_groups: list_key(repo, "awegit", "expandedGroup"),
-        sign_off_set: !value_key(repo, "signoff", "enabled").is_empty(),
-        sign_off: value_key(repo, "signoff", "enabled").eq_ignore_ascii_case("true"),
-        sign_off_format: value_key(repo, "signoff", "format"),
+    let local = local_text(repo);
+    let first = |text: &str, section: &str, key: &str| values_in(text, section, key).into_iter().next().unwrap_or_default();
+    let sign_off = first(&local, "signoff", "enabled");
+    std::thread::scope(|scope| {
+        let branches = scope.spawn(|| local_branches(repo));
+        let remotes = scope.spawn(|| remotes(repo));
+        let tags = scope.spawn(|| tags(repo));
+        let stashes = scope.spawn(|| stashes(repo));
+        let submodules = scope.spawn(|| submodules(repo));
+        let worktrees = worktrees(repo);
+        Ok(RefSnapshot {
+            branches: joined(branches)?,
+            remotes: joined(remotes)?,
+            tags: joined(tags)?,
+            stashes: joined(stashes)?,
+            submodules: joined(submodules)?,
+            worktrees: worktrees?,
+            hidden_refs: hidden_refs(repo),
+            expanded_groups: values_in(&local, "awegit", "expandedGroup"),
+            sign_off_set: !sign_off.is_empty(),
+            sign_off: sign_off.eq_ignore_ascii_case("true"),
+            sign_off_format: first(&local, "signoff", "format"),
+        })
     })
+}
+
+fn joined<T>(handle: ScopedJoinHandle<'_, Result<T, Error>>) -> Result<T, Error> {
+    handle.join().unwrap_or_else(|_| Err(Error::Git("a git read stopped unexpectedly".into())))
 }
 
 /// Names listed under `[awegit] hiddenRef` in `.git/awegit`, or the legacy `.git/gitnuro` file.
@@ -344,13 +365,23 @@ pub fn write_hidden_refs(repo: &Path, names: &[String]) -> Result<(), Error> {
     })
 }
 
+/// The work tree's own git directory. Remembered per path; a directory that disappeared is looked up again.
 fn absolute_git_dir(repo: &Path) -> Result<PathBuf, Error> {
+    if let Some(dir) = GIT_DIRS.lock().ok().and_then(|dirs| dirs.get(repo).cloned()) {
+        if dir.is_dir() {
+            return Ok(dir);
+        }
+    }
     let output = run(repo, &["rev-parse", "--absolute-git-dir"])?;
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if text.is_empty() {
         return Err(Error::Git("could not find the git directory".into()));
     }
-    Ok(PathBuf::from(text))
+    let dir = PathBuf::from(text);
+    if let Ok(mut dirs) = GIT_DIRS.lock() {
+        dirs.insert(repo.to_path_buf(), dir.clone());
+    }
+    Ok(dir)
 }
 
 fn parse_hidden_refs(text: &str) -> Vec<String> {
@@ -469,10 +500,6 @@ fn local_text(repo: &Path) -> String {
         return text;
     }
     std::fs::read_to_string(dir.join("gitnuro")).unwrap_or_default()
-}
-
-fn list_key(repo: &Path, section: &str, key: &str) -> Vec<String> {
-    values_in(&local_text(repo), section, key)
 }
 
 fn value_key(repo: &Path, section: &str, key: &str) -> String {
@@ -833,16 +860,18 @@ pub fn compare_file(repo: &Path, from: &str, to: &str, path: &str, context: u32)
 }
 
 pub fn in_progress(repo: &Path) -> Result<Option<InProgress>, Error> {
-    if git_path_exists(repo, "rebase-merge")? || git_path_exists(repo, "rebase-apply")? {
+    let dir = absolute_git_dir(repo)?;
+    let exists = |name: &str| dir.join(name).exists();
+    if exists("rebase-merge") || exists("rebase-apply") {
         return Ok(Some(InProgress::Rebase));
     }
-    if git_path_exists(repo, "MERGE_HEAD")? {
+    if exists("MERGE_HEAD") {
         return Ok(Some(InProgress::Merge));
     }
-    if git_path_exists(repo, "CHERRY_PICK_HEAD")? {
+    if exists("CHERRY_PICK_HEAD") {
         return Ok(Some(InProgress::CherryPick));
     }
-    if git_path_exists(repo, "REVERT_HEAD")? {
+    if exists("REVERT_HEAD") {
         return Ok(Some(InProgress::Revert));
     }
     Ok(None)
@@ -1059,10 +1088,18 @@ pub struct LfsLockRow {
     pub owner: String,
 }
 
+/// True when `git lfs` runs. Checked once per process.
+pub fn lfs_available(repo: &Path) -> bool {
+    *LFS_INSTALLED.get_or_init(|| {
+        run_output(repo, &["lfs", "version"])
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    })
+}
+
 /// Locked LFS paths. An unavailable `git lfs` is reported as not available rather than a failure.
 pub fn lfs_locks(repo: &Path) -> Result<(bool, Vec<LfsLockRow>), Error> {
-    let version = run_output(repo, &["lfs", "version"])?;
-    if !version.status.success() {
+    if !lfs_available(repo) {
         return Ok((false, Vec::new()));
     }
     let output = run_output(repo, &["lfs", "locks"])?;
@@ -1083,30 +1120,72 @@ pub fn lfs_locks(repo: &Path) -> Result<(bool, Vec<LfsLockRow>), Error> {
     Ok((true, rows))
 }
 
-fn submodules(repo: &Path) -> Result<Vec<SubmoduleRow>, Error> {
-    let output = match run(repo, &["submodule", "status"]) {
-        Ok(output) => output,
-        Err(Error::Git(message)) if message.contains("no submodule") => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut rows = Vec::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let ready = !line.starts_with('-');
-        let line = line.trim_start_matches([' ', '-', '+', 'U']);
-        let mut parts = line.split_whitespace();
-        let id = parts.next().unwrap_or("").to_string();
-        let path = parts.next().unwrap_or("").to_string();
-        if path.is_empty() {
-            continue;
-        }
-        rows.push(SubmoduleRow { path, id, ready });
+/// Paths from `paths` that ignore rules exclude. Tracked files are never reported. Paths are relative to the work tree.
+pub fn ignored_paths(repo: &Path, paths: &[String]) -> Vec<String> {
+    if paths.is_empty() {
+        return Vec::new();
     }
+    let mut input = Vec::new();
+    for path in paths {
+        input.extend_from_slice(path.as_bytes());
+        input.push(0);
+    }
+    let Ok(output) = run_stdin_output(repo, &["check-ignore", "-z", "--stdin"], &input) else {
+        return Vec::new();
+    };
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect()
+}
+
+/// Gitlinks named in `.gitmodules`. `git submodule status` also describes each commit, which costs
+/// about half a second on Windows, so the index and each checkout are read directly instead.
+fn submodules(repo: &Path) -> Result<Vec<SubmoduleRow>, Error> {
+    if !repo.join(".gitmodules").is_file() {
+        return Ok(Vec::new());
+    }
+    let config = run_output(repo, &["config", "-z", "--file", ".gitmodules", "--get-regexp", r"^submodule\..*\.path$"])?;
+    let paths: Vec<String> = config
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter_map(|record| {
+            let record = String::from_utf8_lossy(record);
+            let (_, path) = record.split_once('\n')?;
+            let path = path.trim();
+            (!path.is_empty()).then(|| path.to_string())
+        })
+        .collect();
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut args = vec!["--literal-pathspecs", "ls-files", "--stage", "-z", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    let output = run(repo, &args)?;
+    let mut rows: Vec<SubmoduleRow> = Vec::new();
+    for record in output.stdout.split(|byte| *byte == 0) {
+        let record = String::from_utf8_lossy(record);
+        let Some((meta, path)) = record.split_once('\t') else { continue };
+        let mut fields = meta.split_whitespace();
+        if fields.next() != Some("160000") || rows.iter().any(|row| row.path == path) {
+            continue;
+        }
+        let staged = fields.next().unwrap_or("").to_string();
+        let checkout = repo.join(path);
+        let ready = checkout.join(".git").exists();
+        let id = if ready { checked_out(&checkout).unwrap_or(staged) } else { staged };
+        rows.push(SubmoduleRow { path: path.to_string(), id, ready });
+    }
+    rows.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(rows)
+}
+
+fn checked_out(dir: &Path) -> Option<String> {
+    let repo = gix::open(dir).ok()?;
+    let id = repo.head_id().ok()?;
+    Some(id.to_string())
 }
 
 fn worktrees(repo: &Path) -> Result<Vec<WorktreeRow>, Error> {
@@ -1134,14 +1213,6 @@ fn worktrees(repo: &Path) -> Result<Vec<WorktreeRow>, Error> {
         rows.push(row);
     }
     Ok(rows)
-}
-
-fn git_path_exists(repo: &Path, name: &str) -> Result<bool, Error> {
-    let output = run(repo, &["rev-parse", "--git-path", name])?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let relative = PathBuf::from(text.trim());
-    let full = if relative.is_absolute() { relative } else { repo.join(relative) };
-    Ok(full.exists())
 }
 
 fn parse_track(text: &str) -> (u32, u32) {

@@ -182,6 +182,11 @@ pub fn run_stdin(repo: &Path, args: &[&str], stdin: &[u8]) -> Result<std::proces
     run_prepared(repo, args, &[], Some(stdin), true, false)
 }
 
+/// Like `run_stdin`, but a non-zero exit still returns the output.
+pub(crate) fn run_stdin_output(repo: &Path, args: &[&str], stdin: &[u8]) -> Result<std::process::Output, Error> {
+    run_prepared(repo, args, &[], Some(stdin), true, true)
+}
+
 /// Run git without replacing a repository-local `user.name`.
 pub(crate) fn run_repo_author(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
     run_prepared(repo, args, &[], None, false, false)

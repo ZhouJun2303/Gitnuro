@@ -125,15 +125,29 @@ function tokensFromHtml(html: string): Token[] {
   return tokens;
 }
 
-/** Color one visible line. Unknown file types stay plain text. */
+const MAX_HIGHLIGHT = 2000;
+const CACHE_SIZE = 20000;
+const cache = new Map<string, Token[]>();
+
+/** Color one visible line. Unknown file types and very long lines stay plain text. The result is shared; do not mutate it. */
 export function highlight(text: string, path: string): Token[] {
   const lang = language(path);
-  if (!lang || text.length === 0) return [{ text, cls: "" }];
+  if (!lang || text.length === 0 || text.length > MAX_HIGHLIGHT) return [{ text, cls: "" }];
+  const key = `${lang}\u0000${text}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  let tokens: Token[];
   try {
     const html = hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
-    const tokens = tokensFromHtml(html);
-    return tokens.length > 0 ? tokens : [{ text, cls: "" }];
+    const parsed = tokensFromHtml(html);
+    tokens = parsed.length > 0 ? parsed : [{ text, cls: "" }];
   } catch {
-    return [{ text, cls: "" }];
+    tokens = [{ text, cls: "" }];
   }
+  if (cache.size >= CACHE_SIZE) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(key, tokens);
+  return tokens;
 }

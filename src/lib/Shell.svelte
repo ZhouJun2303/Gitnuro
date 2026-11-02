@@ -238,6 +238,10 @@
   let diff = $state<FileDiff | null>(null);
   let diffError = $state<string | null>(null);
   let diffToken = 0;
+  let statusGen = 0;
+  let contextGen = 0;
+  let refreshing = false;
+  let refreshQueued: "status" | "full" | null = null;
   let refs = $state<RefSnapshot | null>(null);
   let commitsLive = $state<CommitRow[]>([]);
   let progress = $state<InProgress | null>(null);
@@ -305,6 +309,7 @@
   let drops = $state<string[]>([]);
   let fileTop = $state(0);
   let diffTop = $state(0);
+  let diffHeight = $state(0);
   let blameTop = $state(0);
   let preview = $state<FilePreview | null>(null);
   let updateNotice = $state<UpdateNotice | null>(null);
@@ -546,6 +551,32 @@
   const blameWindow = $derived(windowSlice(blameLines ?? [], blameTop, 18));
   const historyDiffWindow = $derived(windowSlice(historyDiff?.lines ?? [], historyDiffTop, 18));
   const splitRows = $derived(settings.diffStyle === "split" ? splitDiff(diffLines) : []);
+  const splitRowHeight = $derived(Math.max(18, Math.ceil((settings.diffFontSize || 13) * 1.45)));
+  const splitWindow = $derived.by(() => {
+    const count = Math.ceil(Math.max(diffHeight, 600) / splitRowHeight) + 24;
+    if (splitRows.length <= count + 40) return { start: 0, rows: splitRows, after: 0 };
+    const start = Math.min(Math.max(0, Math.floor(diffTop / splitRowHeight) - 12), Math.max(0, splitRows.length - count));
+    const rows = splitRows.slice(start, start + count);
+    return { start, rows, after: splitRows.length - start - rows.length };
+  });
+  const splitColumns = $derived.by(() => {
+    let left = 0;
+    let right = 0;
+    for (const row of splitRows) {
+      left = Math.max(left, textColumns(row.left));
+      right = Math.max(right, textColumns(row.right));
+    }
+    const mark = settings.showDiffMarks ? 1 : 0;
+    return { left: left + mark, right: right + mark };
+  });
+  function textColumns(text: string) {
+    let column = 0;
+    for (const char of text) {
+      if (char === "\t" && !settings.showWhitespace) column = (Math.floor(column / 8) + 1) * 8;
+      else column += char.charCodeAt(0) >= 0x1100 && /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe4f\uff00-\uff60\uffe0-\uffe6]/.test(char) ? 2 : 1;
+    }
+    return column;
+  }
   function sampleSplitOf(lines: string[]) {
     return splitDiff(
       lines.map((text) => ({
@@ -560,19 +591,29 @@
     const side = (event.target as HTMLElement).closest("[data-side]")?.getAttribute("data-side");
     if (side === "left" || side === "right") splitPick = side;
   }
-  function splitScroller(node: HTMLElement) {
+  /** `columns` is the widest line per side, for a virtual list that only renders some of its rows. */
+  function splitScroller(node: HTMLElement, columns?: { left: number; right: number }) {
     const sides = ["left", "right"] as const;
     const bar = (side: string) => node.querySelector<HTMLElement>(`.split-bar[data-bar="${side}"]`);
+    let wide = columns;
+    let frame = 0;
     const measure = () => {
-      for (const side of sides) {
-        const track = bar(side);
-        if (!track?.firstElementChild) continue;
+      frame = 0;
+      const widths = sides.map((side) => {
         let width = 0;
         for (const text of node.querySelectorAll<HTMLElement>(`.split-code[data-side="${side}"] > .split-text`)) width = Math.max(width, text.offsetWidth);
-        width += 16;
-        (track.firstElementChild as HTMLElement).style.width = `${width}px`;
+        return width + 16;
+      });
+      sides.forEach((side, index) => {
+        const track = bar(side);
+        if (!track?.firstElementChild) return;
+        const chars = wide?.[side] ?? 0;
+        (track.firstElementChild as HTMLElement).style.width = chars > 0 ? `max(${widths[index]}px, calc(${chars}ch + 16px))` : `${widths[index]}px`;
         node.style.setProperty(`--sx-${side}`, `${track.scrollLeft}px`);
-      }
+      });
+    };
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
     };
     const onScroll = (event: Event) => {
       const target = event.target as HTMLElement;
@@ -589,15 +630,20 @@
       event.preventDefault();
       track.scrollLeft += delta;
     };
-    const resize = new ResizeObserver(measure);
-    const mutate = new MutationObserver(measure);
+    const resize = new ResizeObserver(schedule);
+    const mutate = new MutationObserver(schedule);
     resize.observe(node);
     mutate.observe(node, { childList: true, subtree: true, characterData: true });
     node.addEventListener("scroll", onScroll, true);
     node.addEventListener("wheel", onWheel, { passive: false });
     measure();
     return {
+      update(next?: { left: number; right: number }) {
+        wide = next;
+        schedule();
+      },
       destroy() {
+        cancelAnimationFrame(frame);
         resize.disconnect();
         mutate.disconnect();
         node.removeEventListener("scroll", onScroll, true);
@@ -876,8 +922,14 @@
     return error instanceof Error ? error.message : String(error);
   }
 
+  /** Unchanged data keeps its old object so lists and diffs are not rendered again. */
+  function same(left: unknown, right: unknown) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
   function applySnapshot(value: StatusSnapshot) {
-    snapshot = value;
+    statusGen += 1;
+    if (!same(snapshot, value)) snapshot = value;
     mode = "live";
     if (value.path && !repos.includes(value.path)) repos = [...repos, value.path];
     const sameSide = (selectedSide === "staged" ? value.staged : value.unstaged).some(
@@ -919,7 +971,7 @@
         ignoreSpace: settings.ignoreSpace,
       });
       if (token === diffToken) {
-        diff = value;
+        if (!same(diff, value)) diff = value;
         diffError = null;
         if (value.binary) {
           preview = await invoke<FilePreview | null>("file_preview", { path: repoPath(), file });
@@ -948,37 +1000,59 @@
     return names;
   }
 
-  async function loadContext() {
-    const path = repoPath();
-    refs = await invoke<RefSnapshot>("repository_refs", { path });
+  async function loadCommits(path: string | undefined) {
     const order = settings.commitSort === "topo" ? "topo" : "date";
-    if (historyFilter) {
-      commitsLive = await invoke<CommitRow[]>("file_history", { path, file: historyFilter, limit: 200 });
-    } else if (!allBranches && currentFilterRefs().length > 0) {
+    if (historyFilter) return invoke<CommitRow[]>("file_history", { path, file: historyFilter, limit: 200 });
+    if (!allBranches && currentFilterRefs().length > 0) {
       try {
-        commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: logLimit, order, revs: currentFilterRefs() });
+        return await invoke<CommitRow[]>("commit_log", { path, limit: logLimit, order, revs: currentFilterRefs() });
       } catch {
-        commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: logLimit, all: false, order });
+        return invoke<CommitRow[]>("commit_log", { path, limit: logLimit, all: false, order });
       }
-    } else {
-      commitsLive = await invoke<CommitRow[]>("commit_log", { path, limit: logLimit, all: allBranches || currentFilterRefs().length === 0, order });
     }
-    repoStats = await invoke<NonNullable<typeof repoStats>>("repository_summary", { path }).catch(() => repoStats);
-    const locks = await invoke<{ available: boolean; locks: { path: string }[] }>("lfs_locks", { path }).catch(() => ({ available: false, locks: [] }));
-    lfsAvailable = locks.available;
-    signOff = refs.signOffSet ? !!refs.signOff : settings.signOff;
-    progress = await invoke<InProgress | null>("in_progress", { path });
+    return invoke<CommitRow[]>("commit_log", { path, limit: logLimit, all: allBranches || currentFilterRefs().length === 0, order });
   }
 
-  async function refresh() {
+  async function loadContext() {
+    const path = repoPath();
+    const gen = ++contextGen;
+    const nextRefs = await invoke<RefSnapshot>("repository_refs", { path });
+    if (gen !== contextGen) return;
+    if (!same(refs, nextRefs)) refs = nextRefs;
+    const [rows, stats, state] = await Promise.all([
+      loadCommits(path),
+      invoke<NonNullable<typeof repoStats>>("repository_summary", { path }).catch(() => repoStats),
+      invoke<InProgress | null>("in_progress", { path }),
+    ]);
+    if (gen !== contextGen) return;
+    if (!same(commitsLive, rows)) commitsLive = rows;
+    if (!same(repoStats, stats)) repoStats = stats;
+    signOff = nextRefs.signOffSet ? !!nextRefs.signOff : settings.signOff;
+    progress = state;
+  }
+
+  /** `status` reads the work tree and the open diff only; `full` also reloads branches and history. */
+  async function refresh(scope: "status" | "full" = "full") {
     if (!inApp() || busy) return;
+    if (refreshing) {
+      if (refreshQueued !== "full") refreshQueued = scope;
+      return;
+    }
+    refreshing = true;
     try {
-      applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path: repoPath() }));
-      await loadContext();
+      const gen = statusGen;
+      const value = await invoke<StatusSnapshot>("workspace_status", { path: repoPath() });
+      if (gen === statusGen) applySnapshot(value);
+      if (scope === "full") await loadContext();
       await loadDiff();
     } catch (error) {
       actionError = message(error);
+    } finally {
+      refreshing = false;
     }
+    const next = refreshQueued;
+    refreshQueued = null;
+    if (next) await refresh(next);
   }
 
   async function runChange(command: string, extra: Record<string, unknown> = {}) {
@@ -1205,14 +1279,17 @@
     return () => window.clearInterval(timer);
   });
 
-  async function loadFacts(force = false) {
+  /** `full` adds the ignored files, statistics, and LFS list, which take seconds in a large work tree. */
+  async function loadFacts(force = false, full = false) {
     if (!inApp() || mode !== "live") return null;
-    if (!force && facts && factsPath === repoPath()) return facts;
+    const path = repoPath() ?? "";
+    if (!force && facts && factsPath === path) return facts;
     try {
-      const value = await invoke<RepoFacts>("repo_facts", { path: repoPath() });
-      facts = value;
-      factsPath = repoPath() ?? "";
-      return value;
+      const value = await invoke<RepoFacts>("repo_facts", { path: repoPath(), full });
+      const kept = !full && facts && factsPath === path ? { ignored: facts.ignored, weekday: facts.weekday, hour: facts.hour, lfs: facts.lfs, hot: facts.hot } : {};
+      facts = { ...value, ...kept };
+      factsPath = path;
+      return facts;
     } catch (error) {
       actionError = message(error);
       return null;
@@ -1422,7 +1499,7 @@
       { label: tr("chrome.viewAsList"), checked: fileLayout === "list", run: () => setLayout("list") },
       { label: tr("chrome.viewAsCombined"), checked: fileLayout === "combined", run: () => setLayout("combined") },
       { sep: true },
-      { label: tr("chrome.showIgnoredFiles"), checked: showIgnored, run: () => { showIgnored = !showIgnored; if (showIgnored) void loadFacts(true); } },
+      { label: tr("chrome.showIgnoredFiles"), checked: showIgnored, run: () => { showIgnored = !showIgnored; if (showIgnored) void loadFacts(true, true); } },
       { label: tr("chrome.fakeIgnore"), checked: settings.fakeIgnore !== false, run: () => void toggleFakeIgnore() },
     ];
   }
@@ -2010,6 +2087,9 @@
       await loadContext();
       await loadDiff();
       await invoke("watch_repository", { path: repoPath() });
+      void invoke<{ available: boolean }>("lfs_locks", { path: repoPath(), list: false })
+        .then((value) => (lfsAvailable = value.available))
+        .catch(() => (lfsAvailable = false));
       rememberRepo(path);
       dialog = null;
       facts = null;
@@ -2581,8 +2661,8 @@
       { label: tr("chrome.stash"), disabled: locked || busy, run: () => openStash([]) },
       { label: tr("chrome.bisect"), disabled: locked || busy, run: () => void mutate({ action: "bisect", verb: facts?.bisectActive ? "reset" : "start", rev: "" }).then(() => loadFacts(true)) },
       { label: tr("dialog.gitignore"), disabled: locked, run: () => { draft = "node_modules/\ntarget/\n"; dialog = "gitignore"; } },
-      { label: tr("chrome.stats"), disabled: locked, run: () => { void loadFacts(true); dialog = "stats"; } },
-      { label: tr("chrome.lfsFiles"), disabled: locked, run: () => { void loadFacts(true); dialog = "lfs"; } },
+      { label: tr("chrome.stats"), disabled: locked, run: () => { void loadFacts(true, true); dialog = "stats"; } },
+      { label: tr("chrome.lfsFiles"), disabled: locked, run: () => { void loadFacts(true, true); dialog = "lfs"; } },
       { label: tr("chrome.githubRepo"), disabled: locked, run: () => { draft = ""; draftExtra = ""; draftUser = ""; privateRepo = false; hostForge = "github"; dialog = "github"; } },
       { label: tr("chrome.activity"), run: () => openCommandLog() },
       { label: tr("chrome.contentSearch"), disabled: locked, run: () => { section = "history"; searchOpen.commit = true; commitQuery = "S:"; } },
@@ -2981,6 +3061,16 @@
   }
 
   function blockText(root: HTMLElement, side: "left" | "right" | "all") {
+    if ((side === "left" || side === "right") && root === diffEl && splitRows.length > 0) {
+      const mark = side === "left" ? "delete" : "add";
+      return splitRows
+        .map((row) => {
+          const kind = side === "left" ? row.leftKind : row.rightKind;
+          const text = side === "left" ? row.left : row.right;
+          return (settings.showDiffMarks && kind === mark ? (side === "left" ? "-" : "+") : "") + text;
+        })
+        .join("\n");
+    }
     if (side === "left" || side === "right") {
       return [...root.querySelectorAll<HTMLElement>(`.split-code[data-side="${side}"] .split-text`)]
         .map((node) => node.textContent ?? "")
@@ -4011,8 +4101,8 @@
           }
         }
         try {
-          unlisten = await listen("repo-changed", () => {
-            if (!busy) void refresh();
+          unlisten = await listen<{ refs?: boolean } | null>("repo-changed", (event) => {
+            if (!busy) void refresh(event.payload?.refs === false ? "status" : "full");
           });
         } catch {
           /* the watcher is optional until a repository is open */
@@ -4685,13 +4775,16 @@
             {:else if diff.lines.length === 0}
               <p class="diff-empty">{tr("chrome.noChanges")}</p>
             {:else if settings.diffStyle === "split"}
-              <div class="diff-body split pick-{splitPick}" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined} role="presentation" bind:this={diffEl} onmousedown={pickSplitSide} use:splitScroller>
-                {#each splitRows as row, index (index)}
+              <div class="diff-body split virtual pick-{splitPick}" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined} style:--split-row="{splitRowHeight}px" role="presentation" bind:this={diffEl} bind:clientHeight={diffHeight} onmousedown={pickSplitSide} onscroll={(event) => (diffTop = (event.currentTarget as HTMLElement).scrollTop)} use:splitScroller={splitColumns}>
+                {#if splitWindow.start > 0}<div class="split-gap" style:height="{splitWindow.start * splitRowHeight}px"></div>{/if}
+                {#each splitWindow.rows as row, offset (splitWindow.start + offset)}
+                  {@const index = splitWindow.start + offset}
                   <div class="split-row">
                     {@render splitCell(row, "left", selectedPath ?? "", `l${index}`, splitLineAt(row, "left"))}
                     {@render splitCell(row, "right", selectedPath ?? "", `r${index}`, splitLineAt(row, "right"))}
                   </div>
                 {/each}
+                {#if splitWindow.after > 0}<div class="split-gap" style:height="{splitWindow.after * splitRowHeight}px"></div>{/if}
                 {@render splitBar()}
               </div>
             {:else}
@@ -8451,6 +8544,12 @@
     white-space: pre;
     overflow: hidden;
   }
+
+  .diff-body.split.virtual .split-row > span {
+    height: var(--split-row);
+    line-height: var(--split-row);
+  }
+  .split-gap { grid-column: 1 / -1; }
 
   .split-row > span.del { background: var(--diff-del); }
   .split-row > span.add { background: var(--diff-add); }

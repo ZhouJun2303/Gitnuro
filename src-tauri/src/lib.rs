@@ -4,20 +4,63 @@ mod perf;
 mod settings;
 mod updates;
 
+use std::collections::HashSet;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tauri::{Emitter, Manager};
 
 static GIT_WRITE: Mutex<()> = Mutex::new(());
-static WATCH_TICK: AtomicU64 = AtomicU64::new(0);
 static FAKE_IGNORE: AtomicBool = AtomicBool::new(true);
 static FAKE_IGNORE_KNOWN: AtomicBool = AtomicBool::new(false);
+static WRITE_LANE: OnceLock<Sender<Job>> = OnceLock::new();
+static SETTINGS_LANE: OnceLock<Sender<Job>> = OnceLock::new();
+
+const WATCH_QUIET: Duration = Duration::from_millis(300);
+const WATCH_MAX_WAIT: Duration = Duration::from_secs(2);
+
+type Job = Box<dyn FnOnce() + Send>;
 
 struct RepoWatch(Mutex<Option<RecommendedWatcher>>);
+
+/// What a batch of file events changed. `refs` means branches, `HEAD`, or an operation in progress.
+#[derive(Clone, serde::Serialize)]
+struct RepoChange {
+    refs: bool,
+}
+
+/// Commands never run on the main thread, which also drives the window and webview input.
+/// Writes and settings keep their call order on their own threads; reads share the blocking pool.
+fn dispatch(command: &str, job: Job) {
+    let lane = match command {
+        "stage_all" | "unstage_all" | "stage_path" | "unstage_path" | "commit_changes" | "mutate" | "approve_credential"
+        | "set_repo_author" => Some((&WRITE_LANE, "awegit-write")),
+        "load_settings" | "save_settings" | "watch_repository" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
+        | "log_client" => Some((&SETTINGS_LANE, "awegit-settings")),
+        _ => None,
+    };
+    let Some((slot, name)) = lane else {
+        tauri::async_runtime::spawn_blocking(job);
+        return;
+    };
+    let sender = slot.get_or_init(|| {
+        let (sender, receiver) = mpsc::channel::<Job>();
+        let _ = std::thread::Builder::new().name(name.into()).spawn(move || {
+            for job in receiver {
+                job();
+            }
+        });
+        sender
+    });
+    if let Err(mpsc::SendError(job)) = sender.send(job) {
+        tauri::async_runtime::spawn_blocking(job);
+    }
+}
 
 fn git_cmd(dir: &Path) -> Option<PathBuf> {
     let cmd = dir.join("git").join("cmd");
@@ -544,37 +587,72 @@ fn save_settings(values: settings::Settings) -> Result<settings::Settings, Strin
 fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, path: Option<String>) -> Result<(), String> {
     let repo = repo_from(path)?;
     let mut slot = state.0.lock().map_err(|_| "watcher lock".to_string())?;
-    let app_handle = app.clone();
+    *slot = None;
+    let (sender, receiver) = mpsc::channel::<Vec<PathBuf>>();
     let mut watcher = notify::recommended_watcher(move |result: Result<Event, notify::Error>| {
-        let Ok(event) = result else { return };
-        if !event.paths.is_empty() && event.paths.iter().all(|path| ignored_path(path)) {
-            return;
+        if let Ok(event) = result {
+            let _ = sender.send(event.paths);
         }
-        let ticket = WATCH_TICK.fetch_add(1, Ordering::Relaxed) + 1;
-        let app_handle = app_handle.clone();
-        let sample = event.paths.iter().find(|path| !ignored_path(path)).map(|path| path.display().to_string()).unwrap_or_default();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(300));
-            if WATCH_TICK.load(Ordering::Relaxed) == ticket {
-                perf::write("INFO", "watch", &format!("repo-changed {sample}"));
-                let _ = app_handle.emit("repo-changed", ());
-            }
-        });
     })
     .map_err(|error| error.to_string())?;
     watcher.watch(&repo, RecursiveMode::Recursive).map_err(|error| error.to_string())?;
+    let root = repo.clone();
+    std::thread::Builder::new()
+        .name("awegit-watch".into())
+        .spawn(move || settle_changes(&app, &root, &receiver))
+        .map_err(|error| error.to_string())?;
     *slot = Some(watcher);
     Ok(())
 }
 
-fn ignored_path(path: &Path) -> bool {
-    let text = path.to_string_lossy().replace('\\', "/");
-    text.contains("/.git/objects/")
-        || text.contains("/.git/modules/")
-        || text.contains("/target/")
-        || text.contains("/node_modules/")
-        || text.contains("/.svelte-kit/")
-        || text.ends_with(".lock")
+/// Waits for a quiet gap, then reports the batch once. Ends when the watcher is replaced.
+fn settle_changes(app: &tauri::AppHandle, repo: &Path, receiver: &Receiver<Vec<PathBuf>>) {
+    while let Ok(mut paths) = receiver.recv() {
+        let started = Instant::now();
+        while started.elapsed() < WATCH_MAX_WAIT {
+            match receiver.recv_timeout(WATCH_QUIET) {
+                Ok(more) => paths.extend(more),
+                Err(RecvTimeoutError::Timeout) => break,
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+        }
+        let Some(change) = classify_changes(repo, &paths) else { continue };
+        perf::write("INFO", "watch", &format!("repo-changed refs={} paths={}", change.refs, paths.len()));
+        let _ = app.emit("repo-changed", change);
+    }
+}
+
+/// `None` when every path is Git bookkeeping the UI does not show, or matched by ignore rules.
+fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
+    let mut status = false;
+    let mut files = Vec::new();
+    for path in paths {
+        let Ok(relative) = path.strip_prefix(repo) else { continue };
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        if relative.is_empty() || relative.ends_with(".lock") {
+            continue;
+        }
+        if let Some(inner) = relative.strip_prefix(".git/") {
+            match inner.split('/').next().unwrap_or("") {
+                "index" => status = true,
+                "objects" | "modules" | "lfs" | "logs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit" | "gitnuro" | "fsmonitor--daemon"
+                    if inner != "logs/refs/stash" => {}
+                _ => return Some(RepoChange { refs: true }),
+            }
+            continue;
+        }
+        let skip = relative.split('/').any(|part| matches!(part, ".git" | "node_modules" | "target" | ".svelte-kit"));
+        if !skip {
+            files.push(relative);
+        }
+    }
+    if !status && !files.is_empty() {
+        files.sort();
+        files.dedup();
+        let ignored: HashSet<String> = awegit_git::ignored_paths(repo, &files).into_iter().collect();
+        status = files.iter().any(|file| !ignored.contains(file));
+    }
+    status.then_some(RepoChange { refs: false })
 }
 
 #[tauri::command]
@@ -845,9 +923,13 @@ fn rebase_conflicts(path: Option<String>, onto: String) -> Result<Vec<String>, S
     awegit_git::rebase_conflicts(&repo, &onto).map_err(|error| error.to_string())
 }
 
+/// `list: false` only reports whether `git lfs` runs, without asking the server for locks.
 #[tauri::command]
-fn lfs_locks(path: Option<String>) -> Result<LfsLockReport, String> {
+fn lfs_locks(path: Option<String>, list: Option<bool>) -> Result<LfsLockReport, String> {
     let repo = repo_from(path)?;
+    if !list.unwrap_or(true) {
+        return Ok(LfsLockReport { available: awegit_git::lfs_available(&repo), locks: Vec::new() });
+    }
     let (available, locks) = awegit_git::lfs_locks(&repo).map_err(|error| error.to_string())?;
     Ok(LfsLockReport { available, locks })
 }
@@ -910,10 +992,12 @@ fn forge_pulls(path: Option<String>) -> Result<Vec<forge::PullRequest>, String> 
     )
 }
 
+/// `full: false` skips the ignored-file list, statistics, and LFS files.
 #[tauri::command]
-fn repo_facts(path: Option<String>) -> Result<awegit_git::RepoFacts, String> {
+fn repo_facts(path: Option<String>, full: Option<bool>) -> Result<awegit_git::RepoFacts, String> {
     let repo = repo_from(path)?;
-    awegit_git::repo_facts(&repo).map_err(|error| error.to_string())
+    let facts = if full.unwrap_or(true) { awegit_git::repo_facts(&repo) } else { awegit_git::repo_facts_brief(&repo) };
+    facts.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1132,7 +1216,7 @@ pub fn run() {
     perf::init();
     awegit_git::set_trace(perf::git);
     prefer_bundled_git();
-    let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = Box::new(tauri::generate_handler![
+    let handler: std::sync::Arc<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = std::sync::Arc::new(tauri::generate_handler![
             workspace_status,
             stage_all,
             unstage_all,
@@ -1215,8 +1299,17 @@ pub fn run() {
         })
         .invoke_handler(move |invoke| {
             let name = invoke.message.command().to_string();
-            let _span = (!matches!(name.as_str(), "log_client" | "perf_snapshot")).then(|| perf::command(&name));
-            handler(invoke)
+            let handler = handler.clone();
+            let resolver = invoke.resolver.clone();
+            dispatch(&name.clone(), Box::new(move || {
+                let _span = (!matches!(name.as_str(), "log_client" | "perf_snapshot")).then(|| perf::command(&name));
+                match std::panic::catch_unwind(AssertUnwindSafe(|| handler(invoke))) {
+                    Ok(true) => {}
+                    Ok(false) => resolver.reject(format!("Command {name} not found")),
+                    Err(_) => resolver.reject(format!("{name} stopped unexpectedly")),
+                }
+            }));
+            true
         })
         .build(tauri::generate_context!())
         .expect("error while building AweGit")
