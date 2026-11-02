@@ -5,7 +5,7 @@
   import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
-  import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, unstaged as sampleUnstaged } from "./sample";
+  import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "./sample";
   import { highlight } from "./highlight";
   import SplitHandle from "./SplitHandle.svelte";
   import PerfPanel from "./PerfPanel.svelte";
@@ -415,23 +415,24 @@
   const messageLow = $derived(settings.messageLow > 0 ? settings.messageLow : 50);
   const summaryTooLong = $derived(summary.length > messageHigh);
   const summaryTone = $derived(summary.length > messageHigh ? "over" : summary.length >= messageLow && summary.length > 0 ? "warn" : "");
+  function sampleRow(file: FileChange): Row {
+    return {
+      path: file.path,
+      letter: file.kind,
+      tone: file.kind === "A" ? "added" : file.kind === "D" ? "deleted" : "modified",
+    };
+  }
   const selectedDiff = $derived(mode === "sample" && selectedPath ? (diffs[selectedPath] ?? []) : []);
-  const staged = $derived<Row[]>(mode === "live" ? (snapshot?.staged ?? []).map(toRow) : []);
-  const unstaged = $derived<Row[]>(
-    mode === "live"
-      ? (snapshot?.unstaged ?? []).map(toRow)
-      : sampleUnstaged.map((file) => ({
-          path: file.path,
-          letter: file.kind,
-          tone: file.kind === "A" ? "added" : file.kind === "D" ? "deleted" : "modified",
-        })),
+  const staged = $derived<Row[]>(
+    mode === "live" ? (snapshot?.staged ?? []).map(toRow) : mode === "sample" ? sampleStaged.map(sampleRow) : [],
   );
+  const unstaged = $derived<Row[]>(mode === "live" ? (snapshot?.unstaged ?? []).map(toRow) : sampleUnstaged.map(sampleRow));
   const branchLabel = $derived(
     mode === "sample" ? "main" : (snapshot?.branch ?? (mode === "loading" ? "…" : "HEAD")),
   );
   const tabLabel = $derived(mode === "live" && snapshot ? folderName(snapshot.path) : "AweGit");
   const changeCount = $derived(
-    mode === "live" ? staged.length + unstaged.length : mode === "sample" ? unstaged.length : 0,
+    mode === "live" || mode === "sample" ? staged.length + unstaged.length : 0,
   );
   const conflicted = $derived(
     [...(snapshot?.staged ?? []), ...(snapshot?.unstaged ?? [])].some((file) => file.kind === "conflict"),
@@ -6579,8 +6580,8 @@
     max-height: 30%;
   }
 
-  .changes .staged-list,
-  .changes .file-list {
+  .changes-column .staged-list,
+  .changes-column .file-list {
     flex: 1;
     max-height: none;
   }
@@ -6901,6 +6902,11 @@
   .diff-head .text-button {
     margin-left: 0;
     flex: none;
+  }
+
+  section.diff > .diff-body {
+    flex: 1;
+    min-height: 0;
   }
 
   .diff-body {

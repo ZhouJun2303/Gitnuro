@@ -14,12 +14,58 @@ export type CommitRow = {
   unpushed?: boolean;
 };
 
-export const unstaged: FileChange[] = [
-  { path: "app/src/main/kotlin/com/zhoujun/awegit/ui/status/StatusPane.kt", kind: "M" },
-  { path: "app/src/main/kotlin/com/zhoujun/awegit/theme/Theme.kt", kind: "M" },
-  { path: "README.md", kind: "A" },
-  { path: "art/mark.png", kind: "M" },
-];
+const kinds = ["M", "A", "D"] as const;
+
+function files(paths: string[]): FileChange[] {
+  return paths.map((path, index) => ({ path, kind: kinds[index % kinds.length] }));
+}
+
+/** Web preview file lists. Paths stay unique so the two panes do not highlight the same row. */
+export const unstaged: FileChange[] = files([
+  "app/src/main/kotlin/com/zhoujun/awegit/ui/status/StatusPane.kt",
+  "app/src/main/kotlin/com/zhoujun/awegit/theme/Theme.kt",
+  "README.md",
+  "art/mark.png",
+  "src/lib/Shell.svelte",
+  "src/lib/view.ts",
+  "src/lib/status.ts",
+  "src/lib/keys.ts",
+  "src/routes/+page.svelte",
+  "src-tauri/src/lib.rs",
+  "src-tauri/src/commands.rs",
+  "crates/git/src/status.rs",
+  "crates/git/src/diff.rs",
+  "crates/git/src/history.rs",
+  "package.json",
+  "pnpm-lock.yaml",
+  "AGENTS.md",
+  "docs/shortcuts.md",
+  "scripts/package.mjs",
+  "assets/icon.svg",
+]);
+
+export const staged: FileChange[] = files([
+  "src/lib/highlight.ts",
+  "src/lib/i18n/zh.ts",
+  "src/lib/i18n/en.ts",
+  "src/lib/clonePath.ts",
+  "src/lib/layout.ts",
+  "src/app.html",
+  "src/app.css",
+  "crates/git/src/lib.rs",
+  "crates/git/src/write.rs",
+  "crates/git/src/refs.rs",
+  "crates/git/Cargo.toml",
+  "src-tauri/Cargo.toml",
+  "src-tauri/tauri.conf.json",
+  "vite.config.ts",
+  "tsconfig.json",
+  "README.zh.md",
+  "CHANGELOG.md",
+  "LICENSE",
+  "art/wordmark.svg",
+  "tests/status.test.ts",
+]);
 
 export const commits: CommitRow[] = [
   {
@@ -70,26 +116,28 @@ export const commits: CommitRow[] = [
   },
 ];
 
-export const diffs: Record<string, string[]> = {
-  "app/src/main/kotlin/com/zhoujun/awegit/ui/status/StatusPane.kt": [
-    "@@ -16,6 +16,7 @@ fun StatusPane(",
-    "     val summary = state.summary",
-    "-    Text(stringResource(Res.string.uncommited_changes_text_input_label_message))",
-    "+    SummaryField(summary, onSummaryChange)",
-    "+    DescriptionField(state.description, onDescriptionChange)",
-  ],
-  "app/src/main/kotlin/com/zhoujun/awegit/theme/Theme.kt": [
-    "@@ -8,3 +8,4 @@ val forkLightTheme = forkBase(",
-    "-    primary = Color(0xFF0067C0),",
-    "+    primary = Color(0xFF007AFF),",
-    "     background = Color(0xFFFFFFFF),",
-  ],
-  "README.md": [
-    "@@ -1,2 +1,3 @@",
-    " # AweGit",
-    "+A fast Git client for Windows and Mac.",
-  ],
-};
+/** Enough paired edits that the split diff shows at least 400 changed rows. */
+function samplePatch(path: string): string[] {
+  const name = path.split("/").pop() ?? path;
+  const lines: string[] = [];
+  const pairs = 42;
+  for (let hunk = 0; hunk < 10; hunk += 1) {
+    const start = hunk * pairs + 1;
+    lines.push(`@@ -${start},${pairs} +${start},${pairs} @@ ${name}`);
+    for (let offset = 0; offset < pairs; offset += 1) {
+      const line = start + offset;
+      lines.push(`-    ${name} previous ${line}`);
+      lines.push(`+    ${name} updated ${line}`);
+    }
+  }
+  return lines;
+}
+
+export const diffs: Record<string, string[]> = Object.fromEntries(
+  [...unstaged, ...staged]
+    .filter((file) => !file.path.endsWith(".png"))
+    .map((file) => [file.path, samplePatch(file.path)]),
+);
 
 /** 8×8 red and 8×8 red with a blue corner, so the preview can switch image modes. */
 export const sampleImages = {
