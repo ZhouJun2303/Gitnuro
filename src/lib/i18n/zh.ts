@@ -354,5 +354,9 @@ export const zh: Messages = {
     commandPrompt: "运行前询问",
     remoteBranch: "远程分支名",
     pending: "等待浏览器确认",
+    alias: "别名",
+    childFolder: "二级目录",
+    noSourceFolders: "还没有源代码文件夹。点浏览添加路径，并写上别名。",
+    noChildFolders: "这个文件夹里没有子目录。",
   },
 };

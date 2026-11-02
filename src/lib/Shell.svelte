@@ -233,9 +233,23 @@
   let historyFilter = $state("");
   let historyTop = $state(0);
   let blameLines = $state<BlameLine[] | null>(null);
-  let settings = $state<Settings>({ ...defaultSettings });
+  let settings = $state<Settings>(
+    desktopApp
+      ? { ...defaultSettings }
+      : {
+          ...defaultSettings,
+          cloneDirectory: "D:\\work",
+          sourceDirectories: ["D:\\work", "D:\\personal"],
+          groupNames: ["D:\\work" + "\t" + "工作", "D:\\personal" + "\t" + "个人"],
+        },
+  );
   let repos = $state<string[]>([]);
   let dialog = $state<Dialog>(null);
+  let openRoot = $state("");
+  let openChildren = $state<string[]>([]);
+  let openChildrenReady = $state(false);
+  let openChildrenError = $state("");
+  let prefsSave = 0;
   let draft = $state("");
   let draftExtra = $state("");
   let draftUser = $state("");
@@ -584,7 +598,7 @@
       { label: tr("chrome.explorer"), group: action, run: () => { if (snapshot) void openLocal(snapshot.path); } },
       { label: tr("chrome.flow"), group: action, run: () => { draft = ""; dialog = "flow"; } },
       { label: tr("chrome.about"), group: action, run: () => { dialog = "about"; } },
-      { label: tr("chrome.open"), group: action, run: () => { draft = ""; dialog = "open"; } },
+      { label: tr("chrome.open"), group: action, run: () => beginOpen() },
       { label: tr("chrome.workspace"), group: action, run: () => { draft = ""; dialog = "workspace"; } },
       { label: tr("chrome.clone"), group: action, run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
       { label: tr("chrome.newRepo"), group: action, run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
@@ -1647,10 +1661,13 @@
     applyToolSettings();
     if (close) dialog = null;
     if (!inApp()) return;
+    const ticket = ++prefsSave;
+    const values = settings;
     try {
-      settings = await invoke<Settings>("save_settings", { values: settings });
+      const saved = await invoke<Settings>("save_settings", { values });
+      if (ticket === prefsSave) settings = saved;
     } catch (error) {
-      actionError = message(error);
+      if (ticket === prefsSave) actionError = message(error);
     }
   }
 
@@ -1664,9 +1681,105 @@
     }
   }
 
-  async function pickFolder() {
+  function withSourceRoots(value: Settings): Settings {
+    const folder = value.cloneDirectory.trim();
+    if (!folder || value.sourceDirectories.includes(folder)) return value;
+    const groupNames = value.groupNames.some((item) => item.startsWith(`${folder}\t`))
+      ? value.groupNames
+      : [...value.groupNames, `${folder}\t${folderName(folder)}`];
+    return { ...value, sourceDirectories: [folder, ...value.sourceDirectories], groupNames };
+  }
+
+  function sourceRootList() {
+    const paths = [...settings.sourceDirectories];
+    const extra = settings.cloneDirectory.trim();
+    if (extra && !paths.includes(extra)) paths.unshift(extra);
+    return paths.map((path) => ({ path, alias: groupLabel(path) }));
+  }
+
+  function addSourceRoot(path: string) {
+    const folder = path.trim();
+    if (!folder) return;
+    if (settings.sourceDirectories.includes(folder)) {
+      if (settings.cloneDirectory !== folder) settings = { ...settings, cloneDirectory: folder };
+      return;
+    }
+    const groupNames = settings.groupNames.some((item) => item.startsWith(`${folder}\t`))
+      ? settings.groupNames
+      : [...settings.groupNames, `${folder}\t${folderName(folder)}`];
+    settings = {
+      ...settings,
+      sourceDirectories: [...settings.sourceDirectories, folder],
+      groupNames,
+      cloneDirectory: settings.cloneDirectory.trim() || folder,
+    };
+  }
+
+  function removeSourceRoot(path: string) {
+    const sourceDirectories = settings.sourceDirectories.filter((item) => item !== path);
+    const groupNames = settings.groupNames.filter((item) => !item.startsWith(`${path}\t`));
+    const cloneDirectory = settings.cloneDirectory === path ? (sourceDirectories[0] ?? "") : settings.cloneDirectory;
+    settings = { ...settings, sourceDirectories, groupNames, cloneDirectory };
+    void savePrefs(false);
+  }
+
+  function setSourceAlias(path: string, alias: string) {
+    const label = alias.trim() || folderName(path);
+    const groupNames = [...settings.groupNames.filter((item) => !item.startsWith(`${path}\t`)), `${path}\t${label}`];
+    settings = { ...settings, groupNames };
+  }
+
+  function joinPath(root: string, name: string) {
+    if (root.endsWith("/") || root.endsWith("\\")) return root + name;
+    const sep = root.includes("\\") ? "\\" : "/";
+    return `${root}${sep}${name}`;
+  }
+
+  async function listChildDirs(root: string) {
+    if (!inApp()) return root.toLowerCase().includes("personal") ? ["notes", "blog"] : ["awegit", "client"];
+    return invoke<string[]>("list_directories", { root });
+  }
+
+  async function selectOpenRoot(path: string) {
+    openRoot = path;
+    openChildren = [];
+    openChildrenReady = false;
+    openChildrenError = "";
+    if (settings.cloneDirectory !== path) {
+      settings = { ...settings, cloneDirectory: path };
+      void savePrefs(false);
+    }
+    try {
+      const names = await listChildDirs(path);
+      if (openRoot !== path) return;
+      openChildren = names;
+    } catch (error) {
+      if (openRoot !== path) return;
+      openChildrenError = message(error);
+    } finally {
+      if (openRoot === path) openChildrenReady = true;
+    }
+  }
+
+  function beginOpen() {
+    draft = "";
+    dialog = "open";
+    const roots = sourceRootList();
+    const preferred = roots.find((root) => root.path === settings.cloneDirectory)?.path ?? roots[0]?.path ?? "";
+    if (preferred) void selectOpenRoot(preferred);
+    else {
+      openRoot = "";
+      openChildren = [];
+      openChildrenReady = true;
+      openChildrenError = "";
+    }
+  }
+
+  async function browseSourceRoot() {
     const folder = await browseFolder();
-    if (folder) settings = { ...settings, cloneDirectory: folder };
+    if (!folder) return;
+    addSourceRoot(folder);
+    void savePrefs(false);
   }
 
   async function openLocal(path: string) {
@@ -1879,7 +1992,7 @@
       { label: tr("chrome.repoSettings"), disabled: locked, run: () => openRepoSettings() },
       { sep: true, label: "" },
       { label: tr("chrome.clone"), run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
-      { label: tr("chrome.open"), run: () => { draft = ""; dialog = "open"; } },
+      { label: tr("chrome.open"), run: () => beginOpen() },
       { label: tr("chrome.newRepo"), run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
       { sep: true, label: "" },
       { label: tr("chrome.terminal"), disabled: locked, run: () => void invoke("open_terminal", { path: repoPath() }) },
@@ -2341,10 +2454,8 @@
       draftExtra = "";
       dialog = "branch";
     } else if (action === "stash") void mutate({ action: "stash", message: "" });
-    else if (action === "open" || action === "newTab") {
-      draft = "";
-      dialog = "open";
-    } else if (action === "closeTab" && snapshot) closeTab(snapshot.path);
+    else if (action === "open" || action === "newTab") beginOpen();
+    else if (action === "closeTab" && snapshot) closeTab(snapshot.path);
     else if (action === "tabLeft") cycleTab(-1);
     else if (action === "tabRight") cycleTab(1);
     else if (action === "settings") dialog = "prefs";
@@ -2511,7 +2622,7 @@
       try {
         const value = await invoke<Settings>("load_settings");
         if (stopped) return;
-        settings = { ...defaultSettings, ...value, recent: value.recent ?? [], workspaces: value.workspaces ?? [], commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })), expandedGroups: value.expandedGroups ?? [], accounts: value.accounts ?? [], tabLabels: value.tabLabels ?? [], tabColors: value.tabColors ?? [], pinnedRefs: value.pinnedRefs ?? [], sourceDirectories: value.sourceDirectories ?? [], groupNames: value.groupNames ?? [] };
+        settings = withSourceRoots({ ...defaultSettings, ...value, recent: value.recent ?? [], workspaces: value.workspaces ?? [], commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })), expandedGroups: value.expandedGroups ?? [], accounts: value.accounts ?? [], tabLabels: value.tabLabels ?? [], tabColors: value.tabColors ?? [], pinnedRefs: value.pinnedRefs ?? [], sourceDirectories: value.sourceDirectories ?? [], groupNames: value.groupNames ?? [] });
         if (!settings.dateFormat.trim()) settings = { ...settings, dateFormat: "dd MMM yyyy" };
         if (!settings.proxyType) settings = { ...settings, proxyType: "http" };
         signOff = settings.signOff;
@@ -2695,7 +2806,7 @@
         {/if}
 
         <div class="welcome-actions">
-          <button class="welcome-btn" type="button" onclick={() => (dialog = "open")}>
+          <button class="welcome-btn" type="button" onclick={() => beginOpen()}>
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4a1 1 0 0 1 1-1h3.5l1.5 2H13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4z"/></svg>
             <div class="btn-meta">
               <strong>{tr("chrome.open")}</strong>
@@ -2724,7 +2835,7 @@
             <button class="text-button" type="button" onclick={async () => {
               const folder = await browseFolder();
               if (!folder) return;
-              if (!settings.sourceDirectories.includes(folder)) settings = { ...settings, sourceDirectories: [...settings.sourceDirectories, folder] };
+              addSourceRoot(folder);
               const found = await invoke<string[]>("scan_repositories", { root: folder }).catch((error) => { actionError = message(error); return [] as string[]; });
               scanned = [...new Set([...scanned, ...found])];
               void savePrefs(false);
@@ -3730,7 +3841,7 @@
   {/if}
   {#if dialog}
     <div class="scrim" role="presentation" onclick={() => { if (dialog === "prefs") void savePrefs(true); else dialog = null; }}>
-      <div class="dialog" class:wide={dialog === "prefs" || dialog === "resolve" || dialog === "stats"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+      <div class="dialog" class:wide={dialog === "prefs" || dialog === "resolve" || dialog === "stats"} class:picker={dialog === "open"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
       <form
         onchange={() => { if (dialog === "prefs") void savePrefs(false); }}
         onsubmit={async (event) => {
@@ -3741,7 +3852,6 @@
             if (checkoutNewBranch && !actionError) await mutate({ action: "checkout", name });
           }
           else if (dialog === "clone") void mutate({ action: "clone", url: draft, destination: draftExtra });
-          else if (dialog === "open") void openRepo(draft);
           else if (dialog === "command") void runCommand({ command: draftUser || draft, prompt: commandPrompt });
           else if (dialog === "prefs") void savePrefs();
           else if (dialog === "tag") void mutate({ action: "tag", name: draft, rev: draftExtra || "HEAD", message: draftUser });
@@ -3868,12 +3978,19 @@
           </div>
           <div class="pref-page">
           {#if prefTab === "general"}
-            <label>{tr("dialog.sourceFolder")}
-              <span class="pref-inline">
-                <input bind:value={settings.cloneDirectory} />
-                <button class="text-button" type="button" onclick={() => pickFolder()}>{tr("dialog.browse")}</button>
-              </span>
-            </label>
+            <div class="source-folders">
+              <div class="k">{tr("dialog.sourceFolder")}</div>
+              {#each sourceRootList() as root (root.path)}
+                <div class="composer-row source-root">
+                  <input class="alias" aria-label={tr("dialog.alias")} placeholder={tr("dialog.alias")} value={root.alias} onchange={(event) => setSourceAlias(root.path, event.currentTarget.value)} />
+                  <span class="meta source-path" title={root.path}>{root.path}</span>
+                  <button class="text-button" type="button" onclick={() => removeSourceRoot(root.path)}>{tr("menu.remove")}</button>
+                </div>
+              {:else}
+                <p class="empty">{tr("dialog.noSourceFolders")}</p>
+              {/each}
+              <button class="text-button" type="button" onclick={() => browseSourceRoot()}>{tr("dialog.browse")}</button>
+            </div>
             <div class="diff-sample" class:plain={settings.disableSyntaxHighlight}>
               <div><span class="tok-word">public func</span> elementsEqual&lt;OtherSequence&gt;(</div>
               <div class="del">{settings.showDiffMarks ? "- " : ""}isEquivalent isEquivalent: ({"{GElement}"}, {"{GElement}"})</div>
@@ -4127,15 +4244,35 @@
             <button class="text-button" type="button" onclick={() => mutate({ action: "init", destination: draftExtra })}>Init</button>
           </div>
         {:else if dialog === "open"}
-          <h2>Open repository</h2>
-          <div class="composer-row path-row">
-            <input placeholder="Path" bind:value={draft} />
-            <button class="text-button" type="button" onclick={async () => { const folder = await browseFolder(); if (folder) void openRepo(folder); }}>{tr("dialog.browse")}</button>
-          </div>
+          <h2>{tr("chrome.openRepo")}</h2>
+          {#if sourceRootList().length === 0}
+            <p class="empty">{tr("dialog.noSourceFolders")}</p>
+          {:else}
+            <div class="open-picker">
+              <div class="open-col">
+                <div class="k">{tr("dialog.sourceFolder")}</div>
+                {#each sourceRootList() as root (root.path)}
+                  <button class="text-button pick" type="button" class:on={openRoot === root.path} onclick={() => selectOpenRoot(root.path)}>{root.alias}</button>
+                {/each}
+              </div>
+              <div class="open-col">
+                <div class="k">{tr("dialog.childFolder")}</div>
+                {#each openChildren as name (name)}
+                  <button class="text-button pick" type="button" onclick={() => openRepo(joinPath(openRoot, name))}>{name}</button>
+                {/each}
+                {#if openChildrenError}
+                  <p class="empty">{openChildrenError}</p>
+                {:else if openChildrenReady && openChildren.length === 0}
+                  <p class="empty">{tr("dialog.noChildFolders")}</p>
+                {/if}
+              </div>
+            </div>
+          {/if}
           <div class="composer-row">
-            <button class="commit" type="submit">Open</button>
-            <button class="text-button" type="button" onclick={() => (dialog = "clone")}>Clone</button>
+            <button class="text-button" type="button" onclick={async () => { const folder = await browseFolder(); if (folder) void openRepo(folder); }}>{tr("dialog.browse")}</button>
+            <button class="text-button" type="button" onclick={() => (dialog = "clone")}>{tr("chrome.clone")}</button>
           </div>
+          {#if actionError}<p class="empty">{actionError}</p>{/if}
         {:else if dialog === "tag"}
           <h2>New tag</h2>
           <input placeholder="Name" bind:value={draft} />
@@ -5571,6 +5708,66 @@
   .dialog.wide {
     width: min(760px, calc(100vw - 32px));
     min-height: 520px;
+  }
+
+  .dialog.picker {
+    width: min(560px, calc(100vw - 32px));
+  }
+
+  .source-folders {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .source-folders > .text-button {
+    align-self: flex-start;
+    margin-left: 0;
+  }
+
+  .source-root .alias {
+    width: 128px;
+    flex: none;
+  }
+
+  .source-path {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .open-picker {
+    display: grid;
+    grid-template-columns: minmax(120px, 180px) 1fr;
+    gap: 16px;
+  }
+
+  .open-col {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    min-width: 0;
+    max-height: 280px;
+    overflow: auto;
+  }
+
+  .dialog .text-button.pick {
+    display: block;
+    width: 100%;
+    margin-left: 0;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dialog .text-button.pick.on {
+    background: var(--selection);
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .dialog {

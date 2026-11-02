@@ -31,6 +31,7 @@
     "allow-watch-repository",
     "allow-open-terminal",
     "allow-pick-directory",
+    "allow-list-directories",
     "allow-suggest-commit-message",
     "allow-file-preview",
     "allow-cancel-operation",

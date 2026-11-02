@@ -354,5 +354,9 @@ export const en: Messages = {
     commandPrompt: "Ask before running",
     remoteBranch: "Remote branch",
     pending: "Waiting for the browser",
+    alias: "Alias",
+    childFolder: "Subfolder",
+    noSourceFolders: "No source folders yet. Browse to add a path and give it an alias.",
+    noChildFolders: "This folder has no subfolders.",
   },
 };

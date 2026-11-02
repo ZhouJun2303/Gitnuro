@@ -197,10 +197,10 @@ pub struct Settings {
     /// `repository<TAB>branch` pairs pinned in the sidebar.
     #[serde(default)]
     pub pinned_refs: Vec<String>,
-    /// Extra folders scanned by the repository manager.
+    /// Source folders, each with an alias in `group_names`. Opening a repository lists their child folders.
     #[serde(default)]
     pub source_directories: Vec<String>,
-    /// `folder<TAB>label` names for repository-manager groups.
+    /// `folder<TAB>label` aliases, such as a source folder named 工作 or 个人.
     #[serde(default)]
     pub group_names: Vec<String>,
     #[serde(default)]

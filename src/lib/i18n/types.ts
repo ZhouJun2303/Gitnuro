@@ -354,5 +354,9 @@ export type Messages = {
     commandPrompt: string;
     remoteBranch: string;
     pending: string;
+    alias: string;
+    childFolder: string;
+    noSourceFolders: string;
+    noChildFolders: string;
   };
 };
