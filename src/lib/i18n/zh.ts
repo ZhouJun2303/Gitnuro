@@ -169,6 +169,8 @@ export const zh: Messages = {
     unstage: "取消暂存",
     discard: "放弃…",
     deleteFile: "删除…",
+    addGitignore: "加入到忽略文件",
+    addFakeignore: "加入到 fake 忽略文件",
     blame: "责备",
     history: "历史",
     reveal: "在文件管理器中显示",

@@ -177,6 +177,14 @@ pub enum Mutation {
     WriteGitignore {
         text: String,
     },
+    /// Append one path to `.gitignore` or `.fakeignore` without touching the other lines.
+    AppendIgnore {
+        file: String,
+        #[serde(default)]
+        fake: bool,
+        #[serde(default)]
+        directory: bool,
+    },
     WriteMailmap {
         text: String,
     },
@@ -441,6 +449,7 @@ fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         }
         Mutation::Bisect { verb, rev } => bisect(repo, &verb, &rev),
         Mutation::WriteGitignore { text } => write_gitignore(repo, &text),
+        Mutation::AppendIgnore { file, fake, directory } => append_ignore(repo, &file, fake, directory),
         Mutation::WriteMailmap { text } => write_mailmap(repo, &text),
         Mutation::StageHunk { file, index, unstage } => stage_hunk(repo, &file, index, unstage),
         Mutation::StageLine {
@@ -678,6 +687,62 @@ fn write_gitignore(repo: &Path, text: &str) -> Result<(), Error> {
     std::fs::write(repo.join(".gitignore"), text).map_err(|source| Error::Read {
         path: ".gitignore".into(),
         source,
+    })
+}
+
+fn append_ignore(repo: &Path, file: &str, fake: bool, directory: bool) -> Result<(), Error> {
+    let name = if fake { ".fakeignore" } else { ".gitignore" };
+    let pattern = ignore_pattern(file, directory)?;
+    let path = repo.join(name);
+    let mut text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(source) => {
+            return Err(Error::Read {
+                path: name.into(),
+                source,
+            })
+        }
+    };
+    if text.contains('\0') {
+        return Err(Error::Git(format!("{name} contains a null")));
+    }
+    if ignore_has_pattern(&text, &pattern) {
+        return Ok(());
+    }
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push_str(newline);
+    }
+    text.push_str(&pattern);
+    text.push_str(newline);
+    std::fs::write(&path, text).map_err(|source| Error::Read {
+        path: name.into(),
+        source,
+    })
+}
+
+fn ignore_pattern(file: &str, directory: bool) -> Result<String, Error> {
+    let normalized = file.replace('\\', "/");
+    let file = check_path(&normalized)?;
+    let mut pattern = String::from("/");
+    for ch in file.chars() {
+        if matches!(ch, '*' | '?' | '[' | ']' | '\\') {
+            pattern.push('\\');
+        }
+        pattern.push(ch);
+    }
+    if directory {
+        pattern.push('/');
+    }
+    Ok(pattern)
+}
+
+fn ignore_has_pattern(text: &str, pattern: &str) -> bool {
+    let bare = pattern.trim_start_matches('/');
+    text.lines().any(|line| {
+        let line = line.trim();
+        !line.is_empty() && !line.starts_with('#') && (line == pattern || line == bare)
     })
 }
 

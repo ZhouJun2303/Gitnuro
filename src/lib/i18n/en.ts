@@ -169,6 +169,8 @@ export const en: Messages = {
     unstage: "Unstage",
     discard: "Discard…",
     deleteFile: "Delete…",
+    addGitignore: "Add to ignore file",
+    addFakeignore: "Add to fake ignore file",
     blame: "Blame",
     history: "History",
     reveal: "Reveal in file manager",

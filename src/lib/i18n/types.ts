@@ -169,6 +169,8 @@ export type Messages = {
     unstage: string;
     discard: string;
     deleteFile: string;
+    addGitignore: string;
+    addFakeignore: string;
     blame: string;
     history: string;
     reveal: string;

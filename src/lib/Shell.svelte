@@ -1461,6 +1461,9 @@
       { label: tr("menu.discard"), disabled: locked, shortcut: shortcutLabel("discard"), run: () => ask(tr("menu.discard"), tr("dialog.discardBody", { name: file.path }), () => void mutate({ action: "discard", file: file.path })) },
       { label: tr("menu.deleteFile"), disabled: locked, run: () => ask(tr("menu.deleteFile"), tr("dialog.deleteBody", { name: file.path }), () => void mutate({ action: "delete", file: file.path })) },
       { sep: true, label: "" },
+      { label: tr("menu.addGitignore"), disabled: locked, run: () => void addIgnore(file.path, false, false) },
+      { label: tr("menu.addFakeignore"), disabled: locked, run: () => void addIgnore(file.path, true, false) },
+      { sep: true, label: "" },
       { label: tr("menu.blame"), disabled: locked, run: () => showBlame(file.path) },
       { label: tr("menu.history"), disabled: locked, run: () => showFileHistory(file.path) },
       { label: tr("menu.externalDiff"), disabled: locked || !settings.diffTool, run: () => void invoke("launch_tool", { path: repoPath(), kind: "diff", file: file.path }) },
@@ -2492,14 +2495,26 @@
     ask(title, files.join("\n"), () => void run(files));
   }
 
+  async function addIgnore(path: string, fake: boolean, directory: boolean) {
+    if (fake && settings.fakeIgnore === false) {
+      settings = { ...settings, fakeIgnore: true };
+      await savePrefs(false);
+    }
+    await mutate({ action: "appendIgnore", file: path, fake, directory });
+  }
+
   function dirMenu(dir: string, side: Side): MenuItem[] {
     const unstage = side === "staged";
+    const locked = mode !== "live";
     return [
       {
         label: tr(unstage ? "menu.unstageFolder" : "menu.stageFolder"),
-        disabled: mode !== "live",
+        disabled: locked,
         run: () => stageFolder(dir, unstage),
       },
+      { sep: true, label: "" },
+      { label: tr("menu.addGitignore"), disabled: locked, run: () => void addIgnore(dir, false, true) },
+      { label: tr("menu.addFakeignore"), disabled: locked, run: () => void addIgnore(dir, true, true) },
     ];
   }
 

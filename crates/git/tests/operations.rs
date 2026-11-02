@@ -845,6 +845,42 @@ fn search_commits_finds_added_text() {
 }
 
 #[test]
+fn append_ignore_adds_one_pattern_without_replacing_the_file() {
+    let repo = repo();
+    fs::write(repo.path.join(".gitignore"), "target/\n").unwrap();
+    let add = Mutation::AppendIgnore {
+        file: "src/A.kt".into(),
+        fake: false,
+        directory: false,
+    };
+    perform(&repo.path, add.clone()).unwrap();
+    perform(&repo.path, add).unwrap();
+    let text = fs::read_to_string(repo.path.join(".gitignore")).unwrap();
+    assert_eq!(text, "target/\n/src/A.kt\n");
+
+    perform(
+        &repo.path,
+        Mutation::AppendIgnore {
+            file: "notes".into(),
+            fake: true,
+            directory: true,
+        },
+    )
+    .unwrap();
+    let fake = fs::read_to_string(repo.path.join(".fakeignore")).unwrap();
+    assert_eq!(fake, "/notes/\n");
+    assert!(perform(
+        &repo.path,
+        Mutation::AppendIgnore {
+            file: "../outside".into(),
+            fake: true,
+            directory: false,
+        },
+    )
+    .is_err());
+}
+
+#[test]
 fn write_gitignore_replaces_the_root_file() {
     let repo = repo();
     commit_file(&repo, "a.txt", "a\n", "base");
