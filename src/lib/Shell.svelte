@@ -11,7 +11,7 @@
   import PerfPanel from "./PerfPanel.svelte";
   import { resolveLocale, translate } from "./i18n";
   import { shortcut, shortcutLabel, typing } from "./keys";
-  import { branchGroup, commitGraph, formatWhen, gravatarUrl, laneColors, numberedDiff, splitDiff, windowSlice, type SplitRow } from "./view";
+  import { branchGroup, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, numberedDiff, splitDiff, windowSlice, type SplitRow } from "./view";
   import {
     badge,
     type BlameLine,
@@ -3416,8 +3416,8 @@
                     <span class="graph" role="presentation" title={tr("menu.fold")} onclick={(event) => { event.stopPropagation(); toggleFold(commit.id); }}>
                       {#each liveGraph[historyStart + index] ?? [] as cell, lane (`${commit.id}-${lane}`)}
                         <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}>
-                          {#if cell?.forkFromLeft}
-                            <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M -6 14 C 0 14, 6 20, 6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
+                          {#if cell?.forkDelta}
+                            <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d={forkPath(cell.forkDelta)} fill="none" stroke="currentColor" stroke-width="2" /></svg>
                           {/if}
                           {#if cell?.mergeToLeft}
                             <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M 6 14 C 6 22, -6 28, -6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
@@ -3471,8 +3471,8 @@
                   <span class="graph" aria-hidden="true">
                     {#each sampleGraph[index] ?? [] as cell, lane (`s-${commit.id}-${lane}`)}
                       <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}>
-                        {#if cell?.forkFromLeft}
-                          <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M -6 14 C 0 14, 6 20, 6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
+                        {#if cell?.forkDelta}
+                          <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d={forkPath(cell.forkDelta)} fill="none" stroke="currentColor" stroke-width="2" /></svg>
                         {/if}
                         {#if cell?.mergeToLeft}
                           <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M 6 14 C 6 22, -6 28, -6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
@@ -5695,6 +5695,9 @@
     top: calc(50% + 3px);
     bottom: -1px;
     background: currentColor;
+  }
+  .graph-cell.line-down:not(.node)::before {
+    content: none;
   }
   .graph-curve {
     position: absolute;

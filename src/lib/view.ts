@@ -5,9 +5,17 @@ export const laneColors = ["#e0a106", "#3b82f6", "#16a34a", "#7c3aed", "#e11d48"
 export type GraphCell = {
   color: number;
   role: string;
-  forkFromLeft?: boolean;
+  /** Columns from this cell to the commit that opened the lane. Negative means that commit sits to the left. */
+  forkDelta?: number;
   mergeToLeft?: boolean;
 } | null;
+
+/** Branch curve from a commit `delta` columns away, turning into this column and running to the next row. */
+export function forkPath(delta: number): string {
+  const sx = 6 + delta * 12;
+  const mid = (sx + 6) / 2;
+  return `M ${sx} 14 C ${mid} 14, 6 16, 6 22 L 6 29`;
+}
 
 /** One row of the commit graph. Columns line up across the list. */
 export function commitGraph(commits: { id: string; parents: string[] }[]): GraphCell[][] {
@@ -71,7 +79,7 @@ export function commitGraph(commits: { id: string; parents: string[] }[]): Graph
         rowCells.push({
           color: index % laneColors.length,
           role: "line-down",
-          forkFromLeft: index > lane,
+          forkDelta: lane - index,
         });
       } else if (id) {
         rowCells.push({
