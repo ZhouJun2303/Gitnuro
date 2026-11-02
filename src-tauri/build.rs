@@ -22,7 +22,6 @@ fn main() {
             "watch_repository",
             "open_terminal",
             "pick_directory",
-            "list_directories",
             "suggest_commit_message",
             "file_preview",
             "cancel_operation",

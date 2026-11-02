@@ -245,10 +245,6 @@
   );
   let repos = $state<string[]>([]);
   let dialog = $state<Dialog>(null);
-  let openRoot = $state("");
-  let openChildren = $state<string[]>([]);
-  let openChildrenReady = $state(false);
-  let openChildrenError = $state("");
   let prefsSave = 0;
   let draft = $state("");
   let draftExtra = $state("");
@@ -1729,50 +1725,19 @@
     settings = { ...settings, groupNames };
   }
 
-  function joinPath(root: string, name: string) {
-    if (root.endsWith("/") || root.endsWith("\\")) return root + name;
-    const sep = root.includes("\\") ? "\\" : "/";
-    return `${root}${sep}${name}`;
+  function beginOpen() {
+    draft = "";
+    dialog = "open";
   }
 
-  async function listChildDirs(root: string) {
-    if (!inApp()) return root.toLowerCase().includes("personal") ? ["notes", "blog"] : ["awegit", "client"];
-    return invoke<string[]>("list_directories", { root });
-  }
-
-  async function selectOpenRoot(path: string) {
-    openRoot = path;
-    openChildren = [];
-    openChildrenReady = false;
-    openChildrenError = "";
+  async function openSourceRoot(path: string) {
     if (settings.cloneDirectory !== path) {
       settings = { ...settings, cloneDirectory: path };
       void savePrefs(false);
     }
-    try {
-      const names = await listChildDirs(path);
-      if (openRoot !== path) return;
-      openChildren = names;
-    } catch (error) {
-      if (openRoot !== path) return;
-      openChildrenError = message(error);
-    } finally {
-      if (openRoot === path) openChildrenReady = true;
-    }
-  }
-
-  function beginOpen() {
-    draft = "";
-    dialog = "open";
-    const roots = sourceRootList();
-    const preferred = roots.find((root) => root.path === settings.cloneDirectory)?.path ?? roots[0]?.path ?? "";
-    if (preferred) void selectOpenRoot(preferred);
-    else {
-      openRoot = "";
-      openChildren = [];
-      openChildrenReady = true;
-      openChildrenError = "";
-    }
+    dialog = null;
+    if (!inApp()) return;
+    await openLocal(path);
   }
 
   async function browseSourceRoot() {
@@ -3841,7 +3806,7 @@
   {/if}
   {#if dialog}
     <div class="scrim" role="presentation" onclick={() => { if (dialog === "prefs") void savePrefs(true); else dialog = null; }}>
-      <div class="dialog" class:wide={dialog === "prefs" || dialog === "resolve" || dialog === "stats"} class:picker={dialog === "open"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+      <div class="dialog" class:wide={dialog === "prefs" || dialog === "resolve" || dialog === "stats"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
       <form
         onchange={() => { if (dialog === "prefs") void savePrefs(false); }}
         onsubmit={async (event) => {
@@ -4248,24 +4213,10 @@
           {#if sourceRootList().length === 0}
             <p class="empty">{tr("dialog.noSourceFolders")}</p>
           {:else}
-            <div class="open-picker">
-              <div class="open-col">
-                <div class="k">{tr("dialog.sourceFolder")}</div>
-                {#each sourceRootList() as root (root.path)}
-                  <button class="text-button pick" type="button" class:on={openRoot === root.path} onclick={() => selectOpenRoot(root.path)}>{root.alias}</button>
-                {/each}
-              </div>
-              <div class="open-col">
-                <div class="k">{tr("dialog.childFolder")}</div>
-                {#each openChildren as name (name)}
-                  <button class="text-button pick" type="button" onclick={() => openRepo(joinPath(openRoot, name))}>{name}</button>
-                {/each}
-                {#if openChildrenError}
-                  <p class="empty">{openChildrenError}</p>
-                {:else if openChildrenReady && openChildren.length === 0}
-                  <p class="empty">{tr("dialog.noChildFolders")}</p>
-                {/if}
-              </div>
+            <div class="open-col">
+              {#each sourceRootList() as root (root.path)}
+                <button class="text-button pick" type="button" onclick={() => openSourceRoot(root.path)}>{root.alias}</button>
+              {/each}
             </div>
           {/if}
           <div class="composer-row">
@@ -5710,10 +5661,6 @@
     min-height: 520px;
   }
 
-  .dialog.picker {
-    width: min(560px, calc(100vw - 32px));
-  }
-
   .source-folders {
     display: flex;
     flex-direction: column;
@@ -5738,12 +5685,6 @@
     white-space: nowrap;
   }
 
-  .open-picker {
-    display: grid;
-    grid-template-columns: minmax(120px, 180px) 1fr;
-    gap: 16px;
-  }
-
   .open-col {
     display: flex;
     flex-direction: column;
@@ -5762,12 +5703,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .dialog .text-button.pick.on {
-    background: var(--selection);
-    border-color: var(--accent);
-    color: var(--accent);
   }
 
   .dialog {

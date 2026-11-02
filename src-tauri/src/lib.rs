@@ -609,34 +609,6 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
     }
 }
 
-/// Immediate child folders of a saved source root, used when opening a repository.
-#[tauri::command]
-fn list_directories(root: String) -> Result<Vec<String>, String> {
-    let dir = std::path::Path::new(&root);
-    if !dir.is_dir() {
-        return Err(format!("{root} is not a directory"));
-    }
-    let mut names = Vec::new();
-    for entry in std::fs::read_dir(dir).map_err(|error| error.to_string())?.flatten() {
-        let Ok(meta) = entry.metadata() else { continue };
-        if !meta.is_dir() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.')
-            || matches!(
-                name.as_str(),
-                "node_modules" | "target" | "dist" | "vendor" | "$RECYCLE.BIN" | "System Volume Information"
-            )
-        {
-            continue;
-        }
-        names.push(name);
-    }
-    names.sort_by_key(|name| name.to_lowercase());
-    Ok(names)
-}
-
 #[tauri::command]
 fn file_preview(path: Option<String>, file: String) -> Result<Option<awegit_git::FilePreview>, String> {
     let repo = repo_from(path)?;
@@ -1030,7 +1002,6 @@ pub fn run() {
             watch_repository,
             open_terminal,
             pick_directory,
-            list_directories,
             suggest_commit_message,
             file_preview,
             cancel_operation,

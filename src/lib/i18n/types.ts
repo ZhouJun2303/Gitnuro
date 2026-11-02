@@ -355,8 +355,6 @@ export type Messages = {
     remoteBranch: string;
     pending: string;
     alias: string;
-    childFolder: string;
     noSourceFolders: string;
-    noChildFolders: string;
   };
 };
