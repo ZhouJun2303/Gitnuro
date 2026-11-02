@@ -169,7 +169,9 @@ export type Messages = {
     stage: string;
     unstage: string;
     discard: string;
+    discardSelected: string;
     deleteFile: string;
+    deleteSelected: string;
     addGitignore: string;
     addFakeignore: string;
     addGitignoreSelected: string;
@@ -219,6 +221,8 @@ export type Messages = {
     fold: string;
     compareBranches: string;
     stashSelected: string;
+    stashFile: string;
+    stashFiles: string;
     pushAs: string;
     openWeb: string;
     showLine: string;
@@ -236,6 +240,9 @@ export type Messages = {
     deleteBranch: string;
     deleteBranchBody: string;
     discardBody: string;
+    discardFilesBody: string;
+    stashFiles: string;
+    stashFile: string;
     discardLinesBody: string;
     deleteBody: string;
     hardReset: string;

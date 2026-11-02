@@ -118,7 +118,7 @@ const base: Array<[Shortcut, Chord[]]> = [
   ["commitPush", [{ key: "Enter", ctrl: true, shift: true }]],
   ["stageToggle", [{ key: "s", ctrl: true, shift: true }]],
   ["stageAll", [{ key: "s", ctrl: true, alt: true, shift: true }]],
-  ["discard", [{ key: "d", ctrl: true, shift: true }, { key: "Backspace" }]],
+  ["discard", [{ key: "Delete" }, { key: "d", ctrl: true, shift: true }, { key: "Backspace" }]],
   ["explorer", [{ key: "o", ctrl: true, alt: true }]],
   ["terminal", [{ key: "t", ctrl: true, alt: true }]],
   ["filterBranch", [{ key: "a", ctrl: true, shift: true }]],

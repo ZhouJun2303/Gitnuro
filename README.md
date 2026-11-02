@@ -112,7 +112,7 @@ pnpm package:mac
 | 提交并推送 | `Ctrl+Shift+Enter` |
 | 暂存或取消暂存 | `Ctrl+Shift+S` |
 | 全部暂存 | `Ctrl+Alt+Shift+S` |
-| 丢弃 | `Ctrl+Shift+D` 或 `Backspace` |
+| 丢弃修改 | `Delete`、`Ctrl+Shift+D` 或 `Backspace` |
 | 全选当前列表或差异，再按一次取消 | `Ctrl+A` |
 | 拉取 | `Ctrl+Shift+L` |
 | 推送 | `Ctrl+Shift+P` |

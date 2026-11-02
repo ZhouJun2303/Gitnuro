@@ -315,6 +315,7 @@
   let sessionLog = $state<string[]>([]);
   let fieldValues = $state<Record<string, string>>({});
   let includeUntracked = $state(false);
+  let stashFiles = $state<string[]>([]);
   let flowKind = $state("feature");
   let privateRepo = $state(false);
   let mergeResult = $state("");
@@ -634,7 +635,7 @@
       { label: tr("chrome.push"), group: action, run: () => void doPush() },
       { label: tr("menu.createTag"), group: action, run: () => { draft = ""; draftExtra = "HEAD"; draftUser = ""; dialog = "tag"; } },
       { label: tr("chrome.pushTags"), group: action, run: () => void mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: settings.forceWithLease }) },
-      { label: tr("chrome.stash"), group: action, run: () => { draft = ""; dialog = "stash"; } },
+      { label: tr("chrome.stash"), group: action, run: () => openStash([]) },
       { label: tr("chrome.pop"), group: action, run: () => void mutate({ action: "stashPop" }) },
       { label: tr("chrome.refresh"), group: action, run: () => void refresh() },
       { label: tr("chrome.stageAll"), group: action, run: () => void runChange("stage_all") },
@@ -1234,9 +1235,9 @@
     const picked = pickedIn(shownUnstaged);
     const selection: MenuItem[] = picked.length > 1
       ? [
-          { label: tr("chrome.discardSelected"), disabled: mode !== "live" || busy, run: () => confirmPicked(picked, tr("chrome.discardSelected"), discardPicked) },
-          { label: tr("chrome.deleteSelected"), disabled: mode !== "live" || busy, run: () => confirmPicked(picked, tr("chrome.deleteSelected"), deletePicked) },
-          { label: tr("menu.stashSelected"), disabled: mode !== "live" || busy, run: () => void mutate({ action: "stashPaths", files: picked, message: "", includeUntracked: false }) },
+          { label: tr("menu.discardSelected", { count: String(picked.length) }), disabled: mode !== "live" || busy, shortcut: shortcutLabel("discard"), run: () => discardChosen(picked) },
+          { label: tr("menu.deleteSelected", { count: String(picked.length) }), disabled: mode !== "live" || busy, run: () => deleteChosen(picked) },
+          { label: tr("menu.stashFiles", { count: String(picked.length) }), disabled: mode !== "live" || busy, run: () => openStash(picked) },
           { label: tr("menu.addGitignoreSelected", { count: String(picked.length) }), disabled: mode !== "live" || busy, run: () => void addIgnore(picked, false, false) },
           { label: tr("menu.addFakeignoreSelected", { count: String(picked.length) }), disabled: mode !== "live" || busy, run: () => void addIgnore(picked, true, false) },
           { sep: true },
@@ -1513,11 +1514,12 @@
     const count = String(targets.length);
     return [
       { label: many ? tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected") : tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked, shortcut: shortcutLabel("stageToggle"), run: () => stageChosen(side, targets) },
-      { label: many && side === "unstaged" ? tr("chrome.discardSelected") : tr("menu.discard"), disabled: locked || (many && side === "staged"), shortcut: shortcutLabel("discard"), run: () => { if (many && side === "unstaged") confirmPicked(targets, tr("chrome.discardSelected"), discardPicked); else if (!many) ask(tr("menu.discard"), tr("dialog.discardBody", { name: file.path }), () => void mutate({ action: "discard", file: file.path })); } },
-      { label: many ? tr("chrome.deleteSelected") : tr("menu.deleteFile"), disabled: locked, run: () => { if (many) confirmPicked(targets, tr("chrome.deleteSelected"), deletePicked); else ask(tr("menu.deleteFile"), tr("dialog.deleteBody", { name: file.path }), () => void mutate({ action: "delete", file: file.path })); } },
+      { label: many ? tr("menu.discardSelected", { count }) : tr("menu.discard"), disabled: locked || (side === "staged" && many), shortcut: shortcutLabel("discard"), run: () => discardChosen(targets) },
+      { label: many ? tr("menu.deleteSelected", { count }) : tr("menu.deleteFile"), disabled: locked, run: () => deleteChosen(targets) },
       { sep: true, label: "" },
       { label: many ? tr("menu.addGitignoreSelected", { count }) : tr("menu.addGitignore"), disabled: locked, run: () => void addIgnore(targets, false, false) },
       { label: many ? tr("menu.addFakeignoreSelected", { count }) : tr("menu.addFakeignore"), disabled: locked, run: () => void addIgnore(targets, true, false) },
+      { label: many ? tr("menu.stashFiles", { count }) : tr("menu.stashFile"), disabled: locked, run: () => openStash(targets) },
       { sep: true, label: "" },
       { label: tr("menu.blame"), disabled: locked, run: () => showBlame(file.path) },
       { label: tr("menu.history"), disabled: locked, run: () => showFileHistory(file.path) },
@@ -2399,7 +2401,7 @@
       { label: tr("chrome.fetch"), disabled: locked || busy, run: () => confirmSync("fetch") },
       { label: tr("chrome.pull"), disabled: locked || busy, run: () => confirmSync("pull") },
       { label: tr("chrome.push"), disabled: locked || busy, run: () => confirmSync("push") },
-      { label: tr("chrome.stash"), disabled: locked || busy, run: () => { draft = ""; includeUntracked = false; dialog = "stash"; } },
+      { label: tr("chrome.stash"), disabled: locked || busy, run: () => openStash([]) },
       { label: tr("chrome.bisect"), disabled: locked || busy, run: () => void mutate({ action: "bisect", verb: facts?.bisectActive ? "reset" : "start", rev: "" }).then(() => loadFacts(true)) },
       { label: tr("dialog.gitignore"), disabled: locked, run: () => { draft = "node_modules/\ntarget/\n"; dialog = "gitignore"; } },
       { label: tr("chrome.stats"), disabled: locked, run: () => { void loadFacts(true); dialog = "stats"; } },
@@ -2566,6 +2568,35 @@
     ask(title, files.join("\n"), () => void run(files));
   }
 
+  function discardChosen(files: string[]) {
+    const names = files.filter((path) => path.length > 0);
+    if (names.length === 0 || mode !== "live") return;
+    if (names.length === 1) {
+      ask(tr("chrome.discardSelected"), tr("dialog.discardBody", { name: names[0] ?? "" }), () => void mutate({ action: "discard", file: names[0] }));
+      return;
+    }
+    ask(tr("chrome.discardSelected"), `${tr("dialog.discardFilesBody", { count: String(names.length) })}\n${names.join("\n")}`, () => void discardPicked(names));
+  }
+
+  function deleteChosen(files: string[]) {
+    const names = files.filter((path) => path.length > 0);
+    if (names.length === 0 || mode !== "live") return;
+    if (names.length === 1) {
+      ask(tr("menu.deleteFile"), tr("dialog.deleteBody", { name: names[0] ?? "" }), () => void mutate({ action: "delete", file: names[0] }));
+      return;
+    }
+    confirmPicked(names, tr("chrome.deleteSelected"), deletePicked);
+  }
+
+  function openStash(files: string[]) {
+    const names = [...new Set(files.filter((path) => path.length > 0))];
+    draft = "";
+    const rows = [...unstaged, ...staged];
+    includeUntracked = names.some((path) => rows.some((file) => file.path === path && (file.letter === "A" || file.letter === "?")));
+    stashFiles = names;
+    dialog = "stash";
+  }
+
   function ignoreTargets(path: string, side: Side) {
     const rows = side === "staged" ? shownStaged : shownUnstaged;
     const selected = pickedIn(rows);
@@ -2587,23 +2618,32 @@
   function dirMenu(dir: string, side: Side): MenuItem[] {
     const unstage = side === "staged";
     const locked = mode !== "live";
+    const files = filesInDir(dir, side);
+    const count = String(files.length);
     return [
       {
         label: tr(unstage ? "menu.unstageFolder" : "menu.stageFolder"),
         disabled: locked,
         run: () => stageFolder(dir, unstage),
       },
+      { label: files.length > 1 ? tr("menu.discardSelected", { count }) : tr("menu.discard"), disabled: locked || unstage || files.length === 0, shortcut: shortcutLabel("discard"), run: () => discardChosen(files) },
+      { label: files.length > 1 ? tr("menu.deleteSelected", { count }) : tr("menu.deleteFile"), disabled: locked || files.length === 0, run: () => deleteChosen(files) },
       { sep: true, label: "" },
       { label: tr("menu.addGitignore"), disabled: locked, run: () => void addIgnore([dir], false, true) },
       { label: tr("menu.addFakeignore"), disabled: locked, run: () => void addIgnore([dir], true, true) },
+      { label: files.length > 1 ? tr("menu.stashFiles", { count }) : tr("menu.stashFile"), disabled: locked || files.length === 0, run: () => openStash(files) },
     ];
   }
 
-  function stageFolder(dir: string, unstage: boolean) {
-    const source = unstage ? shownStaged : shownUnstaged;
-    const files = source
+  function filesInDir(dir: string, side: Side) {
+    const source = side === "staged" ? shownStaged : shownUnstaged;
+    return source
       .filter((file) => file.path === dir || file.path.startsWith(`${dir}/`) || file.path.startsWith(`${dir}\\`))
       .map((file) => file.path);
+  }
+
+  function stageFolder(dir: string, unstage: boolean) {
+    const files = filesInDir(dir, unstage ? "staged" : "unstaged");
     if (files.length > 0) void mutate({ action: "stagePaths", files, unstage });
   }
 
@@ -3467,10 +3507,12 @@
       const chosen = pickedIn(rows);
       stageChosen(selectedSide, chosen.length > 1 && chosen.includes(selectedPath) ? chosen : [selectedPath]);
     } else if (action === "stageAll") void runChange(selectedSide === "staged" ? "unstage_all" : "stage_all");
-    else if (action === "discard" && selectedPath && selectedSide === "unstaged") {
+    else if (action === "discard") {
+      const bareDelete = event.key === "Delete";
+      const inUnstaged = (event.target as HTMLElement | null)?.closest(".unstaged-pane");
+      if ((bareDelete && !inUnstaged) || dialog || menu || launchOpen || !selectedPath || selectedSide !== "unstaged") return;
       const chosen = pickedIn(shownUnstaged);
-      if (chosen.length > 1 && chosen.includes(selectedPath)) confirmPicked(chosen, tr("chrome.discardSelected"), discardPicked);
-      else ask(tr("menu.discard"), tr("dialog.discardBody", { name: selectedPath }), () => void mutate({ action: "discard", file: selectedPath }));
+      discardChosen(chosen.length > 1 && chosen.includes(selectedPath) ? chosen : [selectedPath]);
     } else if (action === "explorer" && snapshot) void openLocal(snapshot.path);
     else if (action === "terminal") void invoke("open_terminal", { path: repoPath() });
     else if (action === "filterBranch") {
@@ -4722,10 +4764,14 @@
         <div class="pick-bar">
           {#if unstagedFiles.length > 1}
             <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => void stagePicked(unstagedFiles)}>{tr("chrome.stageSelected")}</button>
-            <button class="pane-chip danger" type="button" disabled={mode !== "live" || busy} onclick={() => confirmPicked(unstagedFiles, tr("chrome.discardSelected"), discardPicked)}>{tr("chrome.discardSelected")}</button>
+            <button class="pane-chip danger" type="button" disabled={mode !== "live" || busy} onclick={() => discardChosen(unstagedFiles)}>{tr("chrome.discardSelected")}</button>
+            <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => openStash(unstagedFiles)}>{tr("chrome.stash")}</button>
+            <button class="pane-chip danger" type="button" disabled={mode !== "live" || busy} onclick={() => deleteChosen(unstagedFiles)}>{tr("chrome.deleteSelected")}</button>
           {/if}
           {#if stagedFiles.length > 1}
             <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => void unstagePicked(stagedFiles)}>{tr("chrome.unstageSelected")}</button>
+            <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => openStash(stagedFiles)}>{tr("chrome.stash")}</button>
+            <button class="pane-chip danger" type="button" disabled={mode !== "live" || busy} onclick={() => deleteChosen(stagedFiles)}>{tr("chrome.deleteSelected")}</button>
           {/if}
         </div>
       {/if}
@@ -5049,7 +5095,14 @@
             else void doPull();
           }
           else if (dialog === "push") void mutate({ action: "push", remote: draft || null, setUpstream: !refs?.branches.some((branch) => branch.current && branch.upstream), tags: draftExtra === "tags", forceWithLease: settings.forceWithLease });
-          else if (dialog === "stash") void mutate({ action: "stash", message: draft, includeUntracked });
+          else if (dialog === "stash") {
+            const files = stashFiles;
+            stashFiles = [];
+            if (files.length > 0) {
+              await mutate({ action: "stashPaths", files, message: draft, includeUntracked });
+              if (!actionError) picked = picked.filter((path) => !files.includes(path));
+            } else await mutate({ action: "stash", message: draft, includeUntracked });
+          }
           else if (dialog === "rename") void mutate({ action: "renameBranch", name: draft, to: draftExtra });
           else if (dialog === "upstream") void mutate({ action: "setUpstream", branch: draft, upstream: draftExtra });
           else if (dialog === "reword") void mutate({ action: "reword", rev: draftExtra || "HEAD", summary: draft });
@@ -5552,10 +5605,11 @@
             <button class="commit" type="submit">{tr("chrome.push")}</button>
           </div>
         {:else if dialog === "stash"}
-          <h2>Stash</h2>
-          <input placeholder="Message (optional)" bind:value={draft} />
+          <h2>{stashFiles.length > 1 ? tr("dialog.stashFiles", { count: String(stashFiles.length) }) : stashFiles.length === 1 ? tr("dialog.stashFile", { name: stashFiles[0] }) : tr("chrome.stash")}</h2>
+          {#if stashFiles.length > 0}<pre class="diff-body stash-paths">{stashFiles.join("\n")}</pre>{/if}
+          <input placeholder={tr("dialog.message")} bind:value={draft} />
           <label class="check"><input type="checkbox" bind:checked={includeUntracked} /> {tr("dialog.includeUntracked")}</label>
-          <button class="commit" type="submit">Stash</button>
+          <button class="commit" type="submit">{tr("chrome.stash")}</button>
         {:else if dialog === "rename"}
           <h2>Rename branch</h2>
           <input placeholder="Current name" bind:value={draft} />
@@ -6597,11 +6651,18 @@
   .pick-bar {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 4px;
     min-height: 32px;
     padding: 4px 8px;
     border-bottom: 1px solid var(--line);
     background: var(--canvas);
+  }
+
+  .stash-paths {
+    max-height: 160px;
+    margin: 0;
+    white-space: pre-wrap;
   }
 
   .pane-chip.danger {
