@@ -501,6 +501,15 @@
   const fileStride = $derived(fileLayout === "tree" ? rowTree : rowFile);
   const fileWindow = $derived(windowSlice(unstagedTree, fileTop, fileStride));
   const diffLines = $derived(diff?.lines ?? []);
+
+  function discardableEntries(indexes: number[]) {
+    if (selectedSide !== "unstaged") return [];
+    return indexes
+      .map((index) => ({ line: diffLines[index], index }))
+      .filter((entry): entry is { line: DiffLine; index: number } => !!entry.line && entry.line.workAt != null && (entry.line.kind === "add" || entry.line.kind === "delete"));
+  }
+
+  const discardableSelected = $derived(discardableEntries(diffSelected));
   const shownDiffLines = $derived(numberedDiff(diffLines));
   const liveGraph = $derived(commitGraph(historyItems.map((commit) => ({ id: commit.id, parents: commit.parents ?? [] }))));
   const diffWindow = $derived(windowSlice(diffLines, diffTop, 18));
@@ -2829,8 +2838,35 @@
     if (mode === "live") void loadDiff();
   }
 
+  function toggleAllDiffLines() {
+    if (blameLines || section !== "changes" || diffLines.length === 0) return false;
+    const complete = diffSelected.length === diffLines.length && diffLines.every((_, index) => diffSelected.includes(index));
+    clearTextSelection();
+    if (complete) {
+      diffSelected = [];
+      return true;
+    }
+    diffAnchor = 0;
+    diffSelected = diffLines.map((_, index) => index);
+    return true;
+  }
+
   function selectAllHere() {
     const textZone = keyTarget === "diff" || keyTarget === "blob" || keyTarget === "detail";
+    if (textZone && keyTarget === "diff" && toggleAllDiffLines()) {
+      if (diffSelected.length > 0) {
+        const root = activeTextRoot();
+        if (root) {
+          const side = diffSide(root);
+          const text = blockText(root, side).replace(/\n$/, "");
+          if (text.length > 0) {
+            heldText = text;
+            textSide = side;
+          }
+        }
+      }
+      return;
+    }
     if (textZone && (heldText || textWhere || textFile)) {
       clearTextSelection();
       return;
@@ -3131,7 +3167,7 @@
       .map((index) => ({ line: diffLines[index], index }))
       .filter((entry): entry is { line: DiffLine; index: number } => !!entry.line);
     const stageable = entries.filter((entry) => entry.line.stageAt != null && (entry.line.kind === "add" || entry.line.kind === "delete"));
-    const discardable = selectedSide === "unstaged" ? entries.filter((entry) => entry.line.workAt != null && (entry.line.kind === "add" || entry.line.kind === "delete")) : [];
+    const discardable = discardableEntries(indexes);
     const hunks = new Set(indexes.map(hunkOf).filter((hunk): hunk is number => hunk != null));
     const oneHunk = hunks.size === 1 ? [...hunks][0] : null;
     const locked = busy || mode !== "live";
@@ -4197,6 +4233,9 @@
           {:else if mode === "live" && section === "changes" && selectedPath}
             <header class="diff-head">
               <span>{selectedPath}</span>
+              {#if discardableSelected.length > 1}
+                <button class="pane-chip danger" type="button" disabled={busy} onclick={() => ask(tr("menu.discardLines"), tr("dialog.discardLinesBody", { count: String(discardableSelected.length) }), () => void applyLineOps("discardLine", discardableSelected))}>{tr("menu.discardLines")}</button>
+              {/if}
             </header>
             {#if diff && diff.lines.length > 0}
               <div class="minimap">
@@ -4593,6 +4632,7 @@
           {@render fileViewButton()}
         </div>
       </div>
+      {@render pickedActions(pickedIn(shownUnstaged), pickedIn(shownStaged))}
       <div class="file-list">
         {#each shownStaged as file (`s:${file.path}`)}
           <button class="side" type="button" class:selected={selectedPath === file.path && selectedSide === "staged"} class:picked={picked.includes(file.path) && !(selectedPath === file.path && selectedSide === "staged")} onclick={() => selectFile(file.path, "staged")}><span class="meta">{tr("chrome.staged")}</span> <span class="name">{file.path}</span></button>
@@ -4611,12 +4651,10 @@
           <span class="count">{staged.length}</span>
         </div>
         <div class="pane-tools">
-          {#if stagedPicked.length > 1}
-            <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => void unstagePicked(stagedPicked)}>{tr("chrome.unstageSelected")}</button>
-          {/if}
           <button class="pane-chip" type="button" disabled={mode !== "live" || busy || staged.length === 0} onclick={() => runChange("unstage_all")}>{tr("chrome.unstageAll")}</button>
         </div>
       </div>
+      {@render pickedActions([], stagedPicked)}
       {#if shownStaged.length === 0}
         <p class="empty">{staged.length === 0 ? tr("chrome.noStaged") : tr("chrome.noMatch")}</p>
       {:else}
@@ -4646,12 +4684,10 @@
         <div class="pane-tools">
           {@render searchToggle("file", tr("chrome.filterFiles"))}
           {@render fileViewButton()}
-          {#if unstagedPicked.length > 1}
-            <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => void stagePicked(unstagedPicked)}>{tr("chrome.stageSelected")}</button>
-          {/if}
           <button class="pane-chip pane-go" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>{tr("chrome.stageAll")}</button>
         </div>
       </div>
+      {@render pickedActions(unstagedPicked, [])}
       <div class="file-list" onscroll={(event) => (fileTop = (event.currentTarget as HTMLElement).scrollTop)}>
         {#if showIgnored}
           {#each facts?.ignored ?? [] as path (path)}
@@ -4679,6 +4715,20 @@
           </div>
         {/if}
       </div>
+    {/snippet}
+
+    {#snippet pickedActions(unstagedFiles: string[], stagedFiles: string[])}
+      {#if unstagedFiles.length > 1 || stagedFiles.length > 1}
+        <div class="pick-bar">
+          {#if unstagedFiles.length > 1}
+            <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => void stagePicked(unstagedFiles)}>{tr("chrome.stageSelected")}</button>
+            <button class="pane-chip danger" type="button" disabled={mode !== "live" || busy} onclick={() => confirmPicked(unstagedFiles, tr("chrome.discardSelected"), discardPicked)}>{tr("chrome.discardSelected")}</button>
+          {/if}
+          {#if stagedFiles.length > 1}
+            <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => void unstagePicked(stagedFiles)}>{tr("chrome.unstageSelected")}</button>
+          {/if}
+        </div>
+      {/if}
     {/snippet}
 
     {#snippet fileRow(file: Row, side: Side, depth = 0)}
@@ -6544,6 +6594,25 @@
     opacity: 0.45;
   }
 
+  .pick-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 32px;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--line);
+    background: var(--canvas);
+  }
+
+  .pane-chip.danger {
+    color: var(--deleted);
+  }
+
+  .pane-chip.danger:hover:not(:disabled) {
+    color: var(--deleted);
+    background: color-mix(in srgb, var(--deleted) 14%, transparent);
+  }
+
   .search.pane-filter {
     min-width: 60px;
     height: 24px;
@@ -6902,6 +6971,11 @@
   .diff-head .text-button {
     margin-left: 0;
     flex: none;
+  }
+
+  .diff-head .pane-chip {
+    margin-left: auto;
+    font-family: var(--font);
   }
 
   section.diff > .diff-body {
