@@ -242,7 +242,6 @@ body {
 :root :is(
   .icon-btn,
   .text-button,
-  .segment button,
   .tab,
   .side,
   .file,
@@ -256,8 +255,11 @@ body {
   .launch-trigger,
   .recent-card,
   .tab-add,
+  .tool-btn,
   .repo-section,
   .repo-row,
+  .command-item,
+  .command-filters button,
   button.virtual-row
 ):not(:disabled):not(.on):not(.active):not(.selected):not(.current):active {
   background: var(--pressed);
@@ -271,10 +273,10 @@ body {
   .menu,
   .menu-dismiss,
   .repo-picker,
+  .command-log,
   .palette-scrim,
   .scrim,
   .pane-head,
-  .segment,
   .icon-btn {
     display: none !important;
   }

@@ -103,6 +103,16 @@
   type RepoEntry =
     | { kind: "folder"; path: string; name: string; repos: string[] }
     | { kind: "repo"; path: string };
+  type CommandEntry = {
+    id: number;
+    title: string;
+    summary: string;
+    command: string;
+    output: string;
+    ok: boolean;
+    at: number;
+    source: "user" | "background";
+  };
 
   const defaultSettings: Settings = {
     theme: "system",
@@ -265,6 +275,13 @@
   let scannedRepos = $state<string[]>([]);
   let repoScanning = $state(false);
   let repoScanToken = 0;
+  let commandLog = $state<CommandEntry[]>([]);
+  let commandLogOpen = $state(false);
+  let commandFilter = $state<"all" | "user" | "background">("all");
+  let commandPick = $state(0);
+  let commandButton = $state<HTMLButtonElement | null>(null);
+  let commandPos = $state({ x: 12, y: 80, width: 860, maxHeight: 460 });
+  let commandSeq = 0;
   let dialog = $state<Dialog>(null);
   let prefsSave = 0;
   let draft = $state("");
@@ -731,6 +748,7 @@
 
   async function openLaunch() {
     repoPickerOpen = false;
+    commandLogOpen = false;
     launch = "";
     launchIndex = 0;
     launchOpen = true;
@@ -964,37 +982,178 @@
   }
 
   async function runChange(command: string, extra: Record<string, unknown> = {}) {
-    if (mode !== "live" || busy) return;
+    if (mode !== "live" || busy) return undefined;
     busy = true;
     actionError = null;
     try {
-      const value = await invoke<StatusSnapshot>(command, { path: repoPath(), ...extra });
+      const value = await invoke<StatusSnapshot & { log?: string }>(command, { path: repoPath(), ...extra });
       applySnapshot(value);
       await loadDiff();
+      return value;
     } catch (error) {
       actionError = message(error);
+      return null;
     } finally {
       busy = false;
     }
   }
 
-  async function mutate(request: Record<string, unknown>) {
+  const quietGit = new Set(["stageHunk", "stageLine", "discardHunk", "discardLine", "setExpanded", "setHidden", "setSignOff"]);
+
+  function shellArg(value: string) {
+    return /^[A-Za-z0-9_./:@+=,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+  }
+
+  function gitLine(args: string[]) {
+    return `git ${args.filter(Boolean).map(shellArg).join(" ")}`;
+  }
+
+  function commandExcerpt(text: string) {
+    const line = text.split(/\r?\n/).map((item) => item.trim()).find((item) => item.length > 0) ?? "";
+    return line.length > 140 ? `${line.slice(0, 137)}…` : line;
+  }
+
+  function describeRequest(request: Record<string, unknown>) {
+    const action = String(request.action ?? "");
+    const text = (key: string) => (typeof request[key] === "string" ? String(request[key]) : "");
+    const remote = text("remote");
+    const branch = snapshot?.branch || "HEAD";
+    switch (action) {
+      case "fetch":
+        return {
+          title: tr("chrome.commandFetchFrom", { name: remote || tr("dialog.allRemotes") }),
+          command: gitLine(["fetch", request.prune ? "--prune" : "", request.tags ? "--tags" : "", remote || "--all"]),
+        };
+      case "pull":
+        return { title: tr("chrome.pull"), command: gitLine(["pull", request.autostash ? "--autostash" : "", request.rebase ? "--rebase" : "--no-rebase"]) };
+      case "push":
+        return {
+          title: remote ? tr("chrome.commandPushTo", { branch, remote }) : tr("chrome.push"),
+          command: gitLine(["push", request.setUpstream ? "--set-upstream" : "", request.tags ? "--tags" : "", request.force ? "--force" : request.forceWithLease ? "--force-with-lease" : "", remote, request.setUpstream ? "HEAD" : ""]),
+        };
+      case "checkout":
+      case "checkoutRemote":
+        return { title: `${tr("menu.checkout")} ${text("name")}`, command: gitLine(["checkout", text("name")]) };
+      case "merge":
+        return { title: `${tr("menu.merge")} ${text("name")}`, command: gitLine(["merge", request.noFf ? "--no-ff" : "", text("name")]) };
+      case "stash":
+        return { title: tr("chrome.stash"), command: gitLine(["stash", "push", text("message") ? "-m" : "", text("message")]) };
+      case "stashPop":
+        return { title: tr("chrome.pop"), command: gitLine(["stash", "pop", text("name")]) };
+      case "clone":
+        return { title: `${tr("chrome.clone")} ${text("url")}`, command: gitLine(["clone", text("url"), text("destination")]) };
+      case "init":
+        return { title: tr("chrome.newRepo"), command: gitLine(["init", text("destination")]) };
+      case "custom":
+        return { title: text("command").split("\n")[0] || tr("chrome.activity"), command: text("command") };
+      case "submoduleUpdate":
+        return { title: tr("chrome.submodules"), command: gitLine(["submodule", "update", "--init", "--recursive"]) };
+      default:
+        return { title: action || tr("chrome.activity"), command: gitLine([action, text("name"), text("rev")]) };
+    }
+  }
+
+  function recordCommand(action: string, described: { title: string; command: string }, output: string, ok: boolean, source: "user" | "background") {
+    if (quietGit.has(action)) return;
+    const text = output.trim();
+    const item: CommandEntry = {
+      id: ++commandSeq,
+      title: described.title,
+      command: described.command,
+      output: text,
+      summary: commandExcerpt(text) || (ok ? tr("chrome.commandSucceeded") : tr("chrome.commandFailed")),
+      ok,
+      at: Date.now(),
+      source,
+    };
+    commandLog = [item, ...commandLog].slice(0, 80);
+    if (!commandLogOpen) commandPick = item.id;
+  }
+
+  function visibleCommands() {
+    return commandFilter === "all" ? commandLog : commandLog.filter((item) => item.source === commandFilter);
+  }
+
+  function commandClock(at: number) {
+    return new Date(at).toLocaleTimeString(activeLocale === "zh" ? "zh-CN" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
+  function commandStamp(at: number) {
+    return new Date(at).toLocaleString(activeLocale === "zh" ? "zh-CN" : "en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  }
+
+  function seedSampleCommands() {
+    if (inApp() || commandLog.length > 0) return;
+    const now = Date.now();
+    const samples: Array<Omit<CommandEntry, "id">> = [
+      { title: tr("chrome.commandFetchFrom", { name: "origin" }), summary: "Already up to date", command: "git fetch --prune origin", output: "Already up to date", ok: true, at: now - 4 * 60 * 1000, source: "user" },
+      { title: tr("chrome.commandPushTo", { branch: "rewrite/tauri", remote: "origin" }), summary: "Updated 'origin/rewrite/tauri'", command: "git push --force-with-lease origin", output: "To github.com:example/awegit.git\n   abc1234..def5678  rewrite/tauri -> rewrite/tauri", ok: true, at: now - 12 * 60 * 1000, source: "user" },
+      { title: tr("chrome.commandFetchFrom", { name: "origin" }), summary: "Already up to date", command: "git fetch --prune origin", output: "Already up to date", ok: true, at: now - 40 * 60 * 1000, source: "background" },
+    ];
+    commandLog = samples.map((item) => ({ ...item, id: ++commandSeq }));
+    commandPick = commandLog[0]?.id ?? 0;
+  }
+
+  function placeCommandLog() {
+    const rect = commandButton?.getBoundingClientRect();
+    const width = Math.min(860, window.innerWidth - 16);
+    const y = rect ? rect.bottom + 8 : 76;
+    const preferred = rect ? rect.left - 280 : 12;
+    commandPos = {
+      x: Math.max(8, Math.min(preferred, window.innerWidth - width - 8)),
+      y,
+      width,
+      maxHeight: Math.max(280, Math.min(480, window.innerHeight - y - 12)),
+    };
+  }
+
+  function branchItems(): MenuItem[] {
+    const rows = refs?.branches ?? [];
+    if (mode !== "live" || rows.length === 0) return [{ label: branchLabel, disabled: true }];
+    return rows.slice(0, 30).map((branch) => ({
+      label: branch.name,
+      checked: branch.current,
+      disabled: branch.current || busy,
+      run: () => void mutate({ action: "checkout", name: branch.name }),
+    }));
+  }
+
+  function openCommandLog() {
+    seedSampleCommands();
+    if (!visibleCommands().some((item) => item.id === commandPick)) commandPick = visibleCommands()[0]?.id ?? 0;
+    repoPickerOpen = false;
+    closeLaunch();
+    menu = null;
+    submenu = null;
+    placeCommandLog();
+    commandLogOpen = true;
+  }
+
+  function showCommandFilter(next: "all" | "user" | "background") {
+    commandFilter = next;
+    if (!visibleCommands().some((item) => item.id === commandPick)) commandPick = visibleCommands()[0]?.id ?? 0;
+  }
+
+  async function mutate(request: Record<string, unknown>, source: "user" | "background" = "user") {
     if (!inApp() || busy) return;
     busy = true;
     actionError = null;
+    const described = describeRequest(request);
     try {
-      const value = await invoke<StatusSnapshot & { output?: string }>("mutate", { path: repoPath(), request });
+      const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path: repoPath(), request });
       applySnapshot(value);
       const output = value.output ?? "";
       await loadContext();
       await loadDiff();
       const action = String(request.action ?? "");
       if (settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (refs?.submodules.length ?? 0) > 0) {
-        const follow = await invoke<StatusSnapshot & { output?: string }>("mutate", { path: repoPath(), request: { action: "submoduleUpdate" } });
+        const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path: repoPath(), request: { action: "submoduleUpdate" } });
         applySnapshot(follow);
         await loadContext();
+        recordCommand("submoduleUpdate", describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
       }
       noteActivity(`${action}${output ? " output" : " ok"}`);
+      recordCommand(action, described, value.log || output, true, source);
       if (output) {
         commandOutput = output;
         dialog = "output";
@@ -1004,6 +1163,7 @@
     } catch (error) {
       actionError = message(error);
       noteActivity(`${String(request.action ?? "")} failed`);
+      recordCommand(String(request.action ?? ""), described, actionError, false, source);
       if (String(request.action ?? "") === "stageHunk" && settings.ignoreSpace) actionError = `${actionError} ${tr("dialog.spaceHint")}`;
       try {
         applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path: repoPath() }));
@@ -1016,9 +1176,9 @@
     }
   }
 
-  function doFetch() {
+  function doFetch(source: "user" | "background" = "user") {
     const remote = refs?.remotes[0]?.name;
-    return mutate({ action: "fetch", remote: remote ?? null, prune: settings.fetchPrune, tags: settings.fetchTags });
+    return mutate({ action: "fetch", remote: remote ?? null, prune: settings.fetchPrune, tags: settings.fetchTags }, source);
   }
 
   function doPull() {
@@ -1040,7 +1200,7 @@
   $effect(() => {
     if (!settings.fetchAutomatically) return;
     const timer = window.setInterval(() => {
-      if (!busy && snapshot) void doFetch();
+      if (!busy && snapshot) void doFetch("background");
     }, 10 * 60 * 1000);
     return () => window.clearInterval(timer);
   });
@@ -1618,7 +1778,11 @@
 
   async function submitCommit(pushAfter = false) {
     if (mode !== "live" || !canCommit) return;
-    await runChange("commit_changes", { summary, description, amend, signOff, skipHooks });
+    const messageText = summary.trim();
+    const value = await runChange("commit_changes", { summary, description, amend, signOff, skipHooks });
+    if (value === undefined) return;
+    const failed = value ? "" : (actionError ?? "");
+    recordCommand("commit", { title: tr("chrome.commandCommit", { name: messageText || "HEAD" }), command: gitLine(["commit", "-m", messageText]) }, (value?.log ?? failed).trim(), !!value, "user");
     if (!actionError) {
       summary = "";
       description = "";
@@ -1856,7 +2020,7 @@
     } finally {
       busy = false;
     }
-    if (settings.fetchAutomatically && snapshot?.path === path) void doFetch();
+    if (settings.fetchAutomatically && snapshot?.path === path) void doFetch("background");
   }
 
   function composeTool(path: string, args: string) {
@@ -2420,7 +2584,7 @@
       { label: tr("chrome.stats"), disabled: locked, run: () => { void loadFacts(true); dialog = "stats"; } },
       { label: tr("chrome.lfsFiles"), disabled: locked, run: () => { void loadFacts(true); dialog = "lfs"; } },
       { label: tr("chrome.githubRepo"), disabled: locked, run: () => { draft = ""; draftExtra = ""; draftUser = ""; privateRepo = false; hostForge = "github"; dialog = "github"; } },
-      { label: tr("chrome.activity"), run: () => void invoke<string[]>("activity_log").then((lines) => { activityLines = lines; dialog = "activity"; }) },
+      { label: tr("chrome.activity"), run: () => openCommandLog() },
       { label: tr("chrome.contentSearch"), disabled: locked, run: () => { section = "history"; searchOpen.commit = true; commitQuery = "S:"; } },
       { label: tr("chrome.stale"), disabled: locked, run: () => void invoke<string[]>("merged_branches", { path: repoPath() }).then((names) => { staleNames = names; stalePicked = []; dialog = "stale"; }) },
       { label: tr("chrome.mailmap"), disabled: locked, run: () => void invoke<{ text?: string }>("blob_view", { path: repoPath(), rev: "HEAD", file: ".mailmap" }).then((view) => { draft = view.text ?? ""; dialog = "mailmap"; }).catch(() => { draft = ""; dialog = "mailmap"; }) },
@@ -3194,6 +3358,7 @@
       return;
     }
     closeLaunch();
+    commandLogOpen = false;
     menu = null;
     submenu = null;
     placeRepoPicker();
@@ -3650,6 +3815,7 @@
       closeLaunch();
       blameLines = null;
       repoPickerOpen = false;
+      commandLogOpen = false;
       return;
     }
     event.preventDefault();
@@ -3915,6 +4081,44 @@
     <button type="button" onclick={(event) => openBar(event, helpItems())}>{tr("chrome.help")}</button>
   </nav>
   <header class="chrome">
+    <div class="chrome-tools">
+      <div class="chrome-left">
+        <button class="launch-trigger" type="button" onclick={() => void openLaunch()}>
+          <span>{tr("chrome.quickLaunch")}</span>
+          <kbd>{shortcutLabel("launch")}</kbd>
+        </button>
+        <button class="icon-btn" type="button" title={tr("chrome.terminal")} onclick={() => invoke("open_terminal", { path: repoPath() })}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m7 9 3 3-3 3M12 15h5"/></svg></button>
+        <button class="icon-btn" type="button" title={tr("chrome.explorer")} onclick={() => snapshot && void openLocal(snapshot.path)}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
+      </div>
+      <div class="chrome-identity">
+        <button class="icon-btn history-btn" class:on={commandLogOpen} type="button" bind:this={commandButton} title={tr("chrome.commandHistory")} aria-label={tr("chrome.commandHistory")} aria-expanded={commandLogOpen} aria-haspopup="dialog" onclick={() => (commandLogOpen ? (commandLogOpen = false) : openCommandLog())}>
+          <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
+        </button>
+        <div class="identity-copy">
+          <strong>{snapshot ? folderName(snapshot.path) : mode === "sample" ? "AweGit" : tr("chrome.welcomeTitle")}</strong>
+          <span>{snapshot || mode === "sample" ? branchLabel : tr("chrome.openRepo")}</span>
+        </div>
+      </div>
+      <div class="chrome-right">
+        <button class="tool-btn" type="button" disabled={busy} onclick={() => confirmSync("fetch")} oncontextmenu={(event) => openMenu(event, [
+          { label: tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: mode !== "live", run: () => void doFetch() },
+          { label: tr("chrome.fetchAll"), disabled: mode !== "live", run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: settings.fetchTags }) },
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>{tr("chrome.fetch")}</button>
+        <button class="tool-btn" type="button" disabled={busy} onclick={() => confirmSync("pull")} oncontextmenu={(event) => openMenu(event, [
+          { label: tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: mode !== "live", run: () => void doPull() },
+          { label: tr("dialog.fastForward"), disabled: mode !== "live", run: () => { settings.pullRebase = false; void doPull(); } },
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg>{tr("chrome.pull")}{#if currentBranch && currentBranch.behind > 0} ↓{currentBranch.behind}{/if}</button>
+        <button class="tool-btn" type="button" disabled={busy} onclick={() => confirmSync("push")} oncontextmenu={(event) => openMenu(event, [
+          { label: tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: mode !== "live", run: () => void doPush() },
+          { label: tr("chrome.pushTags"), disabled: mode !== "live", run: () => void mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: settings.forceWithLease }) },
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg>{tr("chrome.push")}{#if currentBranch && currentBranch.ahead > 0} ↑{currentBranch.ahead}{/if}</button>
+        <button class="tool-btn branch-chip" type="button" onclick={(event) => openMenu(event, branchItems())}>
+          <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
+          <span>{branchLabel}</span>
+          <svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+      </div>
+    </div>
     <div class="chrome-tabs">
       <div class="chrome-side tabs">
       {#each repos as repo (repo)}
@@ -3935,29 +4139,6 @@
       <button class="tab-add" type="button" bind:this={repoPickerButton} title={tr("chrome.manager")} aria-label={tr("chrome.manager")} aria-expanded={repoPickerOpen} aria-haspopup="dialog" onclick={() => void toggleRepoPicker()}>
         <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       </button>
-    </div>
-    <button class="launch-trigger" type="button" onclick={() => void openLaunch()}>
-      <span>{tr("chrome.quickLaunch")}</span>
-      <kbd>{shortcutLabel("launch")}</kbd>
-    </button>
-    <div class="chrome-side end">
-      <div class="segment">
-        <button type="button" disabled={busy} onclick={() => confirmSync("fetch")} oncontextmenu={(event) => openMenu(event, [
-          { label: tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: mode !== "live", run: () => void doFetch() },
-          { label: tr("chrome.fetchAll"), disabled: mode !== "live", run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: settings.fetchTags }) },
-        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>{tr("chrome.fetch")}</button>
-        <button type="button" disabled={busy} onclick={() => confirmSync("pull")} oncontextmenu={(event) => openMenu(event, [
-          { label: tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: mode !== "live", run: () => void doPull() },
-          { label: tr("dialog.fastForward"), disabled: mode !== "live", run: () => { settings.pullRebase = false; void doPull(); } },
-        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg>{tr("chrome.pull")}{#if currentBranch && currentBranch.behind > 0} ↓{currentBranch.behind}{/if}</button>
-        <button type="button" disabled={busy} onclick={() => confirmSync("push")} oncontextmenu={(event) => openMenu(event, [
-          { label: tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: mode !== "live", run: () => void doPush() },
-          { label: tr("chrome.pushTags"), disabled: mode !== "live", run: () => void mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: settings.forceWithLease }) },
-        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg>{tr("chrome.push")}{#if currentBranch && currentBranch.ahead > 0} ↑{currentBranch.ahead}{/if}</button>
-      </div>
-      <span class="chrome-divider" aria-hidden="true"></span>
-      <button class="icon-btn" type="button" title={tr("chrome.terminal")} onclick={() => invoke("open_terminal", { path: repoPath() })}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m7 9 3 3-3 3M12 15h5"/></svg></button>
-      <button class="icon-btn" type="button" title={tr("chrome.explorer")} onclick={() => snapshot && void openLocal(snapshot.path)}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
     </div>
   </header>
 
@@ -5240,6 +5421,41 @@
     {/each}
   {/snippet}
 
+  {#if commandLogOpen}
+    {@const picked = commandLog.find((item) => item.id === commandPick)}
+    <div class="command-log" style:left="{commandPos.x}px" style:top="{commandPos.y}px" style:width="{commandPos.width}px" style:height="{commandPos.maxHeight}px" role="dialog" aria-label={tr("chrome.commandHistory")}>
+      <div class="command-list">
+        <div class="command-filters">
+          <button type="button" class:on={commandFilter === "all"} onclick={() => showCommandFilter("all")}>{tr("chrome.commandAll")}</button>
+          <button type="button" class:on={commandFilter === "user"} onclick={() => showCommandFilter("user")}>{tr("chrome.commandUser")}</button>
+          <button type="button" class:on={commandFilter === "background"} onclick={() => showCommandFilter("background")}>{tr("chrome.commandBackground")}</button>
+        </div>
+        <div class="command-items">
+          {#each visibleCommands() as item (item.id)}
+            <button class="command-item" class:current={item.id === commandPick} type="button" onclick={() => (commandPick = item.id)}>
+              <span class="title">{item.title}</span>
+              <span class="time">{commandClock(item.at)}</span>
+              <span class="summary">{item.summary}</span>
+            </button>
+          {:else}
+            <p class="repo-empty">{tr("chrome.commandEmpty")}</p>
+          {/each}
+        </div>
+      </div>
+      <div class="command-detail">
+        {#if picked}
+          <header>
+            <strong>{picked.title}</strong>
+            <span>{picked.ok ? tr("chrome.commandSucceeded") : tr("chrome.commandFailed")} {commandStamp(picked.at)}</span>
+          </header>
+          <pre><strong>$ {picked.command}</strong>{#if picked.output}{"\n\n"}{picked.output}{/if}</pre>
+        {:else}
+          <p class="repo-empty">{tr("chrome.commandEmpty")}</p>
+        {/if}
+      </div>
+    </div>
+    <button class="scrim menu-dismiss" type="button" aria-label={tr("chrome.close")} onclick={() => (commandLogOpen = false)}></button>
+  {/if}
   {#if repoPickerOpen}
     <div class="repo-picker" style:left="{repoPickerPos.x}px" style:top="{repoPickerPos.y}px" style:max-height="{repoPickerPos.maxHeight}px" role="dialog" aria-label={tr("chrome.manager")}>
       <h2>{tr("chrome.manager")}</h2>
@@ -6194,6 +6410,8 @@
     position: fixed;
     z-index: 30;
     min-width: 220px;
+    max-height: min(70vh, 480px);
+    overflow: auto;
     padding: 4px;
     background: var(--elevated);
     border: 1px solid var(--line);
@@ -6237,15 +6455,60 @@
   }
 
   .chrome {
-    height: 48px;
-    display: grid;
-    grid-template-columns: auto minmax(140px, 1fr) auto;
-    align-items: center;
-    gap: 12px;
-    padding: 0 12px;
+    display: flex;
+    flex-direction: column;
     background: var(--sidebar);
     border-bottom: 1px solid var(--line);
   }
+
+  .chrome-tools {
+    height: 40px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    padding: 0 8px;
+  }
+
+  .chrome-left,
+  .chrome-right {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .chrome-right { justify-content: flex-end; }
+
+  .chrome-identity {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 420px;
+  }
+
+  .identity-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 0;
+    line-height: 1.15;
+  }
+
+  .identity-copy strong,
+  .identity-copy span {
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .identity-copy strong { font-size: 13px; font-weight: 650; }
+  .identity-copy span { color: var(--text-secondary); font-size: 11px; }
+
+  .history-btn.on { background: var(--hover); color: var(--text); }
 
   .chrome-side {
     display: flex;
@@ -6264,11 +6527,13 @@
     align-items: center;
     gap: 2px;
     min-width: 0;
-    max-width: 360px;
+    height: 32px;
+    padding: 0 8px;
   }
 
   .tabs {
     min-width: 0;
+    max-width: calc(100% - 36px);
     overflow: auto;
     scrollbar-width: none;
   }
@@ -6278,7 +6543,7 @@
   .vertical-tabs .tabs {
     position: fixed;
     left: 0;
-    top: 76px;
+    top: 100px;
     bottom: 0;
     width: 168px;
     max-width: 168px;
@@ -6315,7 +6580,7 @@
   .commit-row,
   .commit,
   .icon-btn,
-  .segment button,
+  .tool-btn,
   .launch-trigger {
     font: inherit;
     color: inherit;
@@ -6498,6 +6763,131 @@
     color: var(--text-secondary);
   }
 
+  .command-log {
+    position: fixed;
+    z-index: 31;
+    display: grid;
+    grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+    background: var(--elevated);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .command-list,
+  .command-detail {
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .command-detail { border-left: 1px solid var(--line); }
+
+  .command-filters {
+    display: flex;
+    gap: 16px;
+    padding: 4px 14px 0;
+    border-bottom: 1px solid var(--line);
+    flex: none;
+  }
+
+  .command-filters button {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    padding: 8px 0;
+  }
+
+  .command-filters button.on {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 650;
+  }
+
+  .command-items,
+  .command-detail pre {
+    overflow: auto;
+    min-height: 0;
+  }
+
+  .command-items { flex: 1; padding: 6px; }
+
+  .command-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 10px;
+    width: 100%;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+
+  .command-item .title {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .command-item .time { color: var(--text-secondary); font-size: 12px; }
+  .command-item .summary {
+    grid-column: 1 / -1;
+    color: var(--text-secondary);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .command-item:hover { background: var(--hover); }
+  .command-item.current,
+  .command-item.current:hover { background: var(--accent); color: var(--on-accent); }
+  .command-item.current .time,
+  .command-item.current .summary { color: color-mix(in srgb, var(--on-accent) 78%, transparent); }
+
+  .command-detail header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 16px 8px;
+    flex: none;
+  }
+
+  .command-detail header strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .command-detail header span {
+    color: var(--text-secondary);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .command-detail pre {
+    margin: 0;
+    padding: 0 16px 16px;
+    flex: 1;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    user-select: text;
+  }
+
+  .command-detail pre strong { font-weight: 700; }
+
   .icon-btn {
     position: relative;
     width: 32px;
@@ -6516,11 +6906,9 @@
     color: var(--text);
   }
 
-  .icon-btn:disabled,
-  .segment button:disabled { opacity: 0.4; }
+  .icon-btn:disabled { opacity: 0.4; }
 
-  .icon-btn svg,
-  .segment svg { width: 16px; height: 16px; }
+  .icon-btn svg { width: 16px; height: 16px; }
 
   .line-icon {
     fill: none;
@@ -6530,47 +6918,37 @@
     stroke-linejoin: round;
   }
 
-  .chrome-divider {
-    width: 1px;
-    height: 16px;
-    margin: 0 2px;
-    background: var(--separator);
-    flex: none;
-  }
-
-  .segment {
-    display: flex;
-    align-items: center;
+  .tool-btn {
     height: 28px;
-    padding: 2px;
-    gap: 2px;
-    border-radius: 8px;
-    background: var(--field);
-    flex: none;
-  }
-
-  .segment button {
-    height: 24px;
     padding: 0 8px;
     border-radius: 6px;
-    color: var(--text-secondary);
-    display: flex;
+    color: var(--text);
+    display: inline-flex;
     align-items: center;
     gap: 6px;
+    flex: none;
     transition: background 120ms ease, color 120ms ease;
   }
 
-  .segment button:hover:not(:disabled) {
-    background: var(--hover);
-    color: var(--text);
+  .tool-btn:hover:not(:disabled) { background: var(--hover); }
+  .tool-btn:disabled { opacity: 0.4; }
+  .tool-btn svg { width: 15px; height: 15px; }
+  .tool-btn .caret { width: 12px; height: 12px; color: var(--text-secondary); }
+  .branch-chip span {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .launch-trigger {
-    justify-self: center;
-    height: 32px;
-    width: min(100%, 480px);
-    padding: 0 12px;
-    border-radius: 10px;
+    height: 28px;
+    width: auto;
+    max-width: 220px;
+    min-width: 0;
+    flex: 0 1 200px;
+    padding: 0 10px;
+    border-radius: 8px;
     background: var(--field);
     color: var(--text-secondary);
     display: flex;
@@ -6673,13 +7051,13 @@
   textarea:focus-visible,
   .commit:focus-visible,
   .icon-btn:focus-visible,
-  .segment button:focus-visible,
   .side:focus-visible,
   .file:focus-visible,
   .commit-row:focus-visible,
   .tab:focus-visible,
   .text-button:focus-visible,
   .launch-trigger:focus-visible,
+  .tool-btn:focus-visible,
   .palette-list button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;

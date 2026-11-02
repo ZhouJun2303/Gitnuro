@@ -144,6 +144,17 @@ export type Messages = {
     repositories: string;
     noRecentRepos: string;
     noRepositories: string;
+    welcomeTitle: string;
+    commandHistory: string;
+    commandAll: string;
+    commandUser: string;
+    commandBackground: string;
+    commandSucceeded: string;
+    commandFailed: string;
+    commandEmpty: string;
+    commandCommit: string;
+    commandFetchFrom: string;
+    commandPushTo: string;
   };
   menu: {
     checkout: string;

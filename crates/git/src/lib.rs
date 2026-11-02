@@ -23,7 +23,9 @@ pub use model::{
     show_commit_file_with, BlameLine, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, RefSnapshot, ReflogRow,
     RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
-pub use cli::{cancel_running, configure, set_http_proxy, set_passphrase, set_trace, stop_process_tree, use_bundled_git, Session, Trace};
+pub use cli::{
+    cancel_running, capture_output, configure, set_http_proxy, set_passphrase, set_trace, stop_process_tree, use_bundled_git, Session, Trace,
+};
 pub use ops::{
     approve_credential, cherry_preview, merged_branches, perform, pick_history, repo_facts, scan_repositories, search_commits,
     set_repo_author, HotPath, Mutation, RebaseStep, RepoFacts, ResetMode, SearchHit,

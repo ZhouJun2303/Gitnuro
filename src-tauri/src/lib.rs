@@ -177,7 +177,7 @@ fn commit_changes(
     amend: bool,
     sign_off: bool,
     skip_hooks: Option<bool>,
-) -> Result<awegit_git::StatusSnapshot, String> {
+) -> Result<CommitReport, String> {
     let repo = repo_from(path)?;
     let sign_off_format = if sign_off {
         let local = awegit_git::repo_sign_off_format(&repo);
@@ -190,22 +190,25 @@ fn commit_changes(
         String::new()
     };
     let peel = use_fakeignore();
-    write_then_status(&repo, |repo| {
-        if peel {
-            awegit_git::unstage_fakeignored(repo)?;
-        }
-        awegit_git::commit(
-            repo,
-            awegit_git::CommitRequest {
-                summary,
-                description,
-                amend,
-                sign_off,
-                sign_off_format,
-                skip_hooks: skip_hooks.unwrap_or(false),
-            },
-        )
-    })
+    let (result, log) = awegit_git::capture_output(|| {
+        write_then_status(&repo, |repo| {
+            if peel {
+                awegit_git::unstage_fakeignored(repo)?;
+            }
+            awegit_git::commit(
+                repo,
+                awegit_git::CommitRequest {
+                    summary,
+                    description,
+                    amend,
+                    sign_off,
+                    sign_off_format,
+                    skip_hooks: skip_hooks.unwrap_or(false),
+                },
+            )
+        })
+    });
+    Ok(CommitReport { status: result?, log })
 }
 
 #[tauri::command]
@@ -284,6 +287,16 @@ struct MutationReport {
     status: awegit_git::StatusSnapshot,
     #[serde(skip_serializing_if = "String::is_empty")]
     output: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    log: String,
+}
+
+#[derive(serde::Serialize)]
+struct CommitReport {
+    #[serde(flatten)]
+    status: awegit_git::StatusSnapshot,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    log: String,
 }
 
 #[tauri::command]
@@ -298,10 +311,12 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation) -> Result<Mutatio
         }
         _ => repo.clone(),
     };
-    let output = awegit_git::perform(&repo, request).map_err(|error| error.to_string())?;
+    let (result, log) = awegit_git::capture_output(|| awegit_git::perform(&repo, request));
+    let output = result.map_err(|error| error.to_string())?;
     Ok(MutationReport {
         status: read_status(&next)?,
         output,
+        log,
     })
 }
 

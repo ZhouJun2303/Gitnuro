@@ -4,6 +4,7 @@
 //! and the text of a diff go through `git` so filters, hooks, and line endings match
 //! what the user already has configured. Nothing here writes the global gitconfig.
 
+use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
@@ -19,6 +20,47 @@ pub type Trace = fn(&[&str], std::time::Duration, bool);
 
 pub fn set_trace(hook: Trace) {
     let _ = TRACE.set(hook);
+}
+
+thread_local! {
+    static CAPTURE: Cell<bool> = const { Cell::new(false) };
+    static CAPTURED: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// Keep stdout and stderr from `git` started on this thread, then return that text.
+pub fn capture_output<T>(body: impl FnOnce() -> T) -> (T, String) {
+    CAPTURE.with(|flag| flag.set(true));
+    CAPTURED.with(|slot| slot.borrow_mut().clear());
+    let value = body();
+    let text = CAPTURED.with(|slot| slot.borrow().trim().to_string());
+    CAPTURE.with(|flag| flag.set(false));
+    (value, text)
+}
+
+fn note_captured(stdout: &[u8], stderr: &[u8]) {
+    if !CAPTURE.with(|flag| flag.get()) {
+        return;
+    }
+    let out = String::from_utf8_lossy(stdout).trim().to_string();
+    let err = String::from_utf8_lossy(stderr).trim().to_string();
+    if out.is_empty() && err.is_empty() {
+        return;
+    }
+    CAPTURED.with(|slot| {
+        let mut text = slot.borrow_mut();
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        if !out.is_empty() {
+            text.push_str(&out);
+        }
+        if !err.is_empty() {
+            if !out.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&err);
+        }
+    });
 }
 
 /// Values applied to `git` child processes. Nothing here is written to gitconfig.
@@ -250,6 +292,7 @@ fn run_prepared(
     if let Some(hook) = TRACE.get() {
         hook(args, started.elapsed(), output.status.success());
     }
+    note_captured(&output.stdout, &output.stderr);
     if output.status.success() || allow_failure {
         return Ok(output);
     }
