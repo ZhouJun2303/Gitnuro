@@ -171,6 +171,8 @@ export const en: Messages = {
     deleteFile: "Delete…",
     addGitignore: "Add to ignore file",
     addFakeignore: "Add to fake ignore file",
+    addGitignoreSelected: "Add {count} selected to the ignore file",
+    addFakeignoreSelected: "Add {count} selected to the fake ignore file",
     blame: "Blame",
     history: "History",
     reveal: "Reveal in file manager",

@@ -171,6 +171,8 @@ export type Messages = {
     deleteFile: string;
     addGitignore: string;
     addFakeignore: string;
+    addGitignoreSelected: string;
+    addFakeignoreSelected: string;
     blame: string;
     history: string;
     reveal: string;

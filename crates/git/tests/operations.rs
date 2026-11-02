@@ -849,19 +849,21 @@ fn append_ignore_adds_one_pattern_without_replacing_the_file() {
     let repo = repo();
     fs::write(repo.path.join(".gitignore"), "target/\n").unwrap();
     let add = Mutation::AppendIgnore {
-        file: "src/A.kt".into(),
+        file: String::new(),
+        files: vec!["src/A.kt".into(), "src/B.kt".into(), "src/A.kt".into()],
         fake: false,
         directory: false,
     };
     perform(&repo.path, add.clone()).unwrap();
     perform(&repo.path, add).unwrap();
     let text = fs::read_to_string(repo.path.join(".gitignore")).unwrap();
-    assert_eq!(text, "target/\n/src/A.kt\n");
+    assert_eq!(text, "target/\n/src/A.kt\n/src/B.kt\n");
 
     perform(
         &repo.path,
         Mutation::AppendIgnore {
-            file: "notes".into(),
+            file: String::new(),
+            files: vec!["notes".into()],
             fake: true,
             directory: true,
         },
@@ -873,6 +875,7 @@ fn append_ignore_adds_one_pattern_without_replacing_the_file() {
         &repo.path,
         Mutation::AppendIgnore {
             file: "../outside".into(),
+            files: Vec::new(),
             fake: true,
             directory: false,
         },

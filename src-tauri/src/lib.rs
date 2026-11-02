@@ -440,7 +440,14 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::RestoreFile { rev, file } => join([scrub(rev), scrub(file)]),
         Mutation::Bisect { verb, rev } => join([scrub(verb), scrub(rev)]),
         Mutation::WriteGitignore { text } | Mutation::WriteMailmap { text } => format!("bytes={}", text.len()),
-        Mutation::AppendIgnore { file, fake, directory } => join([scrub(file), flag("fake", *fake), flag("directory", *directory)]),
+        Mutation::AppendIgnore { file, files, fake, directory } => {
+            let names = if files.is_empty() {
+                scrub(file)
+            } else {
+                files.iter().map(|item| scrub(item)).collect::<Vec<_>>().join(",")
+            };
+            join([names, flag("fake", *fake), flag("directory", *directory)])
+        }
         Mutation::StageHunk { file, index, unstage } => join([scrub(file), format!("hunk={index}"), flag("unstage", *unstage)]),
         Mutation::StageLine { file, unstage, .. } => join([scrub(file), flag("unstage", *unstage)]),
         Mutation::StagePaths { files, unstage } => join([files.iter().cloned().map(|file| scrub(&file)).collect::<Vec<_>>().join(","), flag("unstage", *unstage)]),

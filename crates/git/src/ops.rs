@@ -177,9 +177,12 @@ pub enum Mutation {
     WriteGitignore {
         text: String,
     },
-    /// Append one path to `.gitignore` or `.fakeignore` without touching the other lines.
+    /// Append paths to `.gitignore` or `.fakeignore` without touching the other lines.
     AppendIgnore {
+        #[serde(default)]
         file: String,
+        #[serde(default)]
+        files: Vec<String>,
         #[serde(default)]
         fake: bool,
         #[serde(default)]
@@ -449,7 +452,18 @@ fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         }
         Mutation::Bisect { verb, rev } => bisect(repo, &verb, &rev),
         Mutation::WriteGitignore { text } => write_gitignore(repo, &text),
-        Mutation::AppendIgnore { file, fake, directory } => append_ignore(repo, &file, fake, directory),
+        Mutation::AppendIgnore {
+            file,
+            files,
+            fake,
+            directory,
+        } => {
+            let mut paths = files;
+            if paths.is_empty() && !file.is_empty() {
+                paths.push(file);
+            }
+            append_ignore(repo, &paths, fake, directory)
+        }
         Mutation::WriteMailmap { text } => write_mailmap(repo, &text),
         Mutation::StageHunk { file, index, unstage } => stage_hunk(repo, &file, index, unstage),
         Mutation::StageLine {
@@ -690,9 +704,18 @@ fn write_gitignore(repo: &Path, text: &str) -> Result<(), Error> {
     })
 }
 
-fn append_ignore(repo: &Path, file: &str, fake: bool, directory: bool) -> Result<(), Error> {
+fn append_ignore(repo: &Path, files: &[String], fake: bool, directory: bool) -> Result<(), Error> {
+    if files.is_empty() {
+        return Err(Error::Git("ignore needs a path".into()));
+    }
     let name = if fake { ".fakeignore" } else { ".gitignore" };
-    let pattern = ignore_pattern(file, directory)?;
+    let mut patterns = Vec::with_capacity(files.len());
+    for file in files {
+        let pattern = ignore_pattern(file, directory)?;
+        if !patterns.iter().any(|have| have == &pattern) {
+            patterns.push(pattern);
+        }
+    }
     let path = repo.join(name);
     let mut text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
@@ -707,15 +730,22 @@ fn append_ignore(repo: &Path, file: &str, fake: bool, directory: bool) -> Result
     if text.contains('\0') {
         return Err(Error::Git(format!("{name} contains a null")));
     }
-    if ignore_has_pattern(&text, &pattern) {
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut changed = false;
+    for pattern in patterns {
+        if ignore_has_pattern(&text, &pattern) {
+            continue;
+        }
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push_str(newline);
+        }
+        text.push_str(&pattern);
+        text.push_str(newline);
+        changed = true;
+    }
+    if !changed {
         return Ok(());
     }
-    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
-    if !text.is_empty() && !text.ends_with('\n') {
-        text.push_str(newline);
-    }
-    text.push_str(&pattern);
-    text.push_str(newline);
     std::fs::write(&path, text).map_err(|source| Error::Read {
         path: name.into(),
         source,

@@ -1217,6 +1217,8 @@
           { label: tr("chrome.discardSelected"), disabled: mode !== "live" || busy, run: () => confirmPicked(picked, tr("chrome.discardSelected"), discardPicked) },
           { label: tr("chrome.deleteSelected"), disabled: mode !== "live" || busy, run: () => confirmPicked(picked, tr("chrome.deleteSelected"), deletePicked) },
           { label: tr("menu.stashSelected"), disabled: mode !== "live" || busy, run: () => void mutate({ action: "stashPaths", files: picked, message: "", includeUntracked: false }) },
+          { label: tr("menu.addGitignoreSelected", { count: String(picked.length) }), disabled: mode !== "live" || busy, run: () => void addIgnore(picked, false, false) },
+          { label: tr("menu.addFakeignoreSelected", { count: String(picked.length) }), disabled: mode !== "live" || busy, run: () => void addIgnore(picked, true, false) },
           { sep: true },
         ]
       : [];
@@ -1456,13 +1458,16 @@
 
   function fileMenu(file: Row, side: Side): MenuItem[] {
     const locked = mode !== "live";
+    const targets = ignoreTargets(file.path, side);
+    const many = targets.length > 1;
+    const count = String(targets.length);
     return [
       { label: tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked, shortcut: shortcutLabel("stageToggle"), run: () => runChange(side === "staged" ? "unstage_path" : "stage_path", { file: file.path }) },
       { label: tr("menu.discard"), disabled: locked, shortcut: shortcutLabel("discard"), run: () => ask(tr("menu.discard"), tr("dialog.discardBody", { name: file.path }), () => void mutate({ action: "discard", file: file.path })) },
       { label: tr("menu.deleteFile"), disabled: locked, run: () => ask(tr("menu.deleteFile"), tr("dialog.deleteBody", { name: file.path }), () => void mutate({ action: "delete", file: file.path })) },
       { sep: true, label: "" },
-      { label: tr("menu.addGitignore"), disabled: locked, run: () => void addIgnore(file.path, false, false) },
-      { label: tr("menu.addFakeignore"), disabled: locked, run: () => void addIgnore(file.path, true, false) },
+      { label: many ? tr("menu.addGitignoreSelected", { count }) : tr("menu.addGitignore"), disabled: locked, run: () => void addIgnore(targets, false, false) },
+      { label: many ? tr("menu.addFakeignoreSelected", { count }) : tr("menu.addFakeignore"), disabled: locked, run: () => void addIgnore(targets, true, false) },
       { sep: true, label: "" },
       { label: tr("menu.blame"), disabled: locked, run: () => showBlame(file.path) },
       { label: tr("menu.history"), disabled: locked, run: () => showFileHistory(file.path) },
@@ -2495,12 +2500,22 @@
     ask(title, files.join("\n"), () => void run(files));
   }
 
-  async function addIgnore(path: string, fake: boolean, directory: boolean) {
+  function ignoreTargets(path: string, side: Side) {
+    const rows = side === "staged" ? shownStaged : shownUnstaged;
+    const selected = pickedIn(rows);
+    if (selected.length > 1 && selected.includes(path)) return selected;
+    return [path];
+  }
+
+  async function addIgnore(paths: string[], fake: boolean, directory: boolean) {
+    const files = [...new Set(paths.filter((path) => path.length > 0))];
+    if (files.length === 0 || mode !== "live" || busy) return;
     if (fake && settings.fakeIgnore === false) {
       settings = { ...settings, fakeIgnore: true };
       await savePrefs(false);
     }
-    await mutate({ action: "appendIgnore", file: path, fake, directory });
+    await mutate({ action: "appendIgnore", files, fake, directory });
+    picked = picked.filter((path) => !files.includes(path));
   }
 
   function dirMenu(dir: string, side: Side): MenuItem[] {
@@ -2513,8 +2528,8 @@
         run: () => stageFolder(dir, unstage),
       },
       { sep: true, label: "" },
-      { label: tr("menu.addGitignore"), disabled: locked, run: () => void addIgnore(dir, false, true) },
-      { label: tr("menu.addFakeignore"), disabled: locked, run: () => void addIgnore(dir, true, true) },
+      { label: tr("menu.addGitignore"), disabled: locked, run: () => void addIgnore([dir], false, true) },
+      { label: tr("menu.addFakeignore"), disabled: locked, run: () => void addIgnore([dir], true, true) },
     ];
   }
 
