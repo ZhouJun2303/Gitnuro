@@ -220,6 +220,7 @@ export type Settings = {
   groupNames: string[];
   showWhitespace: boolean;
   fileLayout: string;
+  fakeIgnore: boolean;
   tabLabels: string[];
   tabColors: string[];
   accounts: Account[];

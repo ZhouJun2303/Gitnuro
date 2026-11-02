@@ -208,6 +208,10 @@ pub struct Settings {
     /// `tree`, `list`, or `combined`. Empty follows `tree_files`.
     #[serde(default)]
     pub file_layout: String,
+    /// When true, a work-tree `.fakeignore` hides matching changes from the lists.
+    /// Patterns use `.gitignore` syntax. Git itself is unchanged.
+    #[serde(default = "default_true")]
+    pub fake_ignore: bool,
     /// `path<TAB>label` names shown on tabs.
     #[serde(default)]
     pub tab_labels: Vec<String>,
@@ -442,6 +446,7 @@ impl Default for Settings {
             group_names: Vec::new(),
             show_whitespace: false,
             file_layout: String::new(),
+            fake_ignore: true,
             tab_labels: Vec::new(),
             tab_colors: Vec::new(),
             accounts: Vec::new(),

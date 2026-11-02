@@ -113,6 +113,7 @@ export const en: Messages = {
     viewAsTree: "View as Tree",
     viewAsCombined: "View as Combined List",
     showIgnoredFiles: "Show Ignored Files",
+    fakeIgnore: "Use .fakeignore",
     repoSettings: "Repository settings…",
     discardSelected: "Discard selected",
     deleteSelected: "Delete selected",

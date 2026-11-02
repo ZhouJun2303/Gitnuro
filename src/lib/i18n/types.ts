@@ -113,6 +113,7 @@ export type Messages = {
     viewAsTree: string;
     viewAsCombined: string;
     showIgnoredFiles: string;
+    fakeIgnore: string;
     repoSettings: string;
     discardSelected: string;
     deleteSelected: string;

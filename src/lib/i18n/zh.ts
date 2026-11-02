@@ -113,6 +113,7 @@ export const zh: Messages = {
     viewAsTree: "按树查看",
     viewAsCombined: "按合并列表查看",
     showIgnoredFiles: "显示已忽略的文件",
+    fakeIgnore: "启用 .fakeignore",
     repoSettings: "仓库设置…",
     discardSelected: "放弃所选",
     deleteSelected: "删除所选",

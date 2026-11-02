@@ -197,6 +197,7 @@
     groupNames: [],
     showWhitespace: false,
     fileLayout: "",
+    fakeIgnore: true,
     tabLabels: [],
     tabColors: [],
     accounts: [],
@@ -1197,6 +1198,18 @@
     void savePrefs(false);
   }
 
+  async function toggleFakeIgnore() {
+    settings = { ...settings, fakeIgnore: settings.fakeIgnore === false };
+    await savePrefs(false);
+    if (mode !== "live") return;
+    try {
+      applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path: repoPath() }));
+      await loadDiff();
+    } catch (error) {
+      actionError = message(error);
+    }
+  }
+
   function fileViewMenu(): MenuItem[] {
     const picked = pickedIn(shownUnstaged);
     const selection: MenuItem[] = picked.length > 1
@@ -1214,6 +1227,7 @@
       { label: tr("chrome.viewAsCombined"), checked: fileLayout === "combined", run: () => setLayout("combined") },
       { sep: true },
       { label: tr("chrome.showIgnoredFiles"), checked: showIgnored, run: () => { showIgnored = !showIgnored; if (showIgnored) void loadFacts(true); } },
+      { label: tr("chrome.fakeIgnore"), checked: settings.fakeIgnore !== false, run: () => void toggleFakeIgnore() },
     ];
   }
 

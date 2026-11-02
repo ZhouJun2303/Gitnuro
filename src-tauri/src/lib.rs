@@ -5,7 +5,7 @@ mod settings;
 mod updates;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -14,6 +14,8 @@ use tauri::{Emitter, Manager};
 
 static GIT_WRITE: Mutex<()> = Mutex::new(());
 static WATCH_TICK: AtomicU64 = AtomicU64::new(0);
+static FAKE_IGNORE: AtomicBool = AtomicBool::new(true);
+static FAKE_IGNORE_KNOWN: AtomicBool = AtomicBool::new(false);
 
 struct RepoWatch(Mutex<Option<RecommendedWatcher>>);
 
@@ -43,7 +45,21 @@ fn repo_from(path: Option<String>) -> Result<PathBuf, String> {
 }
 
 fn read_status(repo: &Path) -> Result<awegit_git::StatusSnapshot, String> {
-    awegit_git::status(repo).map_err(|error| error.to_string())
+    awegit_git::status_with(repo, use_fakeignore()).map_err(|error| error.to_string())
+}
+
+fn use_fakeignore() -> bool {
+    if FAKE_IGNORE_KNOWN.load(Ordering::Acquire) {
+        return FAKE_IGNORE.load(Ordering::Relaxed);
+    }
+    let enabled = settings::load().map(|values| values.fake_ignore).unwrap_or(true);
+    remember_fakeignore(enabled);
+    enabled
+}
+
+fn remember_fakeignore(enabled: bool) {
+    FAKE_IGNORE.store(enabled, Ordering::Relaxed);
+    FAKE_IGNORE_KNOWN.store(true, Ordering::Release);
 }
 
 fn compose_proxy(settings: &settings::Settings) -> String {
@@ -125,7 +141,14 @@ fn workspace_status(path: Option<String>) -> Result<awegit_git::StatusSnapshot, 
 #[tauri::command]
 fn stage_all(path: Option<String>) -> Result<awegit_git::StatusSnapshot, String> {
     let repo = repo_from(path)?;
-    write_then_status(&repo, awegit_git::stage_all)
+    let peel = use_fakeignore();
+    write_then_status(&repo, |repo| {
+        awegit_git::stage_all(repo)?;
+        if peel {
+            awegit_git::unstage_fakeignored(repo)?;
+        }
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -166,7 +189,11 @@ fn commit_changes(
     } else {
         String::new()
     };
+    let peel = use_fakeignore();
     write_then_status(&repo, |repo| {
+        if peel {
+            awegit_git::unstage_fakeignored(repo)?;
+        }
         awegit_git::commit(
             repo,
             awegit_git::CommitRequest {
@@ -477,12 +504,15 @@ fn public_url(url: &str) -> String {
 
 #[tauri::command]
 fn load_settings() -> Result<settings::Settings, String> {
-    settings::load()
+    let values = settings::load()?;
+    remember_fakeignore(values.fake_ignore);
+    Ok(values)
 }
 
 #[tauri::command]
 fn save_settings(values: settings::Settings) -> Result<settings::Settings, String> {
     settings::save(&values)?;
+    remember_fakeignore(values.fake_ignore);
     Ok(values)
 }
 

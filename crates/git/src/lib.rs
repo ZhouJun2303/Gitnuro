@@ -4,6 +4,7 @@
 
 mod change;
 mod cli;
+mod fakeignore;
 mod model;
 mod ops;
 
@@ -98,6 +99,13 @@ pub enum Error {
 
 /// Read status for the repository at `path` (the work tree, or any directory inside it).
 pub fn status(path: impl AsRef<Path>) -> Result<StatusSnapshot, Error> {
+    status_with(path, false)
+}
+
+/// Like [`status`]. When `fakeignore` is set, paths matched by `.fakeignore` are left out of both lists.
+///
+/// Conflicts stay visible. Passing `false` is the same as [`status`].
+pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSnapshot, Error> {
     let path = path.as_ref();
     let repo = gix::open(path).map_err(|source| Error::Open {
         path: path.display().to_string(),
@@ -125,12 +133,20 @@ pub fn status(path: impl AsRef<Path>) -> Result<StatusSnapshot, Error> {
 
     sort_changes(&mut staged);
     sort_changes(&mut unstaged);
+    if fakeignore {
+        fakeignore::conceal(worktree.as_path(), &repo, &mut staged, &mut unstaged);
+    }
     Ok(StatusSnapshot {
         path: worktree.display().to_string(),
         branch,
         staged,
         unstaged,
     })
+}
+
+/// Unstage index entries that `.fakeignore` matches. Used so stage-all and commit skip local test files.
+pub fn unstage_fakeignored(repo: &Path) -> Result<(), Error> {
+    fakeignore::unstage(repo)
 }
 
 /// Walk upward from `start` until a repository work tree is found.

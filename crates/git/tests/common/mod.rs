@@ -23,17 +23,7 @@ impl TempRepo {
     }
 
     pub fn git(&self, args: &[&str]) {
-        let output = Command::new("git")
-            .current_dir(&self.path)
-            .args(args)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", &self.gitconfig)
-            .env("GIT_AUTHOR_NAME", "Test")
-            .env("GIT_AUTHOR_EMAIL", "test@example.com")
-            .env("GIT_COMMITTER_NAME", "Test")
-            .env("GIT_COMMITTER_EMAIL", "test@example.com")
-            .output()
-            .unwrap_or_else(|error| panic!("git is not on PATH: {error}"));
+        let output = self.raw(args);
         assert!(
             output.status.success(),
             "git {args:?} failed\nstdout: {}\nstderr: {}",
@@ -44,13 +34,7 @@ impl TempRepo {
 
     #[allow(dead_code)]
     pub fn output(&self, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .current_dir(&self.path)
-            .args(args)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .env("GIT_CONFIG_GLOBAL", &self.gitconfig)
-            .output()
-            .unwrap_or_else(|error| panic!("git is not on PATH: {error}"));
+        let output = self.raw(args);
         assert!(
             output.status.success(),
             "git {args:?} failed\nstdout: {}\nstderr: {}",
@@ -58,6 +42,25 @@ impl TempRepo {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).to_string()
+    }
+
+    #[allow(dead_code)]
+    pub fn code(&self, args: &[&str]) -> i32 {
+        self.raw(args).status.code().unwrap_or(128)
+    }
+
+    fn raw(&self, args: &[&str]) -> std::process::Output {
+        Command::new("git")
+            .current_dir(&self.path)
+            .args(args)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", &self.gitconfig)
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .output()
+            .unwrap_or_else(|error| panic!("git is not on PATH: {error}"))
     }
 }
 
