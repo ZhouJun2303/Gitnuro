@@ -9,6 +9,7 @@
   import { highlight } from "./highlight";
   import SplitHandle from "./SplitHandle.svelte";
   import PerfPanel from "./PerfPanel.svelte";
+  import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "./clonePath";
   import { resolveLocale, translate } from "./i18n";
   import { shortcut, shortcutLabel, typing } from "./keys";
   import { branchGroup, changedRanges, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type SplitRow } from "./view";
@@ -255,6 +256,14 @@
   let prefsSave = 0;
   let draft = $state("");
   let draftExtra = $state("");
+  let cloneRoot = $state("");
+  let cloneFolder = $state("");
+  let cloneNameManual = $state(false);
+  let cloneIntent = $state<"clone" | "init">("clone");
+  let cloneJob = $state<{ name: string; destination: string } | null>(null);
+  let cloneDone = $state<string | null>(null);
+  let cloneCancel = false;
+  const cloneTargetPath = $derived(cloneTarget(cloneRoot, cloneFolder, draft));
   let draftUser = $state("");
   let draftSecret = $state("");
   let launch = $state("");
@@ -617,8 +626,8 @@
       { label: tr("chrome.about"), group: action, run: () => { dialog = "about"; } },
       { label: tr("chrome.open"), group: action, run: () => beginOpen() },
       { label: tr("chrome.workspace"), group: action, run: () => { draft = ""; dialog = "workspace"; } },
-      { label: tr("chrome.clone"), group: action, run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
-      { label: tr("chrome.newRepo"), group: action, run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
+      { label: tr("chrome.clone"), group: action, run: () => void beginClone("clone") },
+      { label: tr("chrome.newRepo"), group: action, run: () => void beginClone("init") },
       { label: tr("chrome.notifications"), group: action, run: () => openForge("notes") },
       { label: tr("chrome.pulls"), group: action, run: () => openForge("pulls") },
       { label: tr("chrome.changes"), group: action, run: () => { section = "changes"; } },
@@ -1302,6 +1311,10 @@
     node.focus();
   }
 
+  function focusWhen(node: HTMLInputElement, on: boolean) {
+    if (on) node.focus();
+  }
+
   function fitMenu(node: HTMLElement, spot: { x: number; y: number; anchorTop?: number }) {
     const place = (next: { x: number; y: number; anchorTop?: number }) => {
       const margin = 8;
@@ -1852,6 +1865,136 @@
     dialog = "open";
   }
 
+  async function readClipboardText() {
+    if (inApp()) {
+      try {
+        const text = await invoke<string>("clipboard_text");
+        if (text.trim()) return text;
+      } catch {
+        /* the webview clipboard is the fallback */
+      }
+    }
+    try {
+      return (await navigator.clipboard?.readText()) ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  async function beginClone(intent: "clone" | "init" = "clone") {
+    const roots = sourceRootList();
+    cloneIntent = intent;
+    cloneRoot = roots.find((root) => root.path === settings.cloneDirectory)?.path ?? roots[0]?.path ?? "";
+    cloneNameManual = false;
+    const copied = intent === "clone" ? clipboardRemote(await readClipboardText()) : "";
+    draft = copied;
+    cloneFolder = repoNameFromUrl(copied);
+    actionError = null;
+    dialog = "clone";
+  }
+
+  function onCloneUrl(value: string) {
+    const remote = remoteFromText(value);
+    draft = remote || value;
+    if (!cloneNameManual) cloneFolder = repoNameFromUrl(draft);
+  }
+
+  function onCloneFolder(value: string) {
+    cloneFolder = value;
+    cloneNameManual = safeFolderName(value) !== repoNameFromUrl(remoteFromText(draft) || draft);
+  }
+
+  function rememberCloneRoot() {
+    const folder = cloneRoot.trim();
+    if (!folder || settings.cloneDirectory === folder) return;
+    settings = { ...settings, cloneDirectory: folder };
+    void savePrefs(false);
+  }
+
+  function pathsMatch(left: string, right: string) {
+    const norm = (value: string) => value.replace(/[\\/]+$/, "").replaceAll("\\", "/");
+    return norm(left).toLowerCase() === norm(right).toLowerCase();
+  }
+
+  async function finishCloneOpen(destination: string) {
+    if (!busy) await openRepo(destination);
+    cloneDone = snapshot?.path && pathsMatch(snapshot.path, destination) ? null : destination;
+  }
+
+  function cancelClone() {
+    cloneCancel = true;
+    void invoke("cancel_operation");
+  }
+
+  async function browseCloneRoot() {
+    const folder = await browseFolder(cloneRoot);
+    if (!folder) return;
+    addSourceRoot(folder);
+    cloneRoot = folder;
+    void savePrefs(false);
+  }
+
+  async function startClone() {
+    const url = cloneUrl(draft);
+    const destination = cloneTargetPath;
+    if (!inApp()) return;
+    if (cloneJob) {
+      actionError = tr("dialog.cloneBusy");
+      return;
+    }
+    if (!url || !destination) {
+      actionError = tr("dialog.cloneMissing");
+      return;
+    }
+    rememberCloneRoot();
+    const name = safeFolderName(cloneFolder.trim() || repoNameFromUrl(url));
+    cloneCancel = false;
+    dialog = null;
+    actionError = null;
+    cloneDone = null;
+    cloneJob = { name, destination };
+    try {
+      await invoke("mutate", { path: repoPath(), request: { action: "clone", url, destination } });
+      noteActivity(`clone ${name}`);
+      cloneJob = null;
+      await finishCloneOpen(destination);
+    } catch (error) {
+      cloneJob = null;
+      if (!cloneCancel) actionError = message(error);
+      cloneCancel = false;
+    }
+  }
+
+  async function startInit() {
+    const destination = cloneTargetPath;
+    if (!inApp()) return;
+    if (cloneJob) {
+      actionError = tr("dialog.cloneBusy");
+      return;
+    }
+    if (!destination) {
+      actionError = tr("dialog.cloneMissing");
+      return;
+    }
+    rememberCloneRoot();
+    const name = folderName(destination);
+    cloneCancel = false;
+    dialog = null;
+    actionError = null;
+    cloneDone = null;
+    cloneJob = { name, destination };
+    try {
+      await invoke("mutate", { path: repoPath(), request: { action: "init", destination } });
+      noteActivity(`init ${name}`);
+      cloneJob = null;
+      await finishCloneOpen(destination);
+    } catch (error) {
+      cloneJob = null;
+      if (!cloneCancel) actionError = message(error);
+      cloneCancel = false;
+    }
+  }
+
   async function openSourceRoot(path: string) {
     if (settings.cloneDirectory !== path) {
       settings = { ...settings, cloneDirectory: path };
@@ -2201,9 +2344,9 @@
       { label: tr("menu.createTag"), run: () => { draft = ""; draftExtra = "HEAD"; draftUser = ""; dialog = "tag"; } },
       { label: tr("chrome.repoSettings"), disabled: locked, run: () => openRepoSettings() },
       { sep: true, label: "" },
-      { label: tr("chrome.clone"), run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
+      { label: tr("chrome.clone"), run: () => void beginClone("clone") },
       { label: tr("chrome.open"), run: () => beginOpen() },
-      { label: tr("chrome.newRepo"), run: () => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; } },
+      { label: tr("chrome.newRepo"), run: () => void beginClone("init") },
       { sep: true, label: "" },
       { label: tr("chrome.terminal"), disabled: locked, run: () => void invoke("open_terminal", { path: repoPath() }) },
       { label: tr("chrome.explorer"), disabled: !snapshot, run: () => snapshot && void openLocal(snapshot.path) },
@@ -2704,11 +2847,8 @@
       draft = "";
       draftExtra = snapshot?.branch ?? "HEAD";
       dialog = "tag";
-    } else if (action === "clone" || action === "init") {
-      draft = "";
-      draftExtra = settings.cloneDirectory;
-      dialog = "clone";
-    } else if (action === "changes") section = "changes";
+    } else if (action === "clone" || action === "init") void beginClone(action === "init" ? "init" : "clone");
+    else if (action === "changes") section = "changes";
     else if (action === "commits") section = "history";
     else if (action === "reveal") revealHead();
     else if (action === "zoomIn") {
@@ -2977,6 +3117,17 @@
       <button class="text-button" type="button" onclick={() => invoke("cancel_operation")}>{tr("chrome.cancel")}</button>
     </div>
   {/if}
+  {#if cloneJob}
+    <div class="banner">
+      <span>{tr("chrome.cloning", { name: cloneJob.name })}</span>
+      <button class="text-button" type="button" onclick={cancelClone}>{tr("chrome.cancel")}</button>
+    </div>
+  {:else if cloneDone}
+    <div class="banner">
+      <span>{tr("chrome.cloneReady", { name: folderName(cloneDone) })}</span>
+      <button class="text-button" type="button" onclick={() => { const path = cloneDone; cloneDone = null; if (path) void openRepo(path); }}>{tr("chrome.open")}</button>
+    </div>
+  {/if}
   {#if updateNotice}
     <div class="banner">
       <span>{tr("chrome.updateAvailable", { name: `AweGit ${updateNotice.appVersion}` })}</span>
@@ -3037,14 +3188,14 @@
               <span>{tr("chrome.openRepo")}</span>
             </div>
           </button>
-          <button class="welcome-btn" type="button" onclick={() => { draft = ""; draftExtra = settings.cloneDirectory; dialog = "clone"; }}>
+          <button class="welcome-btn" type="button" onclick={() => void beginClone("clone")}>
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 11V4a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7M6 14h7M10 11l3 3-3 3"/></svg>
             <div class="btn-meta">
               <strong>{tr("chrome.clone")}</strong>
               <span>{tr("chrome.clone")}</span>
             </div>
           </button>
-          <button class="welcome-btn" type="button" onclick={() => { draft = ""; dialog = "clone"; }}>
+          <button class="welcome-btn" type="button" onclick={() => void beginClone("init")}>
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v10M3 8h10"/></svg>
             <div class="btn-meta">
               <strong>{tr("chrome.newRepo")}</strong>
@@ -4280,7 +4431,7 @@
   {/if}
   {#if dialog}
     <div class="scrim" role="presentation" onclick={() => { if (dialog === "prefs") void savePrefs(true); else dialog = null; }}>
-      <div class="dialog" class:wide={dialog === "prefs" || dialog === "resolve" || dialog === "stats"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+      <div class="dialog" class:wide={dialog === "prefs" || dialog === "resolve" || dialog === "stats"} class:path-dialog={dialog === "clone"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
       <form
         onchange={() => { if (dialog === "prefs") void savePrefs(false); }}
         onsubmit={async (event) => {
@@ -4290,7 +4441,10 @@
             await mutate({ action: "createBranch", name, start: draftExtra || null });
             if (checkoutNewBranch && !actionError) await mutate({ action: "checkout", name });
           }
-          else if (dialog === "clone") void mutate({ action: "clone", url: draft, destination: draftExtra });
+          else if (dialog === "clone") {
+            if (cloneIntent === "init") void startInit();
+            else void startClone();
+          }
           else if (dialog === "command") void runCommand({ command: draftUser || draft, prompt: commandPrompt });
           else if (dialog === "prefs") void savePrefs();
           else if (dialog === "tag") void mutate({ action: "tag", name: draft, rev: draftExtra || "HEAD", message: draftUser });
@@ -4672,15 +4826,40 @@
           <label class="check"><input type="checkbox" bind:checked={checkoutNewBranch} /> {tr("dialog.checkoutAfter")}</label>
           <button class="commit" type="submit">{tr("dialog.create")}</button>
         {:else if dialog === "clone"}
-          <h2>Clone</h2>
-          <input placeholder="URL" bind:value={draft} />
-          <div class="composer-row path-row">
-            <input placeholder="Destination folder" bind:value={draftExtra} />
-            <button class="text-button" type="button" onclick={async () => { const folder = await browseFolder(); if (folder) draftExtra = folder; }}>{tr("dialog.browse")}</button>
-          </div>
+          <h2>{cloneIntent === "init" ? tr("chrome.newRepo") : tr("chrome.clone")}</h2>
+          {#if cloneIntent === "clone"}
+            <label>{tr("dialog.url")}
+              <input placeholder="https://github.com/org/repo.git" value={draft} use:focusOnMount oninput={(event) => onCloneUrl(event.currentTarget.value)} />
+            </label>
+          {/if}
+          <label>{tr("dialog.folderName")}
+            <input placeholder={tr("dialog.folderName")} value={cloneFolder} use:focusWhen={cloneIntent === "init"} oninput={(event) => onCloneFolder(event.currentTarget.value)} />
+          </label>
+          <div class="k">{tr("dialog.sourceFolder")}</div>
+          {#if sourceRootList().length === 0}
+            <p class="empty">{tr("dialog.noSourceFolders")}</p>
+          {:else}
+            <div class="open-col">
+              {#each sourceRootList() as root (root.path)}
+                <button class="text-button pick clone-root" type="button" aria-pressed={cloneRoot === root.path} onclick={() => (cloneRoot = root.path)}>
+                  <strong>{root.alias}</strong>
+                  <span>{cloneTarget(root.path, cloneFolder, draft) || root.path}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+          <button class="text-button left" type="button" onclick={() => void browseCloneRoot()}>{tr("dialog.browse")}</button>
+          {#if cloneTargetPath}
+            <p class="empty">{tr("dialog.cloneInto", { path: cloneTargetPath })}</p>
+          {/if}
+          {#if actionError}<p class="empty">{actionError}</p>{/if}
           <div class="composer-row">
-            <button class="commit" type="submit">Clone</button>
-            <button class="text-button" type="button" onclick={() => mutate({ action: "init", destination: draftExtra })}>Init</button>
+            {#if cloneIntent === "init"}
+              <button class="commit" type="submit" disabled={!cloneTargetPath || !!cloneJob}>{tr("dialog.create")}</button>
+            {:else}
+              <button class="commit" type="submit" disabled={!cloneUrl(draft) || !cloneTargetPath || !!cloneJob}>{tr("chrome.clone")}</button>
+              <button class="text-button" type="button" disabled={!cloneTargetPath || !!cloneJob} onclick={() => void startInit()}>{tr("chrome.newRepo")}</button>
+            {/if}
           </div>
         {:else if dialog === "open"}
           <h2>{tr("chrome.openRepo")}</h2>
@@ -4695,7 +4874,7 @@
           {/if}
           <div class="composer-row">
             <button class="text-button" type="button" onclick={async () => { const folder = await browseFolder(); if (folder) void openRepo(folder); }}>{tr("dialog.browse")}</button>
-            <button class="text-button" type="button" onclick={() => (dialog = "clone")}>{tr("chrome.clone")}</button>
+            <button class="text-button" type="button" onclick={() => void beginClone("clone")}>{tr("chrome.clone")}</button>
           </div>
           {#if actionError}<p class="empty">{actionError}</p>{/if}
         {:else if dialog === "tag"}
@@ -5984,15 +6163,6 @@
     flex-wrap: wrap;
   }
 
-  .path-row {
-    flex-wrap: nowrap;
-  }
-
-  .path-row input {
-    flex: 1;
-    min-width: 0;
-  }
-
   .check {
     display: flex;
     align-items: center;
@@ -6253,6 +6423,15 @@
     min-height: 520px;
   }
 
+  .dialog.path-dialog {
+    width: min(520px, calc(100vw - 32px));
+  }
+
+  .dialog .text-button.left {
+    align-self: flex-start;
+    margin-left: 0;
+  }
+
   .source-folders {
     display: flex;
     flex-direction: column;
@@ -6295,6 +6474,31 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .dialog .text-button.pick.clone-root {
+    height: auto;
+    min-height: 44px;
+    padding: 8px 12px;
+    white-space: normal;
+  }
+
+  .dialog .text-button.pick.clone-root strong,
+  .dialog .text-button.pick.clone-root span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dialog .text-button.pick.clone-root span {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+  .dialog .text-button.pick.clone-root[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--elevated));
   }
 
   .dialog {

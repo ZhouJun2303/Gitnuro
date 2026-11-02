@@ -70,6 +70,8 @@ export type Messages = {
     truncated: string;
     openRepo: string;
     clone: string;
+    cloning: string;
+    cloneReady: string;
     newRepo: string;
     recent: string;
     searchRecent: string;
@@ -266,6 +268,10 @@ export type Messages = {
     clone: string;
     url: string;
     destination: string;
+    folderName: string;
+    cloneInto: string;
+    cloneMissing: string;
+    cloneBusy: string;
     open: string;
     about: string;
     resetTo: string;

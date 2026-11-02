@@ -1230,7 +1230,8 @@ fn replay_drop(repo: &Path, onto: &str, ids: &[String], drop: &[String]) -> Resu
 fn clone_repo(url: &str, destination: &str) -> Result<(), Error> {
     let url = check_url(url)?;
     let destination = check_external(destination)?;
-    let parent = Path::new(destination).parent().unwrap_or(Path::new("."));
+    let destination_path = resolve_clone_destination(url, destination)?;
+    let parent = destination_path.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent).map_err(|source| Error::Read {
         path: parent.display().to_string(),
         source,
@@ -1240,7 +1241,107 @@ fn clone_repo(url: &str, destination: &str) -> Result<(), Error> {
     } else {
         parent.to_path_buf()
     };
-    surface(run(&cwd, &["clone", url, destination]).map(|_| ()))
+    let dest = destination_path.display().to_string();
+    surface(run(&cwd, &["clone", url, &dest]).map(|_| ()))
+}
+
+/// If `destination` is an existing folder that already has files, clone into
+/// `<destination>/<repo name>` instead of asking Git to reuse that folder.
+fn resolve_clone_destination(url: &str, destination: &str) -> Result<PathBuf, Error> {
+    let dest = PathBuf::from(destination);
+    if !dest.exists() {
+        return Ok(dest);
+    }
+    if dest.is_file() {
+        return Err(Error::Git(format!("destination path '{}' is not a directory", dest.display())));
+    }
+    let nonempty = std::fs::read_dir(&dest)
+        .map_err(|source| Error::Read {
+            path: dest.display().to_string(),
+            source,
+        })?
+        .next()
+        .is_some();
+    if !nonempty {
+        return Ok(dest);
+    }
+    let name = repo_folder_name(url);
+    let current = dest.file_name().and_then(|item| item.to_str()).unwrap_or("");
+    if name.is_empty() || current == name {
+        return Err(Error::Git(format!(
+            "destination path '{}' already exists and is not an empty directory",
+            dest.display()
+        )));
+    }
+    let nested = dest.join(&name);
+    if nested.is_file()
+        || (nested.is_dir()
+            && std::fs::read_dir(&nested)
+                .map_err(|source| Error::Read {
+                    path: nested.display().to_string(),
+                    source,
+                })?
+                .next()
+                .is_some())
+    {
+        return Err(Error::Git(format!(
+            "destination path '{}' already exists and is not an empty directory",
+            nested.display()
+        )));
+    }
+    Ok(nested)
+}
+
+fn repo_folder_name(url: &str) -> String {
+    let text = url.trim();
+    if text.is_empty() {
+        return String::new();
+    }
+    if let Some(name) = http_repo_name(text) {
+        return sanitize_folder(&name);
+    }
+    let value = text.trim_end_matches(['/', '\\']);
+    let value = value.split(['?', '#']).next().unwrap_or(value);
+    let value = value.strip_suffix(".git").unwrap_or(value);
+    let name = value.rsplit(['/', '\\', ':']).next().unwrap_or(value);
+    sanitize_folder(name)
+}
+
+fn http_repo_name(url: &str) -> Option<String> {
+    let rest = url.split_once("://")?.1;
+    let path = rest.split(['?', '#']).next().unwrap_or(rest);
+    let path = path.split_once('/').map(|(_, path)| path).unwrap_or("");
+    let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    if let Some(index) = parts.iter().rposition(|part| *part == "_git") {
+        return parts.get(index + 1).map(|name| (*name).trim_end_matches(".git").to_string());
+    }
+    let noise = ["-", "tree", "blob", "commit", "commits", "pull", "pulls", "issues", "compare", "src"];
+    let end = parts
+        .iter()
+        .enumerate()
+        .find(|(index, part)| *index > 0 && noise.contains(part))
+        .map(|(index, _)| index)
+        .unwrap_or(parts.len());
+    parts.get(..end).and_then(|kept| kept.last()).map(|name| (*name).trim_end_matches(".git").to_string())
+}
+
+fn sanitize_folder(name: &str) -> String {
+    let mut out = String::new();
+    for ch in name.chars() {
+        if matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\\' | '/') || ch.is_control() {
+            continue;
+        }
+        out.push(ch);
+    }
+    let trimmed = out.trim().trim_end_matches(['.', ' ']);
+    let lower = trimmed.to_ascii_lowercase();
+    let reserved = matches!(lower.as_str(), "con" | "prn" | "aux" | "nul")
+        || (lower.len() == 4 && (lower.starts_with("com") || lower.starts_with("lpt")) && lower.as_bytes().get(3).is_some_and(|byte| byte.is_ascii_digit()));
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." || reserved {
+        String::new()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn init_repo(destination: &str) -> Result<(), Error> {
@@ -1717,4 +1818,36 @@ fn write_script(dir: &Path, name: &str, body: &str) -> Result<String, Error> {
         source,
     })?;
     Ok(path.display().to_string().replace('\\', "/"))
+}
+
+#[cfg(test)]
+mod clone_destination_tests {
+    use super::{repo_folder_name, resolve_clone_destination};
+
+    #[test]
+    fn names_come_from_the_remote() {
+        assert_eq!(repo_folder_name("https://github.com/org/Demo.git"), "Demo");
+        assert_eq!(repo_folder_name("git@github.com:org/Demo.git"), "Demo");
+        assert_eq!(repo_folder_name("https://github.com/org/Demo/tree/main"), "Demo");
+        assert_eq!(repo_folder_name("https://dev.azure.com/org/project/_git/Demo"), "Demo");
+        assert_eq!(repo_folder_name("ssh://git@github.com/org/Demo.git"), "Demo");
+    }
+
+    #[test]
+    fn existing_root_gets_a_repo_subdirectory() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("awegit-clone-{nanos}"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("keep.txt"), "x").unwrap();
+        let dest = resolve_clone_destination("https://github.com/org/Demo.git", &root.display().to_string()).unwrap();
+        assert_eq!(dest, root.join("Demo"));
+        std::fs::create_dir_all(root.join("Demo")).unwrap();
+        std::fs::write(root.join("Demo").join("a.txt"), "x").unwrap();
+        let err = resolve_clone_destination("https://github.com/org/Demo.git", &root.join("Demo").display().to_string()).unwrap_err();
+        assert!(err.to_string().contains("already exists"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

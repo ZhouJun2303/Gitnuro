@@ -30,6 +30,7 @@
     "allow-save-settings",
     "allow-watch-repository",
     "allow-open-terminal",
+    "allow-clipboard-text",
     "allow-pick-directory",
     "allow-suggest-commit-message",
     "allow-file-preview",

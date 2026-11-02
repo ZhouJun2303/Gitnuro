@@ -571,6 +571,91 @@ fn split_command_args(text: &str) -> Vec<String> {
 }
 
 #[tauri::command]
+fn clipboard_text() -> String {
+    read_clipboard()
+}
+
+fn read_clipboard() -> String {
+    #[cfg(windows)]
+    {
+        return read_clipboard_windows();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return read_command_text("pbpaste", &[]);
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let wayland = read_command_text("wl-paste", &["--no-newline"]);
+        if !wayland.is_empty() {
+            return wayland;
+        }
+        return read_command_text("xclip", &["-selection", "clipboard", "-o"]);
+    }
+    #[cfg(not(any(windows, unix)))]
+    String::new()
+}
+
+#[cfg(any(target_os = "macos", all(unix, not(target_os = "macos"))))]
+fn read_command_text(program: &str, args: &[&str]) -> String {
+    std::process::Command::new(program)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+#[cfg(windows)]
+fn read_clipboard_windows() -> String {
+    use std::ffi::c_void;
+    const CF_UNICODETEXT: u32 = 13;
+    #[link(name = "user32")]
+    extern "system" {
+        fn OpenClipboard(hwnd: *mut c_void) -> i32;
+        fn CloseClipboard() -> i32;
+        fn GetClipboardData(format: u32) -> *mut c_void;
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GlobalLock(hmem: *mut c_void) -> *mut c_void;
+        fn GlobalUnlock(hmem: *mut c_void) -> i32;
+    }
+    unsafe {
+        let mut opened = false;
+        for _ in 0..8 {
+            if OpenClipboard(std::ptr::null_mut()) != 0 {
+                opened = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+        if !opened {
+            return String::new();
+        }
+        let handle = GetClipboardData(CF_UNICODETEXT);
+        if handle.is_null() {
+            CloseClipboard();
+            return String::new();
+        }
+        let ptr = GlobalLock(handle) as *const u16;
+        if ptr.is_null() {
+            CloseClipboard();
+            return String::new();
+        }
+        let mut len = 0usize;
+        while len < 8192 && *ptr.add(len) != 0 {
+            len += 1;
+        }
+        let text = String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len));
+        GlobalUnlock(handle);
+        CloseClipboard();
+        text
+    }
+}
+
+#[tauri::command]
 fn pick_directory(initial: Option<String>) -> Result<Option<String>, String> {
     let start = initial.unwrap_or_default();
     #[cfg(windows)]
@@ -1014,6 +1099,7 @@ pub fn run() {
             save_settings,
             watch_repository,
             open_terminal,
+            clipboard_text,
             pick_directory,
             suggest_commit_message,
             file_preview,

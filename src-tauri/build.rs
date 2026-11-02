@@ -21,6 +21,7 @@ fn main() {
             "save_settings",
             "watch_repository",
             "open_terminal",
+            "clipboard_text",
             "pick_directory",
             "suggest_commit_message",
             "file_preview",
