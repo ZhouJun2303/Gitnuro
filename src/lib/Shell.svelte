@@ -11,7 +11,7 @@
   import PerfPanel from "./PerfPanel.svelte";
   import { resolveLocale, translate } from "./i18n";
   import { shortcut, shortcutLabel, typing } from "./keys";
-  import { branchGroup, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, numberedDiff, splitDiff, windowSlice, type SplitRow } from "./view";
+  import { branchGroup, changedRanges, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type SplitRow } from "./view";
   import {
     badge,
     type BlameLine,
@@ -230,6 +230,13 @@
   let commitFiles = $state<StatusFile[]>([]);
   let historyFile = $state<string | null>(null);
   let historyDiff = $state<FileDiff | null>(null);
+  let patchCache = $state<Record<string, FileDiff>>({});
+  let openPatches = $state<string[]>([]);
+  let treeCollapsed = $state<string[]>([]);
+  let treePrepared = $state<string | null>(null);
+  let treeBinary = $state(false);
+  let blobTop = $state(0);
+  let patchGen = 0;
   let historyFilter = $state("");
   let historyTop = $state(0);
   let blameLines = $state<BlameLine[] | null>(null);
@@ -347,6 +354,7 @@
     unstagedHeight?: number;
     composerHeight?: number;
     historyDetailHeight?: number;
+    detailTreeWidth?: number;
   } {
     try {
       const raw = typeof localStorage !== "undefined" ? localStorage.getItem(LAYOUT_KEY) : null;
@@ -369,6 +377,7 @@
   let unstagedHeight = $state<number>(initialLayout.unstagedHeight ?? 280);
   let composerHeight = $state<number>(initialLayout.composerHeight ?? 170);
   let historyDetailHeight = $state<number>(initialLayout.historyDetailHeight ?? 280);
+  let detailTreeWidth = $state<number>(initialLayout.detailTreeWidth ?? 280);
 
   function handleLayoutChange() {
     saveLayoutState({
@@ -378,6 +387,7 @@
       unstagedHeight,
       composerHeight,
       historyDetailHeight,
+      detailTreeWidth,
     });
   }
 
@@ -425,6 +435,18 @@
   ]);
   const sampleGraph = $derived(commitGraph(sampleRows.map((commit) => ({ id: commit.id, parents: commit.parents }))));
   const sampleTree = $derived([...new Set(commits.flatMap((commit) => commit.files.map((file) => file.path)))]);
+  const changeTree = $derived(asTree(commitFiles.map((file) => toRow(file)), commitCollapsed));
+  const repoTree = $derived(asTree((mode === "live" ? treePaths : sampleTree).map((path) => ({ path, letter: "", tone: "modified" as const })), treeCollapsed));
+  const allPatchesOpen = $derived(commitFiles.length > 0 && commitFiles.every((file) => openPatches.includes(file.path)));
+  const blobLines = $derived.by(() => {
+    const text = mode === "live" ? treeText : sampleBlob(historyFile ?? "");
+    return text ? text.split("\n") : [];
+  });
+  const blobWindow = $derived.by(() => {
+    if (blobLines.length <= 400) return { start: 0, rows: blobLines };
+    const start = Math.max(0, Math.floor(blobTop / 18) - 30);
+    return { start, rows: blobLines.slice(start, start + 140) };
+  });
   const shownCommits = $derived(
     commitsLive.filter((commit) => {
       const query = commitQuery.trim().toLowerCase();
@@ -521,7 +543,6 @@
       },
     };
   }
-  const historySplit = $derived(settings.diffStyle === "split" ? splitDiff(historyDiff?.lines ?? []) : []);
   const filterNames = $derived.by(() => {
     if (historyFilter) return [historyFilter];
     if (allBranches) return [];
@@ -1334,7 +1355,10 @@
   async function openTreeFile(file: string) {
     if (!selectedCommit) return;
     historyFile = file;
+    blobTop = 0;
     const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null }>("blob_view", { path: repoPath(), rev: selectedCommit, file });
+    if (historyFile !== file) return;
+    treeBinary = view.binary && !view.preview && !view.text;
     if (view.preview) {
       imageOld = null;
       imageNew = view.preview.dataUrl;
@@ -1522,13 +1546,19 @@
   async function compareDrops() {
     if (drops.length !== 2) return;
     comparePair = [drops[0], drops[1]];
+    resetCommitView();
+    const gen = patchGen;
     try {
       commitFiles = await invoke<StatusFile[]>("compare_files", { path: repoPath(), from: drops[0], to: drops[1] });
+      if (gen !== patchGen) return;
       selectedCommit = drops[1];
       historyFile = commitFiles[0]?.path ?? null;
-      if (historyFile) await pickCommitFile(historyFile);
+      if (historyFile) {
+        await pickCommitFile(historyFile);
+        if (gen === patchGen) openPatches = [historyFile];
+      }
     } catch (error) {
-      actionError = message(error);
+      if (gen === patchGen) actionError = message(error);
     }
   }
 
@@ -1546,10 +1576,13 @@
     selectedCommit = id;
     blameLines = null;
     historyTab = "commit";
+    resetCommitView();
+    const gen = patchGen;
     const row = commitsLive.find((commit) => commit.id === id);
     commitDetail = {
       id,
       body: "",
+      summary: row?.summary ?? "",
       author: row?.author ?? "",
       authorEmail: row?.email ?? "",
       authorAt: row?.at ?? 0,
@@ -1565,6 +1598,7 @@
     }
     try {
       commitFiles = await invoke<StatusFile[]>("commit_files", { path: repoPath(), id });
+      if (gen !== patchGen) return;
       historyFile = commitFiles[0]?.path ?? null;
       historyDiff = historyFile
         ? await invoke<FileDiff>("show_commit_file", {
@@ -1574,39 +1608,107 @@
             unified: settings.showEntireFile ? 100000 : 3,
           })
         : null;
+      if (gen !== patchGen) return;
+      if (historyFile && historyDiff) {
+        patchCache = { [historyFile]: historyDiff };
+        openPatches = [historyFile];
+      }
     } catch (error) {
-      actionError = message(error);
+      if (gen === patchGen) actionError = message(error);
     }
   }
 
   async function pickCommitFile(file: string) {
-    if (comparePair) {
-      historyFile = file;
-      try {
-        historyDiff = await invoke<FileDiff>("compare_file", {
-          path: repoPath(),
-          from: comparePair[0],
-          to: comparePair[1],
-          file,
-          unified: settings.showEntireFile ? 100000 : 3,
-        });
-      } catch (error) {
-        actionError = message(error);
-      }
+    const gen = patchGen;
+    historyFile = file;
+    const cached = patchCache[file];
+    if (cached) {
+      historyDiff = cached;
       return;
     }
-    if (!selectedCommit) return;
-    historyFile = file;
+    historyDiff = null;
+    if (!comparePair && !selectedCommit) return;
     try {
-      historyDiff = await invoke<FileDiff>("show_commit_file", {
-        path: repoPath(),
-        id: selectedCommit,
-        file,
-        unified: settings.showEntireFile ? 100000 : 3,
-      });
+      const diff = comparePair
+        ? await invoke<FileDiff>("compare_file", {
+            path: repoPath(),
+            from: comparePair[0],
+            to: comparePair[1],
+            file,
+            unified: settings.showEntireFile ? 100000 : 3,
+          })
+        : await invoke<FileDiff>("show_commit_file", {
+            path: repoPath(),
+            id: selectedCommit ?? "",
+            file,
+            unified: settings.showEntireFile ? 100000 : 3,
+          });
+      if (gen !== patchGen) return;
+      historyDiff = diff;
+      patchCache = { ...patchCache, [file]: diff };
     } catch (error) {
-      actionError = message(error);
+      if (gen === patchGen) actionError = message(error);
     }
+  }
+
+  async function ensurePatch(file: string) {
+    if (mode !== "live" || patchCache[file] || (!selectedCommit && !comparePair)) return;
+    await pickCommitFile(file);
+  }
+
+  function togglePatch(path: string) {
+    if (openPatches.includes(path)) {
+      openPatches = openPatches.filter((item) => item !== path);
+      return;
+    }
+    openPatches = [...openPatches, path];
+    historyFile = path;
+    void ensurePatch(path);
+  }
+
+  async function toggleAllPatches() {
+    const paths = commitFiles.map((file) => file.path);
+    if (paths.length > 0 && paths.every((path) => openPatches.includes(path))) {
+      openPatches = [];
+      return;
+    }
+    openPatches = paths;
+    const gen = patchGen;
+    const pending = paths.filter((path) => !patchCache[path]);
+    const workers = Array.from({ length: Math.min(4, pending.length) }, async () => {
+      while (gen === patchGen && pending.length > 0) {
+        const path = pending.shift();
+        if (path) await ensurePatch(path);
+      }
+    });
+    await Promise.all(workers);
+  }
+
+  function revealSelectedRow() {
+    void tick().then(() => document.querySelector<HTMLElement>(".detail-tree .tree-row.selected")?.scrollIntoView({ block: "nearest" }));
+  }
+
+  function selectChangeFile(path: string) {
+    if (!path) return;
+    historyFile = path;
+    commitCollapsed = expandParents(path, commitCollapsed);
+    revealSelectedRow();
+    if (mode === "live") void pickCommitFile(path);
+  }
+
+  function selectTreeFile(path: string) {
+    if (!path) return;
+    historyFile = path;
+    treeCollapsed = expandParents(path, treeCollapsed);
+    blobTop = 0;
+    preview = null;
+    treeBinary = false;
+    if (mode === "live") void openTreeFile(path);
+    revealSelectedRow();
+  }
+
+  function toggleRepoDir(path: string) {
+    treeCollapsed = treeCollapsed.includes(path) ? treeCollapsed.filter((item) => item !== path) : [...treeCollapsed, path];
   }
 
   async function showFileHistory(file: string) {
@@ -1894,6 +1996,125 @@
     return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()} ${hours}:${minutes}`;
   }
 
+  function forkWhenFull(at: number) {
+    const clock = forkWhen(at);
+    if (!clock) return "";
+    const date = new Date(at * 1000);
+    const seconds = String(date.getSeconds()).padStart(2, "0");
+    const offset = -date.getTimezoneOffset();
+    const sign = offset >= 0 ? "+" : "-";
+    const abs = Math.abs(offset);
+    const hours = String(Math.floor(abs / 60)).padStart(2, "0");
+    const minutes = String(abs % 60).padStart(2, "0");
+    return `${clock}:${seconds} ${sign}${hours}:${minutes}`;
+  }
+
+  function sampleBlob(path: string) {
+    const lines = diffs[path];
+    if (!lines) return "";
+    return lines
+      .filter((line) => !line.startsWith("@@") && !line.startsWith("-"))
+      .map((line) => (line.startsWith("+") || line.startsWith(" ") ? line.slice(1) : line))
+      .join("\n");
+  }
+
+  function commitSubject() {
+    return commitDetail?.summary || (mode === "live" ? commitsLive.find((row) => row.id === selectedCommit)?.summary : sampleRows.find((row) => row.id === selectedCommit)?.summary) || "";
+  }
+
+  function commitAuthorName() {
+    return commitDetail?.author || (mode === "live" ? commitsLive.find((row) => row.id === selectedCommit)?.author : sampleRows.find((row) => row.id === selectedCommit)?.author) || "";
+  }
+
+  function commitWhenShort() {
+    if (commitDetail?.authorAt) return forkWhen(commitDetail.authorAt);
+    if (mode === "live") {
+      const row = commitsLive.find((item) => item.id === selectedCommit);
+      return row?.at ? forkWhen(row.at) : (row?.when ?? "");
+    }
+    return sampleRows.find((row) => row.id === selectedCommit)?.when ?? "";
+  }
+
+  function commitRefs() {
+    if (mode === "live") return commitsLive.find((row) => row.id === selectedCommit)?.refs ?? [];
+    return sampleRows.find((row) => row.id === selectedCommit)?.badges ?? [];
+  }
+
+  function differentCommitter(detail: CommitDetail | null) {
+    if (!detail?.committer && !detail?.committerEmail) return false;
+    return detail.author.trim().toLowerCase() !== detail.committer.trim().toLowerCase() || detail.authorEmail.trim().toLowerCase() !== detail.committerEmail.trim().toLowerCase();
+  }
+
+  function toneGlyph(letter: string): "added" | "modified" | "deleted" | "file" {
+    if (letter === "A" || letter === "?") return "added";
+    if (letter === "D") return "deleted";
+    if (!letter) return "file";
+    return "modified";
+  }
+
+  function expandParents(path: string, collapsed: string[]) {
+    const parts = path.split(/[/\\]/);
+    const open = new Set<string>();
+    let acc = "";
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      acc = acc ? `${acc}/${parts[index]}` : (parts[index] ?? "");
+      open.add(acc);
+    }
+    return collapsed.filter((item) => !open.has(item));
+  }
+
+  function collapseTreeExcept(paths: string[], focus: string | null) {
+    const dirs = new Set<string>();
+    for (const path of paths) {
+      const parts = path.split(/[/\\]/);
+      let acc = "";
+      for (let index = 0; index < parts.length - 1; index += 1) {
+        acc = acc ? `${acc}/${parts[index]}` : (parts[index] ?? "");
+        dirs.add(acc);
+      }
+    }
+    const open = new Set(focus ? dirs : []);
+    if (focus) {
+      open.clear();
+      const parts = focus.split(/[/\\]/);
+      let acc = "";
+      for (let index = 0; index < parts.length - 1; index += 1) {
+        acc = acc ? `${acc}/${parts[index]}` : (parts[index] ?? "");
+        open.add(acc);
+      }
+    }
+    return [...dirs].filter((dir) => !open.has(dir));
+  }
+
+  function markedLine(text: string, other: string, path: string) {
+    const tokens = paint(text, path);
+    const plain = tokens.map((token) => ({ ...token, hot: false }));
+    if (!other || other === text) return plain;
+    const width = tokens.reduce((sum, token) => sum + token.text.length, 0);
+    if (width !== text.length) return plain;
+    return markTokens(tokens, changedRanges(other, text));
+  }
+
+  function patchOf(file: string) {
+    return patchCache[file] ?? (historyDiff?.path === file ? historyDiff : null);
+  }
+
+  function resetCommitView() {
+    patchGen += 1;
+    patchCache = {};
+    openPatches = [];
+    treePaths = [];
+    treeText = "";
+    treeCollapsed = [];
+    treePrepared = null;
+    treeBinary = false;
+    preview = null;
+    blobTop = 0;
+    commitCollapsed = [];
+    historyFile = null;
+    historyDiff = null;
+  }
+
   function avatarColor(name: string) {
     const colors = ["#5b8def", "#e07a3d", "#3aa76d", "#c45b8a", "#7a6ad8", "#c9a227", "#d16464"];
     let hash = 0;
@@ -2029,8 +2250,32 @@
 
   async function openHistoryTab(tab: "commit" | "changes" | "tree") {
     historyTab = tab;
-    if (tab !== "tree" || !selectedCommit || mode !== "live" || treePaths.length > 0) return;
-    treePaths = await invoke<string[]>("commit_tree", { path: repoPath(), rev: selectedCommit });
+    if (!selectedCommit) return;
+    if (tab === "changes" && historyFile) commitCollapsed = expandParents(historyFile, commitCollapsed);
+    if (tab === "changes") {
+      revealSelectedRow();
+      return;
+    }
+    if (tab !== "tree") return;
+    if (mode === "live" && treePaths.length === 0) {
+      const rev = selectedCommit;
+      try {
+        treePaths = await invoke<string[]>("commit_tree", { path: repoPath(), rev });
+      } catch (error) {
+        actionError = message(error);
+        return;
+      }
+      if (selectedCommit !== rev) return;
+    }
+    const paths = mode === "live" ? treePaths : sampleTree;
+    if (treePrepared !== selectedCommit) {
+      treeCollapsed = collapseTreeExcept(paths, historyFile);
+      treePrepared = selectedCommit;
+    } else if (historyFile) {
+      treeCollapsed = expandParents(historyFile, treeCollapsed);
+    }
+    if (mode === "live" && historyFile && !treeText && !preview) void openTreeFile(historyFile);
+    revealSelectedRow();
   }
 
   function selectSample(id: string) {
@@ -2038,19 +2283,23 @@
     selectedCommit = id;
     selectedPath = id;
     historyTab = "commit";
+    resetCommitView();
     historyFile = commit?.files[0]?.path ?? null;
     commitFiles = (commit?.files ?? []).map((file) => ({ path: file.path, kind: file.kind === "A" ? "added" : file.kind === "D" ? "deleted" : "modified", previousPath: null }));
+    const at = Math.floor(Date.now() / 1000) - 7200;
     commitDetail = {
       id,
+      summary: commit?.summary ?? "",
       body: "",
       author: commit?.author ?? "",
-      authorEmail: "",
-      authorAt: 0,
+      authorEmail: "jun@example.com",
+      authorAt: at,
       committer: commit?.author ?? "",
-      committerEmail: "",
-      committerAt: 0,
+      committerEmail: "jun@example.com",
+      committerAt: at,
       parents: commit?.parents ?? [],
     };
+    openPatches = historyFile ? [historyFile] : [];
   }
 
   function pickedIn(rows: Row[]) {
@@ -3509,104 +3758,119 @@
         />
 
         <section class="detail" style:height="{historyDetailHeight}px">
-          <div class="detail-tabs">
-            <button type="button" class:on={historyTab === "commit"} onclick={() => (historyTab = "commit")}>{tr("chrome.commit")}</button>
-            <button type="button" class:on={historyTab === "changes"} onclick={() => (historyTab = "changes")}>{tr("chrome.changes")}</button>
-            <button type="button" class:on={historyTab === "tree"} onclick={() => openHistoryTab("tree")}>{tr("chrome.fileTree")}</button>
+          <div class="detail-tabs" role="tablist">
+            <button type="button" role="tab" aria-selected={historyTab === "commit"} class:on={historyTab === "commit"} onclick={() => openHistoryTab("commit")}>{tr("chrome.commit")}</button>
+            <button type="button" role="tab" aria-selected={historyTab === "changes"} class:on={historyTab === "changes"} onclick={() => openHistoryTab("changes")}>{tr("chrome.changes")}</button>
+            <button type="button" role="tab" aria-selected={historyTab === "tree"} class:on={historyTab === "tree"} onclick={() => openHistoryTab("tree")}>{tr("chrome.fileTree")}</button>
           </div>
-          <div class="detail-scroll">
+          {#if selectedCommit || commitDetail}
+            {@const name = commitAuthorName()}
+            <div class="commit-strip">
+              <span class="avatar tile strip" style:background={avatarColor(name)}>{(name || "?").slice(0, 1).toUpperCase()}</span>
+              <span class="strip-author" title={name}>{name}</span>
+              <span class="strip-sha">{(selectedCommit ?? "").slice(0, 7)}</span>
+              <span class="strip-when">{commitWhenShort()}</span>
+              <span class="strip-subject" title={commitSubject()}>{@render linked(commitSubject())}</span>
+            </div>
+          {/if}
+          <div class="detail-body">
             {#if !selectedCommit && !commitDetail}
               <p class="empty">{tr("chrome.selectCommitFile")}</p>
             {:else if historyTab === "commit"}
-              <div class="detail-people">
-                <div class="person">
-                  <span class="avatar tile" style:background={avatarColor(commitDetail?.author || "")}>{(commitDetail?.author || "?").slice(0, 1).toUpperCase()}</span>
-                  <div>
-                    <div class="k">{tr("chrome.author")}</div>
-                    <div>{commitDetail?.author}</div>
-                    <div class="meta">{commitDetail?.authorEmail}</div>
-                    <div class="meta">{commitDetail?.authorAt ? forkWhen(commitDetail.authorAt) : ""}</div>
-                  </div>
-                </div>
-                <div class="person">
-                  <span class="avatar tile" style:background={avatarColor(commitDetail?.committer || "")}>{(commitDetail?.committer || "?").slice(0, 1).toUpperCase()}</span>
-                  <div>
-                    <div class="k">{tr("chrome.committer")}</div>
-                    <div>{commitDetail?.committer}</div>
-                    <div class="meta">{commitDetail?.committerEmail}</div>
-                    <div class="meta">{commitDetail?.committerAt ? forkWhen(commitDetail.committerAt) : ""}</div>
-                  </div>
-                </div>
-              </div>
-              <div class="detail-line"><span class="k">{tr("chrome.refsLabel")}</span>
-                {#each (mode === "live" ? commitsLive.find((row) => row.id === selectedCommit)?.refs : sampleRows.find((row) => row.id === selectedCommit)?.badges) ?? [] as label (label)}
-                  <span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>
-                {/each}
-              </div>
-              <div class="detail-line"><span class="k">{tr("chrome.sha")}</span><button class="text-button sha" type="button" onclick={() => copyText(selectedCommit ?? "")}>{selectedCommit}</button></div>
-              <div class="detail-line"><span class="k">{tr("chrome.parents")}</span>
-                {#each commitDetail?.parents ?? [] as parent (parent)}
-                  <button class="text-button sha" type="button" onclick={() => { if (mode === "live") void selectCommit(parent); else selectSample(parent); }}>{parent.slice(0, 7)}</button>
-                {/each}
-              </div>
-              <p class="detail-message">{@render linked(mode === "live" ? (commitsLive.find((row) => row.id === selectedCommit)?.summary ?? "") : (sampleRows.find((row) => row.id === selectedCommit)?.summary ?? ""))}</p>
-              {#if commitDetail?.body}<pre class="detail-body-text">{@render linked(commitDetail.body)}</pre>{/if}
-              <div class="detail-line">
-                <button class="text-button" type="button" onclick={() => (commitCollapsed = [])}>{tr("chrome.expandAll")}</button>
-              </div>
-              {#each asTree(commitFiles.map((file) => toRow(file)), commitCollapsed) as entry (entry.key)}
-                {#if entry.kind === "dir"}
-                  <button class="side" type="button" style:padding-left="{8 + entry.depth * 14}px" onclick={() => toggleCommitDir(entry.path)}>
-                    <span class="twist">{commitCollapsed.includes(entry.path) ? "▸" : "▾"}</span>
-                    <span class="name">{fileName(entry.path)}</span>
-                  </button>
-                {:else if entry.file}
-                  <button class="side" class:selected={historyFile === entry.file.path} type="button" style:padding-left="{22 + entry.depth * 14}px" onclick={() => { const path = entry.file?.path; if (!path) return; historyFile = path; historyTab = "changes"; if (mode === "live") void pickCommitFile(path); }}>
-                    <span class="badge {entry.file.tone}">{entry.file.letter}</span>
-                    <span class="name">{fileName(entry.file.path)}</span>
-                  </button>
-                {/if}
-              {/each}
-            {:else if historyTab === "changes"}
-              <header class="diff-head"><span>{historyFile ?? ""}</span></header>
-              {#if mode === "live" && historyDiff && settings.diffStyle === "split"}
-                <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide} use:splitScroller>
-                  {#each historySplit as row, index (index)}
-                    <div class="split-row">
-                      {@render splitCell(row, "left", historyFile ?? "", `hd-l${index}`)}
-                      {@render splitCell(row, "right", historyFile ?? "", `hd-r${index}`)}
+              <div class="detail-scroll">
+                <div class="fork-card">
+                  {@render personBlock(tr("chrome.author"), commitDetail?.author || commitAuthorName(), commitDetail?.authorEmail ?? "", commitDetail?.authorAt ?? 0)}
+                  {#if differentCommitter(commitDetail)}
+                    {@render personBlock(tr("chrome.committer"), commitDetail?.committer ?? "", commitDetail?.committerEmail ?? "", commitDetail?.committerAt ?? 0)}
+                  {/if}
+                  <div class="fork-row"><span class="k">{tr("chrome.sha")}</span><button class="sha-link" type="button" onclick={() => copyText(commitDetail?.id || selectedCommit || "")}>{commitDetail?.id || selectedCommit}</button></div>
+                  {#if (commitDetail?.parents.length ?? 0) > 0}
+                    <div class="fork-row"><span class="k">{tr("chrome.parents")}</span>
+                      {#each commitDetail?.parents ?? [] as parent (parent)}
+                        <button class="sha-link parent" type="button" onclick={() => { if (mode === "live") void selectCommit(parent); else selectSample(parent); }}>{parent.slice(0, 7)}</button>
+                      {/each}
                     </div>
-                  {/each}
-                  {@render splitBar()}
+                  {/if}
+                  {#if commitRefs().length > 0}
+                    <div class="fork-row"><span class="k">{tr("chrome.refsLabel")}</span>
+                      {#each commitRefs() as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
+                    </div>
+                  {/if}
+                  <p class="detail-message">{@render linked(commitSubject())}</p>
+                  {#if commitDetail?.body}<pre class="detail-body-text">{@render linked(commitDetail.body)}</pre>{/if}
                 </div>
-              {:else if mode === "live" && historyDiff}
-                <div class="diff-body">
-                  {#each historyDiff.lines as line, index (index)}
-                    <span class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"}>{#each paint(line.text, historyFile ?? "") as token, tokenIndex (`hd-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
-                  {/each}
-                </div>
-              {:else if historyFile && diffs[historyFile]}
-                {#if settings.diffStyle === "split"}
-                  <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide} use:splitScroller>
-                    {#each sampleSplitOf(diffs[historyFile]) as row, index (`hf-${index}`)}
-                      <div class="split-row">
-                        {@render splitCell(row, "left", historyFile, `hfl-${index}`)}
-                        {@render splitCell(row, "right", historyFile, `hfr-${index}`)}
-                      </div>
-                    {/each}
-                    {@render splitBar()}
+                {#each commitFiles as file, index (file.path)}
+                  <div class="patch-head">
+                    <button class="patch-toggle" type="button" onclick={() => togglePatch(file.path)}>
+                      <span class="twist">{openPatches.includes(file.path) ? "▾" : "▸"}</span>
+                      {@render treeGlyph(toneGlyph(toRow(file).letter))}
+                      <span class="patch-path" title={file.path}>{file.path}</span>
+                    </button>
+                    {#if index === 0}
+                      <button class="expand-all" type="button" onclick={() => void toggleAllPatches()}>{allPatchesOpen ? tr("chrome.collapseAll") : tr("chrome.expandAll")}</button>
+                    {/if}
                   </div>
-                {:else}
-                  <pre class="diff-body">{#each diffs[historyFile] as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
-                {/if}
-              {:else}
-                <p class="diff-empty">{tr("chrome.selectCommitFile")}</p>
-              {/if}
+                  {#if openPatches.includes(file.path)}
+                    {@render filePatch(file.path, false)}
+                  {/if}
+                {/each}
+              </div>
+            {:else if historyTab === "changes"}
+              <div class="detail-split">
+                <div class="detail-tree" style:width="{detailTreeWidth}px">
+                  {#if changeTree.length === 0}
+                    <p class="empty">{tr("chrome.noChanges")}</p>
+                  {:else}
+                    {@render detailTree(changeTree, commitCollapsed, toggleCommitDir, selectChangeFile)}
+                  {/if}
+                </div>
+                <SplitHandle direction="vertical" bind:size={detailTreeWidth} min={160} max={560} defaultSize={280} onchange={handleLayoutChange} />
+                <div class="detail-pane">
+                  {#if historyFile}
+                    {@render filePatch(historyFile, false)}
+                  {:else}
+                    <p class="diff-empty">{tr("chrome.selectCommitFile")}</p>
+                  {/if}
+                </div>
+              </div>
             {:else}
-              {#each (mode === "live" ? treePaths : sampleTree) as file (file)}
-                <button class="side" type="button" class:selected={historyFile === file} onclick={() => { if (mode === "live") void openTreeFile(file); else historyFile = file; }}><span class="name">{file}</span></button>
-              {/each}
-              {#if treeText}<pre class="diff-body">{treeText}</pre>{/if}
+              <div class="detail-split">
+                <div class="detail-tree" style:width="{detailTreeWidth}px">
+                  {#if repoTree.length === 0}
+                    <p class="empty">{treePrepared === selectedCommit ? tr("chrome.noMatch") : tr("chrome.reading")}</p>
+                  {:else}
+                    {@render detailTree(repoTree, treeCollapsed, toggleRepoDir, selectTreeFile)}
+                  {/if}
+                </div>
+                <SplitHandle direction="vertical" bind:size={detailTreeWidth} min={160} max={560} defaultSize={280} onchange={handleLayoutChange} />
+                <div class="detail-pane">
+                  {#if historyFile}
+                    <div class="blob-tab">{@render treeGlyph("file")}<span>{fileName(historyFile)}</span></div>
+                    {#if preview?.mime.startsWith("image/")}
+                      <img class="blob-image" alt="" src={preview.dataUrl} />
+                    {:else if preview?.mime === "application/pdf"}
+                      <embed class="pdf-view" title={historyFile} src={preview.dataUrl} type="application/pdf" />
+                    {:else if treeBinary}
+                      <p class="diff-empty">{tr("chrome.binary")}</p>
+                    {:else if blobLines.length > 0}
+                      <div class="blob-body" onscroll={(event) => (blobTop = (event.currentTarget as HTMLElement).scrollTop)}>
+                        <div class="blob-window" style:height="{blobLines.length * 18}px">
+                          {#each blobWindow.rows as line, index (`b-${blobWindow.start + index}`)}
+                            <div class="blob-line" style:top="{(blobWindow.start + index) * 18}px">
+                              <span class="blob-no">{blobWindow.start + index + 1}</span>
+                              <span class="blob-code">{#each paint(line, historyFile) as token, tokenIndex (`bt-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+                            </div>
+                          {/each}
+                        </div>
+                      </div>
+                    {:else}
+                      <p class="diff-empty">{mode === "live" ? tr("chrome.reading") : tr("chrome.noChanges")}</p>
+                    {/if}
+                  {:else}
+                    <p class="diff-empty">{tr("chrome.selectCommitFile")}</p>
+                  {/if}
+                </div>
+              </div>
             {/if}
           </div>
         </section>
@@ -3785,8 +4049,105 @@
   {#snippet splitCell(row: SplitRow, side: "left" | "right", file: string, key: string)}
     {@const kind = side === "left" ? row.leftKind : row.rightKind}
     {@const mark = side === "left" ? "delete" : "add"}
+    {@const text = side === "left" ? row.left : row.right}
+    {@const other = side === "left" ? row.right : row.left}
+    {@const paired = Boolean(row.left && row.right && row.left !== row.right && (row.leftKind === "delete" || row.rightKind === "add"))}
     <span class="split-no" class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}>{(side === "left" ? row.leftNo : row.rightNo) ?? ""}</span>
-    <span class="split-code" data-side={side} class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}><span class="split-text">{#if settings.showDiffMarks && kind === mark}{side === "left" ? "-" : "+"}{/if}{#each paint(side === "left" ? row.left : row.right, file) as token, tokenIndex (`${key}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span></span>
+    <span class="split-code" data-side={side} class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}><span class="split-text">{#if settings.showDiffMarks && kind === mark}{side === "left" ? "-" : "+"}{/if}{#each markedLine(text, paired ? other : "", file) as token, tokenIndex (`${key}-${tokenIndex}`)}<span class={token.cls} class:intra={token.hot}>{token.text}</span>{/each}</span></span>
+  {/snippet}
+  {#snippet personBlock(label: string, name: string, email: string, at: number)}
+    <div class="fork-person-wrap">
+      <div class="k">{label}</div>
+      <div class="fork-person">
+        <span class="avatar tile lg" style:background={avatarColor(name || "?")}>{(name || "?").slice(0, 1).toUpperCase()}</span>
+        <div>
+          <div class="fork-id"><span class="who">{name}</span>{#if email}<span class="meta">{email}</span>{/if}</div>
+          <div class="meta">{at ? forkWhenFull(at) : ""}</div>
+        </div>
+      </div>
+    </div>
+  {/snippet}
+  {#snippet treeGlyph(kind: "folder" | "file" | "added" | "modified" | "deleted")}
+    {#if kind === "folder"}
+      <svg class="tree-icon folder" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.6 4.2A1.4 1.4 0 0 1 3 2.8h3.1l1.2 1.3H13a1.4 1.4 0 0 1 1.4 1.4v7.1A1.4 1.4 0 0 1 13 14H3a1.4 1.4 0 0 1-1.4-1.4z"/></svg>
+    {:else if kind === "added"}
+      <svg class="tree-icon added" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="currentColor"/><path d="M8 5.1v5.8M5.1 8h5.8" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/></svg>
+    {:else if kind === "deleted"}
+      <svg class="tree-icon deleted" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="currentColor"/><path d="M5.1 8h5.8" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/></svg>
+    {:else if kind === "modified"}
+      <svg class="tree-icon modified" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="2.2" fill="currentColor"/></svg>
+    {:else}
+      <svg class="tree-icon file" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.2" d="M4 1.7h5.1L12.3 4.9v9.4H4z"/><path fill="none" stroke="currentColor" stroke-width="1.2" d="M9 1.7v3.3h3.3"/></svg>
+    {/if}
+  {/snippet}
+  {#snippet detailTree(entries: TreeEntry[], collapsed: string[], onDir: (path: string) => void, onFile: (path: string) => void)}
+    {#each entries as entry (entry.key)}
+      {#if entry.kind === "dir"}
+        <button class="tree-row" type="button" style:padding-left="{4 + entry.depth * 16}px" onclick={() => onDir(entry.path)}>
+          <span class="twist">{collapsed.includes(entry.path) ? "▸" : "▾"}</span>
+          {@render treeGlyph("folder")}
+          <span class="name">{fileName(entry.path)}</span>
+        </button>
+      {:else if entry.file}
+        <button class="tree-row" class:selected={historyFile === entry.file.path} type="button" style:padding-left="{4 + entry.depth * 16}px" onclick={() => onFile(entry.file?.path ?? "")}>
+          <span class="twist"></span>
+          {@render treeGlyph(toneGlyph(entry.file.letter))}
+          <span class="name">{fileName(entry.file.path)}</span>
+        </button>
+      {/if}
+    {/each}
+  {/snippet}
+  {#snippet splitPatch(rows: SplitRow[], file: string, embedded: boolean)}
+    {#if embedded}
+      <div class="diff-body split flow" role="presentation" onmousedown={pickSplitSide}>
+        {#each rows as row, index (`${file}-e-${index}`)}
+          <div class="split-row">
+            {@render splitCell(row, "left", file, `${file}-el-${index}`)}
+            {@render splitCell(row, "right", file, `${file}-er-${index}`)}
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide} use:splitScroller>
+        {#each rows as row, index (`${file}-s-${index}`)}
+          <div class="split-row">
+            {@render splitCell(row, "left", file, `${file}-sl-${index}`)}
+            {@render splitCell(row, "right", file, `${file}-sr-${index}`)}
+          </div>
+        {/each}
+        {@render splitBar()}
+      </div>
+    {/if}
+  {/snippet}
+  {#snippet filePatch(file: string, embedded: boolean)}
+    {#if mode === "live"}
+      {@const live = patchOf(file)}
+      {#if !live}
+        <p class="diff-empty slim">{tr("chrome.reading")}</p>
+      {:else if live.binary}
+        <p class="diff-empty slim">{tr("chrome.binary")}</p>
+      {:else if live.lines.length === 0}
+        <p class="diff-empty slim">{tr("chrome.noChanges")}</p>
+      {:else if settings.diffStyle === "split"}
+        {@render splitPatch(splitDiff(live.lines), file, embedded)}
+        {#if live.truncated}<p class="meta patch-note">{tr("chrome.truncated")}</p>{/if}
+      {:else}
+        <div class="diff-body" class:flow={embedded}>
+          {#each live.lines as line, index (`uni-${file}-${index}`)}
+            <span class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"}>{#each paint(line.text, file) as token, tokenIndex (`ut-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+          {/each}
+        </div>
+      {/if}
+    {:else}
+      {@const lines = diffs[file] ?? []}
+      {#if lines.length === 0}
+        <p class="diff-empty slim">{tr("chrome.noChanges")}</p>
+      {:else if settings.diffStyle === "split"}
+        {@render splitPatch(sampleSplitOf(lines), file, embedded)}
+      {:else}
+        <pre class="diff-body flow">{#each lines as line, index (`sample-${file}-${index}`)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+      {/if}
+    {/if}
   {/snippet}
   {#snippet splitBar(actions = false)}
     <span class="split-bar-pad"></span>
@@ -6351,6 +6712,13 @@
     align-content: start;
     overflow-x: hidden;
   }
+  .diff-body.split.flow {
+    overflow: visible;
+    grid-template-columns: var(--split-no) auto var(--split-no) auto;
+    width: max-content;
+    min-width: 100%;
+  }
+  .diff-body.flow { overflow: visible; }
   .diff-body.split.actionable { grid-template-columns: var(--split-no) minmax(0, 1fr) var(--split-no) minmax(0, 1fr) auto; }
   .split-row { display: contents; }
 
@@ -6364,6 +6732,10 @@
 
   .split-row > span.del { background: var(--diff-del); }
   .split-row > span.add { background: var(--diff-add); }
+  .diff-body.split.flow .split-row > span { overflow: visible; }
+  .split-code .intra { border-radius: 2px; }
+  .split-code.del .intra { background: color-mix(in srgb, var(--deleted) 32%, var(--diff-del)); }
+  .split-code.add .intra { background: color-mix(in srgb, var(--added) 28%, var(--diff-add)); }
   .split-code > .split-text { display: inline-block; }
   .split-code[data-side="left"] > .split-text { transform: translateX(calc(-1 * var(--sx-left, 0px))); }
   .split-code[data-side="right"] > .split-text { transform: translateX(calc(-1 * var(--sx-right, 0px))); }
@@ -6510,7 +6882,9 @@
   .ref.compact { max-width: 88px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: bottom; }
 
   .detail {
+    --detail-accent: #2f6fed;
     min-height: 0;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     border-top: 1px solid var(--line);
@@ -6518,17 +6892,148 @@
     overflow: hidden;
   }
 
-  .detail-tabs { display: flex; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line); }
-  .detail-tabs button { border: 0; background: transparent; font: inherit; padding: 8px 0; color: var(--text-secondary); }
+  :global(:root[data-theme="dark"]) .detail { --detail-accent: #6aa7ff; }
+
+  .detail-tabs {
+    display: flex;
+    gap: 18px;
+    align-items: stretch;
+    height: 32px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--line);
+    flex: none;
+  }
+  .detail-tabs button {
+    border: 0;
+    background: transparent;
+    font: inherit;
+    font-size: 13px;
+    padding: 0;
+    color: var(--text-secondary);
+    box-shadow: inset 0 -2px 0 transparent;
+  }
   .detail-tabs button:hover { color: var(--text); }
-  .detail-tabs button.on { color: var(--text); font-weight: 500; box-shadow: inset 0 -2px 0 var(--accent); }
-  .detail-scroll { flex: 1; overflow: auto; padding: 12px 16px 16px; }
-  .detail-people { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .person { display: flex; gap: 8px; align-items: flex-start; }
-  .k { color: var(--text-secondary); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
-  .detail-line { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
-  .detail-message { margin: 12px 0 4px; font-weight: 600; }
-  .detail-body-text { margin: 0 0 12px; white-space: pre-wrap; font: inherit; }
+  .detail-tabs button.on { color: var(--text); font-weight: 600; box-shadow: inset 0 -2px 0 var(--detail-accent); }
+  .detail-body { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+  .detail-body > .empty { margin: auto; }
+  .detail-scroll { flex: 1; min-height: 0; overflow: auto; }
+  .commit-strip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 34px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    flex: none;
+    min-width: 0;
+  }
+  .avatar.tile.strip { width: 18px; height: 18px; font-size: 11px; line-height: 18px; border-radius: 3px; }
+  .avatar.tile.lg { width: 36px; height: 36px; font-size: 16px; line-height: 36px; border-radius: 4px; }
+  .strip-author { font-weight: 600; flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .strip-sha, .strip-when { color: var(--text-secondary); flex: none; font-size: 12px; }
+  .strip-sha { font-family: var(--mono); }
+  .strip-subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fork-card { padding: 12px 16px 8px; user-select: text; }
+  .fork-person-wrap + .fork-person-wrap { margin-top: 10px; }
+  .fork-person { display: flex; gap: 10px; align-items: flex-start; margin-top: 6px; }
+  .fork-id { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .fork-id .who { font-weight: 600; }
+  .fork-row { display: flex; gap: 12px; align-items: center; min-height: 22px; flex-wrap: wrap; }
+  .fork-row .k { width: 72px; flex: none; }
+  .k { color: var(--text-secondary); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .sha-link {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: inherit;
+    text-align: left;
+  }
+  .sha-link.parent { color: var(--detail-accent); }
+  .detail-message { margin: 14px 0 4px; font-weight: 600; }
+  .detail-body-text { margin: 0 0 8px; white-space: pre-wrap; font: inherit; }
+  .patch-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    padding: 0 10px 0 6px;
+    border-top: 1px solid var(--line);
+    background: var(--canvas);
+  }
+  .patch-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    padding: 0;
+  }
+  .patch-path { font-family: var(--mono); font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .expand-all { border: 0; background: transparent; color: var(--detail-accent); font: inherit; flex: none; padding: 0; }
+  .patch-note { margin: 4px 12px 8px; }
+  .detail-split { flex: 1; min-height: 0; min-width: 0; display: flex; }
+  .detail-tree {
+    flex: none;
+    min-height: 0;
+    overflow: auto;
+    background: var(--elevated);
+    border-right: 1px solid var(--line);
+  }
+  .detail-tree .empty { padding: 12px; }
+  .tree-row {
+    width: 100%;
+    height: 24px;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    text-align: left;
+    padding-right: 8px;
+  }
+  .tree-row:hover:not(.selected) { background: var(--hover); }
+  .tree-row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-row.selected { background: var(--detail-accent); color: #fff; }
+  .tree-row.selected .twist { color: #fff; }
+  .tree-icon { width: 14px; height: 14px; flex: none; }
+  .tree-icon.folder { color: #e2a21a; }
+  .tree-icon.added { color: #2da44e; }
+  .tree-icon.deleted { color: #cf222e; }
+  .tree-icon.modified { color: #3b82f6; }
+  .tree-icon.file { color: #6b7280; }
+  .tree-row.selected .tree-icon.file,
+  .tree-row.selected .tree-icon.modified { color: #fff; }
+  .detail-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--elevated); }
+  .detail-pane > .diff-body { flex: 1; min-height: 0; }
+  .blob-tab {
+    height: 28px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    border-bottom: 2px solid var(--detail-accent);
+    width: fit-content;
+    max-width: 100%;
+    font-size: 12px;
+    flex: none;
+  }
+  .blob-tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .blob-body { flex: 1; min-height: 0; overflow: auto; font-family: var(--mono); font-size: 13px; line-height: 18px; }
+  .blob-window { position: relative; }
+  .blob-line { position: absolute; left: 0; display: flex; height: 18px; white-space: pre; }
+  .blob-no { width: 46px; flex: none; text-align: right; padding-right: 12px; color: var(--text-secondary); user-select: none; }
+  .blob-code { user-select: text; }
+  .blob-image { display: block; max-width: 100%; max-height: 100%; margin: 12px auto; object-fit: contain; }
+  .diff-empty.slim { margin: 8px 16px; }
   .issue { color: var(--accent); text-decoration: none; }
 
   .tree-dir { width: 100%; }

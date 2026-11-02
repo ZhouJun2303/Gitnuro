@@ -5,7 +5,9 @@ import cpp from "highlight.js/lib/languages/cpp";
 import csharp from "highlight.js/lib/languages/csharp";
 import dart from "highlight.js/lib/languages/dart";
 import go from "highlight.js/lib/languages/go";
+import ini from "highlight.js/lib/languages/ini";
 import java from "highlight.js/lib/languages/java";
+import json from "highlight.js/lib/languages/json";
 import kotlin from "highlight.js/lib/languages/kotlin";
 import lua from "highlight.js/lib/languages/lua";
 import objectivec from "highlight.js/lib/languages/objectivec";
@@ -17,6 +19,8 @@ import scala from "highlight.js/lib/languages/scala";
 import sql from "highlight.js/lib/languages/sql";
 import swift from "highlight.js/lib/languages/swift";
 import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
 
 export type Token = { text: string; cls: string };
 
@@ -26,7 +30,9 @@ hljs.registerLanguage("cpp", cpp);
 hljs.registerLanguage("csharp", csharp);
 hljs.registerLanguage("dart", dart);
 hljs.registerLanguage("go", go);
+hljs.registerLanguage("ini", ini);
 hljs.registerLanguage("java", java);
+hljs.registerLanguage("json", json);
 hljs.registerLanguage("kotlin", kotlin);
 hljs.registerLanguage("lua", lua);
 hljs.registerLanguage("objectivec", objectivec);
@@ -38,6 +44,8 @@ hljs.registerLanguage("scala", scala);
 hljs.registerLanguage("sql", sql);
 hljs.registerLanguage("swift", swift);
 hljs.registerLanguage("typescript", typescript);
+hljs.registerLanguage("xml", xml);
+hljs.registerLanguage("yaml", yaml);
 
 const BY_EXT: Record<string, string> = {
   sh: "bash",
@@ -51,6 +59,10 @@ const BY_EXT: Record<string, string> = {
   cs: "csharp",
   dart: "dart",
   go: "go",
+  ini: "ini",
+  editorconfig: "ini",
+  gitconfig: "ini",
+  json: "json",
   java: "java",
   kt: "kotlin",
   kts: "kotlin",
@@ -70,6 +82,12 @@ const BY_EXT: Record<string, string> = {
   js: "typescript",
   jsx: "typescript",
   svelte: "typescript",
+  xml: "xml",
+  html: "xml",
+  svg: "xml",
+  yml: "yaml",
+  yaml: "yaml",
+  prefab: "yaml",
 };
 
 function language(path: string) {

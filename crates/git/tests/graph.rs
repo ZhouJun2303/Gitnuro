@@ -56,6 +56,7 @@ fn log_lists_commits_branches_and_tags() {
     assert_eq!(detail.committer_email, "test@example.com");
     assert!(detail.author_at > 0, "{detail:?}");
     assert!(detail.body.is_empty(), "{detail:?}");
+    assert_eq!(detail.summary, "rename");
 
     let refs = repository_refs(&repo.path).unwrap();
     assert!(refs.branches.iter().any(|branch| branch.name == "main" && branch.current));

@@ -213,6 +213,87 @@ export function splitDiff(lines: DiffLine[]): SplitRow[] {
   return rows;
 }
 
+function tokenize(text: string) {
+  return text.match(/[A-Za-z0-9_]+|[\u3400-\u9fff]|\s+|[^\s]/g) ?? [];
+}
+
+/** Character ranges in `text` that are not shared with `other`, at word granularity. */
+export function changedRanges(other: string, text: string): Array<[number, number]> {
+  if (!other || !text || other === text) return [];
+  const left = tokenize(other);
+  const right = tokenize(text);
+  if (left.length === 0 || right.length === 0 || left.length > 96 || right.length > 96) return [];
+  if (left.join("") !== other || right.join("") !== text) return [];
+  const keep = lcsKeep(left, right);
+  const ranges: Array<[number, number]> = [];
+  let cursor = 0;
+  let start = -1;
+  for (let index = 0; index < right.length; index += 1) {
+    const token = right[index] ?? "";
+    if (!keep[index]) {
+      if (start < 0) start = cursor;
+    } else if (start >= 0) {
+      ranges.push([start, cursor]);
+      start = -1;
+    }
+    cursor += token.length;
+  }
+  if (start >= 0) ranges.push([start, cursor]);
+  return ranges.filter(([from, to]) => text.slice(from, to).trim().length > 0);
+}
+
+function lcsKeep(left: string[], right: string[]) {
+  const rows = left.length;
+  const cols = right.length;
+  const score: number[][] = Array.from({ length: rows + 1 }, () => new Array<number>(cols + 1).fill(0));
+  for (let row = rows - 1; row >= 0; row -= 1) {
+    for (let col = cols - 1; col >= 0; col -= 1) {
+      score[row][col] = left[row] === right[col] ? (score[row + 1]?.[col + 1] ?? 0) + 1 : Math.max(score[row + 1]?.[col] ?? 0, score[row]?.[col + 1] ?? 0);
+    }
+  }
+  const keep = new Array<boolean>(cols).fill(false);
+  let row = 0;
+  let col = 0;
+  while (row < rows && col < cols) {
+    if (left[row] === right[col]) {
+      keep[col] = true;
+      row += 1;
+      col += 1;
+    } else if ((score[row + 1]?.[col] ?? 0) >= (score[row]?.[col + 1] ?? 0)) {
+      row += 1;
+    } else {
+      col += 1;
+    }
+  }
+  return keep;
+}
+
+/** Split syntax tokens so changed characters can take a stronger background. */
+export function markTokens<T extends { text: string }>(tokens: T[], ranges: Array<[number, number]>): Array<T & { hot: boolean }> {
+  if (ranges.length === 0) return tokens.map((token) => ({ ...token, hot: false }));
+  const out: Array<T & { hot: boolean }> = [];
+  let cursor = 0;
+  for (const token of tokens) {
+    const start = cursor;
+    const end = cursor + token.text.length;
+    cursor = end;
+    let pos = start;
+    for (const [from, to] of ranges) {
+      if (to <= pos || from >= end) continue;
+      if (from > pos) {
+        out.push({ ...token, text: token.text.slice(pos - start, from - start), hot: false });
+        pos = from;
+      }
+      const cut = Math.min(to, end);
+      out.push({ ...token, text: token.text.slice(pos - start, cut - start), hot: true });
+      pos = cut;
+      if (pos >= end) break;
+    }
+    if (pos < end) out.push({ ...token, text: token.text.slice(pos - start), hot: false });
+  }
+  return out.filter((token) => token.text.length > 0);
+}
+
 export function formatWhen(at: number, pattern: string, hour24: boolean) {
   if (!at) return "";
   const date = new Date(at * 1000);

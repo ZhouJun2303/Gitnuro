@@ -101,6 +101,7 @@ export const zh: Messages = {
     sha: "SHA",
     parents: "父提交",
     expandAll: "全部展开",
+    collapseAll: "全部收起",
     commitSubject: "提交主题",
     stage: "暂存",
     pushTags: "推送标签",

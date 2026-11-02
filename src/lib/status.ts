@@ -54,6 +54,7 @@ export function badge(kind: ChangeKind): { letter: string; tone: BadgeTone } {
 
 export type CommitDetail = {
   id: string;
+  summary: string;
   body: string;
   author: string;
   authorEmail: string;

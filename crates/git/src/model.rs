@@ -38,6 +38,7 @@ pub struct CommitRow {
 #[serde(rename_all = "camelCase")]
 pub struct CommitDetail {
     pub id: String,
+    pub summary: String,
     pub body: String,
     pub author: String,
     pub author_email: String,
@@ -262,7 +263,7 @@ pub fn commit_detail(repo: &Path, id: &str) -> Result<CommitDetail, Error> {
     let output = run(repo, &[
         "show",
         "-s",
-        "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%P%x1e%b",
+        "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%P%x1f%s%x1e%b",
         id,
     ])?;
     let text = String::from_utf8_lossy(&output.stdout);
@@ -282,8 +283,10 @@ pub fn commit_detail(repo: &Path, id: &str) -> Result<CommitDetail, Error> {
         .filter(|item| !item.is_empty())
         .map(str::to_string)
         .collect();
+    let summary = fields.next().unwrap_or("").trim().to_string();
     Ok(CommitDetail {
         id,
+        summary,
         body: body.trim().to_string(),
         author,
         author_email,

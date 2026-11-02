@@ -101,6 +101,7 @@ export type Messages = {
     sha: string;
     parents: string;
     expandAll: string;
+    collapseAll: string;
     commitSubject: string;
     stage: string;
     pushTags: string;
