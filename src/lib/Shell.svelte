@@ -292,6 +292,12 @@
   let searchOpen = $state({ recent: false, side: false, commit: false, file: false });
   let historyDiffTop = $state(0);
   let picked = $state<string[]>([]);
+  let keyTarget: "unstaged" | "staged" | "combined" | "diff" | "blob" | "detail" | "commits" = "unstaged";
+  let textWhere = $state<null | "changes" | "blob" | "detail">(null);
+  let textFile = $state<string | null>(null);
+  let textSide = $state<"left" | "right" | "all">("all");
+  let selectRoot: HTMLElement | null = null;
+  let heldText: string | null = null;
   let checkoutNewBranch = $state(true);
   let pendingCheckout = $state("");
   let foldHidden = $state<string[]>([]);
@@ -1462,9 +1468,9 @@
     const many = targets.length > 1;
     const count = String(targets.length);
     return [
-      { label: tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked, shortcut: shortcutLabel("stageToggle"), run: () => runChange(side === "staged" ? "unstage_path" : "stage_path", { file: file.path }) },
-      { label: tr("menu.discard"), disabled: locked, shortcut: shortcutLabel("discard"), run: () => ask(tr("menu.discard"), tr("dialog.discardBody", { name: file.path }), () => void mutate({ action: "discard", file: file.path })) },
-      { label: tr("menu.deleteFile"), disabled: locked, run: () => ask(tr("menu.deleteFile"), tr("dialog.deleteBody", { name: file.path }), () => void mutate({ action: "delete", file: file.path })) },
+      { label: many ? tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected") : tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked, shortcut: shortcutLabel("stageToggle"), run: () => stageChosen(side, targets) },
+      { label: many && side === "unstaged" ? tr("chrome.discardSelected") : tr("menu.discard"), disabled: locked || (many && side === "staged"), shortcut: shortcutLabel("discard"), run: () => { if (many && side === "unstaged") confirmPicked(targets, tr("chrome.discardSelected"), discardPicked); else if (!many) ask(tr("menu.discard"), tr("dialog.discardBody", { name: file.path }), () => void mutate({ action: "discard", file: file.path })); } },
+      { label: many ? tr("chrome.deleteSelected") : tr("menu.deleteFile"), disabled: locked, run: () => { if (many) confirmPicked(targets, tr("chrome.deleteSelected"), deletePicked); else ask(tr("menu.deleteFile"), tr("dialog.deleteBody", { name: file.path }), () => void mutate({ action: "delete", file: file.path })); } },
       { sep: true, label: "" },
       { label: many ? tr("menu.addGitignoreSelected", { count }) : tr("menu.addGitignore"), disabled: locked, run: () => void addIgnore(targets, false, false) },
       { label: many ? tr("menu.addFakeignoreSelected", { count }) : tr("menu.addFakeignore"), disabled: locked, run: () => void addIgnore(targets, true, false) },
@@ -2490,6 +2496,22 @@
     picked = picked.filter((path) => !files.includes(path));
   }
 
+  async function stagePicked(files = [...picked]) {
+    if (files.length === 0) return;
+    await mutate({ action: "stagePaths", files, unstage: false });
+    picked = picked.filter((path) => !files.includes(path));
+  }
+
+  function stageChosen(side: Side, files: string[]) {
+    if (files.length > 1) {
+      if (side === "staged") void unstagePicked(files);
+      else void stagePicked(files);
+      return;
+    }
+    const file = files[0];
+    if (file) runChange(side === "staged" ? "unstage_path" : "stage_path", { file });
+  }
+
   async function deletePicked(files = [...picked]) {
     for (const file of files) await mutate({ action: "delete", file });
     picked = picked.filter((path) => !files.includes(path));
@@ -2616,7 +2638,164 @@
   }
 
   function copyText(text: string) {
-    void navigator.clipboard?.writeText(text);
+    const fallback = () => {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      area.style.left = "0";
+      area.style.top = "0";
+      document.body.appendChild(area);
+      area.focus({ preventScroll: true });
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    };
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.writeText) {
+      fallback();
+      return;
+    }
+    void clipboard.writeText(text).catch(() => fallback());
+  }
+
+  function clearTextSelection() {
+    heldText = null;
+    textWhere = null;
+    textFile = null;
+  }
+
+  function rememberPointer(event: MouseEvent) {
+    if (event.button !== 0) return;
+    clearTextSelection();
+    const node = event.target instanceof Element ? event.target : null;
+    if (!node || node.closest("input, textarea, select, [contenteditable='true'], .palette, .dialog, .menu")) return;
+    const blob = node.closest<HTMLElement>(".blob-body");
+    if (blob) {
+      keyTarget = "blob";
+      selectRoot = blob;
+      return;
+    }
+    const card = node.closest<HTMLElement>(".fork-card");
+    if (card) {
+      keyTarget = "detail";
+      selectRoot = card;
+      return;
+    }
+    const diffBody = node.closest<HTMLElement>(".diff-body");
+    if (diffBody || node.closest("section.diff, .detail-pane")) {
+      keyTarget = "diff";
+      selectRoot = diffBody;
+      return;
+    }
+    if (node.closest(".staged-pane")) {
+      keyTarget = "staged";
+      selectRoot = null;
+      return;
+    }
+    if (node.closest(".unstaged-pane")) {
+      keyTarget = fileLayout === "combined" ? "combined" : "unstaged";
+      selectRoot = null;
+      return;
+    }
+    if (node.closest(".commit-row")) {
+      keyTarget = "commits";
+      selectRoot = null;
+    }
+  }
+
+  function diffSide(root: HTMLElement): "left" | "right" | "all" {
+    if (!root.classList.contains("split")) return "all";
+    if (root.classList.contains("pick-right")) return "right";
+    if (root.classList.contains("pick-left")) return "left";
+    return splitPick;
+  }
+
+  function blockText(root: HTMLElement, side: "left" | "right" | "all") {
+    if (side === "left" || side === "right") {
+      return [...root.querySelectorAll<HTMLElement>(`.split-code[data-side="${side}"] .split-text`)]
+        .map((node) => node.textContent ?? "")
+        .join("\n");
+    }
+    if (root.classList.contains("blob-body")) return blobLines.join("\n");
+    if (root.classList.contains("fork-card")) {
+      const subject = root.querySelector(".detail-message")?.textContent?.trim() ?? "";
+      const body = root.querySelector(".detail-body-text")?.textContent ?? "";
+      return [subject, body].filter((part) => part.length > 0).join("\n\n");
+    }
+    if (root.querySelector("button.virtual-row") && blameLines) return blameLines.map((line) => line.text).join("\n");
+    if (section === "changes" && root.closest("section.diff")) {
+      return mode === "live" ? (diff?.lines ?? []).map((line) => line.text).join("\n") : selectedDiff.join("\n");
+    }
+    if (root.tagName === "PRE") return root.textContent ?? "";
+    const lines = [...root.querySelectorAll<HTMLElement>(":scope > span")];
+    if (lines.length > 0) return lines.map((node) => node.textContent ?? "").join("\n");
+    return root.innerText || "";
+  }
+
+  function activeTextRoot() {
+    if (selectRoot?.isConnected) return selectRoot;
+    if (keyTarget === "blob") return document.querySelector<HTMLElement>(".blob-body");
+    if (keyTarget === "detail") return document.querySelector<HTMLElement>(".fork-card");
+    if (keyTarget === "diff") return document.querySelector<HTMLElement>(section === "changes" ? "section.diff .diff-body" : ".detail-pane .diff-body, .detail .diff-body");
+    return null;
+  }
+
+  function selectAllFiles() {
+    clearTextSelection();
+    let target = keyTarget;
+    if (target !== "staged" && target !== "unstaged" && target !== "combined") target = selectedSide === "staged" && shownStaged.length > 0 ? "staged" : "unstaged";
+    if (target === "staged" && shownStaged.length === 0 && shownUnstaged.length > 0) target = fileLayout === "combined" ? "combined" : "unstaged";
+    if (target === "unstaged" && shownUnstaged.length === 0 && shownStaged.length > 0) target = "staged";
+    const rows = target === "staged" ? shownStaged : target === "combined" ? [...shownStaged, ...shownUnstaged] : shownUnstaged;
+    if (rows.length === 0) return;
+    keyTarget = target;
+    picked = [...new Set(rows.map((file) => file.path))];
+    const side: Side = target === "staged" ? "staged" : "unstaged";
+    const keep = rows.some((file) => file.path === selectedPath && (target === "combined" || selectedSide === side));
+    if (target === "staged" || target === "unstaged") selectedSide = side;
+    if (!keep) {
+      const first = rows[0];
+      if (!first) return;
+      selectedPath = first.path;
+      if (target === "staged") selectedSide = "staged";
+      else if (target === "unstaged") selectedSide = "unstaged";
+      else selectedSide = shownStaged.some((file) => file.path === first.path) ? "staged" : "unstaged";
+      blameLines = null;
+      if (mode === "live") void loadDiff();
+    }
+  }
+
+  function selectAllHere() {
+    const root = activeTextRoot();
+    if (root && (keyTarget === "diff" || keyTarget === "blob" || keyTarget === "detail")) {
+      const side = diffSide(root);
+      const text = blockText(root, side).replace(/\n$/, "");
+      if (text.length > 0) {
+        heldText = text;
+        textSide = side;
+        textFile = null;
+        textWhere = null;
+        if (keyTarget === "blob") textWhere = "blob";
+        else if (keyTarget === "detail") textWhere = "detail";
+        else if (section === "changes" && root.closest("section.diff")) textWhere = "changes";
+        else textFile = root.dataset.file || root.closest<HTMLElement>("[data-file]")?.dataset.file || null;
+        if (!textWhere && !textFile) {
+          root.classList.add("select-all");
+          root.dataset.selectSide = side;
+        }
+        return;
+      }
+    }
+    if (section === "changes") selectAllFiles();
+  }
+
+  function pathsForCopy() {
+    if (section !== "changes") return "";
+    const rows = keyTarget === "staged" ? shownStaged : keyTarget === "combined" ? [...shownStaged, ...shownUnstaged] : keyTarget === "unstaged" ? shownUnstaged : [];
+    const chosen = pickedIn(rows);
+    return chosen.length > 1 ? chosen.join("\n") : "";
   }
 
   function fullPath(file: string) {
@@ -2663,6 +2842,7 @@
   }
 
   function selectFile(path: string, side: Side, event?: MouseEvent) {
+    clearTextSelection();
     selectedPath = path;
     selectedSide = side;
     blameLines = null;
@@ -2834,6 +3014,21 @@
   }
 
   function onShortcut(event: KeyboardEvent) {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c") {
+      if (typing(event) || dialog || launchOpen) return;
+      if (heldText) {
+        event.preventDefault();
+        copyText(heldText);
+        return;
+      }
+      if ((window.getSelection?.()?.toString() ?? "").length > 0) return;
+      const paths = pathsForCopy();
+      if (paths) {
+        event.preventDefault();
+        copyText(paths);
+      }
+      return;
+    }
     if (event.key === " " && !event.ctrlKey && !event.metaKey && !event.altKey && !typing(event) && section === "history" && selectedCommit) {
       const target = event.target as HTMLElement | null;
       if (!target?.closest("button, a, input, textarea")) {
@@ -2865,6 +3060,11 @@
       return;
     }
     event.preventDefault();
+    if (action === "selectAll") {
+      if (dialog || launchOpen || menu) return;
+      selectAllHere();
+      return;
+    }
     if (mode !== "live" && action !== "settings" && action !== "zoomIn" && action !== "zoomOut" && action !== "launch" && action !== "back" && action !== "forward" && action !== "open" && action !== "clone" && action !== "init") return;
     if (action === "refresh") void refresh();
     else if (action === "commit") void submitCommit(false);
@@ -2906,10 +3106,14 @@
       searchOpen.commit = true;
       queueMicrotask(() => searchEl?.focus());
     } else if (action === "stageToggle" && selectedPath) {
-      void runChange(selectedSide === "staged" ? "unstage_path" : "stage_path", { file: selectedPath });
+      const rows = selectedSide === "staged" ? shownStaged : shownUnstaged;
+      const chosen = pickedIn(rows);
+      stageChosen(selectedSide, chosen.length > 1 && chosen.includes(selectedPath) ? chosen : [selectedPath]);
     } else if (action === "stageAll") void runChange(selectedSide === "staged" ? "unstage_all" : "stage_all");
     else if (action === "discard" && selectedPath && selectedSide === "unstaged") {
-      ask(tr("menu.discard"), tr("dialog.discardBody", { name: selectedPath }), () => void mutate({ action: "discard", file: selectedPath }));
+      const chosen = pickedIn(shownUnstaged);
+      if (chosen.length > 1 && chosen.includes(selectedPath)) confirmPicked(chosen, tr("chrome.discardSelected"), discardPicked);
+      else ask(tr("menu.discard"), tr("dialog.discardBody", { name: selectedPath }), () => void mutate({ action: "discard", file: selectedPath }));
     } else if (action === "explorer" && snapshot) void openLocal(snapshot.path);
     else if (action === "terminal") void invoke("open_terminal", { path: repoPath() });
     else if (action === "filterBranch") {
@@ -2999,12 +3203,14 @@
     };
     window.addEventListener("keydown", onShortcut);
     window.addEventListener("mousedown", onMouseNav);
+    window.addEventListener("mousedown", rememberPointer, true);
     window.addEventListener("mouseup", onMouseNav);
     history.pushState({ awegit: 1 }, "");
     window.addEventListener("popstate", onPop);
     const detachNav = () => {
       window.removeEventListener("keydown", onShortcut);
       window.removeEventListener("mousedown", onMouseNav);
+      window.removeEventListener("mousedown", rememberPointer, true);
       window.removeEventListener("mouseup", onMouseNav);
       window.removeEventListener("popstate", onPop);
     };
@@ -3660,7 +3866,7 @@
               <span>{tr("chrome.blameOf", { name: selectedPath ?? "" })}</span>
               <button class="text-button" type="button" onclick={() => (blameLines = null)}>{tr("chrome.close")}</button>
             </header>
-            <div class="diff-body" onscroll={(event) => (blameTop = (event.currentTarget as HTMLElement).scrollTop)}>
+            <div class="diff-body" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined} onscroll={(event) => (blameTop = (event.currentTarget as HTMLElement).scrollTop)}>
               <div class="commit-window" style:height="{(blameLines?.length ?? 0) * 18}px">
                 {#each blameWindow.rows as line, index (`${line.line}-${line.id}`)}
                   <button class="virtual-row" type="button" style:top="{(blameWindow.start + index) * 18}px" title={line.summary} onclick={() => { section = "history"; void selectCommit(line.id); }}>{line.line} {line.shortId} {line.author} {line.summary} {line.text}</button>
@@ -3705,7 +3911,7 @@
             {:else if diff.lines.length === 0}
               <p class="diff-empty">{tr("chrome.noChanges")}</p>
             {:else if settings.diffStyle === "split"}
-              <div class="diff-body split actionable pick-{splitPick}" role="presentation" onmousedown={pickSplitSide} use:splitScroller>
+              <div class="diff-body split actionable pick-{splitPick}" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined} role="presentation" onmousedown={pickSplitSide} use:splitScroller>
                 {#each splitRows as row, index (index)}
                   <div class="split-row">
                     {@render splitCell(row, "left", selectedPath ?? "", `l${index}`)}
@@ -3731,7 +3937,7 @@
                 {@render splitBar(true)}
               </div>
             {:else}
-              <div class="diff-body" onscroll={(event) => (diffTop = (event.currentTarget as HTMLElement).scrollTop)}>
+              <div class="diff-body" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined} onscroll={(event) => (diffTop = (event.currentTarget as HTMLElement).scrollTop)}>
                 <div class="commit-window" style:height="{diffLines.length * 18}px">
                   {#each diffWindow.rows as line, index (`${diffWindow.start}-${index}`)}
                     <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{(diffWindow.start + index) * 18}px">
@@ -3763,7 +3969,7 @@
               <button class="text-button" type="button" disabled>{tr("menu.discard")}</button>
             </header>
             {#if settings.diffStyle === "split"}
-              <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide} use:splitScroller>
+              <div class="diff-body split pick-{splitPick}" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined} role="presentation" onmousedown={pickSplitSide} use:splitScroller>
                 {#each sampleSplit as row, index (index)}
                   <div class="split-row">
                     {@render splitCell(row, "left", selectedPath ?? "", `sl${index}`)}
@@ -3773,7 +3979,7 @@
                 {@render splitBar()}
               </div>
             {:else}
-              <pre class="diff-body">{#each selectedDiff as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+              <pre class="diff-body" class:select-all={textWhere === "changes"} data-select-side={textWhere === "changes" ? textSide : undefined}>{#each selectedDiff as line, index (index)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
             {/if}
           {:else if selectedPath === "art/mark.png"}
             {@render imageCompare(sampleImages.before, sampleImages.after)}
@@ -3981,7 +4187,7 @@
               <p class="empty">{tr("chrome.selectCommitFile")}</p>
             {:else if historyTab === "commit"}
               <div class="detail-scroll">
-                <div class="fork-card">
+                <div class="fork-card" class:select-all={textWhere === "detail"}>
                   {@render personBlock(tr("chrome.author"), commitDetail?.author || commitAuthorName(), commitDetail?.authorEmail ?? "", commitDetail?.authorAt ?? 0)}
                   {#if differentCommitter(commitDetail)}
                     {@render personBlock(tr("chrome.committer"), commitDetail?.committer ?? "", commitDetail?.committerEmail ?? "", commitDetail?.committerAt ?? 0)}
@@ -4057,7 +4263,7 @@
                     {:else if treeBinary}
                       <p class="diff-empty">{tr("chrome.binary")}</p>
                     {:else if blobLines.length > 0}
-                      <div class="blob-body" onscroll={(event) => (blobTop = (event.currentTarget as HTMLElement).scrollTop)}>
+                      <div class="blob-body" class:select-all={textWhere === "blob"} onscroll={(event) => (blobTop = (event.currentTarget as HTMLElement).scrollTop)}>
                         <div class="blob-window" style:height="{blobLines.length * 18}px">
                           {#each blobWindow.rows as line, index (`b-${blobWindow.start + index}`)}
                             <div class="blob-line" style:top="{(blobWindow.start + index) * 18}px">
@@ -4103,10 +4309,10 @@
       </div>
       <div class="file-list">
         {#each shownStaged as file (`s:${file.path}`)}
-          <button class="side" type="button" class:selected={selectedPath === file.path && selectedSide === "staged"} onclick={() => selectFile(file.path, "staged")}><span class="meta">{tr("chrome.staged")}</span> <span class="name">{file.path}</span></button>
+          <button class="side" type="button" class:selected={selectedPath === file.path && selectedSide === "staged"} class:picked={picked.includes(file.path) && !(selectedPath === file.path && selectedSide === "staged")} onclick={() => selectFile(file.path, "staged")}><span class="meta">{tr("chrome.staged")}</span> <span class="name">{file.path}</span></button>
         {/each}
         {#each shownUnstaged as file (`u:${file.path}`)}
-          <button class="side" type="button" class:selected={selectedPath === file.path && selectedSide === "unstaged"} onclick={() => selectFile(file.path, "unstaged")}><span class="meta">{tr("chrome.unstaged")}</span> <span class="name">{file.path}</span></button>
+          <button class="side" type="button" class:selected={selectedPath === file.path && selectedSide === "unstaged"} class:picked={picked.includes(file.path) && !(selectedPath === file.path && selectedSide === "unstaged")} onclick={() => selectFile(file.path, "unstaged")}><span class="meta">{tr("chrome.unstaged")}</span> <span class="name">{file.path}</span></button>
         {/each}
       </div>
     {/snippet}
@@ -4141,6 +4347,7 @@
     {/snippet}
 
     {#snippet unstagedPane()}
+      {@const unstagedPicked = pickedIn(shownUnstaged)}
       <div class="pane-head">
         {#if searchOpen.file}
           {@render fileFilter()}
@@ -4153,6 +4360,9 @@
         <div class="pane-tools">
           {@render searchToggle("file", tr("chrome.filterFiles"))}
           {@render fileViewButton()}
+          {#if unstagedPicked.length > 1}
+            <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => void stagePicked(unstagedPicked)}>{tr("chrome.stageSelected")}</button>
+          {/if}
           <button class="pane-chip pane-go" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>{tr("chrome.stageAll")}</button>
         </div>
       </div>
@@ -4340,7 +4550,7 @@
   {/snippet}
   {#snippet splitPatch(rows: SplitRow[], file: string, embedded: boolean)}
     {#if embedded}
-      <div class="diff-body split flow" role="presentation" onmousedown={pickSplitSide}>
+      <div class="diff-body split flow" class:select-all={textFile === file} data-file={file} data-select-side={textFile === file ? textSide : undefined} role="presentation" onmousedown={pickSplitSide}>
         {#each rows as row, index (`${file}-e-${index}`)}
           <div class="split-row">
             {@render splitCell(row, "left", file, `${file}-el-${index}`)}
@@ -4349,7 +4559,7 @@
         {/each}
       </div>
     {:else}
-      <div class="diff-body split pick-{splitPick}" role="presentation" onmousedown={pickSplitSide} use:splitScroller>
+      <div class="diff-body split pick-{splitPick}" class:select-all={textFile === file} data-file={file} data-select-side={textFile === file ? textSide : undefined} role="presentation" onmousedown={pickSplitSide} use:splitScroller>
         {#each rows as row, index (`${file}-s-${index}`)}
           <div class="split-row">
             {@render splitCell(row, "left", file, `${file}-sl-${index}`)}
@@ -4373,7 +4583,7 @@
         {@render splitPatch(splitDiff(live.lines), file, embedded)}
         {#if live.truncated}<p class="meta patch-note">{tr("chrome.truncated")}</p>{/if}
       {:else}
-        <div class="diff-body" class:flow={embedded}>
+        <div class="diff-body" class:flow={embedded} class:select-all={textFile === file} data-file={file} data-select-side={textFile === file ? textSide : undefined}>
           {#each live.lines as line, index (`uni-${file}-${index}`)}
             <span class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"}>{#each paint(line.text, file) as token, tokenIndex (`ut-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
           {/each}
@@ -4386,7 +4596,7 @@
       {:else if settings.diffStyle === "split"}
         {@render splitPatch(sampleSplitOf(lines), file, embedded)}
       {:else}
-        <pre class="diff-body flow">{#each lines as line, index (`sample-${file}-${index}`)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
+        <pre class="diff-body flow" class:select-all={textFile === file} data-file={file} data-select-side={textFile === file ? textSide : undefined}>{#each lines as line, index (`sample-${file}-${index}`)}<span class:add={line.startsWith("+") && !line.startsWith("+++")} class:del={line.startsWith("-") && !line.startsWith("---")} class:hunk={line.startsWith("@@")}>{line + "\n"}</span>{/each}</pre>
       {/if}
     {/if}
   {/snippet}
@@ -5727,7 +5937,8 @@
     background: var(--selection);
   }
 
-  .file.picked {
+  .file.picked,
+  .side.picked {
     background: color-mix(in srgb, var(--selection) 55%, transparent);
   }
 
@@ -7051,6 +7262,14 @@
   .split.pick-left .split-code[data-side="right"],
   .split.pick-right .split-code[data-side="left"],
   .split-actions { user-select: none; }
+  .diff-body.select-all[data-select-side="all"] > span,
+  .diff-body.select-all[data-select-side="all"] .virtual-row,
+  .diff-body.select-all[data-select-side="left"] .split-code[data-side="left"],
+  .diff-body.select-all[data-select-side="right"] .split-code[data-side="right"],
+  .blob-body.select-all .blob-code,
+  .fork-card.select-all {
+    box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--accent) 28%, transparent);
+  }
   .split-actions {
     display: flex;
     align-items: center;

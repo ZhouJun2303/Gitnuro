@@ -118,6 +118,7 @@ export type Messages = {
     discardSelected: string;
     deleteSelected: string;
     unstageSelected: string;
+    stageSelected: string;
     bisect: string;
     ignored: string;
     createPr: string;

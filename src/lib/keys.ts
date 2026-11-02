@@ -38,7 +38,8 @@ export type Shortcut =
   | "terminal"
   | "filterBranch"
   | "reopen"
-  | "pastePatch";
+  | "pastePatch"
+  | "selectAll";
 
 type Chord = { key: string; ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean };
 
@@ -79,6 +80,7 @@ const commandOnMac = new Set<Shortcut>([
   "filterBranch",
   "reopen",
   "pastePatch",
+  "selectAll",
 ]);
 
 const base: Array<[Shortcut, Chord[]]> = [
@@ -120,6 +122,7 @@ const base: Array<[Shortcut, Chord[]]> = [
   ["explorer", [{ key: "o", ctrl: true, alt: true }]],
   ["terminal", [{ key: "t", ctrl: true, alt: true }]],
   ["filterBranch", [{ key: "a", ctrl: true, shift: true }]],
+  ["selectAll", [{ key: "a", ctrl: true }]],
   ["reopen", [{ key: "t", ctrl: true, shift: true }]],
   ["pastePatch", [{ key: "v", ctrl: true, shift: true }]],
 ];

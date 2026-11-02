@@ -113,6 +113,7 @@ pnpm package:mac
 | 暂存或取消暂存 | `Ctrl+Shift+S` |
 | 全部暂存 | `Ctrl+Alt+Shift+S` |
 | 丢弃 | `Ctrl+Shift+D` 或 `Backspace` |
+| 全选当前列表或差异 | `Ctrl+A` |
 | 拉取 | `Ctrl+Shift+L` |
 | 推送 | `Ctrl+Shift+P` |
 | 获取 | `Ctrl+Shift+F` |

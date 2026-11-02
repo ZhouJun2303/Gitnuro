@@ -118,6 +118,7 @@ export const zh: Messages = {
     discardSelected: "放弃所选",
     deleteSelected: "删除所选",
     unstageSelected: "取消暂存所选",
+    stageSelected: "暂存所选",
     bisect: "二分查找",
     ignored: "已忽略",
     createPr: "创建拉取请求",

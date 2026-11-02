@@ -118,6 +118,7 @@ export const en: Messages = {
     discardSelected: "Discard selected",
     deleteSelected: "Delete selected",
     unstageSelected: "Unstage selected",
+    stageSelected: "Stage selected",
     bisect: "Bisect",
     ignored: "Ignored",
     createPr: "Create pull request",
