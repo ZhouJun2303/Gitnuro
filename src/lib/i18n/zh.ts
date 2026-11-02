@@ -141,6 +141,9 @@ export const zh: Messages = {
     sshConfig: "SSH 配置",
     combined: "合并列表",
     shared: "所有仓库",
+    repositories: "仓库",
+    noRecentRepos: "还没有打开过的仓库",
+    noRepositories: "还没有仓库",
   },
   menu: {
     checkout: "检出",

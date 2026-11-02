@@ -100,6 +100,9 @@
   type MenuItem = { label: string; run?: () => void; disabled?: boolean; shortcut?: string; children?: MenuItem[]; sep?: boolean; checked?: boolean };
   type ConfirmAsk = { title: string; body: string; run: () => void };
   type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row; depth: number };
+  type RepoEntry =
+    | { kind: "folder"; path: string; name: string; repos: string[] }
+    | { kind: "repo"; path: string };
 
   const defaultSettings: Settings = {
     theme: "system",
@@ -253,6 +256,15 @@
         },
   );
   let repos = $state<string[]>([]);
+  let repoPickerOpen = $state(false);
+  let repoPickerRecentOpen = $state(true);
+  let repoPickerReposOpen = $state(true);
+  let repoPickerExpanded = $state<string[]>([]);
+  let repoPickerButton = $state<HTMLButtonElement | null>(null);
+  let repoPickerPos = $state({ x: 12, y: 72, maxHeight: 560 });
+  let scannedRepos = $state<string[]>([]);
+  let repoScanning = $state(false);
+  let repoScanToken = 0;
   let dialog = $state<Dialog>(null);
   let prefsSave = 0;
   let draft = $state("");
@@ -718,6 +730,7 @@
   }
 
   async function openLaunch() {
+    repoPickerOpen = false;
     launch = "";
     launchIndex = 0;
     launchOpen = true;
@@ -3034,6 +3047,188 @@
     return slash >= 0 ? trimmed.slice(slash + 1) : trimmed;
   }
 
+  const sampleRecent = [
+    "D:\\work\\MyTest",
+    "D:\\work\\VPNCloudRelay",
+    "D:\\personal\\TinyCar",
+    "D:\\personal\\LearnAgent",
+    "D:\\personal\\AabInstallHelp",
+  ];
+  const sampleCatalog = [
+    ...sampleRecent,
+    "D:\\work\\ExcelMergeDiffTools_B\\left",
+    "D:\\work\\ExcelMergeDiffTools_B\\right",
+    "D:\\work\\H_FrameWork\\core",
+    "D:\\work\\H_FrameWork\\ui",
+    "D:\\work\\TinyCar\\app",
+    "D:\\work\\TinyCar\\firmware",
+    "D:\\work\\.cursor",
+    "D:\\work\\AgentRelay",
+    "D:\\work\\AITools",
+    "D:\\work\\Ant_Miner",
+    "D:\\work\\Async",
+    "D:\\work\\AutoBuildUnity",
+    "D:\\work\\AutoBuildUnity_Build",
+    "D:\\work\\Log",
+    "D:\\work\\CAO",
+    "D:\\work\\CodeAnalyzer",
+    "D:\\personal\\CursorHelper",
+  ];
+
+  function normalPath(path: string) {
+    return path.replace(/[\\/]+$/, "").replaceAll("\\", "/").toLowerCase();
+  }
+
+  function dedupeRepos(paths: string[]) {
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    for (const path of paths) {
+      const key = normalPath(path);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      unique.push(path);
+    }
+    return unique;
+  }
+
+  function previewRepos() {
+    return !inApp() && settings.recent.length === 0 && repos.length === 0;
+  }
+
+  function recentPaths() {
+    if (settings.recent.length > 0) return settings.recent;
+    return previewRepos() ? sampleRecent : [];
+  }
+
+  function catalogPaths() {
+    return dedupeRepos([
+      ...settings.recent,
+      ...repos,
+      ...settings.workspaces.flatMap((workspace) => [...workspace.repositories, ...workspace.openTabs]),
+      ...scannedRepos,
+      ...(previewRepos() ? sampleCatalog : []),
+    ]);
+  }
+
+  function sourceOf(path: string) {
+    const target = normalPath(path);
+    let best = "";
+    for (const root of sourceRootList()) {
+      const base = normalPath(root.path);
+      if (!base) continue;
+      if (target === base || target.startsWith(`${base}/`)) {
+        if (base.length > normalPath(best).length) best = root.path;
+      }
+    }
+    return best;
+  }
+
+  function relativeParts(root: string, path: string) {
+    const base = root.replace(/[\\/]+$/, "").replaceAll("\\", "/");
+    const target = path.replace(/[\\/]+$/, "").replaceAll("\\", "/");
+    if (target.toLowerCase() === base.toLowerCase()) return [];
+    if (!target.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return [];
+    return target.slice(base.length + 1).split("/").filter(Boolean);
+  }
+
+  function repositoryEntries(): RepoEntry[] {
+    const folders = new Map<string, { name: string; repos: string[] }>();
+    const loose: string[] = [];
+    const outside = new Map<string, string[]>();
+    for (const path of catalogPaths()) {
+      const root = sourceOf(path);
+      const parts = root ? relativeParts(root, path) : [];
+      if (root && parts.length > 1) {
+        const sep = root.includes("\\") ? "\\" : "/";
+        const folderPath = `${root.replace(/[\\/]+$/, "")}${sep}${parts[0]}`;
+        const key = normalPath(folderPath);
+        const group = folders.get(key) ?? { name: parts[0], repos: [] };
+        group.repos.push(path);
+        folders.set(key, group);
+        continue;
+      }
+      if (root) {
+        loose.push(path);
+        continue;
+      }
+      const parent = parentDir(path);
+      const key = normalPath(parent);
+      const list = outside.get(key) ?? [];
+      list.push(path);
+      outside.set(key, list);
+    }
+    for (const [key, items] of outside) {
+      if (key && items.length > 1) folders.set(key, { name: folderName(parentDir(items[0] ?? "")), repos: items });
+      else loose.push(...items);
+    }
+    const byName = (left: string, right: string) => folderName(left).localeCompare(folderName(right), undefined, { sensitivity: "base" });
+    const entries: RepoEntry[] = [...folders.entries()]
+      .map(([path, group]) => ({ kind: "folder" as const, path, name: group.name, repos: [...group.repos].sort(byName) }))
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+    for (const path of [...loose].sort(byName)) entries.push({ kind: "repo", path });
+    return entries;
+  }
+
+  function placeRepoPicker() {
+    const rect = repoPickerButton?.getBoundingClientRect();
+    const width = 292;
+    const margin = 8;
+    if (!rect) {
+      repoPickerPos = { x: 12, y: 72, maxHeight: 560 };
+      return;
+    }
+    const below = window.innerHeight - rect.bottom - margin;
+    const above = rect.top - margin;
+    const openUp = below < 280 && above > below;
+    const maxHeight = Math.max(180, Math.min(640, (openUp ? above : below) - 6));
+    repoPickerPos = {
+      x: Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin)),
+      y: openUp ? Math.max(margin, rect.top - 6 - maxHeight) : rect.bottom + 6,
+      maxHeight,
+    };
+  }
+
+  async function toggleRepoPicker() {
+    if (repoPickerOpen) {
+      repoPickerOpen = false;
+      return;
+    }
+    closeLaunch();
+    menu = null;
+    submenu = null;
+    placeRepoPicker();
+    repoPickerOpen = true;
+    if (!inApp()) return;
+    const token = ++repoScanToken;
+    repoScanning = true;
+    const found: string[] = [];
+    for (const root of sourceRootList()) {
+      try {
+        found.push(...(await invoke<string[]>("scan_repositories", { root: root.path })));
+      } catch {
+        /* a missing source folder should not hide the ones that can be read */
+      }
+    }
+    if (token !== repoScanToken) return;
+    scannedRepos = dedupeRepos(found);
+    repoScanning = false;
+  }
+
+  function toggleRepoFolder(path: string) {
+    repoPickerExpanded = repoPickerExpanded.includes(path)
+      ? repoPickerExpanded.filter((item) => item !== path)
+      : [...repoPickerExpanded, path];
+  }
+
+  function pickRepo(path: string) {
+    repoPickerOpen = false;
+    void openRepo(path);
+  }
+
+  function currentRepo(path: string) {
+    return !!snapshot?.path && pathsMatch(snapshot.path, path);
+  }
+
   function whenLabel(commit: CommitRow) {
     if (settings.dateRelative) return commit.when;
     return formatWhen(commit.at, settings.dateFormat.trim() || "dd MMM yyyy", settings.date24h) || commit.when;
@@ -3454,6 +3649,7 @@
       dialog = null;
       closeLaunch();
       blameLines = null;
+      repoPickerOpen = false;
       return;
     }
     event.preventDefault();
@@ -3719,7 +3915,8 @@
     <button type="button" onclick={(event) => openBar(event, helpItems())}>{tr("chrome.help")}</button>
   </nav>
   <header class="chrome">
-    <div class="chrome-side tabs">
+    <div class="chrome-tabs">
+      <div class="chrome-side tabs">
       {#each repos as repo (repo)}
         <div class="tab" role="group" class:active={snapshot?.path === repo} class:dirty={settings.tabIndicator && snapshot?.path === repo && changeCount > 0} style:box-shadow={tabColor(repo) ? `inset 0 -2px 0 ${tabColor(repo)}` : ""} oncontextmenu={(event) => openMenu(event, [
           { label: tr("chrome.terminal"), disabled: mode !== "live", run: () => void invoke("open_terminal", { path: repo }) },
@@ -3734,6 +3931,10 @@
       {:else}
         <button class="tab active" type="button">{tabLabel}</button>
       {/each}
+      </div>
+      <button class="tab-add" type="button" bind:this={repoPickerButton} title={tr("chrome.manager")} aria-label={tr("chrome.manager")} aria-expanded={repoPickerOpen} aria-haspopup="dialog" onclick={() => void toggleRepoPicker()}>
+        <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
     </div>
     <button class="launch-trigger" type="button" onclick={() => void openLaunch()}>
       <span>{tr("chrome.quickLaunch")}</span>
@@ -5011,6 +5212,17 @@
     </button>
   {/snippet}
 
+  {#snippet repoChoice(path: string, nested: boolean)}
+    <button class="repo-row" class:nested class:current={currentRepo(path)} type="button" title={path} onclick={() => pickRepo(path)}>
+      <svg class="repo-glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.75h5.2L12.25 4.8V14.25H4z"/><path d="M9.1 1.75V5h3.15"/></svg>
+      <span class="repo-name">{tabText(path)}</span>
+      {#if currentRepo(path) && changeCount > 0}<span class="repo-dot" aria-hidden="true"></span>{/if}
+    </button>
+  {/snippet}
+  {#snippet repoChevron(open: boolean)}
+    <svg class="repo-chevron" class:open viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4.5 10 8l-4 3.5"/></svg>
+  {/snippet}
+
   {#snippet menuList(items: MenuItem[])}
     {#each items as item, index (`${item.sep ? "sep" : item.label}-${index}`)}
       {#if item.sep}
@@ -5028,6 +5240,49 @@
     {/each}
   {/snippet}
 
+  {#if repoPickerOpen}
+    <div class="repo-picker" style:left="{repoPickerPos.x}px" style:top="{repoPickerPos.y}px" style:max-height="{repoPickerPos.maxHeight}px" role="dialog" aria-label={tr("chrome.manager")}>
+      <h2>{tr("chrome.manager")}</h2>
+      <div class="repo-picker-scroll">
+        <button class="repo-section" type="button" aria-expanded={repoPickerRecentOpen} onclick={() => (repoPickerRecentOpen = !repoPickerRecentOpen)}>
+          {@render repoChevron(repoPickerRecentOpen)}
+          <span>{tr("chrome.recent")}</span>
+        </button>
+        {#if repoPickerRecentOpen}
+          {#each recentPaths() as path (path)}
+            {@render repoChoice(path, false)}
+          {:else}
+            <p class="repo-empty">{tr("chrome.noRecentRepos")}</p>
+          {/each}
+        {/if}
+        <button class="repo-section" type="button" aria-expanded={repoPickerReposOpen} onclick={() => (repoPickerReposOpen = !repoPickerReposOpen)}>
+          {@render repoChevron(repoPickerReposOpen)}
+          <span>{tr("chrome.repositories")}</span>
+        </button>
+        {#if repoPickerReposOpen}
+          {#each repositoryEntries() as entry (entry.kind === "folder" ? `folder:${entry.path}` : entry.path)}
+            {#if entry.kind === "folder"}
+              <button class="repo-row folder" type="button" aria-expanded={repoPickerExpanded.includes(entry.path)} onclick={() => toggleRepoFolder(entry.path)}>
+                {@render repoChevron(repoPickerExpanded.includes(entry.path))}
+                <svg class="repo-glyph folder" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 3.4c0-.8.7-1.5 1.5-1.5h3.1l1.2 1.4h5.5c.8 0 1.5.7 1.5 1.5v7.3c0 .8-.7 1.5-1.5 1.5H3.1c-.8 0-1.5-.7-1.5-1.5V3.4z"/></svg>
+                <span class="repo-name">{entry.name}</span>
+              </button>
+              {#if repoPickerExpanded.includes(entry.path)}
+                {#each entry.repos as path (path)}
+                  {@render repoChoice(path, true)}
+                {/each}
+              {/if}
+            {:else}
+              {@render repoChoice(entry.path, false)}
+            {/if}
+          {:else}
+            <p class="repo-empty">{repoScanning ? tr("chrome.reading") : tr("chrome.noRepositories")}</p>
+          {/each}
+        {/if}
+      </div>
+    </div>
+    <button class="scrim menu-dismiss" type="button" aria-label={tr("chrome.close")} onclick={() => (repoPickerOpen = false)}></button>
+  {/if}
   {#if menu}
     <div class="menu" use:fitMenu={menu} role="menu">
       {@render menuList(menu.items)}
@@ -6004,8 +6259,16 @@
     min-width: max-content;
   }
 
+  .chrome-tabs {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    max-width: 360px;
+  }
+
   .tabs {
-    max-width: 320px;
+    min-width: 0;
     overflow: auto;
     scrollbar-width: none;
   }
@@ -6087,6 +6350,153 @@
   }
 
   .tab.active:hover { background: var(--elevated); }
+
+  .tab-add {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-secondary);
+    display: grid;
+    place-items: center;
+    flex: none;
+    font: inherit;
+  }
+
+  .tab-add:hover,
+  .tab-add[aria-expanded="true"] {
+    background: var(--hover);
+    color: var(--text);
+  }
+
+  .tab-add svg { width: 16px; height: 16px; }
+
+  .repo-picker {
+    position: fixed;
+    z-index: 31;
+    width: 292px;
+    display: flex;
+    flex-direction: column;
+    background: var(--elevated);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+
+  .repo-picker h2 {
+    margin: 0;
+    padding: 14px 14px 6px;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.3;
+    flex: none;
+  }
+
+  .repo-picker-scroll {
+    overflow: auto;
+    min-height: 0;
+    flex: 1;
+    padding: 0 6px 8px;
+  }
+
+  .repo-section,
+  .repo-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    height: 28px;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+  }
+
+  .repo-section {
+    padding: 0 6px;
+    font-weight: 600;
+  }
+
+  .repo-row {
+    padding: 0 8px 0 22px;
+    border-radius: 6px;
+  }
+
+  .repo-row.folder { padding-left: 6px; }
+  .repo-row.nested { padding-left: 40px; }
+
+  .repo-section:hover,
+  .repo-row:hover { background: var(--hover); }
+
+  .repo-row.current,
+  .repo-row.current:hover {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+
+  .repo-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .repo-glyph {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.3;
+    stroke-linejoin: round;
+    color: var(--text-secondary);
+  }
+
+  .repo-glyph.folder {
+    fill: currentColor;
+    stroke: none;
+    color: #e2a308;
+  }
+
+  .repo-row.current .repo-glyph { color: var(--on-accent); }
+  .repo-row.current .repo-glyph.folder { color: #ffd56a; }
+
+  .repo-chevron {
+    width: 12px;
+    height: 12px;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    color: var(--text-secondary);
+    transition: transform 120ms ease;
+  }
+
+  .repo-chevron.open { transform: rotate(90deg); }
+  .repo-row.current .repo-chevron { color: var(--on-accent); }
+
+  .repo-dot {
+    width: 8px;
+    height: 8px;
+    margin-left: auto;
+    border: 1.5px solid var(--deleted);
+    border-radius: 50%;
+    flex: none;
+  }
+
+  .repo-row.current .repo-dot { border-color: var(--on-accent); }
+
+  .repo-empty {
+    margin: 0;
+    padding: 2px 8px 8px 22px;
+    color: var(--text-secondary);
+  }
 
   .icon-btn {
     position: relative;

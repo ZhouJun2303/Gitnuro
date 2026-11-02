@@ -141,6 +141,9 @@ export const en: Messages = {
     sshConfig: "SSH config",
     combined: "Combined",
     shared: "All repositories",
+    repositories: "Repositories",
+    noRecentRepos: "No recently opened repositories",
+    noRepositories: "No repositories yet",
   },
   menu: {
     checkout: "Checkout",

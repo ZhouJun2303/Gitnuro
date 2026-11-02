@@ -141,6 +141,9 @@ export type Messages = {
     sshConfig: string;
     combined: string;
     shared: string;
+    repositories: string;
+    noRecentRepos: string;
+    noRepositories: string;
   };
   menu: {
     checkout: string;

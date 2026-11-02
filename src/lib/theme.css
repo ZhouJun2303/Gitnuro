@@ -255,8 +255,11 @@ body {
   .pref-tabs button,
   .launch-trigger,
   .recent-card,
+  .tab-add,
+  .repo-section,
+  .repo-row,
   button.virtual-row
-):not(:disabled):not(.on):not(.active):not(.selected):active {
+):not(:disabled):not(.on):not(.active):not(.selected):not(.current):active {
   background: var(--pressed);
 }
 
@@ -267,6 +270,7 @@ body {
   .banner,
   .menu,
   .menu-dismiss,
+  .repo-picker,
   .palette-scrim,
   .scrim,
   .pane-head,
