@@ -37,7 +37,9 @@ export type Messages = {
     new: string;
     add: string;
     showAll: string;
+    allBranches: string;
     fetchAll: string;
+    filter: string;
     filterSidebar: string;
     filterFiles: string;
     staged: string;
@@ -104,6 +106,10 @@ export type Messages = {
     pushTags: string;
     listView: string;
     treeView: string;
+    viewAsList: string;
+    viewAsTree: string;
+    viewAsCombined: string;
+    showIgnoredFiles: string;
     repoSettings: string;
     discardSelected: string;
     deleteSelected: string;

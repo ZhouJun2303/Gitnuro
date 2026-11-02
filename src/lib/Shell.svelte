@@ -96,7 +96,7 @@
     lfs: string;
     hot: { path: string; count: number }[];
   };
-  type MenuItem = { label: string; run?: () => void; disabled?: boolean; shortcut?: string; children?: MenuItem[]; sep?: boolean };
+  type MenuItem = { label: string; run?: () => void; disabled?: boolean; shortcut?: string; children?: MenuItem[]; sep?: boolean; checked?: boolean };
   type ConfirmAsk = { title: string; body: string; run: () => void };
   type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row; depth: number };
 
@@ -269,6 +269,7 @@
   let historyEl = $state<HTMLElement | null>(null);
   let selectedIndex = $state(0);
   let sideQuery = $state("");
+  let sideFilter = $state<HTMLInputElement | null>(null);
   let fileQuery = $state("");
   let recentQuery = $state("");
   let searchOpen = $state({ recent: false, side: false, commit: false, file: false });
@@ -1159,16 +1160,36 @@
     return [...list.filter((item) => !item.startsWith(`${path}\t`)), ...(value.trim() ? [`${path}\t${value.trim()}`] : [])];
   }
 
-  function layoutName() {
-    if (fileLayout === "tree") return tr("chrome.treeView");
-    if (fileLayout === "combined") return tr("chrome.combined");
-    return tr("chrome.listView");
-  }
-
-  function cycleLayout() {
-    const next = fileLayout === "list" ? "tree" : fileLayout === "tree" ? "combined" : "list";
+  function setLayout(next: "list" | "tree" | "combined") {
     settings = { ...settings, fileLayout: next, treeFiles: next === "tree" };
     void savePrefs(false);
+  }
+
+  function fileViewMenu(): MenuItem[] {
+    const picked = pickedIn(shownUnstaged);
+    const selection: MenuItem[] = picked.length > 1
+      ? [
+          { label: tr("chrome.discardSelected"), disabled: mode !== "live" || busy, run: () => confirmPicked(picked, tr("chrome.discardSelected"), discardPicked) },
+          { label: tr("chrome.deleteSelected"), disabled: mode !== "live" || busy, run: () => confirmPicked(picked, tr("chrome.deleteSelected"), deletePicked) },
+          { label: tr("menu.stashSelected"), disabled: mode !== "live" || busy, run: () => void mutate({ action: "stashPaths", files: picked, message: "", includeUntracked: false }) },
+          { sep: true },
+        ]
+      : [];
+    return [
+      ...selection,
+      { label: tr("chrome.viewAsTree"), checked: fileLayout === "tree", run: () => setLayout("tree") },
+      { label: tr("chrome.viewAsList"), checked: fileLayout === "list", run: () => setLayout("list") },
+      { label: tr("chrome.viewAsCombined"), checked: fileLayout === "combined", run: () => setLayout("combined") },
+      { sep: true },
+      { label: tr("chrome.showIgnoredFiles"), checked: showIgnored, run: () => { showIgnored = !showIgnored; if (showIgnored) void loadFacts(true); } },
+    ];
+  }
+
+  function openFileView(event: MouseEvent) {
+    event.stopPropagation();
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    submenu = null;
+    menu = { x: rect.left, y: rect.bottom + 4, items: fileViewMenu() };
   }
 
   async function searchContent(kind: string, needle: string) {
@@ -2809,44 +2830,99 @@
   <div class="body">
     {#if !sidebarCollapsed}
     <aside class="sidebar" style:width="{sidebarWidth}px">
+      {#snippet glyph(kind: string)}
+        <svg class="line-icon side-glyph" class:check={kind === "check"} viewBox="0 0 24 24" aria-hidden="true">
+          {#if kind === "changes"}
+            <path d="M6 3.5h8l4 4V20.5H6z"/><path d="M14 3.5v4h4"/><path d="M9 13h6M9 17h4"/>
+          {:else if kind === "commits"}
+            <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>
+          {:else if kind === "branch"}
+            <path d="M6 3v12"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>
+          {:else if kind === "search"}
+            <circle cx="11" cy="11" r="6"/><path d="M15.5 15.5 20 20"/>
+          {:else if kind === "folder"}
+            <path d="M3 7.5V17.5A1.5 1.5 0 0 0 4.5 19h15a1.5 1.5 0 0 0 1.5-1.5v-8A1.5 1.5 0 0 0 19.5 8H12l-2-2H4.5A1.5 1.5 0 0 0 3 7.5z"/>
+          {:else if kind === "check"}
+            <path d="M5 12.5 9.2 17 19 7"/>
+          {:else if kind === "remote"}
+            <path d="M7 17.5h9.2a3 3 0 0 0 .4-6 4.4 4.4 0 0 0-8.4-1.6A3.1 3.1 0 0 0 7 17.5z"/>
+          {:else if kind === "tag"}
+            <path d="M4 12.2V5h7.2L20 13.8 13.8 20z"/><circle cx="8" cy="8.2" r="1.1"/>
+          {:else if kind === "stash"}
+            <path d="M4 9h16v10H4z"/><path d="M12 4v7M9 8.5 12 11.5 15 8.5"/>
+          {:else if kind === "submodule"}
+            <path d="M4 9h16v9H4z"/><path d="M7 9V6.5h10V9M8 13h8"/>
+          {:else if kind === "worktree"}
+            <rect x="3.5" y="4" width="7" height="6" rx="1"/><rect x="13.5" y="4" width="7" height="6" rx="1"/><rect x="3.5" y="14" width="7" height="6" rx="1"/><rect x="13.5" y="14" width="7" height="6" rx="1"/>
+          {:else if kind === "add"}
+            <path d="M12 5v14M5 12h14"/>
+          {:else if kind === "gear"}
+            <circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3V20.5M3.5 12h2.2M18.3 12h2.2M5.8 5.8l1.6 1.6M16.6 16.6l1.6 1.6M18.2 5.8l-1.6 1.6M7.4 16.6l-1.6 1.6"/>
+          {/if}
+        </svg>
+      {/snippet}
+      {#snippet chevron(open: boolean)}
+        <svg class="line-icon side-chevron" viewBox="0 0 24 24" aria-hidden="true">
+          {#if open}<path d="m6 9 6 6 6-6"/>{:else}<path d="m9 6 6 6-6 6"/>{/if}
+        </svg>
+      {/snippet}
+
+      <div class="side-brand">
+        <span>AweGit</span>
+        <button class="icon-btn" type="button" title={tr("chrome.preferences")} aria-label={tr("chrome.preferences")} onclick={() => (dialog = "prefs")}>{@render glyph("gear")}</button>
+      </div>
       <button class="side nav" type="button" class:selected={section === "changes"} onclick={() => (section = "changes")}>
+        {@render glyph("changes")}
         <span class="name">{tr("chrome.localChanges")}</span>
         {#if changeCount > 0}<span class="count">{changeCount}</span>{/if}
       </button>
       <button class="side nav" type="button" class:selected={section === "history"} onclick={() => (section = "history")}>
+        {@render glyph("commits")}
         <span class="name">{tr("chrome.allCommits")}</span>
       </button>
-      <div class="side-search">
-        {#if searchOpen.side}
-          <input class="search" placeholder={tr("chrome.filterSidebar")} aria-label={tr("chrome.filterSidebar")} bind:value={sideQuery} use:focusOnMount onkeydown={(event) => searchKeys("side", event)} onblur={() => searchBlur("side")} />
-        {/if}
-        {@render searchToggle("side", tr("chrome.filterSidebar"))}
+      <div class="side-tools">
+        <button class="icon-btn side-tool" class:on={!allBranches} type="button" title={!allBranches ? tr("chrome.currentBranch") : tr("chrome.allBranches")} aria-pressed={!allBranches} onclick={() => { allBranches = !allBranches; section = "history"; if (mode === "live") void loadContext(); }}>{@render glyph("branch")}</button>
+        <button class="icon-btn side-tool" class:on={sideQuery.trim() !== ""} type="button" title={tr("chrome.filterSidebar")} aria-label={tr("chrome.filterSidebar")} onclick={() => sideFilter?.focus()}>{@render glyph("search")}</button>
       </div>
+      <label class="side-filter">
+        {@render glyph("search")}
+        <input placeholder={tr("chrome.filter")} aria-label={tr("chrome.filterSidebar")} bind:this={sideFilter} bind:value={sideQuery} onkeydown={(event) => { if (event.key === "Escape") { event.stopPropagation(); sideQuery = ""; } }} />
+        {#if sideQuery}<button class="side-filter-clear" type="button" aria-label={tr("chrome.clearFilter")} onclick={() => (sideQuery = "")}>×</button>{/if}
+      </label>
 
-      {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void }[] = [], empty = count === 0)}
+      {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void; icon?: "add" }[] = [], empty = count === 0)}
         <div class="side section" class:selected={sideSelected === key} role="group">
-          <button class="file-select" type="button" aria-expanded={empty ? undefined : sideOpen(key)} onclick={() => (empty ? (sideSelected = key) : pickSide(key))}>
-            <span class="twist">{empty ? "" : sideOpen(key) ? "▾" : "▸"}</span>
+          <button class="file-select" type="button" aria-expanded={sideOpen(key)} onclick={() => pickSide(key)}>
+            <span class="twist">{@render chevron(sideOpen(key))}</span>
             <span class="name">{label}</span>
-            {#if count !== null}<span class="count">{count}</span>{/if}
+            {#if count !== null && count > 0}<span class="count">{count}</span>{/if}
           </button>
-          {#each actions as action (action.label)}
-            <button class="text-button" type="button" onclick={action.run}>{action.label}</button>
-          {/each}
+          {#if actions.length > 0}
+            <div class="side-actions">
+              {#each actions as action (action.label)}
+                {#if action.icon === "add"}
+                  <button class="icon-btn side-add" type="button" title={action.label} aria-label={action.label} onclick={action.run}>{@render glyph("add")}</button>
+                {:else}
+                  <button class="text-button" type="button" onclick={action.run}>{action.label}</button>
+                {/if}
+              {/each}
+            </div>
+          {/if}
         </div>
       {/snippet}
 
       {#if mode === "live" && refs}
         {@render sideHead("branches", tr("chrome.localBranches"), null, [
-          { label: tr("chrome.new"), run: () => { draft = ""; draftExtra = ""; dialog = "branch"; } },
+          { label: tr("chrome.new"), icon: "add", run: () => { draft = ""; draftExtra = ""; dialog = "branch"; } },
           { label: tr("chrome.showAll"), run: showAllRefs },
         ], visibleBranches.length === 0)}
         {#if sideOpen("branches")}
         {#each visibleBranches as branch, index (branch.name)}
           {@const group = branchGroup(branch.name)}
           {#if group && group !== branchGroup(visibleBranches[index - 1]?.name ?? "")}
-            <button class="side nested quiet" type="button" class:selected={sideSelected === `local:${group}/`} aria-expanded={groupOpen(branch.name)} onclick={() => { sideSelected = `local:${group}/`; toggleGroup(group); }}>
-              <span class="twist">{groupOpen(branch.name) ? "▾" : "▸"}</span>
+            <button class="side nested" type="button" class:selected={sideSelected === `local:${group}/`} aria-expanded={groupOpen(branch.name)} onclick={() => { sideSelected = `local:${group}/`; toggleGroup(group); }}>
+              <span class="twist">{@render chevron(groupOpen(branch.name))}</span>
+              {@render glyph("folder")}
               <span class="name">{group}</span>
             </button>
           {/if}
@@ -2878,48 +2954,50 @@
             ])}
           >
             <button class="file-select" type="button" title={branch.name} onclick={(event) => { if (event.ctrlKey || event.metaKey) compareWith = branch.name; sideSelected = `local:${branch.name}`; }} ondblclick={() => !branch.current && requestCheckout(branch.name)}>
-              <span class="twist">{#if branch.current}<span class="dot"></span>{/if}</span>
+              <span class="twist"></span>
+              {@render glyph(branch.current ? "check" : "branch")}
               <span class="name">{pinnedHere.has(branch.name) ? "• " : ""}{group ? branch.name.slice(group.length + 1) : branch.name}</span>
-              {#if branch.ahead > 0}<span class="ahead">↑{branch.ahead}</span>{/if}
-              {#if branch.behind > 0}<span class="ahead">↓{branch.behind}</span>{/if}
+              {#if branch.ahead > 0}<span class="ahead">{branch.ahead}↑</span>{/if}
+              {#if branch.behind > 0}<span class="ahead">{branch.behind}↓</span>{/if}
             </button>
           </div>
           {/if}
         {/each}
         {/if}
         {@render sideHead("remotes", tr("chrome.remotes"), null, [
-          { label: tr("chrome.add"), run: () => { draft = ""; draftExtra = ""; dialog = "remote"; } },
+          { label: tr("chrome.add"), icon: "add", run: () => { draft = ""; draftExtra = ""; dialog = "remote"; } },
         ], refs.remotes.length === 0)}
         {#if sideOpen("remotes")}
         {#each refs.remotes as remote (remote.name)}
           {#if matchesQuery(remote.name, sideQuery) || remote.branches.some((branch) => matchesQuery(branch, sideQuery))}
           {@const remoteKey = `remote:${remote.name}`}
           {@const remoteEmpty = remote.branches.length === 0 && !remote.head}
-          <div class="side nested quiet" class:selected={sideSelected === remoteKey} role="group" oncontextmenu={(event) => openMenu(event, [
+          <div class="side nested" class:selected={sideSelected === remoteKey} role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("chrome.fetch"), run: () => mutate({ action: "fetch", remote: remote.name, prune: settings.fetchPrune, tags: settings.fetchTags }) },
             { label: tr("dialog.url"), run: () => { draft = remote.name; draftExtra = remote.url ?? ""; dialog = "remote"; } },
             { label: tr("menu.remove"), run: () => mutate({ action: "removeRemote", name: remote.name }) },
           ])}>
             <button class="file-select" type="button" aria-expanded={remoteEmpty ? undefined : sideOpen(remoteKey)} title={remote.url ?? ""} onclick={() => (remoteEmpty ? (sideSelected = remoteKey) : pickSide(remoteKey))}>
-              <span class="twist">{remoteEmpty ? "" : sideOpen(remoteKey) ? "▾" : "▸"}</span>
+              <span class="twist">{#if !remoteEmpty}{@render chevron(sideOpen(remoteKey))}{/if}</span>
+              {@render glyph("remote")}
               <span class="name">{remote.name}</span>
-              <span class="count">{remote.branches.length}</span>
             </button>
           </div>
           {#if sideOpen(remoteKey)}
-          {#if remote.head && !sideQuery.trim()}<div class="side nested deep quiet"><span class="twist"></span><span class="name">HEAD → {remote.head}</span></div>{/if}
+          {#if remote.head && !sideQuery.trim()}<div class="side nested deep quiet"><span class="twist"></span>{@render glyph("branch")}<span class="name">HEAD → {remote.head}</span></div>{/if}
           {#each remote.branches as branch, index (remote.name + branch)}
             {@const folder = branchGroup(branch)}
             {@const folderKey = `${remoteKey}/${folder}`}
             {#if folder && folder !== branchGroup(remote.branches[index - 1] ?? "") && remote.branches.some((item) => branchGroup(item) === folder && matchesQuery(item, sideQuery))}
-              <button class="side nested deep quiet" type="button" class:selected={sideSelected === folderKey} aria-expanded={sideOpen(folderKey)} onclick={() => pickSide(folderKey)}>
-                <span class="twist">{sideOpen(folderKey) ? "▾" : "▸"}</span>
+              <button class="side nested deep" type="button" class:selected={sideSelected === folderKey} aria-expanded={sideOpen(folderKey)} onclick={() => pickSide(folderKey)}>
+                <span class="twist">{@render chevron(sideOpen(folderKey))}</span>
+                {@render glyph("folder")}
                 <span class="name">{folder}</span>
               </button>
             {/if}
             {#if matchesQuery(branch, sideQuery) && (!folder || sideOpen(folderKey))}
             <div
-              class="side nested deep quiet"
+              class="side nested deep"
               class:deeper={!!folder}
               class:selected={sideSelected === `${remoteKey}:${branch}`}
               role="group"
@@ -2933,6 +3011,7 @@
             >
               <button class="file-select" type="button" title={`${remote.name}/${branch}`} onclick={() => (sideSelected = `${remoteKey}:${branch}`)} ondblclick={() => mutate({ action: "checkoutRemote", remote: remote.name, branch })}>
                 <span class="twist"></span>
+                {@render glyph("branch")}
                 <span class="name">{folder ? branch.slice(folder.length + 1) : branch}</span>
               </button>
             </div>
@@ -2944,7 +3023,7 @@
         {/if}
       {:else}
         {@render sideHead("branches", tr("chrome.localBranches"))}
-        {#if sideOpen("branches")}
+        {#if sideOpen("branches") && matchesQuery(branchLabel, sideQuery)}
         <div
           class="side nested current"
           class:selected={sideSelected === `local:${branchLabel}`}
@@ -2962,25 +3041,26 @@
           ])}
         >
           <button class="file-select" type="button" onclick={() => (sideSelected = `local:${branchLabel}`)}>
-            <span class="twist"><span class="dot"></span></span>
+            <span class="twist"></span>
+            {@render glyph("check")}
             <span class="name">{branchLabel}</span>
-            {#if mode === "sample"}<span class="ahead">↑5</span>{/if}
+            {#if mode === "sample"}<span class="ahead">5↑</span>{/if}
           </button>
         </div>
         {/if}
         {@render sideHead("remotes", tr("chrome.remotes"))}
-        {#if sideOpen("remotes")}
-        <div class="side nested quiet" class:selected={sideSelected === "remote:origin"}>
+        {#if sideOpen("remotes") && (matchesQuery("origin", sideQuery) || matchesQuery("main", sideQuery))}
+        <div class="side nested" class:selected={sideSelected === "remote:origin"}>
           <button class="file-select" type="button" aria-expanded={sideOpen("remote:origin")} onclick={() => pickSide("remote:origin")}>
-            <span class="twist">{sideOpen("remote:origin") ? "▾" : "▸"}</span>
+            <span class="twist">{@render chevron(sideOpen("remote:origin"))}</span>
+            {@render glyph("remote")}
             <span class="name">origin</span>
-            <span class="count">1</span>
           </button>
         </div>
         {#if sideOpen("remote:origin")}
-        <div class="side nested deep quiet"><span class="twist"></span><span class="name">HEAD → main</span></div>
+        <div class="side nested deep quiet"><span class="twist"></span>{@render glyph("branch")}<span class="name">HEAD → main</span></div>
         <div
-          class="side nested deep quiet"
+          class="side nested deep"
           class:selected={sideSelected === "remote:origin:main"}
           role="group"
           oncontextmenu={(event) => openMenu(event, [
@@ -2990,27 +3070,28 @@
             { label: tr("menu.deleteRemote"), run: () => ask(tr("menu.deleteRemote"), tr("dialog.deleteRemoteBody", { name: "origin/main" }), () => {}) },
             { label: tr("menu.copyName"), run: () => copyText("origin/main") },
           ])}
-        ><button class="file-select" type="button" onclick={() => (sideSelected = "remote:origin:main")}><span class="twist"></span><span class="name">main</span></button></div>
+        ><button class="file-select" type="button" onclick={() => (sideSelected = "remote:origin:main")}><span class="twist"></span>{@render glyph("branch")}<span class="name">main</span></button></div>
         {/if}
         {/if}
       {/if}
       {@render sideHead("tags", tr("chrome.tags"), visibleTags.length)}
       {#if sideOpen("tags")}
         {#each visibleTags as tag (tag.name)}
-          <div class="side nested quiet" class:selected={sideSelected === `tag:${tag.name}`} role="group" oncontextmenu={(event) => openMenu(event, [
+          <div class="side nested" class:selected={sideSelected === `tag:${tag.name}`} role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("menu.checkout"), disabled: mode !== "live", run: () => mutate({ action: "checkout", name: tag.name }) },
             { label: tr("menu.delete"), disabled: mode !== "live", run: () => ask(tr("menu.delete"), tag.name, () => void mutate({ action: "deleteTag", name: tag.name })) },
             { label: tr("menu.deleteRemoteTag"), disabled: mode !== "live" || !refs?.remotes[0], run: () => { const remote = refs?.remotes[0]?.name ?? ""; ask(tr("menu.deleteRemoteTag"), `${remote} ${tag.name}`, () => void mutate({ action: "deleteRemoteTag", remote, name: tag.name })); } },
             { label: tr("menu.copyName"), run: () => copyText(tag.name) },
           ])}>
-            <button class="file-select" type="button" title={tag.name} onclick={() => (sideSelected = `tag:${tag.name}`)} ondblclick={() => mode === "live" && mutate({ action: "checkout", name: tag.name })}><span class="twist"></span><span class="name">{tag.name}</span></button>
+            <button class="file-select" type="button" title={tag.name} onclick={() => (sideSelected = `tag:${tag.name}`)} ondblclick={() => mode === "live" && mutate({ action: "checkout", name: tag.name })}><span class="twist"></span>{@render glyph("tag")}<span class="name">{tag.name}</span></button>
           </div>
         {/each}
       {/if}
       {@render sideHead("stashes", tr("chrome.stashes"), refs?.stashes.length ?? (mode === "sample" ? 1 : 0))}
       {#if sideOpen("stashes")}
         {#each (refs?.stashes ?? (mode === "sample" ? [{ name: "stash@{0}", summary: "WIP before the palette" }] : [])) as stash (stash.name)}
-          <div class="side nested quiet" class:selected={sideSelected === `stash:${stash.name}`} role="group" oncontextmenu={(event) => openMenu(event, [
+          {#if matchesQuery(stash.summary, sideQuery) || matchesQuery(stash.name, sideQuery)}
+          <div class="side nested" class:selected={sideSelected === `stash:${stash.name}`} role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("menu.apply"), disabled: mode !== "live", run: () => mutate({ action: "stashApply", name: stash.name }) },
             { label: tr("menu.pop"), disabled: mode !== "live", run: () => mutate({ action: "stashPop", name: stash.name }) },
             { label: tr("menu.drop"), disabled: mode !== "live", run: () => ask(tr("menu.drop"), stash.summary, () => void mutate({ action: "stashDrop", name: stash.name })) },
@@ -3018,37 +3099,42 @@
             { label: tr("menu.stashPatch"), disabled: mode !== "live", run: () => void mutate({ action: "stashPatch", name: stash.name }) },
             { label: tr("menu.stashBranch"), disabled: mode !== "live", run: () => { draft = ""; draftExtra = stash.name; dialog = "stashBranch"; } },
           ])}>
-            <button class="file-select" type="button" title={stash.name} onclick={() => (sideSelected = `stash:${stash.name}`)}><span class="twist"></span><span class="name">{stash.summary}</span></button>
+            <button class="file-select" type="button" title={stash.name} onclick={() => (sideSelected = `stash:${stash.name}`)}><span class="twist"></span>{@render glyph("stash")}<span class="name">{stash.summary}</span></button>
           </div>
+          {/if}
         {/each}
       {/if}
       {@render sideHead("submodules", tr("chrome.submodules"), refs?.submodules.length ?? 0, [
-        { label: tr("chrome.add"), run: () => { draft = ""; draftExtra = ""; dialog = "submodule"; } },
+        { label: tr("chrome.add"), icon: "add", run: () => { draft = ""; draftExtra = ""; dialog = "submodule"; } },
       ])}
       {#if sideOpen("submodules")}
         {#each refs?.submodules ?? [] as row (row.path)}
-          <div class="side nested quiet" class:selected={sideSelected === `submodule:${row.path}`} role="group" oncontextmenu={(event) => openMenu(event, [
+          {#if matchesQuery(row.path, sideQuery)}
+          <div class="side nested" class:selected={sideSelected === `submodule:${row.path}`} role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("menu.initialize"), disabled: mode !== "live" || row.ready, run: () => mutate({ action: "submoduleInit", path: row.path }) },
             { label: tr("menu.openFile"), disabled: !row.ready, run: () => openRepo(fullPath(row.path)) },
             { label: tr("menu.sync"), disabled: mode !== "live" || !row.ready, run: () => mutate({ action: "submoduleSync", path: row.path }) },
             { label: tr("menu.update"), disabled: mode !== "live" || !row.ready, run: () => mutate({ action: "submoduleUpdate" }) },
             { label: tr("menu.delete"), disabled: mode !== "live", run: () => ask(tr("menu.delete"), row.path, () => void mutate({ action: "submoduleRemove", path: row.path })) },
           ])}>
-            <button class="file-select" type="button" title={row.path} onclick={() => (sideSelected = `submodule:${row.path}`)} ondblclick={() => row.ready && openRepo(fullPath(row.path))}><span class="twist"></span><span class="name">{row.path}</span></button>
+            <button class="file-select" type="button" title={row.path} onclick={() => (sideSelected = `submodule:${row.path}`)} ondblclick={() => row.ready && openRepo(fullPath(row.path))}><span class="twist"></span>{@render glyph("submodule")}<span class="name">{row.path}</span></button>
           </div>
+          {/if}
         {/each}
       {/if}
       {@render sideHead("worktrees", tr("chrome.worktrees"), refs?.worktrees.length ?? (mode === "sample" ? 1 : 0), [
-        { label: tr("chrome.add"), run: () => { draft = ""; draftExtra = snapshot?.branch ?? ""; dialog = "worktree"; } },
+        { label: tr("chrome.add"), icon: "add", run: () => { draft = ""; draftExtra = snapshot?.branch ?? ""; dialog = "worktree"; } },
       ])}
       {#if sideOpen("worktrees")}
         {#each (refs?.worktrees ?? (mode === "sample" ? [{ path: "this repository", branch: "main" }] : [])) as row (row.path)}
-          <div class="side nested quiet" class:selected={sideSelected === `worktree:${row.path}`} role="group" oncontextmenu={(event) => openMenu(event, [
+          {#if matchesQuery(row.path, sideQuery) || matchesQuery(row.branch ?? "", sideQuery)}
+          <div class="side nested" class:selected={sideSelected === `worktree:${row.path}`} role="group" oncontextmenu={(event) => openMenu(event, [
             { label: tr("menu.openFile"), disabled: mode !== "live", run: () => openRepo(row.path) },
             { label: tr("menu.remove"), disabled: mode !== "live", run: () => ask(tr("menu.remove"), row.path, () => void mutate({ action: "removeWorktree", path: row.path })) },
           ])}>
-            <button class="file-select" type="button" title={row.path} onclick={() => (sideSelected = `worktree:${row.path}`)} ondblclick={() => mode === "live" && openRepo(row.path)}><span class="twist"></span><span class="name">{row.branch ?? folderName(row.path)}</span></button>
+            <button class="file-select" type="button" title={row.path} onclick={() => (sideSelected = `worktree:${row.path}`)} ondblclick={() => mode === "live" && openRepo(row.path)}><span class="twist"></span>{@render glyph("worktree")}<span class="name">{row.branch ?? folderName(row.path)}</span></button>
           </div>
+          {/if}
         {/each}
       {/if}
     </aside>
@@ -3536,11 +3622,16 @@
 
     {#snippet combinedPane()}
       <div class="pane-head">
-        <div class="pane-label">
-          <span class="pane-title">{tr("chrome.combined")}</span>
-        </div>
+        {#if searchOpen.file}
+          {@render fileFilter()}
+        {:else}
+          <div class="pane-label">
+            <span class="pane-title">{tr("chrome.combined")}</span>
+          </div>
+        {/if}
         <div class="pane-tools">
-          <button class="pane-chip" type="button" class:on={fileLayout !== "list"} title={layoutName()} onclick={cycleLayout}>{layoutName()}</button>
+          {@render searchToggle("file", tr("chrome.filterFiles"))}
+          {@render fileViewButton()}
         </div>
       </div>
       <div class="file-list">
@@ -3583,10 +3674,9 @@
     {/snippet}
 
     {#snippet unstagedPane()}
-      {@const loosePicked = pickedIn(shownUnstaged)}
       <div class="pane-head">
         {#if searchOpen.file}
-          <input class="search pane-filter" placeholder={tr("chrome.filterFiles")} aria-label={tr("chrome.filterFiles")} bind:value={fileQuery} use:focusOnMount onkeydown={(event) => searchKeys("file", event)} onblur={() => searchBlur("file")} />
+          {@render fileFilter()}
         {:else}
           <div class="pane-label">
             <span class="pane-title">{tr("chrome.unstaged")}</span>
@@ -3594,18 +3684,8 @@
           </div>
         {/if}
         <div class="pane-tools">
-          {#if loosePicked.length > 1}
-            <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => confirmPicked(loosePicked, tr("chrome.discardSelected"), discardPicked)}>{tr("chrome.discardSelected")}</button>
-            <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => confirmPicked(loosePicked, tr("chrome.deleteSelected"), deletePicked)}>{tr("chrome.deleteSelected")}</button>
-            <button class="pane-chip" type="button" disabled={mode !== "live" || busy} onclick={() => void mutate({ action: "stashPaths", files: loosePicked, message: "", includeUntracked: false })}>{tr("menu.stashSelected")}</button>
-          {/if}
-          <button class="pane-chip" type="button" class:on={fileLayout !== "list"} onclick={cycleLayout}>{layoutName()}</button>
-          <button class="pane-chip" type="button" class:on={showIgnored} aria-pressed={showIgnored} onclick={() => { showIgnored = !showIgnored; if (showIgnored) void loadFacts(true); }}>{tr("chrome.ignored")}</button>
-          {#if searchOpen.file}
-            <button class="pane-chip" type="button" onmousedown={(event) => event.preventDefault()} onclick={() => toggleSearch("file")}>{tr("chrome.close")}</button>
-          {:else}
-            <button class="pane-chip" type="button" onclick={() => toggleSearch("file")}>{tr("chrome.filterFiles")}</button>
-          {/if}
+          {@render searchToggle("file", tr("chrome.filterFiles"))}
+          {@render fileViewButton()}
           <button class="pane-chip pane-go" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>{tr("chrome.stageAll")}</button>
         </div>
       </div>
@@ -3715,6 +3795,14 @@
     <div class="split-bar" data-bar="right"><div></div></div>
     {#if actions}<span class="split-bar-pad"></span>{/if}
   {/snippet}
+  {#snippet fileFilter()}
+    <input class="search pane-filter" placeholder={tr("chrome.filterFiles")} aria-label={tr("chrome.filterFiles")} bind:value={fileQuery} use:focusOnMount onkeydown={(event) => searchKeys("file", event)} onblur={() => searchBlur("file")} />
+  {/snippet}
+  {#snippet fileViewButton()}
+    <button class="icon-btn pane-more" type="button" aria-label={tr("chrome.view")} aria-haspopup="menu" title={tr("chrome.view")} onclick={openFileView}>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  {/snippet}
   {#snippet searchToggle(key: SearchKey, label: string)}
     <button class="icon-btn search-toggle" class:on={searchOpen[key]} type="button" aria-label={label} aria-pressed={searchOpen[key]} title={label} onmousedown={(event) => event.preventDefault()} onclick={() => toggleSearch(key)}>
       {#if searchOpen[key]}
@@ -3730,8 +3818,11 @@
       {#if item.sep}
         <hr />
       {:else}
-        <button type="button" disabled={item.disabled} onmouseenter={(event) => { if (!item.children) { submenu = null; return; } const rect = (event.currentTarget as HTMLElement).getBoundingClientRect(); submenu = { x: rect.right - 4, y: rect.top, items: item.children }; }} onclick={() => { if (item.disabled || item.children || !item.run) return; menu = null; submenu = null; void item.run(); }}>
-          <span>{item.label}</span>
+        <button type="button" disabled={item.disabled} aria-checked={item.checked} onmouseenter={(event) => { if (!item.children) { submenu = null; return; } const rect = (event.currentTarget as HTMLElement).getBoundingClientRect(); submenu = { x: rect.right - 4, y: rect.top, items: item.children }; }} onclick={() => { if (item.disabled || item.children || !item.run) return; menu = null; submenu = null; void item.run(); }}>
+          <span class="menu-main">
+            {#if item.checked !== undefined}<span class="menu-check" aria-hidden="true">{item.checked ? "✓" : ""}</span>{/if}
+            <span>{item.label}</span>
+          </span>
           {#if item.shortcut}<span class="shortcut">{item.shortcut}</span>{/if}
           {#if item.children}<span class="shortcut">›</span>{/if}
         </button>
@@ -4641,6 +4732,8 @@
   .menu button:disabled { opacity: 0.4; }
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 6px; }
   .shortcut { color: var(--text-secondary); font-size: 11px; }
+  .menu-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .menu-check { width: 14px; flex: none; text-align: center; }
   .menu button, .menu-dismiss { font: inherit; }
   .scrim.menu-dismiss { position: fixed; inset: 0; z-index: 29; background: transparent; border: 0; backdrop-filter: none; animation: none; }
   .shell {
@@ -5056,14 +5149,18 @@
     font-size: 11px;
   }
 
-  .side.nav.selected,
-  .side.section.selected {
-    color: var(--accent);
+  .sidebar .side.nav.selected {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .sidebar .side.section.selected {
+    color: var(--text);
     font-weight: 600;
   }
 
   .side.nav.selected .count {
-    color: var(--accent);
+    color: var(--text-secondary);
   }
 
   .side.nested {
@@ -5083,19 +5180,37 @@
   }
 
   .side.section {
+    position: relative;
     margin-top: 6px;
     color: var(--text);
+  }
+
+  .side-actions {
+    position: absolute;
+    right: 4px;
+    top: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .side.section:hover .side-actions,
+  .side.section:focus-within .side-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .side.section:hover:has(.side-actions) .count,
+  .side.section:focus-within:has(.side-actions) .count {
+    visibility: hidden;
   }
 
   .side.section .text-button {
     margin-left: 0;
     flex: none;
-    opacity: 0;
-  }
-
-  .side.section:hover .text-button,
-  .side.section:focus-within .text-button {
-    opacity: 1;
   }
 
   .twist {
@@ -5151,7 +5266,6 @@
     flex-direction: column;
     background: var(--canvas);
     overflow: hidden;
-    container-type: inline-size;
   }
 
   .status-pane {
@@ -5189,13 +5303,16 @@
   }
 
   .pane-head {
+    height: 32px;
     min-height: 32px;
     display: flex;
     align-items: center;
-    gap: 6px 8px;
-    flex-wrap: wrap;
-    padding: 4px 8px;
+    gap: 8px;
+    flex-wrap: nowrap;
+    padding: 0 8px;
     font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
     border-bottom: 1px solid var(--line);
     background: var(--canvas);
   }
@@ -5237,18 +5354,23 @@
     margin-left: auto;
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    flex-wrap: wrap;
-    gap: 4px;
-    max-width: 100%;
+    gap: 2px;
+    flex: none;
   }
 
-  @container (max-width: 380px) {
-    .unstaged-pane .pane-tools {
-      flex-basis: 100%;
-      margin-left: 0;
-      justify-content: flex-start;
-    }
+  .pane-tools .icon-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+  }
+
+  .pane-tools .icon-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .pane-tools .search-toggle {
+    margin-left: 0;
   }
 
   .pane-chip {
@@ -6065,6 +6187,10 @@
     margin-left: auto;
   }
 
+  .pane-head .pane-tools .search-toggle {
+    margin-left: 0;
+  }
+
   .pane-head .search + .search-toggle {
     margin-left: 0;
   }
@@ -6073,13 +6199,133 @@
     margin-left: 0;
   }
 
-  .side-search {
+  .side-brand {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 4px;
-    height: 30px;
-    margin: 2px 8px 2px;
+    justify-content: space-between;
+    height: 32px;
+    padding: 0 6px 0 14px;
+    font-weight: 600;
+  }
+
+  .side-brand .icon-btn {
+    width: 28px;
+    height: 28px;
+  }
+
+  .side-tools {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 28px;
+    margin-top: 2px;
+  }
+
+  .side-tool {
+    width: 26px;
+    height: 26px;
+    color: var(--text-secondary);
+  }
+
+  .side-tool.on,
+  .side-tool.on:hover:not(:disabled) {
+    color: var(--accent);
+  }
+
+  .side-filter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    margin: 4px 10px 8px;
+    padding: 0 8px;
+    border-radius: 6px;
+    background: var(--field);
+    color: var(--text-secondary);
+  }
+
+  .side-filter .side-glyph {
+    width: 14px;
+    height: 14px;
+  }
+
+  .side-filter input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-weight: 400;
+  }
+
+  .side-filter input:focus {
+    outline: none;
+  }
+
+  .side-filter input::placeholder {
+    color: var(--text-secondary);
+  }
+
+  .side-filter:focus-within {
+    background: var(--elevated);
+    box-shadow: inset 0 0 0 1px var(--line);
+  }
+
+  .side-filter-clear {
+    width: 16px;
+    height: 16px;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    line-height: 16px;
+  }
+
+  .side-glyph {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    color: var(--text-secondary);
+  }
+
+  .side-tool .side-glyph,
+  .side-brand .side-glyph,
+  .side-add .side-glyph,
+  .side-filter .side-glyph {
+    color: inherit;
+  }
+
+  .side.nav .side-glyph,
+  .side-glyph.check {
+    color: inherit;
+  }
+
+  .side-glyph.check {
+    stroke-width: 2.4;
+  }
+
+  .side-chevron {
+    width: 14px;
+    height: 14px;
+    color: var(--text-secondary);
+  }
+
+  .side-add {
+    width: 22px;
+    height: 22px;
+    margin-left: 0;
+    flex: none;
+  }
+
+  .sidebar .side.selected,
+  .sidebar .side.nav.selected {
+    background: color-mix(in srgb, var(--text) 12%, var(--sidebar));
+    color: var(--text);
   }
 
   .search-wrap {
@@ -6283,7 +6529,7 @@
   .issue { color: var(--accent); text-decoration: none; }
 
   .tree-dir { width: 100%; }
-  .twist { width: 12px; flex: none; color: var(--text-secondary); }
+  .twist { width: 14px; flex: none; color: var(--text-secondary); }
 
   .summary-input,
   .composer textarea {
