@@ -3536,8 +3536,14 @@
 
     {#snippet combinedPane()}
       <div class="pane-head">
-        <span class="pane-title">{tr("chrome.combined")}</span>
-        <button class="text-button" type="button" class:on={fileLayout !== "list"} onclick={cycleLayout}>{layoutName()}</button>
+        <div class="pane-label">
+          <span class="pane-title">{tr("chrome.combined")}</span>
+        </div>
+        <div class="pane-tools">
+          <button class="icon-btn" type="button" class:on={fileLayout !== "list"} title={layoutName()} aria-label={layoutName()} onclick={cycleLayout}>
+            {@render layoutGlyph()}
+          </button>
+        </div>
       </div>
       <div class="file-list">
         {#each shownStaged as file (`s:${file.path}`)}
@@ -3552,12 +3558,20 @@
     {#snippet stagedPane()}
       {@const stagedPicked = pickedIn(shownStaged)}
       <div class="pane-head">
-        <span class="pane-title">{tr("chrome.staged")}</span>
-        <span class="count">{staged.length}</span>
-        {#if stagedPicked.length > 1}
-          <button class="text-button" type="button" disabled={mode !== "live" || busy} onclick={() => void unstagePicked(stagedPicked)}>{tr("chrome.unstageSelected")}</button>
-        {/if}
-        <button class="text-button" type="button" disabled={mode !== "live" || busy || staged.length === 0} onclick={() => runChange("unstage_all")}>{tr("chrome.unstageAll")}</button>
+        <div class="pane-label">
+          <span class="pane-title">{tr("chrome.staged")}</span>
+          <span class="count">{staged.length}</span>
+        </div>
+        <div class="pane-tools">
+          {#if stagedPicked.length > 1}
+            <button class="icon-btn" type="button" title={tr("chrome.unstageSelected")} aria-label={tr("chrome.unstageSelected")} disabled={mode !== "live" || busy} onclick={() => void unstagePicked(stagedPicked)}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M12.5 8H4.2"/><path d="M7 4.8 3.8 8 7 11.2"/></svg>
+            </button>
+          {/if}
+          <button class="icon-btn" type="button" title={tr("chrome.unstageAll")} aria-label={tr("chrome.unstageAll")} disabled={mode !== "live" || busy || staged.length === 0} onclick={() => runChange("unstage_all")}>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8h9.6"/></svg>
+          </button>
+        </div>
       </div>
       {#if shownStaged.length === 0}
         <p class="empty">{staged.length === 0 ? tr("chrome.noStaged") : tr("chrome.noMatch")}</p>
@@ -3577,20 +3591,40 @@
     {#snippet unstagedPane()}
       {@const loosePicked = pickedIn(shownUnstaged)}
       <div class="pane-head">
-        <span class="pane-title">{tr("chrome.unstaged")}</span>
-        <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : shownUnstaged.length}</span>
-        <button class="text-button" type="button" class:on={fileLayout !== "list"} title={layoutName()} onclick={cycleLayout}>{layoutName()}</button>
-        <button class="text-button" type="button" class:on={showIgnored} onclick={() => { showIgnored = !showIgnored; if (showIgnored) void loadFacts(true); }}>{tr("chrome.ignored")}</button>
         {#if searchOpen.file}
           <input class="search pane-filter" placeholder={tr("chrome.filterFiles")} aria-label={tr("chrome.filterFiles")} bind:value={fileQuery} use:focusOnMount onkeydown={(event) => searchKeys("file", event)} onblur={() => searchBlur("file")} />
+        {:else}
+          <div class="pane-label">
+            <span class="pane-title">{tr("chrome.unstaged")}</span>
+            <span class="count">{mode === "loading" ? "…" : mode === "error" ? "—" : shownUnstaged.length}</span>
+          </div>
         {/if}
-        {@render searchToggle("file", tr("chrome.filterFiles"))}
-        {#if loosePicked.length > 1}
-          <button class="text-button" type="button" disabled={mode !== "live" || busy} onclick={() => confirmPicked(loosePicked, tr("chrome.discardSelected"), discardPicked)}>{tr("chrome.discardSelected")}</button>
-          <button class="text-button" type="button" disabled={mode !== "live" || busy} onclick={() => confirmPicked(loosePicked, tr("chrome.deleteSelected"), deletePicked)}>{tr("chrome.deleteSelected")}</button>
-          <button class="text-button" type="button" disabled={mode !== "live" || busy} onclick={() => void mutate({ action: "stashPaths", files: loosePicked, message: "", includeUntracked: false })}>{tr("menu.stashSelected")}</button>
-        {/if}
-        <button class="text-button" type="button" disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>{tr("chrome.stage")}</button>
+        <div class="pane-tools">
+          {#if loosePicked.length > 1}
+            <button class="icon-btn" type="button" title={tr("chrome.discardSelected")} aria-label={tr("chrome.discardSelected")} disabled={mode !== "live" || busy} onclick={() => confirmPicked(loosePicked, tr("chrome.discardSelected"), discardPicked)}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6.1h4.9a3.15 3.15 0 1 1-1.6 5.8"/><path d="M3.5 3.4v2.7h2.7"/></svg>
+            </button>
+            <button class="icon-btn" type="button" title={tr("chrome.deleteSelected")} aria-label={tr("chrome.deleteSelected")} disabled={mode !== "live" || busy} onclick={() => confirmPicked(loosePicked, tr("chrome.deleteSelected"), deletePicked)}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 4.5h9.6"/><path d="M6.2 4.5V3.2h3.6v1.3"/><path d="M4.5 4.5l.5 8.2h6l.5-8.2"/></svg>
+            </button>
+            <button class="icon-btn" type="button" title={tr("menu.stashSelected")} aria-label={tr("menu.stashSelected")} disabled={mode !== "live" || busy} onclick={() => void mutate({ action: "stashPaths", files: loosePicked, message: "", includeUntracked: false })}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.6 6.1 8 3.7l5.4 2.4L8 8.5 2.6 6.1Z"/><path d="M2.6 6.1v4.2L8 12.7l5.4-2.4V6.1"/><path d="M8 8.5v4.2"/></svg>
+            </button>
+            <span class="chrome-divider"></span>
+          {/if}
+          <button class="icon-btn" type="button" class:on={fileLayout !== "list"} title={layoutName()} aria-label={layoutName()} onclick={cycleLayout}>
+            {@render layoutGlyph()}
+          </button>
+          <button class="icon-btn" type="button" class:on={showIgnored} title={tr("chrome.ignored")} aria-label={tr("chrome.ignored")} aria-pressed={showIgnored} onclick={() => { showIgnored = !showIgnored; if (showIgnored) void loadFacts(true); }}>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 8S4 4.3 8 4.3 14.4 8 14.4 8 12 11.7 8 11.7 1.6 8 1.6 8Z"/><circle cx="8" cy="8" r="1.6"/></svg>
+          </button>
+          {@render searchToggle("file", tr("chrome.filterFiles"))}
+          <span class="chrome-divider"></span>
+          <button class="icon-btn pane-go" type="button" title={tr("chrome.stageAll")} aria-label={tr("chrome.stageAll")} disabled={mode !== "live" || busy || unstaged.length === 0} onclick={() => runChange("stage_all")}>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>
+            <span>{tr("chrome.stage")}</span>
+          </button>
+        </div>
       </div>
       <div class="file-list" onscroll={(event) => (fileTop = (event.currentTarget as HTMLElement).scrollTop)}>
         {#if showIgnored}
@@ -3697,6 +3731,15 @@
     <span class="split-bar-pad"></span>
     <div class="split-bar" data-bar="right"><div></div></div>
     {#if actions}<span class="split-bar-pad"></span>{/if}
+  {/snippet}
+  {#snippet layoutGlyph()}
+    {#if fileLayout === "tree"}
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 3.5v9"/><path d="M4 5h2.2M4 8h2.2M4 11h2.2"/><path d="M8 5h4.5M8 8h4.5M8 11h4.5"/></svg>
+    {:else if fileLayout === "combined"}
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.75" y="2.75" width="10.5" height="3.6" rx="0.8"/><rect x="2.75" y="9.65" width="10.5" height="3.6" rx="0.8"/></svg>
+    {:else}
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M3 8h10M3 11.5h10"/></svg>
+    {/if}
   {/snippet}
   {#snippet searchToggle(key: SearchKey, label: string)}
     <button class="icon-btn search-toggle" class:on={searchOpen[key]} type="button" aria-label={label} aria-pressed={searchOpen[key]} title={label} onmousedown={(event) => event.preventDefault()} onclick={() => toggleSearch(key)}>
@@ -5190,6 +5233,90 @@
     font-weight: 600;
   }
 
+  .pane-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .pane-label .pane-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .pane-head .count {
+    margin-left: 0;
+    flex: none;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: var(--field);
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: center;
+  }
+
+  .pane-tools {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    flex: none;
+  }
+
+  .pane-tools .icon-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+  }
+
+  .pane-tools .icon-btn svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .pane-tools .icon-btn.on {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+
+  .pane-tools .chrome-divider {
+    height: 12px;
+    margin: 0 3px;
+  }
+
+  .pane-tools .pane-go {
+    width: auto;
+    height: 22px;
+    margin-left: 2px;
+    padding: 0 7px 0 5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+
+  .pane-tools .pane-go svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .pane-tools .pane-go:hover:not(:disabled) {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+
   .search.pane-filter {
     min-width: 60px;
     height: 24px;
@@ -5962,6 +6089,10 @@
 
   .pane-head .search-toggle {
     margin-left: auto;
+  }
+
+  .pane-tools .search-toggle {
+    margin-left: 0;
   }
 
   .pane-head .search + .search-toggle {
