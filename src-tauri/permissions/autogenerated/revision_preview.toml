@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-revision-preview"
+description = "Enables the revision_preview command without any pre-configured scope."
+commands.allow = ["revision_preview"]
+
+[[permission]]
+identifier = "deny-revision-preview"
+description = "Denies the revision_preview command without any pre-configured scope."
+commands.deny = ["revision_preview"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-forge-notifications"
+description = "Enables the forge_notifications command without any pre-configured scope."
+commands.allow = ["forge_notifications"]
+
+[[permission]]
+identifier = "deny-forge-notifications"
+description = "Denies the forge_notifications command without any pre-configured scope."
+commands.deny = ["forge_notifications"]

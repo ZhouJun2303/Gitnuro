@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-repository-summary"
+description = "Enables the repository_summary command without any pre-configured scope."
+commands.allow = ["repository_summary"]
+
+[[permission]]
+identifier = "deny-repository-summary"
+description = "Denies the repository_summary command without any pre-configured scope."
+commands.deny = ["repository_summary"]

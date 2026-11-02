@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reflog"
+description = "Enables the reflog command without any pre-configured scope."
+commands.allow = ["reflog"]
+
+[[permission]]
+identifier = "deny-reflog"
+description = "Denies the reflog command without any pre-configured scope."
+commands.deny = ["reflog"]

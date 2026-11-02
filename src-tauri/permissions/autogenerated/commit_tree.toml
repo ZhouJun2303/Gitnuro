@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-commit-tree"
+description = "Enables the commit_tree command without any pre-configured scope."
+commands.allow = ["commit_tree"]
+
+[[permission]]
+identifier = "deny-commit-tree"
+description = "Denies the commit_tree command without any pre-configured scope."
+commands.deny = ["commit_tree"]
