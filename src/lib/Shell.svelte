@@ -4597,15 +4597,15 @@
         </button>
       </div>
       <div class="chrome-identity">
-        <div class="identity-floor">
+        <div class="identity-floor" class:working={workDepth > 0}>
           <button class="icon-btn history-btn" class:on={commandLogOpen} type="button" bind:this={commandButton} title={tr("chrome.commandHistory")} aria-label={tr("chrome.commandHistory")} aria-expanded={commandLogOpen} aria-haspopup="dialog" onclick={() => (commandLogOpen ? (commandLogOpen = false) : openCommandLog())}>
             <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
           </button>
           <div class="identity-copy">
             <strong>{focusPath && !viewing(focusPath) ? folderName(focusPath) : snapshot ? folderName(snapshot.path) : mode === "sample" ? "AweGit" : tr("chrome.welcomeTitle")}</strong>
             <span>
-              {#if focusPath && !viewing(focusPath)}
-                {currentJob?.label || tr("chrome.open")}
+              {#if workDepth > 0}
+                <em class="identity-branch">{busyLabel ? `${tr("chrome.working")} ${busyLabel}` : tr("chrome.working")}</em>
               {:else if snapshot || mode === "sample"}
                 <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
                 <em class="identity-branch">{branchLabel}</em>
@@ -4615,6 +4615,9 @@
               {#if workPercent != null}<em class="identity-pct">{workPercent}%</em>{/if}
             </span>
           </div>
+          {#if workDepth > 0}
+            <button class="text-button identity-cancel" type="button" onclick={() => invoke("cancel_operation", { path: meterPath || cloneJob?.destination || repoPath() })}>{tr("chrome.cancel")}</button>
+          {/if}
           <button class="tool-btn stack branch-chip" type="button" aria-haspopup="menu" onclick={(event) => openBar(event, branchItems())}>
             <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
             <span>{tr("dialog.branch")}<svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
@@ -4706,13 +4709,6 @@
       <button class="text-button" type="button" disabled={busy} onclick={() => mutate({ action: "abort" })}>{tr("chrome.abort")}</button>
       <button class="text-button" type="button" disabled={busy || conflicted} onclick={() => { if (progress === "rebase") { draft = ""; dialog = "continue"; } else void mutate({ action: "continue" }); }}>{tr("chrome.continueAction")}</button>
       <button class="text-button" type="button" disabled={busy || progress === "merge"} onclick={() => mutate({ action: "skip" })}>{tr("chrome.skip")}</button>
-    </div>
-  {/if}
-  {#if workDepth > 0}
-    <div class="banner busy" role="status" aria-live="polite">
-      <span class="busy-text">{busyLabel ? `${tr("chrome.working")} ${busyLabel}` : tr("chrome.working")}</span>
-      <span class="spacer"></span>
-      <button class="text-button busy-cancel" type="button" onclick={() => invoke("cancel_operation", { path: meterPath || cloneJob?.destination || repoPath() })}>{tr("chrome.cancel")}</button>
     </div>
   {/if}
   {#if actionError}
@@ -7153,6 +7149,21 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .identity-floor.working > .history-btn,
+  .identity-floor.working > .identity-copy,
+  .identity-floor.working > .identity-cancel,
+  .identity-floor.working > .branch-chip {
+    position: relative;
+    z-index: 1;
+  }
+
+  .identity-floor > .identity-cancel {
+    flex: none;
+    height: 28px;
+    margin: 0 4px 0 0;
+    padding: 0 8px;
+  }
+
   /* Determinate transfer bar. It sits inside the fixed 40px floor, so the pill does not grow. */
   .identity-bar {
     position: absolute;
@@ -7164,7 +7175,7 @@
     background: color-mix(in srgb, var(--accent) 16%, transparent);
     overflow: hidden;
     pointer-events: none;
-    z-index: 1;
+    z-index: 2;
   }
 
   .identity-bar > span {
@@ -7176,16 +7187,14 @@
     transition: width 140ms linear;
   }
 
-  /* A light that keeps travelling the bottom edge for the whole operation. */
+  /* The same travelling light that used to cross the full-width "正在处理" strip. */
   .identity-sweep {
     position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 2px;
+    inset: 0;
     overflow: hidden;
+    border-radius: inherit;
     pointer-events: none;
-    z-index: 2;
+    z-index: 0;
   }
 
   .identity-sweep::before {
@@ -7193,9 +7202,9 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 42%;
-    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 78%, white), transparent);
-    animation: busy-flow 1.25s linear infinite;
+    width: 46%;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 34%, white), transparent);
+    animation: busy-flow 1.3s linear infinite;
   }
 
   .history-btn.on { background: var(--hover); color: var(--text); }
@@ -7781,26 +7790,9 @@
     background: var(--selection);
   }
 
-  .banner.busy {
-    min-height: 24px;
-    color: var(--text-secondary);
-    background: var(--selection);
-    animation: busy-in 160ms ease-out;
-  }
-
-  .banner.busy .busy-text {
-    font-size: 12px;
-  }
-
-  .banner.busy .spacer { flex: 1; }
-
   @keyframes busy-flow {
     from { transform: translateX(-100%); }
     to { transform: translateX(320%); }
-  }
-
-  @keyframes busy-in {
-    from { opacity: 0; }
   }
 
   @media (prefers-reduced-motion: reduce) {
