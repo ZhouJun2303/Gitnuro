@@ -1221,6 +1221,20 @@ fn search_commits(path: Option<String>, kind: String, needle: String) -> Result<
 }
 
 #[tauri::command]
+fn search_log(
+    path: Option<String>,
+    field: String,
+    scope: String,
+    query: String,
+    limit: Option<usize>,
+    order: Option<String>,
+) -> Result<Vec<awegit_git::CommitRow>, String> {
+    let repo = repo_from(path)?;
+    let topo = order.as_deref() == Some("topo");
+    awegit_git::search_log(&repo, &field, &scope, &query, limit.unwrap_or(500), topo).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn cherry_preview(path: Option<String>, rev: String) -> Result<String, String> {
     let repo = repo_from(path)?;
     awegit_git::cherry_preview(&repo, &rev).map_err(|error| error.to_string())
@@ -1560,6 +1574,7 @@ pub fn run() {
             create_github_repo,
             generate_ssh_key,
             search_commits,
+            search_log,
             cherry_preview,
             merged_branches,
             pick_history,

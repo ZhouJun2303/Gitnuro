@@ -644,7 +644,7 @@ export async function startClone(shell: ShellState) {
     shell.dialog = null;
     shell.actionError = null;
     shell.cloneDone = null;
-    shell.cloneJob = { name, destination };
+    shell.cloneJob = { name, destination, workspace: shell.settings.currentWorkspace };
     shell.startWork(shell.tr("chrome.clone"), destination);
     try {
       await invoke("mutate", { path: shell.repoPath(), request: { action: "clone", url, destination } });
@@ -677,7 +677,7 @@ export async function startInit(shell: ShellState) {
     shell.dialog = null;
     shell.actionError = null;
     shell.cloneDone = null;
-    shell.cloneJob = { name, destination };
+    shell.cloneJob = { name, destination, workspace: shell.settings.currentWorkspace };
     try {
       await invoke("mutate", { path: shell.repoPath(), request: { action: "init", destination } });
       shell.noteActivity(`init ${name}`);

@@ -61,6 +61,7 @@ fn main() {
             "create_github_repo",
             "generate_ssh_key",
             "search_commits",
+            "search_log",
             "cherry_preview",
             "merged_branches",
             "pick_history",

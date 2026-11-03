@@ -114,7 +114,9 @@
           <div class="identity-copy">
             <strong>{shell.focusPath && !shell.viewing(shell.focusPath) ? shell.folderName(shell.focusPath) : shell.snapshot ? shell.folderName(shell.snapshot.path) : shell.mode === "sample" ? "AweGit" : shell.tr("chrome.welcomeTitle")}</strong>
             <span>
-              {#if shell.workDepth > 0}
+              {#if shell.showingClone && shell.cloneJob}
+                <em class="identity-branch">{shell.tr("chrome.cloning", { name: shell.cloneJob.name })}</em>
+              {:else if shell.workDepth > 0}
                 <em class="identity-branch">{shell.busyLabel ? `${shell.tr("chrome.working")} ${shell.busyLabel}` : shell.tr("chrome.working")}</em>
               {:else if shell.snapshot || shell.mode === "sample"}
                 <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
@@ -126,7 +128,7 @@
             </span>
           </div>
           {#if shell.workDepth > 0}
-            <button class="text-button identity-cancel" type="button" onclick={() => invoke("cancel_operation", { path: shell.meterPath || shell.cloneJob?.destination || shell.repoPath() })}>{shell.tr("chrome.cancel")}</button>
+            <button class="text-button identity-cancel" type="button" onclick={() => (shell.showingClone ? shell.cancelClone() : invoke("cancel_operation", { path: shell.meterPath || shell.repoPath() }))}>{shell.tr("chrome.cancel")}</button>
           {/if}
           <button class="tool-btn stack branch-chip" type="button" aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.branchItems())}>
             <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
@@ -185,12 +187,7 @@
     </div>
   </header>
 
-  {#if shell.cloneJob}
-    <div class="banner">
-      <span>{shell.tr("chrome.cloning", { name: shell.cloneJob.name })}</span>
-      <button class="text-button" type="button" onclick={shell.cancelClone.bind(shell)}>{shell.tr("chrome.cancel")}</button>
-    </div>
-  {:else if shell.cloneDone}
+  {#if shell.cloneDone}
     <div class="banner">
       <span>{shell.tr("chrome.cloneReady", { name: shell.folderName(shell.cloneDone) })}</span>
       <button class="text-button" type="button" onclick={() => { const path = shell.cloneDone; shell.cloneDone = null; if (path) void shell.openRepo(path); }}>{shell.tr("chrome.open")}</button>

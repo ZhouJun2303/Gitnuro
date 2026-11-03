@@ -126,9 +126,11 @@
                   </span>
                 </button>
               {/each}
+            {:else if shell.sampleShown.length === 0}
+              <p class="empty">{shell.tr("chrome.noCommits")}</p>
             {:else}
-              {#each shell.sampleRows as commit, index (commit.id)}
-                {@const graphRow = padGraphRow(shell.sampleGraph.rows[index], shell.sampleGraph.width)}
+              {#each shell.sampleShown as commit, index (commit.id)}
+                {@const graphRow = padGraphRow(shell.sampleShownGraph.rows[index], shell.sampleShownGraph.width)}
                 {@const tone = shell.laneTone(graphRow)}
                 <button class="commit-row" class:selected={shell.selectedCommit === commit.id || shell.selectedPath === commit.id} class:unpushed={shell.isCommitUnpushed(commit)} type="button" onclick={() => shell.selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
                   {@render laneGraph(graphRow, commit.id)}

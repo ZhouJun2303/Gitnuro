@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
+import { commits, diffs, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
 import { resolveLocale, translate } from "../i18n";
@@ -33,8 +33,8 @@ import {
     workspaceTabWidth,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
-import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
-import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry } from "./history.svelte";
+import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
+import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
 
@@ -274,6 +274,12 @@ export class ShellState {
   contextGen = 0;
 
 
+  commitSearchGen = 0;
+
+
+  commitSearchTimer = 0;
+
+
   refreshing = false;
 
 
@@ -446,7 +452,7 @@ export class ShellState {
   cloneIntent = $state<"clone" | "init">("clone");
 
 
-  cloneJob = $state<{ name: string; destination: string } | null>(null);
+  cloneJob = $state<{ name: string; destination: string; workspace: string } | null>(null);
 
 
   cloneDone = $state<string | null>(null);
@@ -579,6 +585,24 @@ export class ShellState {
   sideQuery = $state("");
 
 
+  sideView = $state<"refs" | "search">("refs");
+
+
+  commitSearch = $state("");
+
+
+  commitSearchField = $state<"message" | "author" | "path" | "diff">("message");
+
+
+  commitSearchScope = $state<"repository" | "branch">("repository");
+
+
+  commitSearchOpen = $state(false);
+
+
+  commitSearchEl = $state<HTMLInputElement | null>(null);
+
+
   sideFilter = $state<HTMLInputElement | null>(null);
 
 
@@ -691,6 +715,9 @@ export class ShellState {
 
 
   showIgnored = $state(false);
+
+
+  conflictsOnly = $state(false);
 
 
   hunkAt = $state(0);
@@ -969,10 +996,18 @@ export class ShellState {
   conflicted = $derived(this.conflictCount > 0);
 
 
-  selectedConflict = $derived(
-    this.mode === "live" &&
-      !!this.selectedPath &&
-      (this.selectedSide === "staged" ? this.snapshot?.staged : this.snapshot?.unstaged)?.some((file) => file.path === this.selectedPath && file.kind === "conflict") === true,
+  selectedConflict = $derived.by(() => {
+    if (!this.selectedPath) return false;
+    if (this.mode === "sample") return this.selectedSide === "unstaged" && !!sampleConflictViews[this.selectedPath];
+    return (
+      this.mode === "live" &&
+      (this.selectedSide === "staged" ? this.snapshot?.staged : this.snapshot?.unstaged)?.some((file) => file.path === this.selectedPath && file.kind === "conflict") === true
+    );
+  });
+
+
+  activeConflict = $derived<ConflictView | null>(
+    this.mode === "sample" ? (this.selectedPath ? (sampleConflictViews[this.selectedPath] ?? null) : null) : this.conflictView,
   );
 
 
@@ -1002,17 +1037,25 @@ export class ShellState {
   busyLabel = $derived(this.currentJob?.label ?? "");
 
 
+  showingClone = $derived(
+    !!this.cloneJob &&
+      (this.cloneJob.workspace || "") === (this.settings.currentWorkspace || "") &&
+      (this.currentJob?.depth ?? 0) === 0,
+  );
+
+
   workDepth = $derived.by(() => {
     if ((this.currentJob?.depth ?? 0) > 0) return this.currentJob?.depth ?? 0;
-    if (!this.snapshot && !this.focusPath && this.cloneJob) return this.jobs[this.jobKey(this.cloneJob.destination)]?.depth ?? 0;
-    return 0;
+    if (!this.showingClone || !this.cloneJob) return 0;
+    const depth = this.jobs[this.jobKey(this.cloneJob.destination)]?.depth ?? 0;
+    return depth > 0 ? depth : 1;
   });
 
 
   workPercent = $derived.by(() => {
     if ((this.currentJob?.depth ?? 0) > 0) return this.currentJob?.percent ?? null;
-    if (!this.snapshot && !this.focusPath && this.cloneJob) return this.jobs[this.jobKey(this.cloneJob.destination)]?.percent ?? null;
-    return null;
+    if (!this.showingClone || !this.cloneJob) return null;
+    return this.jobs[this.jobKey(this.cloneJob.destination)]?.percent ?? null;
   });
 
 
@@ -1050,6 +1093,22 @@ export class ShellState {
 
 
   sampleGraph = $derived(commitGraph(this.sampleRows.map((commit) => ({ id: commit.id, parents: commit.parents }))));
+
+
+  sampleShown = $derived.by(() => {
+    const query = this.sideView === "search" ? this.commitSearch.trim().toLowerCase() : "";
+    if (!query) return this.sampleRows;
+    const rows = this.commitSearchScope === "branch" ? this.sampleRows.filter((row) => row.badges.includes("main")) : this.sampleRows;
+    return rows.filter((row) => {
+      if (this.commitSearchField === "author") return row.author.toLowerCase().includes(query);
+      if (this.commitSearchField === "path") return row.files.some((file) => file.path.toLowerCase().includes(query));
+      if (this.commitSearchField === "diff") return false;
+      return row.summary.toLowerCase().includes(query) || row.id.toLowerCase().startsWith(query);
+    });
+  });
+
+
+  sampleShownGraph = $derived(commitGraph(this.sampleShown.map((commit) => ({ id: commit.id, parents: commit.parents }))));
 
 
   sampleTree = $derived([...new Set(commits.flatMap((commit) => commit.files.map((file) => file.path)))]);
@@ -1128,10 +1187,10 @@ export class ShellState {
   historyRows = $derived(this.historyWindow.rows);
 
 
-  shownUnstaged = $derived(this.unstaged.filter((file) => this.matchesQuery(file.path, this.fileQuery)));
+  shownUnstaged = $derived(this.unstaged.filter((file) => this.matchesQuery(file.path, this.fileQuery) && (!this.conflictsOnly || file.letter === "C")));
 
 
-  shownStaged = $derived(this.staged.filter((file) => this.matchesQuery(file.path, this.fileQuery)));
+  shownStaged = $derived(this.staged.filter((file) => this.matchesQuery(file.path, this.fileQuery) && (!this.conflictsOnly || file.letter === "C")));
 
 
   fileLayout = $derived(this.settings.fileLayout || (this.settings.treeFiles ? "tree" : "list"));
@@ -2325,6 +2384,36 @@ export class ShellState {
 
   setLayout(next: "list" | "tree" | "combined") {
     return setLayout(this, next);
+  }
+
+
+  setConflictsOnly(on: boolean) {
+    return setConflictsOnly(this, on);
+  }
+
+
+  showSideRefs() {
+    return showSideRefs(this);
+  }
+
+
+  showSideSearch() {
+    return showSideSearch(this);
+  }
+
+
+  queueCommitSearch() {
+    return queueCommitSearch(this);
+  }
+
+
+  pickCommitSearch(field: "message" | "author" | "path" | "diff") {
+    return pickCommitSearch(this, field);
+  }
+
+
+  pickCommitScope(scope: "repository" | "branch") {
+    return pickCommitScope(this, scope);
   }
 
 

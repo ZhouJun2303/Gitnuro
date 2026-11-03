@@ -19,7 +19,7 @@ pub use change::{
 pub use model::{
     blame_file, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log, commit_log_sorted,
     commit_tree, commits_from, compare_file, compare_files, file_history, ignored_paths, in_progress, lfs_available, lfs_locks,
-    locate_ref, prompt_facts, rebase_conflicts, reflog, repo_sign_off_format, repository_refs, repository_summary, show_commit_file,
+    locate_ref, prompt_facts, rebase_conflicts, reflog, repo_sign_off_format, repository_refs, repository_summary, search_log, show_commit_file,
     show_commit_file_with, BlameLine, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, LocatedRef, RefSnapshot, ReflogRow,
     RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };

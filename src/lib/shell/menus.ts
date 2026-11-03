@@ -52,6 +52,7 @@ export function fileViewMenu(shell: ShellState) {
       { label: shell.tr("chrome.viewAsList"), checked: shell.fileLayout === "list", run: () => shell.setLayout("list") },
       { label: shell.tr("chrome.viewAsCombined"), checked: shell.fileLayout === "combined", run: () => shell.setLayout("combined") },
       { sep: true, label: "" },
+      { label: shell.tr("chrome.conflictsOnly"), checked: shell.conflictsOnly, run: () => shell.setConflictsOnly(!shell.conflictsOnly) },
       { label: shell.tr("chrome.showIgnoredFiles"), checked: shell.showIgnored, run: () => { shell.showIgnored = !shell.showIgnored; if (shell.showIgnored) void shell.loadFacts(true, true); } },
       { label: shell.tr("chrome.fakeIgnore"), checked: shell.settings.fakeIgnore !== false, run: () => void shell.toggleFakeIgnore() },
     ];

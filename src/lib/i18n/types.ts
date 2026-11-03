@@ -53,6 +53,11 @@ export type Messages = {
     fetchAll: string;
     filter: string;
     filterSidebar: string;
+    searchCommits: string;
+    commitMessage: string;
+    diffContent: string;
+    searchIn: string;
+    conflictsOnly: string;
     filterFiles: string;
     staged: string;
     unstaged: string;

@@ -44,13 +44,13 @@
                 {/each}
               </div>
             </div>
-          {:else if shell.mode === "live" && shell.section === "changes" && shell.selectedPath && shell.selectedConflict}
+          {:else if (shell.mode === "live" || shell.mode === "sample") && shell.section === "changes" && shell.selectedPath && shell.selectedConflict}
             <header class="diff-head">
               <span>{shell.selectedPath}</span>
             </header>
-            {#if shell.conflictView}
-              {@const view = shell.conflictView}
-              {@const tool = mergeToolLabel(shell)}
+            {#if shell.activeConflict}
+              {@const view = shell.activeConflict}
+              {@const tool = shell.mode === "sample" ? (view.binary ? "ExcelMergeFork" : "") : mergeToolLabel(shell)}
               {@const only = pickTheirs !== pickOurs ? (pickTheirs ? view.theirs.label : view.ours.label) : ""}
               <div class="conflict-pane">
                 <div class="conflict-title">
@@ -70,14 +70,14 @@
                   {@render conflictCard(view.ours, "ours")}
                 </div>
                 <div class="conflict-actions">
-                  <button class="conflict-merge" type="button" disabled={shell.busy || (!pickOurs && !pickTheirs)} onclick={() => void applyConflictChoice(shell, pickOurs, pickTheirs)}>{only ? shell.tr("chrome.chooseSide", { name: only }) : shell.tr("chrome.mergeAction")}</button>
+                  <button class="conflict-merge" type="button" disabled={(!pickOurs && !pickTheirs) || (shell.mode === "live" && shell.busy)} onclick={() => { if (shell.mode === "live") void applyConflictChoice(shell, pickOurs, pickTheirs); }}>{only ? shell.tr("chrome.chooseSide", { name: only }) : shell.tr("chrome.mergeAction")}</button>
                   {#if tool && pickOurs && pickTheirs}
-                    <button class="conflict-tool" type="button" disabled={shell.busy} onclick={() => void openConflictTool(shell)}>
+                    <button class="conflict-tool" type="button" disabled={shell.mode === "live" && shell.busy} onclick={() => { if (shell.mode === "live") void openConflictTool(shell); }}>
                       {shell.tr("chrome.mergeInTool", { name: tool })}
                       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
                   {/if}
-                  {#if tool && !shell.settings.mergeToolPath.trim()}
+                  {#if shell.mode === "live" && tool && !shell.settings.mergeToolPath.trim()}
                     <p class="conflict-note">{shell.tr("chrome.toolPathMissing", { name: tool })}</p>
                   {/if}
                 </div>

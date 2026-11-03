@@ -9,6 +9,8 @@
 
 </script>
 
+<svelte:window onclick={() => { if (shell.commitSearchOpen) shell.commitSearchOpen = false; }} />
+
 <aside class="sidebar" style:width="{shell.sidebarWidth}px">
       {#snippet glyph(kind: string)}
         <svg class="line-icon side-glyph" class:check={kind === "check"} viewBox="0 0 24 24" aria-hidden="true">
@@ -62,14 +64,16 @@
         <span class="name">{shell.tr("chrome.allCommits")}</span>
       </button>
       <div class="side-tools">
-        <button class="icon-btn side-tool" class:on={!shell.allBranches} type="button" title={!shell.allBranches ? shell.tr("chrome.currentBranch") : shell.tr("chrome.allBranches")} aria-pressed={!shell.allBranches} onclick={() => { shell.allBranches = !shell.allBranches; shell.section = "history"; if (shell.mode === "live") void shell.loadContext(); }}>{@render glyph("branch")}</button>
-        <button class="icon-btn side-tool" class:on={shell.sideQuery.trim() !== ""} type="button" title={shell.tr("chrome.filterSidebar")} aria-label={shell.tr("chrome.filterSidebar")} onclick={() => shell.sideFilter?.focus()}>{@render glyph("search")}</button>
+        <button class="icon-btn side-tool" class:on={shell.sideView === "refs"} type="button" title={shell.tr("chrome.localBranches")} aria-pressed={shell.sideView === "refs"} onclick={() => shell.showSideRefs()}>{@render glyph("branch")}</button>
+        <button class="icon-btn side-tool" class:on={shell.sideView === "search"} type="button" title={shell.tr("chrome.searchCommits")} aria-label={shell.tr("chrome.searchCommits")} aria-pressed={shell.sideView === "search"} onclick={() => shell.showSideSearch()}>{@render glyph("search")}</button>
       </div>
+      {#if shell.sideView === "refs"}
       <label class="side-filter">
         {@render glyph("search")}
         <input placeholder={shell.tr("chrome.filter")} aria-label={shell.tr("chrome.filterSidebar")} bind:this={shell.sideFilter} bind:value={shell.sideQuery} onkeydown={(event) => { if (event.key === "Escape") { event.stopPropagation(); shell.sideQuery = ""; } }} />
         {#if shell.sideQuery}<button class="side-filter-clear" type="button" aria-label={shell.tr("chrome.clearFilter")} onclick={() => (shell.sideQuery = "")}>×</button>{/if}
       </label>
+      {/if}
       </div>
 
       {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void; icon?: "add" }[] = [], empty = count === 0)}
@@ -93,6 +97,7 @@
         </div>
       {/snippet}
 
+      {#if shell.sideView === "refs"}
       <div class="side-scroll">
       {#if shell.mode === "live" && shell.refs}
         {@render sideHead("branches", shell.tr("chrome.localBranches"), null, [
@@ -335,4 +340,41 @@
       {/if}
       {/if}
       </div>
+      {:else}
+      <div class="side-search">
+        <h2>{shell.tr("chrome.searchCommits")}</h2>
+        <label class="side-filter">
+          {@render glyph("search")}
+          <input
+            placeholder={shell.commitSearchField === "author" ? shell.tr("chrome.author") : shell.commitSearchField === "path" ? shell.tr("dialog.path") : shell.commitSearchField === "diff" ? shell.tr("chrome.diffContent") : shell.tr("chrome.commitMessage")}
+            aria-label={shell.tr("chrome.searchCommits")}
+            bind:this={shell.commitSearchEl}
+            bind:value={shell.commitSearch}
+            oninput={() => shell.queueCommitSearch()}
+            onkeydown={(event) => { if (event.key === "Escape") { event.stopPropagation(); shell.commitSearchOpen = false; if (shell.commitSearch) { shell.commitSearch = ""; shell.queueCommitSearch(); } } }}
+          />
+          {#if shell.commitSearch}<button class="side-filter-clear" type="button" aria-label={shell.tr("chrome.clearFilter")} onclick={() => { shell.commitSearch = ""; shell.queueCommitSearch(); }}>×</button>{/if}
+        </label>
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="side-search-pick" onclick={(event) => event.stopPropagation()}>
+          <button class="side-search-toggle" type="button" aria-haspopup="menu" aria-expanded={shell.commitSearchOpen} onclick={() => (shell.commitSearchOpen = !shell.commitSearchOpen)}>
+            <span>{shell.commitSearchField === "author" ? shell.tr("chrome.author") : shell.commitSearchField === "path" ? shell.tr("dialog.path") : shell.commitSearchField === "diff" ? shell.tr("chrome.diffContent") : shell.tr("chrome.commitMessage")}</span>
+            <svg class="line-icon side-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          {#if shell.commitSearchOpen}
+            <div class="side-search-menu" role="menu">
+              <button class="side-search-item" type="button" role="menuitemradio" aria-checked={shell.commitSearchField === "message"} onclick={() => shell.pickCommitSearch("message")}><span class="side-search-check">{#if shell.commitSearchField === "message"}{@render glyph("check")}{/if}</span>{shell.tr("chrome.commitMessage")}</button>
+              <button class="side-search-item" type="button" role="menuitemradio" aria-checked={shell.commitSearchField === "author"} onclick={() => shell.pickCommitSearch("author")}><span class="side-search-check">{#if shell.commitSearchField === "author"}{@render glyph("check")}{/if}</span>{shell.tr("chrome.author")}</button>
+              <button class="side-search-item" type="button" role="menuitemradio" aria-checked={shell.commitSearchField === "path"} onclick={() => shell.pickCommitSearch("path")}><span class="side-search-check">{#if shell.commitSearchField === "path"}{@render glyph("check")}{/if}</span>{shell.tr("dialog.path")}</button>
+              <button class="side-search-item" type="button" role="menuitemradio" aria-checked={shell.commitSearchField === "diff"} onclick={() => shell.pickCommitSearch("diff")}><span class="side-search-check">{#if shell.commitSearchField === "diff"}{@render glyph("check")}{/if}</span>{shell.tr("chrome.diffContent")}</button>
+              <div class="side-search-sep"></div>
+              <div class="side-search-label">{shell.tr("chrome.searchIn")}</div>
+              <button class="side-search-item" type="button" role="menuitemradio" aria-checked={shell.commitSearchScope === "repository"} onclick={() => shell.pickCommitScope("repository")}><span class="side-search-check">{#if shell.commitSearchScope === "repository"}{@render glyph("check")}{/if}</span>{shell.tr("chrome.repository")}</button>
+              <button class="side-search-item" type="button" role="menuitemradio" aria-checked={shell.commitSearchScope === "branch"} onclick={() => shell.pickCommitScope("branch")}><span class="side-search-check">{#if shell.commitSearchScope === "branch"}{@render glyph("check")}{/if}</span>{shell.tr("chrome.currentBranch")}</button>
+            </div>
+          {/if}
+        </div>
+      </div>
+      {/if}
     </aside>

@@ -1,6 +1,41 @@
 export type FileChange = {
   path: string;
-  kind: "M" | "A" | "D";
+  kind: "M" | "A" | "D" | "C";
+};
+
+export type SampleConflictView = {
+  ours: { label: string; state: "added" | "modified" | "deleted" | "unchanged" };
+  theirs: { label: string; state: "added" | "modified" | "deleted" | "unchanged" };
+  binary: boolean;
+};
+
+/** Fixture conflict cards for the web preview. Keys match unstaged paths. */
+export const sampleConflictViews: Record<string, SampleConflictView> = {
+  "data/Y语言表_Data_Language.xlsx": {
+    binary: true,
+    theirs: { label: "stash/patch", state: "modified" },
+    ours: { label: "main", state: "modified" },
+  },
+  "src/merge/both-sides.ts": {
+    binary: false,
+    theirs: { label: "feature", state: "modified" },
+    ours: { label: "main", state: "modified" },
+  },
+  "src/merge/both-added.ts": {
+    binary: false,
+    theirs: { label: "feature", state: "added" },
+    ours: { label: "main", state: "added" },
+  },
+  "docs/removed-there.md": {
+    binary: false,
+    theirs: { label: "feature", state: "deleted" },
+    ours: { label: "main", state: "modified" },
+  },
+  "art/removed-here.png": {
+    binary: true,
+    theirs: { label: "feature", state: "modified" },
+    ours: { label: "main", state: "deleted" },
+  },
 };
 
 export type CommitRow = {
@@ -21,7 +56,7 @@ function files(paths: string[]): FileChange[] {
 }
 
 /** Web preview file lists. Paths stay unique so the two panes do not highlight the same row. */
-export const unstaged: FileChange[] = files([
+const sampleUnstagedFiles: FileChange[] = files([
   "app/src/main/kotlin/com/zhoujun/awegit/ui/status/StatusPane.kt",
   "app/src/main/kotlin/com/zhoujun/awegit/theme/Theme.kt",
   "README.md",
@@ -43,6 +78,19 @@ export const unstaged: FileChange[] = files([
   "scripts/package.mjs",
   "assets/icon.svg",
 ]);
+
+export const unstaged: FileChange[] = [
+  { path: "data/Y语言表_Data_Language.xlsx", kind: "C" },
+  sampleUnstagedFiles[0],
+  { path: "src/merge/both-sides.ts", kind: "C" },
+  sampleUnstagedFiles[1],
+  { path: "src/merge/both-added.ts", kind: "C" },
+  ...sampleUnstagedFiles.slice(2, 6),
+  { path: "docs/removed-there.md", kind: "C" },
+  ...sampleUnstagedFiles.slice(6, 10),
+  { path: "art/removed-here.png", kind: "C" },
+  ...sampleUnstagedFiles.slice(10),
+];
 
 export const staged: FileChange[] = files([
   "src/lib/highlight.ts",

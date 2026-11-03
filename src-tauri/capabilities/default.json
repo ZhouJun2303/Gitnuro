@@ -71,6 +71,7 @@
     "allow-create-github-repo",
     "allow-generate-ssh-key",
     "allow-search-commits",
+    "allow-search-log",
     "allow-cherry-preview",
     "allow-merged-branches",
     "allow-pick-history",

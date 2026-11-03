@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    conflict_view, file_diff, file_preview, in_progress, launch_merge_tool, perform, repository_refs, search_commits, stage_hunk, stage_line, status,
+    conflict_view, file_diff, file_preview, in_progress, launch_merge_tool, perform, repository_refs, search_commits, search_log, stage_hunk, stage_line, status,
     stop_process_tree, ChangeKind, InProgress, Mutation, RebaseStep, ResetMode,
 };
 
@@ -918,6 +918,25 @@ fn search_commits_finds_added_text() {
     commit_file(&repo, "a.txt", "needle-token\n", "base");
     let hits = search_commits(&repo.path, "S", "needle-token").unwrap();
     assert!(hits.iter().any(|hit| hit.summary == "base"), "{hits:?}");
+}
+
+#[test]
+fn search_log_finds_message_and_diff() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    commit_file(&repo, "a.txt", "needle-token\n", "feat: add the needle");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "b.txt", "side\n", "only-on-side");
+    repo.git(&["checkout", "main"]);
+    let messages = search_log(&repo.path, "message", "repository", "needle", 20, false).unwrap();
+    assert!(messages.iter().any(|row| row.summary.contains("needle")), "{messages:?}");
+    let diffs = search_log(&repo.path, "diff", "repository", "needle-token", 20, false).unwrap();
+    assert!(diffs.iter().any(|row| row.summary.contains("needle")), "{diffs:?}");
+    let here = search_log(&repo.path, "message", "branch", "only-on-side", 20, false).unwrap();
+    assert!(here.is_empty(), "{here:?}");
+    let everywhere = search_log(&repo.path, "message", "repository", "only-on-side", 20, false).unwrap();
+    assert!(everywhere.iter().any(|row| row.summary == "only-on-side"), "{everywhere:?}");
+    assert!(search_log(&repo.path, "message", "repository", "-needle", 20, false).is_err());
 }
 
 #[test]

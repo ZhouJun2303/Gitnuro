@@ -32,6 +32,17 @@ export function currentFilterRefs(shell: ShellState) {
 
 export async function loadCommits(shell: ShellState, path: string | undefined) {
     const order = shell.settings.commitSort === "topo" ? "topo" : "date";
+    const query = shell.sideView === "search" ? shell.commitSearch.trim() : "";
+    if (query && path) {
+      return invoke<CommitRow[]>("search_log", {
+        path,
+        field: shell.commitSearchField,
+        scope: shell.commitSearchScope,
+        query,
+        limit: shell.logLimit,
+        order,
+      });
+    }
     if (shell.historyFilter) return invoke<CommitRow[]>("file_history", { path, file: shell.historyFilter, limit: 200 });
     if (!shell.allBranches && shell.currentFilterRefs().length > 0) {
       try {
@@ -83,6 +94,57 @@ export function toggleFold(shell: ShellState, id: string) {
       }
       return hide;
     });
+  }
+
+export function showSideRefs(shell: ShellState) {
+    const restore = shell.sideView === "search" && shell.commitSearch.trim() !== "";
+    shell.sideView = "refs";
+    shell.commitSearchOpen = false;
+    shell.commitSearchGen += 1;
+    window.clearTimeout(shell.commitSearchTimer);
+    void tick().then(() => shell.sideFilter?.focus());
+    if (restore && shell.mode === "live") void shell.loadContext();
+  }
+
+export function showSideSearch(shell: ShellState) {
+    shell.sideView = "search";
+    shell.section = "history";
+    shell.commitSearchOpen = false;
+    void tick().then(() => shell.commitSearchEl?.focus());
+    if (shell.commitSearch.trim() && shell.mode === "live") queueCommitSearch(shell);
+  }
+
+export function queueCommitSearch(shell: ShellState) {
+    window.clearTimeout(shell.commitSearchTimer);
+    const gen = ++shell.commitSearchGen;
+    shell.commitSearchTimer = window.setTimeout(() => {
+      if (gen !== shell.commitSearchGen || shell.sideView !== "search" || shell.mode !== "live") return;
+      void refreshSearchedCommits(shell, gen);
+    }, 200);
+  }
+
+export function pickCommitSearch(shell: ShellState, field: "message" | "author" | "path" | "diff") {
+    shell.commitSearchField = field;
+    shell.commitSearchOpen = false;
+    queueCommitSearch(shell);
+  }
+
+export function pickCommitScope(shell: ShellState, scope: "repository" | "branch") {
+    shell.commitSearchScope = scope;
+    shell.commitSearchOpen = false;
+    queueCommitSearch(shell);
+  }
+
+async function refreshSearchedCommits(shell: ShellState, gen: number) {
+    const path = shell.repoPath();
+    try {
+      const rows = await loadCommits(shell, path);
+      if (gen !== shell.commitSearchGen) return;
+      if (!shell.same(shell.commitsLive, rows)) shell.commitsLive = rows;
+    } catch (error) {
+      if (gen !== shell.commitSearchGen) return;
+      shell.actionError = shell.message(error);
+    }
   }
 
 export async function searchContent(shell: ShellState, kind: string, needle: string) {

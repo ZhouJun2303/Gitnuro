@@ -167,6 +167,61 @@ pub fn commits_from(repo: &Path, limit: usize, revs: &[String], topo: bool) -> R
     log_with(repo, limit, false, &[], &checked, topo)
 }
 
+/// Commits matching a sidebar search.
+///
+/// `field` is `message`, `author`, `path`, or `diff`. `scope` is `repository`
+/// (`--branches --remotes`) or `branch` (`HEAD` only). The query is one argv
+/// token, never a separate option.
+pub fn search_log(repo: &Path, field: &str, scope: &str, query: &str, limit: usize, topo: bool) -> Result<Vec<CommitRow>, Error> {
+    let query = query.trim();
+    if query.is_empty() || query.starts_with('-') || query.contains(['\n', '\r', '\0']) {
+        return Err(Error::Rev(query.to_string()));
+    }
+    if field == "path" && query.contains("..") {
+        return Err(Error::Path(query.to_string()));
+    }
+    if run(repo, &["rev-parse", "--verify", "HEAD"]).is_err() {
+        return Ok(Vec::new());
+    }
+    let limit_text = limit.clamp(1, 100_000).to_string();
+    let order = if topo { "--topo-order" } else { "--date-order" };
+    let mut owned = vec![
+        "log".to_string(),
+        "-n".to_string(),
+        limit_text,
+        order.to_string(),
+        "-z".to_string(),
+        "--pretty=format:%H%x1f%P%x1f%an%x1f%ar%x1f%s%x1f%D%x1f%at%x1f%ae".to_string(),
+    ];
+    if scope != "branch" {
+        owned.insert(1, "--remotes".to_string());
+        owned.insert(1, "--branches".to_string());
+    }
+    match field {
+        "author" => {
+            owned.push("--regexp-ignore-case".to_string());
+            owned.push("--fixed-strings".to_string());
+            owned.push(format!("--author={query}"));
+        }
+        "path" => {
+            owned.push("--".to_string());
+            owned.push(format!("*{query}*"));
+        }
+        "diff" => owned.push(format!("-S{query}")),
+        _ => {
+            owned.push("--regexp-ignore-case".to_string());
+            owned.push("--fixed-strings".to_string());
+            owned.push(format!("--grep={query}"));
+        }
+    }
+    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
+    let output = run(repo, &args)?;
+    let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
+    assign_lanes(&mut commits);
+    mark_unpushed(repo, &mut commits);
+    Ok(commits)
+}
+
 /// The commit `name` points at, plus a history page large enough to contain it.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

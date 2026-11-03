@@ -28,8 +28,18 @@ export function sampleRow(shell: ShellState, file: FileChange): Row {
     return {
       path: file.path,
       letter: file.kind,
-      tone: file.kind === "A" ? "added" : file.kind === "D" ? "deleted" : "modified",
+      tone: file.kind === "A" ? "added" : file.kind === "D" || file.kind === "C" ? "deleted" : "modified",
     };
+  }
+
+export function setConflictsOnly(shell: ShellState, on: boolean) {
+    shell.conflictsOnly = on;
+    if (!on) return;
+    const visible = [...shell.shownUnstaged, ...shell.shownStaged];
+    if (shell.selectedPath && visible.some((file) => file.path === shell.selectedPath)) return;
+    const next = shell.shownUnstaged[0] ?? shell.shownStaged[0];
+    if (!next) return;
+    shell.selectFile(next.path, shell.shownUnstaged[0] ? "unstaged" : "staged");
   }
 
 export function discardableEntries(shell: ShellState, indexes: number[]) {
