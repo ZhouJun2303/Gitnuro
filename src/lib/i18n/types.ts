@@ -411,6 +411,9 @@ export type Messages = {
     bringChanges: string;
     stashFirst: string;
     discardChanges: string;
+    checkoutStashMessage: string;
+    checkoutStashed: string;
+    applyStash: string;
     spaceHint: string;
     clientId: string;
     deviceLogin: string;

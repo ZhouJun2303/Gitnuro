@@ -72,6 +72,7 @@
     | "stashRename"
     | "stashBranch"
     | "checkoutDirty"
+    | "checkoutNotice"
     | "activity"
     | "mailmap"
     | "accounts"
@@ -1468,6 +1469,23 @@
     pendingCheckout = name;
     draftExtra = "bring";
     dialog = "checkoutDirty";
+  }
+
+  /** Double-click checkout: stash local work first, switch, then tell the user. */
+  async function quickCheckout(name: string, remote?: { remote: string; branch: string }) {
+    if (mode !== "live") return;
+    const dirty = (snapshot?.staged.length ?? 0) + (snapshot?.unstaged.length ?? 0) > 0;
+    if (dirty) {
+      await mutate({ action: "stash", message: tr("dialog.checkoutStashMessage", { name }), includeUntracked: true });
+      if (actionError) return;
+    }
+    if (remote) await mutate({ action: "checkoutRemote", remote: remote.remote, branch: remote.branch });
+    else await mutate({ action: "checkout", name });
+    if (actionError) return;
+    if (dirty) {
+      pendingCheckout = name;
+      dialog = "checkoutNotice";
+    }
   }
 
   function reopenClosed() {
@@ -4776,7 +4794,7 @@
               ...commandItems("branch"),
             ])}
           >
-            <button class="file-select" type="button" title={branch.name} onclick={(event) => { sideSelected = `local:${branch.name}`; if (event.ctrlKey || event.metaKey) compareWith = branch.name; else void locateRef(branch.name); }} ondblclick={() => !branch.current && requestCheckout(branch.name)}>
+            <button class="file-select" type="button" title={branch.name} onclick={(event) => { sideSelected = `local:${branch.name}`; if (event.ctrlKey || event.metaKey) compareWith = branch.name; else void locateRef(branch.name); }} ondblclick={() => !branch.current && void quickCheckout(branch.name)}>
               <span class="twist"></span>
               {@render glyph(branch.current ? "check" : "branch")}
               <span class="name">{pinnedHere.has(branch.name) ? "• " : ""}{group ? branch.name.slice(group.length + 1) : branch.name}</span>
@@ -4832,7 +4850,7 @@
                 { label: tr("menu.copyName"), run: () => copyText(`${remote.name}/${branch}`) },
               ])}
             >
-              <button class="file-select" type="button" title={`${remote.name}/${branch}`} onclick={() => { sideSelected = `${remoteKey}:${branch}`; void locateRef(`${remote.name}/${branch}`); }} ondblclick={() => mutate({ action: "checkoutRemote", remote: remote.name, branch })}>
+              <button class="file-select" type="button" title={`${remote.name}/${branch}`} onclick={() => { sideSelected = `${remoteKey}:${branch}`; void locateRef(`${remote.name}/${branch}`); }} ondblclick={() => void quickCheckout(`${remote.name}/${branch}`, { remote: remote.name, branch })}>
                 <span class="twist"></span>
                 {@render glyph("branch")}
                 <span class="name">{folder ? branch.slice(folder.length + 1) : branch}</span>
@@ -4906,7 +4924,7 @@
             { label: tr("menu.deleteRemoteTag"), disabled: mode !== "live" || !refs?.remotes[0], run: () => { const remote = refs?.remotes[0]?.name ?? ""; ask(tr("menu.deleteRemoteTag"), `${remote} ${tag.name}`, () => void mutate({ action: "deleteRemoteTag", remote, name: tag.name })); } },
             { label: tr("menu.copyName"), run: () => copyText(tag.name) },
           ])}>
-            <button class="file-select" type="button" title={tag.name} onclick={() => { sideSelected = `tag:${tag.name}`; void locateRef(tag.name); }} ondblclick={() => mode === "live" && mutate({ action: "checkout", name: tag.name })}><span class="twist"></span>{@render glyph("tag")}<span class="name">{tag.name}</span></button>
+            <button class="file-select" type="button" title={tag.name} onclick={() => { sideSelected = `tag:${tag.name}`; void locateRef(tag.name); }} ondblclick={() => void quickCheckout(tag.name)}><span class="twist"></span>{@render glyph("tag")}<span class="name">{tag.name}</span></button>
           </div>
         {/each}
       {/if}
@@ -6636,6 +6654,13 @@
             <button class="text-button" type="button" onclick={() => { draftExtra = "discard"; }}>{tr("dialog.discardChanges")}</button>
           </div>
           <button class="commit" type="submit">{draftExtra || tr("dialog.bringChanges")}</button>
+        {:else if dialog === "checkoutNotice"}
+          <h2>{tr("menu.checkout")}</h2>
+          <p class="empty">{tr("dialog.checkoutStashed", { name: pendingCheckout })}</p>
+          <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => (dialog = null)}>{tr("chrome.close")}</button>
+            <button class="commit" type="button" onclick={() => { dialog = null; void mutate({ action: "stashPop", name: "stash@{0}" }); }}>{tr("dialog.applyStash")}</button>
+          </div>
         {:else if dialog === "activity"}
           <h2>{tr("chrome.activity")}</h2>
           <pre class="diff-body">{[...sessionLog, ...activityLines].join("\n") || tr("chrome.noChanges")}</pre>
