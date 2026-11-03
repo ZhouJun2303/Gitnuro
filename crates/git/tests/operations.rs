@@ -689,6 +689,44 @@ fn repository_file_keeps_hidden_refs_signoff_and_groups() {
 }
 
 #[test]
+fn conflict_keeps_a_backup_of_local_changes() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    commit_file(&repo, "b.txt", "keep\n", "second file");
+    fs::write(repo.path.join("a.txt"), "stashed\n").unwrap();
+    perform(&repo.path, Mutation::Stash { include_untracked: false, message: "wip".into() }).unwrap();
+    commit_file(&repo, "a.txt", "main\n", "main-edit");
+    fs::write(repo.path.join("b.txt"), "local work\n").unwrap();
+
+    let popped = perform(&repo.path, Mutation::StashPop { name: String::new() });
+    assert!(popped.is_err(), "stash pop should conflict");
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    let backup = stashes
+        .iter()
+        .find(|stash| stash.summary.contains("conflict backup"))
+        .unwrap_or_else(|| panic!("no backup in {stashes:?}"));
+    let saved = repo.output(&["show", &format!("{}:b.txt", backup.name)]);
+    assert_eq!(saved.replace("\r\n", "\n"), "local work\n");
+    assert!(stashes.iter().any(|stash| stash.summary.contains("wip")), "{stashes:?}");
+}
+
+#[test]
+fn clean_merge_leaves_no_backup() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "b.txt", "topic\n", "topic");
+    repo.git(&["checkout", "main"]);
+    fs::write(repo.path.join("a.txt"), "dirty\n").unwrap();
+    perform(
+        &repo.path,
+        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false },
+    )
+    .unwrap();
+    assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
+}
+
+#[test]
 fn named_stash_pop_restores_that_stash() {
     let repo = repo();
     commit_file(&repo, "a.txt", "one\n", "base");

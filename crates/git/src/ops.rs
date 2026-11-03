@@ -395,7 +395,67 @@ pub fn perform(repo: &Path, mutation: Mutation) -> Result<String, Error> {
     apply(repo, mutation).map(|_| String::new())
 }
 
+/// Operations that can leave unmerged paths behind. Each one gets a conflict backup.
+fn conflict_label(mutation: &Mutation) -> Option<&'static str> {
+    Some(match mutation {
+        Mutation::Pull { .. } => "pull",
+        Mutation::PullRef { .. } => "pull",
+        Mutation::Merge { .. } => "merge",
+        Mutation::Rebase { .. } => "rebase",
+        Mutation::RebaseInteractive { .. } => "rebase",
+        Mutation::Continue { .. } => "continue",
+        Mutation::CherryPick { .. } => "cherry-pick",
+        Mutation::Revert { .. } => "revert",
+        Mutation::StashPop { .. } => "stash pop",
+        Mutation::StashApply { .. } => "stash apply",
+        Mutation::StashBranch { .. } => "stash branch",
+        Mutation::Squash { .. } => "squash",
+        Mutation::GitFlowFinish { .. } => "git flow finish",
+        _ => return None,
+    })
+}
+
+/// Snapshot the tracked local changes before `action`. If it ends with unmerged paths,
+/// keep the snapshot as a stash entry so the pre-conflict work is never lost. Without
+/// a conflict the snapshot is dropped, and a failed snapshot never blocks the action.
+fn with_conflict_backup(repo: &Path, label: &str, action: impl FnOnce() -> Result<(), Error>) -> Result<(), Error> {
+    let snapshot = snapshot_local_changes(repo);
+    let result = action();
+    if let Some(hash) = snapshot {
+        if has_unmerged(repo) {
+            let message = format!("AweGit conflict backup: {label}");
+            let _ = run(repo, &["stash", "store", "-m", &message, &hash]);
+        }
+    }
+    result
+}
+
+/// `git stash create`: a commit of staged and unstaged changes that touches no ref
+/// and no file. `None` when the tree is clean or the snapshot cannot be made.
+fn snapshot_local_changes(repo: &Path) -> Option<String> {
+    let output = run(repo, &["stash", "create"]).ok()?;
+    let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if hash.len() >= 7 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(hash)
+    } else {
+        None
+    }
+}
+
+fn has_unmerged(repo: &Path) -> bool {
+    run(repo, &["ls-files", "--unmerged"])
+        .map(|output| !output.stdout.is_empty())
+        .unwrap_or(false)
+}
+
 fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
+    match conflict_label(&mutation) {
+        Some(label) => with_conflict_backup(repo, label, || apply_unguarded(repo, mutation)),
+        None => apply_unguarded(repo, mutation),
+    }
+}
+
+fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
     match mutation {
         Mutation::Fetch { remote, prune, tags } => fetch(repo, remote, prune, tags),
         Mutation::Pull { rebase, autostash } => pull(repo, rebase, autostash),
