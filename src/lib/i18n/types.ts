@@ -370,6 +370,13 @@ export type Messages = {
     fetchBody: string;
     pullBody: string;
     pushBody: string;
+    fetchAllRemotes: string;
+    pullInto: string;
+    pullStash: string;
+    pushTo: string;
+    pushDefault: string;
+    pushAllTags: string;
+    forcePush: string;
     allRemotes: string;
     includeTags: string;
     pruneOnFetch: string;

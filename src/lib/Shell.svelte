@@ -290,6 +290,14 @@
   let prefsSave = 0;
   let draft = $state("");
   let draftExtra = $state("");
+  /** Fetch, pull, and push dialog options. */
+  let syncAll = $state(false);
+  let syncTags = $state(false);
+  let syncRebase = $state(false);
+  let syncStash = $state(false);
+  let syncForce = $state(false);
+  let pushBranch = $state("");
+  let pushTo = $state("");
   let cloneRoot = $state("");
   let cloneFolder = $state("");
   let cloneNameManual = $state(false);
@@ -1105,6 +1113,15 @@
           title: remote ? tr("chrome.commandPushTo", { branch, remote }) : tr("chrome.push"),
           command: gitLine(["push", request.setUpstream ? "--set-upstream" : "", request.tags ? "--tags" : "", request.force ? "--force" : request.forceWithLease ? "--force-with-lease" : "", remote, request.setUpstream ? "HEAD" : ""]),
         };
+      case "pullRef":
+        return { title: `${tr("chrome.pull")} ${remote}/${text("branch")}`, command: gitLine(["pull", request.autostash ? "--autostash" : "", request.rebase ? "--rebase" : "--no-rebase", remote, text("branch")]) };
+      case "pushRef": {
+        const target = text("remoteBranch") || text("branch");
+        return {
+          title: tr("chrome.commandPushTo", { branch: text("branch"), remote }),
+          command: gitLine(["push", request.setUpstream ? "--set-upstream" : "", request.tags ? "--tags" : "", request.force ? "--force" : request.forceWithLease ? "--force-with-lease" : "", remote, text("remoteBranch") ? `${text("branch")}:${target}` : `HEAD:${target}`]),
+        };
+      }
       case "checkout":
       case "checkoutRemote":
         return { title: `${tr("menu.checkout")} ${text("name")}`, command: gitLine(["checkout", text("name")]) };
@@ -1577,17 +1594,49 @@
     const upstream = current?.upstream ?? "";
     const firstRemote = refs?.remotes[0]?.name ?? "";
     const upstreamRemote = refs?.remotes.find((remote) => upstream.startsWith(`${remote.name}/`))?.name ?? "";
-    if (kind === "fetch") {
-      draft = firstRemote;
-      draftExtra = settings.fetchTags ? "tags" : "";
-    } else if (kind === "pull") {
-      draft = upstreamRemote || firstRemote;
-      draftExtra = upstreamRemote ? upstream.slice(upstreamRemote.length + 1) : snapshot?.branch ?? "";
-    } else {
-      draft = upstreamRemote || firstRemote;
-      draftExtra = "";
-    }
+    syncAll = false;
+    syncTags = kind === "fetch" ? settings.fetchTags : false;
+    syncRebase = settings.pullRebase;
+    syncStash = settings.mergeAutostash;
+    syncForce = false;
+    pushBranch = current?.name ?? snapshot?.branch ?? "";
+    pushTo = "";
+    draft = upstreamRemote || firstRemote;
+    draftExtra = kind === "pull" ? (upstreamRemote ? upstream.slice(upstreamRemote.length + 1) : snapshot?.branch ?? "") : "";
     dialog = kind;
+  }
+
+  /** The remote branch a pull should default to after the remote changes. */
+  function pullBranchFor(remoteName: string) {
+    const remote = refs?.remotes.find((item) => item.name === remoteName);
+    const branches = remote?.branches ?? [];
+    const upstream = refs?.branches.find((branch) => branch.current)?.upstream ?? "";
+    const fromUpstream = upstream.startsWith(`${remoteName}/`) ? upstream.slice(remoteName.length + 1) : "";
+    const same = snapshot?.branch ?? "";
+    return [fromUpstream, same].find((name) => name && branches.includes(name)) ?? branches[0] ?? same;
+  }
+
+  function splitRemoteRef(ref: string) {
+    const remote = refs?.remotes.find((item) => ref.startsWith(`${item.name}/`));
+    return remote ? { remote: remote.name, branch: ref.slice(remote.name.length + 1) } : null;
+  }
+
+  /** Where a push goes: the picked remote branch, the upstream, or a new branch on the first remote. */
+  function pushTarget(local: string, to: string) {
+    if (to) {
+      const picked = splitRemoteRef(to);
+      return picked ? { ...picked, setUpstream: false } : null;
+    }
+    const upstream = refs?.branches.find((branch) => branch.name === local)?.upstream ?? "";
+    const known = upstream ? splitRemoteRef(upstream) : null;
+    if (known) return { ...known, setUpstream: false };
+    const first = refs?.remotes[0]?.name;
+    return first ? { remote: first, branch: local, setUpstream: true } : null;
+  }
+
+  function pushTargetLabel(local: string) {
+    const target = pushTarget(local, "");
+    return target ? `${target.remote}/${target.branch}` : "—";
   }
 
   function matchesQuery(value: string, query: string) {
@@ -5653,12 +5702,16 @@
           else if (dialog === "prefs") void savePrefs();
           else if (dialog === "tag") void mutate({ action: "tag", name: draft, rev: draftExtra || "HEAD", message: draftUser });
           else if (dialog === "remote") void mutate({ action: "addRemote", name: draft, url: draftExtra });
-          else if (dialog === "fetch") void mutate({ action: "fetch", remote: draft || null, prune: settings.fetchPrune, tags: draftExtra === "tags" });
+          else if (dialog === "fetch") void mutate({ action: "fetch", remote: syncAll ? null : draft || null, prune: settings.fetchPrune, tags: syncTags });
           else if (dialog === "pull") {
-            if (draft && draftExtra) void mutate({ action: "pullRef", remote: draft, branch: draftExtra, rebase: settings.pullRebase, autostash: settings.mergeAutostash });
-            else void doPull();
+            if (draft && draftExtra) void mutate({ action: "pullRef", remote: draft, branch: draftExtra, rebase: syncRebase, autostash: syncStash });
+            else void mutate({ action: "pull", rebase: syncRebase, autostash: syncStash });
           }
-          else if (dialog === "push") void mutate({ action: "push", remote: draft || null, setUpstream: !refs?.branches.some((branch) => branch.current && branch.upstream), tags: draftExtra === "tags", forceWithLease: settings.forceWithLease });
+          else if (dialog === "push") {
+            const target = pushTarget(pushBranch, pushTo);
+            if (target && pushBranch) void mutate({ action: "pushRef", remote: target.remote, branch: pushBranch, remoteBranch: target.branch, setUpstream: target.setUpstream, tags: syncTags, forceWithLease: syncForce, force: false });
+            else void mutate({ action: "push", remote: draft || null, setUpstream: !refs?.branches.some((branch) => branch.current && branch.upstream), tags: syncTags, forceWithLease: syncForce });
+          }
           else if (dialog === "stash") {
             const files = stashFiles;
             stashFiles = [];
@@ -6097,30 +6150,32 @@
         {:else if dialog === "fetch"}
           <h2>{tr("chrome.fetch")}</h2>
           <p>{tr("dialog.fetchBody")}</p>
-          <label>{tr("dialog.remoteName")}
+          <label class="sync-row">
+            <span>{tr("dialog.remoteName")}</span>
             {#if (refs?.remotes.length ?? 0) > 0}
-              <select bind:value={draft}>
-                <option value="">{tr("dialog.allRemotes")}</option>
+              <select bind:value={draft} disabled={syncAll}>
                 {#each refs?.remotes ?? [] as remote (remote.name)}
                   <option value={remote.name}>{remote.name}</option>
                 {/each}
               </select>
             {:else}
-              <input placeholder={tr("dialog.remoteName")} bind:value={draft} />
+              <input placeholder={tr("dialog.remoteName")} bind:value={draft} disabled={syncAll} />
             {/if}
           </label>
-          <label class="check"><input type="checkbox" bind:checked={settings.fetchPrune} /> {tr("dialog.pruneOnFetch")}</label>
-          <label class="check"><input type="checkbox" checked={draftExtra === "tags"} onchange={(event) => (draftExtra = event.currentTarget.checked ? "tags" : "")} /> {tr("dialog.includeTags")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={syncAll} /> {tr("dialog.fetchAllRemotes")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={settings.fetchPrune} /> {tr("dialog.pruneOnFetch")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={syncTags} /> {tr("dialog.includeTags")}</label>
           <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => (dialog = null)}>{tr("dialog.cancel")}</button>
             <button class="commit" type="submit">{tr("chrome.fetch")}</button>
+            <button class="text-button" type="button" onclick={() => (dialog = null)}>{tr("dialog.cancel")}</button>
           </div>
         {:else if dialog === "pull"}
           <h2>{tr("chrome.pull")}</h2>
           <p>{tr("dialog.pullBody")}</p>
-          <label>{tr("dialog.remoteName")}
+          <label class="sync-row">
+            <span>{tr("dialog.remoteName")}</span>
             {#if (refs?.remotes.length ?? 0) > 0}
-              <select bind:value={draft}>
+              <select value={draft} onchange={(event) => { draft = event.currentTarget.value; draftExtra = pullBranchFor(draft); }}>
                 {#each refs?.remotes ?? [] as remote (remote.name)}
                   <option value={remote.name}>{remote.name}</option>
                 {/each}
@@ -6129,44 +6184,61 @@
               <input placeholder={tr("dialog.remoteName")} bind:value={draft} />
             {/if}
           </label>
-          <label>{tr("dialog.branch")}
+          <label class="sync-row">
+            <span>{tr("dialog.branch")}</span>
             {#if (refs?.remotes.find((remote) => remote.name === draft)?.branches.length ?? 0) > 0}
               <select bind:value={draftExtra}>
                 {#if draftExtra && !(refs?.remotes.find((remote) => remote.name === draft)?.branches.includes(draftExtra))}
-                  <option value={draftExtra}>{draftExtra}</option>
+                  <option value={draftExtra}>{draft}/{draftExtra}</option>
                 {/if}
                 {#each refs?.remotes.find((remote) => remote.name === draft)?.branches ?? [] as branch (branch)}
-                  <option value={branch}>{branch}</option>
+                  <option value={branch}>{draft}/{branch}</option>
                 {/each}
               </select>
             {:else}
               <input placeholder={tr("dialog.branch")} bind:value={draftExtra} />
             {/if}
           </label>
-          <label class="check"><input type="checkbox" bind:checked={settings.pullRebase} /> {tr("dialog.pullWithRebase")}</label>
+          <div class="sync-row">
+            <span>{tr("dialog.pullInto")}</span>
+            <strong class="sync-value">{snapshot?.branch ?? ""}</strong>
+          </div>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={syncRebase} /> {tr("dialog.pullWithRebase")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={syncStash} /> {tr("dialog.pullStash")}</label>
           <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => (dialog = null)}>{tr("dialog.cancel")}</button>
             <button class="commit" type="submit">{tr("chrome.pull")}</button>
+            <button class="text-button" type="button" onclick={() => (dialog = null)}>{tr("dialog.cancel")}</button>
           </div>
         {:else if dialog === "push"}
           <h2>{tr("chrome.push")}</h2>
           <p>{tr("dialog.pushBody")}</p>
-          <label>{tr("dialog.remoteName")}
-            {#if (refs?.remotes.length ?? 0) > 0}
-              <select bind:value={draft}>
-                {#each refs?.remotes ?? [] as remote (remote.name)}
-                  <option value={remote.name}>{remote.name}</option>
-                {/each}
-              </select>
-            {:else}
-              <input placeholder={tr("dialog.remoteName")} bind:value={draft} />
-            {/if}
+          <label class="sync-row">
+            <span>{tr("dialog.branch")}</span>
+            <select value={pushBranch} onchange={(event) => { pushBranch = event.currentTarget.value; pushTo = ""; }}>
+              {#if pushBranch && !(refs?.branches.some((branch) => branch.name === pushBranch))}
+                <option value={pushBranch}>{pushBranch}</option>
+              {/if}
+              {#each refs?.branches ?? [] as branch (branch.name)}
+                <option value={branch.name}>{branch.name}</option>
+              {/each}
+            </select>
           </label>
-          <label class="check"><input type="checkbox" checked={draftExtra === "tags"} onchange={(event) => (draftExtra = event.currentTarget.checked ? "tags" : "")} /> {tr("dialog.includeTags")}</label>
-          <label class="check"><input type="checkbox" bind:checked={settings.forceWithLease} /> {tr("dialog.forceWithLease")}</label>
+          <label class="sync-row">
+            <span>{tr("dialog.pushTo")}</span>
+            <select bind:value={pushTo}>
+              <option value="">{tr("dialog.pushDefault", { target: pushTargetLabel(pushBranch) })}</option>
+              {#each refs?.remotes ?? [] as remote (remote.name)}
+                {#each remote.branches as branch (branch)}
+                  <option value={`${remote.name}/${branch}`}>{remote.name}/{branch}</option>
+                {/each}
+              {/each}
+            </select>
+          </label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={syncTags} /> {tr("dialog.pushAllTags")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={syncForce} /> {tr("dialog.forcePush")}</label>
           <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => (dialog = null)}>{tr("dialog.cancel")}</button>
             <button class="commit" type="submit">{tr("chrome.push")}</button>
+            <button class="text-button" type="button" onclick={() => (dialog = null)}>{tr("dialog.cancel")}</button>
           </div>
         {:else if dialog === "stash"}
           <h2>{stashFiles.length > 1 ? tr("dialog.stashFiles", { count: String(stashFiles.length) }) : stashFiles.length === 1 ? tr("dialog.stashFile", { name: stashFiles[0] }) : tr("chrome.stash")}</h2>
@@ -8161,6 +8233,36 @@
     font-size: inherit;
     color: var(--text);
     cursor: pointer;
+  }
+
+  .dialog label.sync-row,
+  .dialog .sync-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    font-size: inherit;
+    color: var(--text);
+  }
+
+  .dialog .sync-row > span {
+    flex: 0 0 64px;
+    text-align: right;
+    color: var(--text-secondary);
+  }
+
+  .dialog .sync-row > :is(select, input) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .dialog .sync-value {
+    flex: 1;
+    font-weight: 500;
+  }
+
+  .dialog label.check.sync-indent {
+    margin-left: 76px;
   }
 
   .dialog label.pref-inline {

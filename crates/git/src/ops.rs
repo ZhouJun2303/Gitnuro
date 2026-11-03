@@ -254,6 +254,10 @@ pub enum Mutation {
         /// When set, push `branch` to this remote branch name.
         #[serde(default)]
         remote_branch: String,
+        #[serde(default)]
+        set_upstream: bool,
+        #[serde(default)]
+        tags: bool,
     },
     PullRef {
         remote: String,
@@ -502,7 +506,20 @@ fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             force_with_lease,
             force,
             remote_branch,
-        } => push_ref(repo, &remote, &branch, force_with_lease, force, &remote_branch),
+            set_upstream,
+            tags,
+        } => push_ref(
+            repo,
+            PushRefOptions {
+                remote: &remote,
+                branch: &branch,
+                remote_branch: &remote_branch,
+                force_with_lease,
+                force,
+                set_upstream,
+                tags,
+            },
+        ),
         Mutation::PullRef {
             remote,
             branch,
@@ -1537,16 +1554,33 @@ fn checkout_remote(repo: &Path, remote: &str, branch: &str) -> Result<(), Error>
     }
 }
 
-fn push_ref(repo: &Path, remote: &str, branch: &str, force_with_lease: bool, force: bool, remote_branch: &str) -> Result<(), Error> {
-    let remote = check_name(remote)?;
-    let branch = check_name(branch)?;
-    let remote_branch = remote_branch.trim();
+struct PushRefOptions<'a> {
+    remote: &'a str,
+    branch: &'a str,
+    remote_branch: &'a str,
+    force_with_lease: bool,
+    force: bool,
+    set_upstream: bool,
+    tags: bool,
+}
+
+fn push_ref(repo: &Path, options: PushRefOptions<'_>) -> Result<(), Error> {
+    let remote = check_name(options.remote)?;
+    let branch = check_name(options.branch)?;
+    let remote_branch = options.remote_branch.trim();
     let spec = if remote_branch.is_empty() {
         format!("HEAD:{branch}")
     } else {
         format!("{branch}:{}", check_name(remote_branch)?)
     };
     let mut args = vec!["push"];
+    if options.set_upstream {
+        args.push("--set-upstream");
+    }
+    if options.tags {
+        args.push("--tags");
+    }
+    let (force, force_with_lease) = (options.force, options.force_with_lease);
     if force {
         args.push("--force");
     } else if force_with_lease {
