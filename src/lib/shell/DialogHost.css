@@ -1,0 +1,156 @@
+.swatch {
+    width: 18px;
+    height: 18px;
+    border: 0;
+    border-radius: 4px;
+    padding: 0;
+  }
+
+.merge-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+  }
+
+.merge-grid textarea { width: 100%; }
+
+.hunk-marks {
+    position: relative;
+    height: 8px;
+    margin: 6px 0;
+    background: var(--line);
+  }
+
+.hunk-marks button {
+    position: absolute;
+    top: 0;
+    width: 6px;
+    height: 8px;
+    border: 0;
+    padding: 0;
+    background: var(--accent);
+  }
+
+.treemap { display: flex; flex-wrap: wrap; gap: 4px; min-height: 72px; }
+
+.treemap span { flex-basis: 48px; padding: 6px; overflow: hidden; background: color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 6px; font-size: 11px; }
+
+.stats-row {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+
+.stats-row span {
+    min-width: 1.6em;
+    text-align: center;
+    font-size: 11px;
+  }
+
+.stash-paths {
+    max-height: 160px;
+    margin: 0;
+    white-space: pre-wrap;
+  }
+
+.dialog.wide {
+    width: min(760px, calc(100vw - 32px));
+    min-height: 520px;
+  }
+
+.dialog.wide.prefs {
+    height: min(640px, calc(100vh - 48px));
+    min-height: 0;
+    overflow: hidden;
+  }
+
+.dialog.prefs form {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+.dialog.path-dialog {
+    width: min(520px, calc(100vw - 32px));
+  }
+
+.dialog .text-button.left {
+    align-self: flex-start;
+    margin-left: 0;
+  }
+
+.open-col {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    min-width: 0;
+    max-height: 280px;
+    overflow: auto;
+  }
+
+.dialog .text-button.pick {
+    display: block;
+    width: 100%;
+    margin-left: 0;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.dialog .text-button.pick.clone-root {
+    height: auto;
+    min-height: 44px;
+    padding: 8px 12px;
+    white-space: normal;
+  }
+
+.dialog .text-button.pick.clone-root strong,
+  .dialog .text-button.pick.clone-root span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.dialog .text-button.pick.clone-root span {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+.dialog .text-button.pick.clone-root[aria-pressed="true"] {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 14%, var(--elevated));
+  }
+
+.dialog label.sync-row,
+  .dialog .sync-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    font-size: inherit;
+    color: var(--text);
+  }
+
+.dialog .sync-row > span {
+    flex: 0 0 64px;
+    text-align: right;
+    color: var(--text-secondary);
+  }
+
+.dialog .sync-row > :is(select, input) {
+    flex: 1;
+    min-width: 0;
+  }
+
+.dialog .sync-value {
+    flex: 1;
+    font-weight: 500;
+  }
+
+.dialog label.check.sync-indent {
+    margin-left: 76px;
+  }

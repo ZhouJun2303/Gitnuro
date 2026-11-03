@@ -17,22 +17,59 @@ export function forkPath(delta: number): string {
   return `M ${sx} 14 C ${mid} 14, 6 16, 6 22 L 6 29`;
 }
 
-/** One row of the commit graph. Columns line up across the list. */
-export function commitGraph(commits: { id: string; parents: string[] }[]): GraphCell[][] {
-  const columns: Array<string | null> = [];
-  const rows: GraphCell[][] = [];
+export type GraphBuild = {
+  rows: GraphCell[][];
+  width: number;
+  columns: Array<string | null>;
+};
 
-  for (let i = 0; i < commits.length; i++) {
+export type GraphResume = {
+  columns: Array<string | null>;
+  count: number;
+  rows: GraphCell[][];
+};
+
+/** One row of the commit graph. Columns line up across the list. Pass the previous build when `commits` only grew at the end. */
+export function commitGraph(commits: { id: string; parents: string[] }[], resume?: GraphResume): GraphBuild {
+  const columns = resume ? resume.columns.slice() : [];
+  const rows = resume ? resume.rows.slice() : [];
+  const laneOf = new Map<string, number>();
+  for (let index = 0; index < columns.length; index++) {
+    const id = columns[index];
+    if (id && !laneOf.has(id)) laneOf.set(id, index);
+  }
+  const assign = (index: number, id: string | null) => {
+    const previous = columns[index];
+    columns[index] = id;
+    if (previous && laneOf.get(previous) === index) {
+      let nextAt = -1;
+      for (let cursor = 0; cursor < columns.length; cursor++) {
+        if (columns[cursor] === previous) {
+          nextAt = cursor;
+          break;
+        }
+      }
+      if (nextAt < 0) laneOf.delete(previous);
+      else laneOf.set(previous, nextAt);
+    }
+    if (id) {
+      const known = laneOf.get(id);
+      if (known === undefined || index < known) laneOf.set(id, index);
+    }
+  };
+
+  for (let i = resume?.count ?? 0; i < commits.length; i++) {
     const commit = commits[i];
-    let lane = columns.findIndex((id) => id === commit.id);
-    const hasUp = lane >= 0;
-    if (lane < 0) {
+    let lane = laneOf.get(commit.id);
+    const hasUp = lane !== undefined;
+    if (lane === undefined) {
       lane = columns.findIndex((id) => !id);
       if (lane < 0) {
         lane = columns.length;
         columns.push(commit.id);
+        laneOf.set(commit.id, lane);
       } else {
-        columns[lane] = commit.id;
+        assign(lane, commit.id);
       }
     }
 
@@ -46,18 +83,21 @@ export function commitGraph(commits: { id: string; parents: string[] }[]): Graph
       if (free < 0) {
         free = columns.length;
         columns.push(extra);
+        if (!laneOf.has(extra)) laneOf.set(extra, free);
       } else {
-        columns[free] = extra;
+        assign(free, extra);
       }
       forkLanes.push(free);
     }
 
     let mergeTargetLane: number | null = null;
     if (firstParent) {
-      const existingLane = columns.findIndex((id, idx) => idx !== lane && id === firstParent);
-      if (existingLane >= 0) {
-        mergeTargetLane = existingLane;
+      let existingLane = laneOf.get(firstParent);
+      if (existingLane === lane) {
+        const found = columns.findIndex((id, idx) => idx !== lane && id === firstParent);
+        existingLane = found >= 0 ? found : undefined;
       }
+      if (existingLane !== undefined && existingLane !== lane) mergeTargetLane = existingLane;
     }
 
     const rowCells: GraphCell[] = [];
@@ -93,19 +133,19 @@ export function commitGraph(commits: { id: string; parents: string[] }[]): Graph
 
     rows.push(rowCells);
 
-    if (mergeTargetLane !== null) {
-      columns[lane] = null;
-    } else {
-      columns[lane] = firstParent ?? null;
-    }
+    if (mergeTargetLane !== null) assign(lane, null);
+    else assign(lane, firstParent ?? null);
   }
 
   const width = rows.reduce((max, row) => Math.max(max, row.length), 1);
-  return rows.map((row) => {
-    const next = row.slice();
-    while (next.length < width) next.push(null);
-    return next;
-  });
+  return { rows, width, columns };
+}
+
+/** Empty lanes are filled when a row is drawn, so earlier rows stay aligned with later ones. */
+export function padGraphRow(row: GraphCell[] | undefined, width: number): GraphCell[] {
+  const next = row ? row.slice() : [];
+  while (next.length < width) next.push(null);
+  return next;
 }
 
 export function numberedDiff(lines: DiffLine[]) {

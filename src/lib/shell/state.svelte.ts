@@ -1,0 +1,3880 @@
+import { onMount, tick } from "svelte";
+import { invoke } from "../perf";
+import { listen } from "@tauri-apps/api/event";
+import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
+import { highlight } from "../highlight";
+import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
+import { resolveLocale, translate } from "../i18n";
+import { shortcut, shortcutLabel, typing } from "../keys";
+import { branchGroup, changedRanges, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
+import {
+    badge,
+    type BlameLine,
+    type CommandRecord,
+    type CommitDetail,
+    type CommitRow,
+    type ConflictSides,
+    type DiffLine,
+    type FileDiff,
+    type FilePreview,
+    type InProgress,
+    type RefSnapshot,
+    type Settings,
+    type StatusFile,
+    type StatusSnapshot,
+    type Suggestion,
+    type UpdateNotice,
+  } from "../status";
+import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu } from "./menus";
+import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
+import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry } from "./history.svelte";
+import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openRebase, submitCommit, suggestMessage, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, applyToolSettings, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
+import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
+
+export class ShellState {
+
+
+  defaultSettings: Settings = {
+    theme: "system",
+    pullRebase: false,
+    fetchPrune: true,
+    diffStyle: "split",
+    proxy: "",
+    aiBaseUrl: "https://api.x.ai/v1",
+    aiModel: "grok-4.7",
+    aiApiKey: "",
+    terminal: "",
+    swapPanes: false,
+    showEntireFile: false,
+    linesHeight: "compact",
+    uiScale: 13,
+    dateRelative: true,
+    dateFormat: "dd MMM yyyy",
+    date24h: true,
+    hiddenRefs: "",
+    authorName: "",
+    authorEmail: "",
+    sslVerify: true,
+    sslCaFile: "",
+    proxyUser: "",
+    proxyPassword: "",
+    proxyEnabled: false,
+    proxyType: "http",
+    proxyHost: "",
+    proxyPort: 0,
+    signCommits: false,
+    mergeNoFf: false,
+    mergeAutostash: false,
+    cloneDirectory: "",
+    windowX: 0,
+    windowY: 0,
+    windowWidth: 0,
+    windowHeight: 0,
+    treeFiles: false,
+    gravatar: false,
+    signOff: false,
+    signOffFormat: "Signed-off-by: %user <%email>",
+    forceWithLease: true,
+    aiEnabled: true,
+    aiLanguage: "",
+    aiMaxChars: 12000,
+    aiPrompt: "",
+    aiTemperature: 0,
+    logDirectory: "",
+    recent: [],
+    workspaces: [],
+    currentWorkspace: "",
+    commands: [],
+    flowMaster: "main",
+    flowDevelop: "develop",
+    flowFeature: "feature/",
+    flowRelease: "release/",
+    flowHotfix: "hotfix/",
+    flowSupport: "support/",
+    expandedGroups: [],
+    locale: "system",
+    diffTool: "",
+    mergeTool: "",
+    githubToken: "",
+    gitlabToken: "",
+    gitlabHost: "",
+    showDiffMarks: false,
+    diffFontSize: 13,
+    disableSyntaxHighlight: false,
+    commitSort: "date",
+    fetchAutomatically: false,
+    fetchTags: false,
+    tabIndicator: true,
+    updateSubmodulesOnCheckout: false,
+    branchSpace: "-",
+    pushOnCommit: false,
+    compactBranchLabels: false,
+    messageLow: 50,
+    messageHigh: 70,
+    spellChecking: "disable",
+    pageGuide: 72,
+    highlightIssues: true,
+    shellKind: "default",
+    shellPath: "",
+    shellArgs: "",
+    diffToolName: "",
+    diffToolPath: "",
+    diffToolArgs: "",
+    mergeToolName: "",
+    mergeToolPath: "",
+    mergeToolArgs: "",
+    ignoreSpace: false,
+    verticalTabs: false,
+    pinnedRefs: [],
+    sourceDirectories: [],
+    groupNames: [],
+    showWhitespace: false,
+    fileLayout: "",
+    fakeIgnore: true,
+    tabLabels: [],
+    tabColors: [],
+    accounts: [],
+    bitbucketToken: "",
+    azureToken: "",
+    azureOrg: "",
+    oauthClientId: "",
+  };
+
+
+
+  desktopApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+
+  section = $state<"changes" | "history">("changes");
+
+
+  selectedPath = $state<string | null>(this.desktopApp ? null : (sampleUnstaged[0]?.path ?? null));
+
+
+  summary = $state("");
+
+
+  description = $state("");
+
+
+  amend = $state(false);
+
+
+  signOff = $state(false);
+
+
+  skipHooks = $state(false);
+
+
+  repoSignOff = $state(false);
+
+
+  selectedSide = $state<Side>("unstaged");
+
+
+  mode = $state<Mode>(this.desktopApp ? "loading" : "sample");
+
+
+  snapshot = $state<StatusSnapshot | null>(null);
+
+
+  loadError = $state<string | null>(null);
+
+
+  actionError = $state<string | null>(null);
+
+
+  jobs = $state<Record<string, RepoJob>>({});
+
+
+  /** Set as soon as a tab is chosen, before that repository's status returns. */
+  focusPath = $state<string | null>(null);
+
+
+  openGen = 0;
+
+
+  errorCopied = $state(false);
+
+
+  diff = $state<FileDiff | null>(null);
+
+
+  diffError = $state<string | null>(null);
+
+
+  diffToken = 0;
+
+
+  statusGen = 0;
+
+
+  contextGen = 0;
+
+
+  refreshing = false;
+
+
+  refreshQueued: "status" | "full" | null = null;
+
+
+  refs = $state<RefSnapshot | null>(null);
+
+
+  commitsLive = $state<CommitRow[]>([]);
+
+
+  progress = $state<InProgress | null>(null);
+
+
+  selectedCommit = $state<string | null>(null);
+
+
+  commitFiles = $state<StatusFile[]>([]);
+
+
+  historyFile = $state<string | null>(null);
+
+
+  historyDiff = $state<FileDiff | null>(null);
+
+
+  patchCache = $state<Record<string, FileDiff>>({});
+
+
+  openPatches = $state<string[]>([]);
+
+
+  treeCollapsed = $state<string[]>([]);
+
+
+  treePrepared = $state<string | null>(null);
+
+
+  treeBinary = $state(false);
+
+
+  blobTop = $state(0);
+
+
+  patchGen = 0;
+
+
+  historyFilter = $state("");
+
+
+  historyTop = $state(0);
+
+
+  blameLines = $state<BlameLine[] | null>(null);
+
+
+  settings = $state<Settings>(
+    this.desktopApp
+      ? { ...this.defaultSettings }
+      : {
+          ...this.defaultSettings,
+          cloneDirectory: "D:\\work",
+          sourceDirectories: ["D:\\work", "D:\\personal"],
+          groupNames: ["D:\\work" + "\t" + "工作", "D:\\personal" + "\t" + "个人"],
+        },
+  );
+
+
+  repos = $state<string[]>([]);
+
+
+  repoPickerOpen = $state(false);
+
+
+  repoPickerRecentOpen = $state(true);
+
+
+  repoPickerReposOpen = $state(true);
+
+
+  repoPickerExpanded = $state<string[]>([]);
+
+
+  repoPickerButton = $state<HTMLButtonElement | null>(null);
+
+
+  repoPickerPos = $state({ x: 12, y: 72, maxHeight: 560 });
+
+
+  scannedRepos = $state<string[]>([]);
+
+
+  repoScanning = $state(false);
+
+
+  repoScanToken = 0;
+
+
+  commandLog = $state<CommandEntry[]>([]);
+
+
+  commandLogOpen = $state(false);
+
+
+  commandFilter = $state<"all" | "user" | "background">("all");
+
+
+  commandPick = $state(0);
+
+
+  commandButton = $state<HTMLButtonElement | null>(null);
+
+
+  commandPos = $state({ x: 12, y: 80, width: 860, maxHeight: 460 });
+
+
+  commandSeq = 0;
+
+
+  dialog = $state<Dialog>(null);
+
+
+  prefsSave = 0;
+
+
+  draft = $state("");
+
+
+  draftExtra = $state("");
+
+
+  /** Fetch, pull, and push dialog options. */
+  syncAll = $state(false);
+
+
+  syncTags = $state(false);
+
+
+  syncRebase = $state(false);
+
+
+  syncStash = $state(false);
+
+
+  syncForce = $state(false);
+
+
+  pushBranch = $state("");
+
+
+  pushTo = $state("");
+
+
+  cloneRoot = $state("");
+
+
+  cloneFolder = $state("");
+
+
+  cloneNameManual = $state(false);
+
+
+  cloneIntent = $state<"clone" | "init">("clone");
+
+
+  cloneJob = $state<{ name: string; destination: string } | null>(null);
+
+
+  cloneDone = $state<string | null>(null);
+
+
+  cloneCancel = false;
+
+
+  cloneTargetPath = $derived(cloneTarget(this.cloneRoot, this.cloneFolder, this.draft));
+
+
+  draftUser = $state("");
+
+
+  draftSecret = $state("");
+
+
+  launch = $state("");
+
+
+  launchOpen = $state(false);
+
+
+  launchIndex = $state(0);
+
+
+  launchList = $state<HTMLElement | null>(null);
+
+
+  allBranches = $state(false);
+
+
+  commitQuery = $state("");
+
+
+  drops = $state<string[]>([]);
+
+
+  fileTop = $state(0);
+
+
+  stagedTop = $state(0);
+
+
+  patchView = $state<Record<string, { start: number; end: number }>>({});
+
+
+  patchSplits = new Map<string, { lines: DiffLine[]; rows: SplitRow[]; columns: { left: number; right: number } }>();
+
+
+  graphResume: { ids: string[]; columns: Array<string | null>; rows: GraphCell[][] } | null = null;
+
+
+  diffTop = $state(0);
+
+
+  diffHeight = $state(0);
+
+
+  blameTop = $state(0);
+
+
+  preview = $state<FilePreview | null>(null);
+
+
+  updateNotice = $state<UpdateNotice | null>(null);
+
+
+  passphrase = $state("");
+
+
+  passUser = $state("");
+
+
+  searchEl = $state<HTMLInputElement | null>(null);
+
+
+  launchEl = $state<HTMLInputElement | null>(null);
+
+
+  historyEl = $state<HTMLElement | null>(null);
+
+
+  selectedIndex = $state(0);
+
+
+  sideQuery = $state("");
+
+
+  sideFilter = $state<HTMLInputElement | null>(null);
+
+
+  fileQuery = $state("");
+
+
+  recentQuery = $state("");
+
+
+  searchOpen = $state({ recent: false, side: false, commit: false, file: false });
+
+
+  historyDiffTop = $state(0);
+
+
+  picked = $state<string[]>([]);
+
+
+  keyTarget: "unstaged" | "staged" | "combined" | "diff" | "blob" | "detail" | "commits" = "unstaged";
+
+
+  textWhere = $state<null | "changes" | "blob" | "detail">(null);
+
+
+  textFile = $state<string | null>(null);
+
+
+  textSide = $state<"left" | "right" | "all">("all");
+
+
+  selectRoot: HTMLElement | null = null;
+
+
+  heldText: string | null = null;
+
+
+  checkoutNewBranch = $state(true);
+
+
+  pendingCheckout = $state("");
+
+
+  foldHidden = $state<string[]>([]);
+
+
+  foldRoots = $state<string[]>([]);
+
+
+  contentHits = $state<{ id: string; shortId: string; summary: string }[] | null>(null);
+
+
+  activityLines = $state<string[]>([]);
+
+
+  staleNames = $state<string[]>([]);
+
+
+  stalePicked = $state<string[]>([]);
+
+
+  compareWith = $state("");
+
+
+  pendingCommand = $state<CommandRecord | null>(null);
+
+
+  commandPrompt = $state("");
+
+
+  hostForge = $state("github");
+
+
+  editingAccount = $state("");
+
+
+  commandShared = $state(true);
+
+
+  sessionLog = $state<string[]>([]);
+
+
+  fieldValues = $state<Record<string, string>>({});
+
+
+  includeUntracked = $state(false);
+
+
+  stashFiles = $state<string[]>([]);
+
+
+  flowKind = $state("feature");
+
+
+  privateRepo = $state(false);
+
+
+  mergeResult = $state("");
+
+
+  mergePieces = $state<MergePiece[]>([]);
+
+
+  closedTabs = $state<string[]>([]);
+
+
+  facts = $state<RepoFacts | null>(null);
+
+
+  factsPath = "";
+
+
+  showIgnored = $state(false);
+
+
+  hunkAt = $state(0);
+
+
+  diffAnchor = 0;
+
+
+  diffSelected = $state<number[]>([]);
+
+
+  diffEl = $state<HTMLElement | null>(null);
+
+
+  diffPicked = $derived(new Set(this.diffSelected));
+
+
+  menu = $state<{ x: number; y: number; items: MenuItem[]; anchorTop?: number } | null>(null);
+
+
+  submenu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
+
+
+  confirmAsk = $state<ConfirmAsk | null>(null);
+
+
+  imageMode = $state<"side" | "swipe" | "onion" | "pixel">("side");
+
+
+  imagePos = $state(50);
+
+
+  imageOld = $state<string | null>(null);
+
+
+  imageNew = $state<string | null>(null);
+
+
+  pixelUrl = $state("");
+
+
+  reflogOn = $state(false);
+
+
+  treeOn = $state(false);
+
+
+  reflogRows = $state<{ id: string; shortId: string; selector: string; summary: string }[]>([]);
+
+
+  treePaths = $state<string[]>([]);
+
+
+  treeText = $state("");
+
+
+  notices = $state<{ id: string; title: string; url: string; unread: boolean }[]>([]);
+
+
+  pulls = $state<{ title: string; author: string; branch: string; url: string }[]>([]);
+
+
+  forgeOpen = $state<"notes" | "pulls" | null>(null);
+
+
+  repoStats = $state<{ branch: string; ahead: number; behind: number; commits: number; branches: number; lastSummary: string } | null>(null);
+
+
+  rebaseConflictFiles = $state<string[]>([]);
+
+
+  updateRefs = $state(false);
+
+
+  lfsAvailable = $state(false);
+
+
+  prefTab = $state<PrefTab>("general");
+
+
+  prefPage = $state<HTMLElement | null>(null);
+
+
+
+  async selectPrefTab(tab: PrefTab) {
+    return selectPrefTab(this, tab);
+  }
+
+
+  commitDetail = $state<CommitDetail | null>(null);
+
+
+  historyTab = $state<"commit" | "changes" | "tree">("commit");
+
+
+  collapsedDirs = $state<string[]>([]);
+
+
+  collapsedSide = $state<string[]>(["tags", "stashes", "submodules", "worktrees"]);
+
+
+  sideSelected = $state<string | null>(null);
+
+
+  commitCollapsed = $state<string[]>([]);
+
+
+  aiFieldsOpen = $state(false);
+
+
+  dragStep = $state<number | null>(null);
+
+
+  rebasePicked = $state<string[]>([]);
+
+
+  recentStats = $state<Record<string, { branch: string; ahead: number; behind: number; lastSummary: string }>>({});
+
+
+  commandOutput = $state("");
+
+
+  conflict = $state<ConflictSides | null>(null);
+
+
+  logLimit = $state(500);
+
+
+  rebaseSteps = $state<{ verb: string; rev: string; summary: string; message: string }[]>([]);
+
+
+  comparePair = $state<[string, string] | null>(null);
+
+
+  drafts = new Map<string, { summary: string; description: string }>();
+
+
+
+  LAYOUT_KEY = "awegit.layout.settings";
+
+
+  getStoredLayout(): {
+    sidebarWidth?: number;
+    sidebarCollapsed?: boolean;
+    changesWidth?: number;
+    unstagedHeight?: number;
+    composerHeight?: number;
+    historyDetailHeight?: number;
+    detailTreeWidth?: number;
+  } {
+    try {
+      const raw = typeof localStorage !== "undefined" ? localStorage.getItem(this.LAYOUT_KEY) : null;
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return {};
+  }
+
+
+
+  saveLayoutState(partial: Record<string, unknown>) {
+    try {
+      const cur = this.getStoredLayout();
+      localStorage.setItem(this.LAYOUT_KEY, JSON.stringify({ ...cur, ...partial }));
+    } catch {}
+  }
+
+
+
+  initialLayout = this.getStoredLayout();
+
+
+  sidebarWidth = $state<number>(this.initialLayout.sidebarWidth ?? 240);
+
+
+  sidebarCollapsed = $state<boolean>(this.initialLayout.sidebarCollapsed ?? false);
+
+
+  changesWidth = $state<number>(this.initialLayout.changesWidth ?? 300);
+
+
+  unstagedHeight = $state<number>(this.initialLayout.unstagedHeight ?? 280);
+
+
+  composerHeight = $state<number>(this.initialLayout.composerHeight ?? 170);
+
+
+  historyDetailHeight = $state<number>(this.initialLayout.historyDetailHeight ?? 280);
+
+
+  detailTreeWidth = $state<number>(this.initialLayout.detailTreeWidth ?? 280);
+
+
+
+  handleLayoutChange() {
+    this.saveLayoutState({
+      sidebarWidth: this.sidebarWidth,
+      sidebarCollapsed: this.sidebarCollapsed,
+      changesWidth: this.changesWidth,
+      unstagedHeight: this.unstagedHeight,
+      composerHeight: this.composerHeight,
+      historyDetailHeight: this.historyDetailHeight,
+      detailTreeWidth: this.detailTreeWidth,
+    });
+  }
+
+
+
+  messageHigh = $derived(this.settings.messageHigh > 0 ? this.settings.messageHigh : 70);
+
+
+  messageLow = $derived(this.settings.messageLow > 0 ? this.settings.messageLow : 50);
+
+
+  summaryTooLong = $derived(this.summary.length > this.messageHigh);
+
+
+  summaryTone = $derived(this.summary.length > this.messageHigh ? "over" : this.summary.length >= this.messageLow && this.summary.length > 0 ? "warn" : "");
+
+
+  sampleRow(file: FileChange): Row {
+    return sampleRow(this, file);
+  }
+
+
+  selectedDiff = $derived(this.mode === "sample" && this.selectedPath ? (diffs[this.selectedPath] ?? []) : []);
+
+
+  staged = $derived<Row[]>(
+    this.mode === "live" ? (this.snapshot?.staged ?? []).map(this.toRow.bind(this)) : this.mode === "sample" ? sampleStaged.map(this.sampleRow.bind(this)) : [],
+  );
+
+
+  unstaged = $derived<Row[]>(this.mode === "live" ? (this.snapshot?.unstaged ?? []).map(this.toRow.bind(this)) : sampleUnstaged.map(this.sampleRow.bind(this)));
+
+
+  branchLabel = $derived(
+    this.mode === "sample" ? "main" : (this.snapshot?.branch ?? (this.mode === "loading" ? "…" : "HEAD")),
+  );
+
+
+  tabLabel = $derived(this.mode === "live" && this.snapshot ? this.folderName(this.snapshot.path) : "AweGit");
+
+
+  changeCount = $derived(
+    this.mode === "live" || this.mode === "sample" ? this.staged.length + this.unstaged.length : 0,
+  );
+
+
+  conflicted = $derived(
+    [...(this.snapshot?.staged ?? []), ...(this.snapshot?.unstaged ?? [])].some((file) => file.kind === "conflict"),
+  );
+
+
+  jobKey(path: string | null | undefined) {
+    return (path ?? "").replace(/[\\/]+$/, "").replaceAll("\\", "/").toLowerCase();
+  }
+
+
+  viewing(path: string | null | undefined) {
+    const key = this.jobKey(path);
+    return key !== "" && key === this.jobKey(this.snapshot?.path);
+  }
+
+
+  switching = $derived(!!this.focusPath && this.jobKey(this.focusPath) !== this.jobKey(this.snapshot?.path));
+
+
+  meterPath = $derived(this.switching ? this.focusPath : (this.snapshot?.path ?? null));
+
+
+  currentJob = $derived(this.meterPath ? this.jobs[this.jobKey(this.meterPath)] : undefined);
+
+
+  busy = $derived(this.switching || (this.jobs[this.jobKey(this.snapshot?.path)]?.depth ?? 0) > 0);
+
+
+  busyLabel = $derived(this.currentJob?.label ?? "");
+
+
+  workDepth = $derived.by(() => {
+    if ((this.currentJob?.depth ?? 0) > 0) return this.currentJob?.depth ?? 0;
+    if (!this.snapshot && !this.focusPath && this.cloneJob) return this.jobs[this.jobKey(this.cloneJob.destination)]?.depth ?? 0;
+    return 0;
+  });
+
+
+  workPercent = $derived.by(() => {
+    if ((this.currentJob?.depth ?? 0) > 0) return this.currentJob?.percent ?? null;
+    if (!this.snapshot && !this.focusPath && this.cloneJob) return this.jobs[this.jobKey(this.cloneJob.destination)]?.percent ?? null;
+    return null;
+  });
+
+
+  canCommit = $derived(
+    this.summary.trim().length > 0 &&
+      !this.summaryTooLong &&
+      !this.busy &&
+      !this.conflicted &&
+      (this.mode !== "live" || this.staged.length > 0 || this.amend),
+  );
+
+
+  rowCommit = $derived(this.settings.linesHeight === "spaced" ? 36 : 28);
+
+
+  rowFile = $derived(this.settings.linesHeight === "spaced" ? 32 : 28);
+
+
+  rowTree = $derived(this.settings.linesHeight === "spaced" ? 28 : 24);
+
+
+  activeLocale = $derived(resolveLocale(this.settings.locale));
+
+
+  tr(key: string, vars: Record<string, string> = {}) {
+    return translate(this.activeLocale, key, vars);
+  }
+
+
+  sampleRows = $derived([
+    { id: "stash@{0}", summary: "WIP before the palette", author: "", when: "", badges: ["stash"], parents: [commits[0]?.id ?? ""], files: [] as (typeof commits)[number]["files"], unpushed: true },
+    ...commits,
+  ]);
+
+
+  sampleGraph = $derived(commitGraph(this.sampleRows.map((commit) => ({ id: commit.id, parents: commit.parents }))));
+
+
+  sampleTree = $derived([...new Set(commits.flatMap((commit) => commit.files.map((file) => file.path)))]);
+
+
+  changeTree = $derived(this.asTree(this.commitFiles.map((file) => this.toRow(file)), this.commitCollapsed));
+
+
+  repoTree = $derived(this.asTree((this.mode === "live" ? this.treePaths : this.sampleTree).map((path) => ({ path, letter: "", tone: "modified" as const })), this.treeCollapsed));
+
+
+  allPatchesOpen = $derived(this.commitFiles.length > 0 && this.commitFiles.every((file) => this.openPatches.includes(file.path)));
+
+
+  blobLines = $derived.by(() => {
+    const text = this.mode === "live" ? this.treeText : this.sampleBlob(this.historyFile ?? "");
+    return text ? text.split("\n") : [];
+  });
+
+
+  blobWindow = $derived.by(() => {
+    if (this.blobLines.length <= 400) return { start: 0, rows: this.blobLines };
+    const start = Math.max(0, Math.floor(this.blobTop / 18) - 30);
+    return { start, rows: this.blobLines.slice(start, start + 140) };
+  });
+
+
+  shownCommits = $derived(
+    this.commitsLive.filter((commit) => {
+      const query = this.commitQuery.trim().toLowerCase();
+      if (!query) return true;
+      return (
+        commit.summary.toLowerCase().includes(query) ||
+        commit.author.toLowerCase().includes(query) ||
+        commit.shortId.startsWith(query)
+      );
+    }),
+  );
+
+
+  historyItems = $derived.by(() => {
+    const rows = [...this.shownCommits];
+    for (const stash of this.refs?.stashes ?? []) {
+      const parent = stash.parent;
+      if (!parent) continue;
+      const extra: CommitRow = { id: stash.id || stash.name, shortId: stash.name, summary: stash.summary, author: "", when: "", parents: [parent], refs: ["stash"], lane: 0, at: 0, email: "", unpushed: true };
+      const at = rows.findIndex((row) => row.id === parent || row.id.startsWith(parent));
+      if (at >= 0) rows.splice(at, 0, extra);
+    }
+    return rows.filter((row) => !this.foldHidden.includes(row.id));
+  });
+
+
+  historyWindow = $derived(windowSlice(this.historyItems, this.historyTop, this.rowCommit));
+
+
+  historyStart = $derived(this.historyWindow.start);
+
+
+  historyRows = $derived(this.historyWindow.rows);
+
+
+  shownUnstaged = $derived(this.unstaged.filter((file) => this.matchesQuery(file.path, this.fileQuery)));
+
+
+  shownStaged = $derived(this.staged.filter((file) => this.matchesQuery(file.path, this.fileQuery)));
+
+
+  fileLayout = $derived(this.settings.fileLayout || (this.settings.treeFiles ? "tree" : "list"));
+
+
+  unstagedTree = $derived(this.fileLayout === "tree" ? this.asTree(this.shownUnstaged, this.collapsedDirs) : this.flatEntries(this.shownUnstaged));
+
+
+  fileStride = $derived(this.fileLayout === "tree" ? this.rowTree : this.rowFile);
+
+
+  fileWindow = $derived(windowSlice(this.unstagedTree, this.fileTop, this.fileStride));
+
+
+  stagedTree = $derived(this.fileLayout === "tree" ? this.asTree(this.shownStaged) : this.flatEntries(this.shownStaged));
+
+
+  stagedWindow = $derived(windowSlice(this.stagedTree, this.stagedTop, this.fileStride));
+
+
+  ignoredWindow = $derived(windowSlice(this.facts?.ignored ?? [], this.fileTop, this.fileStride));
+
+
+  diffLines = $derived(this.diff?.lines ?? []);
+
+
+
+  discardableEntries(indexes: number[]) {
+    return discardableEntries(this, indexes);
+  }
+
+
+
+  discardableSelected = $derived(this.discardableEntries(this.diffSelected));
+
+
+  shownDiffLines = $derived(numberedDiff(this.diffLines));
+
+
+  liveGraph = $derived.by(() => {
+    const items = this.historyItems;
+    const ids = items.map((commit) => commit.id);
+    const prev = this.graphResume;
+    const prefix = !!prev && prev.ids.length <= ids.length && prev.ids.every((id, index) => id === ids[index]);
+    const built = commitGraph(
+      items.map((commit) => ({ id: commit.id, parents: commit.parents ?? [] })),
+      prefix && prev ? { columns: prev.columns, count: prev.ids.length, rows: prev.rows } : undefined,
+    );
+    this.graphResume = { ids, columns: built.columns, rows: built.rows };
+    return built;
+  });
+
+
+  minimapMarks = $derived.by(() => {
+    const lines = this.diff?.lines ?? [];
+    const total = lines.length;
+    if (total === 0) return [];
+    const slots = Math.min(120, total);
+    const marks: { index: number; kind: string; top: number }[] = [];
+    for (let slot = 0; slot < slots; slot++) {
+      const from = Math.floor((slot * total) / slots);
+      const to = slot === slots - 1 ? total : Math.floor(((slot + 1) * total) / slots);
+      for (let index = from; index < to; index++) {
+        const line = lines[index];
+        if (line && (line.kind === "add" || line.kind === "delete" || line.kind === "hunk")) {
+          marks.push({ index, kind: line.kind, top: (index / total) * 100 });
+          break;
+        }
+      }
+    }
+    return marks;
+  });
+
+
+  diffWindow = $derived(windowSlice(this.diffLines, this.diffTop, 18));
+
+
+  blameWindow = $derived(windowSlice(this.blameLines ?? [], this.blameTop, 18));
+
+
+  historyDiffWindow = $derived(windowSlice(this.historyDiff?.lines ?? [], this.historyDiffTop, 18));
+
+
+  splitRows = $derived(this.settings.diffStyle === "split" ? splitDiff(this.diffLines) : []);
+
+
+  splitRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)));
+
+
+  splitWindow = $derived.by(() => {
+    const count = Math.ceil(Math.max(this.diffHeight, 600) / this.splitRowHeight) + 24;
+    if (this.splitRows.length <= count + 40) return { start: 0, rows: this.splitRows, after: 0 };
+    const start = Math.min(Math.max(0, Math.floor(this.diffTop / this.splitRowHeight) - 12), Math.max(0, this.splitRows.length - count));
+    const rows = this.splitRows.slice(start, start + count);
+    return { start, rows, after: this.splitRows.length - start - rows.length };
+  });
+
+
+  splitColumns = $derived.by(() => {
+    let left = 0;
+    let right = 0;
+    for (const row of this.splitRows) {
+      left = Math.max(left, this.textColumns(row.left));
+      right = Math.max(right, this.textColumns(row.right));
+    }
+    const mark = this.settings.showDiffMarks ? 1 : 0;
+    return { left: left + mark, right: right + mark };
+  });
+
+
+  textColumns(text: string) {
+    return textColumns(this, text);
+  }
+
+
+  cachedSplit(file: string, lines: DiffLine[]) {
+    return cachedSplit(this, file, lines);
+  }
+
+
+  splitColumnsOf(rows: SplitRow[]) {
+    return splitColumnsOf(this, rows);
+  }
+
+
+  trackPatch(node: HTMLElement, spec: { file: string; count: number; rowHeight: number }) {
+    return trackPatch(this, node, spec);
+  }
+
+
+  sampleSplitOf(lines: string[]) {
+    return sampleSplitOf(this, lines);
+  }
+
+
+  sampleSplit = $derived(this.sampleSplitOf(this.selectedDiff));
+
+
+  splitPick = $state<"left" | "right">("left");
+
+
+  pickSplitSide(event: MouseEvent) {
+    return pickSplitSide(this, event);
+  }
+
+
+  /** `columns` is the widest line per side, for a virtual list that only renders some of its rows. */
+  splitScroller(node: HTMLElement, columns?: { left: number; right: number }) {
+    return splitScroller(this, node, columns);
+  }
+
+
+  filterNames = $derived.by(() => {
+    if (this.historyFilter) return [this.historyFilter];
+    if (this.allBranches) return [];
+    if (this.mode === "sample") return ["main", "origin/main"];
+    const current = this.refs?.branches.find((branch) => branch.current);
+    if (!current) return [];
+    const names = [current.name];
+    if (current.upstream && !names.includes(current.upstream)) names.push(current.upstream);
+    return names;
+  });
+
+
+  pinnedHere = $derived(
+    new Set(
+      this.settings.pinnedRefs
+        .filter((item) => item.startsWith(`${this.snapshot?.path ?? ""}\t`))
+        .map((item) => item.slice(item.indexOf("\t") + 1)),
+    ),
+  );
+
+
+  visibleBranches = $derived(
+    (this.refs?.branches ?? [])
+      .filter((branch) => (branch.current || !this.refHidden(branch.name)) && this.matchesQuery(branch.name, this.sideQuery))
+      .slice()
+      .sort((a, b) => Number(this.pinnedHere.has(b.name)) - Number(this.pinnedHere.has(a.name))),
+  );
+
+
+  currentBranch = $derived(this.refs?.branches.find((branch) => branch.current) ?? null);
+
+
+  visibleTags = $derived(
+    (this.refs?.tags ?? []).filter((tag) => !this.refHidden(tag.name) && this.matchesQuery(tag.name, this.sideQuery)),
+  );
+
+
+  navBack: Place[] = [];
+
+
+  navForward: Place[] = [];
+
+
+  navLock = 0;
+
+
+  lastPlace: Place | null = null;
+
+
+  navStamp = 0;
+
+
+
+  matches = $derived.by(() => {
+    const query = this.launch.trim().toLowerCase();
+    const action = this.tr("chrome.groupAction");
+    const repoGroup = this.tr("chrome.groupRepo");
+    if (query.startsWith("!")) {
+      const command = query.slice(1);
+      return [{ label: command ? `! ${command}` : "!", group: action, run: () => this.mutate({ action: "custom", command }) }];
+    }
+    const items: LaunchItem[] = [
+      { label: this.tr("chrome.fetch"), group: action, run: () => void this.doFetch() },
+      { label: this.tr("chrome.fetchAll"), group: action, run: () => void this.mutate({ action: "fetch", remote: null, prune: this.settings.fetchPrune, tags: this.settings.fetchTags }) },
+      { label: this.tr("chrome.pull"), group: action, run: () => void this.doPull() },
+      { label: this.tr("dialog.fastForward"), group: action, run: () => { this.settings.pullRebase = false; void this.doPull(); } },
+      { label: this.tr("chrome.push"), group: action, run: () => void this.doPush() },
+      { label: this.tr("menu.createTag"), group: action, run: () => { this.draft = ""; this.draftExtra = "HEAD"; this.draftUser = ""; this.dialog = "tag"; } },
+      { label: this.tr("chrome.pushTags"), group: action, run: () => void this.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: this.settings.forceWithLease }) },
+      { label: this.tr("chrome.stash"), group: action, run: () => this.openStash([]) },
+      { label: this.tr("chrome.pop"), group: action, run: () => void this.mutate({ action: "stashPop" }) },
+      { label: this.tr("chrome.refresh"), group: action, run: () => void this.refresh() },
+      { label: this.tr("chrome.stageAll"), group: action, run: () => void this.runChange("stage_all") },
+      { label: this.tr("chrome.commit"), group: action, run: () => void this.submitCommit(false) },
+      { label: this.tr("chrome.commitAndPush"), group: action, run: () => void this.submitCommit(true) },
+      { label: this.tr("chrome.preferences"), group: action, run: () => { this.dialog = "prefs"; } },
+      { label: this.tr("chrome.terminal"), group: action, run: () => void invoke("open_terminal", { path: this.repoPath() }) },
+      { label: this.tr("chrome.explorer"), group: action, run: () => { if (this.snapshot) void this.openLocal(this.snapshot.path); } },
+      { label: this.tr("chrome.flow"), group: action, run: () => { this.draft = ""; this.dialog = "flow"; } },
+      { label: this.tr("chrome.about"), group: action, run: () => { this.dialog = "about"; } },
+      { label: this.tr("chrome.open"), group: action, run: () => this.beginOpen() },
+      { label: this.tr("chrome.workspace"), group: action, run: () => { this.draft = ""; this.dialog = "workspace"; } },
+      { label: this.tr("chrome.clone"), group: action, run: () => void this.beginClone("clone") },
+      { label: this.tr("chrome.newRepo"), group: action, run: () => void this.beginClone("init") },
+      { label: this.tr("chrome.notifications"), group: action, run: () => this.openForge("notes") },
+      { label: this.tr("chrome.pulls"), group: action, run: () => this.openForge("pulls") },
+      { label: this.tr("chrome.changes"), group: action, run: () => { this.section = "changes"; } },
+      { label: this.tr("chrome.commits"), group: action, run: () => { this.section = "history"; } },
+      ...this.settings.workspaces.map((workspace) => ({
+        label: workspace.name,
+        group: this.tr("chrome.workspace"),
+        run: () => void this.switchWorkspace(workspace.id),
+      })),
+      ...[...new Set([...this.repos, ...this.settings.recent])].map((path) => ({
+        label: this.folderName(path),
+        group: repoGroup,
+        run: () => void this.openRepo(path),
+      })),
+    ];
+    if (this.mode === "live") {
+      items.push(
+        ...this.settings.commands.map((command) => ({ label: command.name, group: action, run: () => this.runCommand(command) })),
+        ...(this.refs?.branches ?? []).map((branch) => ({
+          label: `${this.tr("menu.checkout")} ${branch.name}`,
+          group: this.tr("chrome.groupBranch"),
+          run: () => void this.mutate({ action: "checkout", name: branch.name }),
+        })),
+        ...(this.refs?.tags ?? []).map((tag) => ({
+          label: tag.name,
+          group: this.tr("chrome.groupTag"),
+          run: () => void this.mutate({ action: "checkout", name: tag.name }),
+        })),
+        ...(this.refs?.remotes ?? []).map((remote) => ({
+          label: remote.name,
+          group: this.tr("chrome.groupRemote"),
+          run: () => void this.mutate({ action: "fetch", remote: remote.name, prune: this.settings.fetchPrune, tags: this.settings.fetchTags }),
+        })),
+        ...(this.refs?.stashes ?? []).map((stash) => ({
+          label: stash.summary || stash.name,
+          group: this.tr("chrome.groupStash"),
+          run: () => void this.mutate({ action: "stashPop", name: stash.name }),
+        })),
+      );
+    }
+    const seen = new Set<string>();
+    const unique: LaunchItem[] = [];
+    for (const item of items) {
+      const key = `${item.group}\0${item.label}`;
+      if (seen.has(key)) continue;
+      if (query && !this.fuzzy(query, item.label)) continue;
+      seen.add(key);
+      unique.push(item);
+    }
+    return unique.slice(0, query ? 30 : 60);
+  });
+
+
+
+  fuzzy(query: string, label: string) {
+    const text = label.toLowerCase();
+    if (text.includes(query)) return true;
+    let at = 0;
+    for (const char of query) {
+      const found = text.indexOf(char, at);
+      if (found < 0) return false;
+      at = found + 1;
+    }
+    return query.length > 0;
+  }
+
+
+
+  async openLaunch() {
+    return openLaunch(this);
+  }
+
+
+
+  closeLaunch() {
+    return closeLaunch(this);
+  }
+
+
+
+  runLaunch(item: LaunchItem) {
+    return runLaunch(this, item);
+  }
+
+
+
+  onLaunchKey(event: KeyboardEvent) {
+    return onLaunchKey(this, event);
+  }
+
+
+
+  snapshotPlace(): Place {
+    return {
+      section: this.section,
+      path: this.selectedPath,
+      side: this.selectedSide,
+      commit: this.selectedCommit,
+      blame: this.blameLines != null,
+      tree: this.treeOn,
+      historyFilter: this.historyFilter,
+    };
+  }
+
+
+
+  samePlace(a: Place, b: Place) {
+    return (
+      a.section === b.section &&
+      a.path === b.path &&
+      a.side === b.side &&
+      a.commit === b.commit &&
+      a.blame === b.blame &&
+      a.tree === b.tree &&
+      a.historyFilter === b.historyFilter
+    );
+  }
+
+
+
+  async restorePlace(place: Place) {
+    this.navLock += 1;
+    this.section = place.section;
+    this.selectedSide = place.side;
+    this.selectedPath = place.path;
+    this.selectedCommit = place.commit;
+    this.treeOn = place.tree;
+    const filterChanged = this.historyFilter !== place.historyFilter;
+    this.historyFilter = place.historyFilter;
+    if (!place.blame) this.blameLines = null;
+    try {
+      if (this.mode === "live" && filterChanged) {
+        if (place.historyFilter) {
+          this.commitsLive = await invoke<CommitRow[]>("file_history", { path: this.repoPath(), file: place.historyFilter, limit: 200 });
+        } else {
+          await this.loadContext();
+        }
+      }
+      if (this.mode === "live" && place.section === "history" && place.commit) await this.selectCommit(place.commit);
+      if (place.blame && place.path && this.mode === "live") await this.showBlame(place.path);
+      if (place.tree && place.commit && this.mode === "live") {
+        this.treePaths = await invoke<string[]>("commit_tree", { path: this.repoPath(), rev: place.commit });
+      }
+      if (this.mode === "live" && place.section === "changes" && place.path) await this.loadDiff();
+    } finally {
+      this.lastPlace = this.snapshotPlace();
+      this.navLock -= 1;
+    }
+  }
+
+
+
+  goBack() {
+    const now = Date.now();
+    if (now - this.navStamp < 150) return;
+    this.navStamp = now;
+    if (this.navBack.length === 0) return;
+    const previous = this.navBack[this.navBack.length - 1];
+    this.navForward = [this.snapshotPlace(), ...this.navForward].slice(0, 50);
+    this.navBack = this.navBack.slice(0, -1);
+    void this.restorePlace(previous);
+  }
+
+
+
+  goForward() {
+    const now = Date.now();
+    if (now - this.navStamp < 150) return;
+    this.navStamp = now;
+    if (this.navForward.length === 0) return;
+    const next = this.navForward[0];
+    this.navBack = [...this.navBack, this.snapshotPlace()].slice(-50);
+    this.navForward = this.navForward.slice(1);
+    void this.restorePlace(next);
+  }
+
+
+
+  inApp() {
+    return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  }
+
+
+
+  repoPath() {
+    return this.snapshot?.path;
+  }
+
+
+
+  startWork(label: string, path = this.repoPath() ?? "") {
+    const key = this.jobKey(path);
+    if (!key) return;
+    const current = this.jobs[key];
+    if (current && current.depth > 0) {
+      this.jobs[key] = { ...current, depth: current.depth + 1 };
+      return;
+    }
+    this.jobs[key] = { label, percent: null, depth: 1 };
+  }
+
+
+
+  stopWork(path = this.repoPath() ?? "") {
+    const key = this.jobKey(path);
+    const current = key ? this.jobs[key] : undefined;
+    if (!current) return;
+    if (current.depth <= 1) delete this.jobs[key];
+    else this.jobs[key] = { ...current, depth: current.depth - 1 };
+  }
+
+
+
+  aliasJob(from: string, to: string) {
+    const left = this.jobKey(from);
+    const right = this.jobKey(to);
+    if (!left || left === right) return;
+    const job = this.jobs[left];
+    if (!job) return;
+    if (!this.jobs[right]) this.jobs[right] = job;
+    delete this.jobs[left];
+  }
+
+
+
+  noteProgress(path: string, percent: number) {
+    const key = this.jobKey(path);
+    const current = this.jobs[key];
+    if (current) {
+      if (current.percent !== percent) this.jobs[key] = { ...current, percent };
+      return;
+    }
+    if (!this.cloneJob) return;
+    const dest = this.jobKey(this.cloneJob.destination);
+    const cloning = this.jobs[dest];
+    if (cloning && cloning.percent !== percent) this.jobs[dest] = { ...cloning, percent };
+  }
+
+
+
+  message(error: unknown) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+
+
+  /** Unchanged data keeps its old object so lists and diffs are not rendered again. */
+  same(left: unknown, right: unknown) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+
+
+  applySnapshot(value: StatusSnapshot) {
+    this.statusGen += 1;
+    if (!this.same(this.snapshot, value)) this.snapshot = value;
+    this.mode = "live";
+    if (value.path && !this.repos.includes(value.path)) this.repos = [...this.repos, value.path];
+    const sameSide = (this.selectedSide === "staged" ? value.staged : value.unstaged).some(
+      (file) => file.path === this.selectedPath,
+    );
+    if (this.selectedPath && sameSide) return;
+    const otherSide: Side = this.selectedSide === "staged" ? "unstaged" : "staged";
+    const other = otherSide === "staged" ? value.staged : value.unstaged;
+    if (this.selectedPath && other.some((file) => file.path === this.selectedPath)) {
+      this.selectedSide = otherSide;
+      return;
+    }
+    if (value.unstaged[0]) {
+      this.selectedSide = "unstaged";
+      this.selectedPath = value.unstaged[0].path;
+    } else if (value.staged[0]) {
+      this.selectedSide = "staged";
+      this.selectedPath = value.staged[0].path;
+    } else {
+      this.selectedPath = null;
+    }
+  }
+
+
+
+  async loadDiff() {
+    return loadDiff(this);
+  }
+
+
+
+  currentFilterRefs() {
+    return currentFilterRefs(this);
+  }
+
+
+
+  async loadCommits(path: string | undefined) {
+    return loadCommits(this, path);
+  }
+
+
+
+  async loadContext() {
+    return loadContext(this);
+  }
+
+
+
+  /** `status` reads the work tree and the open diff only; `full` also reloads branches and history. */
+  async refresh(scope: "status" | "full" = "full", silent = false) {
+    const path = this.repoPath();
+    if (!this.inApp() || !path || this.busy) return;
+    if (this.refreshing) {
+      if (this.refreshQueued !== "full") this.refreshQueued = scope;
+      return;
+    }
+    this.refreshing = true;
+    if (!silent) this.startWork(this.tr("chrome.refresh"), path);
+    try {
+      const gen = this.statusGen;
+      const value = await invoke<StatusSnapshot>("workspace_status", { path });
+      if (gen !== this.statusGen || !this.viewing(path)) return;
+      this.applySnapshot(value);
+      if (scope === "full") await this.loadContext();
+      if (this.viewing(path)) await this.loadDiff();
+    } catch (error) {
+      if (this.viewing(path)) this.actionError = this.message(error);
+    } finally {
+      this.refreshing = false;
+      if (!silent) this.stopWork(path);
+    }
+    const next = this.refreshQueued;
+    this.refreshQueued = null;
+    if (next && this.viewing(path)) await this.refresh(next, silent);
+  }
+
+
+
+  async withWork<T>(label: string, body: () => Promise<T>): Promise<T> {
+    const path = this.repoPath() ?? "";
+    this.startWork(label, path);
+    try {
+      return await body();
+    } finally {
+      this.stopWork(path);
+    }
+  }
+
+
+
+  async runChange(command: string, extra: Record<string, unknown> = {}) {
+    const path = this.repoPath();
+    if (this.mode !== "live" || !path || this.busy) return undefined;
+    this.actionError = null;
+    this.startWork(this.tr("chrome.working"), path);
+    try {
+      const value = await invoke<StatusSnapshot & { log?: string }>(command, { path, ...extra });
+      if (this.viewing(path)) {
+        this.applySnapshot(value);
+        await this.loadDiff();
+      }
+      return value;
+    } catch (error) {
+      if (this.viewing(path)) this.actionError = this.message(error);
+      return null;
+    } finally {
+      this.stopWork(path);
+    }
+  }
+
+
+
+  quietGit = new Set(["stageHunk", "stageLine", "discardHunk", "discardLine", "setExpanded", "setHidden", "setSignOff"]);
+
+
+
+  shellArg(value: string) {
+    return /^[A-Za-z0-9_./:@+=,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+  }
+
+
+
+  gitLine(args: string[]) {
+    return `git ${args.filter(Boolean).map(this.shellArg.bind(this)).join(" ")}`;
+  }
+
+
+
+  commandExcerpt(text: string) {
+    const line = text.split(/\r?\n/).map((item) => item.trim()).find((item) => item.length > 0) ?? "";
+    return line.length > 140 ? `${line.slice(0, 137)}…` : line;
+  }
+
+
+
+  describeRequest(request: Record<string, unknown>) {
+    const action = String(request.action ?? "");
+    const text = (key: string) => (typeof request[key] === "string" ? String(request[key]) : "");
+    const remote = text("remote");
+    const branch = this.snapshot?.branch || "HEAD";
+    switch (action) {
+      case "fetch":
+        return {
+          title: this.tr("chrome.commandFetchFrom", { name: remote || this.tr("dialog.allRemotes") }),
+          command: this.gitLine(["fetch", request.prune ? "--prune" : "", request.tags ? "--tags" : "", remote || "--all"]),
+        };
+      case "pull":
+        return { title: this.tr("chrome.pull"), command: this.gitLine(["pull", request.autostash ? "--autostash" : "", request.rebase ? "--rebase" : "--no-rebase"]) };
+      case "push":
+        return {
+          title: remote ? this.tr("chrome.commandPushTo", { branch, remote }) : this.tr("chrome.push"),
+          command: this.gitLine(["push", request.setUpstream ? "--set-upstream" : "", request.tags ? "--tags" : "", request.force ? "--force" : request.forceWithLease ? "--force-with-lease" : "", remote, request.setUpstream ? "HEAD" : ""]),
+        };
+      case "pullRef":
+        return { title: `${this.tr("chrome.pull")} ${remote}/${text("branch")}`, command: this.gitLine(["pull", request.autostash ? "--autostash" : "", request.rebase ? "--rebase" : "--no-rebase", remote, text("branch")]) };
+      case "pushRef": {
+        const target = text("remoteBranch") || text("branch");
+        return {
+          title: this.tr("chrome.commandPushTo", { branch: text("branch"), remote }),
+          command: this.gitLine(["push", request.setUpstream ? "--set-upstream" : "", request.tags ? "--tags" : "", request.force ? "--force" : request.forceWithLease ? "--force-with-lease" : "", remote, text("remoteBranch") ? `${text("branch")}:${target}` : `HEAD:${target}`]),
+        };
+      }
+      case "checkout":
+      case "checkoutRemote":
+        return { title: `${this.tr("menu.checkout")} ${text("name")}`, command: this.gitLine(["checkout", text("name")]) };
+      case "merge":
+        return { title: `${this.tr("menu.merge")} ${text("name")}`, command: this.gitLine(["merge", request.noFf ? "--no-ff" : "", text("name")]) };
+      case "stash":
+        return { title: this.tr("chrome.stash"), command: this.gitLine(["stash", "push", text("message") ? "-m" : "", text("message")]) };
+      case "stashPop":
+        return { title: this.tr("chrome.pop"), command: this.gitLine(["stash", "pop", text("name")]) };
+      case "clone":
+        return { title: `${this.tr("chrome.clone")} ${text("url")}`, command: this.gitLine(["clone", text("url"), text("destination")]) };
+      case "init":
+        return { title: this.tr("chrome.newRepo"), command: this.gitLine(["init", text("destination")]) };
+      case "custom":
+        return { title: text("command").split("\n")[0] || this.tr("chrome.activity"), command: text("command") };
+      case "submoduleUpdate":
+        return { title: this.tr("chrome.submodules"), command: this.gitLine(["submodule", "update", "--init", "--recursive"]) };
+      default:
+        return { title: action || this.tr("chrome.activity"), command: this.gitLine([action, text("name"), text("rev")]) };
+    }
+  }
+
+
+
+  recordCommand(action: string, described: { title: string; command: string }, output: string, ok: boolean, source: "user" | "background") {
+    if (this.quietGit.has(action)) return;
+    const text = output.trim();
+    const item: CommandEntry = {
+      id: ++this.commandSeq,
+      title: described.title,
+      command: described.command,
+      output: text,
+      summary: this.commandExcerpt(text) || (ok ? this.tr("chrome.commandSucceeded") : this.tr("chrome.commandFailed")),
+      ok,
+      at: Date.now(),
+      source,
+    };
+    this.commandLog = [item, ...this.commandLog].slice(0, 80);
+    if (!this.commandLogOpen) this.commandPick = item.id;
+  }
+
+
+
+  visibleCommands() {
+    return this.commandFilter === "all" ? this.commandLog : this.commandLog.filter((item) => item.source === this.commandFilter);
+  }
+
+
+
+  commandClock(at: number) {
+    return new Date(at).toLocaleTimeString(this.activeLocale === "zh" ? "zh-CN" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+
+
+
+  commandStamp(at: number) {
+    return new Date(at).toLocaleString(this.activeLocale === "zh" ? "zh-CN" : "en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  }
+
+
+
+  seedSampleCommands() {
+    if (this.inApp() || this.commandLog.length > 0) return;
+    const now = Date.now();
+    const samples: Array<Omit<CommandEntry, "id">> = [
+      { title: this.tr("chrome.commandFetchFrom", { name: "origin" }), summary: "Already up to date", command: "git fetch --prune origin", output: "Already up to date", ok: true, at: now - 4 * 60 * 1000, source: "user" },
+      { title: this.tr("chrome.commandPushTo", { branch: "rewrite/tauri", remote: "origin" }), summary: "Updated 'origin/rewrite/tauri'", command: "git push --force-with-lease origin", output: "To github.com:example/awegit.git\n   abc1234..def5678  rewrite/tauri -> rewrite/tauri", ok: true, at: now - 12 * 60 * 1000, source: "user" },
+      { title: this.tr("chrome.commandFetchFrom", { name: "origin" }), summary: "Already up to date", command: "git fetch --prune origin", output: "Already up to date", ok: true, at: now - 40 * 60 * 1000, source: "background" },
+    ];
+    this.commandLog = samples.map((item) => ({ ...item, id: ++this.commandSeq }));
+    this.commandPick = this.commandLog[0]?.id ?? 0;
+  }
+
+
+
+  placeCommandLog() {
+    return placeCommandLog(this);
+  }
+
+
+
+  branchItems(): MenuItem[] {
+    return branchItems(this);
+  }
+
+
+
+  openCommandLog() {
+    return openCommandLog(this);
+  }
+
+
+
+  showCommandFilter(next: "all" | "user" | "background") {
+    return showCommandFilter(this, next);
+  }
+
+
+
+  async mutate(request: Record<string, unknown>, source: "user" | "background" = "user") {
+    const path = this.repoPath();
+    if (!this.inApp() || !path || this.busy) return;
+    this.actionError = null;
+    const described = this.describeRequest(request);
+    const action = String(request.action ?? "");
+    const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
+    this.startWork(described.title, path);
+    try {
+      const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request });
+      const output = value.output ?? "";
+      if (this.viewing(path)) {
+        this.applySnapshot(value);
+        await this.loadContext();
+        await this.loadDiff();
+      }
+      if (followSubmodules) {
+        const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request: { action: "submoduleUpdate" } });
+        if (this.viewing(path)) {
+          this.applySnapshot(follow);
+          await this.loadContext();
+        }
+        this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
+      }
+      this.noteActivity(`${action}${output ? " output" : " ok"}`);
+      this.recordCommand(action, described, value.log || output, true, source);
+      if (this.viewing(path)) {
+        if (output) {
+          this.commandOutput = output;
+          this.dialog = "output";
+        } else {
+          this.dialog = null;
+        }
+      }
+    } catch (error) {
+      const text = this.message(error);
+      this.noteActivity(`${String(request.action ?? "")} failed`);
+      this.recordCommand(String(request.action ?? ""), described, text, false, source);
+      if (this.viewing(path)) {
+        this.actionError = text;
+        if (String(request.action ?? "") === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
+        try {
+          this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
+          await this.loadContext();
+        } catch {
+          /* keep the action error */
+        }
+      }
+    } finally {
+      this.stopWork(path);
+    }
+  }
+
+
+
+  closeError() {
+    this.actionError = null;
+    this.errorCopied = false;
+  }
+
+
+
+  copyError() {
+    if (!this.actionError) return;
+    this.copyText(this.actionError);
+    this.errorCopied = true;
+    window.setTimeout(() => (this.errorCopied = false), 1500);
+  }
+
+
+
+  doFetch(source: "user" | "background" = "user") {
+    const remote = this.refs?.remotes[0]?.name;
+    return this.mutate({ action: "fetch", remote: remote ?? null, prune: this.settings.fetchPrune, tags: this.settings.fetchTags }, source);
+  }
+
+
+
+  doPull() {
+    return this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: this.settings.mergeAutostash });
+  }
+
+
+
+  doPush() {
+    const current = this.refs?.branches.find((branch) => branch.current);
+    const remote = this.refs?.remotes[0]?.name ?? null;
+    return this.mutate({
+      action: "push",
+      remote,
+      setUpstream: !current?.upstream,
+      tags: false,
+      forceWithLease: this.settings.forceWithLease,
+    });
+  }
+
+
+
+  /** `full` adds the ignored files, statistics, and LFS list, which take seconds in a large work tree. */
+  async loadFacts(force = false, full = false) {
+    if (!this.inApp() || this.mode !== "live") return null;
+    const path = this.repoPath() ?? "";
+    if (!force && this.facts && this.factsPath === path) return this.facts;
+    try {
+      const value = await invoke<RepoFacts>("repo_facts", { path: this.repoPath(), full });
+      const kept = !full && this.facts && this.factsPath === path ? { ignored: this.facts.ignored, weekday: this.facts.weekday, hour: this.facts.hour, lfs: this.facts.lfs, hot: this.facts.hot } : {};
+      this.facts = { ...value, ...kept };
+      this.factsPath = path;
+      return this.facts;
+    } catch (error) {
+      this.actionError = this.message(error);
+      return null;
+    }
+  }
+
+
+
+  async fillFromMessage(text: string) {
+    return fillFromMessage(this, text);
+  }
+
+
+
+  async fillTemplate() {
+    return fillTemplate(this);
+  }
+
+
+
+  splitConflicts(working: string): MergePiece[] {
+    return splitConflicts(this, working);
+  }
+
+
+
+  joinedPieces(pieces: MergePiece[]) {
+    return joinedPieces(this, pieces);
+  }
+
+
+
+  pickHunk(index: number, pick: "ours" | "theirs" | "both") {
+    return pickHunk(this, index, pick);
+  }
+
+
+
+  bisectMark(id: string) {
+    return bisectMark(this, id);
+  }
+
+
+
+  pullRequestUrl(branch: string) {
+    return pullRequestUrl(this, branch);
+  }
+
+
+
+  commitWeb(id: string) {
+    return commitWeb(this, id);
+  }
+
+
+
+  requestCheckout(name: string) {
+    return requestCheckout(this, name);
+  }
+
+
+
+  /** Double-click checkout: stash local work first, switch, then tell the user. */
+  async quickCheckout(name: string, remote?: { remote: string; branch: string }) {
+    return quickCheckout(this, name, remote);
+  }
+
+
+
+  reopenClosed() {
+    return reopenClosed(this);
+  }
+
+
+
+  async previewCherry(rev: string, record: boolean) {
+    return previewCherry(this, rev, record);
+  }
+
+
+
+  async pastePatch() {
+    return pastePatch(this);
+  }
+
+
+
+  toggleFold(id: string) {
+    return toggleFold(this, id);
+  }
+
+
+
+  tabText(path: string) {
+    return tabText(this, path);
+  }
+
+
+
+  tabColor(path: string) {
+    return tabColor(this, path);
+  }
+
+
+
+  pairSetting(list: string[], path: string, value: string) {
+    return pairSetting(this, list, path, value);
+  }
+
+
+
+  setLayout(next: "list" | "tree" | "combined") {
+    return setLayout(this, next);
+  }
+
+
+
+  async toggleFakeIgnore() {
+    return toggleFakeIgnore(this);
+  }
+
+
+
+  fileViewMenu(): MenuItem[] {
+    return fileViewMenu(this);
+  }
+
+
+
+  openFileView(event: MouseEvent) {
+    return openFileView(this, event);
+  }
+
+
+
+  async searchContent(kind: string, needle: string) {
+    return searchContent(this, kind, needle);
+  }
+
+
+
+  togglePin(name: string) {
+    const key = `${this.snapshot?.path ?? ""}\t${name}`;
+    const pinnedRefs = this.settings.pinnedRefs.includes(key) ? this.settings.pinnedRefs.filter((item) => item !== key) : [...this.settings.pinnedRefs, key];
+    this.settings = { ...this.settings, pinnedRefs };
+    void this.savePrefs(false);
+  }
+
+
+
+  moveHunk(delta: number) {
+    return moveHunk(this, delta);
+  }
+
+
+
+  copyPatch(indexes?: number[]) {
+    return copyPatch(this, indexes);
+  }
+
+
+
+  groupLabel(folder: string) {
+    return groupLabel(this, folder);
+  }
+
+
+
+  confirmSync(kind: "fetch" | "pull" | "push") {
+    return confirmSync(this, kind);
+  }
+
+
+
+  /** The remote branch a pull should default to after the remote changes. */
+  pullBranchFor(remoteName: string) {
+    const remote = this.refs?.remotes.find((item) => item.name === remoteName);
+    const branches = remote?.branches ?? [];
+    const upstream = this.refs?.branches.find((branch) => branch.current)?.upstream ?? "";
+    const fromUpstream = upstream.startsWith(`${remoteName}/`) ? upstream.slice(remoteName.length + 1) : "";
+    const same = this.snapshot?.branch ?? "";
+    return [fromUpstream, same].find((name) => name && branches.includes(name)) ?? branches[0] ?? same;
+  }
+
+
+
+  splitRemoteRef(ref: string) {
+    const remote = this.refs?.remotes.find((item) => ref.startsWith(`${item.name}/`));
+    return remote ? { remote: remote.name, branch: ref.slice(remote.name.length + 1) } : null;
+  }
+
+
+
+  /** Where a push goes: the picked remote branch, the upstream, or a new branch on the first remote. */
+  pushTarget(local: string, to: string) {
+    if (to) {
+      const picked = this.splitRemoteRef(to);
+      return picked ? { ...picked, setUpstream: false } : null;
+    }
+    const upstream = this.refs?.branches.find((branch) => branch.name === local)?.upstream ?? "";
+    const known = upstream ? this.splitRemoteRef(upstream) : null;
+    if (known) return { ...known, setUpstream: false };
+    const first = this.refs?.remotes[0]?.name;
+    return first ? { remote: first, branch: local, setUpstream: true } : null;
+  }
+
+
+
+  pushTargetLabel(local: string) {
+    const target = this.pushTarget(local, "");
+    return target ? `${target.remote}/${target.branch}` : "—";
+  }
+
+
+
+  matchesQuery(value: string, query: string) {
+    const needle = query.trim().toLowerCase();
+    return !needle || value.toLowerCase().includes(needle);
+  }
+
+
+
+  searchQuery(key: SearchKey) {
+    return { recent: this.recentQuery, side: this.sideQuery, commit: this.commitQuery, file: this.fileQuery }[key];
+  }
+
+
+
+  closeSearch(key: SearchKey) {
+    this.searchOpen[key] = false;
+    if (key === "recent") this.recentQuery = "";
+    else if (key === "side") this.sideQuery = "";
+    else if (key === "commit") this.commitQuery = "";
+    else this.fileQuery = "";
+  }
+
+
+
+  toggleSearch(key: SearchKey) {
+    if (this.searchOpen[key]) this.closeSearch(key);
+    else this.searchOpen[key] = true;
+  }
+
+
+
+  searchKeys(key: SearchKey, event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    event.stopPropagation();
+    this.closeSearch(key);
+  }
+
+
+
+  searchBlur(key: SearchKey) {
+    if (!this.searchQuery(key).trim()) this.searchOpen[key] = false;
+  }
+
+
+
+  focusOnMount(node: HTMLInputElement) {
+    node.focus();
+  }
+
+
+
+  focusWhen(node: HTMLInputElement, on: boolean) {
+    if (on) node.focus();
+  }
+
+
+
+  fitMenu(node: HTMLElement, spot: { x: number; y: number; anchorTop?: number }) {
+    const place = (next: { x: number; y: number; anchorTop?: number }) => {
+      const margin = 8;
+      const { width, height } = node.getBoundingClientRect();
+      let left = next.x;
+      let top = next.y;
+      if (left + width > window.innerWidth - margin) left = window.innerWidth - width - margin;
+      if (top + height > window.innerHeight - margin) {
+        top = next.anchorTop !== undefined && next.anchorTop - height - 2 >= margin ? next.anchorTop - height - 2 : window.innerHeight - height - margin;
+      }
+      node.style.left = `${Math.max(margin, left)}px`;
+      node.style.top = `${Math.max(margin, top)}px`;
+    };
+    place(spot);
+    return { update: place };
+  }
+
+
+
+  openMenu(event: MouseEvent, items: MenuItem[]) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.submenu = null;
+    this.menu = { x: Math.min(event.clientX, window.innerWidth - 240), y: Math.min(event.clientY, window.innerHeight - 40), items };
+  }
+
+
+
+  ask(title: string, body: string, run: () => void) {
+    return ask(this, title, body, run);
+  }
+
+
+
+  liveOnly(run: () => void) {
+    return liveOnly(this, run);
+  }
+
+
+
+  refKind(label: string) {
+    return refKind(this, label);
+  }
+
+
+
+  branchRefLabels(labels: string[]) {
+    return branchRefLabels(this, labels);
+  }
+
+
+
+  plainRefLabels(labels: string[]) {
+    return plainRefLabels(this, labels);
+  }
+
+
+
+  /** Color of the commit dot, so a branch chip matches the line it sits on. */
+  laneTone(row: GraphCell[] | undefined) {
+    return laneTone(this, row);
+  }
+
+
+
+  isCommitUnpushed(commit: { unpushed?: boolean; refs?: string[]; badges?: string[]; id?: string }) {
+    return isCommitUnpushed(this, commit);
+  }
+
+
+
+  async showReflog() {
+    return showReflog(this);
+  }
+
+
+
+  async openTreeFile(file: string) {
+    return openTreeFile(this, file);
+  }
+
+
+
+  async openForge(kind: "notes" | "pulls") {
+    return openForge(this, kind);
+  }
+
+
+
+  fitImage(event: Event) {
+    return fitImage(this, event);
+  }
+
+
+
+  async paintPixel(left: string, right: string) {
+    return paintPixel(this, left, right);
+  }
+
+
+
+  fileMenu(file: Row, side: Side): MenuItem[] {
+    return fileMenu(this, file, side);
+  }
+
+
+
+  commitMenu(commit: { id: string; summary: string }): MenuItem[] {
+    return commitMenu(this, commit);
+  }
+
+
+
+  reflogMenu(row: { id: string; selector: string }): MenuItem[] {
+    return reflogMenu(this, row);
+  }
+
+
+
+  setRebaseVerb(rev: string, verb: string) {
+    return setRebaseVerb(this, rev, verb);
+  }
+
+
+
+  rememberRepo(path: string) {
+    const recent = [path, ...this.settings.recent.filter((item) => item !== path)].slice(0, 12);
+    const currentId = this.settings.currentWorkspace;
+    const workspaces = this.settings.workspaces.map((workspace) => {
+      if (!currentId || workspace.id !== currentId) return workspace;
+      const openTabs = workspace.openTabs.includes(path) ? workspace.openTabs : [...workspace.openTabs, path];
+      return {
+        ...workspace,
+        repositories: workspace.repositories.includes(path) ? workspace.repositories : [...workspace.repositories, path],
+        openTabs,
+        selectedTab: Math.max(0, openTabs.indexOf(path)),
+      };
+    });
+    this.settings = { ...this.settings, recent, workspaces };
+    void invoke("save_settings", { values: this.settings });
+  }
+
+
+
+  quick(event: MouseEvent, dialogName: Dialog, run: () => void) {
+    return quick(this, event, dialogName, run);
+  }
+
+
+
+  async submitCommit(pushAfter = false) {
+    return submitCommit(this, pushAfter);
+  }
+
+
+
+  async suggestMessage() {
+    return suggestMessage(this);
+  }
+
+
+
+  async compareDrops() {
+    return compareDrops(this);
+  }
+
+
+
+  async selectCommit(id: string, event?: MouseEvent) {
+    return selectCommit(this, id, event);
+  }
+
+
+
+  async pickCommitFile(file: string) {
+    return pickCommitFile(this, file);
+  }
+
+
+
+  async ensurePatch(file: string) {
+    return ensurePatch(this, file);
+  }
+
+
+
+  togglePatch(path: string) {
+    return togglePatch(this, path);
+  }
+
+
+
+  async toggleAllPatches() {
+    return toggleAllPatches(this);
+  }
+
+
+
+  revealSelectedRow() {
+    void tick().then(() => document.querySelector<HTMLElement>(".detail-tree .tree-row.selected")?.scrollIntoView({ block: "nearest" }));
+  }
+
+
+
+  selectChangeFile(path: string) {
+    return selectChangeFile(this, path);
+  }
+
+
+
+  selectTreeFile(path: string) {
+    return selectTreeFile(this, path);
+  }
+
+
+
+  toggleRepoDir(path: string) {
+    this.treeCollapsed = this.treeCollapsed.includes(path) ? this.treeCollapsed.filter((item) => item !== path) : [...this.treeCollapsed, path];
+  }
+
+
+
+  async showFileHistory(file: string) {
+    return showFileHistory(this, file);
+  }
+
+
+
+  async showBlame(file: string) {
+    return showBlame(this, file);
+  }
+
+
+
+  async openRepo(path: string) {
+    if (!this.inApp() || !path.trim()) return;
+    const gen = ++this.openGen;
+    this.focusPath = path;
+    if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description });
+    const running = (this.jobs[this.jobKey(path)]?.depth ?? 0) > 0;
+    let stopAt = path;
+    this.actionError = null;
+    if (!running) this.startWork(this.tr("chrome.open"), path);
+    try {
+      const value = await invoke<StatusSnapshot>("workspace_status", { path });
+      if (gen !== this.openGen) return;
+      this.aliasJob(path, value.path);
+      stopAt = value.path;
+      this.applySnapshot(value);
+      const saved = this.drafts.get(path) ?? this.drafts.get(value.path);
+      this.summary = saved?.summary ?? "";
+      this.description = saved?.description ?? "";
+      this.historyFilter = "";
+      await this.loadContext();
+      if (gen !== this.openGen) return;
+      await this.loadDiff();
+      if (gen !== this.openGen) return;
+      await invoke("watch_repository", { path: this.repoPath() });
+      void invoke<{ available: boolean }>("lfs_locks", { path: this.repoPath(), list: false })
+        .then((locks) => {
+          if (gen === this.openGen) this.lfsAvailable = locks.available;
+        })
+        .catch(() => {
+          if (gen === this.openGen) this.lfsAvailable = false;
+        });
+      this.rememberRepo(path);
+      this.dialog = null;
+      this.facts = null;
+      this.factsPath = "";
+      void this.fillTemplate();
+    } catch (error) {
+      if (gen === this.openGen) this.actionError = this.message(error);
+    } finally {
+      if (!running) this.stopWork(stopAt);
+      if (gen === this.openGen) this.focusPath = null;
+    }
+    if (gen === this.openGen && this.settings.fetchAutomatically && this.viewing(path) && !this.busy) void this.doFetch("background");
+  }
+
+
+
+  composeTool(path: string, args: string) {
+    return composeTool(this, path, args);
+  }
+
+
+
+  applyToolSettings() {
+    return applyToolSettings(this);
+  }
+
+
+
+  async savePrefs(close = true) {
+    return savePrefs(this, close);
+  }
+
+
+
+  async browseFolder(initial = "") {
+    return browseFolder(this, initial);
+  }
+
+
+
+  withSourceRoots(value: Settings): Settings {
+    return withSourceRoots(this, value);
+  }
+
+
+
+  sourceRootList() {
+    return sourceRootList(this);
+  }
+
+
+
+  addSourceRoot(path: string) {
+    return addSourceRoot(this, path);
+  }
+
+
+
+  removeSourceRoot(path: string) {
+    return removeSourceRoot(this, path);
+  }
+
+
+
+  setSourceAlias(path: string, alias: string) {
+    return setSourceAlias(this, path, alias);
+  }
+
+
+
+  beginOpen() {
+    return beginOpen(this);
+  }
+
+
+
+  async readClipboardText() {
+    return readClipboardText(this);
+  }
+
+
+
+  async beginClone(intent: "clone" | "init" = "clone") {
+    return beginClone(this, intent);
+  }
+
+
+
+  onCloneUrl(value: string) {
+    return onCloneUrl(this, value);
+  }
+
+
+
+  onCloneFolder(value: string) {
+    return onCloneFolder(this, value);
+  }
+
+
+
+  rememberCloneRoot() {
+    return rememberCloneRoot(this);
+  }
+
+
+
+  pathsMatch(left: string, right: string) {
+    return pathsMatch(this, left, right);
+  }
+
+
+
+  async finishCloneOpen(destination: string) {
+    return finishCloneOpen(this, destination);
+  }
+
+
+
+  cancelClone() {
+    return cancelClone(this);
+  }
+
+
+
+  async browseCloneRoot() {
+    return browseCloneRoot(this);
+  }
+
+
+
+  async startClone() {
+    return startClone(this);
+  }
+
+
+
+  async startInit() {
+    return startInit(this);
+  }
+
+
+
+  async openSourceRoot(path: string) {
+    return openSourceRoot(this, path);
+  }
+
+
+
+  async browseSourceRoot() {
+    return browseSourceRoot(this);
+  }
+
+
+
+  async openLocal(path: string) {
+    return openLocal(this, path);
+  }
+
+
+
+  branchName(name: string) {
+    const space = this.settings.branchSpace ?? "-";
+    const trimmed = name.trim();
+    return space ? trimmed.replaceAll(" ", space) : trimmed;
+  }
+
+
+
+  groupOpen(name: string) {
+    const group = branchGroup(name);
+    const saved = this.refs?.expandedGroups ?? [];
+    if (!group || saved.length === 0) return true;
+    return saved.includes(group);
+  }
+
+
+
+  toggleGroup(group: string) {
+    const groups = [...new Set(this.visibleBranches.map((branch) => branchGroup(branch.name)).filter(Boolean))];
+    const saved = this.refs?.expandedGroups ?? [];
+    const current = saved.length === 0 ? groups : [...saved];
+    const next = current.includes(group) ? current.filter((item) => item !== group) : [...current, group];
+    const names = next.length === groups.length ? [] : next;
+    void this.mutate({ action: "setExpanded", names });
+  }
+
+
+
+  sideOpen(key: string) {
+    return this.sideQuery.trim() !== "" || !this.collapsedSide.includes(key);
+  }
+
+
+
+  toggleSide(key: string) {
+    this.collapsedSide = this.collapsedSide.includes(key) ? this.collapsedSide.filter((item) => item !== key) : [...this.collapsedSide, key];
+  }
+
+
+
+  pickSide(key: string) {
+    this.sideSelected = key;
+    this.toggleSide(key);
+  }
+
+
+
+  refHidden(name: string) {
+    return (this.refs?.hiddenRefs ?? []).some((token) => name === token || (token.endsWith("/") && name.startsWith(token)));
+  }
+
+
+
+  hideRef(name: string) {
+    const names = [...(this.refs?.hiddenRefs ?? [])];
+    if (!names.includes(name)) names.push(name);
+    void this.mutate({ action: "setHidden", names });
+  }
+
+
+
+  showOnly(name: string) {
+    const names = (this.refs?.branches ?? []).map((branch) => branch.name).filter((item) => item !== name);
+    void this.mutate({ action: "setHidden", names });
+  }
+
+
+
+  showAllRefs() {
+    void this.mutate({ action: "setHidden", names: [] });
+  }
+
+
+
+  flatEntries(files: Row[]): TreeEntry[] {
+    return flatEntries(this, files);
+  }
+
+
+
+  asTree(files: Row[], collapsed = this.collapsedDirs): TreeEntry[] {
+    return asTree(this, files, collapsed);
+  }
+
+
+
+  toggleDir(path: string) {
+    return toggleDir(this, path);
+  }
+
+
+
+  toggleCommitDir(path: string) {
+    return toggleCommitDir(this, path);
+  }
+
+
+
+  paint(text: string, path: string) {
+    return paint(this, text, path);
+  }
+
+
+
+  forkWhen(at: number) {
+    return forkWhen(this, at);
+  }
+
+
+
+  forkWhenFull(at: number) {
+    return forkWhenFull(this, at);
+  }
+
+
+
+  sampleBlob(path: string) {
+    return sampleBlob(this, path);
+  }
+
+
+
+  commitSubject() {
+    return commitSubject(this);
+  }
+
+
+
+  commitAuthorName() {
+    return commitAuthorName(this);
+  }
+
+
+
+  commitWhenShort() {
+    return commitWhenShort(this);
+  }
+
+
+
+  commitRefs() {
+    return commitRefs(this);
+  }
+
+
+
+  differentCommitter(detail: CommitDetail | null) {
+    return differentCommitter(this, detail);
+  }
+
+
+
+  fileKind(path: string): "image" | "json" | "markup" | "text" | "code" | "file" {
+    return fileKind(this, path);
+  }
+
+
+
+  expandParents(path: string, collapsed: string[]) {
+    return expandParents(this, path, collapsed);
+  }
+
+
+
+  collapseTreeExcept(paths: string[], focus: string | null) {
+    return collapseTreeExcept(this, paths, focus);
+  }
+
+
+
+  markedLine(text: string, other: string, path: string) {
+    return markedLine(this, text, other, path);
+  }
+
+
+
+  patchOf(file: string) {
+    return patchOf(this, file);
+  }
+
+
+
+  resetCommitView() {
+    return resetCommitView(this);
+  }
+
+
+
+  avatarColor(name: string) {
+    return avatarColor(this, name);
+  }
+
+
+
+  issueHref(token: string) {
+    return issueHref(this, token);
+  }
+
+
+
+  linkParts(text: string) {
+    return linkParts(this, text);
+  }
+
+
+
+  openBar(event: MouseEvent, items: MenuItem[]) {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    this.submenu = null;
+    this.menu = { x: rect.left, y: rect.bottom + 2, items, anchorTop: rect.top };
+  }
+
+
+
+  viewItems(): MenuItem[] {
+    return viewItems(this);
+  }
+
+
+
+  stashItems(): MenuItem[] {
+    return stashItems(this);
+  }
+
+
+
+  appearanceItems(): MenuItem[] {
+    return appearanceItems(this);
+  }
+
+
+
+  repositoryItems(): MenuItem[] {
+    return repositoryItems(this);
+  }
+
+
+
+  windowItems(): MenuItem[] {
+    return windowItems(this);
+  }
+
+
+
+  helpItems(): MenuItem[] {
+    return helpItems(this);
+  }
+
+
+
+  commitExtras(): MenuItem[] {
+    return commitExtras(this);
+  }
+
+
+
+  toolPresets = [
+    { name: "Araxis Merge", mergeArgs: "-wait -merge -3 -a1 {ours} {theirs} {working} {file}", diffArgs: "{left} {right}" },
+    { name: "Beyond Compare", mergeArgs: "{ours} {theirs} {working} {file}", diffArgs: "{left} {right}" },
+    { name: "CodeBuddy", mergeArgs: "{ours} {theirs} {working} {file}", diffArgs: "{left} {right}" },
+    { name: "Cursor", mergeArgs: "{working}", diffArgs: "{right}" },
+  ];
+
+
+
+  useMergePreset(name: string) {
+    return useMergePreset(this, name);
+  }
+
+
+
+  useDiffPreset(name: string) {
+    return useDiffPreset(this, name);
+  }
+
+
+
+  async openHistoryTab(tab: "commit" | "changes" | "tree") {
+    return openHistoryTab(this, tab);
+  }
+
+
+
+  selectSample(id: string) {
+    return selectSample(this, id);
+  }
+
+
+
+  pickedIn(rows: Row[]) {
+    return pickedIn(this, rows);
+  }
+
+
+
+  async discardPicked(files = [...this.picked]) {
+    return discardPicked(this, files);
+  }
+
+
+
+  async unstagePicked(files = [...this.picked]) {
+    return unstagePicked(this, files);
+  }
+
+
+
+  async stagePicked(files = [...this.picked]) {
+    return stagePicked(this, files);
+  }
+
+
+
+  stageChosen(side: Side, files: string[]) {
+    return stageChosen(this, side, files);
+  }
+
+
+
+  async deletePicked(files = [...this.picked]) {
+    return deletePicked(this, files);
+  }
+
+
+
+  confirmPicked(files: string[], title: string, run: (files: string[]) => Promise<void>) {
+    return confirmPicked(this, files, title, run);
+  }
+
+
+
+  discardChosen(files: string[]) {
+    return discardChosen(this, files);
+  }
+
+
+
+  deleteChosen(files: string[]) {
+    return deleteChosen(this, files);
+  }
+
+
+
+  openStash(files: string[]) {
+    return openStash(this, files);
+  }
+
+
+
+  ignoreTargets(path: string, side: Side) {
+    return ignoreTargets(this, path, side);
+  }
+
+
+
+  async addIgnore(paths: string[], fake: boolean, directory: boolean) {
+    return addIgnore(this, paths, fake, directory);
+  }
+
+
+
+  dirMenu(dir: string, side: Side): MenuItem[] {
+    return dirMenu(this, dir, side);
+  }
+
+
+
+  filesInDir(dir: string, side: Side) {
+    return filesInDir(this, dir, side);
+  }
+
+
+
+  stageFolder(dir: string, unstage: boolean) {
+    return stageFolder(this, dir, unstage);
+  }
+
+
+
+  noteActivity(text: string) {
+    const at = new Date().toLocaleTimeString();
+    this.sessionLog = [`${at} ${text}`, ...this.sessionLog].slice(0, 100);
+  }
+
+
+
+  fillCommand(template: string, answers: Record<string, string>) {
+    return fillCommand(this, template, answers);
+  }
+
+
+
+  sendCommand(command: string) {
+    return sendCommand(this, command);
+  }
+
+
+
+  runCommand(command: Pick<CommandRecord, "command" | "prompt">) {
+    return runCommand(this, command);
+  }
+
+
+
+  saveCommand() {
+    return saveCommand(this);
+  }
+
+
+
+  removeCommand(id: string) {
+    return removeCommand(this, id);
+  }
+
+
+
+  commandItems(target: string): MenuItem[] {
+    return commandItems(this, target);
+  }
+
+
+
+  saveAccount() {
+    return saveAccount(this);
+  }
+
+
+
+  copyText(text: string) {
+    return copyText(this, text);
+  }
+
+
+
+  clearTextSelection() {
+    return clearTextSelection(this);
+  }
+
+
+
+  rememberPointer(event: MouseEvent) {
+    return rememberPointer(this, event);
+  }
+
+
+
+  diffSide(root: HTMLElement): "left" | "right" | "all" {
+    return diffSide(this, root);
+  }
+
+
+
+  blockText(root: HTMLElement, side: "left" | "right" | "all") {
+    return blockText(this, root, side);
+  }
+
+
+
+  activeTextRoot() {
+    return activeTextRoot(this);
+  }
+
+
+
+  fileTargetRows() {
+    return fileTargetRows(this);
+  }
+
+
+
+  selectAllFiles() {
+    return selectAllFiles(this);
+  }
+
+
+
+  collapseFileSelection(rows: Row[]) {
+    return collapseFileSelection(this, rows);
+  }
+
+
+
+  toggleAllDiffLines() {
+    return toggleAllDiffLines(this);
+  }
+
+
+
+  selectAllHere() {
+    return selectAllHere(this);
+  }
+
+
+
+  pathsForCopy() {
+    return pathsForCopy(this);
+  }
+
+
+
+  fullPath(file: string) {
+    return fullPath(this, file);
+  }
+
+
+
+  async openResolve(file: string) {
+    return openResolve(this, file);
+  }
+
+
+
+  openRebase() {
+    return openRebase(this);
+  }
+
+
+
+  moveStep(index: number, delta: number) {
+    return moveStep(this, index, delta);
+  }
+
+
+
+  selectFile(path: string, side: Side, event?: MouseEvent) {
+    return selectFile(this, path, side, event);
+  }
+
+
+
+  removeBranch(name: string) {
+    return removeBranch(this, name);
+  }
+
+
+
+  hardReset() {
+    return hardReset(this);
+  }
+
+
+
+  toRow(file: StatusFile): Row {
+    return toRow(this, file);
+  }
+
+
+
+  fileName(path: string) {
+    return fileName(this, path);
+  }
+
+
+
+  parentDir(path: string) {
+    return parentDir(this, path);
+  }
+
+
+
+  folderName(path: string) {
+    return folderName(this, path);
+  }
+
+
+
+  sampleRecent = [
+    "D:\\work\\MyTest",
+    "D:\\work\\VPNCloudRelay",
+    "D:\\personal\\TinyCar",
+    "D:\\personal\\LearnAgent",
+    "D:\\personal\\AabInstallHelp",
+  ];
+
+
+  sampleCatalog = [
+    ...this.sampleRecent,
+    "D:\\work\\ExcelMergeDiffTools_B\\left",
+    "D:\\work\\ExcelMergeDiffTools_B\\right",
+    "D:\\work\\H_FrameWork\\core",
+    "D:\\work\\H_FrameWork\\ui",
+    "D:\\work\\TinyCar\\app",
+    "D:\\work\\TinyCar\\firmware",
+    "D:\\work\\.cursor",
+    "D:\\work\\AgentRelay",
+    "D:\\work\\AITools",
+    "D:\\work\\Ant_Miner",
+    "D:\\work\\Async",
+    "D:\\work\\AutoBuildUnity",
+    "D:\\work\\AutoBuildUnity_Build",
+    "D:\\work\\Log",
+    "D:\\work\\CAO",
+    "D:\\work\\CodeAnalyzer",
+    "D:\\personal\\CursorHelper",
+  ];
+
+
+
+  normalPath(path: string) {
+    return normalPath(this, path);
+  }
+
+
+
+  dedupeRepos(paths: string[]) {
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    for (const path of paths) {
+      const key = this.normalPath(path);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      unique.push(path);
+    }
+    return unique;
+  }
+
+
+
+  previewRepos() {
+    return !this.inApp() && this.settings.recent.length === 0 && this.repos.length === 0;
+  }
+
+
+
+  recentPaths() {
+    if (this.settings.recent.length > 0) return this.settings.recent;
+    return this.previewRepos() ? this.sampleRecent : [];
+  }
+
+
+
+  catalogPaths() {
+    return this.dedupeRepos([
+      ...this.settings.recent,
+      ...this.repos,
+      ...this.settings.workspaces.flatMap((workspace) => [...workspace.repositories, ...workspace.openTabs]),
+      ...this.scannedRepos,
+      ...(this.previewRepos() ? this.sampleCatalog : []),
+    ]);
+  }
+
+
+
+  sourceOf(path: string) {
+    const target = this.normalPath(path);
+    let best = "";
+    for (const root of this.sourceRootList()) {
+      const base = this.normalPath(root.path);
+      if (!base) continue;
+      if (target === base || target.startsWith(`${base}/`)) {
+        if (base.length > this.normalPath(best).length) best = root.path;
+      }
+    }
+    return best;
+  }
+
+
+
+  relativeParts(root: string, path: string) {
+    const base = root.replace(/[\\/]+$/, "").replaceAll("\\", "/");
+    const target = path.replace(/[\\/]+$/, "").replaceAll("\\", "/");
+    if (target.toLowerCase() === base.toLowerCase()) return [];
+    if (!target.toLowerCase().startsWith(`${base.toLowerCase()}/`)) return [];
+    return target.slice(base.length + 1).split("/").filter(Boolean);
+  }
+
+
+
+  repositoryEntries(): RepoEntry[] {
+    const folders = new Map<string, { name: string; repos: string[] }>();
+    const loose: string[] = [];
+    const outside = new Map<string, string[]>();
+    for (const path of this.catalogPaths()) {
+      const root = this.sourceOf(path);
+      const parts = root ? this.relativeParts(root, path) : [];
+      if (root && parts.length > 1) {
+        const sep = root.includes("\\") ? "\\" : "/";
+        const folderPath = `${root.replace(/[\\/]+$/, "")}${sep}${parts[0]}`;
+        const key = this.normalPath(folderPath);
+        const group = folders.get(key) ?? { name: parts[0], repos: [] };
+        group.repos.push(path);
+        folders.set(key, group);
+        continue;
+      }
+      if (root) {
+        loose.push(path);
+        continue;
+      }
+      const parent = this.parentDir(path);
+      const key = this.normalPath(parent);
+      const list = outside.get(key) ?? [];
+      list.push(path);
+      outside.set(key, list);
+    }
+    for (const [key, items] of outside) {
+      if (key && items.length > 1) folders.set(key, { name: this.folderName(this.parentDir(items[0] ?? "")), repos: items });
+      else loose.push(...items);
+    }
+    const byName = (left: string, right: string) => this.folderName(left).localeCompare(this.folderName(right), undefined, { sensitivity: "base" });
+    const entries: RepoEntry[] = [...folders.entries()]
+      .map(([path, group]) => ({ kind: "folder" as const, path, name: group.name, repos: [...group.repos].sort(byName) }))
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+    for (const path of [...loose].sort(byName)) entries.push({ kind: "repo", path });
+    return entries;
+  }
+
+
+
+  placeRepoPicker() {
+    const rect = this.repoPickerButton?.getBoundingClientRect();
+    const width = 292;
+    const margin = 8;
+    if (!rect) {
+      this.repoPickerPos = { x: 12, y: 72, maxHeight: 560 };
+      return;
+    }
+    const below = window.innerHeight - rect.bottom - margin;
+    const above = rect.top - margin;
+    const openUp = below < 280 && above > below;
+    const maxHeight = Math.max(180, Math.min(640, (openUp ? above : below) - 6));
+    this.repoPickerPos = {
+      x: Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin)),
+      y: openUp ? Math.max(margin, rect.top - 6 - maxHeight) : rect.bottom + 6,
+      maxHeight,
+    };
+  }
+
+
+
+  async toggleRepoPicker() {
+    if (this.repoPickerOpen) {
+      this.repoPickerOpen = false;
+      return;
+    }
+    this.closeLaunch();
+    this.commandLogOpen = false;
+    this.menu = null;
+    this.submenu = null;
+    this.placeRepoPicker();
+    this.repoPickerOpen = true;
+    if (!this.inApp()) return;
+    const token = ++this.repoScanToken;
+    this.repoScanning = true;
+    const found: string[] = [];
+    for (const root of this.sourceRootList()) {
+      try {
+        found.push(...(await invoke<string[]>("scan_repositories", { root: root.path })));
+      } catch {
+        /* a missing source folder should not hide the ones that can be read */
+      }
+    }
+    if (token !== this.repoScanToken) return;
+    this.scannedRepos = this.dedupeRepos(found);
+    this.repoScanning = false;
+  }
+
+
+
+  toggleRepoFolder(path: string) {
+    this.repoPickerExpanded = this.repoPickerExpanded.includes(path)
+      ? this.repoPickerExpanded.filter((item) => item !== path)
+      : [...this.repoPickerExpanded, path];
+  }
+
+
+
+  pickRepo(path: string) {
+    this.repoPickerOpen = false;
+    void this.openRepo(path);
+  }
+
+
+
+  currentRepo(path: string) {
+    return !!this.snapshot?.path && this.pathsMatch(this.snapshot.path, path);
+  }
+
+
+
+  whenLabel(commit: CommitRow) {
+    return whenLabel(this, commit);
+  }
+
+
+
+  lineText(line: DiffLine) {
+    return lineText(this, line);
+  }
+
+
+
+  splitLineAt(row: SplitRow, side: "left" | "right") {
+    return splitLineAt(this, row, side);
+  }
+
+
+
+  selectDiffRange(from: number, to: number) {
+    return selectDiffRange(this, from, to);
+  }
+
+
+
+  toggleDiffLine(index: number) {
+    return toggleDiffLine(this, index);
+  }
+
+
+
+  clickDiffLine(index: number, event: MouseEvent) {
+    return clickDiffLine(this, index, event);
+  }
+
+
+
+  dragDiffLine(index: number, event: MouseEvent) {
+    return dragDiffLine(this, index, event);
+  }
+
+
+
+  chosenDiffLines(clicked: number) {
+    return chosenDiffLines(this, clicked);
+  }
+
+
+
+  hunkOf(index: number) {
+    return hunkOf(this, index);
+  }
+
+
+
+  editorLineNo(index: number) {
+    return editorLineNo(this, index);
+  }
+
+
+
+  removesOnApply(line: DiffLine, action: "stageLine" | "discardLine", unstage: boolean) {
+    return removesOnApply(this, line, action, unstage);
+  }
+
+
+
+  async applyLineOps(action: "stageLine" | "discardLine", entries: { line: DiffLine; index: number }[]) {
+    return applyLineOps(this, action, entries);
+  }
+
+
+
+  async showLineHistory(line: DiffLine | undefined) {
+    return showLineHistory(this, line);
+  }
+
+
+
+  diffLineMenu(clicked: number): MenuItem[] {
+    return diffLineMenu(this, clicked);
+  }
+
+
+
+  moveSelection(delta: number) {
+    const rows = this.section === "history" ? this.shownCommits : this.selectedSide === "staged" ? this.staged : this.unstaged;
+    if (rows.length === 0) return;
+    this.selectedIndex = Math.min(rows.length - 1, Math.max(0, this.selectedIndex + delta));
+    const row = rows[this.selectedIndex];
+    if (this.section === "history" && "id" in row) void this.selectCommit(row.id);
+    else if ("path" in row) this.selectFile(row.path, this.selectedSide);
+  }
+
+
+
+  cycleTab(delta: number) {
+    if (this.repos.length < 2 || !this.snapshot) return;
+    const index = this.repos.indexOf(this.snapshot.path);
+    const next = this.repos[(index + delta + this.repos.length) % this.repos.length];
+    void this.openRepo(next);
+  }
+
+
+
+  closeTab(path: string) {
+    this.closedTabs = [path, ...this.closedTabs.filter((item) => item !== path)].slice(0, 12);
+    const next = this.repos.filter((repo) => repo !== path);
+    this.repos = next;
+    const currentId = this.settings.currentWorkspace;
+    if (currentId) {
+      this.settings = {
+        ...this.settings,
+        workspaces: this.settings.workspaces.map((workspace) => {
+          if (workspace.id !== currentId) return workspace;
+          const openTabs = workspace.openTabs.filter((item) => item !== path);
+          return { ...workspace, openTabs, selectedTab: Math.min(workspace.selectedTab, Math.max(0, openTabs.length - 1)) };
+        }),
+      };
+    }
+    if (this.snapshot?.path !== path) {
+      if (currentId) void this.savePrefs(false);
+      return;
+    }
+    if (next[0]) void this.openRepo(next[0]);
+    else {
+      this.snapshot = null;
+      this.refs = null;
+      this.mode = "error";
+      this.loadError = "";
+      if (currentId) void this.savePrefs(false);
+    }
+  }
+
+
+
+  async selectWorkspace() {
+    return selectWorkspace(this);
+  }
+
+
+
+  currentWorkspace = $derived(this.settings.workspaces.find((item) => item.id === this.settings.currentWorkspace) ?? null);
+
+
+
+  async switchWorkspace(id: string) {
+    return switchWorkspace(this, id);
+  }
+
+
+
+  async createWorkspace(name: string) {
+    return createWorkspace(this, name);
+  }
+
+
+
+  renameWorkspace(id: string, name: string) {
+    return renameWorkspace(this, id, name);
+  }
+
+
+
+  async deleteWorkspace(id: string) {
+    return deleteWorkspace(this, id);
+  }
+
+
+
+  workspaceItems(): MenuItem[] {
+    return workspaceItems(this);
+  }
+
+
+
+  scrollToCommit(id: string) {
+    return scrollToCommit(this, id);
+  }
+
+
+
+  openHistory() {
+    return openHistory(this);
+  }
+
+
+
+  /** Select the commit a branch or tag points at in the history list. */
+  locateSeq = 0;
+
+
+
+  async locateRef(name: string) {
+    return locateRef(this, name);
+  }
+
+
+
+  /** Show what a stash changed, using the stash commit against the commit it was taken from. */
+  async locateStash(stash: { name: string; id?: string }) {
+    return locateStash(this, stash);
+  }
+
+
+
+  openRepoSettings() {
+    return openRepoSettings(this);
+  }
+
+
+
+  revealHead() {
+    return revealHead(this);
+  }
+
+
+
+  dropCommits() {
+    return dropCommits(this);
+  }
+
+
+
+  toggleDrop(id: string) {
+    return toggleDrop(this, id);
+  }
+
+
+
+  async keepPassphrase() {
+    return keepPassphrase(this);
+  }
+
+
+
+  async saveWindow() {
+    return saveWindow(this);
+  }
+
+
+
+  onShortcut(event: KeyboardEvent) {
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c") {
+      if (typing(event) || this.dialog || this.launchOpen) return;
+      if (this.heldText) {
+        event.preventDefault();
+        this.copyText(this.heldText);
+        return;
+      }
+      if ((window.getSelection?.()?.toString() ?? "").length > 0) return;
+      const paths = this.pathsForCopy();
+      if (paths) {
+        event.preventDefault();
+        this.copyText(paths);
+      }
+      return;
+    }
+    if (event.key === " " && !event.ctrlKey && !event.metaKey && !event.altKey && !typing(event) && this.section === "history" && this.selectedCommit) {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest("button, a, input, textarea")) {
+        event.preventDefault();
+        void this.selectCommit(this.selectedCommit);
+        return;
+      }
+    }
+    const action = shortcut(event);
+    if (!action) return;
+    const editor = typing(event);
+    if (this.launchOpen && (action === "up" || action === "down" || action === "exit")) {
+      event.preventDefault();
+      if (action === "exit") this.closeLaunch();
+      else if (action === "down") this.launchIndex = Math.min(this.matches.length - 1, this.launchIndex + 1);
+      else this.launchIndex = Math.max(0, this.launchIndex - 1);
+      return;
+    }
+    if ((action === "up" || action === "down") && (event.target as HTMLElement | null)?.closest(".sidebar")) {
+      event.preventDefault();
+      this.moveSide(action === "down" ? 1 : -1);
+      return;
+    }
+    if (editor && action !== "commit" && action !== "commitPush" && action !== "exit" && action !== "launch") return;
+    if (action === "exit") {
+      this.dialog = null;
+      this.closeLaunch();
+      this.blameLines = null;
+      this.repoPickerOpen = false;
+      this.commandLogOpen = false;
+      return;
+    }
+    event.preventDefault();
+    if (action === "selectAll") {
+      if (this.dialog || this.launchOpen || this.menu) return;
+      this.selectAllHere();
+      return;
+    }
+    if (this.mode !== "live" && action !== "settings" && action !== "zoomIn" && action !== "zoomOut" && action !== "launch" && action !== "back" && action !== "forward" && action !== "open" && action !== "clone" && action !== "init") return;
+    if (action === "refresh") void this.refresh();
+    else if (action === "commit") void this.submitCommit(false);
+    else if (action === "commitPush") void this.submitCommit(true);
+    else if (action === "up") this.moveSelection(-1);
+    else if (action === "down") this.moveSelection(1);
+    else if (action === "pull" || action === "quickPull") void this.doPull();
+    else if (action === "push" || action === "quickPush") void this.doPush();
+    else if (action === "fetch" || action === "quickFetch") void this.doFetch();
+    else if (action === "branch") {
+      this.draft = "";
+      this.draftExtra = "";
+      this.dialog = "branch";
+    } else if (action === "stash") void this.mutate({ action: "stash", message: "" });
+    else if (action === "open" || action === "newTab") this.beginOpen();
+    else if (action === "closeTab" && this.snapshot) this.closeTab(this.snapshot.path);
+    else if (action === "tabLeft") this.cycleTab(-1);
+    else if (action === "tabRight") this.cycleTab(1);
+    else if (action === "settings") this.dialog = "prefs";
+    else if (action === "launch") void this.openLaunch();
+    else if (action === "back") this.goBack();
+    else if (action === "forward") this.goForward();
+    else if (action === "tag") {
+      this.draft = "";
+      this.draftExtra = this.snapshot?.branch ?? "HEAD";
+      this.dialog = "tag";
+    } else if (action === "clone" || action === "init") void this.beginClone(action === "init" ? "init" : "clone");
+    else if (action === "changes") this.section = "changes";
+    else if (action === "commits") this.section = "history";
+    else if (action === "reveal") this.revealHead();
+    else if (action === "zoomIn") {
+      this.settings.uiScale = Math.min(20, this.settings.uiScale + 1);
+      void this.savePrefs(false);
+    } else if (action === "zoomOut") {
+      this.settings.uiScale = Math.max(11, this.settings.uiScale - 1);
+      void this.savePrefs(false);
+    } else if (action === "search") {
+      this.section = "history";
+      this.searchOpen.commit = true;
+      queueMicrotask(() => this.searchEl?.focus());
+    } else if (action === "stageToggle" && this.selectedPath) {
+      const rows = this.selectedSide === "staged" ? this.shownStaged : this.shownUnstaged;
+      const chosen = this.pickedIn(rows);
+      this.stageChosen(this.selectedSide, chosen.length > 1 && chosen.includes(this.selectedPath) ? chosen : [this.selectedPath]);
+    } else if (action === "stageAll") void this.runChange(this.selectedSide === "staged" ? "unstage_all" : "stage_all");
+    else if (action === "discard") {
+      const bareDelete = event.key === "Delete";
+      const inUnstaged = (event.target as HTMLElement | null)?.closest(".unstaged-pane");
+      if ((bareDelete && !inUnstaged) || this.dialog || this.menu || this.launchOpen || !this.selectedPath || this.selectedSide !== "unstaged") return;
+      const chosen = this.pickedIn(this.shownUnstaged);
+      this.discardChosen(chosen.length > 1 && chosen.includes(this.selectedPath) ? chosen : [this.selectedPath]);
+    } else if (action === "explorer" && this.snapshot) void this.openLocal(this.snapshot.path);
+    else if (action === "terminal") void invoke("open_terminal", { path: this.repoPath() });
+    else if (action === "filterBranch") {
+      this.allBranches = !this.allBranches;
+      void this.loadContext();
+    } else if (action === "reopen") this.reopenClosed();
+    else if (action === "pastePatch") void this.pastePatch();
+  }
+
+
+
+  moveSide(delta: number) {
+    const names = this.visibleBranches.map((branch) => branch.name);
+    if (names.length === 0) return;
+    const current = (this.sideSelected ?? "").startsWith("local:") ? (this.sideSelected ?? "").slice("local:".length) : "";
+    const index = Math.max(0, names.indexOf(current));
+    const next = names[Math.min(names.length - 1, Math.max(0, index + delta))] ?? names[0];
+    this.sideSelected = `local:${next}`;
+  }
+
+
+
+  progressLabel(value: InProgress) {
+    if (value === "cherryPick") return "Cherry-pick";
+    if (value === "rebase") return "Rebase";
+    if (value === "revert") return "Revert";
+    return "Merge";
+  }
+
+  constructor() {
+    $effect(() => {
+    if (!this.settings.fetchAutomatically) return;
+    const timer = window.setInterval(() => {
+    if (!this.busy && this.snapshot) void this.doFetch("background");
+    }, 10 * 60 * 1000);
+    return () => window.clearInterval(timer);
+    });
+    $effect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    if (!this.settings.theme || this.settings.theme === "system") root.removeAttribute("data-theme");
+    else root.setAttribute("data-theme", this.settings.theme);
+    root.style.setProperty("--ui-scale", `${this.settings.uiScale || 13}px`);
+    root.style.setProperty("--row-file", this.settings.linesHeight === "spaced" ? "32px" : "28px");
+    root.style.setProperty("--row-commit", this.settings.linesHeight === "spaced" ? "36px" : "28px");
+    root.style.setProperty("--row-side", this.settings.linesHeight === "spaced" ? "32px" : "28px");
+    root.style.setProperty("--row-tree", this.settings.linesHeight === "spaced" ? "28px" : "24px");
+    });
+    $effect(() => {
+    const next = this.snapshotPlace();
+    if (this.navLock > 0) {
+    this.lastPlace = next;
+    return;
+    }
+    if (!this.lastPlace) {
+    this.lastPlace = next;
+    return;
+    }
+    if (this.samePlace(this.lastPlace, next)) return;
+    this.navBack = [...this.navBack, this.lastPlace].slice(-50);
+    this.navForward = [];
+    this.lastPlace = next;
+    });
+    $effect(() => {
+    const max = Math.max(0, this.matches.length - 1);
+    if (this.launchIndex > max) this.launchIndex = max;
+    });
+    $effect(() => {
+    if (!this.launchOpen) return;
+    this.launchIndex;
+    queueMicrotask(() => this.launchList?.querySelector(".on")?.scrollIntoView({ block: "nearest" }));
+    });
+    $effect(() => {
+    if (this.mode !== "error" || !this.inApp()) return;
+    for (const path of this.settings.recent.slice(0, 12)) {
+    if (this.recentStats[path]) continue;
+    void invoke<{ branch: string; ahead: number; behind: number; lastSummary: string }>("repository_summary", { path })
+    .then((value) => {
+    this.recentStats = { ...this.recentStats, [path]: value };
+    })
+    .catch(() => {});
+    }
+    });
+    onMount(() => {
+    const onMouseNav = (event: MouseEvent) => {
+    if (event.button !== 3 && event.button !== 4) return;
+    event.preventDefault();
+    if (event.button === 3) this.goBack();
+    else this.goForward();
+    };
+    const onPop = () => {
+    history.pushState({ awegit: 1 }, "");
+    this.goBack();
+    };
+    window.addEventListener("keydown", this.onShortcut.bind(this));
+    window.addEventListener("mousedown", onMouseNav);
+    window.addEventListener("mousedown", this.rememberPointer.bind(this), true);
+    window.addEventListener("mouseup", onMouseNav);
+    history.pushState({ awegit: 1 }, "");
+    window.addEventListener("popstate", onPop);
+    const detachNav = () => {
+    window.removeEventListener("keydown", this.onShortcut.bind(this));
+    window.removeEventListener("mousedown", onMouseNav);
+    window.removeEventListener("mousedown", this.rememberPointer.bind(this), true);
+    window.removeEventListener("mouseup", onMouseNav);
+    window.removeEventListener("popstate", onPop);
+    };
+    if (!this.inApp()) {
+    this.notices = sampleNotices;
+    this.pulls = samplePulls;
+    this.repoStats = { branch: "main", ahead: 5, behind: 0, commits: commits.length, branches: 2, lastSummary: commits[0]?.summary ?? "" };
+    return detachNav;
+    }
+    let unlisten = () => {};
+    let unprogress = () => {};
+    let unmoved = () => {};
+    let unresized = () => {};
+    let placeTimer = 0;
+    let stopped = false;
+    this.mode = "loading";
+    this.selectedPath = null;
+    invoke<UpdateNotice | null>("check_for_update")
+    .then((value) => {
+    this.updateNotice = value;
+    })
+    .catch(() => {});
+    void (async () => {
+    try {
+    const value = await invoke<Settings>("load_settings");
+    if (stopped) return;
+    this.settings = this.withSourceRoots({ ...this.defaultSettings, ...value, recent: value.recent ?? [], workspaces: value.workspaces ?? [], commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })), expandedGroups: value.expandedGroups ?? [], accounts: value.accounts ?? [], tabLabels: value.tabLabels ?? [], tabColors: value.tabColors ?? [], pinnedRefs: value.pinnedRefs ?? [], sourceDirectories: value.sourceDirectories ?? [], groupNames: value.groupNames ?? [] });
+    if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
+    if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
+    this.signOff = this.settings.signOff;
+    if (value.windowWidth > 200 && value.windowHeight > 200) {
+    try {
+    const win = getCurrentWindow();
+    await win.setPosition(new LogicalPosition(value.windowX, value.windowY));
+    await win.setSize(new LogicalSize(value.windowWidth, value.windowHeight));
+    } catch {
+    /* a saved position can sit off the current desktop */
+    }
+    }
+    try {
+    unlisten = await listen<{ refs?: boolean } | null>("repo-changed", (event) => {
+    if (!this.busy) void this.refresh(event.payload?.refs === false ? "status" : "full", true);
+    });
+    unprogress = await listen<{ path: string; percent: number }>("git-progress", (event) => {
+    const percent = event.payload?.percent;
+    const path = event.payload?.path;
+    if (typeof percent === "number" && percent >= 0 && percent <= 100 && path) this.noteProgress(path, percent);
+    });
+    } catch {
+    /* the watcher is optional until a repository is open */
+    }
+    try {
+    const win = getCurrentWindow();
+    const remember = () => {
+    window.clearTimeout(placeTimer);
+    placeTimer = window.setTimeout(() => void this.saveWindow(), 400);
+    };
+    unmoved = await win.onMoved(remember);
+    unresized = await win.onResized(remember);
+    } catch {
+    /* placement events are optional */
+    }
+    const params = new URLSearchParams(window.location.search);
+    const queryRepo = params.get("repo");
+    const queryFile = params.get("file");
+    const queryView = params.get("view");
+    if (queryRepo) {
+    await this.openRepo(queryRepo);
+    if (queryView === "blame" && queryFile) await this.showBlame(queryFile);
+    if (queryView === "history" && queryFile) await this.showFileHistory(queryFile);
+    return;
+    }
+    const workspace = this.settings.workspaces.find((item) => item.id === this.settings.currentWorkspace);
+    if (workspace) {
+    const tabs = workspace.openTabs.length > 0 ? [...workspace.openTabs] : [...workspace.repositories];
+    this.repos = tabs;
+    const target = tabs[Math.min(workspace.selectedTab, Math.max(0, tabs.length - 1))] ?? tabs[0];
+    if (!target) {
+    this.mode = "error";
+    this.loadError = "";
+    return;
+    }
+    await this.openRepo(target);
+    if (this.snapshot) return;
+    }
+    const recent = this.settings.recent[0];
+    if (!recent) {
+    this.mode = "error";
+    this.loadError = "";
+    return;
+    }
+    await this.openRepo(recent);
+    if (!this.snapshot) {
+    this.loadError = this.actionError || "Could not open the last repository.";
+    this.mode = "error";
+    }
+    } catch (error) {
+    if (!stopped) {
+    this.loadError = this.message(error);
+    this.mode = "error";
+    }
+    }
+    })();
+    return () => {
+    stopped = true;
+    detachNav();
+    window.clearTimeout(placeTimer);
+    unlisten();
+    unprogress();
+    unmoved();
+    unresized();
+    };
+    });
+  }
+}

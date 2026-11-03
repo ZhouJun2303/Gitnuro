@@ -1,0 +1,90 @@
+.pref-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--field); }
+
+.pref-tabs button { flex: 1; height: 28px; border: 0; background: transparent; color: var(--text-secondary); font: inherit; padding: 0 10px; border-radius: 7px; white-space: nowrap; transition: background 120ms ease, color 120ms ease; }
+
+.pref-tabs button:hover { color: var(--text); }
+
+.pref-tabs button.on { color: var(--text); background: var(--elevated); font-weight: 500; box-shadow: 0 1px 2px rgba(24, 24, 27, 0.08), 0 0 0 1px var(--line); }
+
+.source-folders {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+.source-folders > .text-button {
+    align-self: flex-start;
+    margin-left: 0;
+  }
+
+.source-root .alias {
+    width: 128px;
+    flex: none;
+  }
+
+.source-path {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.dialog label.pref-inline {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    font-size: inherit;
+    color: var(--text);
+  }
+
+.dialog .pref-inline select,
+  .dialog .pref-inline input[type="number"] {
+    width: auto;
+    min-width: 88px;
+  }
+
+.dialog .pref-inline > input:not([type="number"]) {
+    flex: 1;
+  }
+
+.dialog .pref-page > .text-button {
+    align-self: flex-start;
+    margin-left: 0;
+  }
+
+.tok-word { color: #7030c0; }
+
+.pref-page { display: flex; flex-direction: column; gap: 10px; padding: 14px 0; min-height: 360px; }
+
+.pref-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.pref-inline input[type="number"] { width: 72px; }
+
+.diff-sample {
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    overflow: auto;
+    font-family: var(--mono);
+    font-size: var(--diff-font, 13px);
+    line-height: 1.45;
+    padding: 8px;
+  }
+
+.diff-sample .del { background: var(--diff-del); }
+
+.diff-sample .add { background: var(--diff-add); }
+
+.diff-sample.plain .tok-word { color: inherit; }
+
+.tool-grid { display: grid; grid-template-columns: 180px 1fr; gap: 12px; }
+
+.tool-list { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; max-height: 140px; }
+
+.tool-list button { border: 0; background: transparent; text-align: left; padding: 6px 8px; font: inherit; color: inherit; border-radius: 6px; }
+
+.tool-list button:hover { background: var(--hover); }
+
+.tool-list button.on { background: var(--selection); color: var(--accent); font-weight: 500; }
+
+.tool-fields { display: flex; flex-direction: column; gap: 8px; }

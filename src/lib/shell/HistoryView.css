@@ -1,0 +1,250 @@
+.commit-row.good .subject { color: var(--added, #3aa76d); }
+
+.commit-row.bad .subject { color: var(--deleted, #d16464); }
+
+.history-stage {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+.history {
+    min-width: 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+.commit-row {
+    height: var(--row-commit);
+    padding: 0 8px;
+  }
+
+.commit-row.virtual {
+    position: absolute;
+    left: 0;
+  }
+
+.subject {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.commit-row .subject { font-weight: 400; flex: 1; min-width: 0; }
+
+.badges { display: flex; gap: 4px; }
+
+.lane-names {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: min(46%, 320px);
+  }
+
+.lane-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 200px;
+    height: 18px;
+    padding: 0 6px;
+    border: 1px solid var(--lane);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--lane) 10%, var(--elevated));
+    color: var(--text);
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+.lane-name.compact { max-width: 88px; }
+
+.lane-name > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.lane-remote {
+    width: 11px;
+    height: 11px;
+    flex: none;
+    color: var(--lane);
+  }
+
+.graph { display: flex; align-items: center; flex: none; height: 100%; }
+
+.graph-cell { width: 12px; height: 100%; position: relative; flex: none; }
+
+.graph-cell.node::after {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    margin-top: -4px;
+    border-radius: 50%;
+    background: currentColor;
+    z-index: 1;
+    transition: opacity 120ms ease;
+  }
+
+.graph-cell.line::before,
+  .graph-cell.line-up::before,
+  .graph-cell.line-down::before {
+    content: "";
+    position: absolute;
+    left: 5px;
+    width: 2px;
+  }
+
+.graph-cell.line::before {
+    top: -1px;
+    bottom: -1px;
+    background: currentColor;
+  }
+
+.graph-cell.line-up.line-down::before {
+    top: -1px;
+    bottom: -1px;
+    background: linear-gradient(
+      to bottom,
+      currentColor calc(50% - 3px),
+      transparent calc(50% - 3px),
+      transparent calc(50% + 3px),
+      currentColor calc(50% + 3px)
+    );
+  }
+
+.graph-cell.line-up:not(.line-down)::before {
+    top: -1px;
+    bottom: calc(50% + 3px);
+    background: currentColor;
+  }
+
+.graph-cell.line-down:not(.line-up)::before {
+    top: calc(50% + 3px);
+    bottom: -1px;
+    background: currentColor;
+  }
+
+.graph-cell.line-down:not(.node)::before {
+    content: none;
+  }
+
+.graph-curve {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 12px;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+.commit-row.unpushed .subject,
+  .commit-row.unpushed .badges,
+  .commit-row.unpushed .lane-names,
+  .commit-row.unpushed .commit-side {
+    opacity: 0.65;
+    transition: opacity 120ms ease;
+  }
+
+.commit-row.unpushed .graph-cell.node::after {
+    opacity: 0.65;
+  }
+
+.commit-row.unpushed:hover .subject,
+  .commit-row.unpushed:hover .badges,
+  .commit-row.unpushed:hover .lane-names,
+  .commit-row.unpushed:hover .commit-side,
+  .commit-row.unpushed:hover .graph-cell.node::after,
+  .commit-row.unpushed.selected .subject,
+  .commit-row.unpushed.selected .badges,
+  .commit-row.unpushed.selected .lane-names,
+  .commit-row.unpushed.selected .commit-side,
+  .commit-row.unpushed.selected .graph-cell.node::after {
+    opacity: 1;
+  }
+
+.drop-check { opacity: 0; }
+
+.commit-row:hover .drop-check, .drop-check:checked { opacity: 1; }
+
+.sha { font-family: var(--mono); }
+
+.filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 28px;
+    padding: 0 12px;
+    color: var(--text-secondary);
+    background: var(--sidebar);
+    border-bottom: 1px solid var(--line);
+  }
+
+.commit-side {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: none;
+    color: var(--text-secondary);
+  }
+
+.commit-author {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    width: 120px;
+    min-width: 0;
+    flex: none;
+  }
+
+.commit-author .meta,
+  .commit-author .author {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.commit-side .meta {
+    line-height: 16px;
+  }
+
+.commit-side .sha {
+    width: 64px;
+    flex: none;
+    font-family: var(--mono);
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.commit-side .date {
+    width: 120px;
+    flex: none;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.commit-side .selector {
+    width: 120px;
+    flex: none;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
