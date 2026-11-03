@@ -764,8 +764,6 @@ export class ShellState {
   commitCollapsed = $state<string[]>([]);
 
 
-  aiFieldsOpen = $state(false);
-
 
   aiModels = $state<string[]>([]);
 

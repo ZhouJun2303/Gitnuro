@@ -100,33 +100,26 @@
                 <option value="long">{shell.tr("dialog.promptLong")}</option>
               </select>
             </label>
-            {#if shell.settings.aiApiKey && !shell.aiFieldsOpen}
-              <button class="text-button" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.suggestMessage()}>{shell.settings.aiModel || shell.tr("chrome.suggest")}</button>
-            {:else}
-              <button class="text-button" type="button" onclick={() => (shell.aiFieldsOpen = true)}>{shell.tr("chrome.suggest")}</button>
+            <label>Base URL <input bind:value={shell.settings.aiBaseUrl} oninput={() => { shell.aiModels = []; shell.aiEndpointNote = ""; }} /></label>
+            <div class="ai-actions">
+              <button class="text-button" type="button" disabled={shell.aiEndpointBusy !== ""} onclick={() => void shell.testAiEndpoint()}>{shell.aiEndpointBusy === "test" ? shell.tr("chrome.working") : shell.tr("dialog.testEndpoint")}</button>
+              <button class="text-button" type="button" disabled={shell.aiEndpointBusy !== ""} onclick={() => void shell.loadAiModels()}>{shell.aiEndpointBusy === "models" ? shell.tr("chrome.working") : shell.tr("dialog.fetchModels")}</button>
+            </div>
+            {#if shell.aiEndpointNote}<p class="empty">{shell.aiEndpointNote}</p>{/if}
+            <label>Model <input bind:value={shell.settings.aiModel} /></label>
+            {#if shell.aiModels.length}
+              <label>{shell.tr("dialog.fetchedModels")}
+                <select bind:value={shell.settings.aiModel}>
+                  {#if !shell.settings.aiModel || !shell.aiModels.includes(shell.settings.aiModel)}
+                    <option value={shell.settings.aiModel}>{shell.settings.aiModel || shell.tr("dialog.pickModel")}</option>
+                  {/if}
+                  {#each shell.aiModels as id (id)}
+                    <option value={id}>{id}</option>
+                  {/each}
+                </select>
+              </label>
             {/if}
-            {#if shell.aiFieldsOpen || !shell.settings.aiApiKey}
-              <label>Base URL <input bind:value={shell.settings.aiBaseUrl} oninput={() => { shell.aiModels = []; shell.aiEndpointNote = ""; }} /></label>
-              <div class="ai-actions">
-                <button class="text-button" type="button" disabled={shell.aiEndpointBusy !== ""} onclick={() => void shell.testAiEndpoint()}>{shell.aiEndpointBusy === "test" ? shell.tr("chrome.working") : shell.tr("dialog.testEndpoint")}</button>
-                <button class="text-button" type="button" disabled={shell.aiEndpointBusy !== ""} onclick={() => void shell.loadAiModels()}>{shell.aiEndpointBusy === "models" ? shell.tr("chrome.working") : shell.tr("dialog.fetchModels")}</button>
-              </div>
-              {#if shell.aiEndpointNote}<p class="empty">{shell.aiEndpointNote}</p>{/if}
-              <label>Model <input bind:value={shell.settings.aiModel} /></label>
-              {#if shell.aiModels.length}
-                <label>{shell.tr("dialog.fetchedModels")}
-                  <select bind:value={shell.settings.aiModel}>
-                    {#if !shell.settings.aiModel || !shell.aiModels.includes(shell.settings.aiModel)}
-                      <option value={shell.settings.aiModel}>{shell.settings.aiModel || shell.tr("dialog.pickModel")}</option>
-                    {/if}
-                    {#each shell.aiModels as id (id)}
-                      <option value={id}>{id}</option>
-                    {/each}
-                  </select>
-                </label>
-              {/if}
-              <label>API key <input type="password" bind:value={shell.settings.aiApiKey} /></label>
-            {/if}
+            <label>API key <input type="password" bind:value={shell.settings.aiApiKey} /></label>
           {:else if shell.prefTab === "integration"}
             <label class="check"><input type="checkbox" bind:checked={shell.settings.highlightIssues} /> {shell.tr("dialog.issueLinks")}</label>
             <div class="k">{shell.tr("dialog.externalMerge")}</div>
