@@ -14,6 +14,8 @@ fn repo() -> common::TempRepo {
     repo.git(&["init", "-b", "main"]);
     repo.git(&["config", "core.autocrlf", "false"]);
     repo.git(&["config", "commit.gpgsign", "false"]);
+    // A global `core.hooksPath` (for example a commit-msg format check) must not decide these tests.
+    repo.git(&["config", "core.hooksPath", ".git/no-hooks"]);
     repo.git(&["config", "user.name", "Test"]);
     repo.git(&["config", "user.email", "test@example.com"]);
     repo
@@ -872,6 +874,40 @@ fn stash_paths_keeps_the_other_file() {
     let b = fs::read_to_string(repo.path.join("b.txt")).unwrap();
     assert!(a.contains("a\n") || a == "a\n", "{a}");
     assert!(b.contains("changed"), "{b}");
+}
+
+#[test]
+fn stash_paths_takes_untracked_files_without_the_flag() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    fs::write(repo.path.join("new.txt"), "new\n").unwrap();
+    fs::write(repo.path.join("a.txt"), "changed\n").unwrap();
+    perform(
+        &repo.path,
+        Mutation::StashPaths {
+            files: vec!["new.txt".into(), "a.txt".into()],
+            message: "mixed".into(),
+            include_untracked: false,
+        },
+    )
+    .unwrap();
+    assert!(!repo.path.join("new.txt").exists());
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "a\n");
+    assert_eq!(repository_refs(&repo.path).unwrap().stashes.len(), 1);
+}
+
+#[test]
+fn branch_and_tag_names_may_use_any_language() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    perform(&repo.path, Mutation::CreateBranch { name: "测试分支".into(), start: None }).unwrap();
+    perform(&repo.path, Mutation::Checkout { name: "测试分支".into() }).unwrap();
+    perform(&repo.path, Mutation::Tag { name: "v1.0+build5".into(), rev: String::new(), message: "说明".into() }).unwrap();
+    perform(&repo.path, Mutation::DeleteTag { name: "v1.0+build5".into() }).unwrap();
+    perform(&repo.path, Mutation::Checkout { name: "main".into() }).unwrap();
+    perform(&repo.path, Mutation::DeleteBranch { name: "测试分支".into(), force: false }).unwrap();
+    assert!(perform(&repo.path, Mutation::CreateBranch { name: "--force".into(), start: None }).is_err());
+    assert!(perform(&repo.path, Mutation::CreateBranch { name: "a b".into(), start: None }).is_err());
 }
 
 #[test]

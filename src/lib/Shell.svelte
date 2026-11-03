@@ -1504,7 +1504,7 @@
           { label: tr("menu.stashFiles", { count: String(picked.length) }), disabled: mode !== "live" || busy, run: () => openStash(picked) },
           { label: tr("menu.addGitignoreSelected", { count: String(picked.length) }), disabled: mode !== "live" || busy, run: () => void addIgnore(picked, false, false) },
           { label: tr("menu.addFakeignoreSelected", { count: String(picked.length) }), disabled: mode !== "live" || busy, run: () => void addIgnore(picked, true, false) },
-          { sep: true },
+          { sep: true, label: "" },
         ]
       : [];
     return [
@@ -1512,7 +1512,7 @@
       { label: tr("chrome.viewAsTree"), checked: fileLayout === "tree", run: () => setLayout("tree") },
       { label: tr("chrome.viewAsList"), checked: fileLayout === "list", run: () => setLayout("list") },
       { label: tr("chrome.viewAsCombined"), checked: fileLayout === "combined", run: () => setLayout("combined") },
-      { sep: true },
+      { sep: true, label: "" },
       { label: tr("chrome.showIgnoredFiles"), checked: showIgnored, run: () => { showIgnored = !showIgnored; if (showIgnored) void loadFacts(true, true); } },
       { label: tr("chrome.fakeIgnore"), checked: settings.fakeIgnore !== false, run: () => void toggleFakeIgnore() },
     ];

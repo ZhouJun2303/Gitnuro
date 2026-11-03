@@ -12,6 +12,8 @@ fn stage_commit_and_diff_round_trip() {
     repo.git(&["init", "-b", "main"]);
     repo.git(&["config", "core.autocrlf", "false"]);
     repo.git(&["config", "commit.gpgsign", "false"]);
+    // A global `core.hooksPath` (for example a commit-msg format check) must not decide this test.
+    repo.git(&["config", "core.hooksPath", ".git/no-hooks"]);
     repo.git(&["config", "user.name", "Test"]);
     repo.git(&["config", "user.email", "test@example.com"]);
     fs::write(repo.path.join("a.txt"), "one\n").unwrap();

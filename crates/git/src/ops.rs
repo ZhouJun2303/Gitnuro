@@ -871,6 +871,13 @@ fn stash_paths(repo: &Path, files: &[String], message: &str, include_untracked: 
     if !message.is_empty() && (message.starts_with('-') || message.contains(['\n', '\r'])) {
         return Err(Error::Rev(message.to_string()));
     }
+    for file in files {
+        check_path(file)?;
+    }
+    // `git stash push -- <untracked path>` fails with "did not match any file(s) known
+    // to git" unless --include-untracked is given, so a selection that holds an
+    // untracked path always asks for it.
+    let include_untracked = include_untracked || has_untracked(repo, files);
     let mut owned = vec!["stash".to_string(), "push".to_string()];
     if include_untracked {
         owned.push("--include-untracked".into());
@@ -881,10 +888,19 @@ fn stash_paths(repo: &Path, files: &[String], message: &str, include_untracked: 
     }
     owned.push("--".into());
     for file in files {
-        owned.push(check_path(file)?.to_string());
+        owned.push(file.to_string());
     }
     let args: Vec<&str> = owned.iter().map(String::as_str).collect();
     run(repo, &args).map(|_| ())
+}
+
+/// True when any of `files` is not tracked yet (and not ignored).
+fn has_untracked(repo: &Path, files: &[String]) -> bool {
+    let mut args = vec!["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "--"];
+    args.extend(files.iter().map(String::as_str));
+    run(repo, &args)
+        .map(|output| output.stdout.iter().any(|byte| !byte.is_ascii_whitespace()))
+        .unwrap_or(false)
 }
 
 fn create_branch(repo: &Path, name: &str, start: Option<&str>) -> Result<(), Error> {

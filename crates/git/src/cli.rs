@@ -362,14 +362,18 @@ pub fn check_rev(rev: &str) -> Result<&str, Error> {
         && !rev.starts_with('-')
         && !rev.contains("..")
         && !rev.contains([' ', '\n', '\r', '\\'])
-        && rev
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '~' | '^' | '@' | '{' | '}' | '/' | '_' | '.' | '-'));
+        && rev.chars().all(|c| name_char(c) || matches!(c, '~' | '^' | '@' | '{' | '}'));
     if safe {
         Ok(rev)
     } else {
         Err(Error::Rev(rev.to_string()))
     }
+}
+
+/// Characters Git accepts in a ref name that cannot change how the command line is read.
+/// Any letter or digit is fine, so branch and tag names in other languages work.
+fn name_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '/' | '_' | '.' | '-' | '+' | '#' | ',' | '=' | '%' | '!' | '&' | '(' | ')' | '@')
 }
 
 /// Branch, tag, and remote names passed to `git`.
@@ -379,10 +383,9 @@ pub fn check_name(name: &str) -> Result<&str, Error> {
         && !name.ends_with('/')
         && !name.ends_with('.')
         && !name.contains("..")
-        && !name.contains('@')
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '.' | '-'));
+        && name != "@"
+        && !name.contains("@{")
+        && name.chars().all(name_char);
     if safe {
         Ok(name)
     } else {
