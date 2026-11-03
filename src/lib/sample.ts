@@ -9,6 +9,39 @@ export type SampleConflictView = {
   binary: boolean;
 };
 
+/** Working copies with conflict markers, so the web preview can open the text merger. */
+export const sampleConflictText: Record<string, { ours: string; theirs: string; working: string }> = {
+  "src/merge/both-sides.ts": {
+    ours: "export const rate = 2;\n  return rate + 1;",
+    theirs: "export const rate = 5;\n  return rate + 4;",
+    working: [
+      "<<<<<<< main",
+      "export const rate = 2;",
+      "=======",
+      "export const rate = 5;",
+      ">>>>>>> feature",
+      "export function settle() {",
+      "<<<<<<< main",
+      "  return rate + 1;",
+      "=======",
+      "  return rate + 4;",
+      ">>>>>>> feature",
+      "}",
+      "",
+    ].join("\n"),
+  },
+  "src/merge/both-added.ts": {
+    ours: "export const created = \"main\";",
+    theirs: "export const created = \"feature\";",
+    working: ["<<<<<<< main", "export const created = \"main\";", "=======", "export const created = \"feature\";", ">>>>>>> feature", ""].join("\n"),
+  },
+  "docs/removed-there.md": {
+    ours: "# still documented on main",
+    theirs: "",
+    working: ["<<<<<<< main", "# still documented on main", "=======", ">>>>>>> feature", ""].join("\n"),
+  },
+};
+
 /** Fixture conflict cards for the web preview. Keys match unstaged paths. */
 export const sampleConflictViews: Record<string, SampleConflictView> = {
   "data/Y语言表_Data_Language.xlsx": {

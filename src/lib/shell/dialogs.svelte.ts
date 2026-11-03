@@ -2,7 +2,7 @@ import { onMount, tick } from "svelte";
 import { invoke } from "../perf";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
+import { commits, diffs, sampleConflictText, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
 import {
     badge,
@@ -176,6 +176,56 @@ export function joinedPieces(shell: ShellState, pieces: MergePiece[]) {
 export function pickHunk(shell: ShellState, index: number, pick: "ours" | "theirs" | "both") {
     shell.mergePieces = shell.mergePieces.map((piece, at) => (piece.kind === "hunk" && at === index ? { ...piece, pick } : piece));
     shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+  }
+
+export function takeMergeSide(shell: ShellState, pick: "ours" | "theirs") {
+    shell.mergePieces = shell.mergePieces.map((piece) => (piece.kind === "hunk" ? { ...piece, pick } : piece));
+    shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+  }
+
+function piecesFromSides(shell: ShellState, sides: { ours: string; theirs: string; working: string }) {
+    const pieces = shell.splitConflicts(sides.working);
+    if (pieces.some((piece) => piece.kind === "hunk")) return pieces;
+    return [{ kind: "hunk" as const, ours: sides.ours, theirs: sides.theirs, pick: "ours" as const }];
+  }
+
+export async function openTextMerge(shell: ShellState, file: string) {
+    shell.section = "changes";
+    shell.selectedPath = file;
+    const view = shell.mode === "sample" ? sampleConflictViews[file] : shell.activeConflict;
+    shell.mergeLeft = view?.theirs.label || shell.tr("dialog.useTheirs");
+    shell.mergeRight = view?.ours.label || shell.branchLabel || shell.tr("dialog.useOurs");
+    try {
+      const sides = shell.mode === "sample" ? sampleConflictText[file] : await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
+      if (!sides) return;
+      shell.conflict = sides;
+      shell.mergeFile = file;
+      shell.mergePieces = piecesFromSides(shell, sides);
+      shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+      shell.textMerge = true;
+    } catch (error) {
+      shell.actionError = shell.message(error);
+    }
+  }
+
+export function closeTextMerge(shell: ShellState) {
+    shell.textMerge = false;
+  }
+
+export async function applyTextMerge(shell: ShellState) {
+    const file = shell.mergeFile;
+    if (!file) return;
+    if (shell.mode !== "live") {
+      shell.textMerge = false;
+      return;
+    }
+    if (shell.busy) return;
+    await shell.mutate({ action: "resolve", file, side: "text", text: shell.mergeResult });
+    shell.textMerge = false;
+  }
+
+export async function openResolve(shell: ShellState, file: string) {
+    await openTextMerge(shell, file);
   }
 
 export function bisectMark(shell: ShellState, id: string) {
@@ -843,19 +893,6 @@ export function saveAccount(shell: ShellState) {
     shell.settings = { ...shell.settings, accounts };
     shell.editingAccount = account.id;
     void shell.savePrefs(false);
-  }
-
-export async function openResolve(shell: ShellState, file: string) {
-    try {
-      shell.conflict = await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
-      shell.draft = file;
-      shell.mergePieces = shell.splitConflicts(shell.conflict.working);
-      shell.mergeResult = shell.mergePieces.some((piece) => piece.kind === "hunk") ? shell.joinedPieces(shell.mergePieces) : shell.conflict.working;
-      shell.draftExtra = "text";
-      shell.dialog = "resolve";
-    } catch (error) {
-      shell.actionError = shell.message(error);
-    }
   }
 
 export function openRebase(shell: ShellState) {

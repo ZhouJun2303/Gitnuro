@@ -191,23 +191,21 @@ export async function openConflictTool(shell: ShellState) {
 
 export async function applyConflictChoice(shell: ShellState, ours: boolean, theirs: boolean) {
     const file = shell.selectedPath;
-    const view = shell.conflictView;
-    if (!file || !view || shell.busy) return;
+    const view = shell.activeConflict;
+    if (!file || !view) return;
+    if (shell.mode === "live" && shell.busy) return;
     if (ours && theirs) {
-      if (view.binary && mergeToolLabel(shell)) {
-        await openConflictTool(shell);
-        return;
-      }
       if (view.binary) {
-        shell.actionError = shell.tr("chrome.mergePickOne");
+        if (shell.mode === "live" && mergeToolLabel(shell)) await openConflictTool(shell);
+        else if (shell.mode === "live") shell.actionError = shell.tr("chrome.mergePickOne");
         return;
       }
-      void shell.openResolve(file);
+      await shell.openTextMerge(file);
       return;
     }
-    if (!ours && !theirs) return;
+    if (!ours && !theirs || shell.mode !== "live") return;
     await shell.mutate({ action: "resolve", file, side: ours ? "ours" : "theirs", text: "" });
-}
+  }
 
 export async function loadDiff(shell: ShellState) {
     if (shell.mode !== "live" || !shell.selectedPath || shell.section !== "changes") {
@@ -624,12 +622,9 @@ async function conflictCanStage(shell: ShellState, repo: string, path: string) {
       if (shell.repoPath() !== repo || shell.dialog) return false;
       if (conflictMarkers(sides.working)) {
         shell.actionError = null;
-        shell.conflict = sides;
-        shell.draft = path;
-        shell.mergePieces = shell.splitConflicts(sides.working);
-        shell.mergeResult = shell.mergePieces.some((piece) => piece.kind === "hunk") ? shell.joinedPieces(shell.mergePieces) : sides.working;
-        shell.draftExtra = "text";
-        shell.dialog = "resolve";
+        await shell.openTextMerge(path);
+        shell.mergeLeft = view.theirs.label || shell.mergeLeft;
+        shell.mergeRight = view.ours.label || shell.mergeRight;
         return false;
       }
       return true;
@@ -992,6 +987,7 @@ export function fullPath(shell: ShellState, file: string) {
 export function selectFile(shell: ShellState, path: string, side: Side, event?: MouseEvent) {
     shell.clearTextSelection();
     shell.conflictView = null;
+    if (path !== shell.mergeFile) shell.textMerge = false;
     shell.selectedPath = path;
     shell.selectedSide = side;
     shell.blameLines = null;

@@ -483,6 +483,9 @@ export type Messages = {
     useOurs: string;
     useTheirs: string;
     useBoth: string;
+    mergeUseAll: string;
+    mergeEmpty: string;
+    mergeDone: string;
     result: string;
     verticalTabs: string;
     showSpace: string;
