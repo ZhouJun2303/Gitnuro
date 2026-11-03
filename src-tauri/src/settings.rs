@@ -293,6 +293,9 @@ pub struct WorkspaceRecord {
     /// The workspace tabs already include every member repository.
     #[serde(default)]
     pub tabs_seeded: bool,
+    /// Fixed project-tab width in pixels. Set from how many repositories the workspace holds.
+    #[serde(default)]
+    pub tab_width: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -561,7 +564,9 @@ pub fn load() -> Result<Settings, String> {
     }
     let text = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
     let mut settings: Settings = serde_json::from_str(&text).map_err(|error| error.to_string())?;
-    if repair_imported_tabs(&mut settings) {
+    let mut changed = repair_imported_tabs(&mut settings);
+    changed |= assign_tab_widths(&mut settings);
+    if changed {
         save(&settings)?;
     }
     Ok(settings)
@@ -870,6 +875,7 @@ pub fn apply_fork(
     apply_tools(settings, text, &mut preferences);
     let repositories = merge_repositories(settings, fork);
     let workspaces = merge_workspaces(settings, fork);
+    assign_tab_widths(settings);
     (preferences, repositories, workspaces)
 }
 
@@ -1020,6 +1026,7 @@ fn merge_workspaces(settings: &mut Settings, fork: &serde_json::Value) -> u32 {
                 open_tabs,
                 selected_tab,
                 tabs_seeded: true,
+                tab_width: 0,
             });
         }
         count += 1;
@@ -1037,6 +1044,35 @@ fn merge_workspaces(settings: &mut Settings, fork: &serde_json::Value) -> u32 {
         }
     }
     count
+}
+
+/// More repositories share a narrower fixed tab. This is stored, not measured from the window.
+fn workspace_tab_width(count: usize) -> u32 {
+    match count {
+        0 | 1 => 220,
+        2 => 200,
+        3 | 4 => 168,
+        5..=8 => 140,
+        9..=12 => 112,
+        _ => 96,
+    }
+}
+
+fn assign_tab_widths(settings: &mut Settings) -> bool {
+    let mut changed = false;
+    for workspace in &mut settings.workspaces {
+        let count = if workspace.repositories.is_empty() {
+            workspace.open_tabs.len()
+        } else {
+            workspace.repositories.len()
+        };
+        let width = workspace_tab_width(count);
+        if workspace.tab_width != width {
+            workspace.tab_width = width;
+            changed = true;
+        }
+    }
+    changed
 }
 
 /// Fork stores every workspace repository as an open tab and one of them as the active tab.
@@ -1226,6 +1262,7 @@ mod tests {
             open_tabs: vec!["D:/work/old".into()],
             selected_tab: 0,
             tabs_seeded: false,
+            tab_width: 0,
         }];
         let (value, text) = sample();
         let (preferences, repositories, workspaces) = apply_fork(&mut settings, &value, &text);
@@ -1261,6 +1298,8 @@ mod tests {
         );
         assert_eq!(settings.workspaces[0].selected_tab, 1);
         assert!(settings.workspaces[0].tabs_seeded);
+        assert_eq!(settings.workspaces[0].tab_width, 168);
+        assert_eq!(settings.workspaces[1].tab_width, 220);
         assert!(settings.workspaces[0]
             .repositories
             .iter()
@@ -1297,6 +1336,7 @@ mod tests {
                 open_tabs: vec!["D:/b".into()],
                 selected_tab: 0,
                 tabs_seeded: false,
+                tab_width: 0,
             },
             WorkspaceRecord {
                 id: "ws-1".into(),
@@ -1305,6 +1345,7 @@ mod tests {
                 open_tabs: vec!["D:/a".into()],
                 selected_tab: 0,
                 tabs_seeded: false,
+                tab_width: 0,
             },
         ];
         assert!(repair_imported_tabs(&mut settings));

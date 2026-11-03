@@ -271,7 +271,19 @@ export type WorkspaceRecord = {
   openTabs: string[];
   selectedTab: number;
   tabsSeeded?: boolean;
+  /** Fixed project-tab width for this workspace, in pixels. */
+  tabWidth?: number;
 };
+
+/** Width to store for a workspace. More repositories get a narrower tab. */
+export function workspaceTabWidth(count: number) {
+  if (count <= 1) return 220;
+  if (count === 2) return 200;
+  if (count <= 4) return 168;
+  if (count <= 8) return 140;
+  if (count <= 12) return 112;
+  return 96;
+}
 
 export type CommandRecord = {
   id: string;

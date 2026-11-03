@@ -195,9 +195,9 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    flex: 1 1 0;
-    min-width: 96px;
-    max-width: 220px;
+    flex: none;
+    width: var(--tab-width, 220px);
+    overflow: hidden;
     transition: background 120ms ease, color 120ms ease;
   }
 
@@ -207,7 +207,9 @@
   }
 
 .tab > .file-select {
+    flex: 1 1 auto;
     gap: 6px;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

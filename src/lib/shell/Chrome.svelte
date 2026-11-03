@@ -1,11 +1,13 @@
 <script lang="ts">
   import { getShell } from "./context";
+  import { workspaceTabWidth } from "../status";
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
   const shell = getShell();
+  const tabWidth = $derived(shell.currentWorkspace?.tabWidth || workspaceTabWidth(shell.currentWorkspace?.repositories.length || shell.currentWorkspace?.openTabs.length || 0));
 
 </script>
 
@@ -98,7 +100,7 @@
       </div>
     </div>
     <div class="chrome-tabs">
-      <div class="chrome-side tabs">
+      <div class="chrome-side tabs" style:--tab-width="{tabWidth}px">
       {#each shell.repos as repo (repo)}
         {@const job = shell.jobs[shell.jobKey(repo)]}
         <div class="tab" role="group" class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} oncontextmenu={(event) => shell.openMenu(event, [
@@ -108,7 +110,7 @@
           { label: shell.tr("menu.tabColor"), run: () => { shell.draft = shell.tabColor(repo) || "#5b8def"; shell.draftExtra = repo; shell.dialog = "colorTab"; } },
           { label: shell.tr("chrome.close"), run: () => shell.closeTab(repo) },
         ])}>
-          <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : undefined} onclick={() => shell.openRepo(repo)}>{#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}{shell.tabText(repo)}</button>
+          <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabText(repo)} onclick={() => shell.openRepo(repo)}>{#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}{shell.tabText(repo)}</button>
           <button class="text-button row-action tab-close" type="button" onclick={() => shell.closeTab(repo)} aria-label={shell.tr("chrome.close")}>×</button>
         </div>
       {:else}

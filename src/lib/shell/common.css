@@ -37,7 +37,7 @@
     border: 0;
   }
 
-.vertical-tabs .tab { height: 28px; flex: none; max-width: none; border-right: 0; border-radius: 6px; }
+.vertical-tabs .tab { height: 28px; flex: none; width: 100%; min-width: 0; max-width: none; border-right: 0; border-radius: 6px; }
 
 .text-button:hover:not(:disabled),
   .side:hover,
