@@ -167,6 +167,49 @@ pub fn commits_from(repo: &Path, limit: usize, revs: &[String], topo: bool) -> R
     log_with(repo, limit, false, &[], &checked, topo)
 }
 
+/// The commit `name` points at, plus a history page large enough to contain it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocatedRef {
+    pub id: String,
+    pub commits: Vec<CommitRow>,
+}
+
+/// Resolve a branch or tag, then grow `--all` history until that commit is in the page.
+///
+/// Searching by decoration name fails when the commit is older than the first page,
+/// and also when two clicks of a double-click race a checkout. The id is resolved
+/// first so the caller can select it even if decorations are missing.
+pub fn locate_ref(repo: &Path, name: &str, topo: bool) -> Result<LocatedRef, Error> {
+    locate_ref_from(repo, name, topo, 500)
+}
+
+pub(crate) fn locate_ref_from(repo: &Path, name: &str, topo: bool, start: usize) -> Result<LocatedRef, Error> {
+    let name = check_rev(name)?;
+    let output = run(repo, &["rev-parse", "--verify", name])?;
+    let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if id.len() < 7 {
+        return Err(Error::Rev(name.to_string()));
+    }
+    let mut limit = start.clamp(1, 100_000);
+    loop {
+        let commits = log_with(repo, limit, true, &[], &[], topo)?;
+        if commits.iter().any(|commit| commit.id == id) {
+            return Ok(LocatedRef { id, commits });
+        }
+        if commits.len() < limit || limit >= 100_000 {
+            let mut commits = commits;
+            if let Ok(extra) = log_with(repo, 1, false, &[], &[name], topo) {
+                if extra.iter().any(|commit| commit.id == id) && !commits.iter().any(|commit| commit.id == id) {
+                    commits.splice(0..0, extra);
+                }
+            }
+            return Ok(LocatedRef { id, commits });
+        }
+        limit = limit.saturating_mul(4).min(100_000);
+    }
+}
+
 pub fn file_history(repo: &Path, path: &str, limit: usize) -> Result<Vec<CommitRow>, Error> {
     let path = check_path(path)?;
     log_with(repo, limit, false, &[path], &[], false)
@@ -1333,5 +1376,43 @@ fn assign_lanes(commits: &mut [CommitRow]) {
         for parent in commit.parents.iter().skip(1) {
             lanes.place(parent);
         }
+    }
+}
+
+#[cfg(test)]
+mod locate_tests {
+    use super::*;
+    use std::fs;
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn git(path: &Path, args: &[&str]) {
+        let output = Command::new("git").current_dir(path).args(args).output().unwrap();
+        assert!(output.status.success(), "git {args:?} {}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    #[test]
+    fn grows_the_page_until_the_old_branch_is_in_it() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!("awegit-locate-{nanos}"));
+        fs::create_dir_all(&path).unwrap();
+        git(&path, &["init", "-b", "main"]);
+        git(&path, &["config", "user.name", "Test"]);
+        git(&path, &["config", "user.email", "t@e.com"]);
+        git(&path, &["config", "commit.gpgsign", "false"]);
+        git(&path, &["config", "core.hooksPath", ".git/no-hooks"]);
+        git(&path, &["commit", "--allow-empty", "-m", "base"]);
+        git(&path, &["branch", "buried"]);
+        let buried = String::from_utf8_lossy(&Command::new("git").current_dir(&path).args(["rev-parse", "buried"]).output().unwrap().stdout)
+            .trim()
+            .to_string();
+        for i in 0..24 {
+            git(&path, &["commit", "--allow-empty", "-m", &format!("feat: later {i}")]);
+        }
+        let found = locate_ref_from(&path, "buried", false, 8).unwrap();
+        let _ = fs::remove_dir_all(&path);
+        assert_eq!(found.id, buried);
+        assert!(found.commits.len() > 8, "{}", found.commits.len());
+        assert!(found.commits.iter().any(|commit| commit.id == buried));
     }
 }

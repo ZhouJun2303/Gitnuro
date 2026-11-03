@@ -3989,57 +3989,34 @@
   }
 
   /** Select the commit a branch or tag points at in the history list. */
+  let locateSeq = 0;
+
   async function locateRef(name: string) {
     if (mode !== "live") return;
+    // A double click fires two clicks, then checkout. Only the newest locate keeps going.
+    const seq = ++locateSeq;
     openHistory();
     if (commitQuery.trim()) commitQuery = "";
-    const find = () => historyItems.find((commit) => commit.refs.includes(name) && !commit.refs.includes("stash"));
-    let row = find();
-    if (!row && historyFilter) {
-      historyFilter = "";
-      await loadContext();
-      row = find();
+    if (historyFilter) historyFilter = "";
+    allBranches = true;
+    actionError = null;
+    try {
+      const found = await invoke<{ id: string; commits: CommitRow[] }>("locate_ref", {
+        path: repoPath(),
+        name,
+        order: settings.commitSort === "topo" ? "topo" : "date",
+      });
+      if (seq !== locateSeq) return;
+      logLimit = Math.max(logLimit, found.commits.length);
+      if (!same(commitsLive, found.commits)) commitsLive = found.commits;
+      await tick();
+      await selectCommit(found.id);
+      await tick();
+      scrollToCommit(found.id);
+    } catch (error) {
+      if (seq !== locateSeq) return;
+      actionError = message(error);
     }
-    if (!row && !allBranches) {
-      allBranches = true;
-      await loadContext();
-      row = find();
-    }
-    // Old branches and tags sit deeper than the loaded page: widen the page until the ref
-    // shows up or the history runs out.
-    const ceiling = 100_000;
-    // The page is read directly here instead of through `loadContext`: a background
-    // refresh that starts at the same time would discard that result, and this loop
-    // would wrongly decide the history had run out.
-    let widen = true;
-    let tries = 0;
-    while (!row && !historyFilter && tries++ < 12 && (logLimit < ceiling || !widen)) {
-      if (widen) logLimit = Math.min(logLimit * 4, ceiling);
-      widen = true;
-      const gen = ++contextGen;
-      let rows: CommitRow[];
-      try {
-        rows = await loadCommits(repoPath());
-      } catch (error) {
-        actionError = message(error);
-        return;
-      }
-      if (gen !== contextGen) {
-        widen = false;
-        continue;
-      }
-      if (!same(commitsLive, rows)) commitsLive = rows;
-      row = find();
-      if (rows.length < logLimit) break;
-    }
-    if (!row) {
-      actionError = tr("chrome.refNotFound", { name });
-      return;
-    }
-    await tick();
-    await selectCommit(row.id);
-    await tick();
-    scrollToCommit(row.id);
   }
 
   /** Show what a stash changed, using the stash commit against the commit it was taken from. */

@@ -289,6 +289,13 @@ fn commit_detail(path: Option<String>, id: String) -> Result<awegit_git::CommitD
 }
 
 #[tauri::command]
+fn locate_ref(path: Option<String>, name: String, order: Option<String>) -> Result<awegit_git::LocatedRef, String> {
+    let repo = repo_from(path)?;
+    let topo = order.as_deref() == Some("topo");
+    awegit_git::locate_ref(&repo, &name, topo).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn repository_refs(path: Option<String>) -> Result<awegit_git::RefSnapshot, String> {
     let repo = repo_from(path)?;
     awegit_git::repository_refs(&repo).map_err(|error| error.to_string())
@@ -1226,6 +1233,7 @@ pub fn run() {
             file_diff,
             commit_log,
             commit_detail,
+            locate_ref,
             repository_refs,
             commit_files,
             show_commit_file,

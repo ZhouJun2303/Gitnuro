@@ -2,13 +2,14 @@ mod common;
 
 use std::fs;
 
-use awegit_git::{blame_file, branch_commits, commit_detail, commit_files, commit_log, repository_refs, ChangeKind};
+use awegit_git::{blame_file, branch_commits, commit_detail, commit_files, commit_log, locate_ref, repository_refs, ChangeKind};
 
 fn repo() -> common::TempRepo {
     let repo = common::TempRepo::new();
     repo.git(&["init", "-b", "main"]);
     repo.git(&["config", "core.autocrlf", "false"]);
     repo.git(&["config", "commit.gpgsign", "false"]);
+    repo.git(&["config", "core.hooksPath", ".git/no-hooks"]);
     repo.git(&["config", "user.name", "Test"]);
     repo.git(&["config", "user.email", "test@example.com"]);
     repo
@@ -99,4 +100,18 @@ fn stash_commit_lists_its_changes() {
     assert_eq!(files[0].path, "a.txt");
     let diff = awegit_git::show_commit_file(&repo.path, &stash.id, "a.txt").unwrap();
     assert!(diff.lines.iter().any(|line| line.text.contains("two")), "{diff:?}");
+}
+
+#[test]
+fn locate_ref_finds_a_branch_buried_under_later_commits() {
+    let repo = repo();
+    repo.git(&["commit", "--allow-empty", "-m", "base"]);
+    repo.git(&["branch", "buried"]);
+    let buried = repo.output(&["rev-parse", "buried"]).trim().to_string();
+    for i in 0..40 {
+        repo.git(&["commit", "--allow-empty", "-m", &format!("feat: later {i}")]);
+    }
+    let found = locate_ref(&repo.path, "buried", false).unwrap();
+    assert_eq!(found.id, buried);
+    assert!(found.commits.iter().any(|commit| commit.id == buried), "{} commits", found.commits.len());
 }
