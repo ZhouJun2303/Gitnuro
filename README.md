@@ -1,6 +1,6 @@
 # AweGit
 
-AweGit 是 Windows 和 macOS 上的 Git 客户端。界面用 Tauri 2 和 SvelteKit，后端是 Rust。状态用 gitoxide 读取，历史和写操作走本机的 `git`。
+AweGit 是 Windows 和 macOS 上的 Git 客户端。界面用 Tauri 2 和 SvelteKit，后端是 Rust。状态用 gitoxide 读取，差异文本、历史和写操作走本机的 `git`。
 
 命令都在仓库根目录执行。下面的 `pnpm` 脚本定义在 `package.json`。
 
@@ -48,7 +48,7 @@ pnpm start
 
 1420 上已经有页面服务时，再执行 `pnpm start` 会沿用它并打开窗口。这个端口被占用后再另起一个开发服务会失败。
 
-设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令和 HTTPS 密码不写入这个文件。
+设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令只留在当前进程里，HTTPS 密码交给 Git 的凭据存储。API key 和代理密码会写入这个文件。
 
 重新链接桌面程序前先关掉 `awegit.exe`。它占着 `WebView2Loader.dll` 时，`cargo build -p awegit` 会失败。Vite 可以留着。
 
@@ -75,12 +75,20 @@ Windows：
 pnpm package:windows
 ```
 
-脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build`。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在：
+脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build`。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。当前版本是 2.0.0：
 
 - `target\release\bundle\nsis\AweGit_2.0.0_x64-setup.exe`
 - `target\release\bundle\msi\AweGit_2.0.0_x64_en-US.msi`
 
-不要提交 `target\`、`node_modules\` 和下载下来的 MinGit。
+发布到 GitHub，并让已安装的客户端能检查到这个版本：
+
+```powershell
+pnpm publish:windows
+```
+
+这条命令会先打包，再用 `gh` 创建 Release，然后提交并推送 `latest.json`。需要已经登录的 `gh`。
+
+不要提交 `target\`、`src-tauri\target\`、`node_modules\` 和下载下来的 MinGit。
 
 macOS 上：
 
@@ -100,37 +108,37 @@ pnpm package:mac
 | 提交 | `Ctrl+Enter` |
 | 提交并推送 | `Ctrl+Shift+Enter` |
 | 暂存或取消暂存 | `Ctrl+Shift+S` |
-| 全部暂存 | `Ctrl+Alt+Shift+S` |
+| 全部暂存或全部取消暂存 | `Ctrl+Alt+Shift+S` |
 | 丢弃修改 | `Delete`、`Ctrl+Shift+D` 或 `Backspace` |
 | 全选当前列表或差异，再按一次取消 | `Ctrl+A` |
-| 拉取 | `Ctrl+Shift+L` |
-| 推送 | `Ctrl+Shift+P` |
-| 获取 | `Ctrl+Shift+F` |
-| 快速获取 / 拉取 / 推送 | `Ctrl+Alt+Shift+F` / `L` / `P` |
+| 粘贴补丁 | `Ctrl+Shift+V` |
+| 获取 | `Ctrl+Shift+F` 或 `Ctrl+Alt+Shift+F` |
+| 拉取 | `Ctrl+Shift+L` 或 `Ctrl+Alt+Shift+L` |
+| 推送 | `Ctrl+Shift+P` 或 `Ctrl+Alt+Shift+P` |
 | 贮藏 | `Ctrl+Shift+H` |
 | 分支 | `Ctrl+Shift+B` |
-| 标签 | `Ctrl+Shift+T` |
+| 标签 | `Ctrl+Alt+T` |
 | 克隆 | `Ctrl+N` |
 | 新建仓库 | `Ctrl+Shift+N` |
-| 打开仓库 | `Ctrl+O` |
-| 新标签页 | `Ctrl+T` |
+| 打开仓库 | `Ctrl+O` 或 `Ctrl+T` |
 | 关闭标签页 | `Ctrl+W` |
+| 重新打开关闭的标签 | `Ctrl+Shift+T` |
 | 上一个 / 下一个标签 | `Ctrl+Shift+Tab` / `Ctrl+Tab` |
 | 变更 / 历史 | `Ctrl+1` / `Ctrl+2` |
+| 当前分支 / 所有分支 | `Ctrl+Shift+A` |
+| 定位当前分支 | `Ctrl+0` |
 | 快速启动 | `Ctrl+K` |
+| 搜索提交 | `Ctrl+F` |
 | 后退 / 前进 | `Alt+Left` / `Alt+Right` |
-| 打印 | `Ctrl+P` |
-| 搜索 | `Ctrl+F` |
 | 设置 | `Ctrl+,` |
 | 在文件管理器中显示 | `Ctrl+Alt+O` |
-| 终端 | `Ctrl+Alt+T` |
-| 过滤分支 | `Ctrl+Shift+A` |
-| 定位当前提交 | `Ctrl+0` |
 | 放大 / 缩小 | `Ctrl+=` / `Ctrl+-` |
+
+终端从仓库菜单打开，没有单独的快捷键。
 
 ## 下载
 
-安装包发布在 [Releases](https://github.com/ZhouJun2303/AweGit/releases)。
+安装包发布在 [Releases](https://github.com/ZhouJun2303/Gitnuro/releases)。版本清单是 `release` 分支根目录的 `latest.json`。
 
 ## 许可证
 

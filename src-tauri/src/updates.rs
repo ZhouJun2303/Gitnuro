@@ -3,9 +3,9 @@
 use serde::Serialize;
 use std::cmp::Ordering;
 
-const VERSION_CHECK_URL: &str = "https://raw.githubusercontent.com/ZhouJun2303/AweGit/main/latest.json";
-const RELEASE_PREFIX: &str = "https://github.com/ZhouJun2303/AweGit/releases/download/";
-const RELEASES_PAGE: &str = "https://github.com/ZhouJun2303/AweGit/releases/latest";
+const VERSION_CHECK_URL: &str = "https://raw.githubusercontent.com/ZhouJun2303/Gitnuro/release/latest.json";
+const RELEASE_PREFIX: &str = "https://github.com/ZhouJun2303/Gitnuro/releases/download/";
+const RELEASES_PAGE: &str = "https://github.com/ZhouJun2303/Gitnuro/releases/latest";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,7 +72,7 @@ fn platform_download(value: &serde_json::Value) -> (String, bool) {
         let installable = installer_name(&macos).is_ok();
         return (macos, installable);
     }
-    let page = if legacy.starts_with("https://github.com/ZhouJun2303/AweGit/releases") && installer_name(&legacy).is_err() {
+    let page = if legacy.starts_with("https://github.com/ZhouJun2303/Gitnuro/releases") && installer_name(&legacy).is_err() {
         legacy
     } else {
         RELEASES_PAGE.to_string()
@@ -150,9 +150,9 @@ mod tests {
 
     #[test]
     fn installer_url_must_be_a_release_asset() {
-        assert!(installer_name("https://github.com/ZhouJun2303/AweGit/releases/download/v2.0.1/AweGit_2.0.1_x64-setup.exe").is_ok());
-        assert!(installer_name("https://github.com/ZhouJun2303/AweGit/releases/latest").is_err());
+        assert!(installer_name("https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.1/AweGit_2.0.1_x64-setup.exe").is_ok());
+        assert!(installer_name("https://github.com/ZhouJun2303/Gitnuro/releases/latest").is_err());
         assert!(installer_name("https://example.com/AweGit_2.0.1_x64-setup.exe").is_err());
-        assert!(installer_name("https://github.com/ZhouJun2303/AweGit/releases/download/v2.0.1/../secret.exe").is_err());
+        assert!(installer_name("https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.1/../secret.exe").is_err());
     }
 }

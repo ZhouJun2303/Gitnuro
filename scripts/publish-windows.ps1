@@ -1,5 +1,5 @@
 ﻿# Package AweGit for Windows, upload the installers, and publish the version manifest.
-# Run this yourself. It commits latest.json and pushes the current branch.
+# Run this on the release branch. It commits latest.json at the repo root and pushes origin release.
 
 param(
     [string]$Notes = ""
@@ -7,6 +7,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$repo = "ZhouJun2303/Gitnuro"
+
+Push-Location $root
+try {
+    $current = (git rev-parse --abbrev-ref HEAD).Trim()
+    if ($current -ne "release") {
+        throw "Publish from the release branch. Current branch is $current"
+    }
+}
+finally {
+    Pop-Location
+}
 
 function Read-JsonFile([string]$path) {
     Get-Content -Raw -Encoding UTF8 -Path $path | ConvertFrom-Json
@@ -47,12 +59,12 @@ if (Test-Path $msiDir) {
 
 $tag = "v$version"
 $fileName = [IO.Path]::GetFileName($nsis)
-$download = "https://github.com/ZhouJun2303/AweGit/releases/download/$tag/$fileName"
+$download = "https://github.com/$repo/releases/download/$tag/$fileName"
 $releaseNotes = if ($Notes) { $Notes } else { "AweGit $version" }
 $assets = @($nsis)
 if ($msi) { $assets += $msi.FullName }
 
-gh release create $tag @assets --repo ZhouJun2303/AweGit --title "AweGit $version" --notes $releaseNotes
+gh release create $tag @assets --repo $repo --title "AweGit $version" --notes $releaseNotes
 if ($LASTEXITCODE -ne 0) {
     throw "Could not create GitHub release $tag"
 }
@@ -86,7 +98,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Could not commit latest.json"
     }
-    git push origin HEAD
+    git push origin release
     if ($LASTEXITCODE -ne 0) {
         throw "Could not push latest.json"
     }

@@ -9,7 +9,7 @@ export type SampleConflictView = {
   binary: boolean;
 };
 
-/** Working copies with conflict markers, so the web preview can open the text merger. */
+/** Working copies with conflict markers, so sample data can open the text merger. */
 export const sampleConflictText: Record<string, { ours: string; theirs: string; working: string }> = {
   "src/merge/both-sides.ts": {
     ours: "export const rate = 2;\n  return rate + 1;",
@@ -42,7 +42,7 @@ export const sampleConflictText: Record<string, { ours: string; theirs: string; 
   },
 };
 
-/** Fixture conflict cards for the web preview. Keys match unstaged paths. */
+/** Fixture conflict cards for sample data. Keys match unstaged paths. */
 export const sampleConflictViews: Record<string, SampleConflictView> = {
   "data/Y语言表_Data_Language.xlsx": {
     binary: true,
@@ -233,6 +233,6 @@ export const sampleReflog = [
   { id: "b18de07", shortId: "b18de07", selector: "HEAD@{1}", summary: "commit: remember sidebar groups" },
 ];
 
-export const sampleNotices = [{ id: "1", title: "Review requested on the theme palette", url: "https://github.com/ZhouJun2303/AweGit", unread: true }];
+export const sampleNotices = [{ id: "1", title: "Review requested on the theme palette", url: "https://github.com/ZhouJun2303/Gitnuro", unread: true }];
 
-export const samplePulls = [{ title: "Draw colored commit lanes", author: "jun", branch: "graph", url: "https://github.com/ZhouJun2303/AweGit" }];
+export const samplePulls = [{ title: "Draw colored commit lanes", author: "jun", branch: "graph", url: "https://github.com/ZhouJun2303/Gitnuro" }];
