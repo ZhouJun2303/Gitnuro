@@ -4,9 +4,29 @@
   import { sampleImages } from "../sample";
   import { type SplitRow } from "../view";
   import type { Row, Side } from "./types";
+  import { applyConflictChoice, mergeToolLabel, openConflictTool } from "./diff.svelte";
+  import type { ConflictParty } from "../status";
 
   const shell = getShell();
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
+  let pickOurs = $state(true);
+  let pickTheirs = $state(true);
+  let pickedPath = "";
+
+  $effect(() => {
+    const path = shell.selectedPath ?? "";
+    if (path === pickedPath) return;
+    pickedPath = path;
+    pickOurs = true;
+    pickTheirs = true;
+  });
+
+  const sideText = (party: ConflictParty) => {
+    if (party.state === "added") return shell.tr("chrome.sideAdded");
+    if (party.state === "deleted") return shell.tr("chrome.sideDeleted");
+    if (party.state === "modified") return shell.tr("chrome.sideModified");
+    return "";
+  };
 </script>
 
 <section class="diff flex-fill">
@@ -22,6 +42,43 @@
                 {/each}
               </div>
             </div>
+          {:else if shell.mode === "live" && shell.section === "changes" && shell.selectedPath && shell.selectedConflict}
+            <header class="diff-head">
+              <span>{shell.selectedPath}</span>
+            </header>
+            {#if shell.conflictView}
+              {@const view = shell.conflictView}
+              {@const tool = mergeToolLabel(shell)}
+              <div class="conflict-pane">
+                <div class="conflict-title">
+                  <svg class="conflict-warn" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.4 14.8 13.4H1.2L8 1.4z"/><path d="M8 6.1v3.3" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r=".75" fill="#fff"/></svg>
+                  <strong>{shell.tr("chrome.mergeConflict")}</strong>
+                </div>
+                <p class="conflict-hint">{shell.tr("chrome.mergeConflictHint")}</p>
+                <div class="conflict-file">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.2" d="M3.2 1.5h6L12.8 5v9.5H3.2z"/><path fill="none" stroke="currentColor" stroke-width="1.2" d="M9.1 1.6V5.1h3.6"/></svg>
+                  <span>{shell.fileName(shell.selectedPath)}</span>
+                </div>
+                <div class="conflict-row">
+                  {@render conflictCard(view.theirs, "theirs")}
+                  <span class="conflict-link" aria-hidden="true"></span>
+                  {@render conflictCard(view.ours, "ours")}
+                </div>
+                <div class="conflict-actions">
+                  <button class="conflict-merge" type="button" disabled={shell.busy || (!pickOurs && !pickTheirs)} onclick={() => void applyConflictChoice(shell, pickOurs, pickTheirs)}>{shell.tr("chrome.mergeAction")}</button>
+                  {#if tool}
+                    <button class="conflict-tool" type="button" disabled={shell.busy} onclick={() => void openConflictTool(shell)}>
+                      {shell.tr("chrome.mergeInTool", { name: tool })}
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                  {/if}
+                </div>
+              </div>
+            {:else if shell.diffError}
+              <p class="diff-empty">{shell.diffError}</p>
+            {:else}
+              <p class="diff-empty">{shell.tr("chrome.reading")}</p>
+            {/if}
           {:else if shell.mode === "live" && shell.section === "changes" && shell.selectedPath}
             <header class="diff-head">
               <span>{shell.selectedPath}</span>
@@ -126,6 +183,20 @@
     <div class="split-bar" data-bar="right"><div></div></div>
     {#if actions}<span class="split-bar-pad"></span>{/if}
   {/snippet}
+
+{#snippet conflictCard(party: ConflictParty, side: "ours" | "theirs")}
+  <label class="conflict-card">
+    {#if side === "ours"}
+      <input type="checkbox" bind:checked={pickOurs} aria-label={party.label} />
+    {/if}
+    <svg class="branch" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M4 2.2v7.2a2.2 2.2 0 1 0 2.2 2.2"/><circle cx="4" cy="12.2" r="1.35"/><circle cx="12" cy="3.6" r="1.35"/><path fill="none" stroke="currentColor" stroke-width="1.3" d="M12 5a4.2 4.2 0 0 1-6 2.6"/></svg>
+    <span class="name" title={party.label}>{party.label}</span>
+    {#if sideText(party)}<span class="conflict-pill {party.state}">{sideText(party)}</span>{/if}
+    {#if side === "theirs"}
+      <input type="checkbox" bind:checked={pickTheirs} aria-label={party.label} />
+    {/if}
+  </label>
+{/snippet}
 
 {#snippet imageCompare(before: string | null, after: string | null)}
     <div class="image-toolbar">

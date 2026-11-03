@@ -117,6 +117,13 @@
     font-weight: 700;
   }
 
+.conflict-mark {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    color: var(--modified);
+  }
+
 .file-name {
     flex: 1;
     min-width: 0;

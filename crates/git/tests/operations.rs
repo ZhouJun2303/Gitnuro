@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    file_diff, file_preview, in_progress, perform, repository_refs, search_commits, stage_hunk, stage_line, status, stop_process_tree,
-    InProgress, Mutation, RebaseStep, ResetMode,
+    conflict_view, file_diff, file_preview, in_progress, perform, repository_refs, search_commits, stage_hunk, stage_line, status,
+    stop_process_tree, ChangeKind, InProgress, Mutation, RebaseStep, ResetMode,
 };
 
 fn repo() -> common::TempRepo {
@@ -985,6 +985,66 @@ fn resolve_text_writes_the_editor_result() {
     .unwrap();
     let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
     assert_eq!(text, "merged\n");
+}
+
+#[test]
+fn stash_conflict_names_the_patch_and_abort_clears_it() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    fs::write(repo.path.join("a.txt"), "stashed\n").unwrap();
+    perform(
+        &repo.path,
+        Mutation::Stash { message: "wip".into(), include_untracked: false },
+    )
+    .unwrap();
+    commit_file(&repo, "a.txt", "main\n", "main-edit");
+    assert!(perform(&repo.path, Mutation::StashApply { name: "stash@{0}".into() }).is_err());
+    assert!(in_progress(&repo.path).unwrap().is_none());
+    let snap = status(&repo.path).unwrap();
+    assert!(
+        snap.unstaged.iter().any(|file| file.path == "a.txt" && file.kind == ChangeKind::Conflict),
+        "{snap:?}"
+    );
+    let view = conflict_view(&repo.path, "a.txt").unwrap();
+    assert_eq!(view.ours.label, "main");
+    assert_eq!(view.ours.state, "modified");
+    assert_eq!(view.theirs.label, "stash/patch");
+    assert_eq!(view.theirs.state, "modified");
+    assert!(!view.binary);
+    perform(&repo.path, Mutation::Abort).unwrap();
+    let after = status(&repo.path).unwrap();
+    assert!(after.unstaged.is_empty() && after.staged.is_empty(), "{after:?}");
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "main\n");
+    assert!(repository_refs(&repo.path).unwrap().stashes.iter().any(|stash| stash.summary.contains("wip")));
+}
+
+#[test]
+fn merge_conflict_names_both_branches() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    commit_file(&repo, "gone.txt", "keep\n", "keep");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "a.txt", "topic\n", "topic");
+    repo.git(&["rm", "gone.txt"]);
+    repo.git(&["commit", "-m", "drop"]);
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main-edit");
+    commit_file(&repo, "gone.txt", "edited\n", "edit-gone");
+    assert!(perform(
+        &repo.path,
+        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false },
+    )
+    .is_err());
+    let edited = conflict_view(&repo.path, "a.txt").unwrap();
+    assert_eq!(edited.ours.label, "main");
+    assert_eq!(edited.ours.state, "modified");
+    assert_eq!(edited.theirs.label, "topic");
+    assert_eq!(edited.theirs.state, "modified");
+    let removed = conflict_view(&repo.path, "gone.txt").unwrap();
+    assert_eq!(removed.ours.label, "main");
+    assert_eq!(removed.ours.state, "modified");
+    assert_eq!(removed.theirs.label, "topic");
+    assert_eq!(removed.theirs.state, "deleted");
 }
 
 struct RemoveDir(PathBuf);

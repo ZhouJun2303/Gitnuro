@@ -149,9 +149,20 @@
       <button class="text-button" type="button" disabled={shell.busy} onclick={() => void shell.mutate({ action: "bisect", verb: "reset", rev: "" }).then(() => shell.loadFacts(true))}>{shell.tr("chrome.abort")}</button>
     </div>
   {/if}
-  {#if shell.mode === "live" && shell.progress}
+  {#if shell.mode === "live" && shell.conflictCount > 0}
+    <div class="banner unmerged">
+      <span>{shell.conflictCount === 1 ? shell.tr("chrome.unmergedOne") : shell.tr("chrome.unmergedMany", { count: String(shell.conflictCount) })}</span>
+      <span class="grow"></span>
+      {#if shell.progress && shell.progress !== "merge"}
+        <button class="text-button" type="button" disabled={shell.busy || shell.conflicted} onclick={() => { if (shell.progress === "rebase") { shell.draft = ""; shell.dialog = "continue"; } else void shell.mutate({ action: "continue" }); }}>{shell.tr("chrome.continueAction")}</button>
+        <button class="text-button" type="button" disabled={shell.busy} onclick={() => shell.mutate({ action: "skip" })}>{shell.tr("chrome.skip")}</button>
+      {/if}
+      <button class="text-button" type="button" disabled={shell.busy} onclick={() => shell.mutate({ action: "abort" })}>{shell.tr("chrome.abort")}</button>
+    </div>
+  {:else if shell.mode === "live" && shell.progress}
     <div class="banner">
       <span>{shell.tr("chrome.inProgress", { name: shell.progressLabel(shell.progress) })}</span>
+      <span class="grow"></span>
       <button class="text-button" type="button" disabled={shell.busy} onclick={() => shell.mutate({ action: "abort" })}>{shell.tr("chrome.abort")}</button>
       <button class="text-button" type="button" disabled={shell.busy || shell.conflicted} onclick={() => { if (shell.progress === "rebase") { shell.draft = ""; shell.dialog = "continue"; } else void shell.mutate({ action: "continue" }); }}>{shell.tr("chrome.continueAction")}</button>
       <button class="text-button" type="button" disabled={shell.busy || shell.progress === "merge"} onclick={() => shell.mutate({ action: "skip" })}>{shell.tr("chrome.skip")}</button>

@@ -263,6 +263,17 @@ export type ConflictSides = {
   working: string;
 };
 
+export type ConflictParty = {
+  label: string;
+  state: "added" | "modified" | "deleted" | "unchanged";
+};
+
+export type ConflictView = {
+  ours: ConflictParty;
+  theirs: ConflictParty;
+  binary: boolean;
+};
+
 export type FilePreview = {
   mime: string;
   dataUrl: string;

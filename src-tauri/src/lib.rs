@@ -954,6 +954,12 @@ fn conflict_sides(path: Option<String>, file: String) -> Result<awegit_git::Conf
 }
 
 #[tauri::command]
+fn conflict_view(path: Option<String>, file: String) -> Result<awegit_git::ConflictView, String> {
+    let repo = repo_from(path)?;
+    awegit_git::conflict_view(&repo, &file).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn compare_files(path: Option<String>, from: String, to: String) -> Result<Vec<awegit_git::FileChange>, String> {
     let repo = repo_from(path)?;
     awegit_git::compare_files(&repo, &from, &to).map_err(|error| error.to_string())
@@ -1326,6 +1332,7 @@ pub fn run() {
             approve_credential,
             check_for_update,
             conflict_sides,
+            conflict_view,
             compare_files,
             compare_file,
             set_repo_author,

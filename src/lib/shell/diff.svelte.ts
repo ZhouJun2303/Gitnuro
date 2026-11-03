@@ -9,6 +9,7 @@ import {
     type CommitDetail,
     type CommitRow,
     type ConflictSides,
+    type ConflictView,
     type DiffLine,
     type FileDiff,
     type FilePreview,
@@ -147,18 +148,74 @@ export function splitScroller(shell: ShellState, node: HTMLElement, columns?: { 
     };
   }
 
+export function mergeToolLabel(shell: ShellState) {
+    const named = shell.settings.mergeToolName.trim();
+    if (named) return named;
+    const command = shell.settings.mergeTool.trim();
+    if (!command) return "";
+    const program = command.split(/\s+/)[0] ?? "";
+    const base = program.split(/[\\/]/).pop() ?? program;
+    return base.replace(/\.exe$/i, "");
+}
+
+export async function openConflictTool(shell: ShellState) {
+    const file = shell.selectedPath;
+    if (!file || !mergeToolLabel(shell) || shell.busy) return;
+    try {
+      await invoke("launch_tool", { path: shell.repoPath(), kind: "merge", file });
+    } catch (error) {
+      shell.actionError = shell.message(error);
+    }
+}
+
+export async function applyConflictChoice(shell: ShellState, ours: boolean, theirs: boolean) {
+    const file = shell.selectedPath;
+    const view = shell.conflictView;
+    if (!file || !view || shell.busy) return;
+    if (ours && theirs) {
+      if (view.binary && mergeToolLabel(shell)) {
+        await openConflictTool(shell);
+        return;
+      }
+      if (view.binary) {
+        shell.actionError = shell.tr("chrome.mergePickOne");
+        return;
+      }
+      void shell.openResolve(file);
+      return;
+    }
+    if (!ours && !theirs) return;
+    await shell.mutate({ action: "resolve", file, side: ours ? "ours" : "theirs", text: "" });
+}
+
 export async function loadDiff(shell: ShellState) {
     if (shell.mode !== "live" || !shell.selectedPath || shell.section !== "changes") {
       shell.diff = null;
       shell.diffError = null;
+      shell.conflictView = null;
       return;
     }
     const token = ++shell.diffToken;
     const file = shell.selectedPath;
     const stagedSide = shell.selectedSide === "staged";
     const path = shell.repoPath();
+    const rows = stagedSide ? shell.snapshot?.staged : shell.snapshot?.unstaged;
+    const conflicted = rows?.some((item) => item.path === file && item.kind === "conflict") ?? false;
     await shell.withWork(shell.tr("chrome.readingFile"), async () => {
     try {
+      if (conflicted) {
+        const view = await invoke<ConflictView>("conflict_view", { path, file });
+        if (token === shell.diffToken && shell.viewing(path) && shell.selectedPath === file) {
+          shell.conflictView = view;
+          shell.diff = null;
+          shell.diffError = null;
+          shell.preview = null;
+          shell.imageNew = null;
+          shell.imageOld = null;
+        }
+        return;
+      }
+      shell.conflictView = null;
       const value = await invoke<FileDiff>("file_diff", {
         path,
         file,
@@ -183,6 +240,7 @@ export async function loadDiff(shell: ShellState) {
     } catch (error) {
       if (token === shell.diffToken && shell.viewing(path)) {
         shell.diff = null;
+        shell.conflictView = null;
         shell.diffError = shell.message(error);
       }
     }
@@ -820,6 +878,7 @@ export function fullPath(shell: ShellState, file: string) {
 
 export function selectFile(shell: ShellState, path: string, side: Side, event?: MouseEvent) {
     shell.clearTextSelection();
+    shell.conflictView = null;
     shell.selectedPath = path;
     shell.selectedSide = side;
     shell.blameLines = null;

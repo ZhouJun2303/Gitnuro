@@ -491,7 +491,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::RebaseInteractive { onto, drop, steps, autostash, update_refs } => {
             rebase_interactive(repo, &onto, &drop, &steps, autostash, update_refs)
         }
-        Mutation::Abort => flow(repo, "abort"),
+        Mutation::Abort => abort(repo),
         Mutation::Continue { message } => continue_with(repo, &message),
         Mutation::Skip => flow(repo, "skip"),
         Mutation::Reset { rev, mode } => reset(repo, &rev, mode),
@@ -956,6 +956,18 @@ fn continue_with(repo: &Path, message: &str) -> Result<(), Error> {
     }
     let editor = SequenceEditor::with_messages("", &[message])?;
     run_env(repo, &["rebase", "--continue"], &[("GIT_EDITOR", editor.editor.as_str())]).map(|_| ())
+}
+
+fn abort(repo: &Path) -> Result<(), Error> {
+    if in_progress(repo)?.is_some() {
+        return flow(repo, "abort");
+    }
+    // A stash apply leaves unmerged paths without MERGE_HEAD. Reset the conflict
+    // back to HEAD and keep the stash entry.
+    if has_unmerged(repo) {
+        return run(repo, &["reset", "--merge"]).map(|_| ());
+    }
+    Err(Error::Git("nothing in progress".into()))
 }
 
 fn flow(repo: &Path, verb: &str) -> Result<(), Error> {

@@ -17,6 +17,7 @@ import {
     type CommitDetail,
     type CommitRow,
     type ConflictSides,
+    type ConflictView,
     type DiffLine,
     type FileDiff,
     type FilePreview,
@@ -708,6 +709,9 @@ export class ShellState {
   conflict = $state<ConflictSides | null>(null);
 
 
+  conflictView = $state<ConflictView | null>(null);
+
+
   logLimit = $state(500);
 
 
@@ -831,8 +835,18 @@ export class ShellState {
   );
 
 
-  conflicted = $derived(
-    [...(this.snapshot?.staged ?? []), ...(this.snapshot?.unstaged ?? [])].some((file) => file.kind === "conflict"),
+  conflictCount = $derived(
+    [...(this.snapshot?.staged ?? []), ...(this.snapshot?.unstaged ?? [])].filter((file) => file.kind === "conflict").length,
+  );
+
+
+  conflicted = $derived(this.conflictCount > 0);
+
+
+  selectedConflict = $derived(
+    this.mode === "live" &&
+      !!this.selectedPath &&
+      (this.selectedSide === "staged" ? this.snapshot?.staged : this.snapshot?.unstaged)?.some((file) => file.path === this.selectedPath && file.kind === "conflict") === true,
   );
 
 
@@ -1479,7 +1493,11 @@ export class ShellState {
       this.selectedSide = otherSide;
       return;
     }
-    if (value.unstaged[0]) {
+    const conflict = value.unstaged.find((file) => file.kind === "conflict");
+    if (conflict) {
+      this.selectedSide = "unstaged";
+      this.selectedPath = conflict.path;
+    } else if (value.unstaged[0]) {
       this.selectedSide = "unstaged";
       this.selectedPath = value.unstaged[0].path;
     } else if (value.staged[0]) {
@@ -1647,6 +1665,12 @@ export class ShellState {
         return { title: text("command").split("\n")[0] || this.tr("chrome.activity"), command: text("command") };
       case "submoduleUpdate":
         return { title: this.tr("chrome.submodules"), command: this.gitLine(["submodule", "update", "--init", "--recursive"]) };
+      case "abort": {
+        const command = this.progress === "cherryPick" ? "cherry-pick" : this.progress;
+        return this.progress
+          ? { title: this.tr("chrome.abort"), command: this.gitLine([command ?? "", "--abort"]) }
+          : { title: this.tr("chrome.abort"), command: this.gitLine(["reset", "--merge"]) };
+      }
       default:
         return { title: action || this.tr("chrome.activity"), command: this.gitLine([action, text("name"), text("rev")]) };
     }

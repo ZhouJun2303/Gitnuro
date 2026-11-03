@@ -108,7 +108,7 @@
           <button class="side" type="button" class:selected={shell.selectedPath === file.path && shell.selectedSide === "staged"} class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && shell.selectedSide === "staged")} onclick={() => shell.selectFile(file.path, "staged")}><span class="meta">{shell.tr("chrome.staged")}</span> <span class="name">{file.path}</span></button>
         {/each}
         {#each shell.shownUnstaged as file (`u:${file.path}`)}
-          <button class="side" type="button" class:selected={shell.selectedPath === file.path && shell.selectedSide === "unstaged"} class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && shell.selectedSide === "unstaged")} onclick={() => shell.selectFile(file.path, "unstaged")}><span class="meta">{shell.tr("chrome.unstaged")}</span> <span class="name">{file.path}</span></button>
+          <button class="side" type="button" class:selected={shell.selectedPath === file.path && shell.selectedSide === "unstaged"} class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && shell.selectedSide === "unstaged")} onclick={() => shell.selectFile(file.path, "unstaged")}>{#if file.letter === "C"}{@render conflictMark()}{/if}<span class="meta">{shell.tr("chrome.unstaged")}</span> <span class="name">{file.path}</span></button>
         {/each}
       </div>
     {/snippet}
@@ -227,7 +227,11 @@
           {#if shell.fileLayout === "tree"}
             {@render treeLine(false, false, file.path, file.letter)}
           {:else}
-            <span class="badge {file.tone}">{file.letter}</span>
+            {#if file.letter === "C"}
+              {@render conflictMark()}
+            {:else}
+              <span class="badge {file.tone}">{file.letter}</span>
+            {/if}
             <span class="file-name">{shell.fileName(file.path)}</span>
           {/if}
         </button>
@@ -240,7 +244,11 @@
       {@render folderIcon()}
     {:else}
       <span class="twist"></span>
-      {#if letter}{@render statusBadge(letter)}{/if}
+      {#if letter === "C"}
+        {@render conflictMark()}
+      {:else if letter}
+        {@render statusBadge(letter)}
+      {/if}
       {@render typeIcon(path)}
     {/if}
     <span class="name">{shell.fileName(path)}</span>
@@ -257,6 +265,10 @@
 {#snippet folderIcon()}
     <svg class="tree-icon folder" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.5 4.1A1.4 1.4 0 0 1 2.9 2.7h3.2l1.3 1.4H13a1.5 1.5 0 0 1 1.5 1.5v6.9A1.5 1.5 0 0 1 13 14H2.9a1.4 1.4 0 0 1-1.4-1.4z"/></svg>
   {/snippet}
+
+{#snippet conflictMark()}
+  <svg class="conflict-mark" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.4 14.8 13.4H1.2L8 1.4z"/><path d="M8 6.1v3.3" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r=".75" fill="#fff"/></svg>
+{/snippet}
 
 {#snippet statusBadge(letter: string)}
     {#if letter === "A" || letter === "?"}

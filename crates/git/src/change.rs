@@ -1,11 +1,13 @@
 //! Stage, unstage, and commit through the `git` command.
 
-use std::path::Path;
+use std::fs::File;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::cli::{check_path, commit_config, run, run_stdin};
-use crate::Error;
+use crate::{in_progress, Error, InProgress};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitRequest {
@@ -304,6 +306,220 @@ fn show_stage(repo: &Path, path: &str, stage: u8) -> String {
         Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
         Err(_) => String::new(),
     }
+}
+
+/// One side of an unmerged path: the name Git would show, and how it differs from the base.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictParty {
+    pub label: String,
+    pub state: String,
+}
+
+/// Labels and change kinds for the two sides of an unmerged file.
+///
+/// Ours is the current branch (the right side). Theirs is the incoming side:
+/// the other branch, the commit being replayed, or `stash/patch` when the blob
+/// belongs to a stash's working tree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictView {
+    pub ours: ConflictParty,
+    pub theirs: ConflictParty,
+    pub binary: bool,
+}
+
+pub fn conflict_view(repo: &Path, path: &str) -> Result<ConflictView, Error> {
+    let path = check_path(path)?;
+    let stages = stage_oids(repo, path)?;
+    if stages[2].is_none() && stages[3].is_none() {
+        return Err(Error::Git(format!("{path} is not unmerged")));
+    }
+    let base = stages[1].as_deref();
+    Ok(ConflictView {
+        ours: ConflictParty {
+            label: ours_label(repo),
+            state: side_state(base, stages[2].as_deref()).into(),
+        },
+        theirs: ConflictParty {
+            label: theirs_label(repo, path, stages[3].as_deref()),
+            state: side_state(base, stages[3].as_deref()).into(),
+        },
+        binary: conflict_is_binary(repo, path, &stages),
+    })
+}
+
+fn stage_oids(repo: &Path, path: &str) -> Result<[Option<String>; 4], Error> {
+    let output = run(repo, &["ls-files", "-u", "--stage", "--", path])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut stages = [None, None, None, None];
+    for line in text.lines() {
+        let mut fields = line.split_whitespace();
+        let _mode = fields.next();
+        let oid = fields.next().unwrap_or("");
+        let stage: usize = fields.next().unwrap_or("0").parse().unwrap_or(0);
+        if (1..=3).contains(&stage) && oid.len() >= 7 {
+            stages[stage] = Some(oid.to_string());
+        }
+    }
+    Ok(stages)
+}
+
+fn side_state(base: Option<&str>, side: Option<&str>) -> &'static str {
+    match (base, side) {
+        (None, Some(_)) => "added",
+        (_, None) => "deleted",
+        (Some(base), Some(side)) if base == side => "unchanged",
+        (Some(_), Some(_)) => "modified",
+    }
+}
+
+fn ours_label(repo: &Path) -> String {
+    if matches!(in_progress(repo).ok().flatten(), Some(InProgress::Rebase)) {
+        if let Some(name) = rebase_onto_label(repo) {
+            return name;
+        }
+    }
+    head_label(repo)
+}
+
+fn theirs_label(repo: &Path, path: &str, theirs: Option<&str>) -> String {
+    match in_progress(repo).ok().flatten() {
+        Some(InProgress::Merge) => named_ref(repo, "MERGE_HEAD")
+            .or_else(|| merge_message_name(repo))
+            .or_else(|| subject_of(repo, "MERGE_HEAD"))
+            .unwrap_or_else(|| "theirs".into()),
+        Some(InProgress::Rebase) => rebase_head_label(repo)
+            .or_else(|| subject_of(repo, "REBASE_HEAD"))
+            .unwrap_or_else(|| "theirs".into()),
+        Some(InProgress::CherryPick) => subject_of(repo, "CHERRY_PICK_HEAD").unwrap_or_else(|| "cherry-pick".into()),
+        Some(InProgress::Revert) => subject_of(repo, "REVERT_HEAD").unwrap_or_else(|| "revert".into()),
+        None => theirs
+            .and_then(|oid| stash_label(repo, path, oid))
+            .unwrap_or_else(|| "theirs".into()),
+    }
+}
+
+fn head_label(repo: &Path) -> String {
+    match git_text(repo, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+        Some(name) if name != "HEAD" => name,
+        _ => "HEAD".into(),
+    }
+}
+
+fn named_ref(repo: &Path, rev: &str) -> Option<String> {
+    let text = git_text(repo, &[
+        "for-each-ref",
+        "--format=%(refname:short)",
+        "--points-at",
+        rev,
+        "refs/heads",
+        "refs/remotes",
+    ])?;
+    let names: Vec<&str> = text.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+    names
+        .iter()
+        .copied()
+        .find(|name| !name.contains('/'))
+        .or_else(|| names.first().copied())
+        .map(str::to_string)
+}
+
+fn subject_of(repo: &Path, rev: &str) -> Option<String> {
+    let text = git_text(repo, &["log", "-1", "--format=%s", rev])?;
+    let line = text.lines().next()?.trim();
+    if line.is_empty() { None } else { Some(line.to_string()) }
+}
+
+fn merge_message_name(repo: &Path) -> Option<String> {
+    let text = git_file(repo, "MERGE_MSG")?;
+    let line = text.lines().next()?.trim();
+    let start = line.find('\'')?;
+    let rest = &line[start + 1..];
+    let end = rest.find('\'')?;
+    let name = rest[..end].trim();
+    if name.is_empty() { None } else { Some(name.to_string()) }
+}
+
+fn rebase_head_label(repo: &Path) -> Option<String> {
+    for name in ["rebase-merge/head-name", "rebase-apply/head-name"] {
+        if let Some(text) = git_file(repo, name) {
+            return Some(short_ref(&text));
+        }
+    }
+    None
+}
+
+fn rebase_onto_label(repo: &Path) -> Option<String> {
+    for name in ["rebase-merge/onto", "rebase-apply/onto"] {
+        if let Some(sha) = git_file(repo, name) {
+            if let Some(label) = named_ref(repo, sha.trim()) {
+                return Some(label);
+            }
+        }
+    }
+    None
+}
+
+fn short_ref(name: &str) -> String {
+    name.trim()
+        .trim_start_matches("refs/heads/")
+        .trim_start_matches("refs/remotes/")
+        .to_string()
+}
+
+/// `stash/patch` is the stash commit's work tree. `stash/index` is its index parent.
+fn stash_label(repo: &Path, path: &str, oid: &str) -> Option<String> {
+    let list = git_text(repo, &["stash", "list", "--format=%H"])?;
+    for hash in list.lines().map(str::trim).filter(|line| !line.is_empty()).take(30) {
+        let spec = format!("{hash}:{path}");
+        if git_text(repo, &["rev-parse", "--verify", "--quiet", &spec]).as_deref() == Some(oid) {
+            return Some("stash/patch".into());
+        }
+        let index = format!("{hash}^2:{path}");
+        if git_text(repo, &["rev-parse", "--verify", "--quiet", &index]).as_deref() == Some(oid) {
+            return Some("stash/index".into());
+        }
+    }
+    None
+}
+
+fn git_text(repo: &Path, args: &[&str]) -> Option<String> {
+    let output = run(repo, args).ok()?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+fn git_file(repo: &Path, name: &str) -> Option<String> {
+    let rel = git_text(repo, &["rev-parse", "--git-path", name])?;
+    let path = PathBuf::from(&rel);
+    let path = if path.is_absolute() { path } else { repo.join(path) };
+    let text = std::fs::read_to_string(path).ok()?;
+    let text = text.trim().to_string();
+    if text.is_empty() { None } else { Some(text) }
+}
+
+fn conflict_is_binary(repo: &Path, path: &str, stages: &[Option<String>; 4]) -> bool {
+    if file_has_nul(repo, path) {
+        return true;
+    }
+    stages.iter().flatten().any(|oid| blob_has_nul(repo, oid))
+}
+
+fn file_has_nul(repo: &Path, path: &str) -> bool {
+    let mut file = match File::open(repo.join(path)) {
+        Ok(file) => file,
+        Err(_) => return false,
+    };
+    let mut buf = [0u8; 8192];
+    let read = file.read(&mut buf).unwrap_or(0);
+    buf[..read].contains(&0)
+}
+
+fn blob_has_nul(repo: &Path, oid: &str) -> bool {
+    run(repo, &["cat-file", "blob", oid])
+        .map(|output| output.stdout.iter().take(8192).any(|byte| *byte == 0))
+        .unwrap_or(false)
 }
 
 pub fn resolve_conflict(repo: &Path, path: &str, side: &str, text: &str) -> Result<(), Error> {

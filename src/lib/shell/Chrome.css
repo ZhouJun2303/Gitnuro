@@ -328,6 +328,13 @@
     background: var(--selection);
   }
 
+.banner .grow { flex: 1; }
+
+.banner.unmerged {
+    background: color-mix(in srgb, var(--modified) 14%, var(--canvas));
+    color: var(--text);
+  }
+
 .error-toast {
     position: fixed;
     right: 16px;

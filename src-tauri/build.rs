@@ -31,6 +31,7 @@ fn main() {
             "approve_credential",
             "check_for_update",
             "conflict_sides",
+            "conflict_view",
             "compare_files",
             "compare_file",
             "set_repo_author",

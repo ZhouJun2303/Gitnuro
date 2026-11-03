@@ -101,6 +101,16 @@ export type Messages = {
     readingStatus: string;
     noChanges: string;
     inProgress: string;
+    unmergedOne: string;
+    unmergedMany: string;
+    mergeConflict: string;
+    mergeConflictHint: string;
+    mergeAction: string;
+    mergeInTool: string;
+    sideAdded: string;
+    sideModified: string;
+    sideDeleted: string;
+    mergePickOne: string;
     blameOf: string;
     branches: string;
     view: string;

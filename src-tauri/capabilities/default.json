@@ -40,6 +40,7 @@
     "allow-approve-credential",
     "allow-check-for-update",
     "allow-conflict-sides",
+    "allow-conflict-view",
     "allow-compare-files",
     "allow-compare-file",
     "allow-set-repo-author",
