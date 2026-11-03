@@ -389,6 +389,31 @@ textarea {
 
 .ref.stash { background: var(--ref-stash-bg); color: var(--ref-stash); }
 
+.name-plate {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 200px;
+    height: 18px;
+    padding: 0 6px;
+    border: 1px solid var(--lane);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--lane) 10%, var(--elevated));
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 16px;
+    flex: none;
+  }
+
+.name-plate.grow { flex: 1; max-width: none; }
+
+.name-plate > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
 .diff-body {
     margin: 0;
     padding: 8px 0;

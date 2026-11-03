@@ -197,8 +197,8 @@
               class:long={shell.settings.aiPromptStyle === "long"}
               type="button"
               title={shell.staged.length === 0 ? shell.tr("chrome.suggestNeedStaged") : shell.tr("chrome.suggestTitle", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}
-              aria-label={shell.tr("chrome.suggestTitle", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}
-              disabled={shell.busy}
+              aria-label={shell.staged.length === 0 ? shell.tr("chrome.suggestNeedStaged") : shell.tr("chrome.suggestTitle", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}
+              disabled={shell.busy || shell.staged.length === 0}
               onclick={() => void shell.suggestMessage()}
               oncontextmenu={(event) => shell.togglePromptStyle(event)}
             >

@@ -17,7 +17,6 @@ import {
     type StatusFile,
     type StatusSnapshot,
     type Suggestion,
-    type UpdateNotice,
   } from "../status";
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
 import type { ShellState } from "./state.svelte";
@@ -211,7 +210,7 @@ export function windowItems(shell: ShellState) {
 export function helpItems(shell: ShellState) {
     return [
       { label: shell.tr("chrome.about"), run: () => (shell.dialog = "about") },
-      { label: shell.tr("chrome.download"), run: () => void invoke("check_for_update").then((value) => (shell.updateNotice = value as UpdateNotice | null)) },
+      { label: shell.tr("chrome.checkUpdate"), run: () => void shell.checkForUpdate() },
     ];
   }
 
@@ -219,7 +218,7 @@ export function commitExtras(shell: ShellState) {
     return [
       { label: `${shell.signOff ? "✓ " : ""}${shell.tr("chrome.signOff")}`, run: () => { shell.signOff = !shell.signOff; if (shell.mode === "live") void shell.mutate({ action: "setSignOff", enabled: shell.signOff, format: shell.refs?.signOffFormat || shell.settings.signOffFormat }); } },
       { label: `${shell.skipHooks ? "✓ " : ""}${shell.tr("chrome.skipHooks")}`, run: () => (shell.skipHooks = !shell.skipHooks) },
-      { label: shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") }), disabled: shell.busy, run: () => void shell.suggestMessage() },
+      { label: shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") }), disabled: shell.busy || shell.staged.length === 0, run: () => void shell.suggestMessage() },
       { label: shell.tr("chrome.commitAndPush"), disabled: !shell.canCommit, run: () => void shell.submitCommit(true) },
     ];
   }

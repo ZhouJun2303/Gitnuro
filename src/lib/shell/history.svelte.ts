@@ -167,6 +167,14 @@ export async function searchContent(shell: ShellState, kind: string, needle: str
     });
   }
 
+/** `On <branch>: …` and `WIP on <branch>: …` split into a branch plate and a stash plate. */
+export function stashParts(summary: string, refs: string[] = []): { branch: string; message: string } | null {
+  const match = /^(?:WIP )?on ([^:]+): (.*)$/i.exec(summary.trim());
+  if (match) return { branch: match[1].trim(), message: match[2] };
+  if (refs.some((label) => label === "stash" || label.startsWith("stash"))) return { branch: "", message: summary };
+  return null;
+}
+
 export function refKind(shell: ShellState, label: string) {
     if (label === "stash" || label.startsWith("stash")) return "stash";
     if (label.includes("/")) return "remote";

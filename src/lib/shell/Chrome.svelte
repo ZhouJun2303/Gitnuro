@@ -4,7 +4,6 @@
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
-  import { openUrl } from "@tauri-apps/plugin-opener";
 
   const shell = getShell();
 
@@ -197,9 +196,9 @@
   {#if shell.updateNotice}
     <div class="banner">
       <span>{shell.tr("chrome.updateAvailable", { name: `AweGit ${shell.updateNotice.appVersion}` })}</span>
-      {#if shell.updateNotice.downloadUrl}
-        <button class="text-button" type="button" onclick={() => openUrl(shell.updateNotice?.downloadUrl ?? "")}>{shell.tr("chrome.download")}</button>
-      {/if}
+      {#if shell.updateNotice.notes}<span class="meta">{shell.updateNotice.notes}</span>{/if}
+      <button class="text-button" type="button" disabled={shell.updateBusy} onclick={() => void shell.installUpdate()}>{shell.updateBusy ? shell.tr("chrome.updateDownloading") : shell.tr("chrome.updateInstall")}</button>
+      <button class="text-button" type="button" disabled={shell.updateBusy} onclick={() => shell.dismissUpdate()}>{shell.tr("chrome.updateLater")}</button>
     </div>
   {/if}
   {#if shell.mode === "live" && shell.facts?.bisectActive}

@@ -283,6 +283,9 @@ pub struct Settings {
     /// Last commit-message type chosen in the composer.
     #[serde(default = "commit_type_default")]
     pub commit_type: String,
+    /// Update banner stays hidden for this version until a newer one is published.
+    #[serde(default)]
+    pub dismissed_update: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -552,6 +555,7 @@ impl Default for Settings {
             workspace_show_title: false,
             scan_depth: scan_depth_default(),
             commit_type: commit_type_default(),
+            dismissed_update: String::new(),
         }
     }
 }

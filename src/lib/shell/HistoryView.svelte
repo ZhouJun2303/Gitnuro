@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getShell } from "./context";
+  import StashPlates from "./StashPlates.svelte";
   import "./HistoryView.css";
   import SplitHandle from "../SplitHandle.svelte";
   import CommitDetail from "./CommitDetail.svelte";
@@ -60,6 +61,7 @@
                 {#each shell.historyRows as commit, index (commit.id)}
                   {@const graphRow = shell.liveGraph.rows[shell.historyStart + index] ?? []}
                 {@const tone = shell.laneTone(graphRow)}
+                {@const plate = shell.stashParts(commit.summary, commit.refs)}
                   <div
                     class="commit-row virtual"
                     class:selected={shell.selectedCommit === commit.id}
@@ -80,7 +82,11 @@
                     {@render laneGraph(graphRow, commit.id)}
                     <span class="commit-copy">
                       {@render branchChips(shell.branchRefLabels(commit.refs), tone, activeColor)}
-                      <span class="subject">{@render linked(commit.summary)}</span>
+                      {#if plate}
+                        <StashPlates branch={plate.branch} message={plate.message} />
+                      {:else}
+                        <span class="subject">{@render linked(commit.summary)}</span>
+                      {/if}
                       {#if shell.plainRefLabels(commit.refs).length > 0}
                         <span class="badges">
                           {#each shell.plainRefLabels(commit.refs) as label (label)}<span class="ref {shell.refKind(label)}" class:compact={shell.settings.compactBranchLabels}>{label}</span>{/each}
@@ -123,11 +129,16 @@
               {#each shell.sampleShown as commit, index (commit.id)}
                 {@const graphRow = shell.sampleShownGraph.rows[index] ?? []}
                 {@const tone = shell.laneTone(graphRow)}
+                {@const plate = shell.stashParts(commit.summary, commit.badges)}
                 <button class="commit-row" class:selected={shell.selectedCommit === commit.id || shell.selectedPath === commit.id} class:unpushed={shell.isCommitUnpushed(commit)} type="button" onclick={() => shell.selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
                   {@render laneGraph(graphRow, commit.id)}
                   <span class="commit-copy">
                     {@render branchChips(shell.branchRefLabels(commit.badges), tone, activeColor)}
-                    <span class="subject">{@render linked(commit.summary)}</span>
+                    {#if plate}
+                      <StashPlates branch={plate.branch} message={plate.message} />
+                    {:else}
+                      <span class="subject">{@render linked(commit.summary)}</span>
+                    {/if}
                     {#if shell.plainRefLabels(commit.badges).length > 0}
                       <span class="badges">
                         {#each shell.plainRefLabels(commit.badges) as label (label)}<span class="ref {shell.refKind(label)}" class:compact={shell.settings.compactBranchLabels}>{label}</span>{/each}

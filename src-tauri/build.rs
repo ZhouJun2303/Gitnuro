@@ -37,6 +37,8 @@ fn main() {
             "set_passphrase",
             "approve_credential",
             "check_for_update",
+            "app_version",
+            "download_update",
             "conflict_sides",
             "conflict_view",
             "compare_files",

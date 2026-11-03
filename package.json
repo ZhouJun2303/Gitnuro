@@ -13,6 +13,7 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "test": "node ./scripts/with-rust-path.mjs cargo test -p awegit-git -- --test-threads=1",
     "package:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/package-windows.ps1",
+    "publish:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/publish-windows.ps1",
     "package:mac": "sh ./scripts/package-mac.sh",
     "tauri": "node ./scripts/with-rust-path.mjs tauri"
   },

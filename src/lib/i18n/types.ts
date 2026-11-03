@@ -129,6 +129,11 @@ export type Messages = {
     skip: string;
     download: string;
     updateAvailable: string;
+    checkUpdate: string;
+    updateInstall: string;
+    updateLater: string;
+    updateDownloading: string;
+    updateCurrent: string;
     readingStatus: string;
     noChanges: string;
     inProgress: string;

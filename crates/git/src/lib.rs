@@ -75,6 +75,9 @@ pub enum Error {
         #[source]
         source: Box<gix::open::Error>,
     },
+    /// The path is gone, or it is not a Git repository. Callers drop saved config for this path.
+    #[error("could not open repository at {path}: missing")]
+    Missing { path: String },
     #[error(transparent)]
     Status(#[from] gix::status::Error),
     #[error(transparent)]
@@ -111,10 +114,7 @@ pub fn status(path: impl AsRef<Path>) -> Result<StatusSnapshot, Error> {
 /// Conflicts stay visible. Passing `false` is the same as [`status`].
 pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSnapshot, Error> {
     let path = path.as_ref();
-    let repo = gix::open(path).map_err(|source| Error::Open {
-        path: path.display().to_string(),
-        source: Box::new(source),
-    })?;
+    let repo = open_repo(path)?;
     let worktree = repo.workdir().unwrap_or(path).to_path_buf();
     let branch = repo
         .head()?
@@ -151,6 +151,28 @@ pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSna
 /// Unstage index entries that `.fakeignore` matches. Used so stage-all and commit skip local test files.
 pub fn unstage_fakeignored(repo: &Path) -> Result<(), Error> {
     fakeignore::unstage(repo)
+}
+
+fn open_repo(path: &Path) -> Result<gix::Repository, Error> {
+    gix::open(path).map_err(|source| classify_open(path, source))
+}
+
+fn classify_open(path: &Path, source: gix::open::Error) -> Error {
+    let missing = match &source {
+        gix::open::Error::NotARepository { .. } => true,
+        gix::open::Error::Io(err) => err.kind() == std::io::ErrorKind::NotFound || !path.exists(),
+        _ => !path.exists(),
+    };
+    if missing {
+        Error::Missing {
+            path: path.display().to_string(),
+        }
+    } else {
+        Error::Open {
+            path: path.display().to_string(),
+            source: Box::new(source),
+        }
+    }
 }
 
 /// Walk upward from `start` until a repository work tree is found.

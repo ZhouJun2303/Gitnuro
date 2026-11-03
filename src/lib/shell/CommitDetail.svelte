@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getShell } from "./context";
+  import StashPlates from "./StashPlates.svelte";
   import "./CommitDetail.css";
   import SplitHandle from "../SplitHandle.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -21,18 +22,24 @@
           </div>
           {#if shell.selectedCommit || shell.commitDetail}
             {@const name = shell.commitAuthorName()}
+            {@const plate = shell.stashParts(shell.commitSubject(), shell.commitRefs())}
             <div class="commit-strip">
               <span class="avatar tile strip" style:background={shell.avatarColor(name)}>{(name || "?").slice(0, 1).toUpperCase()}</span>
               <span class="strip-author" title={name}>{name}</span>
               <span class="strip-sha">{(shell.selectedCommit ?? "").slice(0, 7)}</span>
               <span class="strip-when">{shell.commitWhenShort()}</span>
-              <span class="strip-subject" title={shell.commitSubject()}>{@render linked(shell.commitSubject())}</span>
+              {#if plate}
+                <StashPlates branch={plate.branch} message={plate.message} />
+              {:else}
+                <span class="strip-subject" title={shell.commitSubject()}>{@render linked(shell.commitSubject())}</span>
+              {/if}
             </div>
           {/if}
           <div class="detail-body">
             {#if !shell.selectedCommit && !shell.commitDetail}
               <p class="empty">{shell.tr("chrome.selectCommitFile")}</p>
             {:else if shell.historyTab === "commit"}
+              {@const plate = shell.stashParts(shell.commitSubject(), shell.commitRefs())}
               <div class="detail-scroll">
                 <div class="fork-card" class:select-all={shell.textWhere === "detail"}>
                   {@render personBlock(shell.tr("chrome.author"), shell.commitDetail?.author || shell.commitAuthorName(), shell.commitDetail?.authorEmail ?? "", shell.commitDetail?.authorAt ?? 0)}
@@ -52,7 +59,11 @@
                       {#each shell.commitRefs() as label (label)}<span class="ref {shell.refKind(label)}" class:compact={shell.settings.compactBranchLabels}>{label}</span>{/each}
                     </div>
                   {/if}
-                  <p class="detail-message">{@render linked(shell.commitSubject())}</p>
+                  {#if plate}
+                    <p class="detail-message"><StashPlates branch={plate.branch} message={plate.message} /></p>
+                  {:else}
+                    <p class="detail-message">{@render linked(shell.commitSubject())}</p>
+                  {/if}
                   {#if shell.commitDetail?.body}<pre class="detail-body-text">{@render linked(shell.commitDetail.body)}</pre>{/if}
                 </div>
                 {#each shell.commitFiles as file, index (file.path)}

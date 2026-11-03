@@ -2,7 +2,6 @@
   import { getShell } from "./context";
   import "./PrefsDialog.css";
   import { invoke } from "../perf";
-  import type { UpdateNotice } from "../status";
 
   const shell = getShell();
 
@@ -209,7 +208,7 @@
                 <option value="dark">{shell.tr("dialog.dark")}</option>
               </select>
             </label>
-            <button class="text-button" type="button" onclick={() => invoke("check_for_update").then((value) => (shell.updateNotice = value as UpdateNotice | null))}>{shell.tr("chrome.download")}</button>
+            <button class="text-button" type="button" onclick={() => void shell.checkForUpdate()}>{shell.tr("chrome.checkUpdate")}</button>
           {:else}
             <label class="check"><input type="checkbox" bind:checked={shell.settings.pullRebase} /> Pull with rebase</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.fetchPrune} /> Prune on fetch</label>

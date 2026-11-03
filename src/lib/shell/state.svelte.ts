@@ -34,7 +34,7 @@ import {
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
-import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
+import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError } from "./types";
 
@@ -196,6 +196,7 @@ export class ShellState {
     workspaceShowTitle: false,
     scanDepth: 5,
     commitType: "feat",
+    dismissedUpdate: "",
   };
 
 
@@ -596,6 +597,12 @@ export class ShellState {
 
 
   updateNotice = $state<UpdateNotice | null>(null);
+
+  pendingUpdate: UpdateNotice | null = null;
+
+  updateBusy = $state(false);
+
+  appVersion = $state("2.0.0");
 
 
   passphrase = $state("");
@@ -1829,6 +1836,7 @@ export class ShellState {
     this.statusGen += 1;
     if (!this.same(this.snapshot, value)) this.snapshot = value;
     this.mode = "live";
+    this.loadError = "";
     if (value.path && !this.repos.includes(value.path)) this.repos = [...this.repos, value.path];
     const sameSide = (this.selectedSide === "staged" ? value.staged : value.unstaged).some(
       (file) => file.path === this.selectedPath,
@@ -1899,7 +1907,11 @@ export class ShellState {
       if (scope === "full") await this.loadContext();
       if (this.viewing(path)) await this.loadDiff();
     } catch (error) {
-      if (this.viewing(path)) this.actionError = this.message(error);
+      if (this.viewing(path)) {
+        const text = this.message(error);
+        this.actionError = text;
+        if (this.missingRepoPath(text)) await this.dropMissingRepo(path, text);
+      }
     } finally {
       this.refreshing = false;
       if (!silent) this.stopWork(path);
@@ -2309,6 +2321,60 @@ export class ShellState {
     const limit = Math.max(1, this.settings.maxCommits || 500);
     if (resetHistory || this.logLimit === 500) this.logLimit = limit;
     this.signOff = this.settings.signOff;
+    this.showPendingUpdate(false);
+  }
+
+  showPendingUpdate(force: boolean) {
+    const value = this.pendingUpdate;
+    if (!value) {
+      if (force) this.updateNotice = null;
+      return;
+    }
+    if (!force && value.appVersion && value.appVersion === this.settings.dismissedUpdate) {
+      this.updateNotice = null;
+      return;
+    }
+    this.updateNotice = value;
+  }
+
+  async checkForUpdate() {
+    try {
+      const value = await invoke<UpdateNotice | null>("check_for_update");
+      this.pendingUpdate = value;
+      if (!value) {
+        this.updateNotice = null;
+        this.actionError = this.tr("chrome.updateCurrent");
+        return;
+      }
+      this.updateNotice = value;
+    } catch (error) {
+      this.actionError = this.message(error);
+    }
+  }
+
+  dismissUpdate() {
+    const version = this.updateNotice?.appVersion ?? "";
+    this.updateNotice = null;
+    if (!version) return;
+    this.settings = { ...this.settings, dismissedUpdate: version };
+    void this.savePrefs(false);
+  }
+
+  async installUpdate() {
+    const notice = this.updateNotice;
+    if (!notice || this.updateBusy) return;
+    if (!notice.installable || !notice.downloadUrl) {
+      if (notice.downloadUrl) void openUrl(notice.downloadUrl);
+      return;
+    }
+    this.updateBusy = true;
+    try {
+      await invoke("download_update", { url: notice.downloadUrl });
+    } catch (error) {
+      this.actionError = this.message(error);
+    } finally {
+      this.updateBusy = false;
+    }
   }
 
 
@@ -2760,6 +2826,12 @@ export class ShellState {
 
 
 
+  stashParts(summary: string, refs: string[] = []) {
+    return stashParts(summary, refs);
+  }
+
+
+
   /** Color of the commit dot, so a branch chip matches the line it sits on. */
   laneTone(row: GraphCell[] | undefined) {
     return laneTone(this, row);
@@ -2869,6 +2941,75 @@ export class ShellState {
     });
     this.settings = { ...this.settings, recent, workspaces };
     void invoke("save_settings", { values: this.settings });
+  }
+
+  /** Path inside `could not open repository at {path}: missing`. Other open errors stay put. */
+  missingRepoPath(text: string) {
+    const marker = "could not open repository at ";
+    const suffix = ": missing";
+    if (!text.startsWith(marker) || !text.endsWith(suffix)) return null;
+    const path = text.slice(marker.length, -suffix.length).trim();
+    return path || null;
+  }
+
+  /** Drop a repository that is gone from the saved lists. Custom commands stay. */
+  forgetRepo(path: string) {
+    const match = (item: string) => this.pathsMatch(item, path);
+    const dropKeyed = (items: string[]) => items.filter((item) => {
+      const tab = item.indexOf("\t");
+      const head = tab >= 0 ? item.slice(0, tab) : item;
+      return !match(head);
+    });
+    const recent = this.settings.recent.filter((item) => !match(item));
+    const workspaces = this.settings.workspaces.map((workspace) => {
+      const current = workspace.openTabs[workspace.selectedTab];
+      const repositories = workspace.repositories.filter((item) => !match(item));
+      const openTabs = workspace.openTabs.filter((item) => !match(item));
+      const kept = current && !match(current) ? openTabs.findIndex((item) => this.pathsMatch(item, current)) : -1;
+      return {
+        ...workspace,
+        repositories,
+        openTabs,
+        selectedTab: kept >= 0 ? kept : 0,
+        tabWidth: workspaceTabWidth(repositories.length),
+      };
+    });
+    this.settings = {
+      ...this.settings,
+      recent,
+      workspaces,
+      tabLabels: dropKeyed(this.settings.tabLabels),
+      tabColors: dropKeyed(this.settings.tabColors),
+      pinnedRefs: dropKeyed(this.settings.pinnedRefs),
+    };
+    this.repos = this.repos.filter((item) => !match(item));
+    this.closedTabs = this.closedTabs.filter((item) => !match(item));
+    for (const key of [...this.drafts.keys()]) {
+      if (match(key)) this.drafts.delete(key);
+    }
+    if (Object.keys(this.recentStats).some((key) => match(key))) {
+      const stats = { ...this.recentStats };
+      for (const key of Object.keys(stats)) {
+        if (match(key)) delete stats[key];
+      }
+      this.recentStats = stats;
+    }
+    void this.savePrefs(false);
+  }
+
+  /** Show the missing-repository error, then drop that path. Open another tab when this one was on screen. */
+  async dropMissingRepo(path: string, text: string) {
+    this.forgetRepo(path);
+    const named = this.missingRepoPath(text);
+    if (named && !this.pathsMatch(named, path)) this.forgetRepo(named);
+    const viewingFailed = !this.snapshot || this.pathsMatch(this.snapshot.path, path);
+    if (!viewingFailed) return;
+    this.snapshot = null;
+    this.refs = null;
+    this.mode = "error";
+    this.loadError = text;
+    const next = this.repos.find((item) => !this.pathsMatch(item, path));
+    if (next) await this.openRepo(next);
   }
 
 
@@ -3020,7 +3161,10 @@ export class ShellState {
       this.factsPath = "";
       void this.fillTemplate();
     } catch (error) {
-      if (gen === this.openGen) this.actionError = this.message(error);
+      if (gen !== this.openGen) return;
+      const text = this.message(error);
+      this.actionError = text;
+      if (this.missingRepoPath(text)) await this.dropMissingRepo(path, text);
     } finally {
       if (!running) this.stopWork(stopAt);
       if (gen === this.openGen) this.focusPath = null;
@@ -4522,9 +4666,11 @@ export class ShellState {
     let stopped = false;
     this.mode = "loading";
     this.selectedPath = null;
+    void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
     invoke<UpdateNotice | null>("check_for_update")
     .then((value) => {
-    this.updateNotice = value;
+    this.pendingUpdate = value;
+    this.showPendingUpdate(false);
     })
     .catch(() => {});
     void (async () => {
@@ -4614,7 +4760,7 @@ export class ShellState {
     const recent = this.settings.recent[0];
     if (!recent) {
     this.mode = "error";
-    this.loadError = "";
+    if (!this.loadError) this.loadError = this.actionError || "";
     return;
     }
     await this.openRepo(recent);

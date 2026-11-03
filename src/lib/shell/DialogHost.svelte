@@ -495,7 +495,7 @@
           <input placeholder="New message (optional)" bind:value={shell.draft} />
           <button class="commit" type="submit">Continue</button>
         {:else if shell.dialog === "about"}
-          <h2>AweGit 2.0.0</h2>
+          <h2>AweGit {shell.appVersion}</h2>
           <p class="empty">com.zhoujun.awegit. Windows builds include MinGit 2.56.0. macOS uses the system Git.</p>
           <button class="commit" type="button" onclick={() => (shell.dialog = null)}>Close</button>
         {:else if shell.dialog === "output"}

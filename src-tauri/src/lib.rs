@@ -154,6 +154,9 @@ fn repo_from(path: Option<String>) -> Result<PathBuf, String> {
         Some(path) if !path.is_empty() => PathBuf::from(path),
         _ => std::env::current_dir().map_err(|error| error.to_string())?,
     };
+    if !start.exists() {
+        return Err(format!("could not open repository at {}: missing", start.display()));
+    }
     Ok(awegit_git::discover(&start).unwrap_or(start))
 }
 
@@ -1309,6 +1312,16 @@ fn check_for_update() -> Result<Option<updates::UpdateNotice>, String> {
 }
 
 #[tauri::command]
+fn app_version() -> String {
+    updates::current_version().to_string()
+}
+
+#[tauri::command]
+fn download_update(url: String) -> Result<(), String> {
+    updates::download_and_open(&url)
+}
+
+#[tauri::command]
 fn conflict_sides(path: Option<String>, file: String) -> Result<awegit_git::ConflictSides, String> {
     let repo = repo_from(path)?;
     awegit_git::conflict_sides(&repo, &file).map_err(|error| error.to_string())
@@ -1834,6 +1847,8 @@ pub fn run() {
             set_passphrase,
             approve_credential,
             check_for_update,
+            app_version,
+            download_update,
             conflict_sides,
             conflict_view,
             compare_files,

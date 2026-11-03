@@ -249,6 +249,8 @@ export type Settings = {
   scanDepth: number;
   /** Last commit-message type chosen in the composer. */
   commitType: string;
+  /** Update banner stays hidden for this version until a newer one is published. */
+  dismissedUpdate: string;
 };
 
 export type ForkImport = {
@@ -345,6 +347,8 @@ export type UpdateNotice = {
   appVersion: string;
   appCode: number;
   downloadUrl: string;
+  notes: string;
+  installable: boolean;
 };
 
 export type Suggestion = {

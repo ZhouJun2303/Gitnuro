@@ -5,6 +5,23 @@ use std::fs;
 use awegit_git::{stage_all, status, status_with, unstage_fakeignored, ChangeKind, FileChange};
 
 #[test]
+fn missing_path_and_plain_directory_are_not_repositories() {
+    let repo = common::TempRepo::new();
+    let missing = repo.path.join("gone");
+    let missing_error = status(&missing).unwrap_err().to_string();
+    assert!(
+        missing_error.ends_with(": missing"),
+        "{missing_error}"
+    );
+    assert!(missing_error.contains(&missing.display().to_string()));
+
+    let plain = repo.path.join("plain");
+    fs::create_dir(&plain).unwrap();
+    let plain_error = status(&plain).unwrap_err().to_string();
+    assert!(plain_error.ends_with(": missing"), "{plain_error}");
+}
+
+#[test]
 fn status_splits_staged_and_unstaged_changes() {
     let repo = common::TempRepo::new();
     repo.git(&["init", "-b", "main"]);
