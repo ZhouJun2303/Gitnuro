@@ -4490,12 +4490,6 @@
     </div>
   </header>
 
-  {#if busy}
-    <div class="banner">
-      <span>{tr("chrome.working")}</span>
-      <button class="text-button" type="button" onclick={() => invoke("cancel_operation")}>{tr("chrome.cancel")}</button>
-    </div>
-  {/if}
   {#if cloneJob}
     <div class="banner">
       <span>{tr("chrome.cloning", { name: cloneJob.name })}</span>
@@ -4534,7 +4528,9 @@
   {/if}
   {#if busy && busyShown}
     <div class="banner busy" role="status" aria-live="polite">
-      <span class="busy-text">{busyLabel || tr("chrome.working")}</span>
+      <span class="busy-text">{busyLabel ? `${tr("chrome.working")} ${busyLabel}` : tr("chrome.working")}</span>
+      <span class="spacer"></span>
+      <button class="text-button busy-cancel" type="button" onclick={() => invoke("cancel_operation")}>{tr("chrome.cancel")}</button>
     </div>
   {/if}
   {#if actionError}
@@ -7481,6 +7477,12 @@
   .banner.busy .busy-text {
     position: relative;
     font-size: 12px;
+  }
+
+  .banner.busy .spacer { flex: 1; }
+
+  .banner.busy .busy-cancel {
+    position: relative;
   }
 
   @keyframes busy-flow {
