@@ -158,14 +158,25 @@ export function mergeToolLabel(shell: ShellState) {
     return base.replace(/\.exe$/i, "");
 }
 
+export function describeToolError(shell: ShellState, kind: "merge" | "diff", error: unknown) {
+    const name = (kind === "merge" ? shell.settings.mergeToolName : shell.settings.diffToolName).trim();
+    const path = (kind === "merge" ? shell.settings.mergeToolPath : shell.settings.diffToolPath).trim();
+    return [shell.tr("chrome.toolFailed", { name: name || shell.tr("chrome.toolUnnamed") }), shell.tr("chrome.toolPathLine", { path: path || shell.tr("chrome.toolPathEmpty") }), "", shell.message(error)].join("\n");
+}
+
+export async function launchExternal(shell: ShellState, kind: "merge" | "diff", file: string) {
+    if (!file || shell.busy) return;
+    try {
+      await invoke("launch_tool", { path: shell.repoPath(), kind, file });
+    } catch (error) {
+      shell.actionError = describeToolError(shell, kind, error);
+    }
+}
+
 export async function openConflictTool(shell: ShellState) {
     const file = shell.selectedPath;
     if (!file || !mergeToolLabel(shell) || shell.busy) return;
-    try {
-      await invoke("launch_tool", { path: shell.repoPath(), kind: "merge", file });
-    } catch (error) {
-      shell.actionError = shell.message(error);
-    }
+    await launchExternal(shell, "merge", file);
 }
 
 export async function applyConflictChoice(shell: ShellState, ours: boolean, theirs: boolean) {

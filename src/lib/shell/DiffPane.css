@@ -238,7 +238,15 @@ section.diff > .diff-body {
     align-items: center;
     gap: 8px;
     margin-top: 22px;
-  }
+}
+
+.conflict-note {
+    max-width: 460px;
+    margin: 8px 0 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+}
 
 .conflict-merge,
   .conflict-tool {

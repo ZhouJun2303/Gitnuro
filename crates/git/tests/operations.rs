@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    conflict_view, file_diff, file_preview, in_progress, perform, repository_refs, search_commits, stage_hunk, stage_line, status,
+    conflict_view, file_diff, file_preview, in_progress, launch_merge_tool, perform, repository_refs, search_commits, stage_hunk, stage_line, status,
     stop_process_tree, ChangeKind, InProgress, Mutation, RebaseStep, ResetMode,
 };
 
@@ -1045,6 +1045,66 @@ fn merge_conflict_names_both_branches() {
     assert_eq!(removed.ours.state, "modified");
     assert_eq!(removed.theirs.label, "topic");
     assert_eq!(removed.theirs.state, "deleted");
+}
+
+fn binary_merge_conflict() -> common::TempRepo {
+    let repo = repo();
+    fs::write(repo.path.join("sheet.xlsx"), b"PK\x03\x04base").unwrap();
+    repo.git(&["add", "--", "sheet.xlsx"]);
+    repo.git(&["commit", "-m", "base"]);
+    repo.git(&["checkout", "-b", "topic"]);
+    fs::write(repo.path.join("sheet.xlsx"), b"PK\x03\x04topic").unwrap();
+    repo.git(&["commit", "-am", "topic"]);
+    repo.git(&["checkout", "main"]);
+    fs::write(repo.path.join("sheet.xlsx"), b"PK\x03\x04main").unwrap();
+    repo.git(&["commit", "-am", "main"]);
+    assert!(perform(
+        &repo.path,
+        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false },
+    )
+    .is_err());
+    repo
+}
+
+#[test]
+fn merge_tool_without_program_explains_bad_exe() {
+    let repo = binary_merge_conflict();
+    let error = launch_merge_tool(&repo.path, "{ours} {theirs} {working} {file}", "sheet.xlsx").unwrap_err();
+    let text = error.to_string();
+    assert!(text.contains("os error 193"), "{text}");
+    assert!(text.contains("sheet.xlsx"), "{text}");
+    assert!(text.contains("not a Win32 application"), "{text}");
+    let program = text.lines().find_map(|line| line.strip_prefix("program: ")).unwrap_or_else(|| panic!("{text}"));
+    assert!(program.ends_with("sheet.xlsx"), "{program}");
+    assert_eq!(fs::read(program).unwrap(), b"PK\x03\x04main");
+    let command = text.lines().find_map(|line| line.strip_prefix("command: ")).unwrap_or_else(|| panic!("{text}"));
+    assert!(command.contains(&repo.path.join("sheet.xlsx").display().to_string()), "{command}");
+}
+
+#[cfg(windows)]
+#[test]
+fn merge_tool_starts_cmd_without_bad_exe() {
+    let repo = binary_merge_conflict();
+    let tool_dir = repo.path.join("tool dir");
+    fs::create_dir(&tool_dir).unwrap();
+    let script = tool_dir.join("merge.cmd");
+    fs::write(&script, "@echo off\r\n> \"%~dp0out.txt\" echo(%~1\r\n").unwrap();
+    let template = format!("\"{}\" {{ours}}", script.display());
+    launch_merge_tool(&repo.path, &template, "sheet.xlsx").unwrap();
+    let out = tool_dir.join("out.txt");
+    let started = (0..50).any(|_| {
+        if out.is_file() {
+            true
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            false
+        }
+    });
+    assert!(started, "cmd.exe did not run {}", script.display());
+    let launched = fs::read_to_string(&out).unwrap();
+    let launched = launched.trim().trim_matches('"');
+    assert!(launched.ends_with("sheet.xlsx"), "{launched}");
+    assert_eq!(fs::read(launched).unwrap(), b"PK\x03\x04main");
 }
 
 struct RemoveDir(PathBuf);

@@ -21,6 +21,7 @@ import {
   } from "../status";
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
 import type { ShellState } from "./state.svelte";
+import { launchExternal } from "./diff.svelte";
 
 export function branchItems(shell: ShellState) {
     const rows = shell.refs?.branches ?? [];
@@ -72,8 +73,8 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { sep: true, label: "" },
       { label: shell.tr("menu.blame"), disabled: locked, run: () => shell.showBlame(file.path) },
       { label: shell.tr("menu.history"), disabled: locked, run: () => shell.showFileHistory(file.path) },
-      { label: shell.tr("menu.externalDiff"), disabled: locked || !shell.settings.diffTool, run: () => void invoke("launch_tool", { path: shell.repoPath(), kind: "diff", file: file.path }) },
-      { label: shell.tr("menu.externalMerge"), disabled: locked || file.letter !== "C" || !shell.settings.mergeTool, run: () => void invoke("launch_tool", { path: shell.repoPath(), kind: "merge", file: file.path }) },
+      { label: shell.tr("menu.externalDiff"), disabled: locked || !shell.settings.diffTool, run: () => void launchExternal(shell, "diff", file.path) },
+      { label: shell.tr("menu.externalMerge"), disabled: locked || file.letter !== "C" || !shell.settings.mergeTool, run: () => void launchExternal(shell, "merge", file.path) },
       { label: shell.tr("menu.lfsLock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsLock", path: file.path }) },
       { label: shell.tr("menu.lfsUnlock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsUnlock", path: file.path }) },
       { sep: true, label: "" },

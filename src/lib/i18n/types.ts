@@ -112,6 +112,11 @@ export type Messages = {
     sideModified: string;
     sideDeleted: string;
     mergePickOne: string;
+    toolFailed: string;
+    toolUnnamed: string;
+    toolPathLine: string;
+    toolPathEmpty: string;
+    toolPathMissing: string;
     blameOf: string;
     branches: string;
     view: string;

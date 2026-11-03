@@ -75,6 +75,9 @@
                       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
                   {/if}
+                  {#if tool && !shell.settings.mergeToolPath.trim()}
+                    <p class="conflict-note">{shell.tr("chrome.toolPathMissing", { name: tool })}</p>
+                  {/if}
                 </div>
               </div>
             {:else if shell.diffError}

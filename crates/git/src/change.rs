@@ -1081,56 +1081,218 @@ pub fn launch_diff_tool(repo: &Path, template: &str, file: &str, staged: bool) -
     } else {
         std::fs::read(repo.join(path)).unwrap_or_default()
     };
-    let dir = std::env::temp_dir().join("awegit-tool");
-    std::fs::create_dir_all(&dir).map_err(|source| Error::Read { path: "tool".into(), source })?;
-    let left = dir.join("left");
-    let right = dir.join("right");
-    std::fs::write(&left, left_bytes).map_err(|source| Error::Read { path: "left".into(), source })?;
-    std::fs::write(&right, right_bytes).map_err(|source| Error::Read { path: "right".into(), source })?;
-    launch_template(template, &[
-        ("{left}", &left.display().to_string()),
-        ("{right}", &right.display().to_string()),
-        ("{file}", path),
+    let dir = tool_scratch();
+    let left = write_copy(&dir, "left", path, &left_bytes)?;
+    let right = write_copy(&dir, "right", path, &right_bytes)?;
+    let absolute = repo.join(path).display().to_string();
+    launch_template(repo, template, path, &[
+        ("{left}", &left),
+        ("{right}", &right),
+        ("{file}", &absolute),
     ])
 }
 
-/// Write ours, theirs, and the working copy, then expand `{ours}` `{theirs}` `{working}` `{file}`.
+/// Write ours, theirs, and the base, then expand `{ours}` `{theirs}` `{base}` `{working}` `{file}`.
+///
+/// `{working}` and `{file}` are the work-tree file, so the tool saves the merge back into the repository.
 pub fn launch_merge_tool(repo: &Path, template: &str, file: &str) -> Result<(), Error> {
-    let sides = conflict_sides(repo, file)?;
-    let dir = std::env::temp_dir().join("awegit-tool");
-    std::fs::create_dir_all(&dir).map_err(|source| Error::Read { path: "tool".into(), source })?;
-    let ours = dir.join("ours");
-    let theirs = dir.join("theirs");
-    let working = dir.join("working");
-    std::fs::write(&ours, sides.ours).map_err(|source| Error::Read { path: "ours".into(), source })?;
-    std::fs::write(&theirs, sides.theirs).map_err(|source| Error::Read { path: "theirs".into(), source })?;
-    std::fs::write(&working, sides.working).map_err(|source| Error::Read { path: "working".into(), source })?;
-    launch_template(template, &[
-        ("{ours}", &ours.display().to_string()),
-        ("{theirs}", &theirs.display().to_string()),
-        ("{working}", &working.display().to_string()),
-        ("{base}", &ours.display().to_string()),
-        ("{file}", file),
+    let path = check_path(file)?;
+    let dir = tool_scratch();
+    let ours = write_copy(&dir, "ours", path, &stage_bytes(repo, path, 2))?;
+    let theirs = write_copy(&dir, "theirs", path, &stage_bytes(repo, path, 3))?;
+    let base = write_copy(&dir, "base", path, &stage_bytes(repo, path, 1))?;
+    let working = repo.join(path).display().to_string();
+    launch_template(repo, template, path, &[
+        ("{ours}", &ours),
+        ("{theirs}", &theirs),
+        ("{base}", &base),
+        ("{working}", &working),
+        ("{file}", &working),
     ])
 }
 
-fn launch_template(template: &str, vars: &[(&str, &str)]) -> Result<(), Error> {
-    let mut text = template.trim().to_string();
-    if text.is_empty() {
-        return Err(Error::Git("external tool is empty".into()));
+fn stage_bytes(repo: &Path, path: &str, stage: u8) -> Vec<u8> {
+    match run(repo, &["show", &format!(":{stage}:{path}")]) {
+        Ok(output) => output.stdout,
+        Err(_) => Vec::new(),
     }
-    for (key, value) in vars {
-        text = text.replace(key, value);
+}
+
+fn tool_scratch() -> PathBuf {
+    let tick = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join("awegit-tool").join(format!("{tick}-{}", std::process::id()))
+}
+
+fn write_copy(dir: &Path, role: &str, rel: &str, bytes: &[u8]) -> Result<String, Error> {
+    let folder = dir.join(role);
+    std::fs::create_dir_all(&folder).map_err(|source| Error::Read { path: folder.display().to_string(), source })?;
+    let dest = folder.join(leaf_name(rel));
+    std::fs::write(&dest, bytes).map_err(|source| Error::Read { path: dest.display().to_string(), source })?;
+    Ok(dest.display().to_string())
+}
+
+fn leaf_name(rel: &str) -> String {
+    let leaf = Path::new(rel).file_name().and_then(|name| name.to_str()).unwrap_or("file");
+    let cleaned: String = leaf
+        .chars()
+        .map(|ch| match ch {
+            '<' | '>' | ':' | '"' | '|' | '?' | '*' => '_',
+            other => other,
+        })
+        .collect();
+    if cleaned.is_empty() { "file".into() } else { cleaned }
+}
+
+fn launch_template(cwd: &Path, template: &str, file: &str, vars: &[(&str, &str)]) -> Result<(), Error> {
+    let raw = template.trim();
+    if raw.is_empty() {
+        return Err(tool_failure("empty", "", raw, "", file, None));
     }
-    let args = split_command(&text);
+    let raw_program = split_command(raw).into_iter().next().unwrap_or_default();
+    let command = expand_template(raw, vars);
+    let args = split_command(&command);
     let Some((program, rest)) = args.split_first() else {
-        return Err(Error::Git("external tool is empty".into()));
+        return Err(tool_failure("empty", "", raw, &command, file, None));
     };
-    std::process::Command::new(program)
-        .args(rest)
-        .spawn()
-        .map_err(|source| Error::Git(source.to_string()))?;
-    Ok(())
+    if raw_program.contains('{') {
+        return Err(tool_failure("no-program", program, raw, &command, file, None));
+    }
+    match classify_program(program) {
+        ToolLaunch::Missing => Err(tool_failure("missing", program, raw, &command, file, None)),
+        ToolLaunch::Directory => Err(tool_failure("directory", program, raw, &command, file, None)),
+        ToolLaunch::NotProgram => Err(tool_failure("not-program", program, raw, &command, file, None)),
+        ToolLaunch::Direct | ToolLaunch::Batch => spawn_tool(program, rest, cwd)
+            .map(|_| ())
+            .map_err(|source| tool_failure("spawn", program, raw, &command, file, Some(&source))),
+    }
+}
+
+enum ToolLaunch {
+    Direct,
+    Batch,
+    Missing,
+    Directory,
+    NotProgram,
+}
+
+fn classify_program(program: &str) -> ToolLaunch {
+    let path = Path::new(program);
+    if is_batch(program) {
+        return if path.is_file() { ToolLaunch::Batch } else { ToolLaunch::Missing };
+    }
+    if path.is_dir() {
+        return ToolLaunch::Directory;
+    }
+    if path.is_file() {
+        let ext = path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase();
+        if ext == "exe" || ext == "com" || looks_like_pe(path) {
+            return ToolLaunch::Direct;
+        }
+        return ToolLaunch::NotProgram;
+    }
+    let rooted = program.contains(':') || program.contains('\\') || program.contains('/');
+    if rooted { ToolLaunch::Missing } else { ToolLaunch::Direct }
+}
+
+fn looks_like_pe(path: &Path) -> bool {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(_) => return false,
+    };
+    let mut magic = [0u8; 2];
+    Read::read_exact(&mut file, &mut magic).is_ok() && magic == *b"MZ"
+}
+
+fn is_batch(program: &str) -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    let lower = program.to_ascii_lowercase();
+    lower.ends_with(".cmd") || lower.ends_with(".bat")
+}
+
+fn spawn_tool(program: &str, args: &[String], cwd: &Path) -> std::io::Result<std::process::Child> {
+    if is_batch(program) {
+        // CreateProcess cannot run a batch file (os error 193). cmd.exe can.
+        // Arguments stay separate so Rust quotes paths that contain spaces.
+        let mut command = std::process::Command::new("cmd.exe");
+        command.current_dir(cwd).arg("/d").arg("/c").arg(program).args(args);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        return command.spawn();
+    }
+    std::process::Command::new(program).args(args).current_dir(cwd).spawn()
+}
+
+fn expand_template(template: &str, vars: &[(&str, &str)]) -> String {
+    let mut text = template.to_string();
+    for (key, value) in vars {
+        text = replace_var(&text, key, value);
+    }
+    text
+}
+
+fn replace_var(text: &str, key: &str, value: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(index) = rest.find(key) {
+        let quoted = index > 0 && matches!(rest.as_bytes()[index - 1], b'"' | b'\'');
+        out.push_str(&rest[..index]);
+        if !quoted && value.chars().any(|ch| ch.is_whitespace()) {
+            out.push('"');
+            out.push_str(value);
+            out.push('"');
+        } else {
+            out.push_str(value);
+        }
+        rest = &rest[index + key.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn tool_failure(kind: &str, program: &str, template: &str, command: &str, file: &str, os: Option<&std::io::Error>) -> Error {
+    let mut lines = Vec::new();
+    lines.push("Could not start the external tool.".to_string());
+    lines.push(format!("file: {file}"));
+    if let Some(os) = os {
+        lines.push(format!("system: {os}"));
+    }
+    let bad_exe = kind == "not-program" || kind == "no-program" || os.and_then(|err| err.raw_os_error()) == Some(193);
+    if bad_exe {
+        lines.push("os error 193 (ERROR_BAD_EXE_FORMAT): \"%1 不是有效的 Win32 应用程序\". Windows leaves %1 blank; %1 is the program path below, and that file is not a Win32 application.".into());
+    }
+    match kind {
+        "empty" => lines.push("The tool command is empty. Set the program path in Preferences.".into()),
+        "no-program" => {
+            lines.push("The command does not start with a program. The first item is a placeholder, so Windows is asked to execute a temporary copy of the conflicted file.".into());
+            lines.push("Set the tool's .exe path in Preferences and keep the placeholders as arguments. Example: \"C:\\Path\\CodeBuddy.exe\" {ours} {theirs} {working} {file}".into());
+        }
+        "not-program" => lines.push("The program path exists, but it is a document or another non-executable. Point it at the real .exe. A .cmd or .bat file is started through cmd.exe.".into()),
+        "missing" => {
+            lines.push("The program path does not exist.".into());
+            lines.push("If the path contains spaces, wrap the program in double quotes.".into());
+        }
+        "directory" => lines.push("The program path is a directory, not an executable.".into()),
+        _ => {}
+    }
+    if !template.is_empty() {
+        lines.push(String::new());
+        lines.push(format!("template: {template}"));
+    }
+    if !program.is_empty() {
+        lines.push(format!("program: {program}"));
+    }
+    if !command.is_empty() {
+        lines.push(format!("command: {command}"));
+    }
+    Error::Git(lines.join("\n"))
 }
 
 fn split_command(text: &str) -> Vec<String> {
