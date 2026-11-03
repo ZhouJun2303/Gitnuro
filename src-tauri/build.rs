@@ -10,6 +10,7 @@ fn main() {
             "file_diff",
             "commit_log",
             "commit_detail",
+            "locate_ref",
             "repository_refs",
             "commit_files",
             "show_commit_file",

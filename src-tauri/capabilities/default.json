@@ -19,6 +19,7 @@
     "allow-file-diff",
     "allow-commit-log",
     "allow-commit-detail",
+    "allow-locate-ref",
     "allow-repository-refs",
     "allow-commit-files",
     "allow-show-commit-file",
