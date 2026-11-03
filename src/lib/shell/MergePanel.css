@@ -1,0 +1,225 @@
+.merge-scrim {
+  z-index: 60;
+}
+
+.merge-panel {
+  width: min(1080px, calc(100vw - 48px));
+  height: min(720px, calc(100vh - 48px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--elevated);
+  box-shadow: var(--shadow);
+  animation: dialog-in 160ms ease-out;
+}
+
+.merge-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 8px 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.merge-panel-title strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.merge-title-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.merge-title-file span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merge-close {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.merge-close:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.merge-head,
+.merge-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.merge-head {
+  align-items: center;
+  min-height: 36px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--field) 65%, var(--elevated));
+}
+
+.merge-party {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0 12px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.merge-party span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merge-party input {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.merge-result-label {
+  padding: 0 12px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.merge-stage {
+  flex: 1;
+  min-height: 0;
+  align-content: start;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.merge-stage.files {
+  align-content: stretch;
+}
+
+.merge-cell {
+  min-width: 0;
+  margin: 0;
+  padding: 6px 12px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.merge-cell.context {
+  color: var(--text-secondary);
+}
+
+.merge-cell.hunk {
+  border-bottom-color: var(--line);
+  cursor: pointer;
+}
+
+.merge-cell.hunk pre {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.merge-cell.hunk.on {
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+}
+
+.merge-cell.result {
+  background: color-mix(in srgb, var(--elevated) 88%, var(--bg));
+}
+
+.merge-cell.result.pick-theirs {
+  box-shadow: inset 2px 0 0 var(--added);
+}
+
+.merge-cell.result.pick-ours {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.merge-cell .empty,
+.merge-cell.empty {
+  color: var(--text-secondary);
+}
+
+.merge-file-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+}
+
+.merge-file-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.merge-file-gone {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.merge-mark {
+  color: var(--text-secondary);
+}
+
+.merge-mark.sheet {
+  color: #5f6b66;
+}
+
+.merge-panel-foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 0 16px;
+  border-top: 1px solid var(--line);
+}
+
+.merge-panel-foot .text-button,
+.merge-panel-foot .commit {
+  margin-left: 0;
+}
+
+.merge-panel-foot .text-button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  background: var(--elevated);
+  color: var(--text);
+}

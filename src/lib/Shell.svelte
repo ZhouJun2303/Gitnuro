@@ -8,6 +8,7 @@
   import FileHistoryPane from "./shell/FileHistoryPane.svelte";
   import BlobPane from "./shell/BlobPane.svelte";
   import DialogHost from "./shell/DialogHost.svelte";
+  import MergePanel from "./shell/MergePanel.svelte";
   import "./shell/common.css";
   import { ShellState } from "./shell/state.svelte";
   import { invoke } from "./perf";
@@ -664,6 +665,7 @@
     </div>
   {/if}
   <DialogHost />
+  <MergePanel />
   {#if shell.launchOpen}
     <div class="palette-scrim" role="presentation" onclick={() => shell.closeLaunch()}>
       <div class="palette" role="dialog" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>

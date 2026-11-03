@@ -325,6 +325,7 @@ export type ConflictSides = {
 export type ConflictParty = {
   label: string;
   state: "added" | "modified" | "deleted" | "unchanged";
+  bytes: number;
 };
 
 export type ConflictView = {

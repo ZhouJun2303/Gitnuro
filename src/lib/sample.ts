@@ -4,8 +4,8 @@ export type FileChange = {
 };
 
 export type SampleConflictView = {
-  ours: { label: string; state: "added" | "modified" | "deleted" | "unchanged" };
-  theirs: { label: string; state: "added" | "modified" | "deleted" | "unchanged" };
+  ours: { label: string; state: "added" | "modified" | "deleted" | "unchanged"; bytes: number };
+  theirs: { label: string; state: "added" | "modified" | "deleted" | "unchanged"; bytes: number };
   binary: boolean;
 };
 
@@ -46,28 +46,28 @@ export const sampleConflictText: Record<string, { ours: string; theirs: string; 
 export const sampleConflictViews: Record<string, SampleConflictView> = {
   "data/Y语言表_Data_Language.xlsx": {
     binary: true,
-    theirs: { label: "stash/patch", state: "modified" },
-    ours: { label: "main", state: "modified" },
+    theirs: { label: "stash/patch", state: "modified", bytes: 56484 },
+    ours: { label: "main", state: "modified", bytes: 54061 },
   },
   "src/merge/both-sides.ts": {
     binary: false,
-    theirs: { label: "feature", state: "modified" },
-    ours: { label: "main", state: "modified" },
+    theirs: { label: "feature", state: "modified", bytes: 48 },
+    ours: { label: "main", state: "modified", bytes: 46 },
   },
   "src/merge/both-added.ts": {
     binary: false,
-    theirs: { label: "feature", state: "added" },
-    ours: { label: "main", state: "added" },
+    theirs: { label: "feature", state: "added", bytes: 34 },
+    ours: { label: "main", state: "added", bytes: 31 },
   },
   "docs/removed-there.md": {
     binary: false,
-    theirs: { label: "feature", state: "deleted" },
-    ours: { label: "main", state: "modified" },
+    theirs: { label: "feature", state: "deleted", bytes: 0 },
+    ours: { label: "main", state: "modified", bytes: 28 },
   },
   "art/removed-here.png": {
     binary: true,
-    theirs: { label: "feature", state: "modified" },
-    ours: { label: "main", state: "deleted" },
+    theirs: { label: "feature", state: "modified", bytes: 18432 },
+    ours: { label: "main", state: "deleted", bytes: 0 },
   },
 };
 

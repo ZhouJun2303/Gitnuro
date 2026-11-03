@@ -486,6 +486,8 @@ export const en: Messages = {
     mergeUseAll: "Use all of {name}",
     mergeEmpty: "(empty)",
     mergeDone: "Save merge",
+    mergeTitle: "Merge",
+    mergeResolve: "Resolve",
     result: "Result",
     verticalTabs: "Vertical tabs",
     showSpace: "Show whitespace",

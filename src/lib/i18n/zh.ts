@@ -486,6 +486,8 @@ export const zh: Messages = {
     mergeUseAll: "全部采用 {name}",
     mergeEmpty: "（空）",
     mergeDone: "完成合并",
+    mergeTitle: "合并",
+    mergeResolve: "解决",
     result: "结果",
     verticalTabs: "垂直标签",
     showSpace: "显示空白",

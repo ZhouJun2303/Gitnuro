@@ -195,11 +195,6 @@ export async function applyConflictChoice(shell: ShellState, ours: boolean, thei
     if (!file || !view) return;
     if (shell.mode === "live" && shell.busy) return;
     if (ours && theirs) {
-      if (view.binary) {
-        if (shell.mode === "live" && mergeToolLabel(shell)) await openConflictTool(shell);
-        else if (shell.mode === "live") shell.actionError = shell.tr("chrome.mergePickOne");
-        return;
-      }
       await shell.openTextMerge(file);
       return;
     }

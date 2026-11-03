@@ -48,37 +48,7 @@
             <header class="diff-head">
               <span>{shell.selectedPath}</span>
             </header>
-            {#if shell.textMerge && shell.mergeFile === shell.selectedPath}
-              {@const allLeft = shell.mergePieces.every((piece) => piece.kind !== "hunk" || piece.pick === "theirs")}
-              {@const allRight = shell.mergePieces.every((piece) => piece.kind !== "hunk" || piece.pick === "ours")}
-              <div class="merge-tool">
-                <div class="merge-tool-bar">
-                  <span class="merge-tool-file">{shell.fileName(shell.selectedPath)}</span>
-                  <button class="text-button" type="button" class:on={allLeft} onclick={() => shell.takeMergeSide("theirs")}>{shell.tr("dialog.mergeUseAll", { name: shell.mergeLeft })}</button>
-                  <button class="text-button" type="button" class:on={allRight} onclick={() => shell.takeMergeSide("ours")}>{shell.tr("dialog.mergeUseAll", { name: shell.mergeRight })}</button>
-                  <button class="text-button" type="button" onclick={() => shell.closeTextMerge()}>{shell.tr("chrome.cancel")}</button>
-                  <button class="conflict-merge" type="button" disabled={shell.mode === "live" && shell.busy} onclick={() => void shell.applyTextMerge()}>{shell.tr("dialog.mergeDone")}</button>
-                </div>
-                <div class="merge-body">
-                  {#each shell.mergePieces as piece, index (index)}
-                    {#if piece.kind === "text"}
-                      {#if piece.text.trim()}<pre class="merge-context">{piece.text}</pre>{/if}
-                    {:else}
-                      <div class="merge-hunk">
-                        <button class="merge-side left" type="button" class:on={piece.pick === "theirs"} onclick={() => shell.pickHunk(index, "theirs")}>
-                          <span class="merge-side-name">{shell.mergeLeft}</span>
-                          <pre>{piece.theirs.trim() ? piece.theirs : shell.tr("dialog.mergeEmpty")}</pre>
-                        </button>
-                        <button class="merge-side right" type="button" class:on={piece.pick === "ours"} onclick={() => shell.pickHunk(index, "ours")}>
-                          <span class="merge-side-name">{shell.mergeRight}</span>
-                          <pre>{piece.ours.trim() ? piece.ours : shell.tr("dialog.mergeEmpty")}</pre>
-                        </button>
-                      </div>
-                    {/if}
-                  {/each}
-                </div>
-              </div>
-            {:else if shell.activeConflict}
+            {#if shell.activeConflict}
               {@const view = shell.activeConflict}
               {@const tool = shell.mode === "sample" ? (view.binary ? "ExcelMergeFork" : "") : mergeToolLabel(shell)}
               {@const only = pickTheirs !== pickOurs ? (pickTheirs ? view.theirs.label : view.ours.label) : ""}

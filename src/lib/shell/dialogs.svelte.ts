@@ -11,6 +11,7 @@ import {
     type CommitDetail,
     type CommitRow,
     type ConflictSides,
+    type ConflictView,
     type DiffLine,
     type FileDiff,
     type FilePreview,
@@ -189,17 +190,57 @@ function piecesFromSides(shell: ShellState, sides: { ours: string; theirs: strin
     return [{ kind: "hunk" as const, ours: sides.ours, theirs: sides.theirs, pick: "ours" as const }];
   }
 
+/** Past this, drawing every line would stall the window. Show the file card instead. */
+const MERGE_TEXT_LIMIT = 200_000;
+
+function textTooBig(text: string) {
+    if (text.length > MERGE_TEXT_LIMIT) return true;
+    let lines = 1;
+    for (let index = 0; index < text.length; index += 1) {
+      if (text.charCodeAt(index) === 10 && ++lines > 8000) return true;
+    }
+    return false;
+  }
+
+function showFileMerge(shell: ShellState, file: string) {
+    shell.mergeFile = file;
+    shell.mergeKind = "file";
+    shell.mergePieces = [];
+    shell.mergeResult = "";
+    shell.conflict = null;
+    shell.textMerge = true;
+  }
+
 export async function openTextMerge(shell: ShellState, file: string) {
     shell.section = "changes";
+    const already = shell.selectedPath === file;
     shell.selectedPath = file;
-    const view = shell.mode === "sample" ? sampleConflictViews[file] : shell.activeConflict;
+    let view = shell.mode === "sample" ? sampleConflictViews[file] : already ? shell.activeConflict : null;
+    if (shell.mode === "live" && !view) {
+      try {
+        view = await invoke<ConflictView>("conflict_view", { path: shell.repoPath(), file });
+        if (shell.selectedPath === file) shell.conflictView = view;
+      } catch (error) {
+        shell.actionError = shell.message(error);
+        return;
+      }
+    }
     shell.mergeLeft = view?.theirs.label || shell.tr("dialog.useTheirs");
     shell.mergeRight = view?.ours.label || shell.branchLabel || shell.tr("dialog.useOurs");
+    const editable = shell.mode === "sample" ? !!sampleConflictText[file] : !view?.binary;
+    if (!editable) {
+      showFileMerge(shell, file);
+      return;
+    }
     try {
       const sides = shell.mode === "sample" ? sampleConflictText[file] : await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
-      if (!sides) return;
+      if (!sides || textTooBig(sides.working) || textTooBig(sides.ours) || textTooBig(sides.theirs)) {
+        showFileMerge(shell, file);
+        return;
+      }
       shell.conflict = sides;
       shell.mergeFile = file;
+      shell.mergeKind = "text";
       shell.mergePieces = piecesFromSides(shell, sides);
       shell.mergeResult = shell.joinedPieces(shell.mergePieces);
       shell.textMerge = true;
@@ -221,6 +262,18 @@ export async function applyTextMerge(shell: ShellState) {
     }
     if (shell.busy) return;
     await shell.mutate({ action: "resolve", file, side: "text", text: shell.mergeResult });
+    shell.textMerge = false;
+  }
+
+export async function applyFileMerge(shell: ShellState, side: "ours" | "theirs") {
+    const file = shell.mergeFile;
+    if (!file) return;
+    if (shell.mode !== "live") {
+      shell.textMerge = false;
+      return;
+    }
+    if (shell.busy) return;
+    await shell.mutate({ action: "resolve", file, side, text: "" });
     shell.textMerge = false;
   }
 

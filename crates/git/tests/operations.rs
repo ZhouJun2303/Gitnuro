@@ -1061,11 +1061,14 @@ fn merge_conflict_names_both_branches() {
     assert_eq!(edited.ours.state, "modified");
     assert_eq!(edited.theirs.label, "topic");
     assert_eq!(edited.theirs.state, "modified");
+    assert!(edited.ours.bytes > 0 && edited.theirs.bytes > 0);
     let removed = conflict_view(&repo.path, "gone.txt").unwrap();
     assert_eq!(removed.ours.label, "main");
     assert_eq!(removed.ours.state, "modified");
     assert_eq!(removed.theirs.label, "topic");
     assert_eq!(removed.theirs.state, "deleted");
+    assert_eq!(removed.theirs.bytes, 0);
+    assert!(removed.ours.bytes > 0);
 }
 
 fn binary_merge_conflict() -> common::TempRepo {

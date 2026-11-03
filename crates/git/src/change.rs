@@ -380,6 +380,7 @@ fn show_stage(repo: &Path, path: &str, stage: u8) -> String {
 pub struct ConflictParty {
     pub label: String,
     pub state: String,
+    pub bytes: u64,
 }
 
 /// Labels and change kinds for the two sides of an unmerged file.
@@ -406,10 +407,12 @@ pub fn conflict_view(repo: &Path, path: &str) -> Result<ConflictView, Error> {
         ours: ConflictParty {
             label: ours_label(repo),
             state: side_state(base, stages[2].as_deref()).into(),
+            bytes: oid_size(repo, stages[2].as_deref()),
         },
         theirs: ConflictParty {
             label: theirs_label(repo, path, stages[3].as_deref()),
             state: side_state(base, stages[3].as_deref()).into(),
+            bytes: oid_size(repo, stages[3].as_deref()),
         },
         binary: conflict_is_binary(repo, path, &stages),
     })
@@ -429,6 +432,11 @@ fn stage_oids(repo: &Path, path: &str) -> Result<[Option<String>; 4], Error> {
         }
     }
     Ok(stages)
+}
+
+fn oid_size(repo: &Path, oid: Option<&str>) -> u64 {
+    let Some(oid) = oid else { return 0 };
+    git_text(repo, &["cat-file", "-s", oid]).and_then(|text| text.parse().ok()).unwrap_or(0)
 }
 
 fn side_state(base: Option<&str>, side: Option<&str>) -> &'static str {
