@@ -38,6 +38,29 @@ import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, to
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
 
+/** Histories up to this length are drawn in one pass. Longer ones continue across frames. */
+const GRAPH_SYNC_LIMIT = 1500;
+
+function sameValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (typeof left !== "object" || typeof right !== "object" || left === null || right === null) return false;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index += 1) {
+      if (!sameValue(left[index], right[index])) return false;
+    }
+    return true;
+  }
+  const a = left as Record<string, unknown>;
+  const b = right as Record<string, unknown>;
+  const aKeys = Object.keys(a);
+  if (aKeys.length !== Object.keys(b).length) return false;
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key) || !sameValue(a[key], b[key])) return false;
+  }
+  return true;
+}
+
 export class ShellState {
 
 
@@ -463,7 +486,26 @@ export class ShellState {
   patchSplits = new Map<string, { lines: DiffLine[]; rows: SplitRow[]; columns: { left: number; right: number } }>();
 
 
-  graphResume: { ids: string[]; columns: Array<string | null>; rows: GraphCell[][] } | null = null;
+  graphResume: { ids: string[]; columns: Array<string | null>; rows: GraphCell[][]; width: number } | null = null;
+
+
+  /** Plain cache. The row arrays stay off `$state` so a long graph is not deeply proxied. */
+  graphItems: CommitRow[] | null = null;
+
+
+  graphRows: GraphCell[][] = [];
+
+
+  graphWidth = 1;
+
+
+  graphColumns: Array<string | null> = [];
+
+
+  graphVersion = $state(0);
+
+
+  commitNeedles: { rows: CommitRow[]; text: string[] } | null = null;
 
 
   diffTop = $state(0);
@@ -1002,29 +1044,44 @@ export class ShellState {
   });
 
 
-  shownCommits = $derived(
-    this.commitsLive.filter((commit) => {
-      const query = this.commitQuery.trim().toLowerCase();
-      if (!query) return true;
-      return (
-        commit.summary.toLowerCase().includes(query) ||
-        commit.author.toLowerCase().includes(query) ||
-        commit.shortId.startsWith(query)
-      );
-    }),
-  );
+  shownCommits = $derived.by(() => {
+    const query = this.commitQuery.trim().toLowerCase();
+    const rows = this.commitsLive;
+    if (!query) return rows;
+    if (this.commitNeedles?.rows !== rows) {
+      this.commitNeedles = {
+        rows,
+        text: rows.map((commit) => `${commit.summary}\n${commit.author}`.toLowerCase()),
+      };
+    }
+    const text = this.commitNeedles.text;
+    const matched: CommitRow[] = [];
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      if (row && (text[index]?.includes(query) || row.shortId.startsWith(query))) matched.push(row);
+    }
+    return matched;
+  });
 
 
   historyItems = $derived.by(() => {
-    const rows = [...this.shownCommits];
-    for (const stash of this.refs?.stashes ?? []) {
-      const parent = stash.parent;
-      if (!parent) continue;
-      const extra: CommitRow = { id: stash.id || stash.name, shortId: stash.name, summary: stash.summary, author: "", when: "", parents: [parent], refs: ["stash"], lane: 0, at: 0, email: "", unpushed: true };
-      const at = rows.findIndex((row) => row.id === parent || row.id.startsWith(parent));
-      if (at >= 0) rows.splice(at, 0, extra);
+    const stashes = this.refs?.stashes ?? [];
+    const hidden = this.foldHidden;
+    let rows = this.shownCommits;
+    if (stashes.length === 0 && hidden.length === 0) return rows;
+    if (stashes.length > 0) {
+      rows = rows.slice();
+      for (const stash of stashes) {
+        const parent = stash.parent;
+        if (!parent) continue;
+        const extra: CommitRow = { id: stash.id || stash.name, shortId: stash.name, summary: stash.summary, author: "", when: "", parents: [parent], refs: ["stash"], lane: 0, at: 0, email: "", unpushed: true };
+        const at = rows.findIndex((row) => row.id === parent || row.id.startsWith(parent));
+        if (at >= 0) rows.splice(at, 0, extra);
+      }
     }
-    return rows.filter((row) => !this.foldHidden.includes(row.id));
+    if (hidden.length === 0) return rows;
+    const hide = new Set(hidden);
+    return rows.filter((row) => !hide.has(row.id));
   });
 
 
@@ -1067,6 +1124,18 @@ export class ShellState {
   diffLines = $derived(this.diff?.lines ?? []);
 
 
+  /** Wrapped diffs draw every line, so large ones stay plain text instead of highlighting each one. */
+  heavyWrap = $derived.by(() => {
+    if (!this.settings.diffWordWrap) return false;
+    if (this.section === "changes") return this.diffLines.length > 300;
+    for (const file of this.openPatches) {
+      const lines = this.patchCache[file]?.lines.length ?? (this.historyDiff?.path === file ? this.historyDiff.lines.length : 0);
+      if (lines > 300) return true;
+    }
+    return false;
+  });
+
+
 
   discardableEntries(indexes: number[]) {
     return discardableEntries(this, indexes);
@@ -1082,15 +1151,12 @@ export class ShellState {
 
   liveGraph = $derived.by(() => {
     const items = this.historyItems;
-    const ids = items.map((commit) => commit.id);
-    const prev = this.graphResume;
-    const prefix = !!prev && prev.ids.length <= ids.length && prev.ids.every((id, index) => id === ids[index]);
-    const built = commitGraph(
-      items.map((commit) => ({ id: commit.id, parents: commit.parents ?? [] })),
-      prefix && prev ? { columns: prev.columns, count: prev.ids.length, rows: prev.rows } : undefined,
-    );
-    this.graphResume = { ids, columns: built.columns, rows: built.rows };
-    return built;
+    if (items.length > GRAPH_SYNC_LIMIT && this.graphVersion > 0 && this.graphItems === items) {
+      return { rows: this.graphRows, width: this.graphWidth, columns: this.graphColumns };
+    }
+    const limit = items.length > GRAPH_SYNC_LIMIT ? Math.min(items.length, 400) : items.length;
+    const built = commitGraph(items.slice(0, limit).map((commit) => ({ id: commit.id, parents: commit.parents ?? [] })));
+    return { rows: built.rows, width: built.width, columns: built.columns };
   });
 
 
@@ -1527,7 +1593,7 @@ export class ShellState {
 
   /** Unchanged data keeps its old object so lists and diffs are not rendered again. */
   same(left: unknown, right: unknown) {
-    return JSON.stringify(left) === JSON.stringify(right);
+    return sameValue(left, right);
   }
 
 
@@ -3888,6 +3954,46 @@ export class ShellState {
   }
 
   constructor() {
+    $effect(() => {
+      const items = this.historyItems;
+      if (items.length <= GRAPH_SYNC_LIMIT) {
+        this.graphItems = null;
+        this.graphRows = [];
+        return;
+      }
+      const commits = items.map((commit) => ({ id: commit.id, parents: commit.parents ?? [] }));
+      const prev = this.graphResume;
+      const prefix = !!prev && prev.ids.length <= commits.length && prev.ids.every((id, index) => id === commits[index].id);
+      let count = prefix && prev ? prev.ids.length : 0;
+      let resume: { columns: Array<string | null>; count: number; rows: GraphCell[][] } | undefined =
+        prefix && prev ? { columns: prev.columns, count: prev.ids.length, rows: prev.rows } : undefined;
+      const publish = (rows: GraphCell[][], width: number, columns: Array<string | null>) => {
+        this.graphRows = rows;
+        this.graphWidth = width;
+        this.graphColumns = columns;
+        this.graphItems = items;
+        this.graphVersion += 1;
+      };
+      if (count >= commits.length && prev) {
+        publish(prev.rows, prev.width, prev.columns);
+        return;
+      }
+      let frame = 0;
+      let first = true;
+      const pump = () => {
+        if (count >= commits.length) return;
+        const next = Math.min(commits.length, count + (first ? 2000 : 5000));
+        first = false;
+        const built = commitGraph(commits.slice(0, next), resume);
+        count = next;
+        resume = { columns: built.columns, count, rows: built.rows };
+        this.graphResume = { ids: commits.slice(0, count).map((commit) => commit.id), columns: built.columns, rows: built.rows, width: built.width };
+        publish(built.rows, built.width, built.columns);
+        if (count < commits.length) frame = requestAnimationFrame(pump);
+      };
+      pump();
+      return () => cancelAnimationFrame(frame);
+    });
     $effect(() => {
     if (!this.settings.fetchAutomatically) return;
     const timer = window.setInterval(() => {

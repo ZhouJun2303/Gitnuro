@@ -185,6 +185,19 @@ export function windowSlice<T>(items: T[], scrollTop: number, rowHeight: number,
   return { start, rows: items.slice(start, Math.min(items.length, start + 48)) };
 }
 
+/** Coalesce scroll events so a virtual list writes state at most once per frame. */
+export function onVirtualScroll(apply: (top: number) => void) {
+  let frame = 0;
+  return (event: Event) => {
+    const node = event.currentTarget as HTMLElement;
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      apply(node.scrollTop);
+    });
+  };
+}
+
 export type SplitRow = {
   left: string;
   right: string;

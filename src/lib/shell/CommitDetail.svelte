@@ -4,11 +4,12 @@
   import SplitHandle from "../SplitHandle.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { diffs } from "../sample";
-  import { type SplitRow } from "../view";
+  import { onVirtualScroll, type SplitRow } from "../view";
   import type { Row, Side, TreeEntry } from "./types";
 
   const shell = getShell();
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
+  const onBlobScroll = onVirtualScroll((top) => (shell.blobTop = top));
   const patchWindow = (node: HTMLElement, spec: { file: string; count: number; rowHeight: number }) => shell.trackPatch(node, spec);
 </script>
 
@@ -109,7 +110,7 @@
                     {:else if shell.treeBinary}
                       <p class="diff-empty">{shell.tr("chrome.binary")}</p>
                     {:else if shell.blobLines.length > 0}
-                      <div class="blob-body" class:select-all={shell.textWhere === "blob"} onscroll={(event) => (shell.blobTop = (event.currentTarget as HTMLElement).scrollTop)}>
+                      <div class="blob-body" class:select-all={shell.textWhere === "blob"} onscroll={onBlobScroll}>
                         <div class="blob-window" style:height="{shell.blobLines.length * 18}px">
                           {#each shell.blobWindow.rows as line, index (`b-${shell.blobWindow.start + index}`)}
                             <div class="blob-line" style:top="{(shell.blobWindow.start + index) * 18}px">

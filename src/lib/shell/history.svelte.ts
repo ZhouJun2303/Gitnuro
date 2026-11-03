@@ -566,12 +566,13 @@ function patchScroller(node: HTMLElement) {
 export function trackPatch(shell: ShellState, node: HTMLElement, spec: { file: string; count: number; rowHeight: number }) {
   let current = spec;
   let scroller: HTMLElement | null = null;
-  const update = () => {
+  let frame = 0;
+  const measure = () => {
     const nextScroller = patchScroller(node);
     if (scroller !== nextScroller) {
-      scroller?.removeEventListener("scroll", update);
+      scroller?.removeEventListener("scroll", schedule);
       scroller = nextScroller;
-      scroller.addEventListener("scroll", update, { passive: true });
+      scroller.addEventListener("scroll", schedule, { passive: true });
     }
     const rowHeight = current.rowHeight || 18;
     const count = current.count;
@@ -587,18 +588,26 @@ export function trackPatch(shell: ShellState, node: HTMLElement, spec: { file: s
     if (prev && prev.start === start && prev.end === end) return;
     shell.patchView = { ...shell.patchView, [current.file]: { start, end } };
   };
-  update();
-  const resize = new ResizeObserver(update);
+  const schedule = () => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      measure();
+    });
+  };
+  measure();
+  const resize = new ResizeObserver(schedule);
   resize.observe(node);
   const host = node.closest(".detail-scroll") ?? node.parentElement;
   if (host instanceof HTMLElement && host !== node) resize.observe(host);
   return {
     update(next: { file: string; count: number; rowHeight: number }) {
       current = next;
-      update();
+      measure();
     },
     destroy() {
-      scroller?.removeEventListener("scroll", update);
+      if (frame) cancelAnimationFrame(frame);
+      scroller?.removeEventListener("scroll", schedule);
       resize.disconnect();
       if (!(current.file in shell.patchView)) return;
       const next = { ...shell.patchView };

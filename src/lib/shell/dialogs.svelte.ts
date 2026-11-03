@@ -328,7 +328,8 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
     if (shell.mode !== "live" || !shell.canCommit) return;
     const messageText = shell.fullSummary.trim();
     if (!messageText) return;
-    const value = await shell.runChange("commit_changes", { summary: messageText, description: shell.description, amend: shell.amend, signOff: shell.signOff, skipHooks: shell.skipHooks });
+    const description = isCommentary(shell.description) ? "" : shell.description;
+    const value = await shell.runChange("commit_changes", { summary: messageText, description, amend: shell.amend, signOff: shell.signOff, skipHooks: shell.skipHooks });
     if (value === undefined) return;
     const failed = value ? "" : (shell.actionError ?? "");
     shell.recordCommand("commit", { title: shell.tr("chrome.commandCommit", { name: messageText || "HEAD" }), command: shell.gitLine(["commit", "-m", messageText]) }, (value?.log ?? failed).trim(), !!value, "user");

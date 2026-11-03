@@ -2,13 +2,15 @@
   import { getShell } from "./context";
   import "./DiffPane.css";
   import { sampleImages } from "../sample";
-  import { type SplitRow } from "../view";
+  import { onVirtualScroll, type SplitRow } from "../view";
   import type { Row, Side } from "./types";
   import { applyConflictChoice, mergeToolLabel, openConflictTool } from "./diff.svelte";
   import type { ConflictParty } from "../status";
 
   const shell = getShell();
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
+  const onDiffScroll = onVirtualScroll((top) => (shell.diffTop = top));
+  const onBlameScroll = onVirtualScroll((top) => (shell.blameTop = top));
   let pickOurs = $state(true);
   let pickTheirs = $state(true);
   let pickedPath = "";
@@ -35,7 +37,7 @@
               <span>{shell.tr("chrome.blameOf", { name: shell.selectedPath ?? "" })}</span>
               <button class="text-button" type="button" onclick={() => (shell.blameLines = null)}>{shell.tr("chrome.close")}</button>
             </header>
-            <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} onscroll={(event) => (shell.blameTop = (event.currentTarget as HTMLElement).scrollTop)}>
+            <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} onscroll={onBlameScroll}>
               <div class="commit-window" style:height="{(shell.blameLines?.length ?? 0) * 18}px">
                 {#each shell.blameWindow.rows as line, index (`${line.line}-${line.id}`)}
                   <button class="virtual-row" type="button" style:top="{(shell.blameWindow.start + index) * 18}px" title={line.summary} onclick={() => { shell.section = "history"; void shell.selectCommit(line.id); }}>{line.line} {line.shortId} {line.author} {line.summary} {line.text}</button>
@@ -114,7 +116,7 @@
             {:else if shell.diff.lines.length === 0}
               <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
             {:else if shell.settings.diffStyle === "split"}
-              <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={(event) => (shell.diffTop = (event.currentTarget as HTMLElement).scrollTop)} use:splitScroller={shell.splitColumns}>
+              <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={onDiffScroll} use:splitScroller={shell.splitColumns}>
                 {#if shell.splitWindow.start > 0}<div class="split-gap" style:height="{shell.splitWindow.start * shell.splitRowHeight}px"></div>{/if}
                 {#each shell.splitWindow.rows as row, offset (shell.splitWindow.start + offset)}
                   {@const index = shell.splitWindow.start + offset}
@@ -127,7 +129,7 @@
                 {@render splitBar()}
               </div>
             {:else}
-              <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} onscroll={(event) => (shell.diffTop = (event.currentTarget as HTMLElement).scrollTop)}>
+              <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} onscroll={onDiffScroll}>
                 <div class="commit-window" style:height="{shell.diffLines.length * 18}px">
                   {#each shell.diffWindow.rows as line, index (`${shell.diffWindow.start}-${index}`)}
                     {@const at = shell.diffWindow.start + index}

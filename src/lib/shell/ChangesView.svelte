@@ -4,11 +4,14 @@
   import "./ChangesView.css";
   import SplitHandle from "../SplitHandle.svelte";
   import DiffPane from "./DiffPane.svelte";
+  import { onVirtualScroll } from "../view";
   import type { Row, SearchKey, Side } from "./types";
   import { COMMIT_TYPES, commitTypeColor, typeMessageKey, type CommitType } from "./commitMessage";
 
   const shell = getShell();
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
+  const onStagedScroll = onVirtualScroll((top) => (shell.stagedTop = top));
+  const onFileScroll = onVirtualScroll((top) => (shell.fileTop = top));
   let typeOpen = $state(false);
 
   function pickType(type: CommitType) {
@@ -255,7 +258,7 @@
       {#if shell.shownStaged.length === 0}
         <p class="empty">{shell.staged.length === 0 ? shell.tr("chrome.noStaged") : shell.tr("chrome.noMatch")}</p>
       {:else}
-        <div class="file-list staged-list" onscroll={(event) => (shell.stagedTop = (event.currentTarget as HTMLElement).scrollTop)}>
+        <div class="file-list staged-list" onscroll={onStagedScroll}>
           <div class="commit-window" style:height="{shell.stagedTree.length * shell.fileStride}px">
             {#each shell.stagedWindow.rows as entry, index (entry.key)}
               <div class="virtual-row" style:top="{(shell.stagedWindow.start + index) * shell.fileStride}px">
@@ -289,7 +292,7 @@
         </div>
       </div>
       {@render pickedActions(unstagedPicked, [])}
-      <div class="file-list" onscroll={(event) => (shell.fileTop = (event.currentTarget as HTMLElement).scrollTop)}>
+      <div class="file-list" onscroll={onFileScroll}>
         {#if shell.showIgnored}
           {#if (shell.facts?.ignored.length ?? 0) === 0}
             <p class="empty">{shell.tr("chrome.noMatch")}</p>

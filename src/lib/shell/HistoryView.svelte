@@ -5,15 +5,16 @@
   import CommitDetail from "./CommitDetail.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { sampleReflog } from "../sample";
-  import { forkPath, gravatarUrl, laneColors, padGraphRow } from "../view";
+  import { forkPath, gravatarUrl, laneColors, onVirtualScroll, padGraphRow } from "../view";
   import type { Row, SearchKey } from "./types";
 
   const shell = getShell();
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
+  const onHistoryScroll = onVirtualScroll((top) => (shell.historyTop = top));
 </script>
 
 <div class="history-stage flex-fill">
-        <section class="history flex-fill" bind:this={shell.historyEl} onscroll={(event) => (shell.historyTop = (event.currentTarget as HTMLElement).scrollTop)}>
+        <section class="history flex-fill" bind:this={shell.historyEl} onscroll={onHistoryScroll}>
           {#if shell.filterNames.length > 0}
             <div class="filter-bar">
               <span>{shell.tr("chrome.filteredBy", { name: shell.filterNames.map((name) => `'${name}'`).join(", ") })}</span>

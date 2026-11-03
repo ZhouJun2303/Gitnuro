@@ -470,7 +470,7 @@ export function toggleCommitDir(shell: ShellState, path: string) {
   }
 
 export function paint(shell: ShellState, text: string, path: string) {
-    const tokens = shell.settings.disableSyntaxHighlight ? [{ text, cls: "" }] : highlight(text, path);
+    const tokens = shell.settings.disableSyntaxHighlight || shell.heavyWrap ? [{ text, cls: "" }] : highlight(text, path);
     if (!shell.settings.showWhitespace) return tokens;
     return tokens.map((token) => ({ ...token, text: token.text.replace(/ /g, "·").replace(/\t/g, "→") }));
   }

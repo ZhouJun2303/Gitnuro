@@ -779,6 +779,8 @@ input[type="checkbox"]:disabled,
     height: auto;
     line-height: 1.45;
     overflow: visible;
+    content-visibility: auto;
+    contain-intrinsic-size: auto 18px;
 }
 
 .shell.diff-wrap .diff-body .virtual-row {
