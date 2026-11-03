@@ -235,10 +235,9 @@
   let loadError = $state<string | null>(null);
   let actionError = $state<string | null>(null);
   let busy = $state(false);
-  /** What the running operation is called, shown in the progress strip. */
+  /** Nested user-facing work. The progress strip follows this, not only writes. */
+  let workDepth = $state(0);
   let busyLabel = $state("");
-  /** The strip appears only after a short delay so quick operations do not flash it. */
-  let busyShown = $state(false);
   let errorCopied = $state(false);
   let diff = $state<FileDiff | null>(null);
   let diffError = $state<string | null>(null);
@@ -972,6 +971,7 @@
     const token = ++diffToken;
     const file = selectedPath;
     const stagedSide = selectedSide === "staged";
+    await withWork(tr("chrome.readingFile"), async () => {
     try {
       const value = await invoke<FileDiff>("file_diff", {
         path: repoPath(),
@@ -1000,6 +1000,7 @@
         diffError = message(error);
       }
     }
+    });
   }
 
   function currentFilterRefs() {
@@ -1042,13 +1043,14 @@
   }
 
   /** `status` reads the work tree and the open diff only; `full` also reloads branches and history. */
-  async function refresh(scope: "status" | "full" = "full") {
+  async function refresh(scope: "status" | "full" = "full", silent = false) {
     if (!inApp() || busy) return;
     if (refreshing) {
       if (refreshQueued !== "full") refreshQueued = scope;
       return;
     }
     refreshing = true;
+    if (!silent) startWork(tr("chrome.refresh"));
     try {
       const gen = statusGen;
       const value = await invoke<StatusSnapshot>("workspace_status", { path: repoPath() });
@@ -1059,16 +1061,37 @@
       actionError = message(error);
     } finally {
       refreshing = false;
+      if (!silent) stopWork();
     }
     const next = refreshQueued;
     refreshQueued = null;
-    if (next) await refresh(next);
+    if (next) await refresh(next, silent);
+  }
+
+  function startWork(label: string) {
+    busyLabel = label;
+    workDepth += 1;
+  }
+
+  function stopWork() {
+    workDepth = Math.max(0, workDepth - 1);
+    if (workDepth === 0) busyLabel = "";
+  }
+
+  async function withWork<T>(label: string, body: () => Promise<T>): Promise<T> {
+    startWork(label);
+    try {
+      return await body();
+    } finally {
+      stopWork();
+    }
   }
 
   async function runChange(command: string, extra: Record<string, unknown> = {}) {
     if (mode !== "live" || busy) return undefined;
     busy = true;
     actionError = null;
+    startWork(tr("chrome.working"));
     try {
       const value = await invoke<StatusSnapshot & { log?: string }>(command, { path: repoPath(), ...extra });
       applySnapshot(value);
@@ -1079,6 +1102,7 @@
       return null;
     } finally {
       busy = false;
+      stopWork();
     }
   }
 
@@ -1232,7 +1256,7 @@
     busy = true;
     actionError = null;
     const described = describeRequest(request);
-    busyLabel = described.title;
+    startWork(described.title);
     try {
       const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path: repoPath(), request });
       applySnapshot(value);
@@ -1267,18 +1291,9 @@
       }
     } finally {
       busy = false;
+      stopWork();
     }
   }
-
-  $effect(() => {
-    if (!busy) {
-      busyShown = false;
-      busyLabel = "";
-      return;
-    }
-    const timer = window.setTimeout(() => (busyShown = true), 150);
-    return () => window.clearTimeout(timer);
-  });
 
   function closeError() {
     actionError = null;
@@ -1949,6 +1964,7 @@
     if (mode !== "live" || busy) return;
     busy = true;
     actionError = null;
+    startWork(tr("chrome.suggest"));
     try {
       const value = await invoke<Suggestion>("suggest_commit_message", { path: repoPath() });
       summary = value.summary;
@@ -1957,6 +1973,7 @@
       actionError = message(error);
     } finally {
       busy = false;
+      stopWork();
     }
   }
 
@@ -1965,18 +1982,20 @@
     comparePair = [drops[0], drops[1]];
     resetCommitView();
     const gen = patchGen;
-    try {
-      commitFiles = await invoke<StatusFile[]>("compare_files", { path: repoPath(), from: drops[0], to: drops[1] });
-      if (gen !== patchGen) return;
-      selectedCommit = drops[1];
-      historyFile = commitFiles[0]?.path ?? null;
-      if (historyFile) {
-        await pickCommitFile(historyFile);
-        if (gen === patchGen) openPatches = [historyFile];
+    await withWork(tr("chrome.readingCommit"), async () => {
+      try {
+        commitFiles = await invoke<StatusFile[]>("compare_files", { path: repoPath(), from: drops[0], to: drops[1] });
+        if (gen !== patchGen) return;
+        selectedCommit = drops[1];
+        historyFile = commitFiles[0]?.path ?? null;
+        if (historyFile) {
+          await pickCommitFile(historyFile);
+          if (gen === patchGen) openPatches = [historyFile];
+        }
+      } catch (error) {
+        if (gen === patchGen) actionError = message(error);
       }
-    } catch (error) {
-      if (gen === patchGen) actionError = message(error);
-    }
+    });
   }
 
   async function selectCommit(id: string, event?: MouseEvent) {
@@ -1996,6 +2015,7 @@
     resetCommitView();
     const gen = patchGen;
     const row = commitsLive.find((commit) => commit.id === id);
+    await withWork(tr("chrome.readingCommit"), async () => {
     commitDetail = {
       id,
       body: "",
@@ -2033,6 +2053,7 @@
     } catch (error) {
       if (gen === patchGen) actionError = message(error);
     }
+    });
   }
 
   async function pickCommitFile(file: string) {
@@ -2045,27 +2066,29 @@
     }
     historyDiff = null;
     if (!comparePair && !selectedCommit) return;
-    try {
-      const diff = comparePair
-        ? await invoke<FileDiff>("compare_file", {
-            path: repoPath(),
-            from: comparePair[0],
-            to: comparePair[1],
-            file,
-            unified: settings.showEntireFile ? 100000 : 3,
-          })
-        : await invoke<FileDiff>("show_commit_file", {
-            path: repoPath(),
-            id: selectedCommit ?? "",
-            file,
-            unified: settings.showEntireFile ? 100000 : 3,
-          });
-      if (gen !== patchGen) return;
-      historyDiff = diff;
-      patchCache = { ...patchCache, [file]: diff };
-    } catch (error) {
-      if (gen === patchGen) actionError = message(error);
-    }
+    await withWork(tr("chrome.readingFile"), async () => {
+      try {
+        const diff = comparePair
+          ? await invoke<FileDiff>("compare_file", {
+              path: repoPath(),
+              from: comparePair[0],
+              to: comparePair[1],
+              file,
+              unified: settings.showEntireFile ? 100000 : 3,
+            })
+          : await invoke<FileDiff>("show_commit_file", {
+              path: repoPath(),
+              id: selectedCommit ?? "",
+              file,
+              unified: settings.showEntireFile ? 100000 : 3,
+            });
+        if (gen !== patchGen) return;
+        historyDiff = diff;
+        patchCache = { ...patchCache, [file]: diff };
+      } catch (error) {
+        if (gen === patchGen) actionError = message(error);
+      }
+    });
   }
 
   async function ensurePatch(file: string) {
@@ -2140,11 +2163,13 @@
 
   async function showBlame(file: string) {
     blameLines = null;
-    try {
-      blameLines = await invoke<BlameLine[]>("blame_file", { path: repoPath(), file });
-    } catch (error) {
-      actionError = message(error);
-    }
+    await withWork(tr("chrome.readingFile"), async () => {
+      try {
+        blameLines = await invoke<BlameLine[]>("blame_file", { path: repoPath(), file });
+      } catch (error) {
+        actionError = message(error);
+      }
+    });
   }
 
   async function openRepo(path: string) {
@@ -2152,6 +2177,7 @@
     if (snapshot?.path) drafts.set(snapshot.path, { summary, description });
     busy = true;
     actionError = null;
+    startWork(tr("chrome.open"));
     try {
       applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
       const saved = drafts.get(path);
@@ -2173,6 +2199,7 @@
       actionError = message(error);
     } finally {
       busy = false;
+      stopWork();
     }
     if (settings.fetchAutomatically && snapshot?.path === path) void doFetch("background");
   }
@@ -3710,6 +3737,7 @@
     if (ordered.length === 0) return;
     busy = true;
     actionError = null;
+    startWork(tr("chrome.working"));
     diffSelected = [];
     try {
       let value: (StatusSnapshot & { output?: string }) | null = null;
@@ -3743,6 +3771,7 @@
       }
     } finally {
       busy = false;
+      stopWork();
     }
   }
 
@@ -4000,23 +4029,25 @@
     if (historyFilter) historyFilter = "";
     allBranches = true;
     actionError = null;
-    try {
-      const found = await invoke<{ id: string; commits: CommitRow[] }>("locate_ref", {
-        path: repoPath(),
-        name,
-        order: settings.commitSort === "topo" ? "topo" : "date",
-      });
-      if (seq !== locateSeq) return;
-      logLimit = Math.max(logLimit, found.commits.length);
-      if (!same(commitsLive, found.commits)) commitsLive = found.commits;
-      await tick();
-      await selectCommit(found.id);
-      await tick();
-      scrollToCommit(found.id);
-    } catch (error) {
-      if (seq !== locateSeq) return;
-      actionError = message(error);
-    }
+    await withWork(tr("chrome.locating", { name }), async () => {
+      try {
+        const found = await invoke<{ id: string; commits: CommitRow[] }>("locate_ref", {
+          path: repoPath(),
+          name,
+          order: settings.commitSort === "topo" ? "topo" : "date",
+        });
+        if (seq !== locateSeq) return;
+        logLimit = Math.max(logLimit, found.commits.length);
+        if (!same(commitsLive, found.commits)) commitsLive = found.commits;
+        await tick();
+        await selectCommit(found.id);
+        await tick();
+        scrollToCommit(found.id);
+      } catch (error) {
+        if (seq !== locateSeq) return;
+        actionError = message(error);
+      }
+    });
   }
 
   /** Show what a stash changed, using the stash commit against the commit it was taken from. */
@@ -4024,10 +4055,12 @@
     if (mode !== "live") return;
     openHistory();
     const id = stash.id || stash.name;
-    await tick();
-    await selectCommit(id);
-    await tick();
-    scrollToCommit(id);
+    await withWork(tr("chrome.locating", { name: stash.name }), async () => {
+      await tick();
+      await selectCommit(id);
+      await tick();
+      scrollToCommit(id);
+    });
   }
 
   function openRepoSettings() {
@@ -4324,7 +4357,7 @@
         }
         try {
           unlisten = await listen<{ refs?: boolean } | null>("repo-changed", (event) => {
-            if (!busy) void refresh(event.payload?.refs === false ? "status" : "full");
+            if (!busy) void refresh(event.payload?.refs === false ? "status" : "full", true);
           });
         } catch {
           /* the watcher is optional until a repository is open */
@@ -4520,7 +4553,7 @@
       <button class="text-button" type="button" disabled={busy || progress === "merge"} onclick={() => mutate({ action: "skip" })}>{tr("chrome.skip")}</button>
     </div>
   {/if}
-  {#if busy && busyShown}
+  {#if workDepth > 0}
     <div class="banner busy" role="status" aria-live="polite">
       <span class="busy-text">{busyLabel ? `${tr("chrome.working")} ${busyLabel}` : tr("chrome.working")}</span>
       <span class="spacer"></span>

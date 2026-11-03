@@ -12,6 +12,9 @@ export type Messages = {
     errorTitle: string;
     copyError: string;
     copied: string;
+    locating: string;
+    readingCommit: string;
+    readingFile: string;
     fetch: string;
     pull: string;
     push: string;
