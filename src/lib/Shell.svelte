@@ -235,6 +235,11 @@
   let loadError = $state<string | null>(null);
   let actionError = $state<string | null>(null);
   let busy = $state(false);
+  /** What the running operation is called, shown in the progress strip. */
+  let busyLabel = $state("");
+  /** The strip appears only after a short delay so quick operations do not flash it. */
+  let busyShown = $state(false);
+  let errorCopied = $state(false);
   let diff = $state<FileDiff | null>(null);
   let diffError = $state<string | null>(null);
   let diffToken = 0;
@@ -1227,6 +1232,7 @@
     busy = true;
     actionError = null;
     const described = describeRequest(request);
+    busyLabel = described.title;
     try {
       const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path: repoPath(), request });
       applySnapshot(value);
@@ -1262,6 +1268,28 @@
     } finally {
       busy = false;
     }
+  }
+
+  $effect(() => {
+    if (!busy) {
+      busyShown = false;
+      busyLabel = "";
+      return;
+    }
+    const timer = window.setTimeout(() => (busyShown = true), 150);
+    return () => window.clearTimeout(timer);
+  });
+
+  function closeError() {
+    actionError = null;
+    errorCopied = false;
+  }
+
+  function copyError() {
+    if (!actionError) return;
+    copyText(actionError);
+    errorCopied = true;
+    window.setTimeout(() => (errorCopied = false), 1500);
   }
 
   function doFetch(source: "user" | "background" = "user") {
@@ -4504,8 +4532,21 @@
       <button class="text-button" type="button" disabled={busy || progress === "merge"} onclick={() => mutate({ action: "skip" })}>{tr("chrome.skip")}</button>
     </div>
   {/if}
+  {#if busy && busyShown}
+    <div class="banner busy" role="status" aria-live="polite">
+      <span class="busy-text">{busyLabel || tr("chrome.working")}</span>
+    </div>
+  {/if}
   {#if actionError}
-    <p class="banner error">{actionError}</p>
+    <div class="error-toast" role="alert">
+      <div class="error-head">
+        <strong>{tr("chrome.errorTitle")}</strong>
+        <span class="spacer"></span>
+        <button class="text-button" type="button" onclick={copyError}>{errorCopied ? tr("chrome.copied") : tr("chrome.copyError")}</button>
+        <button class="text-button" type="button" aria-label={tr("chrome.close")} onclick={closeError}>✕</button>
+      </div>
+      <pre class="error-body">{actionError}</pre>
+    </div>
   {/if}
 
   {#if !snapshot && mode !== "sample"}
@@ -7417,9 +7458,80 @@
     background: var(--selection);
   }
 
-  .banner.error {
+  .banner.busy {
+    position: relative;
+    overflow: hidden;
+    min-height: 24px;
+    color: var(--text-secondary);
+    background: var(--selection);
+    animation: busy-in 160ms ease-out;
+  }
+
+  /* A band of light that keeps travelling across the strip while work is running. */
+  .banner.busy::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 45%;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 38%, transparent), transparent);
+    animation: busy-flow 1.3s linear infinite;
+    pointer-events: none;
+  }
+
+  .banner.busy .busy-text {
+    position: relative;
+    font-size: 12px;
+  }
+
+  @keyframes busy-flow {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(320%); }
+  }
+
+  @keyframes busy-in {
+    from { opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .banner.busy::before { animation-duration: 3s; }
+  }
+
+  .error-toast {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 60;
+    width: min(460px, calc(100vw - 32px));
+    max-height: min(50vh, 360px);
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--deleted);
+    border-radius: var(--radius);
+    background: var(--elevated);
+    box-shadow: 0 10px 30px rgba(9, 9, 11, 0.22);
+    animation: dialog-in 160ms ease-out;
+  }
+
+  .error-head {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 8px 6px 12px;
     color: var(--deleted);
-    background: transparent;
+  }
+
+  .error-head .spacer { flex: 1; }
+
+  .error-body {
+    margin: 0;
+    padding: 0 12px 12px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: 12px/1.5 var(--mono, ui-monospace, Consolas, monospace);
+    color: var(--text);
+    user-select: text;
   }
 
   .body {

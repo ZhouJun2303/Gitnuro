@@ -9,6 +9,9 @@ export type Messages = {
     workspaceCreate: string;
     workspaceDefault: string;
     refNotFound: string;
+    errorTitle: string;
+    copyError: string;
+    copied: string;
     fetch: string;
     pull: string;
     push: string;
