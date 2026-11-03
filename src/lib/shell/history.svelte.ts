@@ -214,7 +214,7 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
             path: shell.repoPath(),
             id,
             file: shell.historyFile,
-            unified: shell.settings.showEntireFile ? 100000 : 3,
+            unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
           })
         : null;
       if (gen !== shell.patchGen) return;
@@ -246,13 +246,13 @@ export async function pickCommitFile(shell: ShellState, file: string) {
               from: shell.comparePair[0],
               to: shell.comparePair[1],
               file,
-              unified: shell.settings.showEntireFile ? 100000 : 3,
+              unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
             })
           : await invoke<FileDiff>("show_commit_file", {
               path: shell.repoPath(),
               id: shell.selectedCommit ?? "",
               file,
-              unified: shell.settings.showEntireFile ? 100000 : 3,
+              unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
             });
         if (gen !== shell.patchGen) return;
         shell.historyDiff = diff;

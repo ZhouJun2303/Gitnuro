@@ -105,7 +105,7 @@ fn report_path(given: Option<String>, repo: &Path) -> PathBuf {
 /// Settings keep their call order. Writes run together, and each repository keeps its own order.
 fn dispatch(command: &str, job: Job) {
     let lane = match command {
-        "load_settings" | "save_settings" | "watch_repository" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
+        "load_settings" | "save_settings" | "settings_path" | "import_fork_settings" | "watch_repository" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
         | "log_client" => Some((&SETTINGS_LANE, "awegit-settings")),
         _ => None,
     };
@@ -657,6 +657,23 @@ fn save_settings(values: settings::Settings) -> Result<settings::Settings, Strin
 }
 
 #[tauri::command]
+fn settings_path() -> Result<String, String> {
+    Ok(settings::path()?.display().to_string())
+}
+
+#[tauri::command]
+fn import_fork_settings(path: Option<String>) -> Result<settings::ForkImport, String> {
+    let chosen = path.filter(|item| !item.trim().is_empty());
+    let file = match chosen {
+        Some(path) => PathBuf::from(path),
+        None => tools::fork_settings_file().ok_or_else(|| "fork-settings-missing".to_string())?,
+    };
+    let imported = settings::import_fork_at(&file)?;
+    remember_fakeignore(imported.settings.fake_ignore);
+    Ok(imported)
+}
+
+#[tauri::command]
 fn external_tools() -> tools::ExternalTools {
     tools::installed()
 }
@@ -923,6 +940,56 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 }
 
 #[tauri::command]
+fn pick_file(initial: Option<String>) -> Result<Option<String>, String> {
+    let start = initial.unwrap_or_default();
+    #[cfg(windows)]
+    {
+        let script = r#"
+Add-Type -AssemblyName System.Windows.Forms | Out-Null
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Filter = "JSON (*.json)|*.json|All files (*.*)|*.*"
+$dialog.CheckFileExists = $true
+$start = $env:AWEGIT_PICK_START
+if ($start -and (Test-Path -LiteralPath $start)) {
+  $item = Get-Item -LiteralPath $start
+  if ($item.PSIsContainer) { $dialog.InitialDirectory = $item.FullName }
+  else { $dialog.InitialDirectory = $item.DirectoryName; $dialog.FileName = $item.Name }
+}
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.FileName }
+"#;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-STA", "-Command", script])
+            .env("AWEGIT_PICK_START", &start)
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if err.is_empty() { "Could not open the file picker.".into() } else { err });
+        }
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(if text.is_empty() { None } else { Some(text) });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = start;
+        let output = std::process::Command::new("osascript")
+            .args(["-e", "try", "-e", "POSIX path of (choose file of type {\"public.json\"})", "-e", "on error number -128", "-e", "\"\"", "-e", "end try"])
+            .output()
+            .map_err(|error| error.to_string())?;
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(if text.is_empty() { None } else { Some(text) });
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = start;
+        Err("This system has no file picker.".into())
+    }
+}
+
+#[tauri::command]
 fn file_preview(path: Option<String>, file: String) -> Result<Option<awegit_git::FilePreview>, String> {
     let repo = repo_from(path)?;
     awegit_git::file_preview(&repo, &file).map_err(|error| error.to_string())
@@ -1095,8 +1162,9 @@ fn repo_facts(path: Option<String>, full: Option<bool>) -> Result<awegit_git::Re
 }
 
 #[tauri::command]
-fn scan_repositories(root: String) -> Result<Vec<String>, String> {
-    awegit_git::scan_repositories(std::path::Path::new(&root)).map_err(|error| error.to_string())
+fn scan_repositories(root: String, depth: Option<u32>) -> Result<Vec<String>, String> {
+    let limit = depth.unwrap_or(5) as usize;
+    awegit_git::scan_repositories(std::path::Path::new(&root), limit).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1340,12 +1408,15 @@ pub fn run() {
             blame_file,
             load_settings,
             save_settings,
+            settings_path,
+            import_fork_settings,
             external_tools,
             program_exists,
             watch_repository,
             open_terminal,
             clipboard_text,
             pick_directory,
+            pick_file,
             suggest_commit_message,
             file_preview,
             cancel_operation,

@@ -379,6 +379,23 @@ export function branchGroup(name: string) {
   return slash > 0 ? name.slice(0, slash) : "";
 }
 
+/** Folders (names with a first path segment) stay together, ahead of bare names. */
+export function orderRefNames(names: readonly string[], pinned?: ReadonlySet<string>) {
+  const folders: string[] = [];
+  const loose: string[] = [];
+  for (const name of names) (branchGroup(name) ? folders : loose).push(name);
+  const byName = (a: string, b: string) => a.localeCompare(b);
+  folders.sort((a, b) => {
+    const group = branchGroup(a).localeCompare(branchGroup(b));
+    return group || byName(a, b);
+  });
+  loose.sort((a, b) => {
+    const pin = Number(pinned?.has(b) ?? false) - Number(pinned?.has(a) ?? false);
+    return pin || byName(a, b);
+  });
+  return [...folders, ...loose];
+}
+
 export function gravatarUrl(email: string) {
   const hash = md5(email.trim().toLowerCase());
   return `https://www.gravatar.com/avatar/${hash}?s=32&d=blank`;

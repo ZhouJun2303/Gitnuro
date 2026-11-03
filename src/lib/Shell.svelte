@@ -416,7 +416,7 @@
 
 <PerfPanel />
 
-<div class="shell" class:vertical-tabs={shell.settings.verticalTabs} style:--diff-font="{shell.settings.diffFontSize || 13}px" style:--guide="{shell.settings.pageGuide || 72}">
+<div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.settings.diffFontSize || 13}px" style:--guide="{shell.settings.pageGuide || 72}">
   <Chrome />
 
   {#if !shell.snapshot && shell.mode !== "sample"}

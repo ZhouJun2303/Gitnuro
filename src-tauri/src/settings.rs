@@ -229,6 +229,51 @@ pub struct Settings {
     /// OAuth client id for a device-code login. Empty keeps token paste.
     #[serde(default)]
     pub oauth_client_id: String,
+    /// Fetch dialog starts with every remote selected.
+    #[serde(default)]
+    pub fetch_all_remotes: bool,
+    /// Pull stashes local edits and puts them back. Separate from merge autostash.
+    #[serde(default)]
+    pub pull_stash: bool,
+    /// Push dialog starts with every tag included.
+    #[serde(default)]
+    pub push_all_tags: bool,
+    /// New branches are checked out after they are created.
+    #[serde(default = "default_true")]
+    pub checkout_after_create: bool,
+    /// Stash dialog includes untracked files.
+    #[serde(default)]
+    pub stash_include_untracked: bool,
+    #[serde(default)]
+    pub diff_word_wrap: bool,
+    /// Unchanged lines kept around each hunk. Zero shows only the changes.
+    #[serde(default = "diff_context_default")]
+    pub diff_context: u32,
+    /// Seconds between local status refreshes. Zero leaves that timer off.
+    #[serde(default)]
+    pub status_interval: u32,
+    #[serde(default = "default_true")]
+    pub show_worktrees: bool,
+    /// How many commits the history list loads. Load more can still ask for a later page.
+    #[serde(default = "max_commits_default")]
+    pub max_commits: u32,
+    #[serde(default)]
+    pub rebase_autostash: bool,
+    #[serde(default)]
+    pub rebase_update_refs: bool,
+    /// Applying a stash drops it afterwards. Pop already drops the stash.
+    #[serde(default)]
+    pub apply_stash_delete: bool,
+    #[serde(default)]
+    pub push_tag_on_create: bool,
+    /// A dirty checkout stashes, switches, then restores. A conflict keeps the stash notice.
+    #[serde(default)]
+    pub checkout_stash: bool,
+    #[serde(default)]
+    pub workspace_show_title: bool,
+    /// How deep a source folder is walked when looking for repositories.
+    #[serde(default = "scan_depth_default")]
+    pub scan_depth: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -347,6 +392,15 @@ fn guide_col() -> u32 {
 fn shell_default() -> String {
     "default".into()
 }
+fn diff_context_default() -> u32 {
+    3
+}
+fn max_commits_default() -> u32 {
+    500
+}
+fn scan_depth_default() -> u32 {
+    5
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -454,6 +508,23 @@ impl Default for Settings {
             azure_token: String::new(),
             azure_org: String::new(),
             oauth_client_id: String::new(),
+            fetch_all_remotes: false,
+            pull_stash: false,
+            push_all_tags: false,
+            checkout_after_create: true,
+            stash_include_untracked: false,
+            diff_word_wrap: false,
+            diff_context: diff_context_default(),
+            status_interval: 0,
+            show_worktrees: true,
+            max_commits: max_commits_default(),
+            rebase_autostash: false,
+            rebase_update_refs: false,
+            apply_stash_delete: false,
+            push_tag_on_create: false,
+            checkout_stash: false,
+            workspace_show_title: false,
+            scan_depth: scan_depth_default(),
         }
     }
 }
@@ -487,4 +558,403 @@ pub fn save(settings: &Settings) -> Result<(), String> {
     }
     let text = serde_json::to_string_pretty(settings).map_err(|error| error.to_string())?;
     std::fs::write(path, text).map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForkImport {
+    pub settings: Settings,
+    pub preferences: u32,
+    pub repositories: u32,
+    pub workspaces: u32,
+}
+
+/// Read a Fork `settings.json`, merge the matching fields, and save AweGit's file.
+pub fn import_fork_at(path: &std::path::Path) -> Result<ForkImport, String> {
+    if !path.is_file() {
+        return Err("fork-settings-missing".into());
+    }
+    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let mut current = load().unwrap_or_else(|_| Settings::default());
+    let report = apply_fork(&mut current, &value, &text);
+    save(&current)?;
+    Ok(ForkImport {
+        settings: current,
+        preferences: report.0,
+        repositories: report.1,
+        workspaces: report.2,
+    })
+}
+
+/// Merge Fork values into `settings`. Secrets, commands, and the window rectangle stay as they are.
+pub fn apply_fork(settings: &mut Settings, fork: &serde_json::Value, text: &str) -> (u32, u32, u32) {
+    let mut preferences = 0u32;
+    take_bool(fork, "Pull_Rebase", &mut settings.pull_rebase, &mut preferences);
+    take_bool(fork, "FetchRemotesAutomatically", &mut settings.fetch_automatically, &mut preferences);
+    take_bool(fork, "FetchAllTags", &mut settings.fetch_tags, &mut preferences);
+    take_bool(fork, "PushAutomaticallyOnCommit", &mut settings.push_on_commit, &mut preferences);
+    take_bool(fork, "UpdateSubmodulesOnCheckout", &mut settings.update_submodules_on_checkout, &mut preferences);
+    take_bool(fork, "DiffIgnoreWhitespaces", &mut settings.ignore_space, &mut preferences);
+    take_bool(fork, "DiffShowHiddenSymbols", &mut settings.show_whitespace, &mut preferences);
+    take_bool(fork, "DiffShowChangeMarks", &mut settings.show_diff_marks, &mut preferences);
+    take_bool(fork, "DiffShowEntireFile", &mut settings.show_entire_file, &mut preferences);
+    take_bool(fork, "DiffWordWrap", &mut settings.diff_word_wrap, &mut preferences);
+    take_bool(fork, "CompactBranchLabels", &mut settings.compact_branch_labels, &mut preferences);
+    take_bool(fork, "DisableSyntaxHighlighting", &mut settings.disable_syntax_highlight, &mut preferences);
+    take_bool(fork, "Fetch_FetchAllRemotes", &mut settings.fetch_all_remotes, &mut preferences);
+    take_bool(fork, "Pull_StashAndReapply", &mut settings.pull_stash, &mut preferences);
+    take_bool(fork, "Push_PushAllTags", &mut settings.push_all_tags, &mut preferences);
+    take_bool(fork, "CreateBranch_Checkout", &mut settings.checkout_after_create, &mut preferences);
+    take_bool(fork, "SaveStash_StageNewFiles", &mut settings.stash_include_untracked, &mut preferences);
+    take_bool(fork, "ApplyStash_DeleteAfterApply", &mut settings.apply_stash_delete, &mut preferences);
+    take_bool(fork, "CreateTag_Push", &mut settings.push_tag_on_create, &mut preferences);
+    take_bool(fork, "Checkout_StashAndReapply", &mut settings.checkout_stash, &mut preferences);
+    take_bool(fork, "ShowWorktrees", &mut settings.show_worktrees, &mut preferences);
+    take_bool(fork, "RebaseAutostash", &mut settings.rebase_autostash, &mut preferences);
+    take_bool(fork, "RebaseUpdateRefs", &mut settings.rebase_update_refs, &mut preferences);
+    take_u32(fork, "CodeEditorFontSize", &mut settings.diff_font_size, &mut preferences, 1);
+    take_u32(fork, "CommitSubjectLowLimit", &mut settings.message_low, &mut preferences, 1);
+    take_u32(fork, "CommitSubjectHighLimit", &mut settings.message_high, &mut preferences, 1);
+    take_u32(fork, "PageGuideLinePosition", &mut settings.page_guide, &mut preferences, 1);
+    take_u32(fork, "DiffContextSize", &mut settings.diff_context, &mut preferences, 0);
+    take_u32(fork, "AutomaticStatusUpdateInterval", &mut settings.status_interval, &mut preferences, 0);
+    take_u32(fork, "MaxCommitCount", &mut settings.max_commits, &mut preferences, 1);
+    if let Some(value) = fork.get("ReferenceSpaceCharacterReplacement").and_then(serde_json::Value::as_str) {
+        settings.branch_space = value.to_string();
+        preferences += 1;
+    }
+    if let Some(mode) = fork.get("CommitSpellCheckingMode").and_then(serde_json::Value::as_i64) {
+        settings.spell_checking = if mode == 0 { "disable" } else { "enable" }.into();
+        preferences += 1;
+    }
+    if fork.get("FollowSystemTheme").and_then(serde_json::Value::as_bool) == Some(true) {
+        settings.theme = "system".into();
+        preferences += 1;
+    } else if let Some(theme) = fork.get("Theme").and_then(serde_json::Value::as_i64) {
+        settings.theme = if theme == 1 { "dark" } else { "light" }.into();
+        preferences += 1;
+    }
+    if let Some(mode) = fork.get("FileListMode").and_then(serde_json::Value::as_i64) {
+        match mode {
+            1 => {
+                settings.file_layout = "tree".into();
+                settings.tree_files = true;
+            }
+            2 => {
+                settings.file_layout = "combined".into();
+                settings.tree_files = false;
+            }
+            _ => {
+                settings.file_layout = "list".into();
+                settings.tree_files = false;
+            }
+        }
+        preferences += 1;
+    }
+    if let Some(mode) = ["HistoryDiffLayoutMode", "CommitDiffLayoutMode", "RevisionDiffLayoutMode"]
+        .into_iter()
+        .find_map(|key| fork.get(key).and_then(serde_json::Value::as_i64))
+    {
+        settings.diff_style = if mode == 0 { "unified" } else { "split" }.into();
+        preferences += 1;
+    }
+    if let Some(depth) = fork.pointer("/RepositoryManager/ScanDepth").and_then(serde_json::Value::as_u64) {
+        if depth > 0 {
+            settings.scan_depth = depth.min(u32::MAX as u64) as u32;
+            preferences += 1;
+        }
+    }
+    if let Some(show) = fork.pointer("/Workspaces/ShowInTitle").and_then(serde_json::Value::as_bool) {
+        settings.workspace_show_title = show;
+        preferences += 1;
+    }
+    apply_tools(settings, text, &mut preferences);
+    let repositories = merge_repositories(settings, fork);
+    let workspaces = merge_workspaces(settings, fork);
+    (preferences, repositories, workspaces)
+}
+
+fn take_bool(fork: &serde_json::Value, key: &str, dest: &mut bool, count: &mut u32) {
+    if let Some(value) = fork.get(key).and_then(serde_json::Value::as_bool) {
+        *dest = value;
+        *count += 1;
+    }
+}
+
+fn take_u32(fork: &serde_json::Value, key: &str, dest: &mut u32, count: &mut u32, minimum: u64) {
+    let Some(value) = fork.get(key) else { return };
+    let Some(number) = value.as_u64().or_else(|| value.as_f64().map(|item| item as u64)) else { return };
+    if number < minimum {
+        return;
+    }
+    *dest = number.min(u32::MAX as u64) as u32;
+    *count += 1;
+}
+
+fn apply_tools(settings: &mut Settings, text: &str, count: &mut u32) {
+    let tools = crate::tools::tools_in_fork_text(text);
+    if let Some(tool) = tools.merge.iter().find(|item| item.primary).or(tools.merge.first()) {
+        settings.merge_tool_name = tool.name.clone();
+        settings.merge_tool_path = tool.path.clone();
+        settings.merge_tool_args = tool.args.clone();
+        settings.merge_tool = compose_tool(&tool.path, &tool.args);
+        *count += 1;
+    }
+    if let Some(tool) = tools.diff.iter().find(|item| item.primary).or(tools.diff.first()) {
+        settings.diff_tool_name = tool.name.clone();
+        settings.diff_tool_path = tool.path.clone();
+        settings.diff_tool_args = tool.args.clone();
+        settings.diff_tool = compose_tool(&tool.path, &tool.args);
+        *count += 1;
+    }
+}
+
+fn compose_tool(path: &str, args: &str) -> String {
+    let file = path.trim();
+    let rest = args.trim();
+    if file.is_empty() {
+        return rest.to_string();
+    }
+    let quoted = if file.contains(' ') { format!("\"{file}\"") } else { file.to_string() };
+    if rest.is_empty() { quoted } else { format!("{quoted} {rest}") }
+}
+
+fn merge_repositories(settings: &mut Settings, fork: &serde_json::Value) -> u32 {
+    let Some(rows) = fork.pointer("/RepositoryManager/Repositories").and_then(serde_json::Value::as_array) else {
+        return 0;
+    };
+    let mut ordered: Vec<(String, String)> = rows
+        .iter()
+        .filter_map(|item| {
+            let path = item.get("Path").and_then(serde_json::Value::as_str)?.trim().to_string();
+            if path.is_empty() {
+                return None;
+            }
+            let time = item.get("LastAccessTime").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
+            Some((time, path))
+        })
+        .collect();
+    ordered.sort_by(|left, right| right.0.cmp(&left.0));
+    let imported: Vec<String> = ordered.into_iter().map(|(_, path)| path).collect();
+    let count = unique_paths(&imported);
+    let roots = string_list(fork.pointer("/RepositoryManager/SourceDirectories"));
+    settings.source_directories = merge_paths(&roots, &settings.source_directories);
+    settings.recent = merge_paths(&imported, &settings.recent);
+    count
+}
+
+fn merge_workspaces(settings: &mut Settings, fork: &serde_json::Value) -> u32 {
+    let Some(rows) = fork.pointer("/Workspaces/All").and_then(serde_json::Value::as_array) else {
+        return 0;
+    };
+    let mut count = 0u32;
+    for item in rows {
+        let Some(name) = item.get("Name").and_then(serde_json::Value::as_str).map(str::trim).filter(|name| !name.is_empty()) else {
+            continue;
+        };
+        let repos = string_list(item.get("Repositories"));
+        let active = item.get("ActiveRepository").and_then(serde_json::Value::as_str).unwrap_or("").trim().to_string();
+        if let Some(existing) = settings.workspaces.iter_mut().find(|workspace| workspace.name == name) {
+            existing.repositories = merge_paths(&repos, &existing.repositories);
+            if existing.open_tabs.is_empty() && !active.is_empty() {
+                existing.open_tabs = vec![active];
+                existing.selected_tab = 0;
+            }
+        } else {
+            let id = fresh_workspace_id(settings, name);
+            let open_tabs = if active.is_empty() { Vec::new() } else { vec![active] };
+            settings.workspaces.push(WorkspaceRecord {
+                id,
+                name: name.to_string(),
+                repositories: repos,
+                open_tabs,
+                selected_tab: 0,
+            });
+        }
+        count += 1;
+    }
+    if let Some(active_name) = fork.pointer("/Workspaces/ActiveWorkspace").and_then(serde_json::Value::as_str) {
+        if let Some(workspace) = settings.workspaces.iter().find(|item| item.name == active_name) {
+            settings.current_workspace = workspace.id.clone();
+        }
+    }
+    count
+}
+
+fn string_list(value: Option<&serde_json::Value>) -> Vec<String> {
+    value
+        .and_then(serde_json::Value::as_array)
+        .map(|rows| rows.iter().filter_map(|item| item.as_str().map(str::trim).filter(|text| !text.is_empty()).map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+fn unique_paths(paths: &[String]) -> u32 {
+    merge_paths(paths, &[]).len() as u32
+}
+
+fn merge_paths(primary: &[String], extra: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for path in primary.iter().chain(extra.iter()) {
+        let path = path.trim();
+        if path.is_empty() || out.iter().any(|item| same_path(item, path)) {
+            continue;
+        }
+        out.push(path.to_string());
+    }
+    out
+}
+
+fn same_path(left: &str, right: &str) -> bool {
+    let norm = |value: &str| value.trim().trim_end_matches(['\\', '/']).replace('/', "\\").to_ascii_lowercase();
+    !left.trim().is_empty() && norm(left) == norm(right)
+}
+
+fn fresh_workspace_id(settings: &Settings, name: &str) -> String {
+    let base = format!("fork-{}", slug(name));
+    if !settings.workspaces.iter().any(|workspace| workspace.id == base) {
+        return base;
+    }
+    let mut index = 2u32;
+    loop {
+        let id = format!("{base}-{index}");
+        if !settings.workspaces.iter().any(|workspace| workspace.id == id) {
+            return id;
+        }
+        index += 1;
+    }
+}
+
+fn slug(name: &str) -> String {
+    let mut out = String::new();
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let out = out.trim_matches('-').to_string();
+    if out.is_empty() { "ws".into() } else { out }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> (serde_json::Value, String) {
+        let text = r#"{
+          "FollowSystemTheme": false,
+          "Theme": 1,
+          "Pull_Rebase": true,
+          "CommitSpellCheckingMode": 0,
+          "ReferenceSpaceCharacterReplacement": "_",
+          "CodeEditorFontSize": 15.0,
+          "FileListMode": 1,
+          "HistoryDiffLayoutMode": 1,
+          "AutomaticStatusUpdateInterval": 60,
+          "MergeTool": {
+            "Type": "Custom",
+            "ApplicationPath": "C:/Tools/merge.exe",
+            "Arguments": "$LOCAL,$BASE,$REMOTE,$MERGED"
+          },
+          "ExternalDiffTool": {
+            "Type": "Custom",
+            "ApplicationPath": "C:/Tools/diff.exe",
+            "Arguments": "\"$REMOTE\" \"$LOCAL\""
+          },
+          "RepositoryManager": {
+            "SourceDirectories": ["D:/work"],
+            "ScanDepth": 4,
+            "Repositories": [
+              { "Name": "one", "Path": "D:/work/one", "LastAccessTime": "2026-01-02T00:00:00" },
+              { "Name": "two", "Path": "D:/work/two", "LastAccessTime": "2026-01-01T00:00:00" }
+            ]
+          },
+          "Workspaces": {
+            "All": [
+              {
+                "Name": "Blog",
+                "Repositories": ["D:/work/one", "D:/work/two"],
+                "ActiveRepository": "D:/work/two"
+              },
+              {
+                "Name": "Home",
+                "Repositories": ["D:/work/one"],
+                "ActiveRepository": "D:/work/one"
+              }
+            ],
+            "ActiveWorkspace": "Blog",
+            "ShowInTitle": true
+          }
+        }"#;
+        (serde_json::from_str(text).unwrap(), text.to_string())
+    }
+
+    #[test]
+    fn maps_fork_settings_without_touching_secrets() {
+        let mut settings = Settings::default();
+        settings.github_token = "secret".into();
+        settings.ai_api_key = "key".into();
+        settings.window_width = 1400;
+        settings.commands = vec![CommandRecord {
+            id: "cmd-1".into(),
+            name: "Open".into(),
+            target: "repository".into(),
+            command: "echo hi".into(),
+            prompt: String::new(),
+            shared: true,
+            repo: String::new(),
+        }];
+        settings.recent = vec!["D:/keep".into()];
+        settings.workspaces = vec![WorkspaceRecord {
+            id: "ws-1".into(),
+            name: "Blog".into(),
+            repositories: vec!["D:/work/old".into()],
+            open_tabs: vec!["D:/work/old".into()],
+            selected_tab: 0,
+        }];
+        let (value, text) = sample();
+        let (preferences, repositories, workspaces) = apply_fork(&mut settings, &value, &text);
+        assert!(preferences >= 8, "{preferences}");
+        assert_eq!(repositories, 2);
+        assert_eq!(workspaces, 2);
+        assert_eq!(settings.theme, "dark");
+        assert_eq!(settings.diff_font_size, 15);
+        assert_eq!(settings.branch_space, "_");
+        assert_eq!(settings.spell_checking, "disable");
+        assert_eq!(settings.file_layout, "tree");
+        assert!(settings.tree_files);
+        assert_eq!(settings.diff_style, "split");
+        assert_eq!(settings.status_interval, 60);
+        assert_eq!(settings.scan_depth, 4);
+        assert!(settings.pull_rebase);
+        assert!(settings.workspace_show_title);
+        assert_eq!(settings.merge_tool_args, "{ours},{base},{theirs},{working}");
+        assert!(settings.diff_tool_args.find("{right}") < settings.diff_tool_args.find("{left}"));
+        assert_eq!(settings.github_token, "secret");
+        assert_eq!(settings.ai_api_key, "key");
+        assert_eq!(settings.window_width, 1400);
+        assert_eq!(settings.commands.len(), 1);
+        assert_eq!(settings.workspaces.len(), 2);
+        assert_eq!(settings.workspaces[0].id, "ws-1");
+        assert_eq!(settings.workspaces[0].open_tabs, vec!["D:/work/old".to_string()]);
+        assert!(settings.workspaces[0].repositories.iter().any(|path| path.ends_with("old")));
+        assert!(settings.workspaces[0].repositories.iter().any(|path| path.ends_with("two")));
+        assert_eq!(settings.workspaces[1].open_tabs, vec!["D:/work/one".to_string()]);
+        assert_eq!(settings.current_workspace, "ws-1");
+        assert!(settings.recent.iter().any(|path| path.ends_with("one")));
+        assert!(settings.recent.iter().any(|path| path == "D:/keep"));
+        assert!(settings.source_directories.iter().any(|path| same_path(path, "D:/work")));
+        let again = apply_fork(&mut settings, &value, &text);
+        assert_eq!(again.2, 2);
+        assert_eq!(settings.workspaces.len(), 2);
+    }
+
+    #[test]
+    fn follow_system_theme_wins() {
+        let mut settings = Settings::default();
+        apply_fork(&mut settings, &serde_json::json!({"FollowSystemTheme": true, "Theme": 1}), "{}");
+        assert_eq!(settings.theme, "system");
+    }
 }

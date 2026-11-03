@@ -215,14 +215,35 @@ export function requestCheckout(shell: ShellState, name: string) {
       void shell.mutate({ action: "checkout", name });
       return;
     }
+    if (shell.settings.checkoutStash) {
+      void checkoutWithStash(shell, name);
+      return;
+    }
     shell.pendingCheckout = name;
     shell.draftExtra = "bring";
     shell.dialog = "checkoutDirty";
   }
 
+async function checkoutWithStash(shell: ShellState, name: string, remote?: { remote: string; branch: string }) {
+    await shell.mutate({ action: "stash", message: shell.tr("dialog.checkoutStashMessage", { name }), includeUntracked: shell.settings.stashIncludeUntracked });
+    if (shell.actionError) return;
+    if (remote) await shell.mutate({ action: "checkoutRemote", remote: remote.remote, branch: remote.branch });
+    else await shell.mutate({ action: "checkout", name });
+    if (shell.actionError) return;
+    await shell.mutate({ action: "stashPop", name: "stash@{0}" });
+    if (shell.actionError) {
+      shell.pendingCheckout = name;
+      shell.dialog = "checkoutNotice";
+    }
+  }
+
 export async function quickCheckout(shell: ShellState, name: string, remote?: { remote: string; branch: string }) {
     if (shell.mode !== "live") return;
     const dirty = (shell.snapshot?.staged.length ?? 0) + (shell.snapshot?.unstaged.length ?? 0) > 0;
+    if (dirty && shell.settings.checkoutStash) {
+      await checkoutWithStash(shell, name, remote);
+      return;
+    }
     if (dirty) {
       await shell.mutate({ action: "stash", message: shell.tr("dialog.checkoutStashMessage", { name }), includeUntracked: true });
       if (shell.actionError) return;
@@ -254,10 +275,10 @@ export function confirmSync(shell: ShellState, kind: "fetch" | "pull" | "push") 
     const upstream = current?.upstream ?? "";
     const firstRemote = shell.refs?.remotes[0]?.name ?? "";
     const upstreamRemote = shell.refs?.remotes.find((remote) => upstream.startsWith(`${remote.name}/`))?.name ?? "";
-    shell.syncAll = false;
-    shell.syncTags = kind === "fetch" ? shell.settings.fetchTags : false;
+    shell.syncAll = shell.settings.fetchAllRemotes;
+    shell.syncTags = kind === "fetch" ? shell.settings.fetchTags : shell.settings.pushAllTags;
     shell.syncRebase = shell.settings.pullRebase;
-    shell.syncStash = shell.settings.mergeAutostash;
+    shell.syncStash = shell.settings.pullStash;
     shell.syncForce = false;
     shell.pushBranch = current?.name ?? shell.snapshot?.branch ?? "";
     shell.pushTo = "";
@@ -734,6 +755,7 @@ export function openRebase(shell: ShellState) {
     const source = shell.mode === "live" ? shell.commitsLive : commits.map((commit) => ({ id: commit.id, summary: commit.summary }));
     const index = source.findIndex((commit) => commit.id === shell.selectedCommit);
     const newer = index > 0 ? source.slice(0, index).slice().reverse() : source.slice(0, 3);
+    shell.updateRefs = shell.settings.rebaseUpdateRefs;
     shell.rebaseSteps = newer.map((commit) => ({ verb: "pick", rev: commit.id, summary: commit.summary, message: commit.summary }));
     shell.rebasePicked = [];
     shell.rebaseConflictFiles = [];

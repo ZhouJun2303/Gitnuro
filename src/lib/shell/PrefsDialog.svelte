@@ -57,6 +57,30 @@
             </label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.pushOnCommit} /> {shell.tr("dialog.pushOnCommit")}</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.compactBranchLabels} /> {shell.tr("dialog.compactLabels")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.fetchAllRemotes} /> {shell.tr("dialog.fetchAllRemotes")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.pullStash} /> {shell.tr("dialog.pullStash")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.pushAllTags} /> {shell.tr("dialog.pushAllTags")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.checkoutAfterCreate} /> {shell.tr("dialog.checkoutAfter")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.checkoutStash} /> {shell.tr("dialog.checkoutStash")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.stashIncludeUntracked} /> {shell.tr("dialog.includeUntracked")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.diffWordWrap} /> {shell.tr("dialog.wordWrap")}</label>
+            <label class="pref-inline">{shell.tr("dialog.diffContext")} <input type="number" min="0" max="100" bind:value={shell.settings.diffContext} /></label>
+            <label class="pref-inline">{shell.tr("dialog.statusInterval")} <input type="number" min="0" max="3600" bind:value={shell.settings.statusInterval} /></label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.showWorktrees} /> {shell.tr("dialog.showWorktrees")}</label>
+            <label class="pref-inline">{shell.tr("dialog.maxCommits")} <input type="number" min="50" bind:value={shell.settings.maxCommits} onchange={() => { shell.logLimit = Math.max(1, shell.settings.maxCommits || 500); if (shell.mode === "live") void shell.loadContext(); }} /></label>
+            <label class="pref-inline">{shell.tr("dialog.scanDepth")} <input type="number" min="1" max="20" bind:value={shell.settings.scanDepth} /></label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.workspaceShowTitle} /> {shell.tr("dialog.workspaceTitle")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.rebaseAutostash} /> {shell.tr("dialog.rebaseAutostash")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.rebaseUpdateRefs} /> {shell.tr("dialog.rebaseUpdateRefs")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.applyStashDelete} /> {shell.tr("dialog.applyStashDelete")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.pushTagOnCreate} /> {shell.tr("dialog.pushTagOnCreate")}</label>
+            <p class="empty">{shell.tr("dialog.settingsFile")}</p>
+            {#if shell.settingsPath}<p class="empty source-path" title={shell.settingsPath}>{shell.settingsPath}</p>{/if}
+            <div class="composer-row">
+              <button class="text-button" type="button" onclick={() => void shell.importFork()}>{shell.tr("dialog.importFork")}</button>
+              <button class="text-button" type="button" onclick={() => void shell.importForkFile()}>{shell.tr("dialog.importForkFile")}</button>
+            </div>
+            {#if shell.forkImportNote}<p class="empty">{shell.forkImportNote}</p>{/if}
           {:else if shell.prefTab === "commit"}
             <div class="pref-inline">{shell.tr("dialog.lengthIndicator")}
               <label>{shell.tr("dialog.lowLimit")} <input type="number" min="1" bind:value={shell.settings.messageLow} /></label>

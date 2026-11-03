@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-import-fork-settings"
+description = "Enables the import_fork_settings command without any pre-configured scope."
+commands.allow = ["import_fork_settings"]
+
+[[permission]]
+identifier = "deny-import-fork-settings"
+description = "Denies the import_fork_settings command without any pre-configured scope."
+commands.deny = ["import_fork_settings"]

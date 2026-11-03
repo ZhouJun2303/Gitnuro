@@ -9,7 +9,7 @@ import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
 import { resolveLocale, translate } from "../i18n";
 import { shortcut, shortcutLabel, typing } from "../keys";
-import { branchGroup, changedRanges, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, orderRefNames, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type BlameLine,
@@ -23,6 +23,7 @@ import {
     type FilePreview,
     type InProgress,
     type RefSnapshot,
+    type ForkImport,
     type Settings,
     type StatusFile,
     type StatusSnapshot,
@@ -142,6 +143,23 @@ export class ShellState {
     azureToken: "",
     azureOrg: "",
     oauthClientId: "",
+    fetchAllRemotes: false,
+    pullStash: false,
+    pushAllTags: false,
+    checkoutAfterCreate: true,
+    stashIncludeUntracked: false,
+    diffWordWrap: false,
+    diffContext: 3,
+    statusInterval: 0,
+    showWorktrees: true,
+    maxCommits: 500,
+    rebaseAutostash: false,
+    rebaseUpdateRefs: false,
+    applyStashDelete: false,
+    pushTagOnCreate: false,
+    checkoutStash: false,
+    workspaceShowTitle: false,
+    scanDepth: 5,
   };
 
 
@@ -271,6 +289,12 @@ export class ShellState {
 
 
   blameLines = $state<BlameLine[] | null>(null);
+
+
+  settingsPath = $state("");
+
+
+  forkImportNote = $state("");
 
 
   settings = $state<Settings>(
@@ -1063,13 +1087,13 @@ export class ShellState {
   });
 
 
-  diffWindow = $derived(windowSlice(this.diffLines, this.diffTop, 18));
+  diffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.diffLines } : windowSlice(this.diffLines, this.diffTop, 18));
 
 
   blameWindow = $derived(windowSlice(this.blameLines ?? [], this.blameTop, 18));
 
 
-  historyDiffWindow = $derived(windowSlice(this.historyDiff?.lines ?? [], this.historyDiffTop, 18));
+  historyDiffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.historyDiff?.lines ?? [] } : windowSlice(this.historyDiff?.lines ?? [], this.historyDiffTop, 18));
 
 
   splitRows = $derived(this.settings.diffStyle === "split" ? splitDiff(this.diffLines) : []);
@@ -1079,6 +1103,7 @@ export class ShellState {
 
 
   splitWindow = $derived.by(() => {
+    if (this.settings.diffWordWrap) return { start: 0, rows: this.splitRows, after: 0 };
     const count = Math.ceil(Math.max(this.diffHeight, 600) / this.splitRowHeight) + 24;
     if (this.splitRows.length <= count + 40) return { start: 0, rows: this.splitRows, after: 0 };
     const start = Math.min(Math.max(0, Math.floor(this.diffTop / this.splitRowHeight) - 12), Math.max(0, this.splitRows.length - count));
@@ -1162,12 +1187,11 @@ export class ShellState {
   );
 
 
-  visibleBranches = $derived(
-    (this.refs?.branches ?? [])
-      .filter((branch) => (branch.current || !this.refHidden(branch.name)) && this.matchesQuery(branch.name, this.sideQuery))
-      .slice()
-      .sort((a, b) => Number(this.pinnedHere.has(b.name)) - Number(this.pinnedHere.has(a.name))),
-  );
+  visibleBranches = $derived.by(() => {
+    const rows = (this.refs?.branches ?? []).filter((branch) => (branch.current || !this.refHidden(branch.name)) && this.matchesQuery(branch.name, this.sideQuery));
+    const order = new Map(orderRefNames(rows.map((branch) => branch.name), this.pinnedHere).map((name, index) => [name, index]));
+    return rows.slice().sort((a, b) => (order.get(a.name) ?? 0) - (order.get(b.name) ?? 0));
+  });
 
 
   currentBranch = $derived(this.refs?.branches.find((branch) => branch.current) ?? null);
@@ -1825,14 +1849,14 @@ export class ShellState {
 
 
   doFetch(source: "user" | "background" = "user") {
-    const remote = this.refs?.remotes[0]?.name;
-    return this.mutate({ action: "fetch", remote: remote ?? null, prune: this.settings.fetchPrune, tags: this.settings.fetchTags }, source);
+    const remote = this.settings.fetchAllRemotes ? null : this.refs?.remotes[0]?.name ?? null;
+    return this.mutate({ action: "fetch", remote, prune: this.settings.fetchPrune, tags: this.settings.fetchTags }, source);
   }
 
 
 
   doPull() {
-    return this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: this.settings.mergeAutostash });
+    return this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: this.settings.pullStash });
   }
 
 
@@ -1844,9 +1868,71 @@ export class ShellState {
       action: "push",
       remote,
       setUpstream: !current?.upstream,
-      tags: false,
+      tags: this.settings.pushAllTags,
       forceWithLease: this.settings.forceWithLease,
     });
+  }
+
+
+
+  async applyStash(name: string) {
+    await this.mutate({ action: "stashApply", name });
+    if (!this.actionError && this.settings.applyStashDelete) await this.mutate({ action: "stashDrop", name });
+  }
+
+
+
+  adoptSettings(value: Settings, resetHistory = false) {
+    this.settings = this.withSourceRoots({
+      ...this.defaultSettings,
+      ...value,
+      recent: value.recent ?? [],
+      workspaces: value.workspaces ?? [],
+      commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })),
+      expandedGroups: value.expandedGroups ?? [],
+      accounts: value.accounts ?? [],
+      tabLabels: value.tabLabels ?? [],
+      tabColors: value.tabColors ?? [],
+      pinnedRefs: value.pinnedRefs ?? [],
+      sourceDirectories: value.sourceDirectories ?? [],
+      groupNames: value.groupNames ?? [],
+    });
+    if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
+    if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
+    const limit = Math.max(1, this.settings.maxCommits || 500);
+    if (resetHistory || this.logLimit === 500) this.logLimit = limit;
+    this.signOff = this.settings.signOff;
+  }
+
+
+
+  async importFork(path?: string | null) {
+    if (!this.inApp()) return;
+    try {
+      const result = await invoke<ForkImport>("import_fork_settings", { path: path || null });
+      this.adoptSettings(result.settings, true);
+      this.forkImportNote = this.tr("dialog.forkImported", {
+        preferences: String(result.preferences),
+        repositories: String(result.repositories),
+        workspaces: String(result.workspaces),
+      });
+      if (this.mode === "live") void this.loadContext();
+    } catch (error) {
+      const text = this.message(error);
+      this.forkImportNote = text.includes("fork-settings-missing") ? this.tr("dialog.forkMissing") : text;
+    }
+  }
+
+
+
+  async importForkFile() {
+    if (!this.inApp()) return;
+    try {
+      const file = await invoke<string | null>("pick_file", { initial: this.settingsPath || null });
+      if (file) await this.importFork(file);
+    } catch (error) {
+      this.forkImportNote = this.message(error);
+    }
   }
 
 
@@ -3309,7 +3395,7 @@ export class ShellState {
     const found: string[] = [];
     for (const root of this.sourceRootList()) {
       try {
-        found.push(...(await invoke<string[]>("scan_repositories", { root: root.path })));
+        found.push(...(await invoke<string[]>("scan_repositories", { root: root.path, depth: this.settings.scanDepth || 5 })));
       } catch {
         /* a missing source folder should not hide the ones that can be read */
       }
@@ -3726,6 +3812,23 @@ export class ShellState {
     return () => window.clearInterval(timer);
     });
     $effect(() => {
+    const seconds = this.settings.statusInterval;
+    if (!seconds || seconds < 1) return;
+    const timer = window.setInterval(() => {
+    if (!this.busy && this.snapshot && this.mode === "live") void this.refresh("status", true);
+    }, seconds * 1000);
+    return () => window.clearInterval(timer);
+    });
+    $effect(() => {
+    const parts: string[] = [];
+    if (this.settings.workspaceShowTitle && this.currentWorkspace?.name) parts.push(this.currentWorkspace.name);
+    if (this.snapshot?.path) parts.push(this.folderName(this.snapshot.path));
+    parts.push("AweGit");
+    const title = parts.join(" — ");
+    if (typeof document !== "undefined") document.title = title;
+    if (this.inApp()) void getCurrentWindow().setTitle(title).catch(() => {});
+    });
+    $effect(() => {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
     if (!this.settings.theme || this.settings.theme === "system") root.removeAttribute("data-theme");
@@ -3818,10 +3921,8 @@ export class ShellState {
     try {
     const value = await invoke<Settings>("load_settings");
     if (stopped) return;
-    this.settings = this.withSourceRoots({ ...this.defaultSettings, ...value, recent: value.recent ?? [], workspaces: value.workspaces ?? [], commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })), expandedGroups: value.expandedGroups ?? [], accounts: value.accounts ?? [], tabLabels: value.tabLabels ?? [], tabColors: value.tabColors ?? [], pinnedRefs: value.pinnedRefs ?? [], sourceDirectories: value.sourceDirectories ?? [], groupNames: value.groupNames ?? [] });
-    if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
-    if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
-    this.signOff = this.settings.signOff;
+    this.adoptSettings(value);
+    void invoke<string>("settings_path").then((path) => (this.settingsPath = path)).catch(() => {});
     await this.loadExternalTools();
     if (value.windowWidth > 200 && value.windowHeight > 200) {
     try {

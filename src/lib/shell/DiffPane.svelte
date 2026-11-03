@@ -114,7 +114,7 @@
             {:else if shell.diff.lines.length === 0}
               <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
             {:else if shell.settings.diffStyle === "split"}
-              <div class="diff-body split virtual pick-{shell.splitPick}" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={(event) => (shell.diffTop = (event.currentTarget as HTMLElement).scrollTop)} use:splitScroller={shell.splitColumns}>
+              <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={(event) => (shell.diffTop = (event.currentTarget as HTMLElement).scrollTop)} use:splitScroller={shell.splitColumns}>
                 {#if shell.splitWindow.start > 0}<div class="split-gap" style:height="{shell.splitWindow.start * shell.splitRowHeight}px"></div>{/if}
                 {#each shell.splitWindow.rows as row, offset (shell.splitWindow.start + offset)}
                   {@const index = shell.splitWindow.start + offset}

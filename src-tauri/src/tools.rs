@@ -53,6 +53,15 @@ pub fn installed() -> ExternalTools {
     tools_from_fork_json(&text, program_exists)
 }
 
+pub fn fork_settings_file() -> Option<std::path::PathBuf> {
+    fork_settings_path()
+}
+
+/// Tools named in a Fork settings file, including programs that are not installed yet.
+pub fn tools_in_fork_text(text: &str) -> ExternalTools {
+    tools_from_fork_json(text, |_| true)
+}
+
 fn fork_settings_path() -> Option<std::path::PathBuf> {
     let base = std::env::var("LOCALAPPDATA").ok()?;
     Some(Path::new(&base).join("Fork").join("settings.json"))

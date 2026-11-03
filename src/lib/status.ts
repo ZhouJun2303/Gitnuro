@@ -228,6 +228,30 @@ export type Settings = {
   azureToken: string;
   azureOrg: string;
   oauthClientId: string;
+  fetchAllRemotes: boolean;
+  pullStash: boolean;
+  pushAllTags: boolean;
+  checkoutAfterCreate: boolean;
+  stashIncludeUntracked: boolean;
+  diffWordWrap: boolean;
+  diffContext: number;
+  statusInterval: number;
+  showWorktrees: boolean;
+  maxCommits: number;
+  rebaseAutostash: boolean;
+  rebaseUpdateRefs: boolean;
+  applyStashDelete: boolean;
+  pushTagOnCreate: boolean;
+  checkoutStash: boolean;
+  workspaceShowTitle: boolean;
+  scanDepth: number;
+};
+
+export type ForkImport = {
+  settings: Settings;
+  preferences: number;
+  repositories: number;
+  workspaces: number;
 };
 
 export type Account = {

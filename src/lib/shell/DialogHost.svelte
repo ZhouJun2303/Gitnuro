@@ -7,6 +7,14 @@
   import { cloneTarget, cloneUrl } from "../clonePath";
 
   const shell = getShell();
+  let primedDialog = "";
+  $effect(() => {
+    const dialog = shell.dialog ?? "";
+    if (dialog === primedDialog) return;
+    primedDialog = dialog;
+    if (dialog === "branch") shell.checkoutNewBranch = shell.settings.checkoutAfterCreate;
+    if (dialog === "rebase") shell.updateRefs = shell.settings.rebaseUpdateRefs;
+  });
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const focusWhen = (node: HTMLInputElement, on: boolean) => shell.focusWhen(node, on);
 </script>
@@ -29,17 +37,35 @@
           }
           else if (shell.dialog === "command") void shell.runCommand({ command: shell.draftUser || shell.draft, prompt: shell.commandPrompt });
           else if (shell.dialog === "prefs") void shell.savePrefs();
-          else if (shell.dialog === "tag") void shell.mutate({ action: "tag", name: shell.draft, rev: shell.draftExtra || "HEAD", message: shell.draftUser });
+          else if (shell.dialog === "tag") {
+            await shell.mutate({ action: "tag", name: shell.draft, rev: shell.draftExtra || "HEAD", message: shell.draftUser });
+            if (!shell.actionError && shell.settings.pushTagOnCreate) await shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease });
+          }
           else if (shell.dialog === "remote") void shell.mutate({ action: "addRemote", name: shell.draft, url: shell.draftExtra });
-          else if (shell.dialog === "fetch") void shell.mutate({ action: "fetch", remote: shell.syncAll ? null : shell.draft || null, prune: shell.settings.fetchPrune, tags: shell.syncTags });
+          else if (shell.dialog === "fetch") {
+            const remote = shell.syncAll ? null : shell.draft || null;
+            const prune = shell.settings.fetchPrune;
+            const tags = shell.syncTags;
+            if (shell.busy) return;
+            shell.dialog = null;
+            void shell.mutate({ action: "fetch", remote, prune, tags });
+          }
           else if (shell.dialog === "pull") {
-            if (shell.draft && shell.draftExtra) void shell.mutate({ action: "pullRef", remote: shell.draft, branch: shell.draftExtra, rebase: shell.syncRebase, autostash: shell.syncStash });
-            else void shell.mutate({ action: "pull", rebase: shell.syncRebase, autostash: shell.syncStash });
+            const request = shell.draft && shell.draftExtra
+              ? { action: "pullRef", remote: shell.draft, branch: shell.draftExtra, rebase: shell.syncRebase, autostash: shell.syncStash }
+              : { action: "pull", rebase: shell.syncRebase, autostash: shell.syncStash };
+            if (shell.busy) return;
+            shell.dialog = null;
+            void shell.mutate(request);
           }
           else if (shell.dialog === "push") {
             const target = shell.pushTarget(shell.pushBranch, shell.pushTo);
-            if (target && shell.pushBranch) void shell.mutate({ action: "pushRef", remote: target.remote, branch: shell.pushBranch, remoteBranch: target.branch, setUpstream: target.setUpstream, tags: shell.syncTags, forceWithLease: shell.syncForce, force: false });
-            else void shell.mutate({ action: "push", remote: shell.draft || null, setUpstream: !shell.refs?.branches.some((branch) => branch.current && branch.upstream), tags: shell.syncTags, forceWithLease: shell.syncForce });
+            const request = target && shell.pushBranch
+              ? { action: "pushRef", remote: target.remote, branch: shell.pushBranch, remoteBranch: target.branch, setUpstream: target.setUpstream, tags: shell.syncTags, forceWithLease: shell.syncForce, force: false }
+              : { action: "push", remote: shell.draft || null, setUpstream: !shell.refs?.branches.some((branch) => branch.current && branch.upstream), tags: shell.syncTags, forceWithLease: shell.syncForce };
+            if (shell.busy) return;
+            shell.dialog = null;
+            void shell.mutate(request);
           }
           else if (shell.dialog === "stash") {
             const files = shell.stashFiles;
@@ -52,7 +78,7 @@
           else if (shell.dialog === "rename") void shell.mutate({ action: "renameBranch", name: shell.draft, to: shell.draftExtra });
           else if (shell.dialog === "upstream") void shell.mutate({ action: "setUpstream", branch: shell.draft, upstream: shell.draftExtra });
           else if (shell.dialog === "reword") void shell.mutate({ action: "reword", rev: shell.draftExtra || "HEAD", summary: shell.draft });
-          else if (shell.dialog === "rebase" && shell.selectedCommit) void shell.mutate({ action: "rebaseInteractive", onto: shell.selectedCommit, drop: [], steps: shell.rebaseSteps.map((step) => ({ verb: step.verb, rev: step.rev, message: step.verb === "reword" || step.verb === "squash" || step.verb === "exec" ? step.message : "" })), autostash: shell.settings.mergeAutostash, updateRefs: shell.updateRefs });
+          else if (shell.dialog === "rebase" && shell.selectedCommit) void shell.mutate({ action: "rebaseInteractive", onto: shell.selectedCommit, drop: [], steps: shell.rebaseSteps.map((step) => ({ verb: step.verb, rev: step.rev, message: step.verb === "reword" || step.verb === "squash" || step.verb === "exec" ? step.message : "" })), autostash: shell.settings.rebaseAutostash, updateRefs: shell.updateRefs });
           else if (shell.dialog === "merge") void shell.mutate({ action: "merge", name: shell.draft, squash: shell.draftExtra === "squash", noFf: shell.draftExtra === "no-ff", autostash: shell.settings.mergeAutostash });
           else if (shell.dialog === "continue") void shell.mutate({ action: "continue", message: shell.draft });
           else if (shell.dialog === "repo") {

@@ -2,7 +2,7 @@
   import { getShell } from "./context";
   import "./Sidebar.css";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { branchGroup } from "../view";
+  import { branchGroup, orderRefNames } from "../view";
   import type { Side } from "./types";
 
   const shell = getShell();
@@ -103,7 +103,7 @@
         {#each shell.visibleBranches as branch, index (branch.name)}
           {@const group = branchGroup(branch.name)}
           {#if group && group !== branchGroup(shell.visibleBranches[index - 1]?.name ?? "")}
-            <button class="side nested" type="button" class:selected={shell.sideSelected === `local:${group}/`} aria-expanded={shell.groupOpen(branch.name)} onclick={() => { shell.sideSelected = `local:${group}/`; shell.toggleGroup(group); }}>
+            <button class="side nested" type="button" aria-expanded={shell.groupOpen(branch.name)} onclick={() => shell.toggleGroup(group)}>
               <span class="twist">{@render chevron(shell.groupOpen(branch.name))}</span>
               {@render glyph("folder")}
               <span class="name">{group}</span>
@@ -167,12 +167,13 @@
             </button>
           </div>
           {#if shell.sideOpen(remoteKey)}
+          {@const remoteBranches = orderRefNames(remote.branches)}
           {#if remote.head && !shell.sideQuery.trim()}<div class="side nested deep quiet"><span class="twist"></span>{@render glyph("branch")}<span class="name">HEAD → {remote.head}</span></div>{/if}
-          {#each remote.branches as branch, index (remote.name + branch)}
+          {#each remoteBranches as branch, index (remote.name + branch)}
             {@const folder = branchGroup(branch)}
             {@const folderKey = `${remoteKey}/${folder}`}
-            {#if folder && folder !== branchGroup(remote.branches[index - 1] ?? "") && remote.branches.some((item) => branchGroup(item) === folder && shell.matchesQuery(item, shell.sideQuery))}
-              <button class="side nested deep" type="button" class:selected={shell.sideSelected === folderKey} aria-expanded={shell.sideOpen(folderKey)} onclick={() => shell.pickSide(folderKey)}>
+            {#if folder && folder !== branchGroup(remoteBranches[index - 1] ?? "") && remoteBranches.some((item) => branchGroup(item) === folder && shell.matchesQuery(item, shell.sideQuery))}
+              <button class="side nested deep" type="button" aria-expanded={shell.sideOpen(folderKey)} onclick={() => shell.toggleSide(folderKey)}>
                 <span class="twist">{@render chevron(shell.sideOpen(folderKey))}</span>
                 {@render glyph("folder")}
                 <span class="name">{folder}</span>
@@ -275,7 +276,7 @@
         {#each (shell.refs?.stashes ?? (shell.mode === "sample" ? [{ name: "stash@{0}", summary: "WIP before the palette" }] : [])) as stash (stash.name)}
           {#if shell.matchesQuery(stash.summary, shell.sideQuery) || shell.matchesQuery(stash.name, shell.sideQuery)}
           <div class="side nested" class:selected={shell.sideSelected === `stash:${stash.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
-            { label: shell.tr("menu.apply"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "stashApply", name: stash.name }) },
+            { label: shell.tr("menu.apply"), disabled: shell.mode !== "live", run: () => void shell.applyStash(stash.name) },
             { label: shell.tr("menu.pop"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "stashPop", name: stash.name }) },
             { label: shell.tr("menu.drop"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.drop"), stash.summary, () => void shell.mutate({ action: "stashDrop", name: stash.name })) },
             { label: shell.tr("menu.renameStash"), disabled: shell.mode !== "live", run: () => { shell.draft = stash.summary; shell.draftExtra = stash.name; shell.dialog = "stashRename"; } },
@@ -305,6 +306,7 @@
           {/if}
         {/each}
       {/if}
+      {#if shell.settings.showWorktrees}
       {@render sideHead("worktrees", shell.tr("chrome.worktrees"), shell.refs?.worktrees.length ?? (shell.mode === "sample" ? 1 : 0), [
         { label: shell.tr("chrome.add"), icon: "add", run: () => { shell.draft = ""; shell.draftExtra = shell.snapshot?.branch ?? ""; shell.dialog = "worktree"; } },
       ])}
@@ -319,6 +321,7 @@
           </div>
           {/if}
         {/each}
+      {/if}
       {/if}
       </div>
     </aside>

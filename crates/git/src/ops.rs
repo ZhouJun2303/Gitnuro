@@ -2010,17 +2010,18 @@ fn activity(repo: &Path) -> (Vec<u32>, Vec<u32>) {
 }
 
 /// Find git work trees under `root`, without entering a repository or common build folders.
-pub fn scan_repositories(root: &Path) -> Result<Vec<String>, Error> {
+pub fn scan_repositories(root: &Path, depth_limit: usize) -> Result<Vec<String>, Error> {
     if !root.is_dir() {
         return Err(Error::Git(format!("{} is not a directory", root.display())));
     }
+    let limit = if depth_limit == 0 { 5 } else { depth_limit };
     let mut found = Vec::new();
-    scan_dir(root, 0, &mut found);
+    scan_dir(root, 0, limit, &mut found);
     Ok(found)
 }
 
-fn scan_dir(dir: &Path, depth: usize, found: &mut Vec<String>) {
-    if found.len() >= 300 || depth > 5 {
+fn scan_dir(dir: &Path, depth: usize, limit: usize, found: &mut Vec<String>) {
+    if found.len() >= 300 || depth > limit {
         return;
     }
     if dir.join(".git").exists() {
@@ -2038,7 +2039,7 @@ fn scan_dir(dir: &Path, depth: usize, found: &mut Vec<String>) {
         if matches!(name.as_ref(), "node_modules" | "target" | "dist" | "vendor" | ".git" | ".next" | "out") {
             continue;
         }
-        scan_dir(&entry.path(), depth + 1, found);
+        scan_dir(&entry.path(), depth + 1, limit, found);
     }
 }
 

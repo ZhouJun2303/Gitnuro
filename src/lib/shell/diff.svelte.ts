@@ -231,7 +231,7 @@ export async function loadDiff(shell: ShellState) {
         path,
         file,
         staged: stagedSide,
-        unified: shell.settings.showEntireFile ? 100000 : 3,
+        unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
         ignoreSpace: shell.settings.ignoreSpace,
       });
       if (token === shell.diffToken && shell.viewing(path)) {
@@ -609,7 +609,8 @@ export function openStash(shell: ShellState, files: string[]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
     shell.draft = "";
     const rows = [...shell.unstaged, ...shell.staged];
-    shell.includeUntracked = names.some((path) => rows.some((file) => file.path === path && (file.letter === "A" || file.letter === "?")));
+    const selectedUntracked = names.some((path) => rows.some((file) => file.path === path && (file.letter === "A" || file.letter === "?")));
+    shell.includeUntracked = shell.settings.stashIncludeUntracked || selectedUntracked;
     shell.stashFiles = names;
     shell.dialog = "stash";
   }

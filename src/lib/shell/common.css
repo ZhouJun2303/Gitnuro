@@ -769,7 +769,26 @@ input[type="checkbox"]:disabled,
     padding: 0 8px;
     white-space: pre;
     overflow: hidden;
-  }
+}
+
+.shell.diff-wrap .diff-body > span,
+.shell.diff-wrap .diff-body .virtual-row,
+.shell.diff-wrap .split-row > span {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    height: auto;
+    line-height: 1.45;
+    overflow: visible;
+}
+
+.shell.diff-wrap .diff-body .virtual-row {
+    position: relative;
+    top: auto !important;
+}
+
+.shell.diff-wrap .commit-window {
+    height: auto !important;
+}
 
 .diff-body.split.virtual .split-row > span {
     height: var(--split-row);
