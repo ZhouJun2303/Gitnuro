@@ -106,6 +106,7 @@ export const en: Messages = {
     mergeConflict: "Merge conflict",
     mergeConflictHint: "Select the changes or merge them manually",
     mergeAction: "Merge",
+    chooseSide: "Choose {name}",
     mergeInTool: "Merge in {name}",
     sideAdded: "added",
     sideModified: "modified",

@@ -106,6 +106,7 @@ export const zh: Messages = {
     mergeConflict: "合并冲突",
     mergeConflictHint: "选择要保留的更改，或手动合并",
     mergeAction: "合并",
+    chooseSide: "选择 {name}",
     mergeInTool: "在 {name} 中合并",
     sideAdded: "新增",
     sideModified: "已修改",

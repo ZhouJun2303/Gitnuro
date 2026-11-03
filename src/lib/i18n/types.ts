@@ -106,6 +106,7 @@ export type Messages = {
     mergeConflict: string;
     mergeConflictHint: string;
     mergeAction: string;
+    chooseSide: string;
     mergeInTool: string;
     sideAdded: string;
     sideModified: string;

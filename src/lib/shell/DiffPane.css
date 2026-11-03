@@ -139,8 +139,16 @@ section.diff > .diff-body {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0;
+    gap: 8px;
     max-width: 100%;
+  }
+
+.conflict-row > input {
+    width: 15px;
+    height: 15px;
+    flex: none;
+    margin: 0;
+    accent-color: var(--accent);
   }
 
 .conflict-card {
@@ -159,6 +167,10 @@ section.diff > .diff-body {
     cursor: pointer;
   }
 
+.conflict-card.on {
+    border-color: var(--accent);
+  }
+
 .conflict-card .branch {
     width: 14px;
     height: 14px;
@@ -172,14 +184,6 @@ section.diff > .diff-body {
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 13px;
-  }
-
-.conflict-card input {
-    width: 15px;
-    height: 15px;
-    flex: none;
-    margin: 0;
-    accent-color: var(--accent);
   }
 
 .conflict-pill {
@@ -221,6 +225,11 @@ section.diff > .diff-body {
     border-radius: 50%;
     background: var(--text-secondary);
     transform: translate(-50%, -50%);
+  }
+
+.conflict-row.pick-one .conflict-link,
+  .conflict-row.pick-one .conflict-link::before {
+    background: var(--accent);
   }
 
 .conflict-actions {
