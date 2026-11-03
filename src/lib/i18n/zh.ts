@@ -295,6 +295,7 @@ export const zh: Messages = {
     nextHunk: "下一块",
     copyPatch: "复制为补丁",
     fold: "折叠",
+    unfold: "展开",
     compareBranches: "比较分支",
     stashSelected: "贮藏所选文件",
     stashFile: "贮藏…",

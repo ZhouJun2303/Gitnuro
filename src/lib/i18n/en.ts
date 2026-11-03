@@ -295,6 +295,7 @@ export const en: Messages = {
     nextHunk: "Next hunk",
     copyPatch: "Copy as patch",
     fold: "Fold",
+    unfold: "Unfold",
     compareBranches: "Compare branches",
     stashSelected: "Stash selected files",
     stashFile: "Stash…",

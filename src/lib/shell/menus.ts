@@ -109,7 +109,7 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
       { label: shell.tr("menu.editMessage"), disabled: locked, run: () => { shell.draft = commit.summary; shell.draftExtra = commit.id; shell.dialog = "reword"; } },
       { label: shell.tr("menu.interactiveRebase"), run: () => { shell.selectedCommit = commit.id; shell.openRebase(); } },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },
-      { label: shell.tr("menu.fold"), run: () => shell.toggleFold(commit.id) },
+      { label: shell.mergeOpen(commit.id) ? shell.tr("menu.fold") : shell.tr("menu.unfold"), disabled: !shell.mergeOwner(commit.id), run: () => shell.toggleFold(commit.id) },
       { label: shell.tr("menu.openWeb"), disabled: !shell.commitWeb(commit.id), run: () => void openUrl(shell.commitWeb(commit.id)) },
       ...(shell.historyFilter ? [{ label: shell.tr("menu.restoreFile"), disabled: locked, run: () => shell.mutate({ action: "restoreFile", rev: commit.id, file: shell.historyFilter }) }] : []),
       ...shell.commandItems("commit"),

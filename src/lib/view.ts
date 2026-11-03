@@ -41,7 +41,9 @@ export function rowGraph(row: GraphCell[]): { width: number; lines: GraphMark[];
     }
     if (node) nodes.push({ color: cell.color, x });
   });
-  return { width: Math.max(row.length, 1) * 12, lines, curves, nodes };
+  let last = -1;
+  for (let index = 0; index < row.length; index += 1) if (row[index]) last = index;
+  return { width: Math.max(last + 1, 1) * 12, lines, curves, nodes };
 }
 
 export type GraphBuild = {
@@ -166,11 +168,73 @@ export function commitGraph(commits: { id: string; parents: string[] }[], resume
   return { rows, width, columns };
 }
 
-/** Empty lanes are filled when a row is drawn, so earlier rows stay aligned with later ones. */
-export function padGraphRow(row: GraphCell[] | undefined, width: number): GraphCell[] {
-  const next = row ? row.slice() : [];
-  while (next.length < width) next.push(null);
-  return next;
+export type MergeFold = {
+  /** Side-branch commits hidden while their merge is collapsed. */
+  hidden: Set<string>;
+  /** Merges drawn as a straight first-parent line. */
+  straight: Set<string>;
+  /** Commit id to the merge that owns its bubble. */
+  owner: Map<string, string>;
+};
+
+/** Branches that left the first parent and were merged back. Collapsed merges keep only the first parent. */
+export function foldedMerges(commits: { id: string; parents?: string[] }[], expanded: readonly string[]): MergeFold {
+  const byId = new Map(commits.map((commit) => [commit.id, commit]));
+  const open = new Set(expanded);
+  const hidden = new Set<string>();
+  const straight = new Set<string>();
+  const owner = new Map<string, string>();
+  const bubbles: { id: string; hidden: string[] }[] = [];
+
+  for (const commit of commits) {
+    const parents = commit.parents ?? [];
+    if (parents.length < 2 || !parents[0] || !byId.has(parents[0])) continue;
+    const main = new Set<string>();
+    const stack = [parents[0]];
+    while (stack.length) {
+      const id = stack.pop();
+      if (!id || main.has(id)) continue;
+      const row = byId.get(id);
+      if (!row) continue;
+      main.add(id);
+      for (const parent of row.parents ?? []) stack.push(parent);
+    }
+    const side: string[] = [];
+    const seen = new Set<string>();
+    const rest = parents.slice(1);
+    while (rest.length) {
+      const id = rest.pop();
+      if (!id || seen.has(id) || main.has(id)) continue;
+      seen.add(id);
+      const row = byId.get(id);
+      if (!row) continue;
+      side.push(id);
+      for (const parent of row.parents ?? []) rest.push(parent);
+    }
+    if (side.length === 0) continue;
+    bubbles.push({ id: commit.id, hidden: side });
+    owner.set(commit.id, commit.id);
+    for (const id of side) if (!owner.has(id)) owner.set(id, commit.id);
+    if (!open.has(commit.id)) straight.add(commit.id);
+  }
+
+  for (const bubble of bubbles) {
+    if (open.has(bubble.id)) continue;
+    for (const id of bubble.hidden) hidden.add(id);
+  }
+  for (const bubble of bubbles) {
+    if (!open.has(bubble.id)) continue;
+    for (const id of bubble.hidden) hidden.delete(id);
+  }
+  return { hidden, straight, owner };
+}
+
+/** Parents the graph should follow. A collapsed merge keeps the first parent so the lane stays straight. */
+export function laneCommits(commits: { id: string; parents?: string[] }[], straight: Set<string>) {
+  return commits.map((commit) => ({
+    id: commit.id,
+    parents: straight.has(commit.id) ? (commit.parents ?? []).slice(0, 1) : (commit.parents ?? []),
+  }));
 }
 
 export function numberedDiff(lines: DiffLine[]) {

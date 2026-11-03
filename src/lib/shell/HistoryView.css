@@ -94,6 +94,8 @@
 
 .graph { position: relative; display: block; flex: none; height: 100%; overflow: visible; }
 
+.graph.foldable { cursor: pointer; }
+
 .graph-svg {
     display: block;
     width: 100%;
@@ -122,6 +124,8 @@
     border-radius: 50%;
     z-index: 1;
   }
+
+.graph-node.folded { background: var(--canvas); }
 
 .commit-copy {
     flex: 1;

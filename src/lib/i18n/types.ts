@@ -295,6 +295,7 @@ export type Messages = {
     nextHunk: string;
     copyPatch: string;
     fold: string;
+    unfold: string;
     compareBranches: string;
     stashSelected: string;
     stashFile: string;

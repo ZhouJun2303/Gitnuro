@@ -10,7 +10,7 @@ import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl
 import { resolveLocale, translate } from "../i18n";
 import { isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
-import { branchGroup, changedRanges, commitGraph, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, orderRefNames, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type BlameLine,
@@ -676,10 +676,7 @@ export class ShellState {
   pendingCheckout = $state("");
 
 
-  foldHidden = $state<string[]>([]);
-
-
-  foldRoots = $state<string[]>([]);
+  expandedMerges = $state<string[]>([]);
 
 
   contentHits = $state<{ id: string; shortId: string; summary: string }[] | null>(null);
@@ -1137,13 +1134,18 @@ export class ShellState {
   ]);
 
 
-  sampleGraph = $derived(commitGraph(this.sampleRows.map((commit) => ({ id: commit.id, parents: commit.parents }))));
+  sampleFold = $derived(foldedMerges(this.sampleRows, this.expandedMerges));
+
+
+  sampleGraph = $derived(commitGraph(laneCommits(this.sampleRows, this.sampleFold.straight)));
 
 
   sampleShown = $derived.by(() => {
+    const hidden = this.sampleFold.hidden;
+    const open = hidden.size === 0 ? this.sampleRows : this.sampleRows.filter((row) => !hidden.has(row.id));
     const query = this.sideView === "search" ? this.commitSearch.trim().toLowerCase() : "";
-    if (!query) return this.sampleRows;
-    const rows = this.commitSearchScope === "branch" ? this.sampleRows.filter((row) => row.badges.includes("main")) : this.sampleRows;
+    if (!query) return open;
+    const rows = this.commitSearchScope === "branch" ? open.filter((row) => row.badges.includes("main")) : open;
     return rows.filter((row) => {
       if (this.commitSearchField === "author") return row.author.toLowerCase().includes(query);
       if (this.commitSearchField === "path") return row.files.some((file) => file.path.toLowerCase().includes(query));
@@ -1153,7 +1155,7 @@ export class ShellState {
   });
 
 
-  sampleShownGraph = $derived(commitGraph(this.sampleShown.map((commit) => ({ id: commit.id, parents: commit.parents }))));
+  sampleShownGraph = $derived(commitGraph(laneCommits(this.sampleShown, this.sampleFold.straight)));
 
 
   sampleTree = $derived([...new Set(commits.flatMap((commit) => commit.files.map((file) => file.path)))]);
@@ -1202,11 +1204,14 @@ export class ShellState {
   });
 
 
+  liveFold = $derived(foldedMerges(this.commitsLive, this.expandedMerges));
+
+
   historyItems = $derived.by(() => {
     const stashes = this.refs?.stashes ?? [];
-    const hidden = this.foldHidden;
-    let rows = this.shownCommits;
-    if (stashes.length === 0 && hidden.length === 0) return rows;
+    const hidden = this.liveFold.hidden;
+    let rows = hidden.size === 0 ? this.shownCommits : this.shownCommits.filter((row) => !hidden.has(row.id));
+    if (stashes.length === 0 && hidden.size === 0) return rows;
     if (stashes.length > 0) {
       rows = rows.slice();
       for (const stash of stashes) {
@@ -1217,9 +1222,7 @@ export class ShellState {
         if (at >= 0) rows.splice(at, 0, extra);
       }
     }
-    if (hidden.length === 0) return rows;
-    const hide = new Set(hidden);
-    return rows.filter((row) => !hide.has(row.id));
+    return rows;
   });
 
 
@@ -1293,7 +1296,7 @@ export class ShellState {
       return { rows: this.graphRows, width: this.graphWidth, columns: this.graphColumns };
     }
     const limit = items.length > GRAPH_SYNC_LIMIT ? Math.min(items.length, 400) : items.length;
-    const built = commitGraph(items.slice(0, limit).map((commit) => ({ id: commit.id, parents: commit.parents ?? [] })));
+    const built = commitGraph(laneCommits(items.slice(0, limit), this.liveFold.straight));
     return { rows: built.rows, width: built.width, columns: built.columns };
   });
 
@@ -2470,6 +2473,17 @@ export class ShellState {
 
   toggleFold(id: string) {
     return toggleFold(this, id);
+  }
+
+
+  mergeOwner(id: string) {
+    return (this.mode === "sample" ? this.sampleFold : this.liveFold).owner.get(id) ?? "";
+  }
+
+
+  mergeOpen(id: string) {
+    const owner = this.mergeOwner(id);
+    return owner !== "" && this.expandedMerges.includes(owner);
   }
 
 
@@ -4351,13 +4365,14 @@ export class ShellState {
 
   constructor() {
     $effect(() => {
+      const straight = this.liveFold.straight;
       const items = this.historyItems;
       if (items.length <= GRAPH_SYNC_LIMIT) {
         this.graphItems = null;
         this.graphRows = [];
         return;
       }
-      const commits = items.map((commit) => ({ id: commit.id, parents: commit.parents ?? [] }));
+      const commits = laneCommits(items, straight);
       const prev = this.graphResume;
       const prefix = !!prev && prev.ids.length <= commits.length && prev.ids.every((id, index) => id === commits[index].id);
       let count = prefix && prev ? prev.ids.length : 0;

@@ -1,7 +1,7 @@
 import { onMount, tick } from "svelte";
 import { invoke } from "../perf";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
-import { branchGroup, changedRanges, commitGraph, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type BlameLine,
@@ -104,21 +104,9 @@ export async function previewCherry(shell: ShellState, rev: string, record: bool
   }
 
 export function toggleFold(shell: ShellState, id: string) {
-    const roots = shell.foldRoots.includes(id) ? shell.foldRoots.filter((item) => item !== id) : [...shell.foldRoots, id];
-    shell.foldRoots = roots;
-    const source = shell.commitsLive.map((commit) => ({ id: commit.id, parents: commit.parents ?? [] }));
-    shell.foldHidden = roots.flatMap((root) => {
-      const start = source.findIndex((row) => row.id === root);
-      if (start < 0) return [];
-      const hide: string[] = [];
-      for (let index = start + 1; index < source.length; index += 1) {
-        const parents = source[index]?.parents ?? [];
-        const prev = source[index - 1]?.id ?? "";
-        if (!parents.some((parent) => parent === prev || prev.startsWith(parent) || parent.startsWith(prev))) break;
-        hide.push(source[index].id);
-      }
-      return hide;
-    });
+    const owner = (shell.mode === "sample" ? shell.sampleFold : shell.liveFold).owner.get(id);
+    if (!owner) return;
+    shell.expandedMerges = shell.expandedMerges.includes(owner) ? shell.expandedMerges.filter((item) => item !== owner) : [...shell.expandedMerges, owner];
   }
 
 export function showSideRefs(shell: ShellState) {

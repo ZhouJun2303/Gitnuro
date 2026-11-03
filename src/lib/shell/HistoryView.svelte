@@ -5,7 +5,7 @@
   import CommitDetail from "./CommitDetail.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { sampleReflog } from "../sample";
-  import { gravatarUrl, laneColors, onVirtualScroll, padGraphRow, rowGraph, type GraphCell } from "../view";
+  import { gravatarUrl, laneColors, onVirtualScroll, rowGraph, type GraphCell } from "../view";
   import type { Row, SearchKey } from "./types";
 
   const shell = getShell();
@@ -58,7 +58,7 @@
             {:else}
               <div class="commit-window" style:height="{shell.historyItems.length * shell.rowCommit}px">
                 {#each shell.historyRows as commit, index (commit.id)}
-                  {@const graphRow = padGraphRow(shell.liveGraph.rows[shell.historyStart + index], shell.liveGraph.width)}
+                  {@const graphRow = shell.liveGraph.rows[shell.historyStart + index] ?? []}
                 {@const tone = shell.laneTone(graphRow)}
                   <div
                     class="commit-row virtual"
@@ -121,7 +121,7 @@
               <p class="empty">{shell.tr("chrome.noCommits")}</p>
             {:else}
               {#each shell.sampleShown as commit, index (commit.id)}
-                {@const graphRow = padGraphRow(shell.sampleShownGraph.rows[index], shell.sampleShownGraph.width)}
+                {@const graphRow = shell.sampleShownGraph.rows[index] ?? []}
                 {@const tone = shell.laneTone(graphRow)}
                 <button class="commit-row" class:selected={shell.selectedCommit === commit.id || shell.selectedPath === commit.id} class:unpushed={shell.isCommitUnpushed(commit)} type="button" onclick={() => shell.selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
                   {@render laneGraph(graphRow, commit.id)}
@@ -164,7 +164,9 @@
 
 {#snippet laneGraph(graphRow: GraphCell[], commitId: string)}
       {@const drawn = rowGraph(graphRow)}
-      <span class="graph" style:width="{drawn.width}px" role="presentation" title={shell.tr("menu.fold")} onclick={(event) => { event.stopPropagation(); shell.toggleFold(commitId); }}>
+      {@const owner = shell.mergeOwner(commitId)}
+      {@const folded = owner !== "" && !shell.mergeOpen(commitId)}
+      <span class="graph" class:foldable={owner !== ""} style:width="{drawn.width}px" role="presentation" title={owner ? (folded ? shell.tr("menu.unfold") : shell.tr("menu.fold")) : undefined} onclick={(event) => { if (!owner) return; event.stopPropagation(); shell.toggleFold(commitId); }}>
         <svg class="graph-svg" viewBox="0 0 {drawn.width} 28" preserveAspectRatio="none">
           {#each drawn.lines as stroke, index (`${commitId}-l-${index}`)}
             <path d={stroke.d} class:dim={activeColor !== null && stroke.color !== activeColor} stroke={laneColors[stroke.color]} />
@@ -174,7 +176,7 @@
           {/each}
         </svg>
         {#each drawn.nodes as node, index (`${commitId}-n-${index}`)}
-          <i class="graph-node" class:dim={activeColor !== null && node.color !== activeColor} style:left="{node.x - 4}px" style:background={laneColors[node.color]}></i>
+          <i class="graph-node" class:folded class:dim={activeColor !== null && node.color !== activeColor} style:left="{node.x - 4}px" style:background={folded ? "var(--canvas)" : laneColors[node.color]} style:box-shadow={folded ? `inset 0 0 0 2px ${laneColors[node.color]}` : undefined}></i>
         {/each}
       </span>
     {/snippet}
