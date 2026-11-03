@@ -235,10 +235,12 @@
   let snapshot = $state<StatusSnapshot | null>(null);
   let loadError = $state<string | null>(null);
   let actionError = $state<string | null>(null);
-  let busy = $state(false);
-  /** Nested user-facing work. The progress strip follows this, not only writes. */
-  let workDepth = $state(0);
-  let busyLabel = $state("");
+  /** Work that belongs to one repository. Switching repos shows that repo's own job. */
+  type RepoJob = { label: string; percent: number | null; depth: number };
+  let jobs = $state<Record<string, RepoJob>>({});
+  /** Set as soon as a tab is chosen, before that repository's status returns. */
+  let focusPath = $state<string | null>(null);
+  let openGen = 0;
   let errorCopied = $state(false);
   let diff = $state<FileDiff | null>(null);
   let diffError = $state<string | null>(null);
@@ -485,6 +487,28 @@
   const conflicted = $derived(
     [...(snapshot?.staged ?? []), ...(snapshot?.unstaged ?? [])].some((file) => file.kind === "conflict"),
   );
+  function jobKey(path: string | null | undefined) {
+    return (path ?? "").replace(/[\\/]+$/, "").replaceAll("\\", "/").toLowerCase();
+  }
+  function viewing(path: string | null | undefined) {
+    const key = jobKey(path);
+    return key !== "" && key === jobKey(snapshot?.path);
+  }
+  let switching = $derived(!!focusPath && jobKey(focusPath) !== jobKey(snapshot?.path));
+  let meterPath = $derived(switching ? focusPath : (snapshot?.path ?? null));
+  let currentJob = $derived(meterPath ? jobs[jobKey(meterPath)] : undefined);
+  let busy = $derived(switching || (jobs[jobKey(snapshot?.path)]?.depth ?? 0) > 0);
+  let busyLabel = $derived(currentJob?.label ?? "");
+  let workDepth = $derived.by(() => {
+    if ((currentJob?.depth ?? 0) > 0) return currentJob?.depth ?? 0;
+    if (!snapshot && !focusPath && cloneJob) return jobs[jobKey(cloneJob.destination)]?.depth ?? 0;
+    return 0;
+  });
+  let workPercent = $derived.by(() => {
+    if ((currentJob?.depth ?? 0) > 0) return currentJob?.percent ?? null;
+    if (!snapshot && !focusPath && cloneJob) return jobs[jobKey(cloneJob.destination)]?.percent ?? null;
+    return null;
+  });
   const canCommit = $derived(
     summary.trim().length > 0 &&
       !summaryTooLong &&
@@ -928,6 +952,48 @@
     return snapshot?.path;
   }
 
+  function startWork(label: string, path = repoPath() ?? "") {
+    const key = jobKey(path);
+    if (!key) return;
+    const current = jobs[key];
+    if (current && current.depth > 0) {
+      jobs[key] = { ...current, depth: current.depth + 1 };
+      return;
+    }
+    jobs[key] = { label, percent: null, depth: 1 };
+  }
+
+  function stopWork(path = repoPath() ?? "") {
+    const key = jobKey(path);
+    const current = key ? jobs[key] : undefined;
+    if (!current) return;
+    if (current.depth <= 1) delete jobs[key];
+    else jobs[key] = { ...current, depth: current.depth - 1 };
+  }
+
+  function aliasJob(from: string, to: string) {
+    const left = jobKey(from);
+    const right = jobKey(to);
+    if (!left || left === right) return;
+    const job = jobs[left];
+    if (!job) return;
+    if (!jobs[right]) jobs[right] = job;
+    delete jobs[left];
+  }
+
+  function noteProgress(path: string, percent: number) {
+    const key = jobKey(path);
+    const current = jobs[key];
+    if (current) {
+      if (current.percent !== percent) jobs[key] = { ...current, percent };
+      return;
+    }
+    if (!cloneJob) return;
+    const dest = jobKey(cloneJob.destination);
+    const cloning = jobs[dest];
+    if (cloning && cloning.percent !== percent) jobs[dest] = { ...cloning, percent };
+  }
+
   function message(error: unknown) {
     return error instanceof Error ? error.message : String(error);
   }
@@ -972,21 +1038,22 @@
     const token = ++diffToken;
     const file = selectedPath;
     const stagedSide = selectedSide === "staged";
+    const path = repoPath();
     await withWork(tr("chrome.readingFile"), async () => {
     try {
       const value = await invoke<FileDiff>("file_diff", {
-        path: repoPath(),
+        path,
         file,
         staged: stagedSide,
         unified: settings.showEntireFile ? 100000 : 3,
         ignoreSpace: settings.ignoreSpace,
       });
-      if (token === diffToken) {
+      if (token === diffToken && viewing(path)) {
         if (!same(diff, value)) diff = value;
         diffError = null;
         if (value.binary) {
-          preview = await invoke<FilePreview | null>("file_preview", { path: repoPath(), file });
-          const older = await invoke<FilePreview | null>("revision_preview", { path: repoPath(), rev: "HEAD", file }).catch(() => null);
+          preview = await invoke<FilePreview | null>("file_preview", { path, file });
+          const older = await invoke<FilePreview | null>("revision_preview", { path, rev: "HEAD", file }).catch(() => null);
           imageNew = preview?.dataUrl ?? null;
           imageOld = older?.dataUrl ?? null;
         } else {
@@ -996,7 +1063,7 @@
         }
       }
     } catch (error) {
-      if (token === diffToken) {
+      if (token === diffToken && viewing(path)) {
         diff = null;
         diffError = message(error);
       }
@@ -1045,65 +1112,59 @@
 
   /** `status` reads the work tree and the open diff only; `full` also reloads branches and history. */
   async function refresh(scope: "status" | "full" = "full", silent = false) {
-    if (!inApp() || busy) return;
+    const path = repoPath();
+    if (!inApp() || !path || busy) return;
     if (refreshing) {
       if (refreshQueued !== "full") refreshQueued = scope;
       return;
     }
     refreshing = true;
-    if (!silent) startWork(tr("chrome.refresh"));
+    if (!silent) startWork(tr("chrome.refresh"), path);
     try {
       const gen = statusGen;
-      const value = await invoke<StatusSnapshot>("workspace_status", { path: repoPath() });
-      if (gen === statusGen) applySnapshot(value);
+      const value = await invoke<StatusSnapshot>("workspace_status", { path });
+      if (gen !== statusGen || !viewing(path)) return;
+      applySnapshot(value);
       if (scope === "full") await loadContext();
-      await loadDiff();
+      if (viewing(path)) await loadDiff();
     } catch (error) {
-      actionError = message(error);
+      if (viewing(path)) actionError = message(error);
     } finally {
       refreshing = false;
-      if (!silent) stopWork();
+      if (!silent) stopWork(path);
     }
     const next = refreshQueued;
     refreshQueued = null;
-    if (next) await refresh(next, silent);
-  }
-
-  function startWork(label: string) {
-    busyLabel = label;
-    workDepth += 1;
-  }
-
-  function stopWork() {
-    workDepth = Math.max(0, workDepth - 1);
-    if (workDepth === 0) busyLabel = "";
+    if (next && viewing(path)) await refresh(next, silent);
   }
 
   async function withWork<T>(label: string, body: () => Promise<T>): Promise<T> {
-    startWork(label);
+    const path = repoPath() ?? "";
+    startWork(label, path);
     try {
       return await body();
     } finally {
-      stopWork();
+      stopWork(path);
     }
   }
 
   async function runChange(command: string, extra: Record<string, unknown> = {}) {
-    if (mode !== "live" || busy) return undefined;
-    busy = true;
+    const path = repoPath();
+    if (mode !== "live" || !path || busy) return undefined;
     actionError = null;
-    startWork(tr("chrome.working"));
+    startWork(tr("chrome.working"), path);
     try {
-      const value = await invoke<StatusSnapshot & { log?: string }>(command, { path: repoPath(), ...extra });
-      applySnapshot(value);
-      await loadDiff();
+      const value = await invoke<StatusSnapshot & { log?: string }>(command, { path, ...extra });
+      if (viewing(path)) {
+        applySnapshot(value);
+        await loadDiff();
+      }
       return value;
     } catch (error) {
-      actionError = message(error);
+      if (viewing(path)) actionError = message(error);
       return null;
     } finally {
-      busy = false;
-      stopWork();
+      stopWork(path);
     }
   }
 
@@ -1253,46 +1314,55 @@
   }
 
   async function mutate(request: Record<string, unknown>, source: "user" | "background" = "user") {
-    if (!inApp() || busy) return;
-    busy = true;
+    const path = repoPath();
+    if (!inApp() || !path || busy) return;
     actionError = null;
     const described = describeRequest(request);
-    startWork(described.title);
+    const action = String(request.action ?? "");
+    const followSubmodules = settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (refs?.submodules.length ?? 0) > 0;
+    startWork(described.title, path);
     try {
-      const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path: repoPath(), request });
-      applySnapshot(value);
+      const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request });
       const output = value.output ?? "";
-      await loadContext();
-      await loadDiff();
-      const action = String(request.action ?? "");
-      if (settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (refs?.submodules.length ?? 0) > 0) {
-        const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path: repoPath(), request: { action: "submoduleUpdate" } });
-        applySnapshot(follow);
+      if (viewing(path)) {
+        applySnapshot(value);
         await loadContext();
+        await loadDiff();
+      }
+      if (followSubmodules) {
+        const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request: { action: "submoduleUpdate" } });
+        if (viewing(path)) {
+          applySnapshot(follow);
+          await loadContext();
+        }
         recordCommand("submoduleUpdate", describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
       }
       noteActivity(`${action}${output ? " output" : " ok"}`);
       recordCommand(action, described, value.log || output, true, source);
-      if (output) {
-        commandOutput = output;
-        dialog = "output";
-      } else {
-        dialog = null;
+      if (viewing(path)) {
+        if (output) {
+          commandOutput = output;
+          dialog = "output";
+        } else {
+          dialog = null;
+        }
       }
     } catch (error) {
-      actionError = message(error);
+      const text = message(error);
       noteActivity(`${String(request.action ?? "")} failed`);
-      recordCommand(String(request.action ?? ""), described, actionError, false, source);
-      if (String(request.action ?? "") === "stageHunk" && settings.ignoreSpace) actionError = `${actionError} ${tr("dialog.spaceHint")}`;
-      try {
-        applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path: repoPath() }));
-        await loadContext();
-      } catch {
-        /* keep the action error */
+      recordCommand(String(request.action ?? ""), described, text, false, source);
+      if (viewing(path)) {
+        actionError = text;
+        if (String(request.action ?? "") === "stageHunk" && settings.ignoreSpace) actionError = `${actionError} ${tr("dialog.spaceHint")}`;
+        try {
+          applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
+          await loadContext();
+        } catch {
+          /* keep the action error */
+        }
       }
     } finally {
-      busy = false;
-      stopWork();
+      stopWork(path);
     }
   }
 
@@ -1999,19 +2069,20 @@
   }
 
   async function suggestMessage() {
-    if (mode !== "live" || busy) return;
-    busy = true;
+    const path = repoPath();
+    if (mode !== "live" || !path || busy) return;
     actionError = null;
-    startWork(tr("chrome.suggest"));
+    startWork(tr("chrome.suggest"), path);
     try {
-      const value = await invoke<Suggestion>("suggest_commit_message", { path: repoPath() });
-      summary = value.summary;
-      description = value.description;
+      const value = await invoke<Suggestion>("suggest_commit_message", { path });
+      if (viewing(path)) {
+        summary = value.summary;
+        description = value.description;
+      }
     } catch (error) {
-      actionError = message(error);
+      if (viewing(path)) actionError = message(error);
     } finally {
-      busy = false;
-      stopWork();
+      stopWork(path);
     }
   }
 
@@ -2211,35 +2282,48 @@
   }
 
   async function openRepo(path: string) {
-    if (!inApp() || busy || !path.trim()) return;
-    if (snapshot?.path) drafts.set(snapshot.path, { summary, description });
-    busy = true;
+    if (!inApp() || !path.trim()) return;
+    const gen = ++openGen;
+    focusPath = path;
+    if (snapshot?.path && !viewing(path)) drafts.set(snapshot.path, { summary, description });
+    const running = (jobs[jobKey(path)]?.depth ?? 0) > 0;
+    let stopAt = path;
     actionError = null;
-    startWork(tr("chrome.open"));
+    if (!running) startWork(tr("chrome.open"), path);
     try {
-      applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
-      const saved = drafts.get(path);
+      const value = await invoke<StatusSnapshot>("workspace_status", { path });
+      if (gen !== openGen) return;
+      aliasJob(path, value.path);
+      stopAt = value.path;
+      applySnapshot(value);
+      const saved = drafts.get(path) ?? drafts.get(value.path);
       summary = saved?.summary ?? "";
       description = saved?.description ?? "";
       historyFilter = "";
       await loadContext();
+      if (gen !== openGen) return;
       await loadDiff();
+      if (gen !== openGen) return;
       await invoke("watch_repository", { path: repoPath() });
       void invoke<{ available: boolean }>("lfs_locks", { path: repoPath(), list: false })
-        .then((value) => (lfsAvailable = value.available))
-        .catch(() => (lfsAvailable = false));
+        .then((locks) => {
+          if (gen === openGen) lfsAvailable = locks.available;
+        })
+        .catch(() => {
+          if (gen === openGen) lfsAvailable = false;
+        });
       rememberRepo(path);
       dialog = null;
       facts = null;
       factsPath = "";
       void fillTemplate();
     } catch (error) {
-      actionError = message(error);
+      if (gen === openGen) actionError = message(error);
     } finally {
-      busy = false;
-      stopWork();
+      if (!running) stopWork(stopAt);
+      if (gen === openGen) focusPath = null;
     }
-    if (settings.fetchAutomatically && snapshot?.path === path) void doFetch("background");
+    if (gen === openGen && settings.fetchAutomatically && viewing(path) && !busy) void doFetch("background");
   }
 
   function composeTool(path: string, args: string) {
@@ -2393,7 +2477,7 @@
 
   function cancelClone() {
     cloneCancel = true;
-    void invoke("cancel_operation");
+    void invoke("cancel_operation", { path: cloneJob?.destination ?? "" });
   }
 
   async function browseCloneRoot() {
@@ -2423,6 +2507,7 @@
     actionError = null;
     cloneDone = null;
     cloneJob = { name, destination };
+    startWork(tr("chrome.clone"), destination);
     try {
       await invoke("mutate", { path: repoPath(), request: { action: "clone", url, destination } });
       noteActivity(`clone ${name}`);
@@ -2432,6 +2517,8 @@
       cloneJob = null;
       if (!cloneCancel) actionError = message(error);
       cloneCancel = false;
+    } finally {
+      stopWork(destination);
     }
   }
 
@@ -3773,9 +3860,10 @@
         return right.index - left.index;
       });
     if (ordered.length === 0) return;
-    busy = true;
+    const path = repoPath();
+    if (!path) return;
     actionError = null;
-    startWork(tr("chrome.working"));
+    startWork(tr("chrome.working"), path);
     diffSelected = [];
     try {
       let value: (StatusSnapshot & { output?: string }) | null = null;
@@ -3783,7 +3871,7 @@
         const at = action === "stageLine" ? entry.line.stageAt : entry.line.workAt;
         if (at == null) continue;
         value = await invoke<StatusSnapshot & { output?: string }>("mutate", {
-          path: repoPath(),
+          path,
           request: {
             action,
             file,
@@ -3794,22 +3882,24 @@
           },
         });
       }
-      if (value) applySnapshot(value);
-      await loadContext();
-      await loadDiff();
+      if (viewing(path)) {
+        if (value) applySnapshot(value);
+        await loadContext();
+        await loadDiff();
+      }
     } catch (error) {
+      if (!viewing(path)) return;
       actionError = message(error);
       if (action === "stageLine" && settings.ignoreSpace) actionError = `${actionError} ${tr("dialog.spaceHint")}`;
       try {
-        applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path: repoPath() }));
+        applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
         await loadContext();
         await loadDiff();
       } catch {
         /* keep the action error */
       }
     } finally {
-      busy = false;
-      stopWork();
+      stopWork(path);
     }
   }
 
@@ -4365,6 +4455,7 @@
       return detachNav;
     }
     let unlisten = () => {};
+    let unprogress = () => {};
     let unmoved = () => {};
     let unresized = () => {};
     let placeTimer = 0;
@@ -4396,6 +4487,11 @@
         try {
           unlisten = await listen<{ refs?: boolean } | null>("repo-changed", (event) => {
             if (!busy) void refresh(event.payload?.refs === false ? "status" : "full", true);
+          });
+          unprogress = await listen<{ path: string; percent: number }>("git-progress", (event) => {
+            const percent = event.payload?.percent;
+            const path = event.payload?.path;
+            if (typeof percent === "number" && percent >= 0 && percent <= 100 && path) noteProgress(path, percent);
           });
         } catch {
           /* the watcher is optional until a repository is open */
@@ -4457,6 +4553,7 @@
       detachNav();
       window.clearTimeout(placeTimer);
       unlisten();
+      unprogress();
       unmoved();
       unresized();
     };
@@ -4505,13 +4602,31 @@
             <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
           </button>
           <div class="identity-copy">
-            <strong>{snapshot ? folderName(snapshot.path) : mode === "sample" ? "AweGit" : tr("chrome.welcomeTitle")}</strong>
-            <span>{#if snapshot || mode === "sample"}<svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>{branchLabel}{:else}{tr("chrome.openRepo")}{/if}</span>
+            <strong>{focusPath && !viewing(focusPath) ? folderName(focusPath) : snapshot ? folderName(snapshot.path) : mode === "sample" ? "AweGit" : tr("chrome.welcomeTitle")}</strong>
+            <span>
+              {#if focusPath && !viewing(focusPath)}
+                {currentJob?.label || tr("chrome.open")}
+              {:else if snapshot || mode === "sample"}
+                <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
+                <em class="identity-branch">{branchLabel}</em>
+              {:else}
+                {tr("chrome.openRepo")}
+              {/if}
+              {#if workPercent != null}<em class="identity-pct">{workPercent}%</em>{/if}
+            </span>
           </div>
           <button class="tool-btn stack branch-chip" type="button" aria-haspopup="menu" onclick={(event) => openBar(event, branchItems())}>
             <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
             <span>{tr("dialog.branch")}<svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
           </button>
+          {#if workDepth > 0}
+            {#if workPercent != null}
+              <div class="identity-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={workPercent} aria-valuetext="{workPercent}%">
+                <span style:width="{workPercent}%"></span>
+              </div>
+            {/if}
+            <div class="identity-sweep" aria-hidden="true"></div>
+          {/if}
         </div>
       </div>
       <div class="chrome-right">
@@ -4536,14 +4651,15 @@
     <div class="chrome-tabs">
       <div class="chrome-side tabs">
       {#each repos as repo (repo)}
-        <div class="tab" role="group" class:active={snapshot?.path === repo} class:dirty={settings.tabIndicator && snapshot?.path === repo && changeCount > 0} style:box-shadow={tabColor(repo) ? `inset 0 -2px 0 ${tabColor(repo)}` : ""} oncontextmenu={(event) => openMenu(event, [
+        {@const job = jobs[jobKey(repo)]}
+        <div class="tab" role="group" class:active={jobKey(repo) === jobKey(meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={settings.tabIndicator && !switching && jobKey(snapshot?.path) === jobKey(repo) && changeCount > 0} style:box-shadow={tabColor(repo) ? `inset 0 -2px 0 ${tabColor(repo)}` : ""} oncontextmenu={(event) => openMenu(event, [
           { label: tr("chrome.terminal"), disabled: mode !== "live", run: () => void invoke("open_terminal", { path: repo }) },
           { label: tr("chrome.explorer"), run: () => void openLocal(repo) },
           { label: tr("menu.renameTab"), run: () => { draft = tabText(repo); draftExtra = repo; dialog = "renameTab"; } },
           { label: tr("menu.tabColor"), run: () => { draft = tabColor(repo) || "#5b8def"; draftExtra = repo; dialog = "colorTab"; } },
           { label: tr("chrome.close"), run: () => closeTab(repo) },
         ])}>
-          <button class="file-select" type="button" onclick={() => openRepo(repo)}>{tabText(repo)}</button>
+          <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : undefined} onclick={() => openRepo(repo)}>{#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}{tabText(repo)}</button>
           <button class="text-button row-action tab-close" type="button" onclick={() => closeTab(repo)} aria-label={tr("chrome.close")}>×</button>
         </div>
       {:else}
@@ -4596,7 +4712,7 @@
     <div class="banner busy" role="status" aria-live="polite">
       <span class="busy-text">{busyLabel ? `${tr("chrome.working")} ${busyLabel}` : tr("chrome.working")}</span>
       <span class="spacer"></span>
-      <button class="text-button busy-cancel" type="button" onclick={() => invoke("cancel_operation")}>{tr("chrome.cancel")}</button>
+      <button class="text-button busy-cancel" type="button" onclick={() => invoke("cancel_operation", { path: meterPath || cloneJob?.destination || repoPath() })}>{tr("chrome.cancel")}</button>
     </div>
   {/if}
   {#if actionError}
@@ -6976,22 +7092,24 @@
     align-items: center;
     justify-content: center;
     min-width: 0;
-    max-width: 460px;
+    max-width: 560px;
   }
 
   .identity-floor {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 0;
     width: max-content;
-    min-width: 236px;
-    max-width: min(440px, 46vw);
+    min-width: 320px;
+    max-width: min(540px, 50vw);
     height: 40px;
     padding: 3px;
     border-radius: 13px;
     background: var(--elevated);
     border: 1px solid var(--line);
     box-shadow: 0 1px 0 color-mix(in srgb, #000 12%, transparent);
+    overflow: hidden;
   }
 
   .identity-copy {
@@ -7019,6 +7137,66 @@
   .identity-copy strong { font-size: 13px; font-weight: 650; }
   .identity-copy span { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: 11px; }
   .identity-copy span .line-icon { width: 12px; height: 12px; flex: none; }
+  .identity-branch {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-style: normal;
+  }
+  .identity-pct {
+    flex: none;
+    margin-left: 4px;
+    color: var(--accent);
+    font-style: normal;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Determinate transfer bar. It sits inside the fixed 40px floor, so the pill does not grow. */
+  .identity-bar {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 4px;
+    height: 3px;
+    border-radius: 99px;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .identity-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 62%, white), var(--accent));
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
+    transition: width 140ms linear;
+  }
+
+  /* A light that keeps travelling the bottom edge for the whole operation. */
+  .identity-sweep {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .identity-sweep::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 42%;
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 78%, white), transparent);
+    animation: busy-flow 1.25s linear infinite;
+  }
 
   .history-btn.on { background: var(--hover); color: var(--text); }
 
@@ -7496,6 +7674,14 @@
     text-overflow: ellipsis;
   }
 
+  .tab-job {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+    flex: none;
+  }
   .tab-close { opacity: 0; }
   .tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
   .glyph {
@@ -7596,35 +7782,17 @@
   }
 
   .banner.busy {
-    position: relative;
-    overflow: hidden;
     min-height: 24px;
     color: var(--text-secondary);
     background: var(--selection);
     animation: busy-in 160ms ease-out;
   }
 
-  /* A band of light that keeps travelling across the strip while work is running. */
-  .banner.busy::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    width: 45%;
-    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 38%, transparent), transparent);
-    animation: busy-flow 1.3s linear infinite;
-    pointer-events: none;
-  }
-
   .banner.busy .busy-text {
-    position: relative;
     font-size: 12px;
   }
 
   .banner.busy .spacer { flex: 1; }
-
-  .banner.busy .busy-cancel {
-    position: relative;
-  }
 
   @keyframes busy-flow {
     from { transform: translateX(-100%); }
@@ -7636,7 +7804,8 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .banner.busy::before { animation-duration: 3s; }
+    .identity-sweep::before { animation-duration: 3s; }
+    .identity-bar > span { transition: none; }
   }
 
   .error-toast {

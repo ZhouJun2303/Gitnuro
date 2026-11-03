@@ -5,21 +5,63 @@
 //! what the user already has configured. Nothing here writes the global gitconfig.
 
 use std::cell::{Cell, RefCell};
-use std::path::Path;
-use std::process::Command;
-use std::sync::Mutex;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 
 use crate::Error;
 
 static BUNDLED_GIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-static CHILDREN: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+static CHILDREN: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
 static TRACE: std::sync::OnceLock<Trace> = std::sync::OnceLock::new();
+static PROGRESS: Mutex<Option<ProgressHook>> = Mutex::new(None);
+
+type ProgressHook = Arc<dyn Fn(&str, u8) + Send + Sync>;
 
 /// Called after each `git` child exits with its arguments, wall time, and success.
 pub type Trace = fn(&[&str], std::time::Duration, bool);
 
 pub fn set_trace(hook: Trace) {
     let _ = TRACE.set(hook);
+}
+
+/// Receive the latest `git` transfer percent (`0`–`100`) while a command is running.
+///
+/// Fetch, pull, push, clone, checkout, and submodule update force `--progress`
+/// so the percent arrives even when stderr is not a terminal.
+pub fn set_progress(hook: impl Fn(&str, u8) + Send + Sync + 'static) {
+    if let Ok(mut slot) = PROGRESS.lock() {
+        *slot = Some(Arc::new(hook));
+    }
+}
+
+fn progress_hook() -> Option<ProgressHook> {
+    PROGRESS.lock().ok().and_then(|guard| guard.clone())
+}
+
+/// Stable identity for one repository. Slash direction and a trailing slash do not matter.
+pub fn repo_key(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase()
+}
+
+thread_local! {
+    static OPERATION_REPO: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+}
+
+/// Attribute git progress and cancellation to `path` while `body` runs on this thread.
+pub fn with_operation_repo<T>(path: &Path, body: impl FnOnce() -> T) -> T {
+    OPERATION_REPO.with(|slot| {
+        let previous = slot.borrow().clone();
+        *slot.borrow_mut() = Some(path.to_path_buf());
+        let value = body();
+        *slot.borrow_mut() = previous;
+        value
+    })
+}
+
+fn operation_path(fallback: &Path) -> PathBuf {
+    OPERATION_REPO.with(|slot| slot.borrow().clone()).unwrap_or_else(|| fallback.to_path_buf())
 }
 
 thread_local! {
@@ -42,7 +84,7 @@ fn note_captured(stdout: &[u8], stderr: &[u8]) {
         return;
     }
     let out = String::from_utf8_lossy(stdout).trim().to_string();
-    let err = String::from_utf8_lossy(stderr).trim().to_string();
+    let err = settle_stderr(stderr);
     if out.is_empty() && err.is_empty() {
         return;
     }
@@ -149,6 +191,18 @@ pub(crate) fn session_snapshot() -> (Session, String) {
 /// Stop every `git` process this library started, including grandchildren.
 pub fn cancel_running() {
     let pids = CHILDREN.lock().map(|guard| guard.clone()).unwrap_or_default();
+    for (_, pid) in pids {
+        stop_process_tree(pid);
+    }
+}
+
+/// Stop `git` processes started for this repository. Other repositories keep running.
+pub fn cancel_repo(repo: &Path) {
+    let key = repo_key(repo);
+    let pids = CHILDREN
+        .lock()
+        .map(|guard| guard.iter().filter(|(item, _)| item == &key).map(|(_, pid)| *pid).collect::<Vec<_>>())
+        .unwrap_or_default();
     for pid in pids {
         stop_process_tree(pid);
     }
@@ -223,14 +277,19 @@ fn run_prepared(
     apply_author: bool,
     allow_failure: bool,
 ) -> Result<std::process::Output, Error> {
+    let progress = progress_hook();
     let mut command = Command::new("git");
+    command.current_dir(repo).env("GIT_TERMINAL_PROMPT", "0");
+    if progress.is_some() {
+        command.env("GIT_LFS_FORCE_PROGRESS", "1");
+        command.args(progress_args(args));
+    } else {
+        command.args(args);
+    }
     command
-        .current_dir(repo)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if let Some(dir) = BUNDLED_GIT.get() {
         let mut path = std::ffi::OsString::from(dir);
         path.push(";");
@@ -273,10 +332,11 @@ fn run_prepared(
         command.env(key, value);
     }
     let started = std::time::Instant::now();
+    let owned = operation_path(repo);
     let mut child = command.spawn().map_err(Error::GitMissing)?;
     let pid = child.id();
     if let Ok(mut guard) = CHILDREN.lock() {
-        guard.push(pid);
+        guard.push((repo_key(&owned), pid));
     }
     if let Some(bytes) = stdin_bytes {
         use std::io::Write;
@@ -292,7 +352,11 @@ fn run_prepared(
         }
         drop(child.stdin.take());
     }
-    let output = child.wait_with_output().map_err(Error::GitMissing)?;
+    let output = if let Some(progress) = progress {
+        stream_output(&mut child, progress, owned.display().to_string())?
+    } else {
+        child.wait_with_output().map_err(Error::GitMissing)?
+    };
     untrack(pid);
     if let Some(hook) = TRACE.get() {
         hook(args, started.elapsed(), output.status.success());
@@ -301,7 +365,7 @@ fn run_prepared(
     if output.status.success() || allow_failure {
         return Ok(output);
     }
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stderr = settle_stderr(&output.stderr);
     Err(Error::Git(if stderr.is_empty() {
         format!("git {} failed", args.join(" "))
     } else {
@@ -309,9 +373,140 @@ fn run_prepared(
     }))
 }
 
+/// Read both pipes while `git` runs. Stderr is scanned for `45% (12/30)` lines.
+fn stream_output(child: &mut Child, progress: ProgressHook, repo: String) -> Result<std::process::Output, Error> {
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+    let stderr_task = match std::thread::Builder::new().name("awegit-progress".into()).spawn(move || read_stderr(stderr_pipe, progress, repo)) {
+        Ok(task) => task,
+        Err(source) => {
+            stop_process_tree(child.id());
+            let _ = child.wait();
+            return Err(Error::GitMissing(source));
+        }
+    };
+    let mut stdout = Vec::new();
+    if let Some(mut pipe) = stdout_pipe {
+        let _ = pipe.read_to_end(&mut stdout);
+    }
+    let status = child.wait().map_err(Error::GitMissing)?;
+    let stderr = stderr_task.join().unwrap_or_default();
+    Ok(std::process::Output { status, stdout, stderr })
+}
+
+fn read_stderr(pipe: Option<impl Read>, progress: ProgressHook, repo: String) -> Vec<u8> {
+    let Some(mut pipe) = pipe else { return Vec::new() };
+    let mut buf = Vec::new();
+    let mut pending = Vec::new();
+    let mut last = None;
+    let mut chunk = [0u8; 1024];
+    loop {
+        match pipe.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                pending.extend_from_slice(&chunk[..n]);
+                drain_progress(&mut pending, &mut last, &progress, &repo);
+            }
+        }
+    }
+    if !pending.is_empty() {
+        report_percent(&pending, &mut last, &progress, &repo);
+    }
+    buf
+}
+
+fn drain_progress(pending: &mut Vec<u8>, last: &mut Option<u8>, progress: &ProgressHook, repo: &str) {
+    loop {
+        let Some(index) = pending.iter().position(|byte| *byte == b'\r' || *byte == b'\n') else { break };
+        let piece: Vec<u8> = pending.drain(..=index).collect();
+        report_percent(&piece, last, progress, repo);
+    }
+}
+
+fn report_percent(piece: &[u8], last: &mut Option<u8>, progress: &ProgressHook, repo: &str) {
+    let text = String::from_utf8_lossy(piece);
+    let Some(percent) = percent_in(text.trim()) else { return };
+    if *last == Some(percent) {
+        return;
+    }
+    *last = Some(percent);
+    progress(repo, percent);
+}
+
+/// Last `N% (` on a git progress line. Other text is ignored.
+fn percent_in(text: &str) -> Option<u8> {
+    let bytes = text.as_bytes();
+    let mut found = None;
+    for index in 0..bytes.len() {
+        if bytes[index] != b'%' {
+            continue;
+        }
+        let mut start = index;
+        while start > 0 && bytes[start - 1].is_ascii_digit() {
+            start -= 1;
+        }
+        if start == index {
+            continue;
+        }
+        let after = text[index + 1..].trim_start();
+        if !after.starts_with('(') {
+            continue;
+        }
+        let Ok(percent) = text[start..index].parse::<u8>() else { continue };
+        if percent <= 100 {
+            found = Some(percent);
+        }
+    }
+    found
+}
+
+/// Drop overwritten `\r` updates and keep the last copy of each line.
+fn settle_stderr(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes)
+        .split('\n')
+        .filter_map(|line| {
+            let kept = line.trim_end_matches(['\r', ' ']).rsplit('\r').next().unwrap_or("").trim();
+            if kept.is_empty() { None } else { Some(kept.to_string()) }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Insert `--progress` for commands that can report a transfer or checkout percent.
+fn progress_args(args: &[&str]) -> Vec<String> {
+    let mut owned: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    if owned.iter().any(|arg| arg == "--progress" || arg == "--no-progress") {
+        return owned;
+    }
+    let mut index = 0;
+    while index < owned.len() {
+        if owned[index] == "-c" {
+            index += 2;
+            continue;
+        }
+        if owned[index].starts_with('-') {
+            index += 1;
+            continue;
+        }
+        break;
+    }
+    let insert_at = match owned.get(index).map(String::as_str) {
+        Some("fetch" | "pull" | "push" | "clone" | "checkout" | "switch" | "restore") => Some(index + 1),
+        Some("submodule") if owned.get(index + 1).map(String::as_str) == Some("update") => Some(index + 2),
+        _ => None,
+    };
+    if let Some(at) = insert_at {
+        if at <= owned.len() {
+            owned.insert(at, "--progress".to_string());
+        }
+    }
+    owned
+}
+
 fn untrack(pid: u32) {
     if let Ok(mut guard) = CHILDREN.lock() {
-        guard.retain(|item| *item != pid);
+        guard.retain(|(_, item)| *item != pid);
     }
 }
 
@@ -405,5 +600,45 @@ pub fn check_path(path: &str) -> Result<&str, Error> {
         Err(Error::Path(path.to_string()))
     } else {
         Ok(path)
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::{percent_in, progress_args, settle_stderr};
+
+    #[test]
+    fn reads_the_latest_git_percent() {
+        assert_eq!(percent_in("Receiving objects:  45% (10/22), 1 KiB | 1 MiB/s"), Some(45));
+        assert_eq!(percent_in("remote: Counting objects: 100% (15/15), done."), Some(100));
+        assert_eq!(percent_in("Writing objects: 100% (11/11), done.\rReceiving objects: 3% (1/30)"), Some(3));
+        assert_eq!(percent_in("Downloading LFS objects:   0% (0/2), 0 B | 0 B/s"), Some(0));
+        assert_eq!(percent_in("nothing to report"), None);
+        assert_eq!(percent_in("already 100% complete"), None);
+    }
+
+    #[test]
+    fn keeps_the_last_progress_line() {
+        let raw = b"Receiving objects:  10% (1/10)\rReceiving objects:  40% (4/10)\r\nfatal: early EOF\n";
+        assert_eq!(settle_stderr(raw), "Receiving objects:  40% (4/10)\nfatal: early EOF");
+    }
+
+    #[test]
+    fn adds_progress_only_where_git_can_report_it() {
+        assert_eq!(progress_args(&["fetch", "--all"]), vec!["fetch", "--progress", "--all"]);
+        assert_eq!(progress_args(&["pull", "--rebase"]), vec!["pull", "--progress", "--rebase"]);
+        assert_eq!(progress_args(&["push", "--force-with-lease"]), vec!["push", "--progress", "--force-with-lease"]);
+        assert_eq!(progress_args(&["clone", "https://example.com/a.git", "a"]), vec!["clone", "--progress", "https://example.com/a.git", "a"]);
+        assert_eq!(
+            progress_args(&["submodule", "update", "--init", "--recursive"]),
+            vec!["submodule", "update", "--progress", "--init", "--recursive"]
+        );
+        assert_eq!(progress_args(&["submodule", "sync", "--", "path"]), vec!["submodule", "sync", "--", "path"]);
+        assert_eq!(
+            progress_args(&["-c", "commit.gpgsign=false", "commit", "-m", "hi"]),
+            vec!["-c", "commit.gpgsign=false", "commit", "-m", "hi"]
+        );
+        assert_eq!(progress_args(&["checkout", "--ours", "--", "file"]), vec!["checkout", "--progress", "--ours", "--", "file"]);
+        assert_eq!(progress_args(&["fetch", "--progress"]), vec!["fetch", "--progress"]);
     }
 }

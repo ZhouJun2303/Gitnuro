@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{check_name, check_path, check_rev, run, run_env, run_output, run_stdin};
+use crate::cli::{check_name, check_path, check_rev, run, run_env, run_output, run_stdin, with_operation_repo};
 use crate::model::in_progress;
 use crate::{commit, discard_hunk, discard_line, resolve_conflict, stage_hunk, stage_line, stage_paths, unstage_paths, CommitRequest, Error, InProgress};
 
@@ -1430,7 +1430,8 @@ fn clone_repo(url: &str, destination: &str) -> Result<(), Error> {
         parent.to_path_buf()
     };
     let dest = destination_path.display().to_string();
-    surface(run(&cwd, &["clone", url, &dest]).map(|_| ()))
+    let reported = PathBuf::from(destination);
+    surface(with_operation_repo(&reported, || run(&cwd, &["clone", url, &dest]).map(|_| ())))
 }
 
 /// If `destination` is an existing folder that already has files, clone into

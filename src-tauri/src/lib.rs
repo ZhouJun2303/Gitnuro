@@ -4,22 +4,24 @@ mod perf;
 mod settings;
 mod updates;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use tauri::{Emitter, Manager};
 
-static GIT_WRITE: Mutex<()> = Mutex::new(());
 static FAKE_IGNORE: AtomicBool = AtomicBool::new(true);
 static FAKE_IGNORE_KNOWN: AtomicBool = AtomicBool::new(false);
-static WRITE_LANE: OnceLock<Sender<Job>> = OnceLock::new();
 static SETTINGS_LANE: OnceLock<Sender<Job>> = OnceLock::new();
+fn repo_gates() -> &'static Mutex<HashMap<String, Arc<RepoGate>>> {
+    static GATES: OnceLock<Mutex<HashMap<String, Arc<RepoGate>>>> = OnceLock::new();
+    GATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 const WATCH_QUIET: Duration = Duration::from_millis(300);
 const WATCH_MAX_WAIT: Duration = Duration::from_secs(2);
@@ -34,12 +36,74 @@ struct RepoChange {
     refs: bool,
 }
 
+/// Transfer percent for one repository. The shell shows it only while that repository is open.
+#[derive(Clone, serde::Serialize)]
+struct GitProgress {
+    path: String,
+    percent: u8,
+}
+
+/// One repository's writes run in the order they were asked for. Other repositories do not wait.
+struct RepoGate {
+    inner: Mutex<RepoTicket>,
+    cv: Condvar,
+}
+
+struct RepoTicket {
+    next: u64,
+    serving: u64,
+}
+
+struct RepoTurn {
+    gate: Arc<RepoGate>,
+}
+
+impl Drop for RepoTurn {
+    fn drop(&mut self) {
+        let mut guard = self.gate.inner.lock().unwrap_or_else(|err| err.into_inner());
+        guard.serving = guard.serving.saturating_add(1);
+        self.gate.cv.notify_all();
+    }
+}
+
+fn repo_turn(repo: &Path) -> RepoTurn {
+    let key = awegit_git::repo_key(repo);
+    let gate = {
+        let mut map = repo_gates().lock().unwrap_or_else(|err| err.into_inner());
+        map.entry(key)
+            .or_insert_with(|| {
+                Arc::new(RepoGate {
+                    inner: Mutex::new(RepoTicket { next: 0, serving: 0 }),
+                    cv: Condvar::new(),
+                })
+            })
+            .clone()
+    };
+    let ticket = {
+        let mut guard = gate.inner.lock().unwrap_or_else(|err| err.into_inner());
+        let ticket = guard.next;
+        guard.next = guard.next.saturating_add(1);
+        ticket
+    };
+    let mut guard = gate.inner.lock().unwrap_or_else(|err| err.into_inner());
+    while guard.serving != ticket {
+        guard = gate.cv.wait(guard).unwrap_or_else(|err| err.into_inner());
+    }
+    drop(guard);
+    RepoTurn { gate }
+}
+
+fn report_path(given: Option<String>, repo: &Path) -> PathBuf {
+    match given {
+        Some(path) if !path.trim().is_empty() => PathBuf::from(path),
+        _ => repo.to_path_buf(),
+    }
+}
+
 /// Commands never run on the main thread, which also drives the window and webview input.
-/// Writes and settings keep their call order on their own threads; reads share the blocking pool.
+/// Settings keep their call order. Writes run together, and each repository keeps its own order.
 fn dispatch(command: &str, job: Job) {
     let lane = match command {
-        "stage_all" | "unstage_all" | "stage_path" | "unstage_path" | "commit_changes" | "mutate" | "approve_credential"
-        | "set_repo_author" => Some((&WRITE_LANE, "awegit-write")),
         "load_settings" | "save_settings" | "watch_repository" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
         | "log_client" => Some((&SETTINGS_LANE, "awegit-settings")),
         _ => None,
@@ -169,11 +233,14 @@ fn apply_session() {
     });
 }
 
-fn write_then_status(repo: &Path, write: impl FnOnce(&Path) -> Result<(), awegit_git::Error>) -> Result<awegit_git::StatusSnapshot, String> {
-    let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
+fn write_then_status(path: Option<String>, write: impl FnOnce(&Path) -> Result<(), awegit_git::Error>) -> Result<awegit_git::StatusSnapshot, String> {
+    let given = path.clone();
+    let repo = repo_from(path)?;
+    let _turn = repo_turn(&repo);
     apply_session();
-    write(repo).map_err(|error| error.to_string())?;
-    read_status(repo)
+    let report = report_path(given, &repo);
+    awegit_git::with_operation_repo(&report, || write(&repo)).map_err(|error| error.to_string())?;
+    read_status(&repo)
 }
 
 #[tauri::command]
@@ -183,9 +250,8 @@ fn workspace_status(path: Option<String>) -> Result<awegit_git::StatusSnapshot, 
 
 #[tauri::command]
 fn stage_all(path: Option<String>) -> Result<awegit_git::StatusSnapshot, String> {
-    let repo = repo_from(path)?;
     let peel = use_fakeignore();
-    write_then_status(&repo, |repo| {
+    write_then_status(path, |repo| {
         awegit_git::stage_all(repo)?;
         if peel {
             awegit_git::unstage_fakeignored(repo)?;
@@ -196,20 +262,17 @@ fn stage_all(path: Option<String>) -> Result<awegit_git::StatusSnapshot, String>
 
 #[tauri::command]
 fn unstage_all(path: Option<String>) -> Result<awegit_git::StatusSnapshot, String> {
-    let repo = repo_from(path)?;
-    write_then_status(&repo, awegit_git::unstage_all)
+    write_then_status(path, awegit_git::unstage_all)
 }
 
 #[tauri::command]
 fn stage_path(path: Option<String>, file: String) -> Result<awegit_git::StatusSnapshot, String> {
-    let repo = repo_from(path)?;
-    write_then_status(&repo, |repo| awegit_git::stage_paths(repo, &[file]))
+    write_then_status(path, |repo| awegit_git::stage_paths(repo, &[file]))
 }
 
 #[tauri::command]
 fn unstage_path(path: Option<String>, file: String) -> Result<awegit_git::StatusSnapshot, String> {
-    let repo = repo_from(path)?;
-    write_then_status(&repo, |repo| awegit_git::unstage_paths(repo, &[file]))
+    write_then_status(path, |repo| awegit_git::unstage_paths(repo, &[file]))
 }
 
 #[tauri::command]
@@ -221,7 +284,7 @@ fn commit_changes(
     sign_off: bool,
     skip_hooks: Option<bool>,
 ) -> Result<CommitReport, String> {
-    let repo = repo_from(path)?;
+    let repo = repo_from(path.clone())?;
     let sign_off_format = if sign_off {
         let local = awegit_git::repo_sign_off_format(&repo);
         if local.trim().is_empty() {
@@ -234,7 +297,7 @@ fn commit_changes(
     };
     let peel = use_fakeignore();
     let (result, log) = awegit_git::capture_output(|| {
-        write_then_status(&repo, |repo| {
+        write_then_status(path, |repo| {
             if peel {
                 awegit_git::unstage_fakeignored(repo)?;
             }
@@ -351,17 +414,19 @@ struct CommitReport {
 
 #[tauri::command]
 fn mutate(path: Option<String>, request: awegit_git::Mutation) -> Result<MutationReport, String> {
+    let given = path.clone();
     let repo = repo_from(path)?;
-    let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
-    apply_session();
-    record_action(&request);
     let next = match &request {
         awegit_git::Mutation::Clone { destination, .. } | awegit_git::Mutation::Init { destination } => {
             PathBuf::from(destination)
         }
         _ => repo.clone(),
     };
-    let (result, log) = awegit_git::capture_output(|| awegit_git::perform(&repo, request));
+    let _turn = repo_turn(&next);
+    apply_session();
+    record_action(&request);
+    let report = report_path(given, &repo);
+    let (result, log) = awegit_git::capture_output(|| awegit_git::with_operation_repo(&report, || awegit_git::perform(&repo, request)));
     let output = result.map_err(|error| error.to_string())?;
     Ok(MutationReport {
         status: read_status(&next)?,
@@ -853,8 +918,11 @@ fn file_preview(path: Option<String>, file: String) -> Result<Option<awegit_git:
 }
 
 #[tauri::command]
-fn cancel_operation() -> Result<(), String> {
-    awegit_git::cancel_running();
+fn cancel_operation(path: Option<String>) -> Result<(), String> {
+    match path {
+        Some(path) if !path.trim().is_empty() => awegit_git::cancel_repo(Path::new(&path)),
+        _ => awegit_git::cancel_running(),
+    }
     Ok(())
 }
 
@@ -866,10 +934,12 @@ fn set_passphrase(user: String, secret: String) -> Result<(), String> {
 
 #[tauri::command]
 fn approve_credential(path: Option<String>, protocol: String, host: String, username: String, password: String) -> Result<(), String> {
+    let given = path.clone();
     let repo = repo_from(path)?;
-    let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
+    let _turn = repo_turn(&repo);
     apply_session();
-    awegit_git::approve_credential(&repo, &protocol, &host, &username, &password).map_err(|error| error.to_string())
+    let report = report_path(given, &repo);
+    awegit_git::with_operation_repo(&report, || awegit_git::approve_credential(&repo, &protocol, &host, &username, &password)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1047,9 +1117,11 @@ fn generate_ssh_key() -> Result<String, String> {
 
 #[tauri::command]
 fn set_repo_author(path: Option<String>, name: String, email: String) -> Result<(), String> {
+    let given = path.clone();
     let repo = repo_from(path)?;
-    let _guard = GIT_WRITE.lock().map_err(|_| "a Git write was interrupted".to_string())?;
-    awegit_git::set_repo_author(&repo, &name, &email).map_err(|error| error.to_string())
+    let _turn = repo_turn(&repo);
+    let report = report_path(given, &repo);
+    awegit_git::with_operation_repo(&report, || awegit_git::set_repo_author(&repo, &name, &email)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1299,7 +1371,11 @@ pub fn run() {
                     awegit_git::use_bundled_git(&cmd);
                 }
             }
-            perf::watch_main_thread(app.handle().clone());
+            let handle = app.handle().clone();
+            perf::watch_main_thread(handle.clone());
+            awegit_git::set_progress(move |path, percent| {
+                let _ = handle.emit("git-progress", GitProgress { path: path.to_string(), percent });
+            });
             Ok(())
         })
         .on_page_load(|_, payload| {
