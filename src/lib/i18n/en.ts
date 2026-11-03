@@ -170,6 +170,8 @@ export const en: Messages = {
     deleteSelected: "Delete selected",
     unstageSelected: "Unstage selected",
     stageSelected: "Stage selected",
+    stageBusy: "Another operation is still running, so this stage change was skipped.",
+    stageConflictBinary: "This binary conflict cannot be staged by double-click. Use a merge tool.",
     bisect: "Bisect",
     ignored: "Ignored",
     createPr: "Create pull request",

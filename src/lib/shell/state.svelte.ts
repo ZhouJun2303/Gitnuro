@@ -33,7 +33,7 @@ import {
     workspaceTabWidth,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu } from "./menus";
-import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
+import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
@@ -1699,9 +1699,10 @@ export class ShellState {
 
 
 
-  async runChange(command: string, extra: Record<string, unknown> = {}) {
+  async runChange(command: string, extra: Record<string, unknown> = {}, duringRead = false) {
     const path = this.repoPath();
-    if (this.mode !== "live" || !path || this.busy) return undefined;
+    const reading = duringRead && !this.switching && this.currentJob?.label === this.tr("chrome.readingFile");
+    if (this.mode !== "live" || !path || (this.busy && !reading)) return undefined;
     this.actionError = null;
     this.startWork(this.tr("chrome.working"), path);
     try {
@@ -3144,6 +3145,12 @@ export class ShellState {
 
   stageChosen(side: Side, files: string[]) {
     return stageChosen(this, side, files);
+  }
+
+
+
+  flipStage(path: string, side: Side) {
+    return flipStage(this, path, side);
   }
 
 

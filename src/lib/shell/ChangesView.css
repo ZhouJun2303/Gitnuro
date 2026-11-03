@@ -108,6 +108,11 @@
 .file {
     height: var(--row-file);
     padding: 0 8px;
+    user-select: none;
+  }
+
+.file-list > .side {
+    user-select: none;
   }
 
 .badge {

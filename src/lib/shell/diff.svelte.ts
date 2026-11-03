@@ -575,6 +575,97 @@ export function stageChosen(shell: ShellState, side: Side, files: string[]) {
     if (file) shell.runChange(side === "staged" ? "unstage_path" : "stage_path", { file });
   }
 
+function rowOnSide(shell: ShellState, path: string, side: Side) {
+    const rows = side === "staged" ? shell.staged : shell.unstaged;
+    return rows.find((item) => item.path === path);
+  }
+
+function readingOnly(shell: ShellState) {
+    const job = shell.currentJob;
+    // A double-click selects the file twice, so more than one diff read can be in flight.
+    // Writes refuse to start while the repository is busy, so this label is still only a read.
+    return !shell.switching && job?.label === shell.tr("chrome.readingFile");
+  }
+
+const flipping = new Set<string>();
+
+/** Open or unclosed conflict markers. A cleaned file is safe to stage. */
+function conflictMarkers(working: string) {
+    let open = false;
+    for (const line of working.split("\n")) {
+      if (line.startsWith("<<<<<<<")) {
+        open = true;
+        continue;
+      }
+      if (open && line.startsWith(">>>>>>>")) return true;
+    }
+    return open;
+  }
+
+async function conflictCanStage(shell: ShellState, repo: string, path: string) {
+    try {
+      const view = await invoke<ConflictView>("conflict_view", { path: repo, file: path });
+      if (shell.repoPath() !== repo) return false;
+      if (view.binary) {
+        shell.actionError = shell.tr("chrome.stageConflictBinary");
+        return false;
+      }
+      const sides = await invoke<ConflictSides>("conflict_sides", { path: repo, file: path });
+      if (shell.repoPath() !== repo || shell.dialog) return false;
+      if (conflictMarkers(sides.working)) {
+        shell.actionError = null;
+        shell.conflict = sides;
+        shell.draft = path;
+        shell.mergePieces = shell.splitConflicts(sides.working);
+        shell.mergeResult = shell.mergePieces.some((piece) => piece.kind === "hunk") ? shell.joinedPieces(shell.mergePieces) : sides.working;
+        shell.draftExtra = "text";
+        shell.dialog = "resolve";
+        return false;
+      }
+      return true;
+    } catch (error) {
+      if (shell.repoPath() !== repo) return false;
+      const text = shell.message(error);
+      // Status can still say "conflict" after the index was already resolved.
+      if (text.includes("is not unmerged")) return true;
+      shell.actionError = text;
+      return false;
+    }
+  }
+
+/** Double-click moves one file to the other side. Conflicts are not staged blindly. */
+export async function flipStage(shell: ShellState, path: string, side: Side) {
+    if (shell.mode !== "live" || !path || shell.dialog || shell.menu || shell.launchOpen) return;
+    const repo = shell.repoPath();
+    const file = rowOnSide(shell, path, side);
+    if (!repo || !file) return;
+    const key = `${shell.jobKey(repo)}\0${side}\0${path}`;
+    if (flipping.has(key)) return;
+    if (shell.busy && !readingOnly(shell)) {
+      shell.actionError = shell.tr("chrome.stageBusy");
+      return;
+    }
+    flipping.add(key);
+    try {
+      if (file.letter === "C") {
+        const ready = await conflictCanStage(shell, repo, path);
+        if (!ready || shell.repoPath() !== repo || shell.dialog || shell.menu || shell.launchOpen) return;
+        if (!rowOnSide(shell, path, side)) return;
+      }
+      const reading = readingOnly(shell);
+      if (shell.busy && !reading) {
+        shell.actionError = shell.tr("chrome.stageBusy");
+        return;
+      }
+      const changed = await shell.runChange(side === "staged" ? "unstage_path" : "stage_path", { file: path }, reading);
+      if (changed === undefined && shell.mode === "live" && shell.repoPath() === repo) {
+        shell.actionError = shell.tr("chrome.stageBusy");
+      }
+    } finally {
+      flipping.delete(key);
+    }
+  }
+
 export async function deletePicked(shell: ShellState, files = [...shell.picked]) {
     for (const file of files) await shell.mutate({ action: "delete", file });
     shell.picked = shell.picked.filter((path) => !files.includes(path));

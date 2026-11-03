@@ -14,6 +14,12 @@
   const onFileScroll = onVirtualScroll((top) => (shell.fileTop = top));
   let typeOpen = $state(false);
 
+  function flipFile(event: MouseEvent, path: string, side: Side) {
+    if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.button !== 0) return;
+    event.preventDefault();
+    void shell.flipStage(path, side);
+  }
+
   function pickType(type: CommitType) {
     shell.rememberCommitType(type);
     shell.fitSummary();
@@ -235,10 +241,10 @@
       {@render pickedActions(shell.pickedIn(shell.shownUnstaged), shell.pickedIn(shell.shownStaged))}
       <div class="file-list">
         {#each shell.shownStaged as file (`s:${file.path}`)}
-          <button class="side" type="button" class:selected={shell.selectedPath === file.path && shell.selectedSide === "staged"} class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && shell.selectedSide === "staged")} onclick={() => shell.selectFile(file.path, "staged")}><span class="meta">{shell.tr("chrome.staged")}</span> <span class="name">{file.path}</span></button>
+          <button class="side" type="button" class:selected={shell.selectedPath === file.path && shell.selectedSide === "staged"} class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && shell.selectedSide === "staged")} onclick={() => shell.selectFile(file.path, "staged")} ondblclick={(event) => flipFile(event, file.path, "staged")}><span class="meta">{shell.tr("chrome.staged")}</span> <span class="name">{file.path}</span></button>
         {/each}
         {#each shell.shownUnstaged as file (`u:${file.path}`)}
-          <button class="side" type="button" class:selected={shell.selectedPath === file.path && shell.selectedSide === "unstaged"} class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && shell.selectedSide === "unstaged")} onclick={() => shell.selectFile(file.path, "unstaged")}>{#if file.letter === "C"}{@render conflictMark()}{/if}<span class="meta">{shell.tr("chrome.unstaged")}</span> <span class="name">{file.path}</span></button>
+          <button class="side" type="button" class:selected={shell.selectedPath === file.path && shell.selectedSide === "unstaged"} class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && shell.selectedSide === "unstaged")} onclick={() => shell.selectFile(file.path, "unstaged")} ondblclick={(event) => flipFile(event, file.path, "unstaged")}>{#if file.letter === "C"}{@render conflictMark()}{/if}<span class="meta">{shell.tr("chrome.unstaged")}</span> <span class="name">{file.path}</span></button>
         {/each}
       </div>
     {/snippet}
@@ -352,6 +358,7 @@
         class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && (shell.mode !== "live" || shell.selectedSide === side))}
         role="group"
         oncontextmenu={(event) => shell.openMenu(event, shell.fileMenu(file, side))}
+        ondblclick={(event) => flipFile(event, file.path, side)}
       >
         <button class="file-select" type="button" onclick={(event) => shell.selectFile(file.path, side, event)}>
           {#if shell.fileLayout === "tree"}

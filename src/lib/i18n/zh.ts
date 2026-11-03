@@ -170,6 +170,8 @@ export const zh: Messages = {
     deleteSelected: "删除所选",
     unstageSelected: "取消暂存所选",
     stageSelected: "暂存所选",
+    stageBusy: "正在处理其他操作，这次没有改动暂存。",
+    stageConflictBinary: "这是二进制冲突，双击不能暂存。请用合并工具处理。",
     bisect: "二分查找",
     ignored: "已忽略",
     createPr: "创建拉取请求",
