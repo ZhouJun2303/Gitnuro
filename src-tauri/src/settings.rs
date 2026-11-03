@@ -290,6 +290,9 @@ pub struct WorkspaceRecord {
     pub open_tabs: Vec<String>,
     #[serde(default)]
     pub selected_tab: u32,
+    /// The workspace tabs already include every member repository.
+    #[serde(default)]
+    pub tabs_seeded: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -540,11 +543,13 @@ pub fn path() -> Result<PathBuf, String> {
     let base = if cfg!(windows) {
         std::env::var("APPDATA").map_err(|error| error.to_string())?
     } else if cfg!(target_os = "macos") {
-        format!("{}/Library/Application Support", std::env::var("HOME").map_err(|error| error.to_string())?)
+        format!(
+            "{}/Library/Application Support",
+            std::env::var("HOME").map_err(|error| error.to_string())?
+        )
     } else {
-        std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| {
-            format!("{}/.config", std::env::var("HOME").unwrap_or_default())
-        })
+        std::env::var("XDG_CONFIG_HOME")
+            .unwrap_or_else(|_| format!("{}/.config", std::env::var("HOME").unwrap_or_default()))
     };
     Ok(PathBuf::from(base).join("AweGit").join("settings.json"))
 }
@@ -555,7 +560,11 @@ pub fn load() -> Result<Settings, String> {
         return Ok(Settings::default());
     }
     let text = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    serde_json::from_str(&text).map_err(|error| error.to_string())
+    let mut settings: Settings = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    if repair_imported_tabs(&mut settings) {
+        save(&settings)?;
+    }
+    Ok(settings)
 }
 
 pub fn save(settings: &Settings) -> Result<(), String> {
@@ -582,7 +591,8 @@ pub fn import_fork_at(path: &std::path::Path) -> Result<ForkImport, String> {
         return Err("fork-settings-missing".into());
     }
     let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|error| error.to_string())?;
     let mut current = load().unwrap_or_else(|_| Settings::default());
     let report = apply_fork(&mut current, &value, &text);
     save(&current)?;
@@ -595,47 +605,218 @@ pub fn import_fork_at(path: &std::path::Path) -> Result<ForkImport, String> {
 }
 
 /// Merge Fork values into `settings`. Secrets, commands, and the window rectangle stay as they are.
-pub fn apply_fork(settings: &mut Settings, fork: &serde_json::Value, text: &str) -> (u32, u32, u32) {
+pub fn apply_fork(
+    settings: &mut Settings,
+    fork: &serde_json::Value,
+    text: &str,
+) -> (u32, u32, u32) {
     let mut preferences = 0u32;
-    take_bool(fork, "Pull_Rebase", &mut settings.pull_rebase, &mut preferences);
-    take_bool(fork, "FetchRemotesAutomatically", &mut settings.fetch_automatically, &mut preferences);
-    take_bool(fork, "FetchAllTags", &mut settings.fetch_tags, &mut preferences);
-    take_bool(fork, "PushAutomaticallyOnCommit", &mut settings.push_on_commit, &mut preferences);
-    take_bool(fork, "UpdateSubmodulesOnCheckout", &mut settings.update_submodules_on_checkout, &mut preferences);
-    take_bool(fork, "DiffIgnoreWhitespaces", &mut settings.ignore_space, &mut preferences);
-    take_bool(fork, "DiffShowHiddenSymbols", &mut settings.show_whitespace, &mut preferences);
-    take_bool(fork, "DiffShowChangeMarks", &mut settings.show_diff_marks, &mut preferences);
-    take_bool(fork, "DiffShowEntireFile", &mut settings.show_entire_file, &mut preferences);
-    take_bool(fork, "DiffWordWrap", &mut settings.diff_word_wrap, &mut preferences);
-    take_bool(fork, "CompactBranchLabels", &mut settings.compact_branch_labels, &mut preferences);
-    take_bool(fork, "DisableSyntaxHighlighting", &mut settings.disable_syntax_highlight, &mut preferences);
-    take_bool(fork, "Fetch_FetchAllRemotes", &mut settings.fetch_all_remotes, &mut preferences);
-    take_bool(fork, "Pull_StashAndReapply", &mut settings.pull_stash, &mut preferences);
-    take_bool(fork, "Push_PushAllTags", &mut settings.push_all_tags, &mut preferences);
-    take_bool(fork, "CreateBranch_Checkout", &mut settings.checkout_after_create, &mut preferences);
-    take_bool(fork, "SaveStash_StageNewFiles", &mut settings.stash_include_untracked, &mut preferences);
-    take_bool(fork, "ApplyStash_DeleteAfterApply", &mut settings.apply_stash_delete, &mut preferences);
-    take_bool(fork, "CreateTag_Push", &mut settings.push_tag_on_create, &mut preferences);
-    take_bool(fork, "Checkout_StashAndReapply", &mut settings.checkout_stash, &mut preferences);
-    take_bool(fork, "ShowWorktrees", &mut settings.show_worktrees, &mut preferences);
-    take_bool(fork, "RebaseAutostash", &mut settings.rebase_autostash, &mut preferences);
-    take_bool(fork, "RebaseUpdateRefs", &mut settings.rebase_update_refs, &mut preferences);
-    take_u32(fork, "CodeEditorFontSize", &mut settings.diff_font_size, &mut preferences, 1);
-    take_u32(fork, "CommitSubjectLowLimit", &mut settings.message_low, &mut preferences, 1);
-    take_u32(fork, "CommitSubjectHighLimit", &mut settings.message_high, &mut preferences, 1);
-    take_u32(fork, "PageGuideLinePosition", &mut settings.page_guide, &mut preferences, 1);
-    take_u32(fork, "DiffContextSize", &mut settings.diff_context, &mut preferences, 0);
-    take_u32(fork, "AutomaticStatusUpdateInterval", &mut settings.status_interval, &mut preferences, 0);
-    take_u32(fork, "MaxCommitCount", &mut settings.max_commits, &mut preferences, 1);
-    if let Some(value) = fork.get("ReferenceSpaceCharacterReplacement").and_then(serde_json::Value::as_str) {
+    take_bool(
+        fork,
+        "Pull_Rebase",
+        &mut settings.pull_rebase,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "FetchRemotesAutomatically",
+        &mut settings.fetch_automatically,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "FetchAllTags",
+        &mut settings.fetch_tags,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "PushAutomaticallyOnCommit",
+        &mut settings.push_on_commit,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "UpdateSubmodulesOnCheckout",
+        &mut settings.update_submodules_on_checkout,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "DiffIgnoreWhitespaces",
+        &mut settings.ignore_space,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "DiffShowHiddenSymbols",
+        &mut settings.show_whitespace,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "DiffShowChangeMarks",
+        &mut settings.show_diff_marks,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "DiffShowEntireFile",
+        &mut settings.show_entire_file,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "DiffWordWrap",
+        &mut settings.diff_word_wrap,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "CompactBranchLabels",
+        &mut settings.compact_branch_labels,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "DisableSyntaxHighlighting",
+        &mut settings.disable_syntax_highlight,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "Fetch_FetchAllRemotes",
+        &mut settings.fetch_all_remotes,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "Pull_StashAndReapply",
+        &mut settings.pull_stash,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "Push_PushAllTags",
+        &mut settings.push_all_tags,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "CreateBranch_Checkout",
+        &mut settings.checkout_after_create,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "SaveStash_StageNewFiles",
+        &mut settings.stash_include_untracked,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "ApplyStash_DeleteAfterApply",
+        &mut settings.apply_stash_delete,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "CreateTag_Push",
+        &mut settings.push_tag_on_create,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "Checkout_StashAndReapply",
+        &mut settings.checkout_stash,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "ShowWorktrees",
+        &mut settings.show_worktrees,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "RebaseAutostash",
+        &mut settings.rebase_autostash,
+        &mut preferences,
+    );
+    take_bool(
+        fork,
+        "RebaseUpdateRefs",
+        &mut settings.rebase_update_refs,
+        &mut preferences,
+    );
+    take_u32(
+        fork,
+        "CodeEditorFontSize",
+        &mut settings.diff_font_size,
+        &mut preferences,
+        1,
+    );
+    take_u32(
+        fork,
+        "CommitSubjectLowLimit",
+        &mut settings.message_low,
+        &mut preferences,
+        1,
+    );
+    take_u32(
+        fork,
+        "CommitSubjectHighLimit",
+        &mut settings.message_high,
+        &mut preferences,
+        1,
+    );
+    take_u32(
+        fork,
+        "PageGuideLinePosition",
+        &mut settings.page_guide,
+        &mut preferences,
+        1,
+    );
+    take_u32(
+        fork,
+        "DiffContextSize",
+        &mut settings.diff_context,
+        &mut preferences,
+        0,
+    );
+    take_u32(
+        fork,
+        "AutomaticStatusUpdateInterval",
+        &mut settings.status_interval,
+        &mut preferences,
+        0,
+    );
+    take_u32(
+        fork,
+        "MaxCommitCount",
+        &mut settings.max_commits,
+        &mut preferences,
+        1,
+    );
+    if let Some(value) = fork
+        .get("ReferenceSpaceCharacterReplacement")
+        .and_then(serde_json::Value::as_str)
+    {
         settings.branch_space = value.to_string();
         preferences += 1;
     }
-    if let Some(mode) = fork.get("CommitSpellCheckingMode").and_then(serde_json::Value::as_i64) {
+    if let Some(mode) = fork
+        .get("CommitSpellCheckingMode")
+        .and_then(serde_json::Value::as_i64)
+    {
         settings.spell_checking = if mode == 0 { "disable" } else { "enable" }.into();
         preferences += 1;
     }
-    if fork.get("FollowSystemTheme").and_then(serde_json::Value::as_bool) == Some(true) {
+    if fork
+        .get("FollowSystemTheme")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
         settings.theme = "system".into();
         preferences += 1;
     } else if let Some(theme) = fork.get("Theme").and_then(serde_json::Value::as_i64) {
@@ -659,20 +840,30 @@ pub fn apply_fork(settings: &mut Settings, fork: &serde_json::Value, text: &str)
         }
         preferences += 1;
     }
-    if let Some(mode) = ["HistoryDiffLayoutMode", "CommitDiffLayoutMode", "RevisionDiffLayoutMode"]
-        .into_iter()
-        .find_map(|key| fork.get(key).and_then(serde_json::Value::as_i64))
+    if let Some(mode) = [
+        "HistoryDiffLayoutMode",
+        "CommitDiffLayoutMode",
+        "RevisionDiffLayoutMode",
+    ]
+    .into_iter()
+    .find_map(|key| fork.get(key).and_then(serde_json::Value::as_i64))
     {
         settings.diff_style = if mode == 0 { "unified" } else { "split" }.into();
         preferences += 1;
     }
-    if let Some(depth) = fork.pointer("/RepositoryManager/ScanDepth").and_then(serde_json::Value::as_u64) {
+    if let Some(depth) = fork
+        .pointer("/RepositoryManager/ScanDepth")
+        .and_then(serde_json::Value::as_u64)
+    {
         if depth > 0 {
             settings.scan_depth = depth.min(u32::MAX as u64) as u32;
             preferences += 1;
         }
     }
-    if let Some(show) = fork.pointer("/Workspaces/ShowInTitle").and_then(serde_json::Value::as_bool) {
+    if let Some(show) = fork
+        .pointer("/Workspaces/ShowInTitle")
+        .and_then(serde_json::Value::as_bool)
+    {
         settings.workspace_show_title = show;
         preferences += 1;
     }
@@ -691,7 +882,12 @@ fn take_bool(fork: &serde_json::Value, key: &str, dest: &mut bool, count: &mut u
 
 fn take_u32(fork: &serde_json::Value, key: &str, dest: &mut u32, count: &mut u32, minimum: u64) {
     let Some(value) = fork.get(key) else { return };
-    let Some(number) = value.as_u64().or_else(|| value.as_f64().map(|item| item as u64)) else { return };
+    let Some(number) = value
+        .as_u64()
+        .or_else(|| value.as_f64().map(|item| item as u64))
+    else {
+        return;
+    };
     if number < minimum {
         return;
     }
@@ -701,14 +897,24 @@ fn take_u32(fork: &serde_json::Value, key: &str, dest: &mut u32, count: &mut u32
 
 fn apply_tools(settings: &mut Settings, text: &str, count: &mut u32) {
     let tools = crate::tools::tools_in_fork_text(text);
-    if let Some(tool) = tools.merge.iter().find(|item| item.primary).or(tools.merge.first()) {
+    if let Some(tool) = tools
+        .merge
+        .iter()
+        .find(|item| item.primary)
+        .or(tools.merge.first())
+    {
         settings.merge_tool_name = tool.name.clone();
         settings.merge_tool_path = tool.path.clone();
         settings.merge_tool_args = tool.args.clone();
         settings.merge_tool = compose_tool(&tool.path, &tool.args);
         *count += 1;
     }
-    if let Some(tool) = tools.diff.iter().find(|item| item.primary).or(tools.diff.first()) {
+    if let Some(tool) = tools
+        .diff
+        .iter()
+        .find(|item| item.primary)
+        .or(tools.diff.first())
+    {
         settings.diff_tool_name = tool.name.clone();
         settings.diff_tool_path = tool.path.clone();
         settings.diff_tool_args = tool.args.clone();
@@ -723,22 +929,41 @@ fn compose_tool(path: &str, args: &str) -> String {
     if file.is_empty() {
         return rest.to_string();
     }
-    let quoted = if file.contains(' ') { format!("\"{file}\"") } else { file.to_string() };
-    if rest.is_empty() { quoted } else { format!("{quoted} {rest}") }
+    let quoted = if file.contains(' ') {
+        format!("\"{file}\"")
+    } else {
+        file.to_string()
+    };
+    if rest.is_empty() {
+        quoted
+    } else {
+        format!("{quoted} {rest}")
+    }
 }
 
 fn merge_repositories(settings: &mut Settings, fork: &serde_json::Value) -> u32 {
-    let Some(rows) = fork.pointer("/RepositoryManager/Repositories").and_then(serde_json::Value::as_array) else {
+    let Some(rows) = fork
+        .pointer("/RepositoryManager/Repositories")
+        .and_then(serde_json::Value::as_array)
+    else {
         return 0;
     };
     let mut ordered: Vec<(String, String)> = rows
         .iter()
         .filter_map(|item| {
-            let path = item.get("Path").and_then(serde_json::Value::as_str)?.trim().to_string();
+            let path = item
+                .get("Path")
+                .and_then(serde_json::Value::as_str)?
+                .trim()
+                .to_string();
             if path.is_empty() {
                 return None;
             }
-            let time = item.get("LastAccessTime").and_then(serde_json::Value::as_str).unwrap_or("").to_string();
+            let time = item
+                .get("LastAccessTime")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string();
             Some((time, path))
         })
         .collect();
@@ -752,47 +977,109 @@ fn merge_repositories(settings: &mut Settings, fork: &serde_json::Value) -> u32 
 }
 
 fn merge_workspaces(settings: &mut Settings, fork: &serde_json::Value) -> u32 {
-    let Some(rows) = fork.pointer("/Workspaces/All").and_then(serde_json::Value::as_array) else {
+    let Some(rows) = fork
+        .pointer("/Workspaces/All")
+        .and_then(serde_json::Value::as_array)
+    else {
         return 0;
     };
     let mut count = 0u32;
     for item in rows {
-        let Some(name) = item.get("Name").and_then(serde_json::Value::as_str).map(str::trim).filter(|name| !name.is_empty()) else {
+        let Some(name) = item
+            .get("Name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
             continue;
         };
         let repos = string_list(item.get("Repositories"));
-        let active = item.get("ActiveRepository").and_then(serde_json::Value::as_str).unwrap_or("").trim().to_string();
-        if let Some(existing) = settings.workspaces.iter_mut().find(|workspace| workspace.name == name) {
+        let active = item
+            .get("ActiveRepository")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if let Some(existing) = settings
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.name == name)
+        {
             existing.repositories = merge_paths(&repos, &existing.repositories);
-            if existing.open_tabs.is_empty() && !active.is_empty() {
-                existing.open_tabs = vec![active];
-                existing.selected_tab = 0;
-            }
+            let (tabs, selected) = open_workspace(&existing.repositories, &active);
+            existing.open_tabs = tabs;
+            existing.selected_tab = selected;
+            existing.tabs_seeded = true;
         } else {
             let id = fresh_workspace_id(settings, name);
-            let open_tabs = if active.is_empty() { Vec::new() } else { vec![active] };
+            let (open_tabs, selected_tab) = open_workspace(&repos, &active);
             settings.workspaces.push(WorkspaceRecord {
                 id,
                 name: name.to_string(),
                 repositories: repos,
                 open_tabs,
-                selected_tab: 0,
+                selected_tab,
+                tabs_seeded: true,
             });
         }
         count += 1;
     }
-    if let Some(active_name) = fork.pointer("/Workspaces/ActiveWorkspace").and_then(serde_json::Value::as_str) {
-        if let Some(workspace) = settings.workspaces.iter().find(|item| item.name == active_name) {
+    if let Some(active_name) = fork
+        .pointer("/Workspaces/ActiveWorkspace")
+        .and_then(serde_json::Value::as_str)
+    {
+        if let Some(workspace) = settings
+            .workspaces
+            .iter()
+            .find(|item| item.name == active_name)
+        {
             settings.current_workspace = workspace.id.clone();
         }
     }
     count
 }
 
+/// Fork stores every workspace repository as an open tab and one of them as the active tab.
+fn open_workspace(repos: &[String], active: &str) -> (Vec<String>, u32) {
+    let selected = repos
+        .iter()
+        .position(|path| same_path(path, active))
+        .unwrap_or(0) as u32;
+    (repos.to_vec(), selected)
+}
+
+/// The first import kept only Fork's active repository in `open_tabs`.
+fn repair_imported_tabs(settings: &mut Settings) -> bool {
+    let mut changed = false;
+    for workspace in &mut settings.workspaces {
+        if workspace.tabs_seeded || !workspace.id.starts_with("fork-") {
+            continue;
+        }
+        if workspace.open_tabs.len() < workspace.repositories.len() {
+            let active = workspace.open_tabs.first().cloned().unwrap_or_default();
+            let (tabs, selected) = open_workspace(&workspace.repositories, &active);
+            workspace.open_tabs = tabs;
+            workspace.selected_tab = selected;
+        }
+        workspace.tabs_seeded = true;
+        changed = true;
+    }
+    changed
+}
+
 fn string_list(value: Option<&serde_json::Value>) -> Vec<String> {
     value
         .and_then(serde_json::Value::as_array)
-        .map(|rows| rows.iter().filter_map(|item| item.as_str().map(str::trim).filter(|text| !text.is_empty()).map(str::to_string)).collect())
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|item| {
+                    item.as_str()
+                        .map(str::trim)
+                        .filter(|text| !text.is_empty())
+                        .map(str::to_string)
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -813,19 +1100,33 @@ fn merge_paths(primary: &[String], extra: &[String]) -> Vec<String> {
 }
 
 fn same_path(left: &str, right: &str) -> bool {
-    let norm = |value: &str| value.trim().trim_end_matches(['\\', '/']).replace('/', "\\").to_ascii_lowercase();
+    let norm = |value: &str| {
+        value
+            .trim()
+            .trim_end_matches(['\\', '/'])
+            .replace('/', "\\")
+            .to_ascii_lowercase()
+    };
     !left.trim().is_empty() && norm(left) == norm(right)
 }
 
 fn fresh_workspace_id(settings: &Settings, name: &str) -> String {
     let base = format!("fork-{}", slug(name));
-    if !settings.workspaces.iter().any(|workspace| workspace.id == base) {
+    if !settings
+        .workspaces
+        .iter()
+        .any(|workspace| workspace.id == base)
+    {
         return base;
     }
     let mut index = 2u32;
     loop {
         let id = format!("{base}-{index}");
-        if !settings.workspaces.iter().any(|workspace| workspace.id == id) {
+        if !settings
+            .workspaces
+            .iter()
+            .any(|workspace| workspace.id == id)
+        {
             return id;
         }
         index += 1;
@@ -842,7 +1143,11 @@ fn slug(name: &str) -> String {
         }
     }
     let out = out.trim_matches('-').to_string();
-    if out.is_empty() { "ws".into() } else { out }
+    if out.is_empty() {
+        "ws".into()
+    } else {
+        out
+    }
 }
 
 #[cfg(test)]
@@ -920,6 +1225,7 @@ mod tests {
             repositories: vec!["D:/work/old".into()],
             open_tabs: vec!["D:/work/old".into()],
             selected_tab: 0,
+            tabs_seeded: false,
         }];
         let (value, text) = sample();
         let (preferences, repositories, workspaces) = apply_fork(&mut settings, &value, &text);
@@ -945,23 +1251,83 @@ mod tests {
         assert_eq!(settings.commands.len(), 1);
         assert_eq!(settings.workspaces.len(), 2);
         assert_eq!(settings.workspaces[0].id, "ws-1");
-        assert_eq!(settings.workspaces[0].open_tabs, vec!["D:/work/old".to_string()]);
-        assert!(settings.workspaces[0].repositories.iter().any(|path| path.ends_with("old")));
-        assert!(settings.workspaces[0].repositories.iter().any(|path| path.ends_with("two")));
-        assert_eq!(settings.workspaces[1].open_tabs, vec!["D:/work/one".to_string()]);
+        assert_eq!(
+            settings.workspaces[0].open_tabs,
+            vec![
+                "D:/work/one".to_string(),
+                "D:/work/two".to_string(),
+                "D:/work/old".to_string()
+            ]
+        );
+        assert_eq!(settings.workspaces[0].selected_tab, 1);
+        assert!(settings.workspaces[0].tabs_seeded);
+        assert!(settings.workspaces[0]
+            .repositories
+            .iter()
+            .any(|path| path.ends_with("old")));
+        assert!(settings.workspaces[0]
+            .repositories
+            .iter()
+            .any(|path| path.ends_with("two")));
+        assert_eq!(
+            settings.workspaces[1].open_tabs,
+            vec!["D:/work/one".to_string()]
+        );
         assert_eq!(settings.current_workspace, "ws-1");
         assert!(settings.recent.iter().any(|path| path.ends_with("one")));
         assert!(settings.recent.iter().any(|path| path == "D:/keep"));
-        assert!(settings.source_directories.iter().any(|path| same_path(path, "D:/work")));
+        assert!(settings
+            .source_directories
+            .iter()
+            .any(|path| same_path(path, "D:/work")));
         let again = apply_fork(&mut settings, &value, &text);
         assert_eq!(again.2, 2);
         assert_eq!(settings.workspaces.len(), 2);
+        assert_eq!(settings.workspaces[0].open_tabs.len(), 3);
+    }
+
+    #[test]
+    fn repairs_imported_workspace_that_only_kept_the_active_tab() {
+        let mut settings = Settings::default();
+        settings.workspaces = vec![
+            WorkspaceRecord {
+                id: "fork-blog".into(),
+                name: "Blog".into(),
+                repositories: vec!["D:/a".into(), "D:/b".into()],
+                open_tabs: vec!["D:/b".into()],
+                selected_tab: 0,
+                tabs_seeded: false,
+            },
+            WorkspaceRecord {
+                id: "ws-1".into(),
+                name: "work".into(),
+                repositories: vec!["D:/a".into(), "D:/b".into()],
+                open_tabs: vec!["D:/a".into()],
+                selected_tab: 0,
+                tabs_seeded: false,
+            },
+        ];
+        assert!(repair_imported_tabs(&mut settings));
+        assert_eq!(
+            settings.workspaces[0].open_tabs,
+            vec!["D:/a".to_string(), "D:/b".to_string()]
+        );
+        assert_eq!(settings.workspaces[0].selected_tab, 1);
+        assert!(settings.workspaces[0].tabs_seeded);
+        assert_eq!(settings.workspaces[1].open_tabs, vec!["D:/a".to_string()]);
+        settings.workspaces[0].open_tabs = vec!["D:/a".into()];
+        assert!(!repair_imported_tabs(&mut settings));
+        assert_eq!(settings.workspaces[0].open_tabs, vec!["D:/a".to_string()]);
     }
 
     #[test]
     fn follow_system_theme_wins() {
         let mut settings = Settings::default();
-        apply_fork(&mut settings, &serde_json::json!({"FollowSystemTheme": true, "Theme": 1}), "{}");
+        apply_fork(
+            &mut settings,
+            &serde_json::json!({"FollowSystemTheme": true, "Theme": 1}),
+            "{}",
+        );
         assert_eq!(settings.theme, "system");
     }
 }

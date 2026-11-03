@@ -1929,6 +1929,7 @@ export class ShellState {
         repositories: String(result.repositories),
         workspaces: String(result.workspaces),
       });
+      if (this.settings.currentWorkspace) await this.selectWorkspace();
       if (this.mode === "live") void this.loadContext();
     } catch (error) {
       const text = this.message(error);

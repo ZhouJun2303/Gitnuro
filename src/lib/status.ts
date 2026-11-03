@@ -270,6 +270,7 @@ export type WorkspaceRecord = {
   repositories: string[];
   openTabs: string[];
   selectedTab: number;
+  tabsSeeded?: boolean;
 };
 
 export type CommandRecord = {
