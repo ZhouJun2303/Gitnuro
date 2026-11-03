@@ -549,6 +549,9 @@ export class ShellState {
   fileTop = $state(0);
 
 
+  sideTop = $state(0);
+
+
   stagedTop = $state(0);
 
 
@@ -1118,6 +1121,9 @@ export class ShellState {
 
 
   rowTree = $derived(this.settings.linesHeight === "spaced" ? 28 : 24);
+
+
+  rowSide = $derived(this.settings.linesHeight === "spaced" ? 32 : 28);
 
 
   activeLocale = $derived(resolveLocale(this.settings.locale));
@@ -2987,6 +2993,7 @@ export class ShellState {
       stopAt = value.path;
       this.applySnapshot(value);
       if (!staying) {
+        this.sideTop = 0;
         const saved = this.drafts.get(path) ?? this.drafts.get(value.path);
         const savedType = saved?.commitType ?? "";
         this.commitType = isCommitType(savedType) ? savedType : this.preferredCommitType();
@@ -4437,7 +4444,7 @@ export class ShellState {
     root.style.setProperty("--ui-scale", `${this.settings.uiScale || 13}px`);
     root.style.setProperty("--row-file", this.settings.linesHeight === "spaced" ? "32px" : "28px");
     root.style.setProperty("--row-commit", this.settings.linesHeight === "spaced" ? "36px" : "28px");
-    root.style.setProperty("--row-side", this.settings.linesHeight === "spaced" ? "32px" : "28px");
+    root.style.setProperty("--row-side", `${this.rowSide}px`);
     root.style.setProperty("--row-tree", this.settings.linesHeight === "spaced" ? "28px" : "24px");
     });
     $effect(() => {

@@ -63,6 +63,8 @@ export function commitGraph(commits: { id: string; parents: string[] }[], resume
   const columns = resume ? resume.columns.slice() : [];
   const rows = resume ? resume.rows.slice() : [];
   const laneOf = new Map<string, number>();
+  const indexOf = new Map<string, number>();
+  for (let index = 0; index < commits.length; index += 1) indexOf.set(commits[index].id, index);
   for (let index = 0; index < columns.length; index++) {
     const id = columns[index];
     if (id && !laneOf.has(id)) laneOf.set(id, index);
@@ -102,12 +104,24 @@ export function commitGraph(commits: { id: string; parents: string[] }[], resume
       }
     }
 
-    const firstParent = commit.parents[0];
+    const parents: string[] = [];
+    for (const parent of commit.parents) {
+      const at = indexOf.get(parent);
+      if (at === undefined || at <= i || parents.includes(parent)) continue;
+      parents.push(parent);
+    }
+    const firstParent = parents[0];
     const hasDown = Boolean(firstParent);
 
-    const extraParents = commit.parents.slice(1);
+    const extraParents = parents.slice(1);
     const forkLanes: number[] = [];
     for (const extra of extraParents) {
+      const existing = columns.findIndex((id) => id === extra);
+      if (existing >= 0 && existing !== lane) {
+        forkLanes.push(existing);
+        continue;
+      }
+      if (existing === lane) continue;
       let free = columns.findIndex((id) => !id);
       if (free < 0) {
         free = columns.length;
@@ -160,8 +174,12 @@ export function commitGraph(commits: { id: string; parents: string[] }[], resume
 
     rows.push(rowCells);
 
+    for (let index = 0; index < columns.length; index += 1) {
+      if (index !== lane && columns[index] === commit.id) assign(index, null);
+    }
     if (mergeTargetLane !== null) assign(lane, null);
     else assign(lane, firstParent ?? null);
+    while (columns.length > 0 && !columns[columns.length - 1]) columns.pop();
   }
 
   const width = rows.reduce((max, row) => Math.max(max, row.length), 1);
@@ -179,52 +197,112 @@ export type MergeFold = {
 
 /** Branches that left the first parent and were merged back. Collapsed merges keep only the first parent. */
 export function foldedMerges(commits: { id: string; parents?: string[] }[], expanded: readonly string[]): MergeFold {
-  const byId = new Map(commits.map((commit) => [commit.id, commit]));
-  const open = new Set(expanded);
   const hidden = new Set<string>();
   const straight = new Set<string>();
   const owner = new Map<string, string>();
-  const bubbles: { id: string; hidden: string[] }[] = [];
+  const n = commits.length;
+  if (n === 0) return { hidden, straight, owner };
 
-  for (const commit of commits) {
-    const parents = commit.parents ?? [];
-    if (parents.length < 2 || !parents[0] || !byId.has(parents[0])) continue;
-    const main = new Set<string>();
-    const stack = [parents[0]];
-    while (stack.length) {
-      const id = stack.pop();
-      if (!id || main.has(id)) continue;
-      const row = byId.get(id);
-      if (!row) continue;
-      main.add(id);
-      for (const parent of row.parents ?? []) stack.push(parent);
+  // Ancestor bitsets, one per commit, freed once every child has been folded.
+  // Walking each merge back to the root is quadratic and freezes a long history.
+  const index = new Map<string, number>();
+  for (let id = 0; id < n; id += 1) index.set(commits[id].id, id);
+  const parentIds: number[][] = new Array(n);
+  const children: number[][] = new Array(n);
+  for (let id = 0; id < n; id += 1) children[id] = [];
+  const indeg = new Uint32Array(n);
+  for (let id = 0; id < n; id += 1) {
+    const seen = new Set<number>();
+    const parents: number[] = [];
+    for (const parent of commits[id].parents ?? []) {
+      const at = index.get(parent);
+      if (at === undefined || seen.has(at)) continue;
+      seen.add(at);
+      parents.push(at);
+      children[at].push(id);
+      indeg[id] += 1;
     }
-    const side: string[] = [];
-    const seen = new Set<string>();
-    const rest = parents.slice(1);
-    while (rest.length) {
-      const id = rest.pop();
-      if (!id || seen.has(id) || main.has(id)) continue;
-      seen.add(id);
-      const row = byId.get(id);
-      if (!row) continue;
-      side.push(id);
-      for (const parent of row.parents ?? []) rest.push(parent);
+    parentIds[id] = parents;
+  }
+  const oldestFirst: number[] = [];
+  const queue: number[] = [];
+  for (let id = 0; id < n; id += 1) if (indeg[id] === 0) queue.push(id);
+  for (let at = 0; at < queue.length; at += 1) {
+    const id = queue[at];
+    oldestFirst.push(id);
+    for (const child of children[id]) {
+      indeg[child] -= 1;
+      if (indeg[child] === 0) queue.push(child);
     }
-    if (side.length === 0) continue;
-    bubbles.push({ id: commit.id, hidden: side });
-    owner.set(commit.id, commit.id);
-    for (const id of side) if (!owner.has(id)) owner.set(id, commit.id);
-    if (!open.has(commit.id)) straight.add(commit.id);
+  }
+  if (oldestFirst.length !== n) return { hidden, straight, owner };
+
+  const words = (n + 31) >>> 5;
+  const rows: Array<Uint32Array | null> = new Array(n);
+  const pending = new Uint32Array(n);
+  for (let id = 0; id < n; id += 1) pending[id] = children[id].length;
+  const bubbles: Array<string[] | undefined> = new Array(n);
+  for (const id of oldestFirst) {
+    const mine = new Uint32Array(words);
+    rows[id] = mine;
+    for (const parent of parentIds[id]) {
+      const other = rows[parent] as Uint32Array;
+      for (let word = 0; word < words; word += 1) mine[word] |= other[word];
+    }
+    mine[id >>> 5] |= 1 << (id & 31);
+    const parents = parentIds[id];
+    if (parents.length >= 2) {
+      const main = rows[parents[0]] as Uint32Array;
+      const side: string[] = [];
+      for (let extra = 1; extra < parents.length; extra += 1) {
+        const other = rows[parents[extra]] as Uint32Array;
+        for (let word = 0; word < words; word += 1) {
+          let value = other[word] & ~main[word];
+          while (value) {
+            const bit = Math.clz32(value & -value) ^ 31;
+            const at = word * 32 + bit;
+            if (at < n) side.push(commits[at].id);
+            value &= value - 1;
+          }
+        }
+      }
+      if (side.length > 0) bubbles[id] = side;
+    }
+    for (const parent of parents) {
+      pending[parent] -= 1;
+      if (pending[parent] === 0) rows[parent] = null;
+    }
   }
 
-  for (const bubble of bubbles) {
-    if (open.has(bubble.id)) continue;
-    for (const id of bubble.hidden) hidden.add(id);
+  const open = new Set(expanded);
+  for (let id = 0; id < n; id += 1) {
+    const side = bubbles[id];
+    if (!side) continue;
+    const name = commits[id].id;
+    owner.set(name, name);
+    for (const sideId of side) if (!owner.has(sideId)) owner.set(sideId, name);
+    if (!open.has(name)) straight.add(name);
   }
-  for (const bubble of bubbles) {
-    if (!open.has(bubble.id)) continue;
-    for (const id of bubble.hidden) hidden.delete(id);
+  for (let id = 0; id < n; id += 1) {
+    const side = bubbles[id];
+    if (!side || open.has(commits[id].id)) continue;
+    for (const sideId of side) hidden.add(sideId);
+  }
+  for (let id = 0; id < n; id += 1) {
+    const side = bubbles[id];
+    if (!side || !open.has(commits[id].id)) continue;
+    for (const sideId of side) hidden.delete(sideId);
+  }
+  // A branch that merged this line in from the side must not erase the line itself.
+  // The first-parent chain stays visible, so the collapsed graph is one continuous stroke.
+  const byId = new Map(commits.map((commit) => [commit.id, commit]));
+  let cursor = commits[0]?.id;
+  const seen = new Set<string>();
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    hidden.delete(cursor);
+    const next = byId.get(cursor)?.parents?.[0];
+    cursor = next && byId.has(next) ? next : undefined;
   }
   return { hidden, straight, owner };
 }
@@ -268,10 +346,10 @@ export function numberedDiff(lines: DiffLine[]) {
   });
 }
 
-export function windowSlice<T>(items: T[], scrollTop: number, rowHeight: number, limit = 80) {
+export function windowSlice<T>(items: T[], scrollTop: number, rowHeight: number, limit = 80, size = 48) {
   if (items.length <= limit) return { start: 0, rows: items };
-  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 8);
-  return { start, rows: items.slice(start, Math.min(items.length, start + 48)) };
+  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 12);
+  return { start, rows: items.slice(start, Math.min(items.length, start + size)) };
 }
 
 /** Coalesce scroll events so a virtual list writes state at most once per frame. */

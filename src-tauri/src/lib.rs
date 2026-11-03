@@ -26,10 +26,15 @@ fn repo_gates() -> &'static Mutex<HashMap<String, Arc<RepoGate>>> {
 
 const WATCH_QUIET: Duration = Duration::from_millis(300);
 const WATCH_MAX_WAIT: Duration = Duration::from_secs(2);
+const WATCH_BATCH: usize = 2_000;
 
 type Job = Box<dyn FnOnce() + Send>;
 
-struct RepoWatch(Mutex<Option<RecommendedWatcher>>);
+struct WatchSlot {
+    watcher: Mutex<Option<RecommendedWatcher>>,
+}
+
+struct RepoWatch(Mutex<Option<Arc<WatchSlot>>>);
 
 /// What a batch of file events changed. `refs` means branches, `HEAD`, or an operation in progress.
 #[derive(Clone, serde::Serialize)]
@@ -689,7 +694,11 @@ fn program_exists(path: String) -> bool {
 fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, path: Option<String>) -> Result<(), String> {
     let repo = repo_from(path)?;
     let mut slot = state.0.lock().map_err(|_| "watcher lock".to_string())?;
-    *slot = None;
+    if let Some(previous) = slot.take() {
+        if let Ok(mut watcher) = previous.watcher.lock() {
+            watcher.take();
+        }
+    }
     let (sender, receiver) = mpsc::channel::<Vec<PathBuf>>();
     let mut watcher = notify::recommended_watcher(move |result: Result<Event, notify::Error>| {
         if let Ok(event) = result {
@@ -697,26 +706,298 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
         }
     })
     .map_err(|error| error.to_string())?;
-    watcher.watch(&repo, RecursiveMode::Recursive).map_err(|error| error.to_string())?;
+    let started = Instant::now();
+    let mut watched = WatchSet::default();
+    let git_dir = git_metadata_dir(&repo);
+    watch_worktree(&mut watcher, &repo, &mut watched)?;
+    if let Some(git) = &git_dir {
+        watch_git_metadata(&mut watcher, git, &mut watched);
+    }
+    perf::write(
+        "INFO",
+        "watch",
+        &format!(
+            "armed watches={} recursive={} {}ms",
+            watched.exact.len(),
+            watched.recursive.len(),
+            started.elapsed().as_millis()
+        ),
+    );
+    let shared = Arc::new(WatchSlot {
+        watcher: Mutex::new(Some(watcher)),
+    });
+    let thread_slot = Arc::clone(&shared);
     let root = repo.clone();
     std::thread::Builder::new()
         .name("awegit-watch".into())
-        .spawn(move || settle_changes(&app, &root, &receiver))
+        .spawn(move || settle_changes(&app, &root, git_dir, receiver, watched, thread_slot))
         .map_err(|error| error.to_string())?;
-    *slot = Some(watcher);
+    *slot = Some(shared);
     Ok(())
 }
 
+/// Directories that are huge or rewrite themselves. A recursive watch of the work tree
+/// would include them, and on Windows that stalls the process while the watch is armed.
+fn heavy_dir(name: &str) -> bool {
+    const NAMES: &[&str] = &[
+        ".git",
+        "node_modules",
+        "target",
+        "dist",
+        "dist-ssr",
+        ".turbo",
+        ".svelte-kit",
+        ".next",
+        ".pnpm-store",
+        ".rust-analyzer",
+        "storybook-static",
+        "playwright-report",
+        "coverage",
+        ".direnv",
+        "vendor",
+        "out",
+        "build",
+    ];
+    NAMES.iter().any(|item| name.eq_ignore_ascii_case(item))
+}
+
+fn skipped_path(path: &Path) -> bool {
+    path.components().any(|component| match component {
+        std::path::Component::Normal(name) => heavy_dir(&name.to_string_lossy()),
+        _ => false,
+    })
+}
+
+fn normalize_watch_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let text = path.to_string_lossy();
+        PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(text.as_ref()))
+    }
+    #[cfg(not(windows))]
+    {
+        path.to_path_buf()
+    }
+}
+
+fn watch_key(path: &Path) -> PathBuf {
+    let normal = normalize_watch_path(path);
+    #[cfg(windows)]
+    {
+        PathBuf::from(normal.to_string_lossy().to_ascii_lowercase())
+    }
+    #[cfg(not(windows))]
+    {
+        normal
+    }
+}
+
+#[derive(Default)]
+struct WatchSet {
+    exact: HashSet<PathBuf>,
+    recursive: Vec<PathBuf>,
+}
+
+impl WatchSet {
+    fn covers(&self, path: &Path) -> bool {
+        let key = watch_key(path);
+        if self.exact.contains(&key) {
+            return true;
+        }
+        self.recursive.iter().any(|root| key.starts_with(root))
+    }
+}
+
+struct WatchNode {
+    parent: Option<usize>,
+    path: PathBuf,
+    children: Vec<usize>,
+    heavy: bool,
+}
+
+/// Work-tree directories, without entering `node_modules`, `target`, and the other heavy names.
+fn scan_worktree(root: &Path) -> Vec<WatchNode> {
+    let mut nodes = vec![WatchNode {
+        parent: None,
+        path: root.to_path_buf(),
+        children: Vec::new(),
+        heavy: false,
+    }];
+    let mut stack = vec![0usize];
+    while let Some(index) = stack.pop() {
+        let path = nodes[index].path.clone();
+        let entries = match std::fs::read_dir(&path) {
+            Ok(entries) => entries,
+            Err(_) => {
+                nodes[index].heavy = true;
+                continue;
+            }
+        };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else { continue };
+            if !kind.is_dir() || kind.is_symlink() {
+                continue;
+            }
+            if heavy_dir(&entry.file_name().to_string_lossy()) {
+                nodes[index].heavy = true;
+                continue;
+            }
+            let child = nodes.len();
+            nodes.push(WatchNode {
+                parent: Some(index),
+                path: entry.path(),
+                children: Vec::new(),
+                heavy: false,
+            });
+            nodes[index].children.push(child);
+            stack.push(child);
+        }
+    }
+    for index in (0..nodes.len()).rev() {
+        if nodes[index].heavy {
+            if let Some(parent) = nodes[index].parent {
+                nodes[parent].heavy = true;
+            }
+        }
+    }
+    nodes
+}
+
+#[cfg(test)]
+fn watch_modes(nodes: &[WatchNode], index: usize, out: &mut Vec<(PathBuf, bool)>) {
+    let recursive = !nodes[index].heavy;
+    out.push((nodes[index].path.clone(), recursive));
+    if !recursive {
+        for child in nodes[index].children.clone() {
+            watch_modes(nodes, child, out);
+        }
+    }
+}
+
+fn watch_one(watcher: &mut RecommendedWatcher, path: &Path, mode: RecursiveMode, set: &mut WatchSet) -> Result<(), String> {
+    let key = watch_key(path);
+    if !set.exact.insert(key.clone()) {
+        return Ok(());
+    }
+    if let Err(error) = watcher.watch(path, mode) {
+        set.exact.remove(&key);
+        return Err(format!("{}: {error}", path.display()));
+    }
+    if mode == RecursiveMode::Recursive {
+        set.recursive.push(key);
+    }
+    Ok(())
+}
+
+fn place_watches(watcher: &mut RecommendedWatcher, nodes: &[WatchNode], index: usize, set: &mut WatchSet) -> Result<(), String> {
+    let heavy = nodes[index].heavy;
+    let path = nodes[index].path.clone();
+    let children = nodes[index].children.clone();
+    if !heavy {
+        return watch_one(watcher, &path, RecursiveMode::Recursive, set);
+    }
+    watch_one(watcher, &path, RecursiveMode::NonRecursive, set)?;
+    for child in children {
+        if let Err(error) = place_watches(watcher, nodes, child, set) {
+            perf::write("WARN", "watch", &error);
+        }
+    }
+    Ok(())
+}
+
+fn watch_worktree(watcher: &mut RecommendedWatcher, root: &Path, set: &mut WatchSet) -> Result<(), String> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+    let nodes = scan_worktree(root);
+    if nodes.is_empty() {
+        return Ok(());
+    }
+    place_watches(watcher, &nodes, 0, set)
+}
+
+fn git_metadata_dir(repo: &Path) -> Option<PathBuf> {
+    let git = repo.join(".git");
+    if git.is_dir() {
+        return Some(git);
+    }
+    let text = std::fs::read_to_string(&git).ok()?;
+    let line = text.lines().find(|line| !line.trim().is_empty())?;
+    let rest = line.trim().strip_prefix("gitdir:")?.trim();
+    if rest.is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(rest);
+    let full = if path.is_absolute() { path } else { repo.join(path) };
+    full.is_dir().then_some(full)
+}
+
+fn watch_git_metadata(watcher: &mut RecommendedWatcher, git: &Path, set: &mut WatchSet) {
+    if let Err(error) = watch_one(watcher, git, RecursiveMode::NonRecursive, set) {
+        perf::write("WARN", "watch", &error);
+    }
+    for name in ["refs", "logs", "worktrees"] {
+        let path = git.join(name);
+        if path.is_dir() {
+            if let Err(error) = watch_one(watcher, &path, RecursiveMode::Recursive, set) {
+                perf::write("WARN", "watch", &error);
+            }
+        }
+    }
+}
+
+fn directory_to_watch(path: &Path) -> Option<PathBuf> {
+    let path = normalize_watch_path(path);
+    if path.is_dir() {
+        Some(path)
+    } else {
+        path.parent().map(Path::to_path_buf)
+    }
+}
+
+fn attach_new_dirs(repo: &Path, git_dir: Option<&Path>, paths: &[PathBuf], set: &mut WatchSet, slot: &WatchSlot) {
+    let Ok(mut guard) = slot.watcher.lock() else { return };
+    let Some(watcher) = guard.as_mut() else { return };
+    for path in paths {
+        let Some(dir) = directory_to_watch(path) else { continue };
+        if !dir.starts_with(repo) || git_dir.is_some_and(|git| dir.starts_with(git)) || set.covers(&dir) || skipped_path(&dir) {
+            continue;
+        }
+        if let Err(error) = watch_worktree(watcher, &dir, set) {
+            perf::write("WARN", "watch", &error);
+        }
+    }
+}
+
 /// Waits for a quiet gap, then reports the batch once. Ends when the watcher is replaced.
-fn settle_changes(app: &tauri::AppHandle, repo: &Path, receiver: &Receiver<Vec<PathBuf>>) {
+fn settle_changes(
+    app: &tauri::AppHandle,
+    repo: &Path,
+    git_dir: Option<PathBuf>,
+    receiver: Receiver<Vec<PathBuf>>,
+    mut watched: WatchSet,
+    slot: Arc<WatchSlot>,
+) {
     while let Ok(mut paths) = receiver.recv() {
         let started = Instant::now();
+        let mut overflow = false;
         while started.elapsed() < WATCH_MAX_WAIT {
+            if paths.len() >= WATCH_BATCH {
+                overflow = true;
+                while receiver.try_recv().is_ok() {}
+                break;
+            }
             match receiver.recv_timeout(WATCH_QUIET) {
                 Ok(more) => paths.extend(more),
                 Err(RecvTimeoutError::Timeout) => break,
                 Err(RecvTimeoutError::Disconnected) => return,
             }
+        }
+        attach_new_dirs(repo, git_dir.as_deref(), &paths, &mut watched, &slot);
+        if overflow {
+            perf::write("INFO", "watch", "repo-changed refs=false paths=overflow");
+            let _ = app.emit("repo-changed", RepoChange { refs: false });
+            continue;
         }
         let Some(change) = classify_changes(repo, &paths) else { continue };
         perf::write("INFO", "watch", &format!("repo-changed refs={} paths={}", change.refs, paths.len()));
@@ -743,7 +1024,7 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
             }
             continue;
         }
-        let skip = relative.split('/').any(|part| matches!(part, ".git" | "node_modules" | "target" | ".svelte-kit"));
+        let skip = relative.split('/').any(heavy_dir);
         if !skip {
             files.push(relative);
         }
@@ -1638,4 +1919,48 @@ pub fn run() {
                 perf::summary();
             }
         });
+}
+
+#[cfg(test)]
+mod watch_plan_tests {
+    use super::{heavy_dir, scan_worktree, watch_modes};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn heavy_names_skip_dependency_directories() {
+        assert!(heavy_dir("node_modules"));
+        assert!(heavy_dir("Node_Modules"));
+        assert!(heavy_dir("target"));
+        assert!(!heavy_dir("src"));
+        assert!(!heavy_dir("crates"));
+    }
+
+    #[test]
+    fn worktree_plan_does_not_watch_node_modules() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("awegit-watch-{nanos}"));
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::create_dir_all(root.join("node_modules").join("left-pad")).unwrap();
+        fs::create_dir_all(root.join("src").join("lib")).unwrap();
+        fs::write(root.join("src").join("lib").join("main.ts"), "export {}\n").unwrap();
+        fs::create_dir_all(root.join("apps").join("web").join("node_modules").join("pkg")).unwrap();
+        fs::create_dir_all(root.join("apps").join("web").join("src")).unwrap();
+        let nodes = scan_worktree(&root);
+        let mut modes = Vec::new();
+        watch_modes(&nodes, 0, &mut modes);
+        let joined = modes
+            .iter()
+            .map(|(path, recursive)| format!("{} {}", path.display(), if *recursive { "recursive" } else { "flat" }))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("flat"), "{joined}");
+        assert!(!joined.to_ascii_lowercase().contains("node_modules"), "{joined}");
+        assert!(modes.iter().any(|(path, recursive)| *recursive && path.ends_with("src") && path.components().any(|part| part.as_os_str() == "src") && !path.ends_with("web")), "{joined}");
+        let web_src = modes.iter().find(|(path, _)| path.ends_with(std::path::Path::new("apps").join("web").join("src")));
+        assert!(web_src.is_some_and(|(_, recursive)| *recursive), "{joined}");
+        let apps = modes.iter().find(|(path, _)| path.ends_with("apps") && !path.ends_with("web"));
+        assert!(apps.is_some_and(|(_, recursive)| !*recursive), "{joined}");
+        let _ = fs::remove_dir_all(&root);
+    }
 }

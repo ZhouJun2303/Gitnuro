@@ -23,6 +23,14 @@
     overflow-y: auto;
   }
 
+.side-scroll .virtual-row {
+    height: var(--row-side);
+  }
+
+.side-scroll .commit-window .side.section {
+    margin-top: 0;
+  }
+
 .sidebar .side.nav.selected {
     color: var(--text);
     font-weight: 600;
