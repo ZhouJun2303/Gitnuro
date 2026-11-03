@@ -72,7 +72,22 @@
         />
 
         <form class="composer" style:height="{shell.composerHeight}px" onsubmit={(event) => { event.preventDefault(); void shell.submitCommit(false); }}>
-          <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength="200" aria-invalid={shell.summaryTooLong} spellcheck={shell.settings.spellChecking === "enable"} />
+          <div class="summary-line">
+            <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength="200" aria-invalid={shell.summaryTooLong} spellcheck={shell.settings.spellChecking === "enable"} />
+            <button
+              class="suggest-message"
+              class:long={shell.settings.aiPromptStyle === "long"}
+              type="button"
+              title={shell.staged.length === 0 ? shell.tr("chrome.suggestNeedStaged") : shell.tr("chrome.suggestTitle", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}
+              aria-label={shell.tr("chrome.suggestTitle", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}
+              disabled={shell.busy}
+              onclick={() => void shell.suggestMessage()}
+              oncontextmenu={(event) => shell.togglePromptStyle(event)}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.1 9.15 5.7 13.8 6.9 9.15 8.05 8 12.7 6.85 8.05 2.2 6.9l4.65-1.2z"/></svg>
+              <span>{shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}</span>
+            </button>
+          </div>
           <textarea class="guided composer-desc flex-fill" placeholder={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>

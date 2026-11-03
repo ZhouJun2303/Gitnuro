@@ -338,19 +338,56 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
     }
   }
 
+export function togglePromptStyle(shell: ShellState, event: MouseEvent) {
+    event.preventDefault();
+    const aiPromptStyle = shell.settings.aiPromptStyle === "long" ? "short" : "long";
+    shell.settings = { ...shell.settings, aiPromptStyle };
+    void shell.savePrefs(false);
+  }
+
+function explainSuggest(shell: ShellState, error: unknown) {
+    const text = shell.message(error);
+    if (text.startsWith("Stage changes")) return shell.tr("chrome.suggestNeedStaged");
+    if (text.startsWith("AI commit messages are turned off")) return shell.tr("chrome.suggestOff");
+    if (text.startsWith("Add an API key")) return shell.tr("chrome.suggestNeedKey");
+    if (text.startsWith("Set an API base URL")) return shell.tr("chrome.suggestNeedUrl");
+    if (text.startsWith("The model returned an empty")) return shell.tr("chrome.suggestEmpty");
+    if (text.startsWith("The model reply does not match")) {
+      const detail = text.slice("The model reply does not match the commit format:".length).trim();
+      const reason = shell.tr("chrome.suggestFormat");
+      return detail ? `${reason}\n${detail}` : reason;
+    }
+    return text;
+  }
+
 export async function suggestMessage(shell: ShellState) {
     const path = shell.repoPath();
-    if (shell.mode !== "live" || !path || shell.busy) return;
+    if (shell.busy) return;
     shell.actionError = null;
-    shell.startWork(shell.tr("chrome.suggest"), path);
+    if (shell.mode !== "live" || !path) {
+      shell.actionError = shell.tr("chrome.suggestNeedRepo");
+      return;
+    }
+    if (!shell.settings.aiEnabled) {
+      shell.actionError = shell.tr("chrome.suggestOff");
+      return;
+    }
+    if (shell.staged.length === 0) {
+      shell.actionError = shell.tr("chrome.suggestNeedStaged");
+      return;
+    }
+    const style = shell.settings.aiPromptStyle === "long" ? "long" : "short";
+    const styleName = shell.tr(style === "long" ? "chrome.promptLong" : "chrome.promptShort");
+    const language = shell.settings.aiLanguage.trim() || (shell.activeLocale === "zh" ? "中文" : "English");
+    shell.startWork(shell.tr("chrome.suggestGenerate", { style: styleName }), path);
     try {
-      const value = await invoke<Suggestion>("suggest_commit_message", { path });
+      const value = await invoke<Suggestion>("suggest_commit_message", { path, style, language });
       if (shell.viewing(path)) {
         shell.summary = value.summary;
         shell.description = value.description;
       }
     } catch (error) {
-      if (shell.viewing(path)) shell.actionError = shell.message(error);
+      if (shell.viewing(path)) shell.actionError = explainSuggest(shell, error);
     } finally {
       shell.stopWork(path);
     }

@@ -15,13 +15,22 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
     if !settings.ai_enabled {
         return Err("AI commit messages are turned off.".into());
     }
+    let (files, branch, recent) = awegit_git::prompt_facts(repo);
+    if files.trim().is_empty() {
+        return Err("Stage changes before asking for a message.".into());
+    }
     let mut diff = awegit_git::staged_diff(repo).map_err(|error| error.to_string())?;
     if diff.trim().is_empty() {
         return Err("Stage changes before asking for a message.".into());
     }
     let limit = if settings.ai_max_chars == 0 { 12_000 } else { settings.ai_max_chars as usize };
     if diff.len() > limit {
-        diff.truncate(limit);
+        let mut end = limit;
+        while end > 0 && !diff.is_char_boundary(end) {
+            end -= 1;
+        }
+        diff.truncate(end);
+        diff.push_str("\n\n[diff truncated]");
     }
     let key = if settings.ai_api_key.trim().is_empty() {
         std::env::var("XAI_API_KEY")
@@ -34,33 +43,25 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
         return Err("Add an API key in Preferences, or set XAI_API_KEY or OPENAI_API_KEY.".into());
     }
     let base = settings.ai_base_url.trim().trim_end_matches('/').to_string();
+    if base.is_empty() {
+        return Err("Set an API base URL in Preferences.".into());
+    }
     let model = if settings.ai_model.trim().is_empty() {
         "grok-4.7".to_string()
     } else {
         settings.ai_model.trim().to_string()
     };
-    let (files, branch, recent) = awegit_git::prompt_facts(repo);
     let language = if settings.ai_language.trim().is_empty() {
         "English".to_string()
     } else {
         settings.ai_language.trim().to_string()
     };
-    let template = if settings.ai_prompt.trim().is_empty() {
-        "Write a git commit message in {language}. The first line is the subject and must be at most 72 characters. Then a blank line and a short body. Branch: {branch}. Files: {files}. Recent commits: {recent_commits}. Use only this staged diff:\n\n{diff}".to_string()
+    let style = if settings.ai_prompt_style.trim().eq_ignore_ascii_case("long") {
+        "long"
     } else {
-        settings.ai_prompt.clone()
+        "short"
     };
-    let prompt = template
-        .replace("{diff}", &diff)
-        .replace("${diff}", &diff)
-        .replace("{files}", &files)
-        .replace("${files}", &files)
-        .replace("{branch}", &branch)
-        .replace("${branch}", &branch)
-        .replace("{recent_commits}", &recent)
-        .replace("${recent_commits}", &recent)
-        .replace("{language}", &language)
-        .replace("${language}", &language);
+    let prompt = compose_prompt(style, settings.ai_prompt.trim(), &language, &files, &branch, &recent, &diff);
     let xai = base.contains("api.x.ai");
     let (url, mut body) = if xai {
         let body = serde_json::json!({ "model": model, "input": prompt });
@@ -69,7 +70,7 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
         let body = serde_json::json!({
             "model": model,
             "messages": [
-                { "role": "system", "content": "You write git commit messages. Reply with a subject of at most 72 characters, a blank line, and an optional body." },
+                { "role": "system", "content": "You write git commit messages. The first line must match type: description. type is feat, fix, docs, art, style, refactor, test, chore, perf, or revert. No scope. Reply with the message only." },
                 { "role": "user", "content": prompt }
             ]
         });
@@ -88,7 +89,7 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
     if answer.trim().is_empty() {
         return Err("The model returned an empty message.".into());
     }
-    Ok(split_message(&answer))
+    parse_suggestion(&answer)
 }
 
 /// Review the diff of `HEAD` against `base` with the same model as commit messages.
@@ -205,10 +206,190 @@ fn extract_text(value: &serde_json::Value) -> String {
         .to_string()
 }
 
-fn split_message(text: &str) -> Suggestion {
-    let trimmed = text.trim().trim_matches('"');
-    let mut lines = trimmed.lines();
-    let summary = lines.next().unwrap_or("").trim().to_string();
-    let description = lines.collect::<Vec<_>>().join("\n").trim().to_string();
-    Suggestion { summary, description }
+const COMMIT_TYPES: [&str; 10] = [
+    "feat", "fix", "docs", "art", "style", "refactor", "test", "chore", "perf", "revert",
+];
+
+fn compose_prompt(
+    style: &str,
+    custom: &str,
+    language: &str,
+    files: &str,
+    branch: &str,
+    recent: &str,
+    diff: &str,
+) -> String {
+    let convention = format!(
+        "Write in {language}. A commit-msg hook rejects any other first line. \
+It must match ^(feat|fix|docs|art|style|refactor|test|chore|perf|revert):[[:space:]]*[^[:space:]].* \
+Types: feat 新增功能; fix 修复 bug; docs 仅文档、注释或说明; art 美术资源; style 只改格式、不改逻辑; \
+refactor 重构，不是新功能也不是修 bug; test 测试; chore 构建、工具、配置或流程; perf 性能; revert 回滚之前的提交. \
+The type is lowercase and is followed immediately by a colon. A space after the colon is optional. \
+Do not add a scope, issue id, quotes, or markdown. Example: feat: 新增挂机奖励结算逻辑"
+    );
+    let custom = custom.trim();
+    if custom.contains("{diff}") || custom.contains("${diff}") {
+        return fill(&format!("{convention}\n\n{custom}"), diff, files, branch, recent, language);
+    }
+    let instructions = if style == "long" {
+        "Reply with the subject, a blank line, then a short body that says why this change exists. \
+Do not list files. The subject is one line of at most 72 characters. \
+Describe only the staged diff. If the diff is cut off, do not invent the missing part. \
+Use style for formatting only, test when the change is tests, and docs when only comments or docs change."
+    } else {
+        "Reply with exactly one line: the subject. No body. At most 72 characters. \
+Describe only the staged diff. Do not invent files or behavior that are not in the diff."
+    };
+    let extra = if custom.is_empty() {
+        String::new()
+    } else {
+        format!("\nExtra instructions:\n{custom}")
+    };
+    let history = if style == "long" {
+        format!("\nRecent subjects, for tone only:\n{recent}")
+    } else {
+        String::new()
+    };
+    fill(
+        &format!(
+            "{convention}\n\n{instructions}{extra}\nBranch: {{branch}}\nStaged files:\n{{files}}{history}\n\nStaged diff:\n{{diff}}"
+        ),
+        diff,
+        files,
+        branch,
+        recent,
+        language,
+    )
+}
+
+fn fill(template: &str, diff: &str, files: &str, branch: &str, recent: &str, language: &str) -> String {
+    template
+        .replace("{diff}", diff)
+        .replace("${diff}", diff)
+        .replace("{files}", files)
+        .replace("${files}", files)
+        .replace("{branch}", branch)
+        .replace("${branch}", branch)
+        .replace("{recent_commits}", recent)
+        .replace("${recent_commits}", recent)
+        .replace("{language}", language)
+        .replace("${language}", language)
+}
+
+fn skip_space(text: &str) -> &str {
+    text.trim_start_matches([' ', '\t', '\u{000B}', '\u{000C}'])
+}
+
+fn valid_subject(line: &str) -> bool {
+    let Some((kind, rest)) = line.split_once(':') else {
+        return false;
+    };
+    COMMIT_TYPES.contains(&kind) && !skip_space(rest).is_empty()
+}
+
+fn clean_line(line: &str) -> String {
+    let mut line = line.trim();
+    if let Some(rest) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
+        line = rest.trim();
+    }
+    line.trim_matches(['"', '\'', '`', '*']).trim().to_string()
+}
+
+fn cap_chars(text: &str, max: usize) -> String {
+    text.chars().take(max).collect()
+}
+
+fn parse_suggestion(text: &str) -> Result<Suggestion, String> {
+    let mut lines: Vec<&str> = text.trim().lines().collect();
+    if lines.first().is_some_and(|line| line.trim().starts_with("```")) {
+        lines.remove(0);
+        if lines.last().is_some_and(|line| line.trim().starts_with("```")) {
+            lines.pop();
+        }
+    }
+    let mut subject_at = None;
+    for (index, line) in lines.iter().enumerate() {
+        if valid_subject(&clean_line(line)) {
+            subject_at = Some(index);
+            break;
+        }
+    }
+    let Some(index) = subject_at else {
+        let sample = lines.iter().find(|line| !line.trim().is_empty()).copied().unwrap_or("");
+        return Err(format!(
+            "The model reply does not match the commit format: {}",
+            cap_chars(sample.trim(), 80)
+        ));
+    };
+    let summary = cap_chars(&clean_line(lines[index]), 200);
+    if !valid_subject(&summary) {
+        return Err(format!(
+            "The model reply does not match the commit format: {}",
+            cap_chars(&summary, 80)
+        ));
+    }
+    let description = lines
+        .iter()
+        .skip(index + 1)
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    Ok(Suggestion { summary, description })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_prompt_keeps_the_hook_rule_and_staged_diff() {
+        let prompt = compose_prompt("short", "", "中文", "src/app.ts", "main", "chore: old", "diff-body");
+        assert!(prompt.contains("feat|fix|docs|art|style|refactor|test|chore|perf|revert"));
+        assert!(prompt.contains("feat: 新增挂机奖励结算逻辑"));
+        assert!(prompt.contains("exactly one line"));
+        assert!(!prompt.contains("blank line"));
+        assert!(prompt.contains("src/app.ts"));
+        assert!(prompt.contains("diff-body"));
+        assert!(!prompt.contains("chore: old"));
+        assert!(!prompt.contains("UNSTAGED"));
+    }
+
+    #[test]
+    fn long_prompt_asks_for_a_body_and_recent_subjects() {
+        let prompt = compose_prompt("long", "", "中文", "src/app.ts", "main", "chore: old", "diff-body");
+        assert!(prompt.contains("blank line"));
+        assert!(prompt.contains("chore: old"));
+        assert!(prompt.contains("diff-body"));
+        assert!(prompt.contains("refactor 重构"));
+    }
+
+    #[test]
+    fn custom_template_still_gets_the_hook_rule() {
+        let prompt = compose_prompt("short", "Only this.\n{diff}", "English", "a.ts", "dev", "old", "DIFF");
+        assert!(prompt.contains("commit-msg hook"));
+        assert!(prompt.contains("Only this."));
+        assert_eq!(prompt.matches("DIFF").count(), 1);
+    }
+
+    #[test]
+    fn accepts_the_hook_examples() {
+        let value = parse_suggestion("feat: 新增挂机奖励结算逻辑").unwrap();
+        assert_eq!(value.summary, "feat: 新增挂机奖励结算逻辑");
+        assert!(value.description.is_empty());
+        let tight = parse_suggestion("fix:keep the composer visible\n\nThe pane collapsed.").unwrap();
+        assert_eq!(tight.summary, "fix:keep the composer visible");
+        assert_eq!(tight.description, "The pane collapsed.");
+    }
+
+    #[test]
+    fn strips_fences_and_rejects_a_freeform_subject() {
+        let value = parse_suggestion("```\n**refactor: 抽出提交提示词**\n\n避免漏掉钩子规则。\n```").unwrap();
+        assert_eq!(value.summary, "refactor: 抽出提交提示词");
+        assert!(value.description.contains("钩子"));
+        let error = parse_suggestion("updated the button").unwrap_err();
+        assert!(error.contains("does not match"));
+        assert!(error.contains("updated the button"));
+    }
 }

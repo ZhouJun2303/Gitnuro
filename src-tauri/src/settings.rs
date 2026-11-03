@@ -97,6 +97,9 @@ pub struct Settings {
     pub ai_max_chars: u32,
     #[serde(default)]
     pub ai_prompt: String,
+    /// `short` or `long`. Empty and anything else mean the short prompt.
+    #[serde(default = "prompt_style")]
+    pub ai_prompt_style: String,
     #[serde(default)]
     pub ai_temperature: f32,
     #[serde(default)]
@@ -350,6 +353,9 @@ fn sign_off_format() -> String {
 fn ai_max() -> u32 {
     12_000
 }
+fn prompt_style() -> String {
+    "short".into()
+}
 fn develop_name() -> String {
     "develop".into()
 }
@@ -449,6 +455,7 @@ impl Default for Settings {
             ai_language: String::new(),
             ai_max_chars: ai_max(),
             ai_prompt: String::new(),
+            ai_prompt_style: prompt_style(),
             ai_temperature: 0.0,
             log_directory: String::new(),
             recent: Vec::new(),

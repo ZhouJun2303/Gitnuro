@@ -1358,9 +1358,21 @@ fn encode_query(text: &str) -> String {
 }
 
 #[tauri::command]
-fn suggest_commit_message(path: Option<String>) -> Result<ai::Suggestion, String> {
+fn suggest_commit_message(path: Option<String>, style: Option<String>, language: Option<String>) -> Result<ai::Suggestion, String> {
     let repo = repo_from(path)?;
-    let values = settings::load()?;
+    let mut values = settings::load()?;
+    if let Some(style) = style.as_deref().map(str::trim).filter(|style| !style.is_empty()) {
+        if style.eq_ignore_ascii_case("long") || style.eq_ignore_ascii_case("short") {
+            values.ai_prompt_style = if style.eq_ignore_ascii_case("long") {
+                "long".to_string()
+            } else {
+                "short".to_string()
+            };
+        }
+    }
+    if let Some(language) = language.as_deref().map(str::trim).filter(|language| !language.is_empty()) {
+        values.ai_language = language.to_string();
+    }
     ai::suggest(&repo, &values)
 }
 

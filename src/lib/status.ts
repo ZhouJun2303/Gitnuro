@@ -169,6 +169,7 @@ export type Settings = {
   aiLanguage: string;
   aiMaxChars: number;
   aiPrompt: string;
+  aiPromptStyle: string;
   aiTemperature: number;
   logDirectory: string;
   recent: string[];

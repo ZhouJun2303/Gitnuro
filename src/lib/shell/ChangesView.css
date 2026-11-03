@@ -175,6 +175,52 @@ textarea:focus,
 
 .summary-input { height: 32px; }
 
+.summary-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+.summary-line .summary-input {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+
+.suggest-message {
+    height: 32px;
+    padding: 0 8px;
+    gap: 4px;
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--elevated);
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+.suggest-message svg {
+    width: 14px;
+    height: 14px;
+    flex: none;
+  }
+
+.suggest-message:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+  }
+
+.suggest-message.long {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  }
+
+.suggest-message:disabled { opacity: 0.4; }
+
 .summary-input.warn { color: var(--modified); }
 
 .guided {

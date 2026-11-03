@@ -94,6 +94,12 @@
             </label>
             <label class="pref-inline">{shell.tr("dialog.pageGuide")} <input type="number" min="20" max="200" bind:value={shell.settings.pageGuide} /></label>
             <div class="k">{shell.tr("dialog.generateMessage")}</div>
+            <label class="pref-inline">{shell.tr("dialog.promptStyle")}
+              <select bind:value={shell.settings.aiPromptStyle}>
+                <option value="short">{shell.tr("dialog.promptShort")}</option>
+                <option value="long">{shell.tr("dialog.promptLong")}</option>
+              </select>
+            </label>
             {#if shell.settings.aiApiKey && !shell.aiFieldsOpen}
               <button class="text-button" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.suggestMessage()}>{shell.settings.aiModel || shell.tr("chrome.suggest")}</button>
             {:else}
@@ -229,7 +235,7 @@
             <label class="check"><input type="checkbox" bind:checked={shell.settings.aiEnabled} /> AI commit messages</label>
             <label>AI language <input bind:value={shell.settings.aiLanguage} placeholder="English" /></label>
             <label>AI max characters <input type="number" bind:value={shell.settings.aiMaxChars} /></label>
-            <label>AI prompt <input bind:value={shell.settings.aiPrompt} /></label>
+            <label>{shell.tr("dialog.promptExtra")} <input bind:value={shell.settings.aiPrompt} placeholder={shell.tr("dialog.promptExtra")} /></label>
             <label>AI temperature <input type="number" step="0.1" bind:value={shell.settings.aiTemperature} /></label>
             <label>Author name <input bind:value={shell.settings.authorName} placeholder="uses git config when empty" /></label>
             <label>Author email <input bind:value={shell.settings.authorEmail} /></label>

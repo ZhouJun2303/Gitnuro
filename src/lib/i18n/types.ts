@@ -67,6 +67,17 @@ export type Messages = {
     signOff: string;
     skipHooks: string;
     suggest: string;
+    suggestGenerate: string;
+    suggestTitle: string;
+    promptShort: string;
+    promptLong: string;
+    suggestNeedStaged: string;
+    suggestNeedRepo: string;
+    suggestOff: string;
+    suggestNeedKey: string;
+    suggestNeedUrl: string;
+    suggestEmpty: string;
+    suggestFormat: string;
     commitAndPush: string;
     commit: string;
     working: string;
@@ -385,6 +396,10 @@ export type Messages = {
     spellEnable: string;
     pageGuide: string;
     generateMessage: string;
+    promptStyle: string;
+    promptShort: string;
+    promptLong: string;
+    promptExtra: string;
     issueLinks: string;
     externalMerge: string;
     externalDiff: string;
