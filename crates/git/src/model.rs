@@ -176,7 +176,7 @@ fn log_with(repo: &Path, limit: usize, all: bool, path: &[&str], revs: &[&str], 
     if run(repo, &["rev-parse", "--verify", "HEAD"]).is_err() {
         return Ok(Vec::new());
     }
-    let limit = limit.clamp(1, 2000).to_string();
+    let limit = limit.clamp(1, 100_000).to_string();
     let order = if topo { "--topo-order" } else { "--date-order" };
     let mut args = vec![
         "log",
@@ -1271,30 +1271,67 @@ fn clean_ref(item: &str) -> &str {
 }
 
 fn assign_lanes(commits: &mut [CommitRow]) {
-    let mut active: Vec<Option<String>> = Vec::new();
-    for commit in commits.iter_mut() {
-        let found = active.iter().position(|slot| slot.as_deref() == Some(commit.id.as_str()));
-        let lane = if let Some(lane) = found {
+    use std::collections::{BTreeSet, HashMap};
+
+    /// Lane slots with an index by commit id and the set of free slots, so each
+    /// lookup stays cheap on histories with tens of thousands of commits.
+    #[derive(Default)]
+    struct Lanes {
+        slots: Vec<Option<String>>,
+        by_id: HashMap<String, BTreeSet<usize>>,
+        free: BTreeSet<usize>,
+    }
+
+    impl Lanes {
+        fn set(&mut self, lane: usize, value: Option<String>) {
+            if let Some(old) = self.slots[lane].take() {
+                if let Some(lanes) = self.by_id.get_mut(&old) {
+                    lanes.remove(&lane);
+                    if lanes.is_empty() {
+                        self.by_id.remove(&old);
+                    }
+                }
+            }
+            match &value {
+                Some(id) => {
+                    self.free.remove(&lane);
+                    self.by_id.entry(id.clone()).or_default().insert(lane);
+                }
+                None => {
+                    self.free.insert(lane);
+                }
+            }
+            self.slots[lane] = value;
+        }
+
+        /// Put `id` in the lowest free slot, or in a new one.
+        fn place(&mut self, id: &str) -> usize {
+            let lane = match self.free.iter().next().copied() {
+                Some(free) => free,
+                None => {
+                    self.slots.push(None);
+                    self.slots.len() - 1
+                }
+            };
+            self.set(lane, Some(id.to_string()));
             lane
-        } else if let Some(free) = active.iter().position(|slot| slot.is_none()) {
-            active[free] = Some(commit.id.clone());
-            free
-        } else {
-            active.push(Some(commit.id.clone()));
-            active.len() - 1
+        }
+    }
+
+    let mut lanes = Lanes::default();
+    for commit in commits.iter_mut() {
+        let found = lanes.by_id.get(commit.id.as_str()).and_then(|set| set.iter().next().copied());
+        let lane = match found {
+            Some(lane) => lane,
+            None => lanes.place(&commit.id),
         };
         commit.lane = lane as u32;
-        if let Some(parent) = commit.parents.first() {
-            active[lane] = Some(parent.clone());
-        } else {
-            active[lane] = None;
+        match commit.parents.first() {
+            Some(parent) => lanes.set(lane, Some(parent.clone())),
+            None => lanes.set(lane, None),
         }
         for parent in commit.parents.iter().skip(1) {
-            if let Some(free) = active.iter().position(|slot| slot.is_none()) {
-                active[free] = Some(parent.clone());
-            } else {
-                active.push(Some(parent.clone()));
-            }
+            lanes.place(parent);
         }
     }
 }

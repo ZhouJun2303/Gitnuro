@@ -4010,7 +4010,7 @@
     const ceiling = 100_000;
     while (!row && !historyFilter && logLimit < ceiling) {
       const loaded = commitsLive.length;
-      logLimit = Math.min(logLimit * 2, ceiling);
+      logLimit = Math.min(logLimit * 4, ceiling);
       await loadContext();
       row = find();
       if (commitsLive.length < logLimit || commitsLive.length === loaded) break;
