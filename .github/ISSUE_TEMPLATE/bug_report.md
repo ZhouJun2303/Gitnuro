@@ -1,30 +1,22 @@
 ---
-name: Bug report
-about: Create a report to help us improve
+name: 缺陷
+about: 报告 AweGit 在 Windows 或 macOS 上的问题
 title: ''
 labels: bug
 assignees: ''
-
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**发生了什么**
 
-**To Reproduce**
-Steps to reproduce the behavior:
+**怎样重现**
 
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+1.
+2.
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+**期望的结果**
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**环境**
 
-**Desktop (please complete the following information):**
-
-- OS: [e.g. Linux]
-- Version [e.g. 1.0.1]
+- 系统：Windows 或 macOS，以及系统版本
+- AweGit 版本：
+- 相关操作：例如提交、拉取、变基、贮藏

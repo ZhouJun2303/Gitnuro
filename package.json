@@ -17,7 +17,7 @@
     "package:mac": "sh ./scripts/package-mac.sh",
     "tauri": "node ./scripts/with-rust-path.mjs tauri"
   },
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",

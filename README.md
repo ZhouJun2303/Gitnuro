@@ -86,7 +86,7 @@ pnpm package:windows
 pnpm publish:windows
 ```
 
-这条命令会先打包，再用 `gh` 创建 Release，然后提交并推送 `latest.json`。需要已经登录的 `gh`。
+这条命令只能在 `release` 分支上运行。它会先打包，再用 `gh` 在 `ZhouJun2303/Gitnuro` 创建 Release，然后提交 `latest.json` 并推送 `origin release`。需要已经登录的 `gh`。
 
 不要提交 `target\`、`src-tauri\target\`、`node_modules\` 和下载下来的 MinGit。
 
