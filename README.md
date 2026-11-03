@@ -6,7 +6,7 @@ AweGit 是 Windows 和 macOS 上的 Git 客户端。界面用 Tauri 2 和 Svelte
 
 ## 准备
 
-每个新终端先装好依赖。`pnpm start`、`pnpm test`、`pnpm tauri` 和 `pnpm package:windows` 会自己把 WinLibs 和 `%USERPROFILE%\.cargo\bin` 排到 PATH 前面。`pnpm dev` 和 `pnpm check` 不编译 Rust。
+每个新终端先装好依赖。`pnpm start`、`pnpm test`、`pnpm tauri` 和 `pnpm package:windows` 会自己把 WinLibs 和 `%USERPROFILE%\.cargo\bin` 排到 PATH 前面。`pnpm check` 不编译 Rust。
 
 ```powershell
 pnpm install
@@ -26,7 +26,6 @@ macOS 使用系统 Git 和系统上的 `cargo`，不需要上面的 PATH。
 
 | 要做的事 | 命令 | 结果 |
 | --- | --- | --- |
-| 网页上看界面 | `pnpm dev` | http://127.0.0.1:1420 ，示例数据 |
 | 启动桌面程序 | `pnpm start` | 编译 Rust（仅第一次或改过后），并打开窗口 |
 | 类型检查 | `pnpm check` | Svelte 和 TypeScript，不跑 Git |
 | Rust 测试 | `pnpm test` | `awegit-git` 的全部测试，使用临时仓库 |
@@ -34,18 +33,6 @@ macOS 使用系统 Git 和系统上的 `cargo`，不需要上面的 PATH。
 | 打 macOS 安装包 | `pnpm package:mac` | 只能在 Mac 上运行，产物在 `target/release/bundle` |
 
 `pnpm start` 就是 `pnpm tauri dev`。`pnpm test` 就是 `cargo test -p awegit-git -- --test-threads=1`。
-
-## 在网页上暂时看界面
-
-```powershell
-pnpm dev
-```
-
-浏览器打开 http://127.0.0.1:1420 。端口固定为 1420。这个地址已经被占用时，说明 Vite 已经在跑，直接打开页面即可，不要再起一个。
-
-网页里没有 Tauri，界面用内置示例数据。可以看布局、主题和字号。Fetch、提交、打开仓库这些操作只在桌面窗口里可用。改 `src/` 后页面会自己刷新，不必重编 Rust。
-
-`pnpm build` 只构建网页。`pnpm preview` 预览构建结果，同样是示例数据。
 
 ## 启动桌面程序
 
@@ -55,9 +42,11 @@ pnpm start
 
 第一次会编译 Tauri，之后改界面走已经打开的 Vite，不必重编 Rust。改了 `src-tauri` 或 `crates/git` 再执行一次 `pnpm start`。
 
-调试程序是 `target\debug\awegit.exe`，它加载 http://127.0.0.1:1420 。单独双击它之前要先有 `pnpm dev`，否则窗口里是无法连接。`pnpm start` 会自己拉起 Vite 和窗口。
+界面调试用这个窗口自带的检查器。调试版按 `Ctrl+Shift+I`。右键「检查」通常会被应用自己的菜单占用。正式包没有检查器。
 
-1420 上已经有 Vite 时，再执行 `pnpm start` 会沿用它并打开窗口。单独再跑一次 `pnpm dev` 仍会因为端口被占用而失败。
+调试程序是 `target\debug\awegit.exe`，它加载 http://127.0.0.1:1420 。单独双击它之前要先有开发服务，否则窗口里无法连接。`pnpm start` 会自己拉起页面服务和窗口。
+
+1420 上已经有页面服务时，再执行 `pnpm start` 会沿用它并打开窗口。这个端口被占用后再另起一个开发服务会失败。
 
 设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令和 HTTPS 密码不写入这个文件。
 
