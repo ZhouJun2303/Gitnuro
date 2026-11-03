@@ -30,3 +30,14 @@
 - Windows 打包：`pnpm package:windows`
 - macOS 打包：`pnpm package:mac`
 - 不提交 `target/`、`node_modules/`、`src-tauri/target/`，也不提交打包进来的 MinGit
+
+## 界面代号
+
+用户用 `A`、`B3`、`Com2`、`Com2-5`、`E:pull` 这种代号说话时，先读 [docs/ui-map.md](docs/ui-map.md)，按表定位再改。不要凭编号猜测。
+
+- 界面是一个字母：`A` 欢迎，`B` 本地更改，`C` 全部提交，`D` 偏好设置，`E` 操作对话框，`F` 浮层，`G` 性能面板
+- 区域是字母加数字，如 `B3`。子区域用短横线，如 `B3-1`
+- 多处出现的同一块用 `Com` 加数字。`B4 Com3` 表示本地更改里的差异区，也就是差异窗格
+- 对话框种类写成 `E:` 加 `shell.dialog` 的值，如 `E:clone`
+- 新增界面用下一个空字母。已经用过的编号不重排；删掉的编号留在表里标成停用
+- 改了界面划分、区域顺序或复用模块，同步改 `docs/ui-map.md`
