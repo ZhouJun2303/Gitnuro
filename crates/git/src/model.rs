@@ -231,8 +231,13 @@ fn log_with(repo: &Path, limit: usize, all: bool, path: &[&str], revs: &[&str], 
     ];
     if !revs.is_empty() {
         args.extend_from_slice(revs);
+        // Fetched remote-tracking branches belong on the graph even when the
+        // page is rooted at the current branch; otherwise a fork looks like a line.
+        args.push("--remotes");
     } else if path.is_empty() && all {
-        args.insert(1, "--all");
+        // Branches and remotes, not `--all`: tags and notes would bury the tips.
+        args.insert(1, "--branches");
+        args.insert(2, "--remotes");
     } else if !path.is_empty() {
         args.push("--");
         args.extend_from_slice(path);

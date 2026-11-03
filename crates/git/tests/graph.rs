@@ -2,7 +2,9 @@ mod common;
 
 use std::fs;
 
-use awegit_git::{blame_file, branch_commits, commit_detail, commit_files, commit_log, locate_ref, repository_refs, ChangeKind};
+use awegit_git::{
+    blame_file, branch_commits, commit_detail, commit_files, commit_log, commits_from, locate_ref, repository_refs, ChangeKind,
+};
 
 fn repo() -> common::TempRepo {
     let repo = common::TempRepo::new();
@@ -114,4 +116,19 @@ fn locate_ref_finds_a_branch_buried_under_later_commits() {
     let found = locate_ref(&repo.path, "buried", false).unwrap();
     assert_eq!(found.id, buried);
     assert!(found.commits.iter().any(|commit| commit.id == buried), "{} commits", found.commits.len());
+}
+
+#[test]
+fn current_branch_log_still_draws_remote_forks() {
+    let repo = repo();
+    repo.git(&["commit", "--allow-empty", "-m", "base"]);
+    repo.git(&["checkout", "-b", "fork"]);
+    repo.git(&["commit", "--allow-empty", "-m", "feat: only on the fork"]);
+    let tip = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+    repo.git(&["update-ref", "refs/remotes/origin/fork", &tip]);
+    repo.git(&["checkout", "main"]);
+    repo.git(&["branch", "-D", "fork"]);
+    let rows = commits_from(&repo.path, 20, &["main".into()], false).unwrap();
+    let found = rows.iter().find(|commit| commit.id == tip).expect("remote fork tip");
+    assert!(found.refs.iter().any(|name| name == "origin/fork"), "{:?}", found.refs);
 }
