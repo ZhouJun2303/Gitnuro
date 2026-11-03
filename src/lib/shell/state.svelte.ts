@@ -239,6 +239,10 @@ export class ShellState {
   jobs = $state<Record<string, RepoJob>>({});
 
 
+  /** Repositories with an automatic fetch in flight. This does not count as busy. */
+  backgroundFetch = new Set<string>();
+
+
   /** Set as soon as a tab is chosen, before that repository's status returns. */
   focusPath = $state<string | null>(null);
 
@@ -1656,7 +1660,7 @@ export class ShellState {
   /** `status` reads the work tree and the open diff only; `full` also reloads branches and history. */
   async refresh(scope: "status" | "full" = "full", silent = false) {
     const path = this.repoPath();
-    if (!this.inApp() || !path || this.busy) return;
+    if (!this.inApp() || !path || this.busy || this.backgroundFetch.has(this.jobKey(path))) return;
     if (this.refreshing) {
       if (this.refreshQueued !== "full") this.refreshQueued = scope;
       return;
@@ -1875,18 +1879,21 @@ export class ShellState {
   async mutate(request: Record<string, unknown>, source: "user" | "background" = "user") {
     const path = this.repoPath();
     if (!this.inApp() || !path || this.busy) return;
-    this.actionError = null;
+    const background = source === "background";
+    if (!background) this.actionError = null;
     const described = this.describeRequest(request);
     const action = String(request.action ?? "");
     const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
-    this.startWork(described.title, path);
+    if (!background) this.startWork(described.title, path);
     try {
       const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request });
       const output = value.output ?? "";
-      if (this.viewing(path)) {
+      // A foreground write started while this was running will paint the later status itself.
+      const superseded = background && this.busy;
+      if (this.viewing(path) && !superseded) {
         this.applySnapshot(value);
         await this.loadContext();
-        await this.loadDiff();
+        if (!background && this.viewing(path)) await this.loadDiff();
       }
       if (followSubmodules) {
         const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request: { action: "submoduleUpdate" } });
@@ -1898,7 +1905,7 @@ export class ShellState {
       }
       this.noteActivity(`${action}${output ? " output" : " ok"}`);
       this.recordCommand(action, described, value.log || output, true, source);
-      if (this.viewing(path)) {
+      if (!background && this.viewing(path)) {
         if (output) {
           this.commandOutput = output;
           this.dialog = "output";
@@ -1910,7 +1917,7 @@ export class ShellState {
       const text = this.message(error);
       this.noteActivity(`${String(request.action ?? "")} failed`);
       this.recordCommand(String(request.action ?? ""), described, text, false, source);
-      if (this.viewing(path)) {
+      if (this.viewing(path) && !(background && this.busy)) {
         this.actionError = text;
         if (String(request.action ?? "") === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
         try {
@@ -1921,7 +1928,7 @@ export class ShellState {
         }
       }
     } finally {
-      this.stopWork(path);
+      if (!background) this.stopWork(path);
     }
   }
 
@@ -1945,7 +1952,12 @@ export class ShellState {
 
   doFetch(source: "user" | "background" = "user") {
     const remote = this.settings.fetchAllRemotes ? null : this.refs?.remotes[0]?.name ?? null;
-    return this.mutate({ action: "fetch", remote, prune: this.settings.fetchPrune, tags: this.settings.fetchTags }, source);
+    const request = { action: "fetch", remote, prune: this.settings.fetchPrune, tags: this.settings.fetchTags };
+    if (source !== "background") return this.mutate(request, source);
+    const key = this.jobKey(this.repoPath());
+    if (!key || this.backgroundFetch.has(key)) return;
+    this.backgroundFetch.add(key);
+    return this.mutate(request, source).finally(() => this.backgroundFetch.delete(key));
   }
 
 
