@@ -40,6 +40,8 @@
     "allow-pick-file",
     "core:window:allow-set-title",
     "allow-suggest-commit-message",
+    "allow-test-ai-endpoint",
+    "allow-list-ai-models",
     "allow-file-preview",
     "allow-cancel-operation",
     "allow-set-passphrase",

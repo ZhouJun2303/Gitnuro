@@ -360,6 +360,60 @@ function explainSuggest(shell: ShellState, error: unknown) {
     return text;
   }
 
+function explainAiEndpoint(shell: ShellState, error: unknown) {
+    const text = shell.message(error);
+    if (text.startsWith("Set an API base URL")) return shell.tr("chrome.suggestNeedUrl");
+    if (text.startsWith("The API base URL")) return shell.tr("dialog.endpointScheme");
+    if (text.startsWith("curl is not available")) return shell.tr("dialog.curlMissing");
+    return text;
+  }
+
+export async function testAiEndpoint(shell: ShellState) {
+    if (shell.aiEndpointBusy) return;
+    const baseUrl = shell.settings.aiBaseUrl;
+    const apiKey = shell.settings.aiApiKey;
+    if (!baseUrl.trim()) {
+      shell.aiEndpointNote = shell.tr("chrome.suggestNeedUrl");
+      return;
+    }
+    shell.aiEndpointBusy = "test";
+    shell.aiEndpointNote = "";
+    try {
+      const count = await invoke<number>("test_ai_endpoint", { baseUrl, apiKey });
+      if (shell.settings.aiBaseUrl !== baseUrl) return;
+      shell.aiEndpointNote = shell.tr("dialog.endpointOk", { count: String(count) });
+    } catch (error) {
+      if (shell.settings.aiBaseUrl !== baseUrl) return;
+      shell.aiEndpointNote = explainAiEndpoint(shell, error);
+    } finally {
+      shell.aiEndpointBusy = "";
+    }
+  }
+
+export async function loadAiModels(shell: ShellState) {
+    if (shell.aiEndpointBusy) return;
+    const baseUrl = shell.settings.aiBaseUrl;
+    const apiKey = shell.settings.aiApiKey;
+    if (!baseUrl.trim()) {
+      shell.aiEndpointNote = shell.tr("chrome.suggestNeedUrl");
+      return;
+    }
+    shell.aiEndpointBusy = "models";
+    shell.aiEndpointNote = "";
+    try {
+      const models = await invoke<string[]>("list_ai_models", { baseUrl, apiKey });
+      if (shell.settings.aiBaseUrl !== baseUrl) return;
+      shell.aiModels = models;
+      shell.aiEndpointNote = models.length ? shell.tr("dialog.modelsLoaded", { count: String(models.length) }) : shell.tr("dialog.noModels");
+    } catch (error) {
+      if (shell.settings.aiBaseUrl !== baseUrl) return;
+      shell.aiModels = [];
+      shell.aiEndpointNote = explainAiEndpoint(shell, error);
+    } finally {
+      shell.aiEndpointBusy = "";
+    }
+  }
+
 export async function suggestMessage(shell: ShellState) {
     const path = shell.repoPath();
     if (shell.busy) return;

@@ -1377,6 +1377,16 @@ fn suggest_commit_message(path: Option<String>, style: Option<String>, language:
 }
 
 #[tauri::command]
+fn test_ai_endpoint(base_url: String, api_key: String) -> Result<u32, String> {
+    Ok(ai::list_models(&base_url, &api_key)?.len() as u32)
+}
+
+#[tauri::command]
+fn list_ai_models(base_url: String, api_key: String) -> Result<Vec<String>, String> {
+    ai::list_models(&base_url, &api_key)
+}
+
+#[tauri::command]
 fn log_client(entries: Vec<perf::ClientEntry>) {
     perf::client(entries);
 }
@@ -1430,6 +1440,8 @@ pub fn run() {
             pick_directory,
             pick_file,
             suggest_commit_message,
+            test_ai_endpoint,
+            list_ai_models,
             file_preview,
             cancel_operation,
             set_passphrase,

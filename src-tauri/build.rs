@@ -30,6 +30,8 @@ fn main() {
             "pick_directory",
             "pick_file",
             "suggest_commit_message",
+            "test_ai_endpoint",
+            "list_ai_models",
             "file_preview",
             "cancel_operation",
             "set_passphrase",

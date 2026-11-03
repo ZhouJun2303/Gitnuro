@@ -399,6 +399,15 @@ export type Messages = {
     promptStyle: string;
     promptShort: string;
     promptLong: string;
+    testEndpoint: string;
+    fetchModels: string;
+    endpointOk: string;
+    modelsLoaded: string;
+    noModels: string;
+    pickModel: string;
+    fetchedModels: string;
+    endpointScheme: string;
+    curlMissing: string;
     promptExtra: string;
     issueLinks: string;
     externalMerge: string;
