@@ -1262,12 +1262,20 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
         query.push_str(&format!("file={}", encode_query(file)));
     }
     let url = if query.is_empty() { "index.html".to_string() } else { format!("index.html?{query}") };
-    tauri::webview::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
+    let window = tauri::webview::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
         .title("AweGit")
         .inner_size(1100.0, 720.0)
         .build()
         .map_err(|error| error.to_string())?;
+    show_devtools(&window);
     Ok(())
+}
+
+fn show_devtools(window: &tauri::WebviewWindow) {
+    #[cfg(debug_assertions)]
+    window.open_devtools();
+    #[cfg(not(debug_assertions))]
+    let _ = window;
 }
 
 fn encode_query(text: &str) -> String {
@@ -1390,6 +1398,10 @@ pub fn run() {
                 if let Some(cmd) = git_cmd(&dir) {
                     awegit_git::use_bundled_git(&cmd);
                 }
+            }
+            #[cfg(debug_assertions)]
+            if let Some(window) = app.get_webview_window("main") {
+                show_devtools(&window);
             }
             let handle = app.handle().clone();
             perf::watch_main_thread(handle.clone());
