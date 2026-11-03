@@ -4471,11 +4471,6 @@
     <button type="button" onclick={(event) => openBar(event, repositoryItems())}>{tr("chrome.repository")}</button>
     <button type="button" onclick={(event) => openBar(event, windowItems())}>{tr("chrome.window")}</button>
     <button type="button" onclick={(event) => openBar(event, helpItems())}>{tr("chrome.help")}</button>
-    <button class="workspace-btn" type="button" title={tr("chrome.workspace")} aria-label={tr("chrome.workspace")} aria-haspopup="menu" onclick={(event) => openBar(event, workspaceItems())}>
-      <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="13" height="13" rx="2"/><path d="M8 20h11a2 2 0 0 0 2-2V8"/></svg>
-      <span>{currentWorkspace?.name ?? tr("chrome.workspace")}</span>
-      <svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-    </button>
   </nav>
   <header class="chrome">
     <div class="chrome-tools">
@@ -4505,19 +4500,21 @@
         </button>
       </div>
       <div class="chrome-identity">
-        <button class="icon-btn history-btn" class:on={commandLogOpen} type="button" bind:this={commandButton} title={tr("chrome.commandHistory")} aria-label={tr("chrome.commandHistory")} aria-expanded={commandLogOpen} aria-haspopup="dialog" onclick={() => (commandLogOpen ? (commandLogOpen = false) : openCommandLog())}>
-          <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
-        </button>
-        <div class="identity-copy">
-          <strong>{snapshot ? folderName(snapshot.path) : mode === "sample" ? "AweGit" : tr("chrome.welcomeTitle")}</strong>
-          <span>{#if snapshot || mode === "sample"}<svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>{branchLabel}{:else}{tr("chrome.openRepo")}{/if}</span>
+        <div class="identity-floor">
+          <button class="icon-btn history-btn" class:on={commandLogOpen} type="button" bind:this={commandButton} title={tr("chrome.commandHistory")} aria-label={tr("chrome.commandHistory")} aria-expanded={commandLogOpen} aria-haspopup="dialog" onclick={() => (commandLogOpen ? (commandLogOpen = false) : openCommandLog())}>
+            <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
+          </button>
+          <div class="identity-copy">
+            <strong>{snapshot ? folderName(snapshot.path) : mode === "sample" ? "AweGit" : tr("chrome.welcomeTitle")}</strong>
+            <span>{#if snapshot || mode === "sample"}<svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>{branchLabel}{:else}{tr("chrome.openRepo")}{/if}</span>
+          </div>
+          <button class="tool-btn stack branch-chip" type="button" aria-haspopup="menu" onclick={(event) => openBar(event, branchItems())}>
+            <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
+            <span>{tr("dialog.branch")}<svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+          </button>
         </div>
       </div>
       <div class="chrome-right">
-        <button class="tool-btn stack branch-chip" type="button" onclick={(event) => openMenu(event, branchItems())}>
-          <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
-          <span>{tr("dialog.branch")}<svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
-        </button>
         <button class="tool-btn stack" type="button" disabled={!snapshot} onclick={() => snapshot && void openLocal(snapshot.path)}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>
           <span>{tr("chrome.explorer")}</span>
@@ -4529,6 +4526,10 @@
         <button class="tool-btn stack" type="button" aria-haspopup="menu" onclick={(event) => openBar(event, appearanceItems())}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg>
           <span>{tr("dialog.appearance")}</span>
+        </button>
+        <button class="tool-btn stack workspace-chip" type="button" title={currentWorkspace?.name ?? tr("chrome.workspace")} aria-label={tr("chrome.workspace")} aria-haspopup="menu" onclick={(event) => openBar(event, workspaceItems())}>
+          <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="13" height="13" rx="2"/><path d="M8 20h11a2 2 0 0 0 2-2V8"/></svg>
+          <span><span class="workspace-name">{currentWorkspace?.name ?? tr("chrome.workspace")}</span><svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
         </button>
       </div>
     </div>
@@ -4728,6 +4729,7 @@
         </svg>
       {/snippet}
 
+      <div class="side-pin">
       <div class="side-brand">
         <span>AweGit</span>
         <button class="icon-btn" type="button" title={tr("chrome.preferences")} aria-label={tr("chrome.preferences")} onclick={() => (dialog = "prefs")}>{@render glyph("gear")}</button>
@@ -4750,6 +4752,7 @@
         <input placeholder={tr("chrome.filter")} aria-label={tr("chrome.filterSidebar")} bind:this={sideFilter} bind:value={sideQuery} onkeydown={(event) => { if (event.key === "Escape") { event.stopPropagation(); sideQuery = ""; } }} />
         {#if sideQuery}<button class="side-filter-clear" type="button" aria-label={tr("chrome.clearFilter")} onclick={() => (sideQuery = "")}>×</button>{/if}
       </label>
+      </div>
 
       {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void; icon?: "add" }[] = [], empty = count === 0)}
         <div class="side section" class:selected={sideSelected === key} role="group">
@@ -4772,6 +4775,7 @@
         </div>
       {/snippet}
 
+      <div class="side-scroll">
       {#if mode === "live" && refs}
         {@render sideHead("branches", tr("chrome.localBranches"), null, [
           { label: tr("chrome.new"), icon: "add", run: () => { draft = ""; draftExtra = ""; dialog = "branch"; } },
@@ -4998,6 +5002,7 @@
           {/if}
         {/each}
       {/if}
+      </div>
     </aside>
     {/if}
 
@@ -6970,22 +6975,42 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
     min-width: 0;
-    max-width: 420px;
+    max-width: 460px;
+  }
+
+  .identity-floor {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    width: max-content;
+    min-width: 236px;
+    max-width: min(440px, 46vw);
+    height: 40px;
+    padding: 3px;
+    border-radius: 13px;
+    background: var(--elevated);
+    border: 1px solid var(--line);
+    box-shadow: 0 1px 0 color-mix(in srgb, #000 12%, transparent);
   }
 
   .identity-copy {
     display: flex;
+    flex: 1;
+    align-self: stretch;
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
+    justify-content: center;
     min-width: 0;
+    margin-right: 2px;
+    padding: 0 12px 0 8px;
+    border-right: 1px solid var(--line);
     line-height: 1.15;
   }
 
   .identity-copy strong,
   .identity-copy span {
-    max-width: 280px;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -7449,6 +7474,27 @@
   .tool-btn.stack > span { display: inline-flex; align-items: center; gap: 2px; }
   .tool-btn.caret-only { width: 16px; min-width: 0; height: 42px; padding: 0; justify-content: center; margin-left: -6px; }
   .tool-btn.caret-only svg { width: 11px; height: 11px; }
+  .identity-floor .history-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+  }
+  .identity-floor .tool-btn.stack.branch-chip {
+    height: 34px;
+    min-width: 56px;
+    padding: 0 8px;
+    border-radius: 9px;
+    background: transparent;
+  }
+  .identity-floor .tool-btn.stack.branch-chip:hover:not(:disabled) { background: var(--hover); }
+  .identity-floor .tool-btn.stack.branch-chip > svg { width: 15px; height: 15px; }
+  .tool-btn.workspace-chip { max-width: 108px; }
+  .workspace-name {
+    display: block;
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
   .tab-close { opacity: 0; }
   .tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
@@ -7648,9 +7694,25 @@
 
   .sidebar {
     flex: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     background: var(--sidebar);
     border-right: 1px solid var(--line);
-    padding: 8px 0;
+    overflow: hidden;
+  }
+
+  .side-pin {
+    flex: none;
+    padding: 8px 0 6px;
+    background: var(--sidebar);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .side-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 6px 0 12px;
     overflow-x: hidden;
     overflow-y: auto;
   }
@@ -8947,7 +9009,7 @@
     align-items: center;
     gap: 6px;
     height: 28px;
-    margin: 4px 10px 8px;
+    margin: 4px 10px 2px;
     padding: 0 8px;
     border-radius: 6px;
     background: var(--field);
@@ -9144,32 +9206,6 @@
   }
 
   .menubar button:hover { background: var(--selection); }
-
-  .menubar .workspace-btn {
-    margin-left: auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    max-width: 220px;
-  }
-
-  .menubar .workspace-btn span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .menubar .workspace-btn .line-icon {
-    width: 15px;
-    height: 15px;
-    flex: none;
-  }
-
-  .menubar .workspace-btn .caret {
-    width: 12px;
-    height: 12px;
-    opacity: 0.7;
-  }
 
   .tab.dirty .file-select::before {
     content: "";
