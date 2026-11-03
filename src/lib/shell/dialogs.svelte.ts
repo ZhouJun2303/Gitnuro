@@ -27,6 +27,7 @@ import type { ShellState } from "./state.svelte";
 
 export async function selectPrefTab(shell: ShellState, tab: PrefTab) {
     shell.prefTab = tab;
+    if (tab === "integration") void shell.loadExternalTools();
     await tick();
     shell.prefPage?.scrollTo(0, 0);
   }
@@ -584,16 +585,72 @@ export async function openLocal(shell: ShellState, path: string) {
     }
   }
 
-export function useMergePreset(shell: ShellState, name: string) {
-    const preset = shell.toolPresets.find((item) => item.name === name);
-    if (!preset) return;
-    shell.settings = { ...shell.settings, mergeToolName: preset.name, mergeToolArgs: preset.mergeArgs };
+export type ExternalTool = {
+    name: string;
+    path: string;
+    args: string;
+    primary: boolean;
+  };
+
+export async function loadExternalTools(shell: ShellState) {
+    if (!shell.inApp()) {
+      shell.mergeTools = [];
+      shell.diffTools = [];
+      return;
+    }
+    let catalog: { merge: ExternalTool[]; diff: ExternalTool[] };
+    try {
+      catalog = await invoke("external_tools");
+    } catch {
+      return;
+    }
+    shell.mergeTools = catalog.merge ?? [];
+    shell.diffTools = catalog.diff ?? [];
+    const mergeChanged = await adoptTool(shell, "merge");
+    const diffChanged = await adoptTool(shell, "diff");
+    if (mergeChanged || diffChanged) {
+      shell.applyToolSettings();
+      await shell.savePrefs(false);
+    }
   }
 
-export function useDiffPreset(shell: ShellState, name: string) {
-    const preset = shell.toolPresets.find((item) => item.name === name);
+async function adoptTool(shell: ShellState, kind: "merge" | "diff") {
+    const path = (kind === "merge" ? shell.settings.mergeToolPath : shell.settings.diffToolPath).trim();
+    if (path) {
+      try {
+        if (await invoke<boolean>("program_exists", { path })) return false;
+      } catch {
+        return false;
+      }
+    }
+    const tools = kind === "merge" ? shell.mergeTools : shell.diffTools;
+    return writeTool(shell, kind, tools.find((item) => item.primary) ?? tools[0] ?? null);
+  }
+
+function writeTool(shell: ShellState, kind: "merge" | "diff", tool: ExternalTool | null) {
+    const name = tool?.name ?? "";
+    const path = tool?.path ?? "";
+    const args = tool?.args ?? "";
+    if (kind === "merge") {
+      if (shell.settings.mergeToolName === name && shell.settings.mergeToolPath === path && shell.settings.mergeToolArgs === args) return false;
+      shell.settings = { ...shell.settings, mergeToolName: name, mergeToolPath: path, mergeToolArgs: args };
+      return true;
+    }
+    if (shell.settings.diffToolName === name && shell.settings.diffToolPath === path && shell.settings.diffToolArgs === args) return false;
+    shell.settings = { ...shell.settings, diffToolName: name, diffToolPath: path, diffToolArgs: args };
+    return true;
+  }
+
+export function useMergePreset(shell: ShellState, path: string) {
+    const preset = shell.mergeTools.find((item) => shell.pathsMatch(item.path, path));
     if (!preset) return;
-    shell.settings = { ...shell.settings, diffToolName: preset.name, diffToolArgs: preset.diffArgs };
+    writeTool(shell, "merge", preset);
+  }
+
+export function useDiffPreset(shell: ShellState, path: string) {
+    const preset = shell.diffTools.find((item) => shell.pathsMatch(item.path, path));
+    if (!preset) return;
+    writeTool(shell, "diff", preset);
   }
 
 export function fillCommand(shell: ShellState, template: string, answers: Record<string, string>) {

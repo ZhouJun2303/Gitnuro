@@ -85,8 +85,11 @@
             <div class="k">{shell.tr("dialog.externalMerge")}</div>
             <div class="tool-grid">
               <div class="tool-list">
-                {#each shell.toolPresets as preset (preset.name)}
-                  <button type="button" class:on={shell.settings.mergeToolName === preset.name} onclick={() => shell.useMergePreset(preset.name)}>{preset.name}</button>
+                {#each shell.mergeTools as tool (tool.path)}
+                  <button type="button" class:on={shell.pathsMatch(shell.settings.mergeToolPath, tool.path)} title={tool.path} onclick={() => shell.useMergePreset(tool.path)}>
+                    <span>{tool.name}</span>
+                    <span class="tool-path">{tool.path}</span>
+                  </button>
                 {/each}
               </div>
               <div class="tool-fields">
@@ -98,8 +101,11 @@
             <div class="k">{shell.tr("dialog.externalDiff")}</div>
             <div class="tool-grid">
               <div class="tool-list">
-                {#each shell.toolPresets as preset (`diff-${preset.name}`)}
-                  <button type="button" class:on={shell.settings.diffToolName === preset.name} onclick={() => shell.useDiffPreset(preset.name)}>{preset.name}</button>
+                {#each shell.diffTools as tool (`diff-${tool.path}`)}
+                  <button type="button" class:on={shell.pathsMatch(shell.settings.diffToolPath, tool.path)} title={tool.path} onclick={() => shell.useDiffPreset(tool.path)}>
+                    <span>{tool.name}</span>
+                    <span class="tool-path">{tool.path}</span>
+                  </button>
                 {/each}
               </div>
               <div class="tool-fields">

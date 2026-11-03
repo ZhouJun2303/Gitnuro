@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-program-exists"
+description = "Enables the program_exists command without any pre-configured scope."
+commands.allow = ["program_exists"]
+
+[[permission]]
+identifier = "deny-program-exists"
+description = "Denies the program_exists command without any pre-configured scope."
+commands.deny = ["program_exists"]

@@ -20,6 +20,8 @@ fn main() {
             "blame_file",
             "load_settings",
             "save_settings",
+            "external_tools",
+            "program_exists",
             "watch_repository",
             "open_terminal",
             "clipboard_text",

@@ -62,6 +62,8 @@
 .pref-inline input[type="number"] { width: 72px; }
 
 .diff-sample {
+    flex: none;
+    min-height: max-content;
     border: 1px solid var(--line);
     border-radius: 4px;
     overflow: auto;
@@ -69,6 +71,11 @@
     font-size: var(--diff-font, 13px);
     line-height: 1.45;
     padding: 8px;
+  }
+
+.diff-sample > div {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
 .diff-sample .del { background: var(--diff-del); }
@@ -81,7 +88,11 @@
 
 .tool-list { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; max-height: 140px; }
 
-.tool-list button { border: 0; background: transparent; text-align: left; padding: 6px 8px; font: inherit; color: inherit; border-radius: 6px; }
+.tool-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; border: 0; background: transparent; text-align: left; padding: 6px 8px; font: inherit; color: inherit; border-radius: 6px; }
+
+.tool-list .tool-path { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 400; color: var(--text-secondary); }
+
+.tool-list button.on .tool-path { color: inherit; }
 
 .tool-list button:hover { background: var(--hover); }
 

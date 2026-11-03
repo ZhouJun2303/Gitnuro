@@ -2,6 +2,7 @@ mod ai;
 mod forge;
 mod perf;
 mod settings;
+mod tools;
 mod updates;
 
 use std::collections::{HashMap, HashSet};
@@ -653,6 +654,16 @@ fn save_settings(values: settings::Settings) -> Result<settings::Settings, Strin
     settings::save(&values)?;
     remember_fakeignore(values.fake_ignore);
     Ok(values)
+}
+
+#[tauri::command]
+fn external_tools() -> tools::ExternalTools {
+    tools::installed()
+}
+
+#[tauri::command]
+fn program_exists(path: String) -> bool {
+    tools::program_exists(&path)
 }
 
 #[tauri::command]
@@ -1321,6 +1332,8 @@ pub fn run() {
             blame_file,
             load_settings,
             save_settings,
+            external_tools,
+            program_exists,
             watch_repository,
             open_terminal,
             clipboard_text,
