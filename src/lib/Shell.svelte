@@ -3977,6 +3977,16 @@
       await loadContext();
       row = find();
     }
+    // Old branches and tags sit deeper than the loaded page: widen the page until the ref
+    // shows up or the history runs out.
+    const ceiling = 100_000;
+    while (!row && !historyFilter && logLimit < ceiling) {
+      const loaded = commitsLive.length;
+      logLimit = Math.min(logLimit * 2, ceiling);
+      await loadContext();
+      row = find();
+      if (commitsLive.length < logLimit || commitsLive.length === loaded) break;
+    }
     if (!row) {
       actionError = tr("chrome.refNotFound", { name });
       return;
