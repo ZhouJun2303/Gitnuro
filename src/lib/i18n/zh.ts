@@ -4,6 +4,11 @@ export const zh: Messages = {
   chrome: {
     open: "打开",
     workspace: "工作区",
+    workspaceConfigure: "配置…",
+    workspaceName: "工作区名称",
+    workspaceCreate: "新建工作区",
+    workspaceDefault: "默认",
+    refNotFound: "已加载的历史里没有找到 {name}，请加载更多提交后再试。",
     fetch: "获取",
     pull: "拉取",
     push: "推送",

@@ -4,6 +4,11 @@ export const en: Messages = {
   chrome: {
     open: "Open",
     workspace: "Workspace",
+    workspaceConfigure: "Configure…",
+    workspaceName: "Workspace name",
+    workspaceCreate: "New workspace",
+    workspaceDefault: "Default",
+    refNotFound: "{name} was not found in the loaded history. Load more commits and try again.",
     fetch: "Fetch",
     pull: "Pull",
     push: "Push",

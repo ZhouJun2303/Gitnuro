@@ -691,9 +691,23 @@ fn push_sign_off(out: &mut String, enabled: bool, format: &str) {
     }
 }
 
+/// For a merge commit (a stash is one too), the first parent to diff against.
+/// Plain `diff-tree` and `show` print nothing for such commits.
+fn merge_base_of(repo: &Path, id: &str) -> Option<String> {
+    let second = format!("{id}^2");
+    let output = run_output(repo, &["rev-parse", "--verify", "-q", &second]).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(format!("{id}^1"))
+}
+
 pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
     let id = check_rev(id)?;
-    let output = run(repo, &["diff-tree", "--no-commit-id", "--name-status", "-r", "-M", "--root", id])?;
+    let output = match merge_base_of(repo, id) {
+        Some(base) => run(repo, &["diff", "--name-status", "-r", "-M", &base, id])?,
+        None => run(repo, &["diff-tree", "--no-commit-id", "--name-status", "-r", "-M", "--root", id])?,
+    };
     let text = String::from_utf8_lossy(&output.stdout);
     let mut files = Vec::new();
     for line in text.lines() {
@@ -782,19 +796,25 @@ pub fn show_commit_file_with(repo: &Path, id: &str, path: &str, context: u32) ->
     let id = check_rev(id)?;
     let path = check_path(path)?;
     let unified = format!("--unified={}", context.min(1_000_000));
-    let output = run(
-        repo,
-        &[
-            "show",
-            "--no-ext-diff",
-            "--no-color",
-            &unified,
-            "--format=",
-            id,
-            "--",
-            path,
-        ],
-    )?;
+    let output = match merge_base_of(repo, id) {
+        Some(base) => run(
+            repo,
+            &["diff", "--no-ext-diff", "--no-color", &unified, &base, id, "--", path],
+        )?,
+        None => run(
+            repo,
+            &[
+                "show",
+                "--no-ext-diff",
+                "--no-color",
+                &unified,
+                "--format=",
+                id,
+                "--",
+                path,
+            ],
+        )?,
+    };
     Ok(parse_diff(path, false, &String::from_utf8_lossy(&output.stdout)))
 }
 

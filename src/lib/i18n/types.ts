@@ -4,6 +4,11 @@ export type Messages = {
   chrome: {
     open: string;
     workspace: string;
+    workspaceConfigure: string;
+    workspaceName: string;
+    workspaceCreate: string;
+    workspaceDefault: string;
+    refNotFound: string;
     fetch: string;
     pull: string;
     push: string;

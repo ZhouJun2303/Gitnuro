@@ -740,10 +740,7 @@
       ...settings.workspaces.map((workspace) => ({
         label: workspace.name,
         group: tr("chrome.workspace"),
-        run: () => {
-          settings.currentWorkspace = workspace.id;
-          void selectWorkspace();
-        },
+        run: () => void switchWorkspace(workspace.id),
       })),
       ...[...new Set([...repos, ...settings.recent])].map((path) => ({
         label: folderName(path),
@@ -3854,7 +3851,123 @@
     const tabs = workspace.openTabs.length > 0 ? [...workspace.openTabs] : [...workspace.repositories];
     repos = tabs;
     const path = tabs[Math.min(workspace.selectedTab, Math.max(0, tabs.length - 1))] ?? tabs[0];
-    if (path) await openRepo(path);
+    if (path) {
+      await openRepo(path);
+      return;
+    }
+    snapshot = null;
+    refs = null;
+    commitsLive = [];
+    selectedCommit = null;
+    mode = "error";
+    loadError = "";
+  }
+
+  const currentWorkspace = $derived(settings.workspaces.find((item) => item.id === settings.currentWorkspace) ?? null);
+
+  async function switchWorkspace(id: string) {
+    if (id === settings.currentWorkspace || busy) return;
+    settings = { ...settings, currentWorkspace: id };
+    await selectWorkspace();
+  }
+
+  async function createWorkspace(name: string) {
+    const label = name.trim();
+    if (!label) return;
+    let list = settings.workspaces;
+    if (list.length === 0 && repos.length > 0) {
+      list = [{
+        id: `ws-default-${Date.now()}`,
+        name: tr("chrome.workspaceDefault"),
+        repositories: [...repos],
+        openTabs: [...repos],
+        selectedTab: Math.max(0, repos.indexOf(snapshot?.path ?? "")),
+      }];
+    }
+    const id = `ws-${Date.now()}`;
+    settings = { ...settings, workspaces: [...list, { id, name: label, repositories: [], openTabs: [], selectedTab: 0 }], currentWorkspace: id };
+    await selectWorkspace();
+  }
+
+  function renameWorkspace(id: string, name: string) {
+    const label = name.trim();
+    if (!label) return;
+    settings = { ...settings, workspaces: settings.workspaces.map((item) => (item.id === id ? { ...item, name: label } : item)) };
+    void savePrefs(false);
+  }
+
+  async function deleteWorkspace(id: string) {
+    const rest = settings.workspaces.filter((item) => item.id !== id);
+    const wasCurrent = settings.currentWorkspace === id;
+    settings = { ...settings, workspaces: rest, currentWorkspace: wasCurrent ? (rest[0]?.id ?? "") : settings.currentWorkspace };
+    if (wasCurrent && rest[0]) await selectWorkspace();
+    else await savePrefs(false);
+  }
+
+  function workspaceItems(): MenuItem[] {
+    return [
+      ...settings.workspaces.map((item) => ({
+        label: item.name,
+        checked: item.id === settings.currentWorkspace,
+        disabled: busy,
+        run: () => void switchWorkspace(item.id),
+      })),
+      ...(settings.workspaces.length > 0 ? [{ label: "", sep: true }] : []),
+      { label: tr("chrome.workspaceConfigure"), run: () => { draft = ""; dialog = "workspace"; } },
+    ];
+  }
+
+  function scrollToCommit(id: string) {
+    const index = historyItems.findIndex((commit) => commit.id === id);
+    if (index < 0) return;
+    const view = historyEl?.clientHeight ?? 0;
+    const top = Math.max(0, index * rowCommit - Math.max(0, view / 2 - rowCommit));
+    historyTop = top;
+    historyEl?.scrollTo({ top });
+  }
+
+  function openHistory() {
+    section = "history";
+    reflogOn = false;
+    treeOn = false;
+  }
+
+  /** Select the commit a branch or tag points at in the history list. */
+  async function locateRef(name: string) {
+    if (mode !== "live") return;
+    openHistory();
+    if (commitQuery.trim()) commitQuery = "";
+    const find = () => historyItems.find((commit) => commit.refs.includes(name) && !commit.refs.includes("stash"));
+    let row = find();
+    if (!row && historyFilter) {
+      historyFilter = "";
+      await loadContext();
+      row = find();
+    }
+    if (!row && !allBranches) {
+      allBranches = true;
+      await loadContext();
+      row = find();
+    }
+    if (!row) {
+      actionError = tr("chrome.refNotFound", { name });
+      return;
+    }
+    await tick();
+    await selectCommit(row.id);
+    await tick();
+    scrollToCommit(row.id);
+  }
+
+  /** Show what a stash changed, using the stash commit against the commit it was taken from. */
+  async function locateStash(stash: { name: string; id?: string }) {
+    if (mode !== "live") return;
+    openHistory();
+    const id = stash.id || stash.name;
+    await tick();
+    await selectCommit(id);
+    await tick();
+    scrollToCommit(id);
   }
 
   function openRepoSettings() {
@@ -4179,7 +4292,16 @@
         }
         const workspace = settings.workspaces.find((item) => item.id === settings.currentWorkspace);
         if (workspace) {
-          repos = workspace.openTabs.length > 0 ? [...workspace.openTabs] : [...workspace.repositories];
+          const tabs = workspace.openTabs.length > 0 ? [...workspace.openTabs] : [...workspace.repositories];
+          repos = tabs;
+          const target = tabs[Math.min(workspace.selectedTab, Math.max(0, tabs.length - 1))] ?? tabs[0];
+          if (!target) {
+            mode = "error";
+            loadError = "";
+            return;
+          }
+          await openRepo(target);
+          if (snapshot) return;
         }
         const recent = settings.recent[0];
         if (!recent) {
@@ -4218,6 +4340,11 @@
     <button type="button" onclick={(event) => openBar(event, repositoryItems())}>{tr("chrome.repository")}</button>
     <button type="button" onclick={(event) => openBar(event, windowItems())}>{tr("chrome.window")}</button>
     <button type="button" onclick={(event) => openBar(event, helpItems())}>{tr("chrome.help")}</button>
+    <button class="workspace-btn" type="button" title={tr("chrome.workspace")} aria-label={tr("chrome.workspace")} aria-haspopup="menu" onclick={(event) => openBar(event, workspaceItems())}>
+      <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="13" height="13" rx="2"/><path d="M8 20h11a2 2 0 0 0 2-2V8"/></svg>
+      <span>{currentWorkspace?.name ?? tr("chrome.workspace")}</span>
+      <svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
   </nav>
   <header class="chrome">
     <div class="chrome-tools">
@@ -4531,7 +4658,7 @@
               ...commandItems("branch"),
             ])}
           >
-            <button class="file-select" type="button" title={branch.name} onclick={(event) => { if (event.ctrlKey || event.metaKey) compareWith = branch.name; sideSelected = `local:${branch.name}`; }} ondblclick={() => !branch.current && requestCheckout(branch.name)}>
+            <button class="file-select" type="button" title={branch.name} onclick={(event) => { sideSelected = `local:${branch.name}`; if (event.ctrlKey || event.metaKey) compareWith = branch.name; else void locateRef(branch.name); }} ondblclick={() => !branch.current && requestCheckout(branch.name)}>
               <span class="twist"></span>
               {@render glyph(branch.current ? "check" : "branch")}
               <span class="name">{pinnedHere.has(branch.name) ? "• " : ""}{group ? branch.name.slice(group.length + 1) : branch.name}</span>
@@ -4587,7 +4714,7 @@
                 { label: tr("menu.copyName"), run: () => copyText(`${remote.name}/${branch}`) },
               ])}
             >
-              <button class="file-select" type="button" title={`${remote.name}/${branch}`} onclick={() => (sideSelected = `${remoteKey}:${branch}`)} ondblclick={() => mutate({ action: "checkoutRemote", remote: remote.name, branch })}>
+              <button class="file-select" type="button" title={`${remote.name}/${branch}`} onclick={() => { sideSelected = `${remoteKey}:${branch}`; void locateRef(`${remote.name}/${branch}`); }} ondblclick={() => mutate({ action: "checkoutRemote", remote: remote.name, branch })}>
                 <span class="twist"></span>
                 {@render glyph("branch")}
                 <span class="name">{folder ? branch.slice(folder.length + 1) : branch}</span>
@@ -4661,7 +4788,7 @@
             { label: tr("menu.deleteRemoteTag"), disabled: mode !== "live" || !refs?.remotes[0], run: () => { const remote = refs?.remotes[0]?.name ?? ""; ask(tr("menu.deleteRemoteTag"), `${remote} ${tag.name}`, () => void mutate({ action: "deleteRemoteTag", remote, name: tag.name })); } },
             { label: tr("menu.copyName"), run: () => copyText(tag.name) },
           ])}>
-            <button class="file-select" type="button" title={tag.name} onclick={() => (sideSelected = `tag:${tag.name}`)} ondblclick={() => mode === "live" && mutate({ action: "checkout", name: tag.name })}><span class="twist"></span>{@render glyph("tag")}<span class="name">{tag.name}</span></button>
+            <button class="file-select" type="button" title={tag.name} onclick={() => { sideSelected = `tag:${tag.name}`; void locateRef(tag.name); }} ondblclick={() => mode === "live" && mutate({ action: "checkout", name: tag.name })}><span class="twist"></span>{@render glyph("tag")}<span class="name">{tag.name}</span></button>
           </div>
         {/each}
       {/if}
@@ -4677,7 +4804,7 @@
             { label: tr("menu.stashPatch"), disabled: mode !== "live", run: () => void mutate({ action: "stashPatch", name: stash.name }) },
             { label: tr("menu.stashBranch"), disabled: mode !== "live", run: () => { draft = ""; draftExtra = stash.name; dialog = "stashBranch"; } },
           ])}>
-            <button class="file-select" type="button" title={stash.name} onclick={() => (sideSelected = `stash:${stash.name}`)}><span class="twist"></span>{@render glyph("stash")}<span class="name">{stash.summary}</span></button>
+            <button class="file-select" type="button" title={stash.name} onclick={() => { sideSelected = `stash:${stash.name}`; void locateStash(stash); }}><span class="twist"></span>{@render glyph("stash")}<span class="name">{stash.summary}</span></button>
           </div>
           {/if}
         {/each}
@@ -4942,7 +5069,7 @@
             {#if shownCommits.length === 0}
               <p class="empty">{tr("chrome.noCommits")}</p>
             {:else}
-              <div class="commit-window" style:height="{shownCommits.length * rowCommit}px">
+              <div class="commit-window" style:height="{historyItems.length * rowCommit}px">
                 {#each historyRows as commit, index (commit.id)}
                   <div
                     class="commit-row virtual"
@@ -5738,9 +5865,10 @@
           else if (dialog === "submodule") void mutate({ action: "submoduleAdd", url: draft, path: draftExtra });
           else if (dialog === "worktree") void mutate({ action: "addWorktree", path: draft, branch: draftExtra });
           else if (dialog === "workspace") {
-            const id = `ws-${Date.now()}`;
-            settings = { ...settings, currentWorkspace: id, workspaces: [...settings.workspaces, { id, name: draft || "Workspace", repositories: repos, openTabs: repos, selectedTab: 0 }] };
-            void savePrefs();
+            if (draft.trim()) {
+              dialog = null;
+              await createWorkspace(draft);
+            }
           }
           else if (dialog === "resolve") void mutate({ action: "resolve", file: draft, side: draftExtra || "text", text: mergeResult });
           else if (dialog === "gitignore") void mutate({ action: "writeGitignore", text: draft });
@@ -6300,9 +6428,16 @@
           <input placeholder="Branch" bind:value={draftExtra} />
           <button class="commit" type="submit">Add</button>
         {:else if dialog === "workspace"}
-          <h2>New workspace</h2>
-          <input placeholder="Name" bind:value={draft} />
-          <button class="commit" type="submit">Create</button>
+          <h2>{tr("chrome.workspaceConfigure")}</h2>
+          {#each settings.workspaces as item (item.id)}
+            <div class="composer-row">
+              <input value={item.name} aria-label={tr("chrome.workspaceName")} onchange={(event) => renameWorkspace(item.id, event.currentTarget.value)} />
+              <span class="count" title={tr("chrome.manager")}>{item.repositories.length}</span>
+              <button class="text-button" type="button" onclick={() => void deleteWorkspace(item.id)}>{tr("menu.delete")}</button>
+            </div>
+          {/each}
+          <input placeholder={tr("chrome.workspaceName")} bind:value={draft} />
+          <button class="commit" type="submit">{tr("chrome.workspaceCreate")}</button>
         {:else if dialog === "resolve"}
           <h2>Resolve {draft}</h2>
           <div class="merge-grid">
@@ -8717,6 +8852,32 @@
   }
 
   .menubar button:hover { background: var(--selection); }
+
+  .menubar .workspace-btn {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 220px;
+  }
+
+  .menubar .workspace-btn span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .menubar .workspace-btn .line-icon {
+    width: 15px;
+    height: 15px;
+    flex: none;
+  }
+
+  .menubar .workspace-btn .caret {
+    width: 12px;
+    height: 12px;
+    opacity: 0.7;
+  }
 
   .tab.dirty .file-select::before {
     content: "";

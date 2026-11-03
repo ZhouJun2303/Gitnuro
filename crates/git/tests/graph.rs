@@ -82,3 +82,21 @@ fn branch_log_hides_other_branches() {
     let all = commit_log(&repo.path, 20).unwrap();
     assert!(all.iter().any(|commit| commit.summary == "only-other"), "{all:?}");
 }
+
+#[test]
+fn stash_commit_lists_its_changes() {
+    let repo = repo();
+    fs::write(repo.path.join("a.txt"), "one\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    repo.git(&["commit", "-m", "first"]);
+    fs::write(repo.path.join("a.txt"), "two\n").unwrap();
+    repo.git(&["stash", "push", "-m", "wip"]);
+
+    let refs = repository_refs(&repo.path).unwrap();
+    let stash = refs.stashes.first().expect("stash");
+    let files = commit_files(&repo.path, &stash.id).unwrap();
+    assert_eq!(files.len(), 1, "{files:?}");
+    assert_eq!(files[0].path, "a.txt");
+    let diff = awegit_git::show_commit_file(&repo.path, &stash.id, "a.txt").unwrap();
+    assert!(diff.lines.iter().any(|line| line.text.contains("two")), "{diff:?}");
+}
