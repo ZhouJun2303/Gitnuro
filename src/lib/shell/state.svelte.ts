@@ -1197,9 +1197,11 @@ export class ShellState {
   currentBranch = $derived(this.refs?.branches.find((branch) => branch.current) ?? null);
 
 
-  visibleTags = $derived(
-    (this.refs?.tags ?? []).filter((tag) => !this.refHidden(tag.name) && this.matchesQuery(tag.name, this.sideQuery)),
-  );
+  visibleTags = $derived.by(() => {
+    const rows = (this.refs?.tags ?? []).filter((tag) => !this.refHidden(tag.name) && this.matchesQuery(tag.name, this.sideQuery));
+    const order = new Map(orderRefNames(rows.map((tag) => tag.name)).map((name, index) => [name, index]));
+    return rows.slice().sort((a, b) => (order.get(a.name) ?? 0) - (order.get(b.name) ?? 0));
+  });
 
 
   navBack: Place[] = [];
@@ -2654,20 +2656,31 @@ export class ShellState {
 
   groupOpen(name: string) {
     const group = branchGroup(name);
-    const saved = this.refs?.expandedGroups ?? [];
-    if (!group || saved.length === 0) return true;
-    return saved.includes(group);
+    if (!group) return true;
+    if (this.sideQuery.trim() !== "") return true;
+    return (this.refs?.expandedGroups ?? []).includes(group);
   }
 
 
 
   toggleGroup(group: string) {
-    const groups = [...new Set(this.visibleBranches.map((branch) => branchGroup(branch.name)).filter(Boolean))];
     const saved = this.refs?.expandedGroups ?? [];
-    const current = saved.length === 0 ? groups : [...saved];
-    const next = current.includes(group) ? current.filter((item) => item !== group) : [...current, group];
-    const names = next.length === groups.length ? [] : next;
-    void this.mutate({ action: "setExpanded", names });
+    const next = saved.includes(group) ? saved.filter((item) => item !== group) : [...saved, group];
+    if (this.refs) this.refs = { ...this.refs, expandedGroups: next };
+    void this.mutate({ action: "setExpanded", names: next });
+  }
+
+
+
+  folderOpen(key: string) {
+    if (!key || this.sideQuery.trim() !== "") return true;
+    return (this.refs?.expandedGroups ?? []).includes(key);
+  }
+
+
+
+  toggleFolder(key: string) {
+    this.toggleGroup(key);
   }
 
 

@@ -173,13 +173,13 @@
             {@const folder = branchGroup(branch)}
             {@const folderKey = `${remoteKey}/${folder}`}
             {#if folder && folder !== branchGroup(remoteBranches[index - 1] ?? "") && remoteBranches.some((item) => branchGroup(item) === folder && shell.matchesQuery(item, shell.sideQuery))}
-              <button class="side nested deep" type="button" aria-expanded={shell.sideOpen(folderKey)} onclick={() => shell.toggleSide(folderKey)}>
-                <span class="twist">{@render chevron(shell.sideOpen(folderKey))}</span>
+              <button class="side nested deep" type="button" aria-expanded={shell.folderOpen(folderKey)} onclick={() => shell.toggleFolder(folderKey)}>
+                <span class="twist">{@render chevron(shell.folderOpen(folderKey))}</span>
                 {@render glyph("folder")}
                 <span class="name">{folder}</span>
               </button>
             {/if}
-            {#if shell.matchesQuery(branch, shell.sideQuery) && (!folder || shell.sideOpen(folderKey))}
+            {#if shell.matchesQuery(branch, shell.sideQuery) && (!folder || shell.folderOpen(folderKey))}
             <div
               class="side nested deep"
               class:deeper={!!folder}
@@ -260,15 +260,26 @@
       {/if}
       {@render sideHead("tags", shell.tr("chrome.tags"), shell.visibleTags.length)}
       {#if shell.sideOpen("tags")}
-        {#each shell.visibleTags as tag (tag.name)}
-          <div class="side nested" class:selected={shell.sideSelected === `tag:${tag.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
+        {#each shell.visibleTags as tag, index (tag.name)}
+          {@const group = branchGroup(tag.name)}
+          {@const tagFolder = group ? `tag:${group}` : ""}
+          {#if group && group !== branchGroup(shell.visibleTags[index - 1]?.name ?? "")}
+            <button class="side nested" type="button" aria-expanded={shell.folderOpen(tagFolder)} onclick={() => shell.toggleFolder(tagFolder)}>
+              <span class="twist">{@render chevron(shell.folderOpen(tagFolder))}</span>
+              {@render glyph("folder")}
+              <span class="name">{group}</span>
+            </button>
+          {/if}
+          {#if shell.folderOpen(tagFolder)}
+          <div class="side nested" class:deep={!!group} class:selected={shell.sideSelected === `tag:${tag.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.checkout"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "checkout", name: tag.name }) },
             { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), tag.name, () => void shell.mutate({ action: "deleteTag", name: tag.name })) },
             { label: shell.tr("menu.deleteRemoteTag"), disabled: shell.mode !== "live" || !shell.refs?.remotes[0], run: () => { const remote = shell.refs?.remotes[0]?.name ?? ""; shell.ask(shell.tr("menu.deleteRemoteTag"), `${remote} ${tag.name}`, () => void shell.mutate({ action: "deleteRemoteTag", remote, name: tag.name })); } },
             { label: shell.tr("menu.copyName"), run: () => shell.copyText(tag.name) },
           ])}>
-            <button class="file-select" type="button" title={tag.name} onclick={() => { shell.sideSelected = `tag:${tag.name}`; void shell.locateRef(tag.name); }} ondblclick={() => void shell.quickCheckout(tag.name)}><span class="twist"></span>{@render glyph("tag")}<span class="name">{tag.name}</span></button>
+            <button class="file-select" type="button" title={tag.name} onclick={() => { shell.sideSelected = `tag:${tag.name}`; void shell.locateRef(tag.name); }} ondblclick={() => void shell.quickCheckout(tag.name)}><span class="twist"></span>{@render glyph("tag")}<span class="name">{group ? tag.name.slice(group.length + 1) : tag.name}</span></button>
           </div>
+          {/if}
         {/each}
       {/if}
       {@render sideHead("stashes", shell.tr("chrome.stashes"), shell.refs?.stashes.length ?? (shell.mode === "sample" ? 1 : 0))}
