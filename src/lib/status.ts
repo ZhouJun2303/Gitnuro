@@ -273,9 +273,12 @@ export type WorkspaceRecord = {
   openTabs: string[];
   selectedTab: number;
   tabsSeeded?: boolean;
-  /** Fixed project-tab width for this workspace, in pixels. */
+  /** Count-based width kept with the workspace. The strip paints from `fillWorkspaceTabs` when dirty. */
   tabWidth?: number;
 };
+
+/** Narrowest project tab. Past this, the strip scrolls instead of shrinking further. */
+export const workspaceTabFloor = 96;
 
 /** Width to store for a workspace. More repositories get a narrower tab. */
 export function workspaceTabWidth(count: number) {
@@ -284,7 +287,23 @@ export function workspaceTabWidth(count: number) {
   if (count <= 4) return 168;
   if (count <= 8) return 140;
   if (count <= 12) return 112;
-  return 96;
+  return workspaceTabFloor;
+}
+
+/**
+ * Split `available` pixels across `count` tabs so the row is full.
+ * The last tab receives the leftover pixels. Below the floor, every tab stays
+ * at the floor and the strip scrolls.
+ */
+export function fillWorkspaceTabs(available: number, count: number) {
+  const n = Math.max(1, Math.trunc(count));
+  const space = Math.max(0, Math.trunc(available));
+  const share = Math.floor(space / n);
+  if (share < workspaceTabFloor) {
+    if (n === 1) return { width: space, extra: 0 };
+    return { width: workspaceTabFloor, extra: 0 };
+  }
+  return { width: share, extra: space - share * n };
 }
 
 export type CommandRecord = {

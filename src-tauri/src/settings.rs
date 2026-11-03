@@ -296,7 +296,7 @@ pub struct WorkspaceRecord {
     /// The workspace tabs already include every member repository.
     #[serde(default)]
     pub tabs_seeded: bool,
-    /// Fixed project-tab width in pixels. Set from how many repositories the workspace holds.
+    /// Count-based width kept in settings. The tab strip fills from the open repositories when its size or count is dirty.
     #[serde(default)]
     pub tab_width: u32,
 }

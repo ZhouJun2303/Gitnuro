@@ -201,6 +201,10 @@
     transition: background 120ms ease, color 120ms ease;
   }
 
+.tabs .tab:last-child {
+    width: calc(var(--tab-width, 220px) + var(--tab-extra, 0px));
+  }
+
 .tab.active {
     background: var(--elevated);
     color: var(--text);

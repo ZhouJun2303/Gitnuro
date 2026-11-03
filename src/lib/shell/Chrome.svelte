@@ -1,13 +1,75 @@
 <script lang="ts">
   import { getShell } from "./context";
-  import { workspaceTabWidth } from "../status";
+  import { fillWorkspaceTabs } from "../status";
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
   const shell = getShell();
-  const tabWidth = $derived(shell.currentWorkspace?.tabWidth || workspaceTabWidth(shell.currentWorkspace?.repositories.length || shell.currentWorkspace?.openTabs.length || 0));
+
+  /** Write tab width once per frame, and only after the count or the strip size is marked dirty. */
+  function fillTabs(node: HTMLElement, count: number) {
+    let current = Math.max(1, count);
+    let dirty = false;
+    let frame = 0;
+    let painted = "";
+    let misses = 0;
+
+    const flush = () => {
+      frame = 0;
+      if (!dirty) return;
+      if (!node.isConnected || node.clientWidth <= 0) {
+        dirty = true;
+        if (misses < 8) {
+          misses += 1;
+          frame = requestAnimationFrame(flush);
+        }
+        return;
+      }
+      dirty = false;
+      misses = 0;
+      if (node.closest(".vertical-tabs")) {
+        if (!painted) return;
+        node.style.removeProperty("--tab-width");
+        node.style.removeProperty("--tab-extra");
+        painted = "";
+        return;
+      }
+      const { width, extra } = fillWorkspaceTabs(node.clientWidth, current);
+      const next = `${width}:${extra}`;
+      if (next === painted) return;
+      painted = next;
+      node.style.setProperty("--tab-width", `${width}px`);
+      node.style.setProperty("--tab-extra", `${extra}px`);
+    };
+
+    const mark = () => {
+      dirty = true;
+      if (frame) return;
+      if (node.isConnected && node.clientWidth > 0) {
+        flush();
+        return;
+      }
+      frame = requestAnimationFrame(flush);
+    };
+
+    const observer = new ResizeObserver(mark);
+    observer.observe(node);
+    mark();
+    return {
+      update(next: number) {
+        const countNext = Math.max(1, next);
+        if (countNext === current) return;
+        current = countNext;
+        mark();
+      },
+      destroy() {
+        if (frame) cancelAnimationFrame(frame);
+        observer.disconnect();
+      },
+    };
+  }
 
 </script>
 
@@ -100,7 +162,7 @@
       </div>
     </div>
     <div class="chrome-tabs">
-      <div class="chrome-side tabs" style:--tab-width="{tabWidth}px">
+      <div class="chrome-side tabs" use:fillTabs={shell.repos.length}>
       {#each shell.repos as repo (repo)}
         {@const job = shell.jobs[shell.jobKey(repo)]}
         <div class="tab" role="group" class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} oncontextmenu={(event) => shell.openMenu(event, [
