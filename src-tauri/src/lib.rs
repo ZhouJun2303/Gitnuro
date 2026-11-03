@@ -297,6 +297,7 @@ fn commit_changes(
         String::new()
     };
     let peel = use_fakeignore();
+    let skip_hooks = skip_hooks.unwrap_or(false);
     let (result, log) = awegit_git::capture_output(|| {
         write_then_status(path, |repo| {
             if peel {
@@ -310,7 +311,8 @@ fn commit_changes(
                     amend,
                     sign_off,
                     sign_off_format,
-                    skip_hooks: skip_hooks.unwrap_or(false),
+                    skip_hooks,
+                    convention: !skip_hooks,
                 },
             )
         })

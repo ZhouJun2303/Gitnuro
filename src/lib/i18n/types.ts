@@ -63,6 +63,18 @@ export type Messages = {
     unstageAll: string;
     summary: string;
     description: string;
+    commitConvention: string;
+    commitType: string;
+    typeFeat: string;
+    typeFix: string;
+    typeDocs: string;
+    typeArt: string;
+    typeStyle: string;
+    typeRefactor: string;
+    typeTest: string;
+    typeChore: string;
+    typePerf: string;
+    typeRevert: string;
     amend: string;
     signOff: string;
     skipHooks: string;

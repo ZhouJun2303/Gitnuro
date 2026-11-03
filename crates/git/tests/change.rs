@@ -54,6 +54,7 @@ fn stage_commit_and_diff_round_trip() {
             sign_off: false,
             sign_off_format: String::new(),
             skip_hooks: false,
+            convention: false,
         },
     );
     assert!(error.is_err());
@@ -68,6 +69,7 @@ fn stage_commit_and_diff_round_trip() {
             sign_off: true,
             sign_off_format: String::new(),
             skip_hooks: false,
+            convention: false,
         },
     )
     .unwrap();
@@ -84,6 +86,56 @@ fn stage_rejects_a_path_outside_the_work_tree() {
     let repo = common::TempRepo::new();
     let error = stage_paths(&repo.path, &["../outside.txt".to_string()]).unwrap_err();
     assert!(error.to_string().contains("outside.txt"), "{error}");
+}
+
+#[test]
+fn editor_commit_requires_the_builtin_subject_and_drops_the_type_guide() {
+    let repo = common::TempRepo::new();
+    repo.git(&["init", "-b", "main"]);
+    repo.git(&["config", "core.autocrlf", "false"]);
+    repo.git(&["config", "commit.gpgsign", "false"]);
+    repo.git(&["config", "core.hooksPath", ".git/no-hooks"]);
+    repo.git(&["config", "user.name", "Test"]);
+    repo.git(&["config", "user.email", "test@example.com"]);
+    fs::write(repo.path.join("a.txt"), "one\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    repo.git(&["commit", "-m", "initial"]);
+    fs::write(repo.path.join("a.txt"), "two\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+
+    let rejected = commit(
+        &repo.path,
+        CommitRequest {
+            summary: "stage both".into(),
+            description: String::new(),
+            amend: false,
+            sign_off: false,
+            sign_off_format: String::new(),
+            skip_hooks: false,
+            convention: true,
+        },
+    );
+    assert!(rejected.unwrap_err().to_string().contains("不符合规范"));
+    assert!(repo.output(&["log", "-1", "--format=%s"]).contains("initial"));
+
+    commit(
+        &repo.path,
+        CommitRequest {
+            summary: "fix:keep the subject".into(),
+            description: "# 可用类型：\n# feat     新增功能\n\n说明为什么\n".into(),
+            amend: false,
+            sign_off: false,
+            sign_off_format: String::new(),
+            skip_hooks: false,
+            convention: true,
+        },
+    )
+    .unwrap();
+    let message = repo.output(&["log", "-1", "--format=%B"]);
+    assert!(message.contains("fix:keep the subject"), "{message}");
+    assert!(message.contains("说明为什么"), "{message}");
+    assert!(!message.contains("可用类型"), "{message}");
+    assert!(!message.contains("新增功能"), "{message}");
 }
 
 fn assert_has(snapshot: &awegit_git::StatusSnapshot, path: &str, kind: ChangeKind, staged: bool) {

@@ -794,6 +794,7 @@ fn skip_hooks_commits_past_a_failing_hook() {
             sign_off: false,
             sign_off_format: String::new(),
             skip_hooks: false,
+            convention: false,
         },
     );
     assert!(blocked.is_err(), "hook should reject the commit");
@@ -806,6 +807,7 @@ fn skip_hooks_commits_past_a_failing_hook() {
             sign_off: false,
             sign_off_format: String::new(),
             skip_hooks: true,
+            convention: false,
         },
     )
     .unwrap();

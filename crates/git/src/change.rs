@@ -19,6 +19,8 @@ pub struct CommitRequest {
     pub sign_off_format: String,
     /// When true, `git commit` gets `--no-verify` for this commit only.
     pub skip_hooks: bool,
+    /// Editor commits check the subject against the built-in commit-msg rule and drop `#` commentary.
+    pub convention: bool,
 }
 
 /// Stage the given work-tree paths, including new files.
@@ -60,7 +62,14 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
     if summary.is_empty() {
         return Err(Error::EmptySummary);
     }
-    let mut description = request.description.trim().to_string();
+    if request.convention && !commit_subject_allowed(summary) {
+        return Err(Error::Git(CONVENTION_ERROR.into()));
+    }
+    let mut description = if request.convention {
+        strip_commentary(&request.description)
+    } else {
+        request.description.trim().to_string()
+    };
     let mut git_signoff = false;
     if request.sign_off {
         let format = request.sign_off_format.trim();
@@ -99,6 +108,63 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
     } else {
         run(repo, &borrowed).map(|_| ())
     }
+}
+
+const COMMIT_TYPES: [&str; 10] = [
+    "feat", "fix", "docs", "art", "style", "refactor", "test", "chore", "perf", "revert",
+];
+
+const CONVENTION_ERROR: &str = "\
+ERROR: 提交信息不符合规范。
+允许格式: type:描述 或 type: 描述（冒号后空格可选）
+允许类型: feat|fix|docs|art|style|refactor|test|chore|perf|revert
+示例: feat: 新增挂机奖励结算逻辑";
+
+/// Same rule as the commit-msg hook: `type: description`, with an optional space after the colon.
+fn commit_subject_allowed(summary: &str) -> bool {
+    let Some((kind, rest)) = summary.split_once(':') else {
+        return false;
+    };
+    if !COMMIT_TYPES.contains(&kind) {
+        return false;
+    }
+    let rest = rest.trim_start_matches([' ', '\t', '\u{000B}', '\u{000C}', '\r']);
+    rest.chars().next().is_some_and(|ch| !ch.is_whitespace())
+}
+
+/// Drop git commentary (`#` lines) and the blank lines that only separated them.
+fn strip_commentary(text: &str) -> String {
+    let mut kept = Vec::new();
+    for line in text.lines() {
+        let line = line.trim_end_matches([' ', '\t']);
+        if line.trim_start().starts_with('#') {
+            continue;
+        }
+        kept.push(line);
+    }
+    while kept.first().is_some_and(|line| line.trim().is_empty()) {
+        kept.remove(0);
+    }
+    while kept.last().is_some_and(|line| line.trim().is_empty()) {
+        kept.pop();
+    }
+    let mut out = String::new();
+    let mut blank = false;
+    for line in kept {
+        if line.trim().is_empty() {
+            if blank {
+                continue;
+            }
+            blank = true;
+        } else {
+            blank = false;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(line);
+    }
+    out
 }
 
 fn sign_off_line(repo: &Path, format: &str) -> String {

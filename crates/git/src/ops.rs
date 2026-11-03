@@ -1016,6 +1016,7 @@ fn reword(repo: &Path, rev: &str, summary: &str) -> Result<(), Error> {
                 sign_off: false,
                 sign_off_format: String::new(),
                 skip_hooks: false,
+                convention: false,
             },
         )
     } else {
@@ -1269,6 +1270,7 @@ fn squash(repo: &Path, from: &str, to: &str, summary: &str) -> Result<(), Error>
             sign_off: false,
             sign_off_format: String::new(),
             skip_hooks: false,
+            convention: false,
         },
     )?;
     for id in later {
@@ -1981,14 +1983,34 @@ fn text_of(repo: &Path, args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
+/// Same text as `commit-template.txt`. Used when git has no `commit.template`.
+const BUILTIN_COMMIT_TEMPLATE: &str = "\
+feat: \n\
+\n\
+# 可用类型：\n\
+# feat     新增功能\n\
+# fix      修复 bug\n\
+# docs     仅修改文档/注释/配置说明\n\
+# art      美术资源新增或修改\n\
+# style    代码格式调整（不影响逻辑）\n\
+# refactor 重构（非新增功能、非修复 bug）\n\
+# test     测试相关改动\n\
+# chore    构建、工具、配置、流程调整\n\
+# perf     性能优化\n\
+# revert   回滚之前的提交\n";
+
 fn commit_template(repo: &Path) -> String {
     let configured = text_of(repo, &["config", "--get", "commit.template"]);
     let path = configured.trim();
-    if path.is_empty() {
-        return String::new();
+    if !path.is_empty() {
+        let full = if Path::new(path).is_absolute() { PathBuf::from(path) } else { repo.join(path) };
+        if let Ok(text) = std::fs::read_to_string(full) {
+            if !text.trim().is_empty() {
+                return text;
+            }
+        }
     }
-    let full = if Path::new(path).is_absolute() { PathBuf::from(path) } else { repo.join(path) };
-    std::fs::read_to_string(full).unwrap_or_default()
+    BUILTIN_COMMIT_TEMPLATE.to_string()
 }
 
 fn activity(repo: &Path) -> (Vec<u32>, Vec<u32>) {

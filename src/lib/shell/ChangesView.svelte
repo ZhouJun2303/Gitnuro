@@ -1,12 +1,83 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { getShell } from "./context";
   import "./ChangesView.css";
   import SplitHandle from "../SplitHandle.svelte";
   import DiffPane from "./DiffPane.svelte";
   import type { Row, SearchKey, Side } from "./types";
+  import { COMMIT_TYPES, commitTypeColor, typeMessageKey, type CommitType } from "./commitMessage";
 
   const shell = getShell();
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
+  let typeOpen = $state(false);
+
+  function pickType(type: CommitType) {
+    shell.commitType = type;
+    shell.fitSummary();
+    typeOpen = false;
+    queueMicrotask(() => document.querySelector<HTMLInputElement>(".composer .summary-input")?.focus());
+  }
+
+  async function moveType(step: number) {
+    const index = COMMIT_TYPES.indexOf(shell.commitType);
+    const next = COMMIT_TYPES[(index + step + COMMIT_TYPES.length) % COMMIT_TYPES.length];
+    shell.commitType = next;
+    shell.fitSummary();
+    await tick();
+    document.querySelector<HTMLElement>(".type-option.selected")?.scrollIntoView({ block: "nearest" });
+  }
+
+  function onTypeKey(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      typeOpen = false;
+      return;
+    }
+    if (!typeOpen && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      event.preventDefault();
+      typeOpen = true;
+      return;
+    }
+    if (!typeOpen) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      void moveType(event.key === "ArrowDown" ? 1 : -1);
+    }
+  }
+
+  function placeTypeMenu(node: HTMLElement) {
+    const place = () => {
+      const chip = document.querySelector<HTMLElement>(".composer .type-chip");
+      if (!chip) return;
+      const rect = chip.getBoundingClientRect();
+      const width = 280;
+      const gap = 6;
+      const spaceBelow = window.innerHeight - rect.bottom - gap - 8;
+      const spaceAbove = rect.top - gap - 8;
+      const openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+      node.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+      node.style.width = `${width}px`;
+      node.style.maxHeight = `${Math.max(120, Math.min(320, openUp ? spaceAbove : spaceBelow))}px`;
+      node.style.top = openUp ? `${Math.max(8, rect.top - gap - node.offsetHeight)}px` : `${rect.bottom + gap}px`;
+    };
+    place();
+    const frame = requestAnimationFrame(() => {
+      place();
+      node.querySelector(".selected")?.scrollIntoView({ block: "nearest" });
+    });
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return {
+      destroy() {
+        cancelAnimationFrame(frame);
+        window.removeEventListener("resize", place);
+        window.removeEventListener("scroll", place, true);
+      },
+    };
+  }
+
+  $effect(() => {
+    if (shell.busy) typeOpen = false;
+  });
 </script>
 
 <section class="changes-column" style:width="{shell.changesWidth}px">
@@ -73,7 +144,45 @@
 
         <form class="composer" style:height="{shell.composerHeight}px" onsubmit={(event) => { event.preventDefault(); void shell.submitCommit(false); }}>
           <div class="summary-line">
-            <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength="200" aria-invalid={shell.summaryTooLong} spellcheck={shell.settings.spellChecking === "enable"} />
+            <div class="type-picker" class:open={typeOpen}>
+              <button
+                class="type-chip"
+                type="button"
+                style:--type-color={commitTypeColor(shell.commitType)}
+                aria-label={shell.tr("chrome.commitType")}
+                aria-haspopup="listbox"
+                aria-expanded={typeOpen}
+                title={`${shell.commitType}: ${shell.tr(typeMessageKey(shell.commitType))}`}
+                disabled={shell.busy}
+                onclick={() => (typeOpen = !typeOpen)}
+                onkeydown={onTypeKey}
+              >
+                <span class="type-swatch" aria-hidden="true"></span>
+                <span class="type-name">{shell.commitType}</span>
+                <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+              {#if typeOpen}
+                <button class="type-dismiss" type="button" tabindex="-1" aria-label={shell.tr("chrome.close")} onclick={() => (typeOpen = false)}></button>
+                <div class="type-menu" role="listbox" aria-label={shell.tr("chrome.commitType")} use:placeTypeMenu>
+                  {#each COMMIT_TYPES as type (type)}
+                    <button
+                      class="type-option"
+                      class:selected={type === shell.commitType}
+                      type="button"
+                      role="option"
+                      aria-selected={type === shell.commitType}
+                      style:--type-color={commitTypeColor(type)}
+                      onclick={() => pickType(type)}
+                    >
+                      <span class="type-swatch" aria-hidden="true"></span>
+                      <span class="type-name">{type}</span>
+                      <span class="type-detail">{shell.tr(typeMessageKey(type))}</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+            <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength={shell.summaryRoom} aria-invalid={shell.summaryTooLong || (!shell.skipHooks && shell.summary.trim().length > 0 && !shell.summaryFitsConvention)} spellcheck={shell.settings.spellChecking === "enable"} oninput={() => shell.normalizeSummary()} />
             <button
               class="suggest-message"
               class:long={shell.settings.aiPromptStyle === "long"}
@@ -88,7 +197,10 @@
               <span>{shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}</span>
             </button>
           </div>
-          <textarea class="guided composer-desc flex-fill" placeholder={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
+          {#if shell.summary.trim() && !shell.skipHooks && !shell.summaryFitsConvention}
+            <p class="convention-hint">{shell.tr("chrome.commitConvention")}</p>
+          {/if}
+          <textarea class="guided composer-desc flex-fill" class:guide-only={shell.descriptionIsGuide} placeholder={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
             <button class="text-button more" type="button" onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>

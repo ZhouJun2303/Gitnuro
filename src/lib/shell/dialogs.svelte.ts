@@ -21,9 +21,11 @@ import {
     type StatusSnapshot,
     type Suggestion,
     type UpdateNotice,
+    workspaceTabWidth,
   } from "../status";
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
 import type { ShellState } from "./state.svelte";
+import { alignCommitTemplate, isCommentary, withoutRepeatedSubject } from "./commitMessage";
 
 export async function selectPrefTab(shell: ShellState, tab: PrefTab) {
     shell.prefTab = tab;
@@ -105,14 +107,16 @@ export function showCommandFilter(shell: ShellState, next: "all" | "user" | "bac
 
 export async function fillFromMessage(shell: ShellState, text: string) {
     const [first, ...rest] = text.replace(/\r\n/g, "\n").split("\n");
-    shell.summary = (first ?? "").trim();
+    shell.applySubject(first ?? "");
     shell.description = rest.join("\n").replace(/^\n/, "").trim();
   }
 
 export async function fillTemplate(shell: ShellState) {
     const value = await shell.loadFacts(true);
-    if (shell.summary.trim() || shell.description.trim() || !value?.template.trim()) return;
-    await shell.fillFromMessage(value.template);
+    if (!value?.template.trim()) return;
+    const aligned = alignCommitTemplate(value.template);
+    if (!shell.summary.trim()) shell.applySubject(aligned.subject);
+    if (!shell.description.trim() || isCommentary(shell.description)) shell.description = aligned.description;
   }
 
 export function splitConflicts(shell: ShellState, working: string) {
@@ -322,8 +326,9 @@ export function quick(shell: ShellState, event: MouseEvent, dialogName: Dialog, 
 
 export async function submitCommit(shell: ShellState, pushAfter = false) {
     if (shell.mode !== "live" || !shell.canCommit) return;
-    const messageText = shell.summary.trim();
-    const value = await shell.runChange("commit_changes", { summary: shell.summary, description: shell.description, amend: shell.amend, signOff: shell.signOff, skipHooks: shell.skipHooks });
+    const messageText = shell.fullSummary.trim();
+    if (!messageText) return;
+    const value = await shell.runChange("commit_changes", { summary: messageText, description: shell.description, amend: shell.amend, signOff: shell.signOff, skipHooks: shell.skipHooks });
     if (value === undefined) return;
     const failed = value ? "" : (shell.actionError ?? "");
     shell.recordCommand("commit", { title: shell.tr("chrome.commandCommit", { name: messageText || "HEAD" }), command: shell.gitLine(["commit", "-m", messageText]) }, (value?.log ?? failed).trim(), !!value, "user");
@@ -334,6 +339,7 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
       shell.skipHooks = false;
       if (shell.snapshot?.path) shell.drafts.delete(shell.snapshot.path);
       await shell.loadContext();
+      void shell.fillTemplate();
       if (pushAfter || shell.settings.pushOnCommit) await shell.doPush();
     }
   }
@@ -437,8 +443,8 @@ export async function suggestMessage(shell: ShellState) {
     try {
       const value = await invoke<Suggestion>("suggest_commit_message", { path, style, language });
       if (shell.viewing(path)) {
-        shell.summary = value.summary;
-        shell.description = value.description;
+        shell.applySubject(value.summary);
+        shell.description = withoutRepeatedSubject(value.description, shell.commitType, shell.summary);
       }
     } catch (error) {
       if (shell.viewing(path)) shell.actionError = explainSuggest(shell, error);
@@ -909,10 +915,11 @@ export async function createWorkspace(shell: ShellState, name: string) {
         repositories: [...shell.repos],
         openTabs: [...shell.repos],
         selectedTab: Math.max(0, shell.repos.indexOf(shell.snapshot?.path ?? "")),
+        tabWidth: workspaceTabWidth(shell.repos.length),
       }];
     }
     const id = `ws-${Date.now()}`;
-    shell.settings = { ...shell.settings, workspaces: [...list, { id, name: label, repositories: [], openTabs: [], selectedTab: 0 }], currentWorkspace: id };
+    shell.settings = { ...shell.settings, workspaces: [...list, { id, name: label, repositories: [], openTabs: [], selectedTab: 0, tabWidth: workspaceTabWidth(0) }], currentWorkspace: id };
     await shell.selectWorkspace();
   }
 

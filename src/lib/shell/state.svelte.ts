@@ -8,6 +8,7 @@ import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog,
 import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
 import { resolveLocale, translate } from "../i18n";
+import { isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, orderRefNames, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
@@ -29,6 +30,7 @@ import {
     type StatusSnapshot,
     type Suggestion,
     type UpdateNotice,
+    workspaceTabWidth,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
@@ -175,6 +177,9 @@ export class ShellState {
 
 
   summary = $state("");
+
+
+  commitType = $state<CommitType>("feat");
 
 
   description = $state("");
@@ -755,7 +760,7 @@ export class ShellState {
   comparePair = $state<[string, string] | null>(null);
 
 
-  drafts = new Map<string, { summary: string; description: string }>();
+  drafts = new Map<string, { summary: string; description: string; commitType?: CommitType }>();
 
 
 
@@ -834,10 +839,22 @@ export class ShellState {
   messageLow = $derived(this.settings.messageLow > 0 ? this.settings.messageLow : 50);
 
 
-  summaryTooLong = $derived(this.summary.length > this.messageHigh);
+  summaryRoom = $derived(Math.max(1, 200 - this.commitType.length - 2));
 
 
-  summaryTone = $derived(this.summary.length > this.messageHigh ? "over" : this.summary.length >= this.messageLow && this.summary.length > 0 ? "warn" : "");
+  fullSummary = $derived(joinSubject(this.commitType, this.summary));
+
+
+  summaryTooLong = $derived(this.fullSummary.length > this.messageHigh);
+
+
+  summaryTone = $derived(this.fullSummary.length > this.messageHigh ? "over" : this.fullSummary.length >= this.messageLow && this.summary.trim().length > 0 ? "warn" : "");
+
+
+  summaryFitsConvention = $derived(subjectFitsConvention(this.fullSummary));
+
+
+  descriptionIsGuide = $derived(isCommentary(this.description));
 
 
   sampleRow(file: FileChange): Row {
@@ -926,6 +943,7 @@ export class ShellState {
 
   canCommit = $derived(
     this.summary.trim().length > 0 &&
+      (this.skipHooks || this.summaryFitsConvention) &&
       !this.summaryTooLong &&
       !this.busy &&
       !this.conflicted &&
@@ -1899,7 +1917,10 @@ export class ShellState {
       ...this.defaultSettings,
       ...value,
       recent: value.recent ?? [],
-      workspaces: value.workspaces ?? [],
+      workspaces: (value.workspaces ?? []).map((item) => ({
+        ...item,
+        tabWidth: item.tabWidth || workspaceTabWidth(item.repositories?.length || item.openTabs?.length || 0),
+      })),
       commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })),
       expandedGroups: value.expandedGroups ?? [],
       accounts: value.accounts ?? [],
@@ -1968,6 +1989,27 @@ export class ShellState {
     }
   }
 
+
+
+  applySubject(text: string) {
+    const split = splitSubject(text);
+    if (split.type) this.commitType = split.type;
+    this.summary = split.text;
+    this.fitSummary();
+  }
+
+
+  normalizeSummary() {
+    const split = splitSubject(this.summary);
+    if (!split.peeled) return;
+    if (split.type) this.commitType = split.type;
+    this.summary = split.text;
+  }
+
+
+  fitSummary() {
+    if (this.summary.length > this.summaryRoom) this.summary = this.summary.slice(0, this.summaryRoom);
+  }
 
 
   async fillFromMessage(text: string) {
@@ -2364,11 +2406,13 @@ export class ShellState {
     const workspaces = this.settings.workspaces.map((workspace) => {
       if (!currentId || workspace.id !== currentId) return workspace;
       const openTabs = workspace.openTabs.includes(path) ? workspace.openTabs : [...workspace.openTabs, path];
+      const repositories = workspace.repositories.includes(path) ? workspace.repositories : [...workspace.repositories, path];
       return {
         ...workspace,
-        repositories: workspace.repositories.includes(path) ? workspace.repositories : [...workspace.repositories, path],
+        repositories,
         openTabs,
         selectedTab: Math.max(0, openTabs.indexOf(path)),
+        tabWidth: workspaceTabWidth(repositories.length),
       };
     });
     this.settings = { ...this.settings, recent, workspaces };
@@ -2483,7 +2527,7 @@ export class ShellState {
     if (!this.inApp() || !path.trim()) return;
     const gen = ++this.openGen;
     this.focusPath = path;
-    if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description });
+    if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description, commitType: this.commitType });
     const running = (this.jobs[this.jobKey(path)]?.depth ?? 0) > 0;
     let stopAt = path;
     this.actionError = null;
@@ -2495,8 +2539,11 @@ export class ShellState {
       stopAt = value.path;
       this.applySnapshot(value);
       const saved = this.drafts.get(path) ?? this.drafts.get(value.path);
+      const savedType = saved?.commitType ?? "";
+      this.commitType = isCommitType(savedType) ? savedType : "feat";
       this.summary = saved?.summary ?? "";
       this.description = saved?.description ?? "";
+      this.normalizeSummary();
       this.historyFilter = "";
       await this.loadContext();
       if (gen !== this.openGen) return;
