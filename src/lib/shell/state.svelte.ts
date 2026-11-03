@@ -186,6 +186,7 @@ export class ShellState {
     checkoutStash: false,
     workspaceShowTitle: false,
     scanDepth: 5,
+    commitType: "feat",
   };
 
 
@@ -1999,6 +2000,8 @@ export class ShellState {
     if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
     if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
     if (this.settings.aiPromptStyle !== "long") this.settings = { ...this.settings, aiPromptStyle: "short" };
+    if (!isCommitType(this.settings.commitType)) this.settings = { ...this.settings, commitType: "feat" };
+    if (!this.snapshot && isCommitType(this.settings.commitType)) this.commitType = this.settings.commitType;
     const limit = Math.max(1, this.settings.maxCommits || 500);
     if (resetHistory || this.logLimit === 500) this.logLimit = limit;
     this.signOff = this.settings.signOff;
@@ -2057,9 +2060,22 @@ export class ShellState {
 
 
 
+  preferredCommitType(): CommitType {
+    return isCommitType(this.settings.commitType) ? this.settings.commitType : "feat";
+  }
+
+
+  rememberCommitType(type: CommitType) {
+    this.commitType = type;
+    if (this.settings.commitType === type) return;
+    this.settings = { ...this.settings, commitType: type };
+    void this.savePrefs(false);
+  }
+
+
   applySubject(text: string) {
     const split = splitSubject(text);
-    if (split.type) this.commitType = split.type;
+    if (split.type) this.rememberCommitType(split.type);
     this.summary = split.text;
     this.fitSummary();
   }
@@ -2068,7 +2084,7 @@ export class ShellState {
   normalizeSummary() {
     const split = splitSubject(this.summary);
     if (!split.peeled) return;
-    if (split.type) this.commitType = split.type;
+    if (split.type) this.rememberCommitType(split.type);
     this.summary = split.text;
   }
 
@@ -2601,15 +2617,19 @@ export class ShellState {
     try {
       const value = await invoke<StatusSnapshot>("workspace_status", { path });
       if (gen !== this.openGen) return;
+      // Reopening the repository already on screen keeps the message being written.
+      const staying = this.viewing(path) || this.viewing(value.path);
       this.aliasJob(path, value.path);
       stopAt = value.path;
       this.applySnapshot(value);
-      const saved = this.drafts.get(path) ?? this.drafts.get(value.path);
-      const savedType = saved?.commitType ?? "";
-      this.commitType = isCommitType(savedType) ? savedType : "feat";
-      this.summary = saved?.summary ?? "";
-      this.description = saved?.description ?? "";
-      this.normalizeSummary();
+      if (!staying) {
+        const saved = this.drafts.get(path) ?? this.drafts.get(value.path);
+        const savedType = saved?.commitType ?? "";
+        this.commitType = isCommitType(savedType) ? savedType : this.preferredCommitType();
+        this.summary = saved?.summary ?? "";
+        this.description = saved?.description ?? "";
+        this.normalizeSummary();
+      }
       this.historyFilter = "";
       await this.loadContext();
       if (gen !== this.openGen) return;

@@ -277,6 +277,9 @@ pub struct Settings {
     /// How deep a source folder is walked when looking for repositories.
     #[serde(default = "scan_depth_default")]
     pub scan_depth: u32,
+    /// Last commit-message type chosen in the composer.
+    #[serde(default = "commit_type_default")]
+    pub commit_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -413,6 +416,9 @@ fn max_commits_default() -> u32 {
 fn scan_depth_default() -> u32 {
     5
 }
+fn commit_type_default() -> String {
+    "feat".into()
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -538,6 +544,7 @@ impl Default for Settings {
             checkout_stash: false,
             workspace_show_title: false,
             scan_depth: scan_depth_default(),
+            commit_type: commit_type_default(),
         }
     }
 }
@@ -1237,6 +1244,12 @@ mod tests {
           }
         }"#;
         (serde_json::from_str(text).unwrap(), text.to_string())
+    }
+
+    #[test]
+    fn missing_commit_type_stays_feat() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.commit_type, "feat");
     }
 
     #[test]

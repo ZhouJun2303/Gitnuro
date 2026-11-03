@@ -15,7 +15,7 @@
   let typeOpen = $state(false);
 
   function pickType(type: CommitType) {
-    shell.commitType = type;
+    shell.rememberCommitType(type);
     shell.fitSummary();
     typeOpen = false;
     queueMicrotask(() => document.querySelector<HTMLInputElement>(".composer .summary-input")?.focus());
@@ -24,7 +24,7 @@
   async function moveType(step: number) {
     const index = COMMIT_TYPES.indexOf(shell.commitType);
     const next = COMMIT_TYPES[(index + step + COMMIT_TYPES.length) % COMMIT_TYPES.length];
-    shell.commitType = next;
+    shell.rememberCommitType(next);
     shell.fitSummary();
     await tick();
     document.querySelector<HTMLElement>(".type-option.selected")?.scrollIntoView({ block: "nearest" });

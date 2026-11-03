@@ -25,7 +25,7 @@ import {
   } from "../status";
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
 import type { ShellState } from "./state.svelte";
-import { alignCommitTemplate, isCommentary, withoutRepeatedSubject } from "./commitMessage";
+import { alignCommitTemplate, isCommentary, isCommitType, splitSubject, withoutRepeatedSubject } from "./commitMessage";
 
 export async function selectPrefTab(shell: ShellState, tab: PrefTab) {
     shell.prefTab = tab;
@@ -115,7 +115,8 @@ export async function fillTemplate(shell: ShellState) {
     const value = await shell.loadFacts(true);
     if (!value?.template.trim()) return;
     const aligned = alignCommitTemplate(value.template);
-    if (!shell.summary.trim()) shell.applySubject(aligned.subject);
+    // `feat:` with an empty subject is the template placeholder. Keep the chosen type.
+    if (!shell.summary.trim() && splitSubject(aligned.subject).text.trim()) shell.applySubject(aligned.subject);
     if (!shell.description.trim() || isCommentary(shell.description)) shell.description = aligned.description;
   }
 
@@ -478,7 +479,10 @@ export async function savePrefs(shell: ShellState, close = true) {
     const values = shell.settings;
     try {
       const saved = await invoke<Settings>("save_settings", { values });
-      if (ticket === shell.prefsSave) shell.settings = saved;
+      if (ticket === shell.prefsSave) {
+        const commitType = isCommitType(saved.commitType) ? saved.commitType : values.commitType;
+        shell.settings = isCommitType(commitType) ? { ...saved, commitType } : saved;
+      }
     } catch (error) {
       if (ticket === shell.prefsSave) shell.actionError = shell.message(error);
     }

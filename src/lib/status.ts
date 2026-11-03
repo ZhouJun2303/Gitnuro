@@ -246,6 +246,8 @@ export type Settings = {
   checkoutStash: boolean;
   workspaceShowTitle: boolean;
   scanDepth: number;
+  /** Last commit-message type chosen in the composer. */
+  commitType: string;
 };
 
 export type ForkImport = {
