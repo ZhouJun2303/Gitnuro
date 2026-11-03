@@ -101,7 +101,7 @@ export const commits: CommitRow[] = [
     summary: "feat: draw the side branch used by the graph",
     author: "Jun",
     when: "4 days ago",
-    badges: [],
+    badges: ["graph"],
     parents: ["66f02e1"],
     files: [{ path: "art/mark.png", kind: "M" }],
   },

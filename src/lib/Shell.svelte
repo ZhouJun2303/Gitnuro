@@ -12,7 +12,7 @@
   import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "./clonePath";
   import { resolveLocale, translate } from "./i18n";
   import { shortcut, shortcutLabel, typing } from "./keys";
-  import { branchGroup, changedRanges, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type SplitRow } from "./view";
+  import { branchGroup, changedRanges, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "./view";
   import {
     badge,
     type BlameLine,
@@ -1776,6 +1776,26 @@
     if (label.includes("/")) return "remote";
     if (/^v?\d/.test(label)) return "tag";
     return "local";
+  }
+
+  function branchRefLabels(labels: string[]) {
+    return labels.filter((label) => {
+      const kind = refKind(label);
+      return kind === "local" || kind === "remote";
+    });
+  }
+
+  function plainRefLabels(labels: string[]) {
+    return labels.filter((label) => {
+      const kind = refKind(label);
+      return kind !== "local" && kind !== "remote";
+    });
+  }
+
+  /** Color of the commit dot, so a branch chip matches the line it sits on. */
+  function laneTone(row: GraphCell[] | undefined) {
+    const node = row?.find((cell) => cell?.role.split(" ").includes("node"));
+    return node ? laneColors[node.color] : undefined;
   }
 
   function isCommitUnpushed(commit: { unpushed?: boolean; refs?: string[]; badges?: string[]; id?: string }) {
@@ -5207,6 +5227,7 @@
             {:else}
               <div class="commit-window" style:height="{historyItems.length * rowCommit}px">
                 {#each historyRows as commit, index (commit.id)}
+                  {@const tone = laneTone(liveGraph[historyStart + index])}
                   <div
                     class="commit-row virtual"
                     class:selected={selectedCommit === commit.id}
@@ -5237,10 +5258,13 @@
                         </i>
                       {/each}
                     </span>
+                    {@render branchChips(branchRefLabels(commit.refs), tone)}
                     <span class="subject">{@render linked(commit.summary)}</span>
-                    <span class="badges">
-                      {#each commit.refs as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
-                    </span>
+                    {#if plainRefLabels(commit.refs).length > 0}
+                      <span class="badges">
+                        {#each plainRefLabels(commit.refs) as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
+                      </span>
+                    {/if}
                     <span class="commit-side">
                       <span class="commit-author">
                         {#if settings.gravatar && commit.email}
@@ -5279,6 +5303,7 @@
               {/each}
             {:else}
               {#each sampleRows as commit, index (commit.id)}
+                {@const tone = laneTone(sampleGraph[index])}
                 <button class="commit-row" class:selected={selectedCommit === commit.id || selectedPath === commit.id} class:unpushed={isCommitUnpushed(commit)} type="button" onclick={() => selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? openMenu(event, [{ label: tr("menu.apply"), disabled: true }, { label: tr("menu.pop"), disabled: true }, { label: tr("menu.drop"), disabled: true }]) : openMenu(event, commitMenu(commit))}>
                   <span class="graph" aria-hidden="true">
                     {#each sampleGraph[index] ?? [] as cell, lane (`s-${commit.id}-${lane}`)}
@@ -5291,11 +5316,14 @@
                         {/if}
                       </i>
                     {/each}
-                  </span>
+                    </span>
+                  {@render branchChips(branchRefLabels(commit.badges), tone)}
                   <span class="subject">{@render linked(commit.summary)}</span>
-                  <span class="badges">
-                    {#each commit.badges as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
-                  </span>
+                  {#if plainRefLabels(commit.badges).length > 0}
+                    <span class="badges">
+                      {#each plainRefLabels(commit.badges) as label (label)}<span class="ref {refKind(label)}" class:compact={settings.compactBranchLabels}>{label}</span>{/each}
+                    </span>
+                  {/if}
                   <span class="commit-side">
                     <span class="commit-author">
                       <span class="avatar tile" style:background={avatarColor(commit.author || "?")}>{(commit.author || "?").slice(0, 1).toUpperCase()}</span>
@@ -5583,6 +5611,21 @@
           {/if}
         </button>
       </div>
+    {/snippet}
+
+    {#snippet branchChips(labels: string[], tone: string | undefined)}
+      {#if labels.length > 0}
+        <span class="lane-names">
+          {#each labels as label (label)}
+            <span class="lane-name" class:compact={settings.compactBranchLabels} style:--lane={tone ?? "var(--text-secondary)"} title={label}>
+              {#if refKind(label) === "remote"}
+                <svg class="lane-remote" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.2" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="6" cy="6" r="1.15" fill="currentColor"/></svg>
+              {/if}
+              <span>{label}</span>
+            </span>
+          {/each}
+        </span>
+      {/if}
     {/snippet}
 
     {#snippet linked(text: string)}
@@ -8185,6 +8228,41 @@
   .commit-row .subject { font-weight: 400; flex: 1; min-width: 0; }
 
   .badges { display: flex; gap: 4px; }
+  .lane-names {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: min(46%, 320px);
+  }
+  .lane-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 200px;
+    height: 18px;
+    padding: 0 6px;
+    border: 1px solid var(--lane);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--lane) 10%, var(--elevated));
+    color: var(--text);
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .lane-name.compact { max-width: 88px; }
+  .lane-name > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .lane-remote {
+    width: 11px;
+    height: 11px;
+    flex: none;
+    color: var(--lane);
+  }
 
   .ref {
     height: 16px;
@@ -8261,6 +8339,7 @@
   }
   .commit-row.unpushed .subject,
   .commit-row.unpushed .badges,
+  .commit-row.unpushed .lane-names,
   .commit-row.unpushed .commit-side {
     opacity: 0.65;
     transition: opacity 120ms ease;
@@ -8270,10 +8349,12 @@
   }
   .commit-row.unpushed:hover .subject,
   .commit-row.unpushed:hover .badges,
+  .commit-row.unpushed:hover .lane-names,
   .commit-row.unpushed:hover .commit-side,
   .commit-row.unpushed:hover .graph-cell.node::after,
   .commit-row.unpushed.selected .subject,
   .commit-row.unpushed.selected .badges,
+  .commit-row.unpushed.selected .lane-names,
   .commit-row.unpushed.selected .commit-side,
   .commit-row.unpushed.selected .graph-cell.node::after {
     opacity: 1;
