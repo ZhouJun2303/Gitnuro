@@ -10,7 +10,7 @@ import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl
 import { resolveLocale, translate } from "../i18n";
 import { isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
-import { branchGroup, changedRanges, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, orderRefNames, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, commitGraph, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, orderRefNames, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type BlameLine,
@@ -34,9 +34,11 @@ import {
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
-import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope } from "./history.svelte";
+import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
-import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
+import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError } from "./types";
+
+const initialErrors = readErrorLog();
 
 /** Histories up to this length are drawn in one pass. Longer ones continue across frames. */
 const GRAPH_SYNC_LIMIT = 1500;
@@ -146,6 +148,7 @@ export class ShellState {
     branchSpace: "-",
     pushOnCommit: false,
     compactBranchLabels: false,
+    errorLogDays: 7,
     messageLow: 50,
     messageHigh: 70,
     spellChecking: "disable",
@@ -239,7 +242,16 @@ export class ShellState {
   loadError = $state<string | null>(null);
 
 
-  actionError = $state<string | null>(null);
+  actionErrorText = $state<string | null>(null);
+
+  get actionError() {
+    return this.actionErrorText;
+  }
+
+  set actionError(value: string | null) {
+    this.actionErrorText = value;
+    if (value) this.noteError(this.tr("chrome.errorTitle"), value);
+  }
 
 
   jobs = $state<Record<string, RepoJob>>({});
@@ -391,7 +403,22 @@ export class ShellState {
   commandLogOpen = $state(false);
 
 
-  commandFilter = $state<"all" | "user" | "background">("all");
+  commandFilter = $state<CommandFilter>("all");
+
+
+  errorLog = $state<StoredError[]>(initialErrors);
+
+
+  errorSeq = initialErrors.reduce((max, item) => Math.max(max, item.id), 0);
+
+
+  unseenErrors = $state(0);
+
+
+  recentErrors = $derived.by(() => {
+    const cutoff = Date.now() - this.errorDays() * 86_400_000;
+    return this.errorLog.filter((item) => item.at >= cutoff);
+  });
 
 
   commandPick = $state(0);
@@ -507,6 +534,10 @@ export class ShellState {
 
 
   allBranches = $state(false);
+
+
+  /** Branch whose history is shown alone. Empty means the current branch and its upstream. */
+  graphSolo = $state<string | null>(null);
 
 
   commitQuery = $state("");
@@ -1370,12 +1401,8 @@ export class ShellState {
   filterNames = $derived.by(() => {
     if (this.historyFilter) return [this.historyFilter];
     if (this.allBranches) return [];
-    if (this.mode === "sample") return ["main", "origin/main"];
-    const current = this.refs?.branches.find((branch) => branch.current);
-    if (!current) return [];
-    const names = [current.name];
-    if (current.upstream && !names.includes(current.upstream)) names.push(current.upstream);
-    return names;
+    if (this.mode === "sample") return this.graphSolo ? [this.graphSolo] : ["main", "origin/main"];
+    return this.exactRefs();
   });
 
 
@@ -2005,12 +2032,79 @@ export class ShellState {
     };
     this.commandLog = [item, ...this.commandLog].slice(0, 80);
     if (!this.commandLogOpen) this.commandPick = item.id;
+    if (!ok) this.noteError(described.title, text || this.tr("chrome.commandFailed"), described.command);
   }
 
 
+  errorDays() {
+    const days = Number(this.settings.errorLogDays);
+    if (!Number.isFinite(days)) return 7;
+    return Math.min(90, Math.max(1, Math.round(days)));
+  }
+
+
+  noteError(title: string, text: string, command = "") {
+    const body = text.trim();
+    if (!body) return;
+    const latest = this.errorLog[0];
+    if (latest && Date.now() - latest.at < 2000 && (latest.text === body || latest.text.startsWith(body) || body.startsWith(latest.text))) {
+      if (body.length > latest.text.length || (command && !latest.command)) {
+        const revised = { ...latest, title: title || latest.title, text: body.length >= latest.text.length ? body : latest.text, command: command || latest.command, at: Date.now() };
+        this.errorLog = this.keptErrors([revised, ...this.errorLog.slice(1)]);
+        writeErrorLog(this.errorLog);
+      }
+      return;
+    }
+    const entry: StoredError = { id: ++this.errorSeq, at: Date.now(), title, text: body, command };
+    this.errorLog = this.keptErrors([entry, ...this.errorLog]);
+    writeErrorLog(this.errorLog);
+    if (!this.commandLogOpen) this.unseenErrors += 1;
+  }
+
+
+  keptErrors(items: StoredError[]) {
+    const cutoff = Date.now() - this.errorDays() * 86_400_000;
+    return items.filter((item) => item.at >= cutoff).slice(0, 200);
+  }
+
+
+  pruneErrorLog() {
+    const next = this.keptErrors(this.errorLog);
+    if (next.length !== this.errorLog.length) {
+      this.errorLog = next;
+      writeErrorLog(next);
+    }
+    if (next.length === 0) this.unseenErrors = 0;
+  }
+
+
+  copyNoted(text: string) {
+    if (!text) return;
+    this.copyText(text);
+    this.errorCopied = true;
+    window.setTimeout(() => (this.errorCopied = false), 1500);
+  }
+
 
   visibleCommands() {
+    if (this.commandFilter === "errors") {
+      return this.recentErrors.map((item) => ({
+        id: item.id,
+        title: item.title || this.tr("chrome.errorTitle"),
+        command: item.command,
+        output: item.text,
+        summary: this.commandExcerpt(item.text) || this.tr("chrome.commandFailed"),
+        ok: false,
+        at: item.at,
+        source: "user" as const,
+      }));
+    }
     return this.commandFilter === "all" ? this.commandLog : this.commandLog.filter((item) => item.source === this.commandFilter);
+  }
+
+
+  pickedCommand() {
+    return this.visibleCommands().find((item) => item.id === this.commandPick);
   }
 
 
@@ -2059,7 +2153,7 @@ export class ShellState {
 
 
 
-  showCommandFilter(next: "all" | "user" | "background") {
+  showCommandFilter(next: CommandFilter) {
     return showCommandFilter(this, next);
   }
 
@@ -2200,6 +2294,8 @@ export class ShellState {
     if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
     if (this.settings.aiPromptStyle !== "long") this.settings = { ...this.settings, aiPromptStyle: "short" };
     if (!isCommitType(this.settings.commitType)) this.settings = { ...this.settings, commitType: "feat" };
+    if (!this.settings.errorLogDays) this.settings = { ...this.settings, errorLogDays: 7 };
+    this.pruneErrorLog();
     if (!this.snapshot && isCommitType(this.settings.commitType)) this.commitType = this.settings.commitType;
     const limit = Math.max(1, this.settings.maxCommits || 500);
     if (resetHistory || this.logLimit === 500) this.logLimit = limit;
@@ -2647,6 +2743,31 @@ export class ShellState {
   /** Color of the commit dot, so a branch chip matches the line it sits on. */
   laneTone(row: GraphCell[] | undefined) {
     return laneTone(this, row);
+  }
+
+
+  activeLaneColor() {
+    return activeLaneColor(this);
+  }
+
+
+  exactRefs() {
+    return exactRefs(this);
+  }
+
+
+  soloBranch(name: string) {
+    return soloBranch(this, name);
+  }
+
+
+  toggleHistoryScope() {
+    return toggleHistoryScope(this);
+  }
+
+
+  clearHistoryFilter() {
+    return clearHistoryFilter(this);
   }
 
 
@@ -3105,8 +3226,7 @@ export class ShellState {
 
 
   showOnly(name: string) {
-    const names = (this.refs?.branches ?? []).map((branch) => branch.name).filter((item) => item !== name);
-    void this.mutate({ action: "setHidden", names });
+    this.soloBranch(name);
   }
 
 
@@ -4205,10 +4325,7 @@ export class ShellState {
       this.discardChosen(chosen.length > 1 && chosen.includes(this.selectedPath) ? chosen : [this.selectedPath]);
     } else if (action === "explorer" && this.snapshot) void this.openLocal(this.snapshot.path);
     else if (action === "terminal") void invoke("open_terminal", { path: this.repoPath() });
-    else if (action === "filterBranch") {
-      this.allBranches = !this.allBranches;
-      void this.loadContext();
-    } else if (action === "reopen") this.reopenClosed();
+    else if (action === "filterBranch") this.toggleHistoryScope(); else if (action === "reopen") this.reopenClosed();
     else if (action === "pastePatch") void this.pastePatch();
   }
 

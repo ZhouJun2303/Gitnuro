@@ -24,7 +24,7 @@ import {
     type UpdateNotice,
     workspaceTabWidth,
   } from "../status";
-import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
+import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
 import type { ShellState } from "./state.svelte";
 import { alignCommitTemplate, isCommentary, isCommitType, splitSubject, withoutRepeatedSubject } from "./commitMessage";
 
@@ -97,6 +97,9 @@ export function placeCommandLog(shell: ShellState) {
   }
 
 export function openCommandLog(shell: ShellState) {
+    shell.pruneErrorLog();
+    if (shell.unseenErrors > 0) shell.commandFilter = "errors";
+    shell.unseenErrors = 0;
     shell.seedSampleCommands();
     if (!shell.visibleCommands().some((item) => item.id === shell.commandPick)) shell.commandPick = shell.visibleCommands()[0]?.id ?? 0;
     shell.repoPickerOpen = false;
@@ -107,7 +110,7 @@ export function openCommandLog(shell: ShellState) {
     shell.commandLogOpen = true;
   }
 
-export function showCommandFilter(shell: ShellState, next: "all" | "user" | "background") {
+export function showCommandFilter(shell: ShellState, next: CommandFilter) {
     shell.commandFilter = next;
     if (!shell.visibleCommands().some((item) => item.id === shell.commandPick)) shell.commandPick = shell.visibleCommands()[0]?.id ?? 0;
   }

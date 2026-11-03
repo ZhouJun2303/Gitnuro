@@ -23,6 +23,17 @@
     padding: 0 8px;
   }
 
+.history .commit-row {
+    gap: 0;
+    background: transparent;
+  }
+
+.history .commit-row:hover,
+  .history .commit-row.selected,
+  .history .commit-row.selected:hover {
+    background: transparent;
+  }
+
 .commit-row.virtual {
     position: absolute;
     left: 0;
@@ -79,11 +90,38 @@
     color: var(--lane);
   }
 
-.graph { position: relative; display: flex; align-items: center; flex: none; height: 100%; overflow: visible; }
+.lane-name.quiet { opacity: 0.45; }
 
-.graph-cell { width: 12px; height: 100%; position: relative; flex: none; }
+.graph { position: relative; display: block; flex: none; height: 100%; overflow: visible; }
 
-.graph-cell.graph-past { position: absolute; top: 0; z-index: 0; }
+.graph-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+.graph-svg path {
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+.graph-svg path.dim,
+  .graph-node.dim { opacity: 0.45; }
+
+.graph-node {
+    position: absolute;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    margin-top: -4px;
+    border-radius: 50%;
+    z-index: 1;
+  }
 
 .commit-copy {
     flex: 1;
@@ -93,6 +131,8 @@
     gap: 8px;
     position: relative;
     z-index: 1;
+    height: 100%;
+    padding-left: 8px;
     background: var(--canvas);
   }
 
@@ -100,73 +140,6 @@
 
 .commit-row.selected .commit-copy,
   .commit-row.selected:hover .commit-copy { background: var(--selection); }
-
-.graph-cell.node::after {
-    content: "";
-    position: absolute;
-    left: 2px;
-    top: 50%;
-    width: 8px;
-    height: 8px;
-    margin-top: -4px;
-    border-radius: 50%;
-    background: currentColor;
-    z-index: 1;
-    transition: opacity 120ms ease;
-  }
-
-.graph-cell.line::before,
-  .graph-cell.line-up::before,
-  .graph-cell.line-down::before {
-    content: "";
-    position: absolute;
-    left: 5px;
-    width: 2px;
-  }
-
-.graph-cell.line::before {
-    top: -1px;
-    bottom: -1px;
-    background: currentColor;
-  }
-
-.graph-cell.line-up.line-down::before {
-    top: -1px;
-    bottom: -1px;
-    background: linear-gradient(
-      to bottom,
-      currentColor calc(50% - 3px),
-      transparent calc(50% - 3px),
-      transparent calc(50% + 3px),
-      currentColor calc(50% + 3px)
-    );
-  }
-
-.graph-cell.line-up:not(.line-down)::before {
-    top: -1px;
-    bottom: calc(50% + 3px);
-    background: currentColor;
-  }
-
-.graph-cell.line-down:not(.line-up)::before {
-    top: calc(50% + 3px);
-    bottom: -1px;
-    background: currentColor;
-  }
-
-.graph-cell.line-down:not(.node)::before {
-    content: none;
-  }
-
-.graph-curve {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 12px;
-    height: 100%;
-    overflow: visible;
-    pointer-events: none;
-  }
 
 .commit-row.unpushed .subject,
   .commit-row.unpushed .badges,
@@ -176,7 +149,7 @@
     transition: opacity 120ms ease;
   }
 
-.commit-row.unpushed .graph-cell.node::after {
+.commit-row.unpushed .graph-node:not(.dim) {
     opacity: 0.65;
   }
 
@@ -184,12 +157,12 @@
   .commit-row.unpushed:hover .badges,
   .commit-row.unpushed:hover .lane-names,
   .commit-row.unpushed:hover .commit-side,
-  .commit-row.unpushed:hover .graph-cell.node::after,
+  .commit-row.unpushed:hover .graph-node:not(.dim),
   .commit-row.unpushed.selected .subject,
   .commit-row.unpushed.selected .badges,
   .commit-row.unpushed.selected .lane-names,
   .commit-row.unpushed.selected .commit-side,
-  .commit-row.unpushed.selected .graph-cell.node::after {
+  .commit-row.unpushed.selected .graph-node:not(.dim) {
     opacity: 1;
   }
 

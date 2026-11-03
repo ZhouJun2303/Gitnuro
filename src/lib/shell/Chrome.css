@@ -152,7 +152,39 @@
     animation: busy-flow 1.3s linear infinite;
   }
 
+.history-btn { position: relative; }
+
 .history-btn.on { background: var(--hover); color: var(--text); }
+
+.history-btn.alert,
+  .history-btn.alert:hover:not(:disabled) {
+    background: var(--deleted, #d16464);
+    color: #fff;
+  }
+
+.history-btn.alert .error-count {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: #fff;
+    color: var(--deleted, #d16464);
+    font-style: normal;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    pointer-events: none;
+    animation: error-pop 280ms ease;
+  }
+
+@keyframes error-pop {
+    from { transform: scale(0.6); }
+    to { transform: scale(1); }
+  }
 
 .chrome-side {
     display: flex;
@@ -358,44 +390,6 @@
 .banner.unmerged {
     background: color-mix(in srgb, var(--modified) 14%, var(--canvas));
     color: var(--text);
-  }
-
-.error-toast {
-    position: fixed;
-    right: 16px;
-    bottom: 16px;
-    z-index: 60;
-    width: min(560px, calc(100vw - 32px));
-    max-height: min(50vh, 360px);
-    display: flex;
-    flex-direction: column;
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--deleted);
-    border-radius: var(--radius);
-    background: var(--elevated);
-    box-shadow: 0 10px 30px rgba(9, 9, 11, 0.22);
-    animation: dialog-in 160ms ease-out;
-  }
-
-.error-head {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 6px 8px 6px 12px;
-    color: var(--deleted);
-  }
-
-.error-head .spacer { flex: 1; }
-
-.error-body {
-    margin: 0;
-    padding: 0 12px 12px;
-    overflow: auto;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    font: 12px/1.5 var(--mono, ui-monospace, Consolas, monospace);
-    color: var(--text);
-    user-select: text;
   }
 
 .row-action {

@@ -40,6 +40,12 @@
             <path d="M12 5v14M5 12h14"/>
           {:else if kind === "gear"}
             <circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3V20.5M3.5 12h2.2M18.3 12h2.2M5.8 5.8l1.6 1.6M16.6 16.6l1.6 1.6M18.2 5.8l-1.6 1.6M7.4 16.6l-1.6 1.6"/>
+          {:else if kind === "pin"}
+            <path d="M9 3.5h6v6.2l2.2 2.1v2.2h-4.1L12 20.5l-1.1-6.5H6.8v-2.2L9 9.7z"/>
+          {:else if kind === "funnel"}
+            <path d="M4 5h16l-6.2 7.2V18l-3.6 2v-7.8z"/>
+          {:else if kind === "eye"}
+            <path d="M2.5 12S6.2 6.5 12 6.5 21.5 12 21.5 12 17.8 17.5 12 17.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.4"/>
           {/if}
         </svg>
       {/snippet}
@@ -76,13 +82,24 @@
       {/if}
       </div>
 
-      {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void; icon?: "add" }[] = [], empty = count === 0)}
+      {#snippet branchSwitches(name: string, canHide: boolean)}
+        <div class="side-actions branch-switches">
+          <button class="icon-btn" class:on={shell.pinnedHere.has(name)} type="button" title={shell.pinnedHere.has(name) ? shell.tr("menu.unpin") : shell.tr("menu.pin")} aria-pressed={shell.pinnedHere.has(name)} onclick={(event) => { event.stopPropagation(); shell.togglePin(name); }}>{@render glyph("pin")}</button>
+          <button class="icon-btn" class:on={shell.graphSolo === name} type="button" title={shell.tr("menu.showOnly")} aria-pressed={shell.graphSolo === name} onclick={(event) => { event.stopPropagation(); shell.soloBranch(name); }}>{@render glyph("funnel")}</button>
+          <button class="icon-btn" type="button" disabled={!canHide} title={shell.tr("menu.hide")} aria-label={shell.tr("menu.hide")} onclick={(event) => { event.stopPropagation(); if (canHide) shell.hideRef(name); }}>{@render glyph("eye")}</button>
+        </div>
+      {/snippet}
+
+      {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void; icon?: "add" }[] = [], empty = count === 0, filter = false)}
         <div class="side section" class:selected={shell.sideSelected === key} role="group">
           <button class="file-select" type="button" aria-expanded={shell.sideOpen(key)} onclick={() => shell.pickSide(key)}>
             <span class="twist">{@render chevron(shell.sideOpen(key))}</span>
             <span class="name">{label}</span>
             {#if count !== null && count > 0}<span class="count">{count}</span>{/if}
           </button>
+          {#if filter}
+            <button class="icon-btn section-filter" class:on={!shell.allBranches} type="button" title={shell.allBranches ? shell.tr("chrome.checkedOnly") : shell.tr("chrome.allBranches")} aria-pressed={!shell.allBranches} onclick={(event) => { event.stopPropagation(); shell.toggleHistoryScope(); }}>{@render glyph("funnel")}</button>
+          {/if}
           {#if actions.length > 0}
             <div class="side-actions">
               {#each actions as action (action.label)}
@@ -103,7 +120,7 @@
         {@render sideHead("branches", shell.tr("chrome.localBranches"), null, [
           { label: shell.tr("chrome.new"), icon: "add", run: () => { shell.draft = ""; shell.draftExtra = ""; shell.dialog = "branch"; } },
           { label: shell.tr("chrome.showAll"), run: shell.showAllRefs.bind(shell) },
-        ], shell.visibleBranches.length === 0)}
+        ], shell.visibleBranches.length === 0, true)}
         {#if shell.sideOpen("branches")}
         {#each shell.visibleBranches as branch, index (branch.name)}
           {@const group = branchGroup(branch.name)}
@@ -148,6 +165,7 @@
               {#if branch.ahead > 0}<span class="ahead">{branch.ahead}↑</span>{/if}
               {#if branch.behind > 0}<span class="ahead">{branch.behind}↓</span>{/if}
             </button>
+            {@render branchSwitches(branch.name, !branch.current && shell.mode === "live")}
           </div>
           {/if}
         {/each}
@@ -184,7 +202,7 @@
                 <span class="name">{folder}</span>
               </button>
             {/if}
-            {#if shell.matchesQuery(branch, shell.sideQuery) && (!folder || shell.folderOpen(folderKey))}
+            {#if shell.matchesQuery(branch, shell.sideQuery) && !shell.refHidden(`${remote.name}/${branch}`) && (!folder || shell.folderOpen(folderKey))}
             <div
               class="side nested deep"
               class:deeper={!!folder}
@@ -203,6 +221,7 @@
                 {@render glyph("branch")}
                 <span class="name">{folder ? branch.slice(folder.length + 1) : branch}</span>
               </button>
+              {@render branchSwitches(`${remote.name}/${branch}`, shell.mode === "live")}
             </div>
             {/if}
           {/each}
@@ -211,7 +230,7 @@
         {/each}
         {/if}
       {:else}
-        {@render sideHead("branches", shell.tr("chrome.localBranches"))}
+        {@render sideHead("branches", shell.tr("chrome.localBranches"), null, [], false, true)}
         {#if shell.sideOpen("branches") && shell.matchesQuery(shell.branchLabel, shell.sideQuery)}
         <div
           class="side nested current"
@@ -235,6 +254,7 @@
             <span class="name">{shell.branchLabel}</span>
             {#if shell.mode === "sample"}<span class="ahead">5↑</span>{/if}
           </button>
+          {@render branchSwitches(shell.branchLabel, false)}
         </div>
         {/if}
         {@render sideHead("remotes", shell.tr("chrome.remotes"))}
@@ -259,7 +279,14 @@
             { label: shell.tr("menu.deleteRemote"), run: () => shell.ask(shell.tr("menu.deleteRemote"), shell.tr("dialog.deleteRemoteBody", { name: "origin/main" }), () => {}) },
             { label: shell.tr("menu.copyName"), run: () => shell.copyText("origin/main") },
           ])}
-        ><button class="file-select" type="button" onclick={() => (shell.sideSelected = "remote:origin:main")}><span class="twist"></span>{@render glyph("branch")}<span class="name">main</span></button></div>
+        >
+          <button class="file-select" type="button" onclick={() => (shell.sideSelected = "remote:origin:main")}>
+            <span class="twist"></span>
+            {@render glyph("branch")}
+            <span class="name">main</span>
+          </button>
+          {@render branchSwitches("origin/main", false)}
+        </div>
         {/if}
         {/if}
       {/if}

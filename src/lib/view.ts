@@ -7,14 +7,41 @@ export type GraphCell = {
   role: string;
   /** Columns from this cell to the commit that opened the lane. Negative means that commit sits to the left. */
   forkDelta?: number;
-  mergeToLeft?: boolean;
+  /** Columns from this commit to the lane its first parent already occupies. Negative means that lane sits to the left. */
+  mergeDelta?: number;
 } | null;
 
-/** Branch curve from a commit `delta` columns away, turning into this column and running to the next row. */
-export function forkPath(delta: number): string {
-  const sx = 6 + delta * 12;
-  const mid = (sx + 6) / 2;
-  return `M ${sx} 14 C ${mid} 14, 6 16, 6 22 L 6 29`;
+export type GraphMark = { color: number; d: string };
+
+export type GraphDot = { color: number; x: number };
+
+/** Strokes for one commit row. The viewBox is `width` by 28, and lines run one pixel past each edge so rows meet. */
+export function rowGraph(row: GraphCell[]): { width: number; lines: GraphMark[]; curves: GraphMark[]; nodes: GraphDot[] } {
+  const lines: GraphMark[] = [];
+  const curves: GraphMark[] = [];
+  const nodes: GraphDot[] = [];
+  row.forEach((cell, index) => {
+    if (!cell) return;
+    const x = index * 12 + 6;
+    const roles = cell.role.split(" ");
+    const node = roles.includes("node");
+    const up = roles.includes("line-up");
+    const down = roles.includes("line-down");
+    const through = roles.includes("line");
+    if (through || (node && up && down)) lines.push({ color: cell.color, d: `M ${x} -1 L ${x} 29` });
+    else if (node && up) lines.push({ color: cell.color, d: `M ${x} -1 L ${x} 14` });
+    else if (node && down && cell.forkDelta === undefined) lines.push({ color: cell.color, d: `M ${x} 14 L ${x} 29` });
+    if (cell.forkDelta !== undefined) {
+      const sx = x + cell.forkDelta * 12;
+      curves.push({ color: cell.color, d: `M ${sx} 14 C ${sx} 22, ${x} 22, ${x} 29` });
+    }
+    if (cell.mergeDelta) {
+      const tx = x + cell.mergeDelta * 12;
+      curves.push({ color: cell.color, d: `M ${x} 14 C ${x} 22, ${tx} 22, ${tx} 29` });
+    }
+    if (node) nodes.push({ color: cell.color, x });
+  });
+  return { width: Math.max(row.length, 1) * 12, lines, curves, nodes };
 }
 
 export type GraphBuild = {
@@ -111,9 +138,7 @@ export function commitGraph(commits: { id: string; parents: string[] }[], resume
           color: index % laneColors.length,
           role: classes.join(" "),
         };
-        if (mergeTargetLane !== null && mergeTargetLane < lane) {
-          cell.mergeToLeft = true;
-        }
+        if (mergeTargetLane !== null) cell.mergeDelta = mergeTargetLane - lane;
         rowCells.push(cell);
       } else if (forkLanes.includes(index)) {
         rowCells.push({

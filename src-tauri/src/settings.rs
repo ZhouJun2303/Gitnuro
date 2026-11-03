@@ -163,6 +163,9 @@ pub struct Settings {
     pub push_on_commit: bool,
     #[serde(default)]
     pub compact_branch_labels: bool,
+    /// How many days of operation failures the command log keeps.
+    #[serde(default = "error_days")]
+    pub error_log_days: u32,
     #[serde(default = "low_limit")]
     pub message_low: u32,
     #[serde(default = "high_limit")]
@@ -395,6 +398,9 @@ fn dash() -> String {
 fn low_limit() -> u32 {
     50
 }
+fn error_days() -> u32 {
+    7
+}
 fn high_limit() -> u32 {
     70
 }
@@ -498,6 +504,7 @@ impl Default for Settings {
             branch_space: dash(),
             push_on_commit: false,
             compact_branch_labels: false,
+            error_log_days: error_days(),
             message_low: low_limit(),
             message_high: high_limit(),
             spell_checking: spell_off(),

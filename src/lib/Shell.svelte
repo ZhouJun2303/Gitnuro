@@ -18,7 +18,7 @@
   import PerfPanel from "./PerfPanel.svelte";
   import { cloneTarget, cloneUrl } from "./clonePath";
   import { shortcutLabel } from "./keys";
-  import { branchGroup, forkPath, gravatarUrl, laneColors, splitDiff, type SplitRow } from "./view";
+  import { branchGroup, gravatarUrl, laneColors, splitDiff, type SplitRow } from "./view";
   import { type UpdateNotice } from "./status";
   import type { MenuItem, Row, SearchKey, Side, TreeEntry } from "./shell/types";
 
@@ -257,6 +257,23 @@
     font-weight: 650;
   }
 
+.command-filters button.alert {
+    color: var(--deleted, #d16464);
+  }
+
+.command-filters button.alert.on {
+    color: var(--deleted, #d16464);
+    border-bottom-color: var(--deleted, #d16464);
+  }
+
+.command-filters button em {
+    margin-left: 4px;
+    font-style: normal;
+    font-weight: 650;
+  }
+
+.command-item.failed:not(.current) .title { color: var(--deleted, #d16464); }
+
 .command-items,
   .command-detail pre {
     overflow: auto;
@@ -489,17 +506,6 @@
   </div>
   {/if}
   {/if}
-  {#if shell.actionError}
-    <div class="error-toast" role="alert">
-      <div class="error-head">
-        <strong>{shell.tr("chrome.errorTitle")}</strong>
-        <span class="spacer"></span>
-        <button class="text-button" type="button" onclick={shell.copyError.bind(shell)}>{shell.errorCopied ? shell.tr("chrome.copied") : shell.tr("chrome.copyError")}</button>
-        <button class="text-button" type="button" aria-label={shell.tr("chrome.close")} onclick={shell.closeError.bind(shell)}>✕</button>
-      </div>
-      <pre class="error-body">{shell.actionError}</pre>
-    </div>
-  {/if}
 
   
 
@@ -546,17 +552,18 @@
   {/snippet}
 
   {#if shell.commandLogOpen}
-    {@const picked = shell.commandLog.find((item) => item.id === shell.commandPick)}
+    {@const picked = shell.pickedCommand()}
     <div class="command-log" style:left="{shell.commandPos.x}px" style:top="{shell.commandPos.y}px" style:width="{shell.commandPos.width}px" style:height="{shell.commandPos.maxHeight}px" role="dialog" aria-label={shell.tr("chrome.commandHistory")}>
       <div class="command-list">
         <div class="command-filters">
           <button type="button" class:on={shell.commandFilter === "all"} onclick={() => shell.showCommandFilter("all")}>{shell.tr("chrome.commandAll")}</button>
           <button type="button" class:on={shell.commandFilter === "user"} onclick={() => shell.showCommandFilter("user")}>{shell.tr("chrome.commandUser")}</button>
           <button type="button" class:on={shell.commandFilter === "background"} onclick={() => shell.showCommandFilter("background")}>{shell.tr("chrome.commandBackground")}</button>
+          <button type="button" class:on={shell.commandFilter === "errors"} class:alert={shell.recentErrors.length > 0} onclick={() => shell.showCommandFilter("errors")}>{shell.tr("chrome.commandErrors")}{#if shell.recentErrors.length > 0}<em>{shell.recentErrors.length}</em>{/if}</button>
         </div>
         <div class="command-items">
           {#each shell.visibleCommands() as item (item.id)}
-            <button class="command-item" class:current={item.id === shell.commandPick} type="button" onclick={() => (shell.commandPick = item.id)}>
+            <button class="command-item" class:current={item.id === shell.commandPick} class:failed={!item.ok} type="button" onclick={() => (shell.commandPick = item.id)}>
               <span class="title">{item.title}</span>
               <span class="time">{shell.commandClock(item.at)}</span>
               <span class="summary">{item.summary}</span>
@@ -571,8 +578,9 @@
           <header>
             <strong>{picked.title}</strong>
             <span>{picked.ok ? shell.tr("chrome.commandSucceeded") : shell.tr("chrome.commandFailed")} {shell.commandStamp(picked.at)}</span>
+            {#if !picked.ok}<button class="text-button" type="button" onclick={() => shell.copyNoted(picked.output)}>{shell.errorCopied ? shell.tr("chrome.copied") : shell.tr("chrome.copyError")}</button>{/if}
           </header>
-          <pre><strong>$ {picked.command}</strong>{#if picked.output}{"\n\n"}{picked.output}{/if}</pre>
+          <pre>{#if picked.command}<strong>$ {picked.command}</strong>{/if}{#if picked.output}{picked.command ? "\n\n" : ""}{picked.output}{/if}</pre>
         {:else}
           <p class="repo-empty">{shell.tr("chrome.commandEmpty")}</p>
         {/if}

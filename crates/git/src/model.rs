@@ -285,10 +285,8 @@ fn log_with(repo: &Path, limit: usize, all: bool, path: &[&str], revs: &[&str], 
         "--pretty=format:%H%x1f%P%x1f%an%x1f%ar%x1f%s%x1f%D%x1f%at%x1f%ae",
     ];
     if !revs.is_empty() {
+        // Named revisions only. Extra remote tips would walk the whole remote set.
         args.extend_from_slice(revs);
-        // Fetched remote-tracking branches belong on the graph even when the
-        // page is rooted at the current branch; otherwise a fork looks like a line.
-        args.push("--remotes");
     } else if path.is_empty() && all {
         // Branches and remotes, not `--all`: tags and notes would bury the tips.
         args.insert(1, "--branches");

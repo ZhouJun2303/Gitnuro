@@ -5,16 +5,13 @@
   import CommitDetail from "./CommitDetail.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { sampleReflog } from "../sample";
-  import { forkPath, gravatarUrl, laneColors, onVirtualScroll, padGraphRow, type GraphCell } from "../view";
+  import { gravatarUrl, laneColors, onVirtualScroll, padGraphRow, rowGraph, type GraphCell } from "../view";
   import type { Row, SearchKey } from "./types";
 
   const shell = getShell();
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const onHistoryScroll = onVirtualScroll((top) => (shell.historyTop = top));
-  const nodeLane = (row: GraphCell[]) => {
-    const index = row.findIndex((cell) => cell?.role.split(" ").includes("node"));
-    return index < 0 ? 0 : index;
-  };
+  const activeColor = $derived(shell.activeLaneColor());
 </script>
 
 <div class="history-stage flex-fill">
@@ -22,7 +19,7 @@
           {#if shell.filterNames.length > 0}
             <div class="filter-bar">
               <span>{shell.tr("chrome.filteredBy", { name: shell.filterNames.map((name) => `'${name}'`).join(", ") })}</span>
-              <button class="text-button" type="button" onclick={() => { shell.allBranches = true; shell.historyFilter = ""; void shell.loadContext(); }}>{shell.tr("chrome.clearFilter")}</button>
+              <button class="text-button" type="button" onclick={() => shell.clearHistoryFilter()}>{shell.tr("chrome.clearFilter")}</button>
             </div>
           {/if}
           <div class="pane-head">
@@ -82,7 +79,7 @@
                   >
                     {@render laneGraph(graphRow, commit.id)}
                     <span class="commit-copy">
-                      {@render branchChips(shell.branchRefLabels(commit.refs), tone)}
+                      {@render branchChips(shell.branchRefLabels(commit.refs), tone, activeColor)}
                       <span class="subject">{@render linked(commit.summary)}</span>
                       {#if shell.plainRefLabels(commit.refs).length > 0}
                         <span class="badges">
@@ -107,12 +104,6 @@
               </div>
             {/if}
           {:else}
-            {#if shell.filterNames.length > 0}
-              <div class="filter-bar">
-                <span>{shell.tr("chrome.filteredBy", { name: shell.filterNames.map((name) => `'${name}'`).join(", ") })}</span>
-                <button class="text-button" type="button" onclick={() => (shell.allBranches = true)}>{shell.tr("chrome.clearFilter")}</button>
-              </div>
-            {/if}
             {#if shell.repoStats}
               <div class="pane-head"><span class="meta">{shell.repoStats.lastSummary}</span></div>
             {/if}
@@ -135,7 +126,7 @@
                 <button class="commit-row" class:selected={shell.selectedCommit === commit.id || shell.selectedPath === commit.id} class:unpushed={shell.isCommitUnpushed(commit)} type="button" onclick={() => shell.selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
                   {@render laneGraph(graphRow, commit.id)}
                   <span class="commit-copy">
-                    {@render branchChips(shell.branchRefLabels(commit.badges), tone)}
+                    {@render branchChips(shell.branchRefLabels(commit.badges), tone, activeColor)}
                     <span class="subject">{@render linked(commit.summary)}</span>
                     {#if shell.plainRefLabels(commit.badges).length > 0}
                       <span class="badges">
@@ -172,26 +163,27 @@
       </div>
 
 {#snippet laneGraph(graphRow: GraphCell[], commitId: string)}
-      {@const nodeAt = nodeLane(graphRow)}
-      <span class="graph" style:width="{(nodeAt + 1) * 12}px" role="presentation" title={shell.tr("menu.fold")} onclick={(event) => { event.stopPropagation(); shell.toggleFold(commitId); }}>
-        {#each graphRow as cell, lane (`${commitId}-${lane}`)}
-          <i class="graph-cell {cell?.role ?? ""}" class:graph-past={lane > nodeAt} style:left={lane > nodeAt ? `${lane * 12}px` : undefined} style:color={cell ? laneColors[cell.color] : "transparent"}>
-            {#if cell?.forkDelta}
-              <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d={forkPath(cell.forkDelta)} fill="none" stroke="currentColor" stroke-width="2" /></svg>
-            {/if}
-            {#if cell?.mergeToLeft}
-              <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M 6 14 C 6 22, -6 28, -6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
-            {/if}
-          </i>
+      {@const drawn = rowGraph(graphRow)}
+      <span class="graph" style:width="{drawn.width}px" role="presentation" title={shell.tr("menu.fold")} onclick={(event) => { event.stopPropagation(); shell.toggleFold(commitId); }}>
+        <svg class="graph-svg" viewBox="0 0 {drawn.width} 28" preserveAspectRatio="none">
+          {#each drawn.lines as stroke, index (`${commitId}-l-${index}`)}
+            <path d={stroke.d} class:dim={activeColor !== null && stroke.color !== activeColor} stroke={laneColors[stroke.color]} />
+          {/each}
+          {#each drawn.curves as stroke, index (`${commitId}-c-${index}`)}
+            <path d={stroke.d} class:dim={activeColor !== null && stroke.color !== activeColor} stroke={laneColors[stroke.color]} />
+          {/each}
+        </svg>
+        {#each drawn.nodes as node, index (`${commitId}-n-${index}`)}
+          <i class="graph-node" class:dim={activeColor !== null && node.color !== activeColor} style:left="{node.x - 4}px" style:background={laneColors[node.color]}></i>
         {/each}
       </span>
     {/snippet}
 
-{#snippet branchChips(labels: string[], tone: string | undefined)}
+{#snippet branchChips(labels: string[], tone: string | undefined, active: number | null)}
       {#if labels.length > 0}
         <span class="lane-names">
           {#each labels as label (label)}
-            <span class="lane-name" class:compact={shell.settings.compactBranchLabels} style:--lane={tone ?? "var(--text-secondary)"} title={label}>
+            <span class="lane-name" class:compact={shell.settings.compactBranchLabels} class:quiet={active !== null && tone !== laneColors[active]} style:--lane={tone ?? "var(--text-secondary)"} title={label}>
               {#if shell.refKind(label) === "remote"}
                 <svg class="lane-remote" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.2" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="6" cy="6" r="1.15" fill="currentColor"/></svg>
               {/if}

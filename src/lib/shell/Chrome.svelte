@@ -108,8 +108,9 @@
       </div>
       <div class="chrome-identity">
         <div class="identity-floor" class:working={shell.workDepth > 0}>
-          <button class="icon-btn history-btn" class:on={shell.commandLogOpen} type="button" bind:this={shell.commandButton} title={shell.tr("chrome.commandHistory")} aria-label={shell.tr("chrome.commandHistory")} aria-expanded={shell.commandLogOpen} aria-haspopup="dialog" onclick={() => (shell.commandLogOpen ? (shell.commandLogOpen = false) : shell.openCommandLog())}>
+          <button class="icon-btn history-btn" class:on={shell.commandLogOpen} class:alert={shell.unseenErrors > 0} type="button" bind:this={shell.commandButton} title={shell.unseenErrors > 0 ? `${shell.tr("chrome.commandHistory")} (${shell.unseenErrors})` : shell.tr("chrome.commandHistory")} aria-label={shell.unseenErrors > 0 ? `${shell.tr("chrome.commandHistory")} (${shell.unseenErrors})` : shell.tr("chrome.commandHistory")} aria-expanded={shell.commandLogOpen} aria-haspopup="dialog" onclick={() => (shell.commandLogOpen ? (shell.commandLogOpen = false) : shell.openCommandLog())}>
             <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
+            {#if shell.unseenErrors > 0}<em class="error-count">{shell.unseenErrors > 99 ? "99+" : shell.unseenErrors}</em>{/if}
           </button>
           <div class="identity-copy">
             <strong>{shell.focusPath && !shell.viewing(shell.focusPath) ? shell.folderName(shell.focusPath) : shell.snapshot ? shell.folderName(shell.snapshot.path) : shell.mode === "sample" ? "AweGit" : shell.tr("chrome.welcomeTitle")}</strong>

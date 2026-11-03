@@ -1,7 +1,7 @@
 import { invoke } from "../perf";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
-import { branchGroup, changedRanges, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, commitGraph, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type BlameLine,

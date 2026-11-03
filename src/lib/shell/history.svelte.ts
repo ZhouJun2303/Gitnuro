@@ -1,7 +1,7 @@
 import { onMount, tick } from "svelte";
 import { invoke } from "../perf";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
-import { branchGroup, changedRanges, commitGraph, forkPath, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, commitGraph, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type BlameLine,
@@ -20,7 +20,31 @@ import {
     type Suggestion,
     type UpdateNotice,
   } from "../status";
+import type { StoredError } from "./types";
 import type { ShellState } from "./state.svelte";
+
+const ERROR_KEY = "awegit-errors";
+
+export function readErrorLog(): StoredError[] {
+    if (typeof localStorage === "undefined") return [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem(ERROR_KEY) ?? "[]") as unknown;
+      if (!Array.isArray(parsed)) return [];
+      return parsed.flatMap((item) => {
+        if (!item || typeof item !== "object") return [];
+        const row = item as Partial<StoredError>;
+        if (typeof row.at !== "number" || typeof row.text !== "string" || typeof row.id !== "number") return [];
+        return [{ id: row.id, at: row.at, title: typeof row.title === "string" ? row.title : "", text: row.text, command: typeof row.command === "string" ? row.command : "" }];
+      }).slice(0, 200);
+    } catch {
+      return [];
+    }
+  }
+
+export function writeErrorLog(items: StoredError[]) {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(ERROR_KEY, JSON.stringify(items.slice(0, 200)));
+  }
 
 export function currentFilterRefs(shell: ShellState) {
     const current = shell.refs?.branches.find((branch) => branch.current);
@@ -44,14 +68,15 @@ export async function loadCommits(shell: ShellState, path: string | undefined) {
       });
     }
     if (shell.historyFilter) return invoke<CommitRow[]>("file_history", { path, file: shell.historyFilter, limit: 200 });
-    if (!shell.allBranches && shell.currentFilterRefs().length > 0) {
+    const revs = shell.exactRefs();
+    if (!shell.allBranches && revs.length > 0) {
       try {
-        return await invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, order, revs: shell.currentFilterRefs() });
+        return await invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, order, revs });
       } catch {
         return invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, all: false, order });
       }
     }
-    return invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, all: shell.allBranches || shell.currentFilterRefs().length === 0, order });
+    return invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, all: shell.allBranches || revs.length === 0, order });
   }
 
 export async function loadContext(shell: ShellState) {
@@ -178,6 +203,59 @@ export function plainRefLabels(shell: ShellState, labels: string[]) {
 export function laneTone(shell: ShellState, row: GraphCell[] | undefined) {
     const node = row?.find((cell) => cell?.role.split(" ").includes("node"));
     return node ? laneColors[node.color] : undefined;
+  }
+
+function nodeColor(row: GraphCell[] | undefined) {
+    const node = row?.find((cell) => cell?.role.split(" ").includes("node"));
+    return node ? node.color : null;
+  }
+
+/** Lane color of the selected commit, or of the current branch tip when nothing is selected. */
+export function activeLaneColor(shell: ShellState): number | null {
+    const sample = shell.mode === "sample";
+    const rows = sample ? shell.sampleShownGraph.rows : shell.liveGraph.rows;
+    const items = sample ? shell.sampleShown : shell.historyItems;
+    let index = shell.selectedCommit ? items.findIndex((row) => row.id === shell.selectedCommit) : -1;
+    if (index < 0) {
+      if (sample) index = shell.sampleShown.findIndex((row) => row.badges.includes("main"));
+      else if (shell.currentBranch?.name) {
+        const name = shell.currentBranch.name;
+        index = shell.historyItems.findIndex((row) => row.refs.includes(name));
+      }
+    }
+    if (index < 0 || index >= rows.length) return null;
+    return nodeColor(rows[index]);
+  }
+
+/** Revisions the history should walk while “checked branches only” is on. */
+export function exactRefs(shell: ShellState): string[] {
+    const visible = (name: string, forced: boolean) => forced || !shell.refHidden(name);
+    if (shell.graphSolo) {
+      const names = [shell.graphSolo];
+      const local = shell.refs?.branches.find((branch) => branch.name === shell.graphSolo);
+      if (local?.upstream && !names.includes(local.upstream)) names.push(local.upstream);
+      return names.filter((name, index) => visible(name, index === 0));
+    }
+    return shell.currentFilterRefs().filter((name, index) => visible(name, index === 0));
+  }
+
+export function soloBranch(shell: ShellState, name: string) {
+    shell.graphSolo = shell.graphSolo === name ? null : name;
+    shell.allBranches = false;
+    if (shell.mode === "live") void shell.loadContext();
+  }
+
+export function toggleHistoryScope(shell: ShellState) {
+    shell.allBranches = !shell.allBranches;
+    if (shell.allBranches) shell.graphSolo = null;
+    if (shell.mode === "live") void shell.loadContext();
+  }
+
+export function clearHistoryFilter(shell: ShellState) {
+    shell.allBranches = true;
+    shell.graphSolo = null;
+    shell.historyFilter = "";
+    if (shell.mode === "live") void shell.loadContext();
   }
 
 export function isCommitUnpushed(shell: ShellState, commit: { unpushed?: boolean; refs?: string[]; badges?: string[]; id?: string }) {
@@ -560,8 +638,32 @@ export async function locateRef(shell: ShellState, name: string) {
     shell.openHistory();
     if (shell.commitQuery.trim()) shell.commitQuery = "";
     if (shell.historyFilter) shell.historyFilter = "";
-    shell.allBranches = true;
     shell.actionError = null;
+    if (!shell.allBranches) {
+      shell.graphSolo = name;
+      await shell.withWork(shell.tr("chrome.locating", { name }), async () => {
+        try {
+          const rows = await invoke<CommitRow[]>("commit_log", {
+            path: shell.repoPath(),
+            limit: shell.logLimit,
+            order: shell.settings.commitSort === "topo" ? "topo" : "date",
+            revs: shell.exactRefs(),
+          });
+          if (seq !== shell.locateSeq) return;
+          if (!shell.same(shell.commitsLive, rows)) shell.commitsLive = rows;
+          await tick();
+          const tip = rows.find((commit) => commit.refs.includes(name)) ?? rows[0];
+          if (!tip) return;
+          await shell.selectCommit(tip.id);
+          await tick();
+          shell.scrollToCommit(tip.id);
+        } catch (error) {
+          if (seq !== shell.locateSeq) return;
+          shell.actionError = shell.message(error);
+        }
+      });
+      return;
+    }
     await shell.withWork(shell.tr("chrome.locating", { name }), async () => {
       try {
         const found = await invoke<{ id: string; commits: CommitRow[] }>("locate_ref", {

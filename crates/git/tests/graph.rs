@@ -119,7 +119,7 @@ fn locate_ref_finds_a_branch_buried_under_later_commits() {
 }
 
 #[test]
-fn current_branch_log_still_draws_remote_forks() {
+fn named_revs_skip_unnamed_remotes() {
     let repo = repo();
     repo.git(&["commit", "--allow-empty", "-m", "base"]);
     repo.git(&["checkout", "-b", "fork"]);
@@ -129,6 +129,8 @@ fn current_branch_log_still_draws_remote_forks() {
     repo.git(&["checkout", "main"]);
     repo.git(&["branch", "-D", "fork"]);
     let rows = commits_from(&repo.path, 20, &["main".into()], false).unwrap();
-    let found = rows.iter().find(|commit| commit.id == tip).expect("remote fork tip");
+    assert!(rows.iter().all(|commit| commit.id != tip), "exact log included the unnamed remote");
+    let named = commits_from(&repo.path, 20, &["main".into(), "origin/fork".into()], false).unwrap();
+    let found = named.iter().find(|commit| commit.id == tip).expect("named remote tip");
     assert!(found.refs.iter().any(|name| name == "origin/fork"), "{:?}", found.refs);
 }

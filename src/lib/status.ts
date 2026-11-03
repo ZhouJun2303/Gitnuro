@@ -200,6 +200,7 @@ export type Settings = {
   branchSpace: string;
   pushOnCommit: boolean;
   compactBranchLabels: boolean;
+  errorLogDays: number;
   messageLow: number;
   messageHigh: number;
   spellChecking: string;

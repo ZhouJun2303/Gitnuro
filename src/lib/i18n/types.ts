@@ -50,6 +50,7 @@ export type Messages = {
     add: string;
     showAll: string;
     allBranches: string;
+    checkedOnly: string;
     fetchAll: string;
     filter: string;
     filterSidebar: string;
@@ -209,6 +210,7 @@ export type Messages = {
     commandAll: string;
     commandUser: string;
     commandBackground: string;
+    commandErrors: string;
     commandSucceeded: string;
     commandFailed: string;
     commandEmpty: string;
@@ -426,6 +428,7 @@ export type Messages = {
     branchSpace: string;
     pushOnCommit: string;
     compactLabels: string;
+    errorLogDays: string;
     lengthIndicator: string;
     lowLimit: string;
     highLimit: string;

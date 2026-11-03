@@ -64,10 +64,42 @@
   }
 
 .side.section:hover .side-actions,
-  .side.section:focus-within .side-actions {
+  .side.section:focus-within .side-actions,
+  .side.nested:hover .side-actions,
+  .side.nested:focus-within .side-actions {
     opacity: 1;
     pointer-events: auto;
   }
+
+.side.nested { position: relative; }
+
+.side.nested:hover:has(.branch-switches) .ahead,
+  .side.nested:focus-within:has(.branch-switches) .ahead { visibility: hidden; }
+
+.side.nested:hover:has(.branch-switches) .file-select,
+  .side.nested:focus-within:has(.branch-switches) .file-select { padding-right: 72px; }
+
+.branch-switches .icon-btn {
+    width: 22px;
+    height: 22px;
+  }
+
+.branch-switches .line-icon { width: 14px; height: 14px; }
+
+.branch-switches .icon-btn.on { color: var(--accent); }
+
+.section-filter {
+    position: absolute;
+    right: 4px;
+    top: 0;
+    height: 100%;
+    width: 28px;
+    color: var(--text-secondary);
+  }
+
+.section-filter.on { color: var(--accent); }
+
+.side.section:has(.section-filter) .side-actions { right: 32px; }
 
 .side.section:hover:has(.side-actions) .count,
   .side.section:focus-within:has(.side-actions) .count {

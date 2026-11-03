@@ -80,6 +80,16 @@ export type RepoEntry =
     | { kind: "folder"; path: string; name: string; repos: string[] }
     | { kind: "repo"; path: string };
 
+export type CommandFilter = "all" | "user" | "background" | "errors";
+
+export type StoredError = {
+    id: number;
+    at: number;
+    title: string;
+    text: string;
+    command: string;
+  };
+
 export type CommandEntry = {
     id: number;
     title: string;
