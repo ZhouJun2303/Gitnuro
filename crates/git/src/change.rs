@@ -1118,6 +1118,11 @@ fn blob_bytes(repo: &Path, rev: &str, path: &str) -> Result<Vec<u8>, Error> {
     Ok(output.stdout)
 }
 
+/// Bytes of `rev:path`, for saving a historical copy.
+pub fn revision_bytes(repo: &Path, rev: &str, path: &str) -> Result<Vec<u8>, Error> {
+    blob_bytes(repo, rev, path)
+}
+
 fn preview_from_bytes(bytes: &[u8]) -> Option<FilePreview> {
     if bytes.len() > 8_000_000 {
         return None;
@@ -1147,6 +1152,22 @@ pub fn launch_diff_tool(repo: &Path, template: &str, file: &str, staged: bool) -
     } else {
         std::fs::read(repo.join(path)).unwrap_or_default()
     };
+    let dir = tool_scratch();
+    let left = write_copy(&dir, "left", path, &left_bytes)?;
+    let right = write_copy(&dir, "right", path, &right_bytes)?;
+    let absolute = repo.join(path).display().to_string();
+    launch_template(repo, template, path, &[
+        ("{left}", &left),
+        ("{right}", &right),
+        ("{file}", &absolute),
+    ])
+}
+
+/// Diff two revisions of one path. A missing side is an empty file.
+pub fn launch_diff_pair(repo: &Path, template: &str, file: &str, left_rev: &str, right_rev: &str) -> Result<(), Error> {
+    let path = check_path(file)?;
+    let left_bytes = blob_bytes(repo, left_rev, path).unwrap_or_default();
+    let right_bytes = blob_bytes(repo, right_rev, path).unwrap_or_default();
     let dir = tool_scratch();
     let left = write_copy(&dir, "left", path, &left_bytes)?;
     let right = write_copy(&dir, "right", path, &right_bytes)?;

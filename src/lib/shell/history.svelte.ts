@@ -300,7 +300,17 @@ export async function showFileHistory(shell: ShellState, file: string) {
     shell.historyFilter = file;
     shell.section = "history";
     try {
-      shell.commitsLive = await invoke<CommitRow[]>("file_history", { path: shell.repoPath(), file, limit: 200 });
+      const rows = await invoke<CommitRow[]>("file_history", { path: shell.repoPath(), file, limit: 200 });
+      shell.commitsLive = rows;
+      shell.historyTop = 0;
+      const first = rows[0];
+      if (first) {
+        await shell.selectCommit(first.id);
+        if (shell.historyFilter === file) await shell.pickCommitFile(file);
+      } else {
+        shell.selectedCommit = null;
+        shell.historyDiff = null;
+      }
     } catch (error) {
       shell.actionError = shell.message(error);
     }

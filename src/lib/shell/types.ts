@@ -95,7 +95,7 @@ export type RepoJob = { label: string; percent: number | null; depth: number };
 
 export type PrefTab = "general" | "commit" | "git" | "integration" | "commands" | "updates";
 
-export type LaunchItem = { label: string; group: string; run: () => void };
+export type LaunchItem = { label: string; group: string; run: () => void; stay?: boolean };
 
 export type Place = {
     section: "changes" | "history";

@@ -21,7 +21,7 @@
 
 {#if shell.dialog}
     <div class="scrim" role="presentation" onclick={() => { if (shell.dialog === "prefs") void shell.savePrefs(true); else shell.dialog = null; }}>
-      <div class="dialog" class:wide={shell.dialog === "prefs" || shell.dialog === "resolve" || shell.dialog === "stats"} class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+      <div class="dialog" class:wide={shell.dialog === "prefs" || shell.dialog === "resolve" || shell.dialog === "stats"} class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
       <form
         onchange={() => { if (shell.dialog === "prefs") void shell.savePrefs(false); }}
         onsubmit={async (event) => {
@@ -429,15 +429,20 @@
           <button class="commit" type="submit">Add</button>
         {:else if shell.dialog === "workspace"}
           <h2>{shell.tr("chrome.workspaceConfigure")}</h2>
-          {#each shell.settings.workspaces as item (item.id)}
-            <div class="composer-row">
-              <input value={item.name} aria-label={shell.tr("chrome.workspaceName")} onchange={(event) => shell.renameWorkspace(item.id, event.currentTarget.value)} />
-              <span class="count" title={shell.tr("chrome.manager")}>{item.repositories.length}</span>
-              <button class="text-button" type="button" onclick={() => void shell.deleteWorkspace(item.id)}>{shell.tr("menu.delete")}</button>
-            </div>
-          {/each}
-          <input placeholder={shell.tr("chrome.workspaceName")} bind:value={shell.draft} />
-          <button class="commit" type="submit">{shell.tr("chrome.workspaceCreate")}</button>
+          <div class="workspace-list">
+            {#each shell.settings.workspaces as item (item.id)}
+              <div class="workspace-row" class:current={item.id === shell.settings.currentWorkspace}>
+                <span class="workspace-mark" aria-hidden="true"></span>
+                <input value={item.name} aria-label={shell.tr("chrome.workspaceName")} onchange={(event) => shell.renameWorkspace(item.id, event.currentTarget.value)} />
+                <span class="workspace-count" title={shell.tr("chrome.manager")}>{item.repositories.length}</span>
+                <button class="text-button workspace-delete" type="button" onclick={() => shell.ask(shell.tr("dialog.deleteWorkspace"), shell.tr("dialog.deleteWorkspaceBody", { name: item.name }), () => void shell.deleteWorkspace(item.id))}>{shell.tr("menu.delete")}</button>
+              </div>
+            {/each}
+          </div>
+          <div class="composer-row workspace-create">
+            <input placeholder={shell.tr("chrome.workspaceName")} bind:value={shell.draft} />
+            <button class="commit" type="submit">{shell.tr("chrome.workspaceCreate")}</button>
+          </div>
         {:else if shell.dialog === "resolve"}
           <h2>Resolve {shell.draft}</h2>
           <div class="merge-grid">

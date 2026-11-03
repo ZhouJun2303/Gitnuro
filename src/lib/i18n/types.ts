@@ -98,6 +98,8 @@ export type Messages = {
     reading: string;
     noCommits: string;
     findCommits: string;
+    fileHistory: string;
+    repositoryFiles: string;
     loadMore: string;
     selectFile: string;
     selectCommitFile: string;
@@ -300,12 +302,29 @@ export type Messages = {
     bareForce: string;
     popBlame: string;
     popHistory: string;
+    open: string;
+    showInExplorer: string;
+    resetFileTo: string;
+    stateAtCommit: string;
+    stateBeforeCommit: string;
+    blameTimeline: string;
+    showInTree: string;
+    saveAs: string;
+    copyFullPath: string;
+    copyRepoPath: string;
+    openSeparate: string;
+    revealMain: string;
+    copyCommitInfo: string;
+    resetAtCommit: string;
   };
   dialog: {
     confirm: string;
     cancel: string;
     deleteBranch: string;
     deleteBranchBody: string;
+    deleteWorkspace: string;
+    deleteWorkspaceBody: string;
+    restoreFileBody: string;
     discardBody: string;
     discardFilesBody: string;
     stashFiles: string;

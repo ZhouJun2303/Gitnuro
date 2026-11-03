@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "desk", "blame", "history"],
+  "windows": ["main", "desk", "blame", "history", "blob"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -83,6 +83,8 @@
     "allow-write-ssh-config",
     "allow-open-editor",
     "allow-open-window",
+    "allow-reveal-commit",
+    "allow-save-revision",
     "core:window:allow-inner-size",
     "core:window:allow-outer-position",
     "core:window:allow-scale-factor",

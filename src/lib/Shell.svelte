@@ -5,6 +5,8 @@
   import Sidebar from "./shell/Sidebar.svelte";
   import ChangesView from "./shell/ChangesView.svelte";
   import HistoryView from "./shell/HistoryView.svelte";
+  import FileHistoryPane from "./shell/FileHistoryPane.svelte";
+  import BlobPane from "./shell/BlobPane.svelte";
   import DialogHost from "./shell/DialogHost.svelte";
   import "./shell/common.css";
   import { ShellState } from "./shell/state.svelte";
@@ -365,8 +367,27 @@
     color: var(--text);
     font: inherit;
     font-size: 15px;
-    padding: 0 16px;
+    padding: 0 4px;
     outline: none;
+  }
+
+.palette-query {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+.palette-chip {
+    flex: none;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 6px;
+    background: var(--field);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 24px;
   }
 
 .palette-list {
@@ -417,6 +438,11 @@
 <PerfPanel />
 
 <div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.settings.diffFontSize || 13}px" style:--guide="{shell.settings.pageGuide || 72}">
+  {#if shell.standalone === "history"}
+    <FileHistoryPane />
+  {:else if shell.standalone === "blob"}
+    <BlobPane />
+  {:else}
   <Chrome />
 
   {#if !shell.snapshot && shell.mode !== "sample"}
@@ -461,9 +487,21 @@
     
   </div>
   {/if}
-  
+  {/if}
+  {#if shell.actionError}
+    <div class="error-toast" role="alert">
+      <div class="error-head">
+        <strong>{shell.tr("chrome.errorTitle")}</strong>
+        <span class="spacer"></span>
+        <button class="text-button" type="button" onclick={shell.copyError.bind(shell)}>{shell.errorCopied ? shell.tr("chrome.copied") : shell.tr("chrome.copyError")}</button>
+        <button class="text-button" type="button" aria-label={shell.tr("chrome.close")} onclick={shell.closeError.bind(shell)}>✕</button>
+      </div>
+      <pre class="error-body">{shell.actionError}</pre>
+    </div>
+  {/if}
 
   
+
   
   
   
@@ -629,15 +667,20 @@
   {#if shell.launchOpen}
     <div class="palette-scrim" role="presentation" onclick={() => shell.closeLaunch()}>
       <div class="palette" role="dialog" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
-        <input
-          class="palette-input"
-          placeholder={shell.tr("chrome.quickLaunch")}
-          aria-label={shell.tr("chrome.quickLaunch")}
-          bind:this={shell.launchEl}
-          bind:value={shell.launch}
-          oninput={() => (shell.launchIndex = 0)}
-          onkeydown={shell.onLaunchKey.bind(shell)}
-        />
+        <div class="palette-query">
+          {#if shell.launchMode === "files"}
+            <span class="palette-chip">{shell.tr("chrome.fileHistory")}</span>
+          {/if}
+          <input
+            class="palette-input"
+            placeholder={shell.launchMode === "files" ? shell.tr("chrome.repositoryFiles") : shell.tr("chrome.quickLaunch")}
+            aria-label={shell.tr("chrome.quickLaunch")}
+            bind:this={shell.launchEl}
+            bind:value={shell.launch}
+            oninput={() => (shell.launchIndex = 0)}
+            onkeydown={shell.onLaunchKey.bind(shell)}
+          />
+        </div>
         <div class="palette-list" bind:this={shell.launchList}>
           {#each shell.matches as item, index (`${item.group}-${item.label}`)}
             <button type="button" class:on={index === shell.launchIndex} onmouseenter={() => (shell.launchIndex = index)} onclick={() => shell.runLaunch(item)}>

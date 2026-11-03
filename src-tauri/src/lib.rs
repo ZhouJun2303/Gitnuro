@@ -1105,11 +1105,14 @@ struct LfsLockReport {
 }
 
 #[tauri::command]
-fn launch_tool(path: Option<String>, kind: String, file: String) -> Result<(), String> {
+fn launch_tool(path: Option<String>, kind: String, file: String, tool: Option<String>, left: Option<String>, right: Option<String>) -> Result<(), String> {
     let repo = repo_from(path)?;
     let values = settings::load()?;
     let result = if kind == "merge" {
         awegit_git::launch_merge_tool(&repo, &values.merge_tool, &file)
+    } else if let (Some(left), Some(right)) = (left.filter(|item| !item.is_empty()), right.filter(|item| !item.is_empty())) {
+        let template = tool.filter(|item| !item.trim().is_empty()).unwrap_or(values.diff_tool);
+        awegit_git::launch_diff_pair(&repo, &template, &file, &left, &right)
     } else {
         awegit_git::launch_diff_tool(&repo, &values.diff_tool, &file, false)
     };
@@ -1310,26 +1313,113 @@ fn open_editor(path: Option<String>, file: String, line: u32) -> Result<(), Stri
     Ok(())
 }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowNav {
+    view: String,
+    repo: String,
+    file: String,
+    rev: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct RevealCommit {
+    repo: String,
+    id: String,
+}
+
 #[tauri::command]
-fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>, file: Option<String>) -> Result<(), String> {
-    let label = match view.as_deref() {
-        Some("blame") => "blame",
-        Some("history") => "history",
+fn reveal_commit(app: tauri::AppHandle, repo: String, id: String) -> Result<(), String> {
+    app.emit("awegit-reveal", RevealCommit { repo, id }).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_revision(path: Option<String>, rev: String, file: String) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let bytes = awegit_git::revision_bytes(&repo, &rev, &file).map_err(|error| error.to_string())?;
+    let name = file.rsplit(['/', '\\']).next().filter(|item| !item.is_empty()).unwrap_or("file");
+    let Some(dest) = pick_save(name)? else {
+        return Ok(());
+    };
+    std::fs::write(dest, bytes).map_err(|error| error.to_string())
+}
+
+fn pick_save(name: &str) -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    {
+        let script = r#"
+Add-Type -AssemblyName System.Windows.Forms | Out-Null
+$dialog = New-Object System.Windows.Forms.SaveFileDialog
+$dialog.Filter = "All files (*.*)|*.*"
+$dialog.FileName = $env:AWEGIT_SAVE_NAME
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.FileName }
+"#;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-STA", "-Command", script])
+            .env("AWEGIT_SAVE_NAME", name)
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if err.is_empty() { "Could not open the save dialog.".into() } else { err });
+        }
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(if text.is_empty() { None } else { Some(text) });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+        let choose = format!("POSIX path of (choose file name default name \"{escaped}\")");
+        let output = std::process::Command::new("osascript")
+            .args(["-e", "try", "-e", &choose, "-e", "on error number -128", "-e", "\"\"", "-e", "end try"])
+            .output()
+            .map_err(|error| error.to_string())?;
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(if text.is_empty() { None } else { Some(text) });
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = name;
+        Err("This system has no save dialog.".into())
+    }
+}
+
+#[tauri::command]
+fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>, file: Option<String>, rev: Option<String>) -> Result<(), String> {
+    let view_name = view.unwrap_or_default();
+    let repo_name = repo.unwrap_or_default();
+    let file_name = file.unwrap_or_default();
+    let rev_name = rev.unwrap_or_default();
+    let label = match view_name.as_str() {
+        "blame" => "blame",
+        "history" => "history",
+        "blob" => "blob",
         _ => "desk",
     };
     if let Some(window) = app.get_webview_window(label) {
         let _ = window.set_focus();
+        if label == "history" || label == "blob" {
+            let _ = app.emit(
+                "awegit-navigate",
+                WindowNav { view: view_name, repo: repo_name, file: file_name, rev: rev_name },
+            );
+        }
         return Ok(());
     }
     let mut query = String::new();
-    if let Some(view) = view.as_deref() {
-        query.push_str(&format!("view={}&", encode_query(view)));
-    }
-    if let Some(repo) = repo.as_deref() {
-        query.push_str(&format!("repo={}&", encode_query(repo)));
-    }
-    if let Some(file) = file.as_deref() {
-        query.push_str(&format!("file={}", encode_query(file)));
+    for (key, value) in [("view", view_name.as_str()), ("repo", repo_name.as_str()), ("file", file_name.as_str()), ("rev", rev_name.as_str())] {
+        if value.is_empty() {
+            continue;
+        }
+        if !query.is_empty() {
+            query.push('&');
+        }
+        query.push_str(key);
+        query.push('=');
+        query.push_str(&encode_query(value));
     }
     let url = if query.is_empty() { "index.html".to_string() } else { format!("index.html?{query}") };
     let window = tauri::webview::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
@@ -1482,6 +1572,8 @@ pub fn run() {
             write_ssh_config,
             open_editor,
             open_window,
+            reveal_commit,
+            save_revision,
             log_client,
             perf_snapshot,
             open_log_folder

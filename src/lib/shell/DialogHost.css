@@ -154,3 +154,74 @@
 .dialog label.check.sync-indent {
     margin-left: 76px;
   }
+
+.dialog.workspace {
+    overflow: hidden;
+    width: 420px;
+  }
+
+.workspace-list {
+    max-height: min(272px, 46vh);
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: none;
+  }
+
+.workspace-row {
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 0 4px 0 8px;
+    border-radius: 8px;
+  }
+
+.workspace-row.current { background: var(--selection); }
+
+.workspace-mark {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: transparent;
+  }
+
+.workspace-row.current .workspace-mark { background: var(--accent); }
+
+.dialog.workspace .workspace-row input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+    height: 28px;
+    border-color: transparent;
+    background: transparent;
+    padding: 0 6px;
+    box-shadow: none;
+  }
+
+.dialog.workspace .workspace-row input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):hover,
+  .dialog.workspace .workspace-row input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus {
+    border-color: var(--line);
+    background: var(--canvas);
+    box-shadow: none;
+  }
+
+.workspace-count {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 9px;
+    background: var(--field);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 18px;
+    text-align: center;
+  }
+
+.workspace-delete {
+    height: 26px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+.workspace-create { margin-top: 4px; }

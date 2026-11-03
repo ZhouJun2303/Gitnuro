@@ -32,7 +32,7 @@ import {
     type UpdateNotice,
     workspaceTabWidth,
   } from "../status";
-import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu } from "./menus";
+import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
@@ -40,6 +40,12 @@ import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmA
 
 /** Histories up to this length are drawn in one pass. Longer ones continue across frames. */
 const GRAPH_SYNC_LIMIT = 1500;
+
+function standaloneView(): "" | "history" | "blob" {
+  if (typeof window === "undefined") return "";
+  const view = new URLSearchParams(window.location.search).get("view");
+  return view === "history" || view === "blob" ? view : "";
+}
 
 function sameValue(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
@@ -465,6 +471,30 @@ export class ShellState {
 
 
   launchIndex = $state(0);
+
+
+  launchMode = $state<"commands" | "files">("commands");
+
+
+  launchFiles = $state<string[]>([]);
+
+
+  standalone = $state<"" | "history" | "blob">(standaloneView());
+
+
+  blobFile = $state("");
+
+
+  blobRev = $state("");
+
+
+  blobText = $state("");
+
+
+  blobBinary = $state(false);
+
+
+  blobPreview = $state<FilePreview | null>(null);
 
 
   launchList = $state<HTMLElement | null>(null);
@@ -1054,14 +1084,15 @@ export class ShellState {
     if (this.commitNeedles?.rows !== rows) {
       this.commitNeedles = {
         rows,
-        text: rows.map((commit) => `${commit.summary}\n${commit.author}`.toLowerCase()),
+        text: rows.map((commit) => `${commit.summary}\n${commit.author}\n${commit.email ?? ""}\n${commit.refs.join("\n")}`.toLowerCase()),
       };
     }
     const text = this.commitNeedles.text;
+    const hex = /^[0-9a-f]{4,}$/.test(query);
     const matched: CommitRow[] = [];
     for (let index = 0; index < rows.length; index += 1) {
       const row = rows[index];
-      if (row && (text[index]?.includes(query) || row.shortId.startsWith(query))) matched.push(row);
+      if (row && (text[index]?.includes(query) || (hex && (row.id.startsWith(query) || row.shortId.startsWith(query))))) matched.push(row);
     }
     return matched;
   });
@@ -1325,6 +1356,20 @@ export class ShellState {
       const command = query.slice(1);
       return [{ label: command ? `! ${command}` : "!", group: action, run: () => this.mutate({ action: "custom", command }) }];
     }
+    if (this.launchMode === "files") {
+      const files: LaunchItem[] = [];
+      for (const path of this.launchFiles) {
+        if (query && !path.toLowerCase().includes(query)) continue;
+        const name = path.split("/").pop() || path;
+        files.push({
+          label: name,
+          group: path,
+          run: () => void invoke("open_window", { view: "history", repo: this.repoPath(), file: path }),
+        });
+        if (files.length >= 40) break;
+      }
+      return files;
+    }
     const items: LaunchItem[] = [
       { label: this.tr("chrome.fetch"), group: action, run: () => void this.doFetch() },
       { label: this.tr("chrome.fetchAll"), group: action, run: () => void this.mutate({ action: "fetch", remote: null, prune: this.settings.fetchPrune, tags: this.settings.fetchTags }) },
@@ -1365,6 +1410,7 @@ export class ShellState {
     ];
     if (this.mode === "live") {
       items.push(
+        { label: this.tr("chrome.fileHistory"), group: action, stay: true, run: () => { this.launchMode = "files"; this.launch = ""; this.launchIndex = 0; void this.loadLaunchFiles(); } },
         ...this.settings.commands.map((command) => ({ label: command.name, group: action, run: () => this.runCommand(command) })),
         ...(this.refs?.branches ?? []).map((branch) => ({
           label: `${this.tr("menu.checkout")} ${branch.name}`,
@@ -1418,6 +1464,75 @@ export class ShellState {
 
   async openLaunch() {
     return openLaunch(this);
+  }
+
+
+  async loadLaunchFiles() {
+    if (this.mode !== "live") {
+      this.launchFiles = [];
+      return;
+    }
+    try {
+      this.launchFiles = await invoke<string[]>("commit_tree", { path: this.repoPath(), rev: "HEAD" });
+    } catch (error) {
+      this.launchFiles = [];
+      this.actionError = this.message(error);
+    }
+  }
+
+
+  commitSearchEnter() {
+    const query = this.commitQuery.trim();
+    if (query.startsWith("S:") || query.startsWith("G:")) {
+      void this.searchContent(query[0] ?? "S", query.slice(2).trim());
+      return;
+    }
+    if (/^[0-9a-f]{4,}$/i.test(query) && this.shownCommits.length === 0) void this.locateRef(query);
+  }
+
+
+  revisionFileMenu(file: string): MenuItem[] {
+    return revisionFileMenu(this, file);
+  }
+
+
+  historyFileMenu(commit: CommitRow): MenuItem[] {
+    return historyFileMenu(this, commit);
+  }
+
+
+  async loadBlobPane() {
+    if (!this.blobFile) return;
+    try {
+      const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null }>("blob_view", { path: this.repoPath(), rev: this.blobRev || "HEAD", file: this.blobFile });
+      this.blobBinary = view.binary && !view.preview && !view.text;
+      this.blobPreview = view.preview;
+      this.blobText = view.text;
+      if (this.inApp()) await getCurrentWindow().setTitle(this.fileName(this.blobFile)).catch(() => {});
+    } catch (error) {
+      this.actionError = this.message(error);
+    }
+  }
+
+
+  async applyWindowNav(nav: { view: string; repo: string; file: string; rev: string }) {
+    const label = this.inApp() ? getCurrentWindow().label : "";
+    if (nav.view === "history") {
+      if (label && label !== "history") return;
+      this.standalone = "history";
+      if (nav.file) this.historyFilter = nav.file;
+      if (nav.repo && nav.repo !== this.repoPath()) await this.openRepo(nav.repo);
+      if (nav.file) await this.showFileHistory(nav.file);
+      return;
+    }
+    if (nav.view === "blob") {
+      if (label && label !== "blob") return;
+      this.standalone = "blob";
+      this.blobFile = nav.file;
+      this.blobRev = nav.rev;
+      if (nav.repo && nav.repo !== this.repoPath()) await this.openRepo(nav.repo);
+      await this.loadBlobPane();
+    }
   }
 
 
@@ -2641,7 +2756,7 @@ export class ShellState {
         this.description = saved?.description ?? "";
         this.normalizeSummary();
       }
-      this.historyFilter = "";
+      if (this.standalone !== "history") this.historyFilter = "";
       await this.loadContext();
       if (gen !== this.openGen) return;
       await this.loadDiff();
@@ -4135,6 +4250,8 @@ export class ShellState {
     let unprogress = () => {};
     let unmoved = () => {};
     let unresized = () => {};
+    let unnav = () => {};
+    let unreveal = () => {};
     let placeTimer = 0;
     let stopped = false;
     this.mode = "loading";
@@ -4151,7 +4268,7 @@ export class ShellState {
     this.adoptSettings(value);
     void invoke<string>("settings_path").then((path) => (this.settingsPath = path)).catch(() => {});
     await this.loadExternalTools();
-    if (value.windowWidth > 200 && value.windowHeight > 200) {
+    if (value.windowWidth > 200 && value.windowHeight > 200 && !this.standalone) {
     try {
     const win = getCurrentWindow();
     await win.setPosition(new LogicalPosition(value.windowX, value.windowY));
@@ -4173,6 +4290,7 @@ export class ShellState {
     /* the watcher is optional until a repository is open */
     }
     try {
+    if (!this.standalone) {
     const win = getCurrentWindow();
     const remember = () => {
     window.clearTimeout(placeTimer);
@@ -4180,17 +4298,38 @@ export class ShellState {
     };
     unmoved = await win.onMoved(remember);
     unresized = await win.onResized(remember);
+    }
     } catch {
     /* placement events are optional */
+    }
+    try {
+    unnav = await listen<{ view: string; repo: string; file: string; rev: string }>("awegit-navigate", (event) => {
+      void this.applyWindowNav(event.payload);
+    });
+    unreveal = await listen<{ repo: string; id: string }>("awegit-reveal", (event) => {
+      if (this.standalone) return;
+      const repo = event.payload?.repo;
+      const id = event.payload?.id;
+      if (!id || (repo && repo !== this.repoPath())) return;
+      void this.locateRef(id);
+    });
+    } catch {
+    /* navigation events are optional outside the desktop shell */
     }
     const params = new URLSearchParams(window.location.search);
     const queryRepo = params.get("repo");
     const queryFile = params.get("file");
     const queryView = params.get("view");
     if (queryRepo) {
+    if (queryView === "history" && queryFile) this.historyFilter = queryFile;
     await this.openRepo(queryRepo);
     if (queryView === "blame" && queryFile) await this.showBlame(queryFile);
     if (queryView === "history" && queryFile) await this.showFileHistory(queryFile);
+    if (queryView === "blob" && queryFile) {
+      this.blobFile = queryFile;
+      this.blobRev = params.get("rev") ?? "";
+      await this.loadBlobPane();
+    }
     return;
     }
     const workspace = this.settings.workspaces.find((item) => item.id === this.settings.currentWorkspace);
@@ -4232,6 +4371,8 @@ export class ShellState {
     unprogress();
     unmoved();
     unresized();
+    unnav();
+    unreveal();
     };
     });
   }

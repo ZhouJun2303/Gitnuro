@@ -8,6 +8,13 @@
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">
+    <script>
+      document.addEventListener("contextmenu", (event) => {
+        const target = event.target;
+        if (target instanceof Element && target.closest("input, textarea, [contenteditable='true']")) return;
+        event.preventDefault();
+      }, true);
+    </script>
     <div style="display: contents">%sveltekit.body%</div>
   </body>
 </html>

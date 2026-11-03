@@ -93,11 +93,11 @@
         <button class="tool-btn stack" type="button" disabled={shell.busy} onclick={() => shell.confirmSync("pull")} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: shell.mode !== "live", run: () => void shell.doPull() },
           { label: shell.tr("dialog.fastForward"), disabled: shell.mode !== "live", run: () => { shell.settings.pullRebase = false; void shell.doPull(); } },
-        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg><span>{shell.tr("chrome.pull")}{#if shell.currentBranch && shell.currentBranch.behind > 0} ↓{shell.currentBranch.behind}{/if}</span></button>
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg><span>{shell.tr("chrome.pull")}</span>{#if shell.currentBranch && shell.currentBranch.behind > 0}<em class="sync-count">{shell.currentBranch.behind}</em>{/if}</button>
         <button class="tool-btn stack" type="button" disabled={shell.busy} onclick={() => shell.confirmSync("push")} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: shell.mode !== "live", run: () => void shell.doPush() },
           { label: shell.tr("chrome.pushTags"), disabled: shell.mode !== "live", run: () => void shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease }) },
-        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg><span>{shell.tr("chrome.push")}{#if shell.currentBranch && shell.currentBranch.ahead > 0} ↑{shell.currentBranch.ahead}{/if}</span></button>
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg><span>{shell.tr("chrome.push")}</span>{#if shell.currentBranch && shell.currentBranch.ahead > 0}<em class="sync-count">{shell.currentBranch.ahead}</em>{/if}</button>
         <button class="tool-btn stack" type="button" disabled={shell.busy || shell.mode !== "live"} onclick={() => shell.openStash([])} oncontextmenu={(event) => shell.openMenu(event, shell.stashItems())}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
           <span>{shell.tr("chrome.stash")}</span>
@@ -230,16 +230,5 @@
       <button class="text-button" type="button" disabled={shell.busy} onclick={() => shell.mutate({ action: "abort" })}>{shell.tr("chrome.abort")}</button>
       <button class="text-button" type="button" disabled={shell.busy || shell.conflicted} onclick={() => { if (shell.progress === "rebase") { shell.draft = ""; shell.dialog = "continue"; } else void shell.mutate({ action: "continue" }); }}>{shell.tr("chrome.continueAction")}</button>
       <button class="text-button" type="button" disabled={shell.busy || shell.progress === "merge"} onclick={() => shell.mutate({ action: "skip" })}>{shell.tr("chrome.skip")}</button>
-    </div>
-  {/if}
-  {#if shell.actionError}
-    <div class="error-toast" role="alert">
-      <div class="error-head">
-        <strong>{shell.tr("chrome.errorTitle")}</strong>
-        <span class="spacer"></span>
-        <button class="text-button" type="button" onclick={shell.copyError.bind(shell)}>{shell.errorCopied ? shell.tr("chrome.copied") : shell.tr("chrome.copyError")}</button>
-        <button class="text-button" type="button" aria-label={shell.tr("chrome.close")} onclick={shell.closeError.bind(shell)}>✕</button>
-      </div>
-      <pre class="error-body">{shell.actionError}</pre>
     </div>
   {/if}

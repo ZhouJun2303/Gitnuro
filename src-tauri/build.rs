@@ -73,6 +73,8 @@ fn main() {
             "write_ssh_config",
             "open_editor",
             "open_window",
+            "reveal_commit",
+            "save_revision",
         ]),
     );
     tauri_build::try_build(attributes).expect("failed to run tauri-build");

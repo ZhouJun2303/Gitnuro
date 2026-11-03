@@ -79,9 +79,27 @@
     color: var(--lane);
   }
 
-.graph { display: flex; align-items: center; flex: none; height: 100%; }
+.graph { position: relative; display: flex; align-items: center; flex: none; height: 100%; overflow: visible; }
 
 .graph-cell { width: 12px; height: 100%; position: relative; flex: none; }
+
+.graph-cell.graph-past { position: absolute; top: 0; z-index: 0; }
+
+.commit-copy {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    z-index: 1;
+    background: var(--canvas);
+  }
+
+.commit-row:hover .commit-copy { background: var(--hover); }
+
+.commit-row.selected .commit-copy,
+  .commit-row.selected:hover .commit-copy { background: var(--selection); }
 
 .graph-cell.node::after {
     content: "";
@@ -174,10 +192,6 @@
   .commit-row.unpushed.selected .graph-cell.node::after {
     opacity: 1;
   }
-
-.drop-check { opacity: 0; }
-
-.commit-row:hover .drop-check, .drop-check:checked { opacity: 1; }
 
 .sha { font-family: var(--mono); }
 

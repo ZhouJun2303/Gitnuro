@@ -48,10 +48,11 @@ export function closeLaunch(shell: ShellState) {
     shell.launchOpen = false;
     shell.launch = "";
     shell.launchIndex = 0;
+    shell.launchMode = "commands";
   }
 
 export function runLaunch(shell: ShellState, item: LaunchItem) {
-    shell.closeLaunch();
+    if (!item.stay) shell.closeLaunch();
     item.run();
   }
 
@@ -73,6 +74,11 @@ export function onLaunchKey(shell: ShellState, event: KeyboardEvent) {
       event.preventDefault();
       event.stopPropagation();
       shell.closeLaunch();
+    } else if (event.key === "Backspace" && shell.launchMode === "files" && shell.launch === "") {
+      event.preventDefault();
+      event.stopPropagation();
+      shell.launchMode = "commands";
+      shell.launchIndex = 0;
     }
   }
 

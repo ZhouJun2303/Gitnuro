@@ -5,12 +5,16 @@
   import CommitDetail from "./CommitDetail.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { sampleReflog } from "../sample";
-  import { forkPath, gravatarUrl, laneColors, onVirtualScroll, padGraphRow } from "../view";
+  import { forkPath, gravatarUrl, laneColors, onVirtualScroll, padGraphRow, type GraphCell } from "../view";
   import type { Row, SearchKey } from "./types";
 
   const shell = getShell();
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const onHistoryScroll = onVirtualScroll((top) => (shell.historyTop = top));
+  const nodeLane = (row: GraphCell[]) => {
+    const index = row.findIndex((cell) => cell?.role.split(" ").includes("node"));
+    return index < 0 ? 0 : index;
+  };
 </script>
 
 <div class="history-stage flex-fill">
@@ -23,7 +27,7 @@
           {/if}
           <div class="pane-head">
             {#if shell.searchOpen.commit}
-              <input class="search" placeholder={shell.tr("chrome.findCommits")} aria-label={shell.tr("chrome.findCommits")} bind:this={shell.searchEl} bind:value={shell.commitQuery} use:focusOnMount onkeydown={(event) => { shell.searchKeys("commit", event); if (event.key === "Enter") { const query = shell.commitQuery.trim(); if (query.startsWith("S:") || query.startsWith("G:")) void shell.searchContent(query[0] ?? "S", query.slice(2).trim()); } }} onblur={() => shell.searchBlur("commit")} />
+              <input class="search" placeholder={shell.tr("chrome.findCommits")} aria-label={shell.tr("chrome.findCommits")} bind:this={shell.searchEl} bind:value={shell.commitQuery} use:focusOnMount onkeydown={(event) => { shell.searchKeys("commit", event); if (event.key === "Enter") shell.commitSearchEnter(); }} onblur={() => shell.searchBlur("commit")} />
             {:else}
               <span class="pane-title">{shell.tr("chrome.allCommits")}</span>
             {/if}
@@ -76,26 +80,16 @@
                     onkeydown={(event) => { if (event.key === "Enter") void shell.selectCommit(commit.id); }}
                     oncontextmenu={(event) => shell.openMenu(event, shell.commitMenu(commit))}
                   >
-                    <input class="drop-check" type="checkbox" checked={shell.drops.includes(commit.id)} aria-label={shell.tr("menu.drop")} onclick={(event) => event.stopPropagation()} onchange={() => shell.toggleDrop(commit.id)} />
-                    <span class="graph" role="presentation" title={shell.tr("menu.fold")} onclick={(event) => { event.stopPropagation(); shell.toggleFold(commit.id); }}>
-                      {#each graphRow as cell, lane (`${commit.id}-${lane}`)}
-                        <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}>
-                          {#if cell?.forkDelta}
-                            <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d={forkPath(cell.forkDelta)} fill="none" stroke="currentColor" stroke-width="2" /></svg>
-                          {/if}
-                          {#if cell?.mergeToLeft}
-                            <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M 6 14 C 6 22, -6 28, -6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
-                          {/if}
-                        </i>
-                      {/each}
+                    {@render laneGraph(graphRow, commit.id)}
+                    <span class="commit-copy">
+                      {@render branchChips(shell.branchRefLabels(commit.refs), tone)}
+                      <span class="subject">{@render linked(commit.summary)}</span>
+                      {#if shell.plainRefLabels(commit.refs).length > 0}
+                        <span class="badges">
+                          {#each shell.plainRefLabels(commit.refs) as label (label)}<span class="ref {shell.refKind(label)}" class:compact={shell.settings.compactBranchLabels}>{label}</span>{/each}
+                        </span>
+                      {/if}
                     </span>
-                    {@render branchChips(shell.branchRefLabels(commit.refs), tone)}
-                    <span class="subject">{@render linked(commit.summary)}</span>
-                    {#if shell.plainRefLabels(commit.refs).length > 0}
-                      <span class="badges">
-                        {#each shell.plainRefLabels(commit.refs) as label (label)}<span class="ref {shell.refKind(label)}" class:compact={shell.settings.compactBranchLabels}>{label}</span>{/each}
-                      </span>
-                    {/if}
                     <span class="commit-side">
                       <span class="commit-author">
                         {#if shell.settings.gravatar && commit.email}
@@ -137,25 +131,16 @@
                 {@const graphRow = padGraphRow(shell.sampleGraph.rows[index], shell.sampleGraph.width)}
                 {@const tone = shell.laneTone(graphRow)}
                 <button class="commit-row" class:selected={shell.selectedCommit === commit.id || shell.selectedPath === commit.id} class:unpushed={shell.isCommitUnpushed(commit)} type="button" onclick={() => shell.selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
-                  <span class="graph" aria-hidden="true">
-                    {#each graphRow as cell, lane (`s-${commit.id}-${lane}`)}
-                      <i class="graph-cell {cell?.role ?? ""}" style:color={cell ? laneColors[cell.color] : "transparent"}>
-                        {#if cell?.forkDelta}
-                          <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d={forkPath(cell.forkDelta)} fill="none" stroke="currentColor" stroke-width="2" /></svg>
-                        {/if}
-                        {#if cell?.mergeToLeft}
-                          <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M 6 14 C 6 22, -6 28, -6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
-                        {/if}
-                      </i>
-                    {/each}
-                    </span>
-                  {@render branchChips(shell.branchRefLabels(commit.badges), tone)}
-                  <span class="subject">{@render linked(commit.summary)}</span>
-                  {#if shell.plainRefLabels(commit.badges).length > 0}
-                    <span class="badges">
-                      {#each shell.plainRefLabels(commit.badges) as label (label)}<span class="ref {shell.refKind(label)}" class:compact={shell.settings.compactBranchLabels}>{label}</span>{/each}
-                    </span>
-                  {/if}
+                  {@render laneGraph(graphRow, commit.id)}
+                  <span class="commit-copy">
+                    {@render branchChips(shell.branchRefLabels(commit.badges), tone)}
+                    <span class="subject">{@render linked(commit.summary)}</span>
+                    {#if shell.plainRefLabels(commit.badges).length > 0}
+                      <span class="badges">
+                        {#each shell.plainRefLabels(commit.badges) as label (label)}<span class="ref {shell.refKind(label)}" class:compact={shell.settings.compactBranchLabels}>{label}</span>{/each}
+                      </span>
+                    {/if}
+                  </span>
                   <span class="commit-side">
                     <span class="commit-author">
                       <span class="avatar tile" style:background={shell.avatarColor(commit.author || "?")}>{(commit.author || "?").slice(0, 1).toUpperCase()}</span>
@@ -183,6 +168,22 @@
         <CommitDetail />
 
       </div>
+
+{#snippet laneGraph(graphRow: GraphCell[], commitId: string)}
+      {@const nodeAt = nodeLane(graphRow)}
+      <span class="graph" style:width="{(nodeAt + 1) * 12}px" role="presentation" title={shell.tr("menu.fold")} onclick={(event) => { event.stopPropagation(); shell.toggleFold(commitId); }}>
+        {#each graphRow as cell, lane (`${commitId}-${lane}`)}
+          <i class="graph-cell {cell?.role ?? ""}" class:graph-past={lane > nodeAt} style:left={lane > nodeAt ? `${lane * 12}px` : undefined} style:color={cell ? laneColors[cell.color] : "transparent"}>
+            {#if cell?.forkDelta}
+              <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d={forkPath(cell.forkDelta)} fill="none" stroke="currentColor" stroke-width="2" /></svg>
+            {/if}
+            {#if cell?.mergeToLeft}
+              <svg class="graph-curve" viewBox="0 0 12 28" preserveAspectRatio="none"><path d="M 6 14 C 6 22, -6 28, -6 28" fill="none" stroke="currentColor" stroke-width="2" /></svg>
+            {/if}
+          </i>
+        {/each}
+      </span>
+    {/snippet}
 
 {#snippet branchChips(labels: string[], tone: string | undefined)}
       {#if labels.length > 0}

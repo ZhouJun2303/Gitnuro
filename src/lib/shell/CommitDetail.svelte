@@ -57,7 +57,7 @@
                 </div>
                 {#each shell.commitFiles as file, index (file.path)}
                   <div class="patch-head">
-                    <button class="patch-toggle" type="button" onclick={() => shell.togglePatch(file.path)}>
+                    <button class="patch-toggle" type="button" onclick={() => shell.togglePatch(file.path)} oncontextmenu={(event) => shell.openMenu(event, shell.revisionFileMenu(file.path))}>
                       {@render disclosure(shell.openPatches.includes(file.path))}
                       {@render statusBadge(shell.toRow(file).letter)}
                       {@render typeIcon(file.path)}
@@ -218,7 +218,7 @@
           {@render treeLine(true, !collapsed.includes(entry.path), entry.path, "")}
         </button>
       {:else if entry.file}
-        <button class="tree-row" class:selected={shell.historyFile === entry.file.path} type="button" style:padding-left="{8 + entry.depth * 16}px" onclick={() => onFile(entry.file?.path ?? "")}>
+        <button class="tree-row" class:selected={shell.historyFile === entry.file.path} type="button" style:padding-left="{8 + entry.depth * 16}px" onclick={() => onFile(entry.file?.path ?? "")} oncontextmenu={(event) => shell.openMenu(event, shell.revisionFileMenu(entry.file?.path ?? ""))}>
           {@render treeLine(false, false, entry.file.path, entry.file.letter)}
         </button>
       {/if}
