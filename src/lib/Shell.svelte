@@ -4008,12 +4008,29 @@
     // Old branches and tags sit deeper than the loaded page: widen the page until the ref
     // shows up or the history runs out.
     const ceiling = 100_000;
-    while (!row && !historyFilter && logLimit < ceiling) {
-      const loaded = commitsLive.length;
-      logLimit = Math.min(logLimit * 4, ceiling);
-      await loadContext();
+    // The page is read directly here instead of through `loadContext`: a background
+    // refresh that starts at the same time would discard that result, and this loop
+    // would wrongly decide the history had run out.
+    let widen = true;
+    let tries = 0;
+    while (!row && !historyFilter && tries++ < 12 && (logLimit < ceiling || !widen)) {
+      if (widen) logLimit = Math.min(logLimit * 4, ceiling);
+      widen = true;
+      const gen = ++contextGen;
+      let rows: CommitRow[];
+      try {
+        rows = await loadCommits(repoPath());
+      } catch (error) {
+        actionError = message(error);
+        return;
+      }
+      if (gen !== contextGen) {
+        widen = false;
+        continue;
+      }
+      if (!same(commitsLive, rows)) commitsLive = rows;
       row = find();
-      if (commitsLive.length < logLimit || commitsLive.length === loaded) break;
+      if (rows.length < logLimit) break;
     }
     if (!row) {
       actionError = tr("chrome.refNotFound", { name });
