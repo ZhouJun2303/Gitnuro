@@ -21,6 +21,7 @@ export const en: Messages = {
     preferences: "Preferences",
     about: "About",
     quickLaunch: "Search or run a command",
+    launch: "Quick Launch",
     paletteHint: "↑↓ select · Enter run · Esc close",
     refresh: "Refresh",
     groupAction: "Action",

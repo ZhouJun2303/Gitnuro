@@ -21,6 +21,7 @@ export const zh: Messages = {
     preferences: "偏好设置",
     about: "关于",
     quickLaunch: "搜索或执行命令",
+    launch: "快速启动",
     paletteHint: "↑↓ 选择 · Enter 执行 · Esc 关闭",
     refresh: "刷新",
     groupAction: "动作",

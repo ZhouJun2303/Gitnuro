@@ -21,6 +21,7 @@ export type Messages = {
     preferences: string;
     about: string;
     quickLaunch: string;
+    launch: string;
     paletteHint: string;
     refresh: string;
     groupAction: string;

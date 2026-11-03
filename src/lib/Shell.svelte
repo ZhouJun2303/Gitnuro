@@ -2698,6 +2698,34 @@
     ];
   }
 
+  function stashItems(): MenuItem[] {
+    const locked = mode !== "live" || busy;
+    return [
+      { label: tr("chrome.stash"), disabled: locked, run: () => openStash([]) },
+      { label: tr("chrome.pop"), disabled: locked || (refs?.stashes ?? []).length === 0, run: () => void mutate({ action: "stashPop" }) },
+      ...(refs?.stashes ?? []).map((stash) => ({
+        label: stash.summary || stash.name,
+        disabled: locked,
+        run: () => void mutate({ action: "stashPop", name: stash.name }),
+      })),
+    ];
+  }
+
+  function appearanceItems(): MenuItem[] {
+    const mark = (value: string) => ((settings.theme || "system") === value ? "✓ " : "");
+    const pick = (value: string) => () => {
+      settings.theme = value;
+      void savePrefs(false);
+    };
+    return [
+      { label: `${mark("system")}${tr("dialog.system")}`, run: pick("system") },
+      { label: `${mark("light")}${tr("dialog.light")}`, run: pick("light") },
+      { label: `${mark("dark")}${tr("dialog.dark")}`, run: pick("dark") },
+      { sep: true, label: "" },
+      { label: tr("chrome.preferences"), shortcut: shortcutLabel("settings"), run: () => (dialog = "prefs") },
+    ];
+  }
+
   function repositoryItems(): MenuItem[] {
     const locked = mode !== "live";
     return [
@@ -4349,12 +4377,29 @@
   <header class="chrome">
     <div class="chrome-tools">
       <div class="chrome-left">
-        <button class="launch-trigger" type="button" onclick={() => void openLaunch()}>
-          <span>{tr("chrome.quickLaunch")}</span>
-          <kbd>{shortcutLabel("launch")}</kbd>
+        <button class="tool-btn stack" type="button" title="{tr("chrome.quickLaunch")} ({shortcutLabel("launch")})" onclick={() => void openLaunch()}>
+          <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
+          <span>{tr("chrome.launch")}</span>
         </button>
-        <button class="icon-btn" type="button" title={tr("chrome.terminal")} onclick={() => invoke("open_terminal", { path: repoPath() })}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m7 9 3 3-3 3M12 15h5"/></svg></button>
-        <button class="icon-btn" type="button" title={tr("chrome.explorer")} onclick={() => snapshot && void openLocal(snapshot.path)}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg></button>
+        <button class="tool-btn stack" type="button" disabled={busy} onclick={() => confirmSync("fetch")} oncontextmenu={(event) => openMenu(event, [
+          { label: tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: mode !== "live", run: () => void doFetch() },
+          { label: tr("chrome.fetchAll"), disabled: mode !== "live", run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: settings.fetchTags }) },
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span>{tr("chrome.fetch")}</span></button>
+        <button class="tool-btn stack" type="button" disabled={busy} onclick={() => confirmSync("pull")} oncontextmenu={(event) => openMenu(event, [
+          { label: tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: mode !== "live", run: () => void doPull() },
+          { label: tr("dialog.fastForward"), disabled: mode !== "live", run: () => { settings.pullRebase = false; void doPull(); } },
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg><span>{tr("chrome.pull")}{#if currentBranch && currentBranch.behind > 0} ↓{currentBranch.behind}{/if}</span></button>
+        <button class="tool-btn stack" type="button" disabled={busy} onclick={() => confirmSync("push")} oncontextmenu={(event) => openMenu(event, [
+          { label: tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: mode !== "live", run: () => void doPush() },
+          { label: tr("chrome.pushTags"), disabled: mode !== "live", run: () => void mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: settings.forceWithLease }) },
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg><span>{tr("chrome.push")}{#if currentBranch && currentBranch.ahead > 0} ↑{currentBranch.ahead}{/if}</span></button>
+        <button class="tool-btn stack" type="button" disabled={busy || mode !== "live"} onclick={() => openStash([])} oncontextmenu={(event) => openMenu(event, stashItems())}>
+          <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
+          <span>{tr("chrome.stash")}</span>
+        </button>
+        <button class="tool-btn caret-only" type="button" disabled={busy || mode !== "live"} aria-label={tr("chrome.stash")} aria-haspopup="menu" onclick={(event) => openBar(event, stashItems())}>
+          <svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
       </div>
       <div class="chrome-identity">
         <button class="icon-btn history-btn" class:on={commandLogOpen} type="button" bind:this={commandButton} title={tr("chrome.commandHistory")} aria-label={tr("chrome.commandHistory")} aria-expanded={commandLogOpen} aria-haspopup="dialog" onclick={() => (commandLogOpen ? (commandLogOpen = false) : openCommandLog())}>
@@ -4362,26 +4407,25 @@
         </button>
         <div class="identity-copy">
           <strong>{snapshot ? folderName(snapshot.path) : mode === "sample" ? "AweGit" : tr("chrome.welcomeTitle")}</strong>
-          <span>{snapshot || mode === "sample" ? branchLabel : tr("chrome.openRepo")}</span>
+          <span>{#if snapshot || mode === "sample"}<svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>{branchLabel}{:else}{tr("chrome.openRepo")}{/if}</span>
         </div>
       </div>
       <div class="chrome-right">
-        <button class="tool-btn" type="button" disabled={busy} onclick={() => confirmSync("fetch")} oncontextmenu={(event) => openMenu(event, [
-          { label: tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: mode !== "live", run: () => void doFetch() },
-          { label: tr("chrome.fetchAll"), disabled: mode !== "live", run: () => void mutate({ action: "fetch", remote: null, prune: settings.fetchPrune, tags: settings.fetchTags }) },
-        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>{tr("chrome.fetch")}</button>
-        <button class="tool-btn" type="button" disabled={busy} onclick={() => confirmSync("pull")} oncontextmenu={(event) => openMenu(event, [
-          { label: tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: mode !== "live", run: () => void doPull() },
-          { label: tr("dialog.fastForward"), disabled: mode !== "live", run: () => { settings.pullRebase = false; void doPull(); } },
-        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg>{tr("chrome.pull")}{#if currentBranch && currentBranch.behind > 0} ↓{currentBranch.behind}{/if}</button>
-        <button class="tool-btn" type="button" disabled={busy} onclick={() => confirmSync("push")} oncontextmenu={(event) => openMenu(event, [
-          { label: tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: mode !== "live", run: () => void doPush() },
-          { label: tr("chrome.pushTags"), disabled: mode !== "live", run: () => void mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: settings.forceWithLease }) },
-        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg>{tr("chrome.push")}{#if currentBranch && currentBranch.ahead > 0} ↑{currentBranch.ahead}{/if}</button>
-        <button class="tool-btn branch-chip" type="button" onclick={(event) => openMenu(event, branchItems())}>
+        <button class="tool-btn stack branch-chip" type="button" onclick={(event) => openMenu(event, branchItems())}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
-          <span>{branchLabel}</span>
-          <svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+          <span>{tr("dialog.branch")}<svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+        </button>
+        <button class="tool-btn stack" type="button" disabled={!snapshot} onclick={() => snapshot && void openLocal(snapshot.path)}>
+          <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>
+          <span>{tr("chrome.explorer")}</span>
+        </button>
+        <button class="tool-btn stack" type="button" disabled={mode !== "live"} onclick={() => invoke("open_terminal", { path: repoPath() })}>
+          <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m7 9 3 3-3 3M12 15h5"/></svg>
+          <span>{tr("chrome.terminal")}</span>
+        </button>
+        <button class="tool-btn stack" type="button" aria-haspopup="menu" onclick={(event) => openBar(event, appearanceItems())}>
+          <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg>
+          <span>{tr("dialog.appearance")}</span>
         </button>
       </div>
     </div>
@@ -6762,7 +6806,7 @@
   }
 
   .chrome-tools {
-    height: 40px;
+    height: 48px;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
@@ -6806,7 +6850,8 @@
   }
 
   .identity-copy strong { font-size: 13px; font-weight: 650; }
-  .identity-copy span { color: var(--text-secondary); font-size: 11px; }
+  .identity-copy span { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: 11px; }
+  .identity-copy span .line-icon { width: 12px; height: 12px; flex: none; }
 
   .history-btn.on { background: var(--hover); color: var(--text); }
 
@@ -6824,16 +6869,18 @@
 
   .chrome-tabs {
     display: flex;
-    align-items: center;
-    gap: 2px;
+    align-items: stretch;
+    gap: 0;
     min-width: 0;
-    height: 32px;
-    padding: 0 8px;
+    height: 30px;
+    padding: 0;
+    border-top: 1px solid var(--line);
   }
 
   .tabs {
+    flex: 1 1 auto;
+    gap: 0;
     min-width: 0;
-    max-width: calc(100% - 36px);
     overflow: auto;
     scrollbar-width: none;
   }
@@ -6843,7 +6890,7 @@
   .vertical-tabs .tabs {
     position: fixed;
     left: 0;
-    top: 100px;
+    top: 108px;
     bottom: 0;
     width: 168px;
     max-width: 168px;
@@ -6880,8 +6927,7 @@
   .commit-row,
   .commit,
   .icon-btn,
-  .tool-btn,
-  .launch-trigger {
+  .tool-btn {
     font: inherit;
     color: inherit;
     background: transparent;
@@ -6889,22 +6935,33 @@
   }
 
   .tab {
-    height: 28px;
-    padding: 0 10px;
-    border-radius: 8px;
+    height: 100%;
+    padding: 0 8px;
+    border-radius: 0;
+    border-right: 1px solid var(--line);
     color: var(--text-secondary);
     display: flex;
     align-items: center;
     gap: 4px;
-    flex: none;
+    flex: 1 1 0;
+    min-width: 96px;
+    max-width: 220px;
     transition: background 120ms ease, color 120ms ease;
   }
 
   .tab.active {
     background: var(--elevated);
     color: var(--text);
-    box-shadow: 0 1px 2px rgba(24, 24, 27, 0.06);
   }
+
+  .tab > .file-select {
+    gap: 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .vertical-tabs .tab { height: 28px; flex: none; max-width: none; border-right: 0; border-radius: 6px; }
 
   .text-button:hover:not(:disabled),
   .side:hover,
@@ -6917,11 +6974,11 @@
   .tab.active:hover { background: var(--elevated); }
 
   .tab-add {
-    width: 28px;
-    height: 28px;
+    width: 30px;
+    height: 100%;
     padding: 0;
     border: 0;
-    border-radius: 8px;
+    border-radius: 0;
     background: transparent;
     color: var(--text-secondary);
     display: grid;
@@ -7234,44 +7291,22 @@
   .tool-btn:disabled { opacity: 0.4; }
   .tool-btn svg { width: 15px; height: 15px; }
   .tool-btn .caret { width: 12px; height: 12px; color: var(--text-secondary); }
-  .branch-chip span {
-    max-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .tool-btn.stack {
+    height: 42px;
+    min-width: 54px;
+    padding: 0 8px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    font-size: 12px;
+    line-height: 1;
     white-space: nowrap;
   }
-
-  .launch-trigger {
-    height: 28px;
-    width: auto;
-    max-width: 220px;
-    min-width: 0;
-    flex: 0 1 200px;
-    padding: 0 10px;
-    border-radius: 8px;
-    background: var(--field);
-    color: var(--text-secondary);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    transition: background 120ms ease;
-  }
-
-  .launch-trigger:hover { background: var(--hover); }
-
-  .launch-trigger span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .launch-trigger kbd {
-    flex: none;
-    font: inherit;
-    font-size: 11px;
-    color: var(--text-secondary);
-  }
+  .tool-btn.stack > svg { width: 18px; height: 18px; color: var(--text-secondary); }
+  .tool-btn.stack:hover:not(:disabled) > svg { color: var(--text); }
+  .tool-btn.stack > span { display: inline-flex; align-items: center; gap: 2px; }
+  .tool-btn.caret-only { width: 16px; min-width: 0; height: 42px; padding: 0; justify-content: center; margin-left: -6px; }
+  .tool-btn.caret-only svg { width: 11px; height: 11px; }
 
   .tab-close { opacity: 0; }
   .tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
