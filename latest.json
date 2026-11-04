@@ -1,10 +1,10 @@
 {
   "appVersion": "2.0.0",
   "notes": "",
-  "appCode": 25,
-  "downloadUrl": "https://github.com/ZhouJun2303/Gitnuro/releases/latest",
+  "appCode": 26,
+  "downloadUrl": "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.0/AweGit_2.0.0_x64-setup.exe",
   "downloads": {
-    "windows": "",
+    "windows": "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.0/AweGit_2.0.0_x64-setup.exe",
     "macos": ""
   }
 }
