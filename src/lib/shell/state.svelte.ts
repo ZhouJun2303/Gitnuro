@@ -1881,6 +1881,18 @@ export class ShellState {
       if (item.repo) {
         const path = layout[item.repo];
         if (!path) throw new Error(`场景 ${item.id} 没有仓库 ${item.repo}`);
+        if (["conflict", "merge", "rebase", "cherry", "revert", "bisect"].includes(item.repo)) {
+          const progress = await invoke<string | null>("in_progress", { path }).catch(() => null);
+          const facts = await invoke<{ bisectActive?: boolean }>("repo_facts", { path, full: false }).catch(() => null);
+          const status = await invoke<{ staged?: { kind: string }[]; unstaged?: { kind: string }[] }>("workspace_status", { path }).catch(() => null);
+          const conflicts = [...(status?.staged ?? []), ...(status?.unstaged ?? [])].some((file) => file.kind === "conflict");
+          const need = item.repo === "conflict"
+            ? !conflicts
+            : item.repo === "bisect"
+              ? !facts?.bisectActive
+              : !progress;
+          if (need) await invoke("lab_restore", { name: item.repo });
+        }
         const file = params.get("file");
         if (item.id === "file-history" && file) this.historyFilter = file;
         await this.openRepo(path);

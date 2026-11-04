@@ -41,10 +41,21 @@
     if (!file || !shell.inApp()) return;
     void getCurrentWindow().setTitle(`${shell.tr("menu.history")} — ${file}`).catch(() => {});
   });
+
+  function closePane() {
+    if (shell.inApp()) {
+      void getCurrentWindow().close();
+      return;
+    }
+    window.location.href = "/";
+  }
 </script>
 
 <div class="file-history">
-  <header class="history-file"><strong>{shell.historyFilter || shell.tr("menu.history")}</strong></header>
+  <header class="history-file">
+    <strong>{shell.historyFilter || shell.tr("menu.history")}</strong>
+    <button class="text-button" type="button" aria-label={shell.tr("chrome.close")} onclick={closePane}>{shell.tr("chrome.close")}</button>
+  </header>
   {#if span}
     <div class="history-time">
       {#each years as year (year)}
@@ -124,11 +135,27 @@
   }
 
   .history-file {
-    height: 36px;
+    height: 28px;
     display: flex;
     align-items: center;
-    padding: 0 14px;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 10px 0 12px;
     border-bottom: 1px solid var(--line);
+    flex: none;
+    font-size: 12px;
+  }
+
+  .history-file strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .history-file :global(.text-button) {
+    margin-left: 0;
     flex: none;
   }
 

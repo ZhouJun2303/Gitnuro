@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getShell } from "./context";
   import { onVirtualScroll, windowSlice } from "../view";
 
@@ -7,10 +8,21 @@
   const lines = $derived(shell.blobText ? shell.blobText.split("\n") : []);
   const view = $derived(windowSlice(lines, top, 18));
   const onScroll = onVirtualScroll((value) => (top = value));
+
+  function closePane() {
+    if (shell.inApp()) {
+      void getCurrentWindow().close();
+      return;
+    }
+    window.location.href = "/";
+  }
 </script>
 
 <div class="blob-pane">
-  <header>{shell.blobFile || shell.tr("chrome.reading")}</header>
+  <header>
+    <strong>{shell.blobFile || shell.tr("chrome.reading")}</strong>
+    <button class="text-button" type="button" aria-label={shell.tr("chrome.close")} onclick={closePane}>{shell.tr("chrome.close")}</button>
+  </header>
   {#if shell.blobPreview}
     <img alt="" src={shell.blobPreview.dataUrl} />
   {:else if shell.blobBinary}
@@ -42,11 +54,27 @@
   }
 
   header {
-    height: 36px;
+    height: 28px;
     display: flex;
     align-items: center;
-    padding: 0 14px;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 10px 0 12px;
     border-bottom: 1px solid var(--line);
+    flex: none;
+    font-size: 12px;
+  }
+
+  header strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  header :global(.text-button) {
+    margin-left: 0;
     flex: none;
   }
 

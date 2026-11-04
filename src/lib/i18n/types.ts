@@ -26,6 +26,7 @@ export type Messages = {
     explorer: string;
     preferences: string;
     about: string;
+    performance: string;
     quickLaunch: string;
     launch: string;
     paletteHint: string;

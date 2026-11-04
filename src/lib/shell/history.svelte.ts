@@ -296,10 +296,7 @@ export async function compareDrops(shell: ShellState) {
         if (gen !== shell.patchGen) return;
         shell.selectedCommit = shell.drops[1];
         shell.historyFile = shell.commitFiles[0]?.path ?? null;
-        if (shell.historyFile) {
-          await shell.pickCommitFile(shell.historyFile);
-          if (gen === shell.patchGen) shell.openPatches = [shell.historyFile];
-        }
+        if (shell.historyFile) await shell.pickCommitFile(shell.historyFile);
       } catch (error) {
         if (gen === shell.patchGen) shell.actionError = shell.message(error);
       }
@@ -356,7 +353,7 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
       if (gen !== shell.patchGen) return;
       if (shell.historyFile && shell.historyDiff) {
         shell.patchCache = { [shell.historyFile]: shell.historyDiff };
-        shell.openPatches = [shell.historyFile];
+        shell.openPatches = [];
       }
     } catch (error) {
       if (gen === shell.patchGen) shell.actionError = shell.message(error);
@@ -604,7 +601,7 @@ export function selectSample(shell: ShellState, id: string) {
       committerAt: at,
       parents: commit?.parents ?? [],
     };
-    shell.openPatches = shell.historyFile ? [shell.historyFile] : [];
+    shell.openPatches = [];
   }
 
 export function whenLabel(shell: ShellState, commit: CommitRow) {

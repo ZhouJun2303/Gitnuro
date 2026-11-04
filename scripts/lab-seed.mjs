@@ -204,6 +204,110 @@ function conflictRepo(path, pause) {
   }
 }
 
+function diverge(path, verb) {
+  initWork(path);
+  if (verb === "cherry") {
+    commit(path, "a.txt", "one\n", "first");
+    git(path, ["checkout", "-b", "side"]);
+    commit(path, "a.txt", "side\n", "side");
+    git(path, ["checkout", "main"]);
+    commit(path, "a.txt", "main\n", "main");
+    const result = git(path, ["cherry-pick", "side"], { allowFail: true });
+    if (result.status === 0) throw new Error(`${path} cherry-pick did not conflict`);
+    pauseIndex(path, "CHERRY_PICK_HEAD");
+    dirtyBatch(path, "paused", FILL);
+    return;
+  }
+  commit(path, "a.txt", "one\n", "first");
+  commit(path, "a.txt", "two\n", "second");
+  commit(path, "a.txt", "three\n", "third");
+  const result = git(path, ["revert", "--no-edit", "HEAD~1"], { allowFail: true });
+  if (result.status === 0) throw new Error(`${path} revert did not conflict`);
+  pauseIndex(path, "REVERT_HEAD");
+  dirtyBatch(path, "paused", FILL);
+}
+
+function seedConflictRepo() {
+  const path = join(repos, "conflict");
+  wipe(path);
+  conflictRepo(path, null);
+}
+
+function seedMergeRepo() {
+  const path = join(repos, "merge");
+  wipe(path);
+  conflictRepo(path, pauseIndex);
+}
+
+function seedRebaseRepo() {
+  const path = join(repos, "rebase");
+  wipe(path);
+  initWork(path);
+  commit(path, "README.md", "rebase base\n", "rebase base");
+  git(path, ["checkout", "-b", "side"]);
+  for (let i = 1; i <= FILL; i++) {
+    commit(path, `side/step-${pad(i)}.txt`, `side ${i}\n`, `side work ${i}`);
+  }
+  git(path, ["checkout", "main"]);
+  commit(path, "main.txt", "main\n", "main work");
+  git(path, ["checkout", "side"]);
+  const editorCmd = `node "${editor.replaceAll("\\", "/")}"`;
+  const paused = git(path, ["rebase", "-i", "main"], {
+    allowFail: true,
+    extraEnv: { GIT_SEQUENCE_EDITOR: editorCmd },
+  });
+  if (!has(path, join(".git", "rebase-merge")) && !has(path, join(".git", "rebase-apply"))) {
+    throw new Error(`rebase did not pause\n${paused.stdout ?? ""}\n${paused.stderr ?? ""}`);
+  }
+  dirtyBatch(path, "paused", FILL);
+}
+
+function seedCherryRepo() {
+  const path = join(repos, "cherry");
+  wipe(path);
+  diverge(path, "cherry");
+}
+
+function seedRevertRepo() {
+  const path = join(repos, "revert");
+  wipe(path);
+  diverge(path, "revert");
+}
+
+function seedBisectRepo() {
+  const path = join(repos, "bisect");
+  wipe(path);
+  if (!existsSync(remote)) throw new Error("lab remote missing; run a full seed first");
+  cloneFrom(fileUrl(remote), path);
+  for (let i = 1; i <= FILL; i++) {
+    commit(path, "steps.txt", `step ${i}\n`, `bisect ${i}`);
+  }
+  git(path, ["bisect", "start", "HEAD", "HEAD~2"]);
+}
+
+const restore = {
+  conflict: seedConflictRepo,
+  merge: seedMergeRepo,
+  rebase: seedRebaseRepo,
+  cherry: seedCherryRepo,
+  revert: seedRevertRepo,
+  bisect: seedBisectRepo,
+};
+
+const only = process.argv.slice(2).filter((arg) => !arg.startsWith("-"));
+if (only.length > 0) {
+  mkdirSync(repos, { recursive: true });
+  if (!existsSync(join(lab, "gitconfig"))) writeFileSync(join(lab, "gitconfig"), "");
+  for (const name of only) {
+    const seed = restore[name];
+    if (!seed) throw new Error(`unknown lab repo ${name}`);
+    console.log("restoring", name);
+    seed();
+  }
+  console.log("lab repositories restored");
+  process.exit(0);
+}
+
 console.log("seeding", lab);
 wipe(lab);
 mkdirSync(repos, { recursive: true });
@@ -237,21 +341,15 @@ const origin = fileUrl(remote);
 const full = join(repos, "full");
 const even = join(repos, "even");
 const ahead = join(repos, "ahead");
-const bisect = join(repos, "bisect");
 cloneFrom(origin, full);
 cloneFrom(origin, even);
 cloneFrom(origin, ahead);
-cloneFrom(origin, bisect);
+seedBisectRepo();
 
 for (let i = 1; i <= FILL; i++) {
   commit(ahead, `local/ahead-${pad(i)}.txt`, `ahead ${i}\n`, `local ahead ${i}`);
 }
 dirtyBatch(ahead, "pending", FILL);
-
-for (let i = 1; i <= FILL; i++) {
-  commit(bisect, "steps.txt", `step ${i}\n`, `bisect ${i}`);
-}
-git(bisect, ["bisect", "start", "HEAD", "HEAD~2"]);
 
 commit(full, "src/keep.ts", "export const keep = true;\n", "keep a source file");
 git(full, ["checkout", "-b", "graph"]);
@@ -369,54 +467,11 @@ const pushbox = join(repos, "pushbox");
 cloneFrom(fileUrl(remotePush), pushbox);
 write(pushbox, "note.txt", "lab push note\n");
 
-conflictRepo(join(repos, "conflict"), null);
-conflictRepo(join(repos, "merge"), pauseIndex);
-
-const rebase = join(repos, "rebase");
-initWork(rebase);
-commit(rebase, "README.md", "rebase base\n", "rebase base");
-git(rebase, ["checkout", "-b", "side"]);
-for (let i = 1; i <= FILL; i++) {
-  commit(rebase, `side/step-${pad(i)}.txt`, `side ${i}\n`, `side work ${i}`);
-}
-git(rebase, ["checkout", "main"]);
-commit(rebase, "main.txt", "main\n", "main work");
-git(rebase, ["checkout", "side"]);
-const editorCmd = `node "${editor.replaceAll("\\", "/")}"`;
-const paused = git(rebase, ["rebase", "-i", "main"], {
-  allowFail: true,
-  extraEnv: { GIT_SEQUENCE_EDITOR: editorCmd },
-});
-if (!has(rebase, join(".git", "rebase-merge")) && !has(rebase, join(".git", "rebase-apply"))) {
-  throw new Error(`rebase did not pause\n${paused.stdout ?? ""}\n${paused.stderr ?? ""}`);
-}
-dirtyBatch(rebase, "paused", FILL);
-
-function diverge(path, verb) {
-  initWork(path);
-  if (verb === "cherry") {
-    commit(path, "a.txt", "one\n", "first");
-    git(path, ["checkout", "-b", "side"]);
-    commit(path, "a.txt", "side\n", "side");
-    git(path, ["checkout", "main"]);
-    commit(path, "a.txt", "main\n", "main");
-    const result = git(path, ["cherry-pick", "side"], { allowFail: true });
-    if (result.status === 0) throw new Error(`${path} cherry-pick did not conflict`);
-    pauseIndex(path, "CHERRY_PICK_HEAD");
-    dirtyBatch(path, "paused", FILL);
-    return;
-  }
-  commit(path, "a.txt", "one\n", "first");
-  commit(path, "a.txt", "two\n", "second");
-  commit(path, "a.txt", "three\n", "third");
-  const result = git(path, ["revert", "--no-edit", "HEAD~1"], { allowFail: true });
-  if (result.status === 0) throw new Error(`${path} revert did not conflict`);
-  pauseIndex(path, "REVERT_HEAD");
-  dirtyBatch(path, "paused", FILL);
-}
-
-diverge(join(repos, "cherry"), "cherry");
-diverge(join(repos, "revert"), "revert");
+seedConflictRepo();
+seedMergeRepo();
+seedRebaseRepo();
+seedCherryRepo();
+seedRevertRepo();
 
 const detached = join(repos, "detached");
 initWork(detached);

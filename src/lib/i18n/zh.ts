@@ -26,6 +26,7 @@ export const zh: Messages = {
     explorer: "资源管理器",
     preferences: "偏好设置",
     about: "关于",
+    performance: "性能",
     quickLaunch: "搜索或执行命令",
     launch: "快速启动",
     paletteHint: "↑↓ 选择 · Enter 执行 · Esc 关闭",

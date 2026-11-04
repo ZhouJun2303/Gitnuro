@@ -157,7 +157,7 @@ async function fillSurface(shell: ShellState, id: string) {
     return;
   }
   if (id === "perf") {
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", ctrlKey: true, altKey: true, bubbles: true }));
+    window.dispatchEvent(new CustomEvent("awegit-perf", { detail: { open: true } }));
     return;
   }
   if (id === "conflict") return showChange(shell, "src/both-sides.ts", "unstaged");

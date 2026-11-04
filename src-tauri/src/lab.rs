@@ -212,9 +212,36 @@ fn write_lab_ssh(text: String) -> Result<(), String> {
     std::fs::write(path, text).map_err(|error| error.to_string())
 }
 
+fn restore_repo(name: String) -> Result<(), String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("lab restore needs a repository name".into());
+    }
+    let root = lab_root()?
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "AWEGIT_LAB has no parent".to_string())?;
+    let script = root.join("scripts").join("lab-seed.mjs");
+    if !script.is_file() {
+        return Err(format!("missing {}", script.display()));
+    }
+    let status = std::process::Command::new("node")
+        .arg(&script)
+        .arg(&name)
+        .current_dir(&root)
+        .env("AWEGIT_LAB", lab_root()?)
+        .status()
+        .map_err(|error| error.to_string())?;
+    if !status.success() {
+        return Err(format!("lab restore {name} failed"));
+    }
+    Ok(())
+}
+
 fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
     match command {
         "lab_layout" => layout(),
+        "lab_restore" => done_result(restore_repo(req(args, "name")?)),
         "workspace_status" => done_result(super::workspace_status(req(args, "path")?)),
         "stage_all" => done_result(super::stage_all(req(args, "path")?)),
         "unstage_all" => done_result(super::unstage_all(req(args, "path")?)),
