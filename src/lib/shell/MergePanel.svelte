@@ -90,7 +90,7 @@
 
 {#if shell.textMerge}
   <div class="scrim merge-scrim" role="presentation">
-    <div class="merge-panel" bind:this={panel} role="dialog" aria-modal="true" aria-label={shell.tr("dialog.mergeTitle")} tabindex="-1" onkeydown={(event) => { if (event.key === "Escape") { event.preventDefault(); shell.closeTextMerge(); } }}>
+    <div class="merge-panel" data-layer="text-merge" bind:this={panel} role="dialog" aria-modal="true" aria-label={shell.tr("dialog.mergeTitle")} tabindex="-1" onkeydown={(event) => { if (event.key === "Escape") { event.preventDefault(); shell.closeTextMerge(); } }}>
       <header class="merge-panel-title">
         <strong>{shell.tr("dialog.mergeTitle")}</strong>
         <span class="merge-title-file">

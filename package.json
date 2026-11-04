@@ -4,7 +4,9 @@
   "description": "AweGit desktop client",
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
+    "dev": "node ./scripts/lab-dev.mjs",
+    "lab:seed": "node ./scripts/lab-seed.mjs",
+    "test:ui": "node ./scripts/lab-test.mjs",
     "start": "node ./scripts/with-rust-path.mjs tauri dev",
     "build": "vite build",
     "preview": "vite preview",
@@ -30,6 +32,7 @@
     "@tauri-apps/cli": "^2",
     "svelte": "^5.56.3",
     "svelte-check": "^4.6.0",
+    "@playwright/test": "^1.55.0",
     "typescript": "~6.0.3",
     "vite": "^8.0.16"
   }

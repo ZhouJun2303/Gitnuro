@@ -115,12 +115,12 @@
             <strong>{shell.focusPath && !shell.viewing(shell.focusPath) ? shell.folderName(shell.focusPath) : shell.snapshot ? shell.folderName(shell.snapshot.path) : shell.mode === "sample" ? "AweGit" : shell.tr("chrome.welcomeTitle")}</strong>
             <span>
               {#if shell.showingClone && shell.cloneJob}
-                <em class="identity-branch">{shell.tr("chrome.cloning", { name: shell.cloneJob.name })}</em>
+                <em class="identity-branch" data-layer="clone">{shell.tr("chrome.cloning", { name: shell.cloneJob.name })}</em>
               {:else if shell.workDepth > 0}
                 <em class="identity-branch">{shell.busyLabel ? `${shell.tr("chrome.working")} ${shell.busyLabel}` : shell.tr("chrome.working")}</em>
               {:else if shell.snapshot || shell.mode === "sample"}
                 <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
-                <em class="identity-branch">{shell.branchLabel}</em>
+                <em class="identity-branch" data-branch={shell.branchLabel}>{shell.branchLabel}</em>
               {:else}
                 {shell.tr("chrome.openRepo")}
               {/if}
@@ -189,13 +189,13 @@
 
   <div class="notice-stack">
   {#if shell.cloneDone}
-    <div class="banner">
+    <div class="banner" data-layer="clone-done">
       <span>{shell.tr("chrome.cloneReady", { name: shell.folderName(shell.cloneDone) })}</span>
       <button class="text-button" type="button" onclick={() => { const path = shell.cloneDone; shell.cloneDone = null; if (path) void shell.openRepo(path); }}>{shell.tr("chrome.open")}</button>
     </div>
   {/if}
   {#if shell.updateNotice}
-    <div class="banner">
+    <div class="banner" data-layer="update">
       <span>{shell.tr("chrome.updateAvailable", { name: `AweGit ${shell.updateNotice.appVersion}` })}</span>
       {#if shell.updateNotice.notes}<span class="meta">{shell.updateNotice.notes}</span>{/if}
       {#if shell.updatePhase === "downloading" && shell.updatePercent != null}<span class="update-track" aria-hidden="true"><span style:width={`${shell.updatePercent}%`}></span></span>{/if}
@@ -209,7 +209,7 @@
     </div>
   {/if}
   {#if shell.mode === "live" && shell.facts?.bisectActive}
-    <div class="banner">
+    <div class="banner" data-layer="bisect">
       <span>{shell.tr("chrome.bisect")}</span>
       <button class="text-button" type="button" disabled={shell.busy} onclick={() => void shell.mutate({ action: "bisect", verb: "good", rev: "" }).then(() => shell.loadFacts(true))}>{shell.tr("chrome.good")}</button>
       <button class="text-button" type="button" disabled={shell.busy} onclick={() => void shell.mutate({ action: "bisect", verb: "bad", rev: "" }).then(() => shell.loadFacts(true))}>{shell.tr("chrome.bad")}</button>
@@ -218,7 +218,7 @@
     </div>
   {/if}
   {#if shell.mode === "live" && shell.conflictCount > 0}
-    <div class="banner unmerged">
+    <div class="banner unmerged" data-layer="conflicts">
       <span>{shell.conflictCount === 1 ? shell.tr("chrome.unmergedOne") : shell.tr("chrome.unmergedMany", { count: String(shell.conflictCount) })}</span>
       <span class="grow"></span>
       {#if shell.progress && shell.progress !== "merge"}
@@ -228,7 +228,7 @@
       <button class="text-button" type="button" disabled={shell.busy} onclick={() => shell.mutate({ action: "abort" })}>{shell.tr("chrome.abort")}</button>
     </div>
   {:else if shell.mode === "live" && shell.progress}
-    <div class="banner">
+    <div class="banner" data-layer="progress">
       <span>{shell.tr("chrome.inProgress", { name: shell.progressLabel(shell.progress) })}</span>
       <span class="grow"></span>
       <button class="text-button" type="button" disabled={shell.busy} onclick={() => shell.mutate({ action: "abort" })}>{shell.tr("chrome.abort")}</button>
@@ -237,7 +237,7 @@
     </div>
   {/if}
   {#if shell.actionError}
-    <div class="banner error">
+    <div class="banner error" data-layer="error">
       <span>{shell.actionError}</span>
       <button class="text-button" type="button" onclick={() => shell.closeError()}>{shell.tr("chrome.close")}</button>
     </div>

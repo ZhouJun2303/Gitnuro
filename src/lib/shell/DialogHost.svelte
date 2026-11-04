@@ -51,7 +51,7 @@
 
 {#if shell.dialog}
     <div class="scrim" role="presentation" onclick={() => { if (shell.dialog === "prefs") void shell.savePrefs(true); else shell.dialog = null; }}>
-      <div class="dialog {dialogSize(shell.dialog ?? "")}" class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()}>
+      <div class="dialog {dialogSize(shell.dialog ?? "")}" class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} data-dialog={shell.dialog} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()}>
       <form
         onchange={() => { if (shell.dialog === "prefs") void shell.savePrefs(false); }}
         onsubmit={async (event) => {

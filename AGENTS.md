@@ -32,6 +32,15 @@
 - macOS 打包：`pnpm package:mac`
 - 不提交 `target/`、`node_modules/`、`src-tauri/target/`，也不提交打包进来的 MinGit
 
+## 试验台
+
+浏览器看界面用 `pnpm dev`，自动化用 `pnpm test:ui`。桌面仍是 `pnpm start`。
+
+- `.lab/` 不提交。种子脚本 `scripts/lab-seed.mjs` 和场景清单要提交
+- 改了界面、弹窗或仓库状态后，补场景并跑 `pnpm test:ui`
+- 新弹窗必须记入 `src/lib/lab/scenes.ts`。缺一项时 `pnpm check` 会失败
+- 不拿 AweGit 自身仓库做暂存、提交或推送实验。试验只写 `.lab`
+
 ## 性能
 
 界面要一直能滚动、能点击。主线程上出现明显卡顿就是缺陷。

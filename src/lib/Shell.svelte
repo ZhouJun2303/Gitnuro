@@ -455,7 +455,7 @@
 
 <PerfPanel />
 
-<div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.settings.diffFontSize || 13}px" style:--guide="{shell.settings.pageGuide || 72}">
+<div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.settings.diffFontSize || 13}px" style:--guide="{shell.settings.pageGuide || 72}" data-lab-scene={shell.labSceneId || undefined} data-lab-error={shell.labPage && !shell.labSceneId && shell.loadError ? shell.loadError : undefined}>
   {#if shell.standalone === "history"}
     <FileHistoryPane />
   {:else if shell.standalone === "blob"}
@@ -553,7 +553,7 @@
 
   {#if shell.commandLogOpen}
     {@const picked = shell.pickedCommand()}
-    <div class="command-log" style:left="{shell.commandPos.x}px" style:top="{shell.commandPos.y}px" style:width="{shell.commandPos.width}px" style:height="{shell.commandPos.maxHeight}px" role="dialog" aria-label={shell.tr("chrome.commandHistory")}>
+    <div class="command-log" data-layer="commands" style:left="{shell.commandPos.x}px" style:top="{shell.commandPos.y}px" style:width="{shell.commandPos.width}px" style:height="{shell.commandPos.maxHeight}px" role="dialog" aria-label={shell.tr("chrome.commandHistory")}>
       <div class="command-list">
         <div class="command-filters">
           <button type="button" class:on={shell.commandFilter === "all"} onclick={() => shell.showCommandFilter("all")}>{shell.tr("chrome.commandAll")}</button>
@@ -589,7 +589,7 @@
     <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => (shell.commandLogOpen = false)}></button>
   {/if}
   {#if shell.repoPickerOpen}
-    <div class="repo-picker" style:left="{shell.repoPickerPos.x}px" style:top="{shell.repoPickerPos.y}px" style:max-height="{shell.repoPickerPos.maxHeight}px" role="dialog" aria-label={shell.tr("chrome.manager")}>
+    <div class="repo-picker" data-layer="repos" style:left="{shell.repoPickerPos.x}px" style:top="{shell.repoPickerPos.y}px" style:max-height="{shell.repoPickerPos.maxHeight}px" role="dialog" aria-label={shell.tr("chrome.manager")}>
       <h2>{shell.tr("chrome.manager")}</h2>
       <div class="repo-picker-scroll">
         <button class="repo-section" type="button" aria-expanded={shell.repoPickerRecentOpen} onclick={() => (shell.repoPickerRecentOpen = !shell.repoPickerRecentOpen)}>
@@ -632,7 +632,7 @@
     <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => (shell.repoPickerOpen = false)}></button>
   {/if}
   {#if shell.menu}
-    <div class="menu" use:fitMenu={shell.menu} role="menu">
+    <div class="menu" data-layer="menu" use:fitMenu={shell.menu} role="menu">
       {@render menuList(shell.menu.items)}
     </div>
     {#if shell.submenu}
@@ -644,7 +644,7 @@
   {/if}
   {#if shell.confirmAsk}
     <div class="scrim" role="presentation">
-      <div class="dialog sm" data-confirm role="dialog" tabindex="-1">
+      <div class="dialog sm" data-confirm data-layer="confirm" role="dialog" tabindex="-1">
         <h2>{shell.confirmAsk.title}</h2>
         <p>{shell.confirmAsk.body}</p>
         <div class="composer-row">
@@ -656,7 +656,7 @@
   {/if}
   {#if shell.forgeOpen}
     <div class="scrim" role="presentation" onclick={() => (shell.forgeOpen = null)} onkeydown={() => {}}>
-      <div class="dialog md" role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()}>
+      <div class="dialog md" data-layer="forge" role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()}>
         <h2>{shell.forgeOpen === "notes" ? shell.tr("chrome.notifications") : shell.tr("chrome.pulls")}</h2>
         {#if shell.forgeOpen === "notes"}
           {#if shell.notices.length === 0}<p class="empty">{shell.tr("dialog.noToken")}</p>{/if}
@@ -676,7 +676,7 @@
   <MergePanel />
   {#if shell.launchOpen}
     <div class="palette-scrim" role="presentation" onclick={() => shell.closeLaunch()}>
-      <div class="palette" role="dialog" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+      <div class="palette" data-layer="launch" role="dialog" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
         <div class="palette-query">
           {#if shell.launchMode === "files"}
             <span class="palette-chip">{shell.tr("chrome.fileHistory")}</span>

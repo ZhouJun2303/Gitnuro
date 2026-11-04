@@ -423,6 +423,7 @@
         <label class="side-filter">
           {@render glyph("search")}
           <input
+            data-layer="search"
             placeholder={shell.commitSearchField === "author" ? shell.tr("chrome.author") : shell.commitSearchField === "path" ? shell.tr("dialog.path") : shell.commitSearchField === "diff" ? shell.tr("chrome.diffContent") : shell.tr("chrome.commitMessage")}
             aria-label={shell.tr("chrome.searchCommits")}
             bind:this={shell.commitSearchEl}

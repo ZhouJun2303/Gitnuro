@@ -33,7 +33,7 @@
 
 <section class="diff flex-fill">
           {#if shell.blameLines}
-            <header class="diff-head">
+            <header class="diff-head" data-layer="blame">
               <span>{shell.tr("chrome.blameOf", { name: shell.selectedPath ?? "" })}</span>
               <button class="text-button" type="button" onclick={() => (shell.blameLines = null)}>{shell.tr("chrome.close")}</button>
             </header>

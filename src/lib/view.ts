@@ -296,13 +296,13 @@ export function foldedMerges(commits: { id: string; parents?: string[] }[], expa
   // A branch that merged this line in from the side must not erase the line itself.
   // The first-parent chain stays visible, so the collapsed graph is one continuous stroke.
   const byId = new Map(commits.map((commit) => [commit.id, commit]));
-  let cursor = commits[0]?.id;
+  let cursor: string | undefined = commits[0]?.id;
   const seen = new Set<string>();
-  while (cursor && !seen.has(cursor)) {
+  while (cursor !== undefined && !seen.has(cursor)) {
     seen.add(cursor);
     hidden.delete(cursor);
-    const next = byId.get(cursor)?.parents?.[0];
-    cursor = next && byId.has(next) ? next : undefined;
+    const next: string | undefined = byId.get(cursor)?.parents?.[0];
+    cursor = next !== undefined && byId.has(next) ? next : undefined;
   }
   return { hidden, straight, owner };
 }

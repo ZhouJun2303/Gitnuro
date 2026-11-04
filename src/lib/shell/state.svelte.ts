@@ -204,10 +204,14 @@ export class ShellState {
   desktopApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 
+  /** Browser scene page. The desktop app keeps using Tauri. */
+  labPage = typeof window !== "undefined" && !this.desktopApp && new URLSearchParams(window.location.search).has("scene");
+
+
   section = $state<"changes" | "history">("changes");
 
 
-  selectedPath = $state<string | null>(this.desktopApp ? null : (sampleUnstaged[0]?.path ?? null));
+  selectedPath = $state<string | null>(this.desktopApp || this.labPage ? null : (sampleUnstaged[0]?.path ?? null));
 
 
   summary = $state("");
@@ -234,7 +238,10 @@ export class ShellState {
   selectedSide = $state<Side>("unstaged");
 
 
-  mode = $state<Mode>(this.desktopApp ? "loading" : "sample");
+  mode = $state<Mode>(this.desktopApp || this.labPage ? "loading" : "sample");
+
+
+  labSceneId = $state("");
 
 
   snapshot = $state<StatusSnapshot | null>(null);
@@ -1787,6 +1794,60 @@ export class ShellState {
 
 
 
+  /** Desktop commands, or the browser lab when a scene is open. */
+  backend() {
+    return this.inApp() || this.labPage;
+  }
+
+
+
+  async bootLab() {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("scene") ?? "";
+    try {
+      const [{ sceneById }, { applyLabScene }] = await Promise.all([import("../lab/scenes"), import("../lab/apply")]);
+      const item = sceneById(id);
+      if (!item) throw new Error(`未知场景 ${id}`);
+      const layout = await invoke<Record<string, string>>("lab_layout");
+      const settings = await invoke<Settings>("load_settings");
+      const recent = [layout.full, layout.ahead, layout.conflict, layout.even].filter((path) => !!path);
+      this.adoptSettings({
+        ...settings,
+        authorName: settings.authorName || "AweGit Lab",
+        authorEmail: settings.authorEmail || "lab@example.com",
+        recent,
+        sourceDirectories: layout.repos ? [layout.repos] : settings.sourceDirectories,
+        cloneDirectory: layout.repos || settings.cloneDirectory,
+        fetchAutomatically: false,
+        statusInterval: 0,
+        fileLayout: "list",
+      });
+      void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
+      await this.loadExternalTools();
+      if (item.repo) {
+        const path = layout[item.repo];
+        if (!path) throw new Error(`场景 ${item.id} 没有仓库 ${item.repo}`);
+        const file = params.get("file");
+        if (item.id === "file-history" && file) this.historyFilter = file;
+        await this.openRepo(path);
+        if (!this.snapshot) throw new Error(this.actionError || `打不开 ${item.repo}`);
+      } else {
+        this.snapshot = null;
+        this.mode = "error";
+        this.loadError = "";
+      }
+      await applyLabScene(this, item);
+      this.labSceneId = item.id;
+    } catch (error) {
+      const text = this.message(error);
+      this.loadError = text;
+      if (!this.snapshot) this.mode = "error";
+      console.error(text);
+    }
+  }
+
+
+
   repoPath() {
     return this.snapshot?.path;
   }
@@ -1916,7 +1977,7 @@ export class ShellState {
   /** `status` reads the work tree and the open diff only; `full` also reloads branches and history. */
   async refresh(scope: "status" | "full" = "full", silent = false) {
     const path = this.repoPath();
-    if (!this.inApp() || !path || this.busy || this.backgroundFetch.has(this.jobKey(path))) return;
+    if (!this.backend() || !path || this.busy || this.backgroundFetch.has(this.jobKey(path))) return;
     if (this.refreshing) {
       if (this.refreshQueued !== "full") this.refreshQueued = scope;
       return;
@@ -2173,7 +2234,7 @@ export class ShellState {
 
 
   seedSampleCommands() {
-    if (this.inApp() || this.commandLog.length > 0) return;
+    if (this.inApp() || this.labPage || this.commandLog.length > 0) return;
     const now = Date.now();
     const samples: Array<Omit<CommandEntry, "id">> = [
       { title: this.tr("chrome.commandFetchFrom", { name: "origin" }), summary: "Already up to date", command: "git fetch --prune origin", output: "Already up to date", ok: true, at: now - 4 * 60 * 1000, source: "user" },
@@ -2212,7 +2273,7 @@ export class ShellState {
 
   async mutate(request: Record<string, unknown>, source: "user" | "background" = "user") {
     const path = this.repoPath();
-    if (!this.inApp() || !path || this.busy) return;
+    if (!this.backend() || !path || this.busy) return;
     const background = source === "background";
     if (!background) this.actionError = null;
     const described = this.describeRequest(request);
@@ -2463,7 +2524,7 @@ export class ShellState {
 
   /** `full` adds the ignored files, statistics, and LFS list, which take seconds in a large work tree. */
   async loadFacts(force = false, full = false) {
-    if (!this.inApp() || this.mode !== "live") return null;
+    if (!this.backend() || this.mode !== "live") return null;
     const path = this.repoPath() ?? "";
     if (!force && this.facts && this.factsPath === path) return this.facts;
     try {
@@ -3167,7 +3228,7 @@ export class ShellState {
 
 
   async openRepo(path: string) {
-    if (!this.inApp() || !path.trim()) return;
+    if (!this.backend() || !path.trim()) return;
     const gen = ++this.openGen;
     this.focusPath = path;
     if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description, commitType: this.commitType });
@@ -4050,7 +4111,7 @@ export class ShellState {
 
 
   previewRepos() {
-    return !this.inApp() && this.settings.recent.length === 0 && this.repos.length === 0;
+    return !this.backend() && this.settings.recent.length === 0 && this.repos.length === 0;
   }
 
 
@@ -4171,7 +4232,7 @@ export class ShellState {
     this.submenu = null;
     this.placeRepoPicker();
     this.repoPickerOpen = true;
-    if (!this.inApp()) return;
+    if (!this.backend()) return;
     const token = ++this.repoScanToken;
     this.repoScanning = true;
     const found: string[] = [];
@@ -4756,7 +4817,7 @@ export class ShellState {
     queueMicrotask(() => this.launchList?.querySelector(".on")?.scrollIntoView({ block: "nearest" }));
     });
     $effect(() => {
-    if (this.mode !== "error" || !this.inApp()) return;
+    if (this.mode !== "error" || !this.backend()) return;
     for (const path of this.settings.recent.slice(0, 12)) {
     if (this.recentStats[path]) continue;
     void invoke<{ branch: string; ahead: number; behind: number; lastSummary: string }>("repository_summary", { path })
@@ -4790,6 +4851,10 @@ export class ShellState {
     window.removeEventListener("mouseup", onMouseNav);
     window.removeEventListener("popstate", onPop);
     };
+    if (this.labPage) {
+    void this.bootLab();
+    return detachNav;
+    }
     if (!this.inApp()) {
     this.notices = sampleNotices;
     this.pulls = samplePulls;

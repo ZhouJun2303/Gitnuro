@@ -1125,7 +1125,7 @@ export function removesOnApply(shell: ShellState, line: DiffLine, action: "stage
 
 export async function applyLineOps(shell: ShellState, action: "stageLine" | "discardLine", entries: { line: DiffLine; index: number }[]) {
     const file = shell.selectedPath;
-    if (!file || entries.length === 0 || !shell.inApp() || shell.busy) return;
+    if (!file || entries.length === 0 || !shell.backend() || shell.busy) return;
     const unstage = shell.selectedSide === "staged";
     const ordered = [...entries]
       .filter((entry) => (action === "stageLine" ? entry.line.stageAt : entry.line.workAt) != null)

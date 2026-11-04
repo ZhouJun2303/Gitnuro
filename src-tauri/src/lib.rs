@@ -1,9 +1,12 @@
 mod ai;
 mod forge;
+mod lab;
 mod perf;
 mod settings;
 mod tools;
 mod updates;
+
+pub use lab::run_lab;
 
 use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
@@ -152,12 +155,20 @@ fn prefer_bundled_git() {
 fn repo_from(path: Option<String>) -> Result<PathBuf, String> {
     let start = match path {
         Some(path) if !path.is_empty() => PathBuf::from(path),
-        _ => std::env::current_dir().map_err(|error| error.to_string())?,
+        _ => {
+            if lab::lab_guarded() {
+                return Err("lab command needs a repository path".into());
+            }
+            std::env::current_dir().map_err(|error| error.to_string())?
+        }
     };
     if !start.exists() {
         return Err(format!("could not open repository at {}: missing", start.display()));
     }
-    Ok(awegit_git::discover(&start).unwrap_or(start))
+    let found = awegit_git::discover(&start).unwrap_or_else(|| start.clone());
+    lab::ensure_lab_path(&start)?;
+    lab::ensure_lab_path(&found)?;
+    Ok(found)
 }
 
 fn read_status(repo: &Path) -> Result<awegit_git::StatusSnapshot, String> {

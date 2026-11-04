@@ -45,7 +45,7 @@
           {/if}
           {#if shell.reflogOn}
             {#each shell.reflogRows as row (`${row.selector}-${row.id}`)}
-              <button class="commit-row" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
+              <button class="commit-row" data-layer="reflog" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
                 <span class="subject">{row.summary}</span>
                 <span class="commit-side">
                   <span class="meta selector" title={row.selector}>{row.selector}</span>
@@ -115,7 +115,7 @@
             {/if}
             {#if shell.reflogOn}
               {#each sampleReflog as row (row.selector)}
-                <button class="commit-row" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
+                <button class="commit-row" data-layer="reflog" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
                   <span class="subject">{row.summary}</span>
                   <span class="commit-side">
                     <span class="meta selector" title={row.selector}>{row.selector}</span>

@@ -15,6 +15,14 @@ name = "awegit_lib"
 # GNU ld rejects that table once it passes 65535 ordinals.
 crate-type = ["rlib"]
 
+[[bin]]
+name = "awegit"
+path = "src/main.rs"
+
+[[bin]]
+name = "awegit-lab"
+path = "src/bin/lab.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

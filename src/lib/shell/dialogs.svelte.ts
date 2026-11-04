@@ -586,7 +586,7 @@ export function applyToolSettings(shell: ShellState) {
 export async function savePrefs(shell: ShellState, close = true) {
     shell.applyToolSettings();
     if (close) shell.dialog = null;
-    if (!shell.inApp()) return;
+    if (!shell.backend()) return;
     const ticket = ++shell.prefsSave;
     const values = shell.settings;
     try {
@@ -735,7 +735,7 @@ export async function browseCloneRoot(shell: ShellState) {
 export async function startClone(shell: ShellState) {
     const url = cloneUrl(shell.draft);
     const destination = shell.cloneTargetPath;
-    if (!shell.inApp()) return;
+    if (!shell.backend()) return;
     if (shell.cloneJob) {
       shell.actionError = shell.tr("dialog.cloneBusy");
       return;
@@ -768,7 +768,7 @@ export async function startClone(shell: ShellState) {
 
 export async function startInit(shell: ShellState) {
     const destination = shell.cloneTargetPath;
-    if (!shell.inApp()) return;
+    if (!shell.backend()) return;
     if (shell.cloneJob) {
       shell.actionError = shell.tr("dialog.cloneBusy");
       return;
@@ -828,7 +828,7 @@ export type ExternalTool = {
   };
 
 export async function loadExternalTools(shell: ShellState) {
-    if (!shell.inApp()) {
+    if (!shell.backend()) {
       shell.mergeTools = [];
       shell.diffTools = [];
       return;

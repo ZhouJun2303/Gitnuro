@@ -561,6 +561,12 @@ impl Default for Settings {
 }
 
 pub fn path() -> Result<PathBuf, String> {
+    if let Ok(custom) = std::env::var("AWEGIT_SETTINGS") {
+        let custom = custom.trim();
+        if !custom.is_empty() {
+            return Ok(PathBuf::from(custom));
+        }
+    }
     let base = if cfg!(windows) {
         std::env::var("APPDATA").map_err(|error| error.to_string())?
     } else if cfg!(target_os = "macos") {
