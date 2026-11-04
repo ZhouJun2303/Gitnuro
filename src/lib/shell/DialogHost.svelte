@@ -213,23 +213,23 @@
         {#if shell.dialog === "prefs"}
           <PrefsDialog />
         {:else if shell.dialog === "reset"}
-          <h2>Reset to {shell.draft}</h2>
+          <h2>{shell.tr("dialog.resetTo", { name: shell.draft.slice(0, 7) })}</h2>
           <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "reset", rev: shell.draft, mode: "soft" })}>Soft</button>
-            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "reset", rev: shell.draft, mode: "mixed" })}>Mixed</button>
-            <button class="text-button" type="button" onclick={shell.hardReset.bind(shell)}>Hard</button>
+            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "reset", rev: shell.draft, mode: "soft" })}>{shell.tr("menu.soft")}</button>
+            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "reset", rev: shell.draft, mode: "mixed" })}>{shell.tr("menu.mixed")}</button>
+            <button class="text-button" type="button" onclick={shell.hardReset.bind(shell)}>{shell.tr("menu.hard")}</button>
           </div>
         {:else if shell.dialog === "flow"}
-          <h2>Git Flow</h2>
-          <input placeholder="Feature name" bind:value={shell.draft} />
-          <input placeholder="master branch" bind:value={shell.settings.flowMaster} />
-          <input placeholder="develop branch" bind:value={shell.settings.flowDevelop} />
-          <input placeholder="feature prefix" bind:value={shell.settings.flowFeature} />
-          <input placeholder="release prefix" bind:value={shell.settings.flowRelease} />
-          <input placeholder="hotfix prefix" bind:value={shell.settings.flowHotfix} />
-          <input placeholder="support prefix" bind:value={shell.settings.flowSupport} />
+          <h2>{shell.tr("chrome.flow")}</h2>
+          <input placeholder={shell.tr("dialog.flowName")} bind:value={shell.draft} />
+          <input placeholder={shell.tr("dialog.flowMaster")} bind:value={shell.settings.flowMaster} />
+          <input placeholder={shell.tr("dialog.flowDevelop")} bind:value={shell.settings.flowDevelop} />
+          <input placeholder={shell.tr("dialog.flowFeaturePrefix")} bind:value={shell.settings.flowFeature} />
+          <input placeholder={shell.tr("dialog.flowReleasePrefix")} bind:value={shell.settings.flowRelease} />
+          <input placeholder={shell.tr("dialog.flowHotfixPrefix")} bind:value={shell.settings.flowHotfix} />
+          <input placeholder={shell.tr("dialog.flowSupportPrefix")} bind:value={shell.settings.flowSupport} />
           <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "gitFlowInit", master: shell.settings.flowMaster, develop: shell.settings.flowDevelop, feature: shell.settings.flowFeature, release: shell.settings.flowRelease, hotfix: shell.settings.flowHotfix, support: shell.settings.flowSupport })}>Init</button>
+            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "gitFlowInit", master: shell.settings.flowMaster, develop: shell.settings.flowDevelop, feature: shell.settings.flowFeature, release: shell.settings.flowRelease, hotfix: shell.settings.flowHotfix, support: shell.settings.flowSupport })}>{shell.tr("dialog.flowInit")}</button>
             <label>{shell.tr("dialog.flowKind")}
               <select bind:value={shell.flowKind}>
                 <option value="feature">feature</option>
@@ -238,8 +238,8 @@
                 <option value="support">support</option>
               </select>
             </label>
-            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "gitFlowStart", name: shell.draft, kind: shell.flowKind })}>Start</button>
-            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "gitFlowFinish", name: shell.draft, kind: shell.flowKind })}>Finish</button>
+            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "gitFlowStart", name: shell.draft, kind: shell.flowKind })}>{shell.tr("dialog.flowStart")}</button>
+            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "gitFlowFinish", name: shell.draft, kind: shell.flowKind })}>{shell.tr("dialog.flowFinish")}</button>
           </div>
         {:else if shell.dialog === "branch"}
           <h2>{shell.tr("dialog.newBranch")}</h2>
@@ -300,11 +300,11 @@
           </div>
           {#if shell.actionError}<p class="empty">{shell.actionError}</p>{/if}
         {:else if shell.dialog === "tag"}
-          <h2>New tag</h2>
-          <input placeholder="Name" bind:value={shell.draft} />
-          <input placeholder="Revision" bind:value={shell.draftExtra} />
-          <input placeholder="Message (empty makes a lightweight tag)" bind:value={shell.draftUser} />
-          <button class="commit" type="submit">Create</button>
+          <h2>{shell.tr("dialog.newTag")}</h2>
+          <input placeholder={shell.tr("dialog.name")} bind:value={shell.draft} />
+          <input placeholder={shell.tr("dialog.tagRevision")} bind:value={shell.draftExtra} />
+          <input placeholder={shell.tr("dialog.tagMessage")} bind:value={shell.draftUser} />
+          <button class="commit" type="submit">{shell.tr("dialog.create")}</button>
         {:else if shell.dialog === "fetch"}
           <h2>{shell.tr("chrome.fetch")}</h2>
           <p>{shell.tr("dialog.fetchBody")}</p>
@@ -405,22 +405,23 @@
           <label class="check"><input type="checkbox" bind:checked={shell.includeUntracked} /> {shell.tr("dialog.includeUntracked")}</label>
           <button class="commit" type="submit">{shell.tr("chrome.stash")}</button>
         {:else if shell.dialog === "rename"}
-          <h2>Rename branch</h2>
-          <input placeholder="Current name" bind:value={shell.draft} />
-          <input placeholder="New name" bind:value={shell.draftExtra} />
-          <button class="commit" type="submit">Rename</button>
+          <h2>{shell.tr("dialog.renameBranch")}</h2>
+          <input placeholder={shell.tr("dialog.currentName")} bind:value={shell.draft} />
+          <input placeholder={shell.tr("dialog.to")} bind:value={shell.draftExtra} />
+          <button class="commit" type="submit">{shell.tr("dialog.renameBranch")}</button>
         {:else if shell.dialog === "upstream"}
-          <h2>Upstream for {shell.draft}</h2>
-          <input placeholder="origin/main (empty clears it)" bind:value={shell.draftExtra} />
-          <button class="commit" type="submit">Save</button>
+          <h2>{shell.tr("dialog.upstreamFor", { name: shell.draft })}</h2>
+          <input placeholder={shell.tr("dialog.upstreamEmpty")} bind:value={shell.draftExtra} />
+          <button class="commit" type="submit">{shell.tr("dialog.save")}</button>
         {:else if shell.dialog === "reword"}
-          <h2>Reword {shell.draftExtra.slice(0, 7)}</h2>
-          <input placeholder="Summary" bind:value={shell.draft} />
-          <button class="commit" type="submit">Reword</button>
+          <h2>{shell.tr("dialog.rewordTitle", { name: shell.draftExtra.slice(0, 7) })}</h2>
+          <input placeholder={shell.tr("dialog.message")} bind:value={shell.draft} />
+          <button class="commit" type="submit">{shell.tr("dialog.rewordAction")}</button>
         {:else if shell.dialog === "rebase"}
           <h2>{shell.tr("dialog.rebase")}</h2>
           <p class="empty">{shell.rebaseConflictFiles.length === 0 ? shell.tr("dialog.conflictNone") : shell.tr("dialog.conflictSome", { name: shell.rebaseConflictFiles.join(", ") })}</p>
           <label class="check"><input type="checkbox" bind:checked={shell.updateRefs} /> {shell.tr("dialog.updateRefs")}</label>
+          <div class="dialog-scroll">
           {#each shell.rebaseSteps as step, index (step.rev)}
             <div class="composer-row" role="listitem" draggable="true" ondragstart={() => (shell.dragStep = index)} ondragover={(event) => event.preventDefault()} ondrop={() => { if (shell.dragStep == null || shell.dragStep === index) return; const copy = [...shell.rebaseSteps]; const [item] = copy.splice(shell.dragStep, 1); copy.splice(index, 0, item); shell.rebaseSteps = copy; shell.dragStep = null; }}>
               <input type="checkbox" checked={shell.rebasePicked.includes(step.rev)} aria-label={step.summary} onchange={() => { shell.rebasePicked = shell.rebasePicked.includes(step.rev) ? shell.rebasePicked.filter((rev) => rev !== step.rev) : [...shell.rebasePicked, step.rev]; }} />
@@ -435,28 +436,29 @@
               <span>{step.summary}</span>
             </div>
             {#if step.verb === "reword" || step.verb === "squash" || step.verb === "exec"}
-              <input placeholder="Message" bind:value={step.message} />
+              <input placeholder={shell.tr("dialog.message")} bind:value={step.message} />
             {/if}
           {/each}
+          </div>
           <div class="composer-row">
             <button class="text-button" type="button" onclick={() => { shell.rebaseSteps = [...shell.rebaseSteps, { verb: "break", rev: `break-${Date.now()}`, summary: "break", message: "" }]; }}>break</button>
             <button class="text-button" type="button" onclick={() => { shell.rebaseSteps = [...shell.rebaseSteps, { verb: "exec", rev: `exec-${Date.now()}`, summary: "exec", message: "echo awegit" }]; }}>exec</button>
           </div>
           <button class="commit" type="submit" disabled={shell.mode !== "live"}>{shell.tr("dialog.startRebase")}</button>
         {:else if shell.dialog === "patch"}
-          <h2>Apply patch</h2>
-          <textarea rows="8" placeholder="Patch text" bind:value={shell.draft}></textarea>
-          <button class="commit" type="submit">Apply</button>
+          <h2>{shell.tr("dialog.applyPatch")}</h2>
+          <textarea rows="8" placeholder={shell.tr("dialog.patchBody")} bind:value={shell.draft}></textarea>
+          <button class="commit" type="submit">{shell.tr("dialog.applyNow")}</button>
         {:else if shell.dialog === "submodule"}
-          <h2>Add submodule</h2>
-          <input placeholder="URL" bind:value={shell.draft} />
-          <input placeholder="Path" bind:value={shell.draftExtra} />
-          <button class="commit" type="submit">Add</button>
+          <h2>{shell.tr("dialog.addSubmodule")}</h2>
+          <input placeholder={shell.tr("dialog.url")} bind:value={shell.draft} />
+          <input placeholder={shell.tr("dialog.path")} bind:value={shell.draftExtra} />
+          <button class="commit" type="submit">{shell.tr("dialog.create")}</button>
         {:else if shell.dialog === "worktree"}
-          <h2>Add worktree</h2>
-          <input placeholder="Path" bind:value={shell.draft} />
-          <input placeholder="Branch" bind:value={shell.draftExtra} />
-          <button class="commit" type="submit">Add</button>
+          <h2>{shell.tr("dialog.addWorktree")}</h2>
+          <input placeholder={shell.tr("dialog.path")} bind:value={shell.draft} />
+          <input placeholder={shell.tr("dialog.branch")} bind:value={shell.draftExtra} />
+          <button class="commit" type="submit">{shell.tr("dialog.create")}</button>
         {:else if shell.dialog === "workspace"}
           <h2>{shell.tr("chrome.workspaceConfigure")}</h2>
           <div class="workspace-list">
@@ -474,7 +476,7 @@
             <button class="commit" type="submit">{shell.tr("chrome.workspaceCreate")}</button>
           </div>
         {:else if shell.dialog === "resolve"}
-          <h2>Resolve {shell.draft}</h2>
+          <h2>{shell.tr("dialog.mergeResolve")} {shell.draft}</h2>
           <div class="merge-grid">
             <label>{shell.tr("dialog.useOurs")}<textarea rows="8" readonly value={shell.conflict?.ours ?? ""}></textarea></label>
             <label>{shell.tr("dialog.useTheirs")}<textarea rows="8" readonly value={shell.conflict?.theirs ?? ""}></textarea></label>
@@ -501,7 +503,7 @@
             <button class="text-button" type="button" onclick={() => (shell.draftExtra = "both")}>{shell.tr("dialog.useBoth")}</button>
             <button class="text-button" type="button" onclick={() => (shell.draftExtra = "text")}>{shell.tr("dialog.result")}</button>
           </div>
-          <button class="commit" type="submit">Apply {shell.draftExtra || "text"}</button>
+          <button class="commit" type="submit">{shell.tr("dialog.applyNow")}</button>
         {:else if shell.dialog === "merge"}
           {@const into = shell.mergeInto || shell.snapshot?.branch || "HEAD"}
           <h2>{shell.tr(shell.draftExtra === "squash" ? "dialog.mergeSquashTitle" : "dialog.mergeTitleLine", { source: shell.draft, into })}</h2>
@@ -528,42 +530,42 @@
           <p class="empty">{shell.settings.mergeAutostash ? shell.tr("dialog.mergeAutostash") : shell.tr("dialog.mergeClean")}</p>
           <button class="commit" type="submit">{shell.tr("dialog.merge")}</button>
         {:else if shell.dialog === "repo"}
-          <h2>Repository</h2>
-          <label>Author name <input bind:value={shell.draft} placeholder="uses git config when empty" /></label>
-          <label>Author email <input bind:value={shell.draftExtra} /></label>
-          <label class="check"><input type="checkbox" bind:checked={shell.repoSignOff} /> Sign-off in this repository</label>
-          <label>Sign-off format <input bind:value={shell.draftUser} /></label>
-          <p class="empty">Author and sign-off are stored in this repository. Preferences still holds the default for new repositories.</p>
-          <button class="commit" type="submit">Save</button>
+          <h2>{shell.tr("chrome.repoSettings")}</h2>
+          <label>{shell.tr("dialog.authorName")} <input bind:value={shell.draft} placeholder={shell.tr("dialog.authorEmpty")} /></label>
+          <label>{shell.tr("dialog.authorEmail")} <input bind:value={shell.draftExtra} /></label>
+          <label class="check"><input type="checkbox" bind:checked={shell.repoSignOff} /> {shell.tr("dialog.signOffRepo")}</label>
+          <label>{shell.tr("dialog.signOffFormat")} <input bind:value={shell.draftUser} /></label>
+          <p class="empty">{shell.tr("dialog.repoLocalHint")}</p>
+          <button class="commit" type="submit">{shell.tr("dialog.save")}</button>
         {:else if shell.dialog === "continue"}
-          <h2>Continue rebase</h2>
-          <p class="empty">Leave this empty to keep the current message. A message is applied when this step is a reword.</p>
-          <input placeholder="New message (optional)" bind:value={shell.draft} />
-          <button class="commit" type="submit">Continue</button>
+          <h2>{shell.tr("dialog.continueRebase")}</h2>
+          <p class="empty">{shell.tr("dialog.continueHint")}</p>
+          <input placeholder={shell.tr("dialog.continueMessage")} bind:value={shell.draft} />
+          <button class="commit" type="submit">{shell.tr("dialog.continueAction")}</button>
         {:else if shell.dialog === "about"}
-          <h2>AweGit {shell.appVersion}</h2>
-          <p class="empty">com.zhoujun.awegit. Windows builds include MinGit 2.56.0. macOS uses the system Git.</p>
+          <h2>{shell.tr("dialog.about")} {shell.appVersion}</h2>
+          <p class="empty">{shell.tr("dialog.aboutBody")}</p>
           <div class="composer-row">
             <button class="text-button" type="button" onclick={() => void copyDiagnostics()}>{diagnosticsCopied ? shell.tr("chrome.copied") : shell.tr("dialog.copyDiagnostics")}</button>
             <button class="commit" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
           </div>
         {:else if shell.dialog === "output"}
-          <h2>Command output</h2>
+          <h2>{shell.tr("dialog.commandOutput")}</h2>
           <pre class="diff-body">{shell.commandOutput}</pre>
-          <button class="commit" type="button" onclick={() => (shell.dialog = null)}>Close</button>
+          <button class="commit" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
         {:else if shell.dialog === "remote"}
-          <h2>Remote</h2>
-          <input placeholder="Name" bind:value={shell.draft} />
-          <input placeholder="URL" bind:value={shell.draftExtra} />
+          <h2>{shell.tr("chrome.groupRemote")}</h2>
+          <input placeholder={shell.tr("dialog.name")} bind:value={shell.draft} />
+          <input placeholder={shell.tr("dialog.url")} bind:value={shell.draftExtra} />
           <div class="composer-row">
-            <button class="commit" type="submit">Add</button>
-            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "setRemoteUrl", name: shell.draft, url: shell.draftExtra })}>Set URL</button>
+            <button class="commit" type="submit">{shell.tr("dialog.create")}</button>
+            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "setRemoteUrl", name: shell.draft, url: shell.draftExtra })}>{shell.tr("dialog.setRemoteUrl")}</button>
           </div>
         {:else if shell.dialog === "squash"}
-          <h2>Squash</h2>
-          <p class="empty">Uses the selected commit through HEAD, or the consecutive commits you checked. Later commits are replayed. The range must contain no merge.</p>
-          <input placeholder="Summary" bind:value={shell.draft} />
-          <button class="commit" type="submit">Squash</button>
+          <h2>{shell.tr("dialog.squash")}</h2>
+          <p class="empty">{shell.tr("dialog.squashHint")}</p>
+          <input placeholder={shell.tr("dialog.message")} bind:value={shell.draft} />
+          <button class="commit" type="submit">{shell.tr("dialog.squash")}</button>
         {:else if shell.dialog === "checkoutDirty"}
           <h2>{shell.tr("menu.checkout")} {shell.pendingCheckout}</h2>
           <div class="composer-row">
@@ -663,8 +665,9 @@
           <button class="commit" type="submit">{shell.tr("dialog.save")}</button>
         {:else if shell.dialog === "stats"}
           <h2>{shell.tr("chrome.stats")}</h2>
-          <p class="empty">UTC</p>
+          <div class="stats-row">{#each shell.tr("dialog.weekdays").split(" ") as day}<span>{day}</span>{/each}</div>
           <div class="stats-row">{#each shell.facts?.weekday ?? [] as count, index (index)}<span title={String(count)}>{count}</span>{/each}</div>
+          <p class="empty">{shell.tr("dialog.byHour")}</p>
           <div class="stats-row">{#each shell.facts?.hour ?? [] as count, index (index)}<span title={`${index}:00 ${count}`}>{count}</span>{/each}</div>
           <div class="treemap">
             {#each shell.facts?.hot ?? [] as item (item.path)}
@@ -676,8 +679,8 @@
           <h2>{shell.tr("chrome.lfsFiles")}</h2>
           <pre class="diff-body">{shell.facts?.lfs || shell.tr("chrome.noChanges")}</pre>
           <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => void shell.mutate({ action: "lfsPull" })}>pull</button>
-            <button class="text-button" type="button" onclick={() => void shell.mutate({ action: "lfsPush" })}>push</button>
+            <button class="text-button" type="button" onclick={() => void shell.mutate({ action: "lfsPull" })}>{shell.tr("chrome.pull")}</button>
+            <button class="text-button" type="button" onclick={() => void shell.mutate({ action: "lfsPush" })}>{shell.tr("chrome.push")}</button>
           </div>
           <button class="commit" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
         {:else if shell.dialog === "github"}
@@ -702,36 +705,36 @@
           <input placeholder={shell.tr("dialog.branch")} bind:value={shell.draft} />
           <button class="commit" type="submit">{shell.tr("dialog.create")}</button>
         {:else if shell.dialog === "credential"}
-          <h2>HTTPS login</h2>
-          <p class="empty">The password is sent to git credential approve and is not saved in settings.</p>
-          <input placeholder="Protocol" bind:value={shell.draft} />
-          <input placeholder="Host" bind:value={shell.draftExtra} />
-          <input placeholder="Username" bind:value={shell.draftUser} />
-          <input placeholder="Password" type="password" bind:value={shell.draftSecret} />
-          <button class="commit" type="submit">Save in Git</button>
+          <h2>{shell.tr("dialog.httpsLogin")}</h2>
+          <p class="empty">{shell.tr("dialog.httpsHint")}</p>
+          <input placeholder={shell.tr("dialog.protocol")} bind:value={shell.draft} />
+          <input placeholder={shell.tr("dialog.host")} bind:value={shell.draftExtra} />
+          <input placeholder={shell.tr("dialog.username")} bind:value={shell.draftUser} />
+          <input placeholder={shell.tr("dialog.password")} type="password" bind:value={shell.draftSecret} />
+          <button class="commit" type="submit">{shell.tr("dialog.saveInGit")}</button>
         {:else}
-          <h2>Custom commands</h2>
+          <h2>{shell.tr("dialog.customCommands")}</h2>
           {#each shell.settings.commands as command (command.id)}
             <div class="composer-row">
               <span>{command.name}</span>
               <span class="meta">{command.target}</span>
-              <button class="text-button" type="button" onclick={() => shell.runCommand(command)}>Run</button>
-              <button class="text-button" type="button" onclick={() => shell.removeCommand(command.id)}>Delete</button>
+              <button class="text-button" type="button" onclick={() => shell.runCommand(command)}>{shell.tr("dialog.run")}</button>
+              <button class="text-button" type="button" onclick={() => shell.removeCommand(command.id)}>{shell.tr("menu.delete")}</button>
             </div>
           {/each}
-          <input placeholder="Name" bind:value={shell.draft} />
+          <input placeholder={shell.tr("dialog.name")} bind:value={shell.draft} />
           <select bind:value={shell.draftExtra}>
-            <option value="repository">Repository</option>
-            <option value="commit">Commit</option>
-            <option value="branch">Branch</option>
-            <option value="file">File</option>
+            <option value="repository">{shell.tr("chrome.repository")}</option>
+            <option value="commit">{shell.tr("chrome.commit")}</option>
+            <option value="branch">{shell.tr("dialog.branch")}</option>
+            <option value="file">{shell.tr("dialog.file")}</option>
           </select>
-          <input placeholder={"Template. Placeholders: ${repo} ${sha} ${branch} ${file} ${input} https://"} bind:value={shell.draftUser} />
+          <input placeholder={"${repo} ${sha} ${branch} ${file} ${input}"} bind:value={shell.draftUser} />
           <textarea rows="3" placeholder={shell.tr("dialog.commandPrompt")} bind:value={shell.commandPrompt}></textarea>
           <label class="check"><input type="checkbox" bind:checked={shell.commandShared} /> {shell.tr("chrome.shared")}</label>
           <div class="composer-row">
-            <button class="text-button" type="button" onclick={shell.saveCommand.bind(shell)}>Save</button>
-            <button class="commit" type="submit">Run</button>
+            <button class="text-button" type="button" onclick={shell.saveCommand.bind(shell)}>{shell.tr("dialog.save")}</button>
+            <button class="commit" type="submit">{shell.tr("dialog.run")}</button>
           </div>
         {/if}
       </form>

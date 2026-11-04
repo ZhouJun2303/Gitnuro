@@ -181,8 +181,8 @@
               <span class="twist"></span>
               {@render glyph(row.current ? "check" : "branch")}
               <span class="name">{shell.pinnedHere.has(row.name) ? "• " : ""}{row.group ? row.name.slice(row.group.length + 1) : row.name}</span>
-              {#if row.ahead > 0}<span class="ahead">{row.ahead}↑</span>{/if}
-              {#if row.behind > 0}<span class="ahead">{row.behind}↓</span>{/if}
+              {#if row.ahead > 0}<span class="ahead up">{row.ahead}</span>{/if}
+              {#if row.behind > 0}<span class="ahead down">{row.behind}</span>{/if}
             </button>
             {@render branchSwitches(row.name, !row.current && shell.mode === "live")}
           </div>
@@ -300,7 +300,7 @@
             <span class="twist"></span>
             {@render glyph("check")}
             <span class="name">{shell.branchLabel}</span>
-            {#if shell.mode === "sample"}<span class="ahead">5↑</span>{/if}
+            {#if shell.mode === "sample"}<span class="ahead up">5</span>{/if}
           </button>
           {@render branchSwitches(shell.branchLabel, false)}
         </div>

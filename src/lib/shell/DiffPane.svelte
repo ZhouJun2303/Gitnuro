@@ -40,7 +40,12 @@
             <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} onscroll={onBlameScroll}>
               <div class="commit-window" style:height="{(shell.blameLines?.length ?? 0) * 18}px">
                 {#each shell.blameWindow.rows as line, index (`${line.line}-${line.id}`)}
-                  <button class="virtual-row" type="button" style:top="{(shell.blameWindow.start + index) * 18}px" title={line.summary} onclick={() => { shell.section = "history"; void shell.selectCommit(line.id); }}>{line.line} {line.shortId} {line.author} {line.summary} {line.text}</button>
+                  {@const pending = !line.id || /^0+$/.test(line.id)}
+                  <button class="virtual-row blame-line" class:blame-pending={pending} type="button" style:top="{(shell.blameWindow.start + index) * 18}px" title={pending ? shell.tr("dialog.notCommitted") : `${line.author} · ${line.summary}`} onclick={() => { if (pending) return; shell.section = "history"; void shell.selectCommit(line.id); }}>
+                    <span class="blame-gutter">{line.line}</span>
+                    <span class="blame-who">{pending ? shell.tr("dialog.notCommitted") : line.author}</span>
+                    <span class="blame-code">{line.text}</span>
+                  </button>
                 {/each}
               </div>
             </div>

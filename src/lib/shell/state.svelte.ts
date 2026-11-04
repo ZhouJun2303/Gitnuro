@@ -925,6 +925,7 @@ export class ShellState {
 
 
   recentStats = $state<Record<string, { branch: string; ahead: number; behind: number; lastSummary: string }>>({});
+  recentAsked = new Set<string>();
 
 
   commandOutput = $state("");
@@ -3101,7 +3102,9 @@ export class ShellState {
     if (Object.keys(this.recentStats).some((key) => match(key))) {
       const stats = { ...this.recentStats };
       for (const key of Object.keys(stats)) {
-        if (match(key)) delete stats[key];
+        if (!match(key)) continue;
+        delete stats[key];
+        this.recentAsked.delete(key);
       }
       this.recentStats = stats;
     }
@@ -4819,12 +4822,15 @@ export class ShellState {
     $effect(() => {
     if (this.mode !== "error" || !this.backend()) return;
     for (const path of this.settings.recent.slice(0, 12)) {
-    if (this.recentStats[path]) continue;
+    if (this.recentStats[path] || this.recentAsked.has(path)) continue;
+    this.recentAsked.add(path);
     void invoke<{ branch: string; ahead: number; behind: number; lastSummary: string }>("repository_summary", { path })
     .then((value) => {
     this.recentStats = { ...this.recentStats, [path]: value };
     })
-    .catch(() => {});
+    .catch(() => {
+    this.recentAsked.delete(path);
+    });
     }
     });
     onMount(() => {

@@ -1,6 +1,7 @@
 import { invoke } from "../perf";
 import type { CommandRecord } from "../status";
 import type { ShellState } from "../shell/state.svelte";
+import { fillResolveDialog } from "../shell/dialogs.svelte";
 import type { LabDialog, LabScene } from "./scenes";
 
 async function showChange(shell: ShellState, path: string, side: "staged" | "unstaged") {
@@ -249,9 +250,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
       shell.draftExtra = "origin/main";
       break;
     case "resolve":
-      shell.draft = "src/both-sides.ts";
-      shell.draftExtra = "text";
-      shell.mergeResult = "export const side = \"lab\";\n";
+      await fillResolveDialog(shell, "src/both-sides.ts");
       break;
     case "rebase": {
       const onto = shell.commitsLive[shell.commitsLive.length - 1];

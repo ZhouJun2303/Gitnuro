@@ -85,19 +85,19 @@
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
           <span>{shell.tr("chrome.launch")}</span>
         </button>
-        <button class="tool-btn stack" type="button" disabled={shell.busy} onclick={() => shell.confirmSync("fetch")} oncontextmenu={(event) => shell.openMenu(event, [
+        <button class="tool-btn stack" type="button" title={shell.tr("chrome.fetch")} disabled={shell.busy} onclick={() => shell.confirmSync("fetch")} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: shell.mode !== "live", run: () => void shell.doFetch() },
           { label: shell.tr("chrome.fetchAll"), disabled: shell.mode !== "live", run: () => void shell.mutate({ action: "fetch", remote: null, prune: shell.settings.fetchPrune, tags: shell.settings.fetchTags }) },
         ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span>{shell.tr("chrome.fetch")}</span></button>
-        <button class="tool-btn stack" type="button" disabled={shell.busy} onclick={() => shell.confirmSync("pull")} oncontextmenu={(event) => shell.openMenu(event, [
+        <button class="tool-btn stack" type="button" title={shell.tr("chrome.pull")} disabled={shell.busy} onclick={() => shell.confirmSync("pull")} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: shell.mode !== "live", run: () => void shell.doPull() },
           { label: shell.tr("dialog.fastForward"), disabled: shell.mode !== "live", run: () => { shell.settings.pullRebase = false; void shell.doPull(); } },
         ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg><span>{shell.tr("chrome.pull")}</span>{#if shell.currentBranch && shell.currentBranch.behind > 0}<em class="sync-count">{shell.currentBranch.behind}</em>{/if}</button>
-        <button class="tool-btn stack" type="button" disabled={shell.busy} onclick={() => shell.confirmSync("push")} oncontextmenu={(event) => shell.openMenu(event, [
+        <button class="tool-btn stack" type="button" title={shell.tr("chrome.push")} disabled={shell.busy} onclick={() => shell.confirmSync("push")} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: shell.mode !== "live", run: () => void shell.doPush() },
           { label: shell.tr("chrome.pushTags"), disabled: shell.mode !== "live", run: () => void shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease }) },
         ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg><span>{shell.tr("chrome.push")}</span>{#if shell.currentBranch && shell.currentBranch.ahead > 0}<em class="sync-count">{shell.currentBranch.ahead}</em>{/if}</button>
-        <button class="tool-btn stack" type="button" disabled={shell.busy || shell.mode !== "live"} onclick={() => shell.openStash([])} oncontextmenu={(event) => shell.openMenu(event, shell.stashItems())}>
+        <button class="tool-btn stack" type="button" title={shell.tr("chrome.stash")} disabled={shell.busy || shell.mode !== "live"} onclick={() => shell.openStash([])} oncontextmenu={(event) => shell.openMenu(event, shell.stashItems())}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
           <span>{shell.tr("chrome.stash")}</span>
         </button>
@@ -145,15 +145,15 @@
         </div>
       </div>
       <div class="chrome-right">
-        <button class="tool-btn stack" type="button" disabled={!shell.snapshot} onclick={() => shell.snapshot && void shell.openLocal(shell.snapshot.path)}>
+        <button class="tool-btn stack" type="button" title={shell.tr("chrome.explorer")} disabled={!shell.snapshot} onclick={() => shell.snapshot && void shell.openLocal(shell.snapshot.path)}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>
           <span>{shell.tr("chrome.explorer")}</span>
         </button>
-        <button class="tool-btn stack" type="button" disabled={shell.mode !== "live"} onclick={() => invoke("open_terminal", { path: shell.repoPath() })}>
+        <button class="tool-btn stack" type="button" title={shell.tr("chrome.terminal")} disabled={shell.mode !== "live"} onclick={() => invoke("open_terminal", { path: shell.repoPath() })}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m7 9 3 3-3 3M12 15h5"/></svg>
           <span>{shell.tr("chrome.terminal")}</span>
         </button>
-        <button class="tool-btn stack" type="button" aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.appearanceItems())}>
+        <button class="tool-btn stack" type="button" title={shell.tr("dialog.appearance")} aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.appearanceItems())}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg>
           <span>{shell.tr("dialog.appearance")}</span>
         </button>

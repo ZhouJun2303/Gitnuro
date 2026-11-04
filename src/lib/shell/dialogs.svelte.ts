@@ -284,6 +284,26 @@ export async function openResolve(shell: ShellState, file: string) {
     await openTextMerge(shell, file);
   }
 
+export async function fillResolveDialog(shell: ShellState, file: string) {
+    shell.draft = file;
+    shell.draftExtra = "text";
+    try {
+      const sides = await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
+      shell.conflict = sides;
+      if (!sides || textTooBig(sides.working) || textTooBig(sides.ours) || textTooBig(sides.theirs)) {
+        shell.mergePieces = [];
+        shell.mergeResult = sides?.working ?? "";
+        return;
+      }
+      shell.mergePieces = piecesFromSides(shell, sides);
+      shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+    } catch {
+      shell.conflict = null;
+      shell.mergePieces = [];
+      shell.mergeResult = "";
+    }
+  }
+
 export function bisectMark(shell: ShellState, id: string) {
     const log = shell.facts?.bisectLog ?? "";
     if (!shell.facts?.bisectActive || !id) return "";

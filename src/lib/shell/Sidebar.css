@@ -146,7 +146,28 @@
   .ahead {
     margin-left: auto;
     font-size: 11px;
+    font-variant-numeric: tabular-nums;
   }
+
+.ahead.up,
+  .ahead.down {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+.ahead.up::after,
+  .ahead.down::after {
+    content: "";
+    width: 0;
+    height: 0;
+    border-left: 3.5px solid transparent;
+    border-right: 3.5px solid transparent;
+  }
+
+.ahead.up::after { border-bottom: 5px solid var(--added); }
+
+.ahead.down::after { border-top: 5px solid var(--deleted); }
 
 .side-brand {
     display: flex;

@@ -178,21 +178,21 @@
               <div class="composer-row">
                 <span>{command.name}</span>
                 <span class="meta">{command.target}</span>
-                <button class="text-button" type="button" onclick={() => shell.runCommand(command)}>Run</button>
-                <button class="text-button" type="button" onclick={() => shell.removeCommand(command.id)}>Delete</button>
+                <button class="text-button" type="button" onclick={() => shell.runCommand(command)}>{shell.tr("dialog.run")}</button>
+                <button class="text-button" type="button" onclick={() => shell.removeCommand(command.id)}>{shell.tr("menu.delete")}</button>
               </div>
             {/each}
-            <input placeholder="Name" bind:value={shell.draft} />
+            <input placeholder={shell.tr("dialog.name")} bind:value={shell.draft} />
             <select bind:value={shell.draftExtra}>
-              <option value="repository">Repository</option>
-              <option value="commit">Commit</option>
-              <option value="branch">Branch</option>
-              <option value="file">File</option>
+              <option value="repository">{shell.tr("chrome.repository")}</option>
+              <option value="commit">{shell.tr("chrome.commit")}</option>
+              <option value="branch">{shell.tr("dialog.branch")}</option>
+              <option value="file">{shell.tr("dialog.file")}</option>
             </select>
             <input placeholder={"${repo} ${sha} ${branch} ${file} ${input} https://"} bind:value={shell.draftUser} />
             <textarea rows="3" placeholder={shell.tr("dialog.commandPrompt")} bind:value={shell.commandPrompt}></textarea>
             <label class="check"><input type="checkbox" bind:checked={shell.commandShared} /> {shell.tr("chrome.shared")}</label>
-            <button class="text-button" type="button" onclick={shell.saveCommand.bind(shell)}>Save</button>
+            <button class="text-button" type="button" onclick={shell.saveCommand.bind(shell)}>{shell.tr("dialog.save")}</button>
           {:else if shell.prefTab === "updates"}
             <label>{shell.tr("dialog.language")}
               <select bind:value={shell.settings.locale}>

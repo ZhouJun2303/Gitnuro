@@ -314,3 +314,23 @@ section.diff > .diff-body {
 .split-gap { grid-column: 1 / -1; }
 
 .image-toolbar button:hover:not(.on) { background: var(--hover); }
+
+.diff-body button.blame-line {
+    display: grid;
+    grid-template-columns: 3.2em minmax(72px, 11em) minmax(0, 1fr);
+    gap: 10px;
+    text-align: left;
+}
+
+.diff-body .blame-line > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.diff-body .blame-gutter,
+  .diff-body .blame-who {
+    color: var(--text-secondary);
+}
+
+.diff-body .blame-pending { cursor: default; }

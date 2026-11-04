@@ -18,7 +18,7 @@
       <h2>{group}</h2>
       <div class="lab-grid">
         {#each inGroup(group) as scene (scene.id)}
-          <a href={scene.href}>{scene.title}</a>
+          <a href={scene.href} data-sveltekit-reload>{scene.title}</a>
         {/each}
       </div>
     </section>
@@ -27,7 +27,8 @@
 
 <style>
   .lab-home {
-    min-height: 100%;
+    height: 100%;
+    overflow: auto;
     padding: 32px 40px 64px;
     background: var(--canvas);
     color: var(--text);
