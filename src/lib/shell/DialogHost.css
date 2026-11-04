@@ -54,6 +54,21 @@
     white-space: pre-wrap;
   }
 
+.merge-conflict-log {
+    max-height: min(320px, 42vh);
+    margin: 0;
+    overflow: auto;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--canvas);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
 .dialog.prefs {
     height: min(640px, calc(100vh - 48px));
     overflow: hidden;

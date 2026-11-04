@@ -553,6 +553,14 @@
           <h2>{shell.tr("dialog.commandOutput")}</h2>
           <pre class="diff-body">{shell.commandOutput}</pre>
           <button class="commit" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
+        {:else if shell.dialog === "mergeConflict"}
+          <h2>{shell.tr("dialog.mergeConflictTitle")}</h2>
+          <p class="empty">{shell.tr("dialog.mergeConflictBody")}</p>
+          <pre class="diff-body merge-conflict-log" data-layer="merge-conflict">{shell.commandOutput}</pre>
+          <div class="composer-row">
+            <span class="grow"></span>
+            <button class="commit" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
+          </div>
         {:else if shell.dialog === "remote"}
           <h2>{shell.tr("chrome.groupRemote")}</h2>
           <input placeholder={shell.tr("dialog.name")} bind:value={shell.draft} />

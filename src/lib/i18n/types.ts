@@ -563,6 +563,8 @@ export type Messages = {
     continueMessage: string;
     continueAction: string;
     commandOutput: string;
+    mergeConflictTitle: string;
+    mergeConflictBody: string;
     setRemoteUrl: string;
     squashHint: string;
     httpsLogin: string;

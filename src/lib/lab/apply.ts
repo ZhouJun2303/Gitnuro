@@ -366,6 +366,19 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
     case "output":
       shell.commandOutput = lines(FILL, "实验室审查输出");
       break;
+    case "mergeConflict":
+      shell.commandOutput = [
+        "Auto-merging README.md",
+        "CONFLICT (content): Merge conflict in README.md",
+        "Automatic merge failed; fix conflicts and then commit the result.",
+        "On branch main",
+        "You have unmerged paths.",
+        "  (fix conflicts and run \"git commit\")",
+        "Unmerged paths:",
+        "  both modified:   README.md",
+        ...Array.from({ length: Math.min(12, FILL) }, (_, index) => `  both modified:   conflict-${pad(index + 1)}.txt`),
+      ].join("\n");
+      break;
     case "workspace":
       shell.draft = "实验室工作区";
       break;

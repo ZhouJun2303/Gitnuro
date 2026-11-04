@@ -2580,13 +2580,19 @@ export class ShellState {
       this.noteActivity(`${String(request.action ?? "")} failed`);
       this.recordCommand(String(request.action ?? ""), described, text, false, source);
       if (this.viewing(path) && !(background && this.busy)) {
-        this.actionError = text;
-        if (String(request.action ?? "") === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
         try {
           this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
           await this.loadContext();
         } catch {
           /* keep the action error */
+        }
+        if (this.shouldShowMergeConflict(action, text)) {
+          this.commandOutput = text.trim();
+          this.dialog = "mergeConflict";
+          this.actionError = null;
+        } else {
+          this.actionError = text;
+          if (action === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
         }
       }
     } finally {
@@ -2626,6 +2632,16 @@ export class ShellState {
 
   doPull() {
     return this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: this.settings.pullStash });
+  }
+
+
+  /** Pull/merge-style writes that leave unmerged paths get Fork-style conflict dialog. */
+  shouldShowMergeConflict(action: string, text: string) {
+    const ops = new Set(["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashPop", "stashApply", "continue"]);
+    if (!ops.has(action)) return false;
+    if (this.conflictCount > 0) return true;
+    const lower = text.toLowerCase();
+    return /conflict|fix conflicts|merge failed|could not apply|needs merge|unmerged paths|自动合并失败/.test(lower);
   }
 
 

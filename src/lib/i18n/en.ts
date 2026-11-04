@@ -563,6 +563,8 @@ export const en: Messages = {
     continueMessage: "New message (optional)",
     continueAction: "Continue",
     commandOutput: "Command output",
+    mergeConflictTitle: "Merge Conflict",
+    mergeConflictBody: "Automatic merge failed. Fix conflicts and then commit the result.",
     setRemoteUrl: "Set URL",
     squashHint: "Uses the selected commit through HEAD, or the consecutive commits you checked. Later commits are replayed. The range must contain no merge.",
     httpsLogin: "HTTPS login",

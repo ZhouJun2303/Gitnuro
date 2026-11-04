@@ -52,6 +52,7 @@ export const dialogScenes = {
   submodule: dialog("submodule", "添加子模块"),
   worktree: dialog("worktree", "添加工作区"),
   output: dialog("output", "命令输出", "full", "叠层"),
+  mergeConflict: dialog("mergeConflict", "合并冲突结果", "conflict", "叠层"),
   workspace: dialog("workspace", "工作区"),
   reword: dialog("reword", "改写说明"),
   merge: dialog("merge", "合并"),

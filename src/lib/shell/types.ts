@@ -29,6 +29,7 @@ export type Dialog =
     | "submodule"
     | "worktree"
     | "output"
+    | "mergeConflict"
     | "workspace"
     | "reword"
     | "merge"

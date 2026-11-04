@@ -563,6 +563,8 @@ export const zh: Messages = {
     continueMessage: "新说明（可选）",
     continueAction: "继续",
     commandOutput: "命令输出",
+    mergeConflictTitle: "合并冲突",
+    mergeConflictBody: "自动合并失败。请解决冲突后再提交结果。",
     setRemoteUrl: "设置地址",
     squashHint: "从选中的提交一直到 HEAD，或连续勾选的提交。后面的提交会重放。这个范围里不能有合并提交。",
     httpsLogin: "HTTPS 登录",
