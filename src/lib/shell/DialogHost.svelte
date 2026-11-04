@@ -91,8 +91,8 @@
       } else {
         box.setAttribute("aria-label", shell.tr("dialog.preferences"));
       }
-      const target = box.querySelector<HTMLElement>('input:not([type="checkbox"]):not([type="radio"]), select, textarea, .dialog-close');
-      target?.focus();
+      const fields = [...box.querySelectorAll<HTMLElement>('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select, textarea')];
+      (fields.find((item) => item.offsetParent !== null) ?? box.querySelector<HTMLElement>(".dialog-close"))?.focus();
     });
     return () => {
       if (!shell.dialog) lastFocus?.focus?.();
@@ -636,7 +636,7 @@
         {:else if shell.dialog === "continue"}
           <h2>{shell.tr("dialog.continueRebase")}</h2>
           <p class="empty">{shell.tr("dialog.continueHint")}</p>
-          <input placeholder={shell.tr("dialog.continueMessage")} bind:value={shell.draft} />
+          <label>{shell.tr("dialog.continueMessage")}<input bind:value={shell.draft} /></label>
           <button class="commit" type="submit">{shell.tr("dialog.continueAction")}</button>
         {:else if shell.dialog === "about"}
           <h2>{shell.tr("dialog.about")} {shell.appVersion}</h2>
@@ -811,12 +811,14 @@
           <button class="commit" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
         {:else if shell.dialog === "github"}
           <h2>{shell.tr("chrome.githubRepo")}</h2>
-          <select bind:value={shell.hostForge}>
-            <option value="github">GitHub</option>
-            <option value="gitlab">GitLab</option>
-            <option value="bitbucket">Bitbucket</option>
-            <option value="azure">Azure</option>
-          </select>
+          <label>{shell.tr("dialog.forge")}
+            <select bind:value={shell.hostForge}>
+              <option value="github">GitHub</option>
+              <option value="gitlab">GitLab</option>
+              <option value="bitbucket">Bitbucket</option>
+              <option value="azure">Azure</option>
+            </select>
+          </label>
           <label>{shell.tr("dialog.name")}<input placeholder={shell.tr("dialog.name")} bind:value={shell.draft} /></label>
           <label>{shell.hostForge === "azure" ? shell.tr("dialog.project") : shell.tr("dialog.host")}<input placeholder={shell.hostForge === "azure" ? shell.tr("dialog.project") : shell.tr("dialog.host")} bind:value={shell.draftExtra} /></label>
           <label>{shell.hostForge === "bitbucket" ? shell.tr("dialog.workspaceName") : shell.tr("dialog.org")}<input placeholder={shell.hostForge === "bitbucket" ? shell.tr("dialog.workspaceName") : shell.tr("dialog.org")} bind:value={shell.draftUser} /></label>

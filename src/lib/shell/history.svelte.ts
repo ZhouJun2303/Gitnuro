@@ -140,12 +140,14 @@ export function pickCommitSearch(shell: ShellState, field: "message" | "author" 
     shell.commitSearchField = field;
     shell.commitSearchOpen = false;
     queueCommitSearch(shell);
+    void tick().then(() => shell.commitSearchEl?.focus());
   }
 
 export function pickCommitScope(shell: ShellState, scope: "repository" | "branch") {
     shell.commitSearchScope = scope;
     shell.commitSearchOpen = false;
     queueCommitSearch(shell);
+    void tick().then(() => shell.commitSearchEl?.focus());
   }
 
 async function refreshSearchedCommits(shell: ShellState, gen: number) {

@@ -831,6 +831,9 @@ export class ShellState {
   submenu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
 
+  menuOpener: HTMLElement | null = null;
+
+
   confirmAsk = $state<ConfirmAsk | null>(null);
 
 
@@ -3220,7 +3223,23 @@ export class ShellState {
     event.preventDefault();
     event.stopPropagation();
     this.submenu = null;
+    this.menuOpener = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
     this.menu = { x: Math.min(event.clientX, window.innerWidth - 240), y: Math.min(event.clientY, window.innerHeight - 40), items };
+  }
+
+
+
+  dismissMenu(restore = true) {
+    const opener = this.menuOpener;
+    this.menu = null;
+    this.submenu = null;
+    this.menuOpener = null;
+    if (!restore || !opener) return;
+    requestAnimationFrame(() => {
+      if (!opener.isConnected) return;
+      const active = document.activeElement;
+      if (!active || active === document.body) opener.focus();
+    });
   }
 
 
@@ -3552,8 +3571,7 @@ export class ShellState {
     this.dialog = null;
     this.textMerge = false;
     this.confirmAsk = null;
-    this.menu = null;
-    this.submenu = null;
+    this.dismissMenu(false);
     this.launchOpen = false;
     this.commandLogOpen = false;
     this.repoPickerOpen = false;
@@ -3977,6 +3995,7 @@ export class ShellState {
   openBar(event: MouseEvent, items: MenuItem[]) {
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     this.submenu = null;
+    this.menuOpener = event.currentTarget as HTMLElement;
     this.menu = { x: rect.left, y: rect.bottom + 2, items, anchorTop: rect.top };
   }
 
@@ -4557,8 +4576,7 @@ export class ShellState {
     }
     this.closeLaunch();
     this.commandLogOpen = false;
-    this.menu = null;
-    this.submenu = null;
+    this.dismissMenu(false);
     this.placeRepoPicker();
     this.repoPickerOpen = true;
     if (!this.backend()) return;
@@ -4891,6 +4909,7 @@ export class ShellState {
 
 
   onShortcut(event: KeyboardEvent) {
+    if (event.defaultPrevented) return;
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c") {
       if (typing(event) || this.dialog || this.launchOpen) return;
       if (this.heldText) {
@@ -4935,8 +4954,7 @@ export class ShellState {
     if (action === "exit") {
       event.preventDefault();
       if (this.menu) {
-        this.menu = null;
-        this.submenu = null;
+        this.dismissMenu();
         return;
       }
       if (this.textMerge) {

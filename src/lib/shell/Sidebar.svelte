@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { getShell } from "./context";
   import "./Sidebar.css";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -10,8 +11,71 @@
   const sideWindow = $derived(windowSlice(sideRows, shell.sideTop, shell.rowSide, 60, 80));
   const onSideScroll = onVirtualScroll((top) => (shell.sideTop = top));
   let sideScroll = $state<HTMLDivElement | null>(null);
+  let searchToggleEl = $state<HTMLButtonElement | null>(null);
+  let searchMenuEl = $state<HTMLElement | null>(null);
   let sideRepo = "";
   let sideQuerySeen = "";
+
+  function searchItems() {
+    return [...(searchMenuEl?.querySelectorAll<HTMLButtonElement>(".side-search-item") ?? [])];
+  }
+
+  function focusSearchItem(last = false) {
+    void tick().then(() => {
+      const items = searchItems();
+      (last ? items[items.length - 1] : items[0])?.focus();
+    });
+  }
+
+  function closeSearchMenu(restore: boolean) {
+    shell.commitSearchOpen = false;
+    if (restore) void tick().then(() => searchToggleEl?.focus());
+  }
+
+  function toggleSearchMenu(event: MouseEvent) {
+    if (shell.commitSearchOpen) {
+      closeSearchMenu(false);
+      return;
+    }
+    shell.commitSearchOpen = true;
+    if (event.detail === 0) focusSearchItem();
+  }
+
+  function searchToggleKeys(event: KeyboardEvent) {
+    if (event.key === "Escape" && shell.commitSearchOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSearchMenu(true);
+      return;
+    }
+    if (shell.commitSearchOpen || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    shell.commitSearchOpen = true;
+    focusSearchItem(event.key === "ArrowUp");
+  }
+
+  function searchMenuKeys(event: KeyboardEvent) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSearchMenu(true);
+      return;
+    }
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Home" && event.key !== "End") return;
+    const items = searchItems();
+    if (items.length === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const at = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : event.key === "ArrowDown" ? (at + 1) % items.length : (at - 1 + items.length) % items.length;
+    items[next]?.focus();
+  }
+
+  function searchMenuFocusOut(event: FocusEvent) {
+    const next = event.relatedTarget as Node | null;
+    if (!next || !(event.currentTarget as HTMLElement).contains(next)) shell.commitSearchOpen = false;
+  }
 
   $effect(() => {
     const path = shell.snapshot?.path ?? "";
@@ -37,7 +101,7 @@
 
 <svelte:window onclick={() => { if (shell.commitSearchOpen) shell.commitSearchOpen = false; }} />
 
-<aside class="sidebar" style:width="{shell.sidebarWidth}px">
+<aside class="sidebar" style:width="{shell.sidebarWidth}px" style:--sidebar-w="{shell.sidebarWidth}px">
       {#snippet glyph(kind: string)}
         <svg class="line-icon side-glyph" class:check={kind === "check"} viewBox="0 0 24 24" aria-hidden="true">
           {#if kind === "changes"}
@@ -96,7 +160,7 @@
         <span class="name">{shell.tr("chrome.allCommits")}</span>
       </button>
       <div class="side-tools">
-        <button class="icon-btn side-tool" class:on={shell.sideView === "refs"} type="button" title={shell.tr("chrome.localBranches")} aria-pressed={shell.sideView === "refs"} onclick={() => shell.showSideRefs()}>{@render glyph("branch")}</button>
+        <button class="icon-btn side-tool" class:on={shell.sideView === "refs"} type="button" title={shell.tr("chrome.localBranches")} aria-label={shell.tr("chrome.localBranches")} aria-pressed={shell.sideView === "refs"} onclick={() => shell.showSideRefs()}>{@render glyph("branch")}</button>
         <button class="icon-btn side-tool" class:on={shell.sideView === "search"} type="button" title={shell.tr("chrome.searchCommits")} aria-label={shell.tr("chrome.searchCommits")} aria-pressed={shell.sideView === "search"} onclick={() => shell.showSideSearch()}>{@render glyph("search")}</button>
       </div>
       {#if shell.sideView === "refs"}
@@ -435,13 +499,13 @@
         </label>
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="side-search-pick" onclick={(event) => event.stopPropagation()}>
-          <button class="side-search-toggle" type="button" aria-haspopup="menu" aria-expanded={shell.commitSearchOpen} onclick={() => (shell.commitSearchOpen = !shell.commitSearchOpen)}>
+        <div class="side-search-pick" onclick={(event) => event.stopPropagation()} onfocusout={searchMenuFocusOut}>
+          <button class="side-search-toggle" id="commit-search-field" bind:this={searchToggleEl} type="button" aria-haspopup="menu" aria-expanded={shell.commitSearchOpen} onclick={toggleSearchMenu} onkeydown={searchToggleKeys}>
             <span>{shell.commitSearchField === "author" ? shell.tr("chrome.author") : shell.commitSearchField === "path" ? shell.tr("dialog.path") : shell.commitSearchField === "diff" ? shell.tr("chrome.diffContent") : shell.tr("chrome.commitMessage")}</span>
             <svg class="line-icon side-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
           </button>
           {#if shell.commitSearchOpen}
-            <div class="side-search-menu" role="menu">
+            <div class="side-search-menu" bind:this={searchMenuEl} role="menu" aria-label={shell.tr("chrome.searchOptions")} tabindex="-1" onkeydown={searchMenuKeys}>
               <button class="side-search-item" type="button" role="menuitemradio" aria-checked={shell.commitSearchField === "message"} onclick={() => shell.pickCommitSearch("message")}><span class="side-search-check">{#if shell.commitSearchField === "message"}{@render glyph("check")}{/if}</span>{shell.tr("chrome.commitMessage")}</button>
               <button class="side-search-item" type="button" role="menuitemradio" aria-checked={shell.commitSearchField === "author"} onclick={() => shell.pickCommitSearch("author")}><span class="side-search-check">{#if shell.commitSearchField === "author"}{@render glyph("check")}{/if}</span>{shell.tr("chrome.author")}</button>
               <button class="side-search-item" type="button" role="menuitemradio" aria-checked={shell.commitSearchField === "path"} onclick={() => shell.pickCommitSearch("path")}><span class="side-search-check">{#if shell.commitSearchField === "path"}{@render glyph("check")}{/if}</span>{shell.tr("dialog.path")}</button>

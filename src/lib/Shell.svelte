@@ -80,8 +80,7 @@
           requestAnimationFrame(() => submenuAnchor?.isConnected && submenuAnchor.focus());
           return;
         }
-        shell.menu = null;
-        shell.submenu = null;
+        shell.dismissMenu();
       }
     };
     node.addEventListener("keydown", onKey);
@@ -618,6 +617,7 @@
       max={480}
       defaultSize={240}
       collapsible
+      label={shell.tr("chrome.resizeSidebar")}
       bind:collapsed={shell.sidebarCollapsed}
       onchange={shell.handleLayoutChange.bind(shell)}
     />
@@ -679,7 +679,7 @@
       {#if item.sep}
         <hr />
       {:else}
-        <button type="button" role={item.checked !== undefined ? "menuitemradio" : "menuitem"} disabled={item.disabled} aria-checked={item.checked !== undefined ? item.checked : undefined} aria-haspopup={item.children ? "menu" : undefined} aria-expanded={item.children ? shell.submenu?.items === item.children : undefined} onmouseenter={(event) => { if (!item.children) { shell.submenu = null; return; } openSubmenu(item, event.currentTarget as HTMLElement); }} onclick={(event) => { if (item.disabled) return; if (item.children) { openSubmenu(item, event.currentTarget as HTMLElement, true); return; } if (!item.run) return; shell.menu = null; shell.submenu = null; void item.run(); }}>
+        <button type="button" role={item.checked !== undefined ? "menuitemradio" : "menuitem"} disabled={item.disabled} aria-checked={item.checked !== undefined ? item.checked : undefined} aria-haspopup={item.children ? "menu" : undefined} aria-expanded={item.children ? shell.submenu?.items === item.children : undefined} onmouseenter={(event) => { if (!item.children) { shell.submenu = null; return; } openSubmenu(item, event.currentTarget as HTMLElement); }} onclick={(event) => { if (item.disabled) return; if (item.children) { openSubmenu(item, event.currentTarget as HTMLElement, true); return; } if (!item.run) return; shell.dismissMenu(); void item.run(); }}>
           <span class="menu-main">
             {#if item.checked !== undefined}<span class="menu-check" aria-hidden="true">{item.checked ? "✓" : ""}</span>{/if}
             <span>{item.label}</span>
@@ -797,7 +797,7 @@
         {@render menuList(shell.submenu.items)}
       </div>
     {/if}
-    <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => { shell.menu = null; shell.submenu = null; }}></button>
+    <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => shell.dismissMenu()}></button>
   {/if}
   {#if shell.confirmAsk}
     <div class="scrim confirm-scrim" role="presentation">

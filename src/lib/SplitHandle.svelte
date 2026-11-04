@@ -10,6 +10,7 @@
     collapsible = false,
     collapsed = $bindable(false),
     reverse = false,
+    label,
     onchange,
   }: {
     direction?: Direction;
@@ -20,6 +21,7 @@
     collapsible?: boolean;
     collapsed?: boolean;
     reverse?: boolean;
+    label?: string;
     onchange?: (size: number) => void;
   } = $props();
 
@@ -133,6 +135,7 @@
   ondblclick={handleDoubleClick}
   onkeydown={handleKey}
   role="separator"
+  aria-label={label}
   aria-orientation={direction}
   aria-valuenow={collapsed ? 0 : size}
   aria-valuemin={collapsible ? 0 : min}

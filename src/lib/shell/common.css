@@ -23,6 +23,18 @@
     margin-left: 168px;
   }
 
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
 .tab,
   .text-button,
   .side,
@@ -116,6 +128,9 @@ textarea:focus-visible,
   .repo-section:focus-visible,
   .menu button:focus-visible,
   .swatch:focus-visible,
+  .side-search-toggle:focus-visible,
+  .side-search-item:focus-visible,
+  .side-filter-clear:focus-visible,
   .tab-close:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;

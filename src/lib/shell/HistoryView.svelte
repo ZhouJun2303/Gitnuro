@@ -87,7 +87,13 @@
                     ondragover={(event) => event.preventDefault()}
                     ondrop={(event) => { event.preventDefault(); const from = event.dataTransfer?.getData("text/plain") ?? ""; if (from && from !== commit.id) { shell.drops = [from, commit.id]; shell.draft = ""; shell.dialog = "squash"; } }}
                     onclick={(event) => shell.selectCommit(commit.id, event)}
-                    onkeydown={(event) => { if (event.key === "Enter") void shell.selectCommit(commit.id); }}
+                    onkeydown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      void shell.selectCommit(commit.id);
+                    }}
                     oncontextmenu={(event) => shell.openMenu(event, shell.commitMenu(commit))}
                   >
                     {@render laneGraph(graphRow, commit.id)}
@@ -177,6 +183,7 @@
           max={650}
           defaultSize={280}
           reverse
+          label={shell.tr("chrome.resizeDetail")}
           onchange={shell.handleLayoutChange.bind(shell)}
         />
 

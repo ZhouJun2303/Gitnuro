@@ -227,6 +227,13 @@ export const zh: Messages = {
     commandCommit: "提交 '{name}'",
     commandFetchFrom: "获取 '{name}'",
     commandPushTo: "推送 '{branch}' 到 '{remote}'",
+    searchOptions: "搜索选项",
+    resizeSidebar: "调整侧栏宽度",
+    resizeStage: "调整暂存区高度",
+    resizeFiles: "调整文件列表宽度",
+    resizeComposer: "调整提交区高度",
+    resizeTree: "调整文件树宽度",
+    resizeDetail: "调整提交详情高度",
   },
   menu: {
     checkout: "检出",

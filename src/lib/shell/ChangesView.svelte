@@ -113,6 +113,7 @@
             min={100}
             max={650}
             defaultSize={280}
+            label={shell.tr("chrome.resizeStage")}
             onchange={shell.handleLayoutChange.bind(shell)}
           />
 
@@ -130,6 +131,7 @@
             min={100}
             max={650}
             defaultSize={280}
+            label={shell.tr("chrome.resizeStage")}
             onchange={shell.handleLayoutChange.bind(shell)}
           />
 
@@ -145,6 +147,7 @@
         min={220}
         max={650}
         defaultSize={300}
+        label={shell.tr("chrome.resizeFiles")}
         onchange={shell.handleLayoutChange.bind(shell)}
       />
 
@@ -158,6 +161,7 @@
           max={450}
           defaultSize={170}
           reverse
+          label={shell.tr("chrome.resizeComposer")}
           onchange={shell.handleLayoutChange.bind(shell)}
         />
 

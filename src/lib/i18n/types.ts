@@ -227,6 +227,13 @@ export type Messages = {
     commandCommit: string;
     commandFetchFrom: string;
     commandPushTo: string;
+    searchOptions: string;
+    resizeSidebar: string;
+    resizeStage: string;
+    resizeFiles: string;
+    resizeComposer: string;
+    resizeTree: string;
+    resizeDetail: string;
   };
   menu: {
     checkout: string;

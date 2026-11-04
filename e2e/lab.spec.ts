@@ -177,3 +177,79 @@ test("history restores its scroll position after switching sections", async ({ p
   });
   expect(visible).toBeGreaterThan(0);
 });
+
+test("context menu arrows stay in the menu and restore focus", async ({ page }) => {
+  await openLabScene(page, "history", ".history .commit-row");
+  const row = page.locator(".history .commit-row").nth(2);
+  await row.focus();
+  const selected = () => page.evaluate(() => [...document.querySelectorAll(".history .commit-row")].findIndex((node) => node.classList.contains("selected")));
+  const before = await selected();
+  await page.keyboard.press("Shift+F10");
+  await expect(page.locator('[data-layer="menu"]')).toBeVisible();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  expect(await selected()).toBe(before);
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-layer="menu"]')).toHaveCount(0);
+  await expect(row).toBeFocused();
+});
+
+test("Space selects the focused history row", async ({ page }) => {
+  await openLabScene(page, "history", ".history .commit-row");
+  const row = page.locator(".history .commit-row").nth(3);
+  await row.focus();
+  await page.keyboard.press("Space");
+  await expect(row).toHaveClass(/selected/);
+});
+
+test("horizontal splitter arrows do not move history selection", async ({ page }) => {
+  await openLabScene(page, "history", ".history .commit-row");
+  const selected = () => page.evaluate(() => [...document.querySelectorAll(".history .commit-row")].findIndex((node) => node.classList.contains("selected")));
+  const before = await selected();
+  const handle = page.locator(".split-handle.horizontal");
+  await handle.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  expect(await selected()).toBe(before);
+});
+
+test("search options work from the keyboard and return to the input", async ({ page }) => {
+  await openLabScene(page, "search", '[data-layer="search"]');
+  const toggle = page.locator(".side-search-toggle");
+  const input = page.locator(".side-search .side-filter input");
+  const items = page.locator(".side-search-item");
+  const initialLabel = (await toggle.textContent())?.trim() ?? "";
+  await toggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(items.nth(1)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".side-search-menu")).toHaveCount(0);
+  await expect(toggle).toBeFocused();
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".side-search-menu")).toHaveCount(0);
+  await expect(input).toBeFocused();
+  const pickedLabel = (await toggle.textContent())?.trim() ?? "";
+  expect(pickedLabel).not.toBe(initialLabel);
+  expect(await input.getAttribute("placeholder")).toBe(pickedLabel);
+});
+
+test("search options fit inside a narrow sidebar", async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("awegit.layout.settings", JSON.stringify({ sidebarWidth: 180 })));
+  await openLabScene(page, "search", '[data-layer="search"]');
+  await page.locator(".side-search-toggle").click();
+  const sidebar = await page.locator(".sidebar").boundingBox();
+  const menu = await page.locator(".side-search-menu").boundingBox();
+  expect(sidebar && menu).toBeTruthy();
+  expect((menu?.x ?? 0) + (menu?.width ?? 0)).toBeLessThanOrEqual((sidebar?.x ?? 0) + (sidebar?.width ?? 0) + 0.5);
+});
+
+test("dialogs focus the first field and fall back to close", async ({ page }) => {
+  await openLabScene(page, "dialog-branch", '[data-dialog="branch"]');
+  await expect(page.locator('[data-dialog="branch"] input').first()).toBeFocused();
+  await openLabScene(page, "dialog-about", '[data-dialog="about"]');
+  await expect(page.locator('[data-dialog="about"] .dialog-close')).toBeFocused();
+});

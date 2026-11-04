@@ -227,6 +227,13 @@ export const en: Messages = {
     commandCommit: "Commit '{name}'",
     commandFetchFrom: "Fetch '{name}'",
     commandPushTo: "Push '{branch}' to '{remote}'",
+    searchOptions: "Search options",
+    resizeSidebar: "Resize sidebar",
+    resizeStage: "Resize staging area",
+    resizeFiles: "Resize file list",
+    resizeComposer: "Resize commit area",
+    resizeTree: "Resize file tree",
+    resizeDetail: "Resize commit details",
   },
   menu: {
     checkout: "Checkout",

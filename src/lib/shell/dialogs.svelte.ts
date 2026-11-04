@@ -116,8 +116,7 @@ export function openCommandLog(shell: ShellState, prefer?: CommandFilter | Statu
     if (!shell.visibleCommands().some((item) => item.id === shell.commandPick)) shell.commandPick = shell.visibleCommands()[0]?.id ?? 0;
     shell.repoPickerOpen = false;
     shell.closeLaunch();
-    shell.menu = null;
-    shell.submenu = null;
+    shell.dismissMenu(false);
     shell.placeCommandLog();
     shell.commandLogOpen = true;
   }

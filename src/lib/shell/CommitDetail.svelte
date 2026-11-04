@@ -92,7 +92,7 @@
                     {@render detailTree(shell.changeTree, shell.commitCollapsed, shell.toggleCommitDir.bind(shell), shell.selectChangeFile.bind(shell))}
                   {/if}
                 </div>
-                <SplitHandle direction="vertical" bind:size={shell.detailTreeWidth} min={160} max={560} defaultSize={280} onchange={shell.handleLayoutChange.bind(shell)} />
+                <SplitHandle direction="vertical" bind:size={shell.detailTreeWidth} min={160} max={560} defaultSize={280} label={shell.tr("chrome.resizeTree")} onchange={shell.handleLayoutChange.bind(shell)} />
                 <div class="detail-pane">
                   {#if shell.historyFile}
                     {@render filePatch(shell.historyFile, false)}
@@ -110,7 +110,7 @@
                     {@render detailTree(shell.repoTree, shell.treeCollapsed, shell.toggleRepoDir.bind(shell), shell.selectTreeFile.bind(shell))}
                   {/if}
                 </div>
-                <SplitHandle direction="vertical" bind:size={shell.detailTreeWidth} min={160} max={560} defaultSize={280} onchange={shell.handleLayoutChange.bind(shell)} />
+                <SplitHandle direction="vertical" bind:size={shell.detailTreeWidth} min={160} max={560} defaultSize={280} label={shell.tr("chrome.resizeTree")} onchange={shell.handleLayoutChange.bind(shell)} />
                 <div class="detail-pane">
                   {#if shell.historyFile}
                     <div class="blob-tab">{@render typeIcon(shell.historyFile)}<span>{shell.fileName(shell.historyFile)}</span></div>

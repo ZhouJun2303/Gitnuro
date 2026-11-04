@@ -415,9 +415,11 @@
     flex: none;
   }
 
-.tab-close { opacity: 0; }
+.tab-close { opacity: 0; pointer-events: none; }
 
-.tab:hover .tab-close, .tab.active .tab-close, .tab:focus-within .tab-close { opacity: 1; }
+.tab:hover .tab-close,
+  .tab.active .tab-close,
+  .tab:focus-within .tab-close { opacity: 1; pointer-events: auto; }
 
 .row-action {
     margin-left: 0;

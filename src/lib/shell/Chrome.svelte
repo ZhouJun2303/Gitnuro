@@ -81,11 +81,12 @@
 
 </script>
 
-<nav class="menubar">
-    <button type="button" onclick={(event) => shell.openBar(event, shell.viewItems())}>{shell.tr("chrome.view")}</button>
-    <button type="button" onclick={(event) => shell.openBar(event, shell.repositoryItems())}>{shell.tr("chrome.repository")}</button>
-    <button type="button" onclick={(event) => shell.openBar(event, shell.windowItems())}>{shell.tr("chrome.window")}</button>
-    <button type="button" onclick={(event) => shell.openBar(event, shell.helpItems())}>{shell.tr("chrome.help")}</button>
+<p class="sr-only" role="status" aria-live="polite">{shell.floorNotice?.title ?? ""}</p>
+  <nav class="menubar">
+    <button type="button" aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.viewItems())}>{shell.tr("chrome.view")}</button>
+    <button type="button" aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.repositoryItems())}>{shell.tr("chrome.repository")}</button>
+    <button type="button" aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.windowItems())}>{shell.tr("chrome.window")}</button>
+    <button type="button" aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.helpItems())}>{shell.tr("chrome.help")}</button>
   </nav>
   <header class="chrome">
     <div class="chrome-tools">
