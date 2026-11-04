@@ -65,6 +65,21 @@
   const unresolved = $derived(Math.max(0, conflictTotal - conflictResolved));
   const canResolve = $derived(shell.mergeKind === "file" ? fileSide !== "" : unresolved === 0);
 
+  function trapTab(event: KeyboardEvent) {
+    if (event.key !== "Tab" || !panel) return;
+    const nodes = [...panel.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')].filter((node) => node.offsetParent !== null);
+    if (nodes.length === 0) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   function withDirtyGuard(run: () => void) {
     if (!resultDirty) {
       run();
@@ -165,7 +180,7 @@
 
 {#if shell.textMerge}
   <div class="scrim merge-scrim" role="presentation">
-    <div class="merge-panel" data-layer="text-merge" bind:this={panel} role="dialog" aria-modal="true" aria-label={shell.tr("dialog.mergeTitle")} tabindex="-1" onkeydown={(event) => { if (event.key === "Escape") { event.preventDefault(); shell.closeTextMerge(); } }}>
+    <div class="merge-panel" data-layer="text-merge" bind:this={panel} role="dialog" aria-modal="true" aria-label={shell.tr("dialog.mergeTitle")} tabindex="-1" onkeydown={(event) => { if (event.key === "Escape") { event.preventDefault(); shell.closeTextMerge(); return; } trapTab(event); }}>
       <header class="merge-panel-title">
         <strong>{shell.tr("dialog.mergeTitle")}</strong>
         <span class="merge-title-file">
@@ -182,14 +197,19 @@
         <button class="merge-close" type="button" aria-label={shell.tr("chrome.close")} onclick={() => shell.closeTextMerge()}>×</button>
       </header>
       <div class="merge-head">
-        <label class="merge-party">
-          <input type="checkbox" checked={leftOn} aria-label={shell.mergeLeft} onclick={onLeft} />
-          <span>{shell.mergeLeft}</span>
-        </label>
-        <label class="merge-party right">
-          <input type="checkbox" checked={rightOn} aria-label={shell.mergeRight} onclick={onRight} />
-          <span>{shell.mergeRight}</span>
-        </label>
+        <div class="merge-parties">
+          <label class="merge-party">
+            <input type="checkbox" checked={leftOn} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })} onclick={onLeft} />
+            <span>{shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })}</span>
+          </label>
+          <label class="merge-party right">
+            <input type="checkbox" checked={rightOn} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })} onclick={onRight} />
+            <span>{shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })}</span>
+          </label>
+        </div>
+        {#if shell.mergeKind === "text"}
+          <p class="merge-overview-hint">{shell.tr("dialog.mergeOverviewHint")}</p>
+        {/if}
       </div>
       {#if shell.mergeKind === "file"}
         <div class="merge-stage files">
@@ -262,9 +282,7 @@
         <div class="merge-result-pane">
           <div class="merge-result-head">
             <span>{shell.tr("dialog.result")}</span>
-            {#if shell.mergeKind === "text"}
-              <button class="merge-edit-toggle" type="button" aria-pressed={editingResult} onclick={() => (editingResult = !editingResult)}>{editingResult ? shell.tr("dialog.previewResult") : shell.tr("dialog.editResult")}</button>
-            {/if}
+            {#if editingResult}<span class="merge-result-mode">{shell.tr("dialog.editResult")}</span>{/if}
           </div>
           {#if editingResult}
             <textarea class="merge-result-edit" aria-label={shell.tr("dialog.result")} spellcheck="false" bind:value={shell.mergeResult} oninput={() => (resultDirty = true)}></textarea>
@@ -291,7 +309,18 @@
             <span class="merge-edit-hint">{shell.tr("dialog.editingAllowed")}</span>
           {/if}
         {/if}
-        <button class="commit" type="button" disabled={shell.busy || !canResolve} title={!canResolve ? shell.tr("dialog.mergeUnresolved", { count: String(unresolved) }) : undefined} onclick={() => void resolve()}>{shell.tr("dialog.mergeResolve")}</button>
+        {#if shell.mergeKind === "text"}
+          <button
+            class="text-button merge-edit-entry"
+            type="button"
+            aria-pressed={editingResult}
+            onclick={() => {
+              editingResult = !editingResult;
+              if (editingResult) queueMicrotask(() => panel?.querySelector<HTMLTextAreaElement>(".merge-result-edit")?.focus());
+            }}
+          >{editingResult ? shell.tr("dialog.previewResult") : shell.tr("dialog.editResult")}</button>
+        {/if}
+        <button class="commit" type="button" disabled={shell.busy || !canResolve} title={!canResolve ? shell.tr(shell.mergeKind === "file" ? "dialog.mergePickFile" : "dialog.mergeUnresolved", shell.mergeKind === "file" ? {} : { count: String(unresolved) }) : undefined} onclick={() => void resolve()}>{shell.tr("dialog.mergeResolve")}</button>
         <button class="text-button" type="button" onclick={() => shell.closeTextMerge()}>{shell.tr("chrome.cancel")}</button>
       </footer>
     </div>

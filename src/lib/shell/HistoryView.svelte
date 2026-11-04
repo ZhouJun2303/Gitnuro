@@ -42,9 +42,6 @@
               <button class="text-button" type="button" onclick={() => { shell.historyFilter = ""; void shell.loadContext(); }}>{shell.tr("chrome.allCommits")}</button>
             {/if}
           </div>
-          {#if shell.historyFilter}
-            <div class="pane-head"><span>{shell.historyFilter}</span></div>
-          {/if}
         </div>
         <section class="history flex-fill" bind:this={shell.historyEl} use:restoreHistory onscroll={onHistoryScroll}>
           {#if shell.contentHits}
@@ -54,18 +51,22 @@
             {/each}
           {/if}
           {#if shell.reflogOn}
-            {#each shell.reflogRows as row (`${row.selector}-${row.id}`)}
-              <button class="commit-row" data-layer="reflog" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
-                <span class="subject">{row.summary}</span>
-                <span class="commit-side">
-                  <span class="meta selector" title={row.selector}>{row.selector}</span>
-                  <span class="meta sha">{row.shortId}</span>
-                </span>
-              </button>
-            {/each}
+            {#if shell.reflogRows.length === 0}
+              <p class="empty">{shell.tr("chrome.noReflog")}</p>
+            {:else}
+              {#each shell.reflogRows as row (`${row.selector}-${row.id}`)}
+                <button class="commit-row" data-layer="reflog" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
+                  <span class="subject">{row.summary}</span>
+                  <span class="commit-side">
+                    <span class="meta selector" title={row.selector}>{row.selector}</span>
+                    <span class="meta sha" title={row.shortId}>{row.shortId}</span>
+                  </span>
+                </button>
+              {/each}
+            {/if}
           {:else if shell.mode !== "sample"}
             {#if shell.shownCommits.length === 0}
-              <p class="empty">{shell.commitQuery.trim() ? shell.tr("chrome.noMatch") : shell.tr("chrome.noCommits")}</p>
+              <p class="empty">{shell.commitQuery.trim() || shell.historyFilter ? shell.tr("chrome.noMatch") : shell.tr("chrome.noCommits")}</p>
             {:else}
               <div class="commit-window" style:height="{shell.historyItems.length * shell.rowCommit}px">
                 {#each shell.historyRows as commit, index (commit.id)}

@@ -551,6 +551,12 @@ export class ShellState {
   blobText = $state("");
 
 
+  blobLoaded = $state(false);
+
+
+  blobError = $state("");
+
+
   blobBinary = $state(false);
 
 
@@ -1789,6 +1795,8 @@ export class ShellState {
 
   async loadBlobPane() {
     if (!this.blobFile) return;
+    this.blobLoaded = false;
+    this.blobError = "";
     try {
       const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null }>("blob_view", { path: this.repoPath(), rev: this.blobRev || "HEAD", file: this.blobFile });
       this.blobBinary = view.binary && !view.preview && !view.text;
@@ -1797,6 +1805,12 @@ export class ShellState {
       if (this.inApp()) await getCurrentWindow().setTitle(this.fileName(this.blobFile)).catch(() => {});
     } catch (error) {
       this.actionError = this.message(error);
+      this.blobError = this.message(error);
+      this.blobText = "";
+      this.blobPreview = null;
+      this.blobBinary = false;
+    } finally {
+      this.blobLoaded = true;
     }
   }
 

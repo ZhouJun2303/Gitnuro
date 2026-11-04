@@ -379,6 +379,8 @@ export type SplitRow = {
   rightIndex?: number;
   lineIndex?: number;
   hunkIndex?: number;
+  /** Diff metadata (hunk header, file header) shown once across both columns. */
+  meta?: boolean;
 };
 
 /** Pair removed and added lines inside each hunk for a split diff. */
@@ -435,6 +437,7 @@ export function splitDiff(lines: DiffLine[]): SplitRow[] {
         rightKind: "meta",
         lineIndex: index,
         hunkIndex: line.kind === "hunk" ? hunkIndex : undefined,
+        meta: true,
       });
     }
   });

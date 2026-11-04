@@ -24,8 +24,9 @@
         </div>
 
         {#if shell.loadError}
-          <div class="welcome-error">
-            <span>⚠️ {shell.loadError}</span>
+          <div class="welcome-error" role="alert">
+            <svg class="welcome-error-icon" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.4 14.8 13.4H1.2L8 1.4z"/><path d="M8 6.1v3.3" stroke="var(--on-deleted)" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r=".75" fill="var(--on-deleted)"/></svg>
+            <span>{shell.loadError}</span>
           </div>
         {/if}
 

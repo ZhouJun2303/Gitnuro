@@ -23,12 +23,16 @@
     <strong>{shell.blobFile || shell.tr("chrome.reading")}</strong>
     <button class="text-button" type="button" aria-label={shell.tr("chrome.close")} onclick={closePane}>{shell.tr("chrome.close")}</button>
   </header>
-  {#if shell.blobPreview}
-    <img alt="" src={shell.blobPreview.dataUrl} />
+  {#if shell.blobError}
+    <p class="empty">{shell.blobError}</p>
+  {:else if !shell.blobLoaded}
+    <p class="empty">{shell.tr("chrome.reading")}</p>
+  {:else if shell.blobPreview}
+    <img alt={shell.blobFile} src={shell.blobPreview.dataUrl} />
   {:else if shell.blobBinary}
     <p class="empty">{shell.tr("chrome.binary")}</p>
   {:else if lines.length === 0}
-    <p class="empty">{shell.tr("chrome.reading")}</p>
+    <p class="empty">{shell.tr("chrome.emptyFile")}</p>
   {:else}
     <div class="blob-scroll" onscroll={onScroll}>
       <div class="commit-window" style:height="{lines.length * 18}px">

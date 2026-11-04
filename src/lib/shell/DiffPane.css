@@ -55,20 +55,20 @@
 }
 
 .diff-hunk-actions button.danger {
-  color: var(--deleted, #d16464);
+  color: var(--deleted);
 }
 
 .minimap { position: relative; height: 10px; margin: 0 12px 4px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--field) 55%, transparent); overflow: hidden; }
 
 .minimap .mark { position: absolute; top: 0; bottom: 0; width: 2px; height: auto; border: 0; padding: 0; border-radius: 1px; transform: translateX(-1px); }
 
-.minimap .add { background: var(--added, #3aa76d); }
+.minimap .add { background: var(--added); }
 
-.minimap .delete, .minimap .hunk { background: var(--deleted, #d16464); }
+.minimap .delete, .minimap .hunk { background: var(--deleted); }
 
 .counter.over { color: var(--deleted); }
 
-.gutter { width: 32px; flex: none; text-align: right; color: var(--text-secondary); user-select: none; cursor: pointer; }
+.gutter { width: calc(5ch + 2px); flex: none; overflow: hidden; text-align: right; color: var(--text-secondary); user-select: none; cursor: pointer; }
 
 .image-toolbar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; }
 
@@ -92,9 +92,11 @@
 
 .image-box img { display: block; max-width: 100%; max-height: 60vh; height: auto; }
 
-.image-overlay { position: relative; max-width: 100%; }
+.image-overlay { position: relative; max-width: 100%; line-height: 0; }
 
-.image-overlay .over { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.image-overlay img { display: block; max-width: 100%; max-height: 60vh; width: auto; height: auto; }
+
+.image-overlay .over { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; object-fit: contain; }
 
 .diff {
     flex: 1;
@@ -116,7 +118,7 @@
     font-weight: 400;
   }
 
-.diff-head span:first-child {
+.diff-head > span:first-child {
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -132,6 +134,50 @@
 .diff-head .pane-chip {
     margin-left: auto;
     font-family: var(--font);
+  }
+
+.hunk-tools {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+    margin-left: auto;
+    font-family: var(--font);
+  }
+
+.hunk-tools .pane-chip {
+    margin-left: 0;
+    height: 22px;
+    padding: 0 8px;
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+
+.hunk-step {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--elevated);
+    color: var(--text-secondary);
+    font: 15px/1 var(--font);
+    flex: none;
+  }
+
+.hunk-step:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+  }
+
+.hunk-step:disabled { opacity: 0.4; }
+
+.hunk-pos {
+    min-width: 34px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
   }
 
 section.diff > .diff-body {
@@ -373,13 +419,36 @@ section.diff > .diff-body {
 
 .split-gap { grid-column: 1 / -1; }
 
+.split-meta {
+    grid-column: 1 / -1;
+    min-height: 18px;
+    padding: 0 8px;
+    overflow: hidden;
+    color: var(--text-secondary);
+    white-space: pre;
+}
+
+.diff-body.split.virtual .split-meta {
+    height: var(--split-row);
+    line-height: var(--split-row);
+}
+
 .image-toolbar button:hover:not(.on) { background: var(--hover); }
 
 .diff-body button.blame-line {
     display: grid;
     grid-template-columns: 3.2em minmax(72px, 11em) minmax(0, 1fr);
     gap: 10px;
+    border: 0;
+    padding: 0 12px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
     text-align: left;
+}
+
+.diff-body button.blame-line:hover:not(.blame-pending) {
+    background: var(--hover);
 }
 
 .diff-body .blame-line > span {

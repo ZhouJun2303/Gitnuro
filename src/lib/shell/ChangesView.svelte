@@ -223,7 +223,7 @@
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
             <button class="text-button more" type="button" aria-label={shell.tr("chrome.more")} title={shell.tr("chrome.more")} onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>
-            <button class="commit" type="submit" disabled={!shell.canCommit}>{shell.busy ? shell.tr("chrome.working") : shell.tr("chrome.commit")}</button>
+            <button class="commit" type="submit" disabled={!shell.canCommit || shell.mode !== "live"}>{shell.busy ? shell.tr("chrome.working") : shell.tr("chrome.commit")}</button>
           </div>
         </form>
       </div>
@@ -372,7 +372,7 @@
         oncontextmenu={(event) => shell.openMenu(event, shell.fileMenu(file, side))}
         ondblclick={(event) => flipFile(event, file.path, side)}
       >
-        <button class="file-select" type="button" onclick={(event) => shell.selectFile(file.path, side, event)}>
+        <button class="file-select" type="button" title={file.path} onclick={(event) => shell.selectFile(file.path, side, event)}>
           {#if shell.fileLayout === "tree"}
             {@render treeLine(false, false, file.path, file.letter)}
           {:else}

@@ -145,9 +145,15 @@
   }
 
 .dialog .text-button.pick.clone-root {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 2px;
     height: auto;
-    min-height: 44px;
+    min-height: 48px;
     padding: 8px 12px;
+    line-height: 1.35;
     white-space: normal;
   }
 
@@ -161,7 +167,7 @@
 
 .dialog .text-button.pick.clone-root span {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 11.5px;
   }
 
 .dialog .text-button.pick.clone-root[aria-pressed="true"] {

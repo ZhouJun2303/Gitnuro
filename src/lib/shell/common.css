@@ -858,7 +858,8 @@ input[type="checkbox"]:disabled,
 
 .shell.diff-wrap .diff-body > span,
 .shell.diff-wrap .diff-body .virtual-row,
-.shell.diff-wrap .split-row > span {
+.shell.diff-wrap .split-row > span,
+.shell.diff-wrap .split-meta {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     height: auto;
@@ -936,6 +937,45 @@ input[type="checkbox"]:disabled,
 .ref.compact { max-width: 88px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: bottom; }
 
 .k { color: var(--text-secondary); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+
+@media print {
+  .shell {
+    height: auto;
+    overflow: visible;
+    background: #fff;
+    color: #111;
+  }
+
+  .menubar,
+  .chrome,
+  .tabs,
+  .sidebar,
+  .split-handle,
+  .changes-column,
+  .history-head,
+  .minimap,
+  .diff-head,
+  .perf {
+    display: none !important;
+  }
+
+  .body,
+  .diff,
+  .diff-body {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  .diff-body .commit-window {
+    height: auto !important;
+  }
+
+  .diff-body .virtual-row {
+    position: relative !important;
+    top: auto !important;
+    break-inside: avoid;
+  }
+}
 
 .tree-row {
     width: 100%;

@@ -108,6 +108,9 @@ export type Messages = {
     cancel: string;
     close: string;
     reading: string;
+    emptyFile: string;
+    hunkActions: string;
+    noReflog: string;
     noCommits: string;
     findCommits: string;
     fileHistory: string;
@@ -514,6 +517,7 @@ export type Messages = {
     privateRepo: string;
     sshKey: string;
     markRead: string;
+    markAllRead: string;
     gitignore: string;
     useOurs: string;
     useTheirs: string;
@@ -532,6 +536,9 @@ export type Messages = {
     editResult: string;
     previewResult: string;
     mergeUnresolved: string;
+    mergeKeepSide: string;
+    mergePickFile: string;
+    mergeOverviewHint: string;
     mergeOverwriteEdits: string;
     mergeOverwriteEditsBody: string;
     result: string;
@@ -548,6 +555,8 @@ export type Messages = {
     token: string;
     deviceLogin: string;
     commandPrompt: string;
+    commandTarget: string;
+    commandTemplate: string;
     commandInput: string;
     remoteBranch: string;
     pending: string;
@@ -595,6 +604,10 @@ export type Messages = {
     httpsHint: string;
     protocol: string;
     host: string;
+    project: string;
+    forge: string;
+    org: string;
+    workspaceName: string;
     username: string;
     password: string;
     saveInGit: string;

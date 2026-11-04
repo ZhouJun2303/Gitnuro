@@ -1,6 +1,6 @@
-.commit-row.good .subject { color: var(--added, #3aa76d); }
+.commit-row.good .subject { color: var(--added); }
 
-.commit-row.bad .subject { color: var(--deleted, #d16464); }
+.commit-row.bad .subject { color: var(--deleted); }
 
 .history-stage {
     flex: 1;

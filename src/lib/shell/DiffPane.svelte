@@ -16,6 +16,7 @@
   let pickTheirs = $state(true);
   let pickedPath = "";
   let hoveredHunk = $state<number | null>(null);
+  let activeHunk = $state<number | null>(null);
 
   $effect(() => {
     const path = shell.selectedPath ?? "";
@@ -24,11 +25,19 @@
     pickOurs = true;
     pickTheirs = true;
     hoveredHunk = null;
+    activeHunk = null;
     shell.pixelUrl = "";
     shell.imageMode = "side";
+    shell.imagePos = 50;
   });
 
   const hunkList = $derived(shell.mode === "live" && shell.section === "changes" ? shell.hunkRanges() : []);
+  const activeAt = $derived(hunkList.findIndex((range) => range.index === activeHunk));
+
+  $effect(() => {
+    if (activeHunk != null && !hunkList.some((range) => range.index === activeHunk)) activeHunk = null;
+  });
+  const litHunk = $derived(hoveredHunk ?? activeHunk);
   const hoveredRange = $derived(hoveredHunk == null ? null : hunkList.find((range) => range.index === hoveredHunk) ?? null);
   const hoveredSelected = $derived(
     hoveredRange
@@ -80,6 +89,8 @@
   }
 
   function goMark(index: number) {
+    activeHunk = index;
+    hoveredHunk = index;
     const node = shell.diffEl;
     if (!node) return;
     if (shell.settings.diffStyle === "split") {
@@ -88,6 +99,52 @@
     }
     node.scrollTop = Math.max(0, index * shell.diffRowHeight);
     shell.diffTop = node.scrollTop;
+  }
+
+  function scrollToHunk(index: number) {
+    const node = shell.diffEl;
+    const range = hunkList.find((item) => item.index === index);
+    if (!node || !range) return;
+    if (shell.settings.diffStyle === "split") {
+      const row = shell.splitRows.findIndex((item) => {
+        const left = shell.splitLineAt(item, "left");
+        const right = shell.splitLineAt(item, "right");
+        return (left != null && left >= range.start && left < range.end) || (right != null && right >= range.start && right < range.end);
+      });
+      node.scrollTop = Math.max(0, (row < 0 ? 0 : row) * shell.splitRowHeight - 8);
+    } else {
+      node.scrollTop = Math.max(0, range.start * shell.diffRowHeight - 8);
+    }
+    shell.diffTop = node.scrollTop;
+  }
+
+  function selectHunk(index: number) {
+    activeHunk = index;
+    hoveredHunk = index;
+    scrollToHunk(index);
+  }
+
+  function stepHunk(delta: number) {
+    if (hunkList.length === 0) return;
+    const at = activeAt < 0 ? (delta > 0 ? -1 : 0) : activeAt;
+    const next = (at + delta + hunkList.length) % hunkList.length;
+    const range = hunkList[next];
+    if (range) selectHunk(range.index);
+  }
+
+  function stageActive() {
+    const file = shell.selectedPath;
+    if (!file || shell.busy || activeHunk == null) return;
+    void shell.mutate({ action: "stageHunk", file, index: activeHunk, unstage: shell.selectedSide === "staged" });
+  }
+
+  function discardActive() {
+    const file = shell.selectedPath;
+    if (!file || shell.busy || activeHunk == null || shell.selectedSide === "staged") return;
+    const index = activeHunk;
+    shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody", { name: file }), () => {
+      void shell.mutate({ action: "discardHunk", file, index });
+    });
   }
 
   function stageHovered() {
@@ -184,9 +241,9 @@
                 <div class="conflict-row" class:pick-one={pickTheirs !== pickOurs}>
                   <div class="conflict-end left">{@render conflictCard(view.theirs, "theirs")}</div>
                   <div class="conflict-bridge">
-                    <input id="conflict-theirs" type="checkbox" bind:checked={pickTheirs} aria-label={view.theirs.label} />
+                    <input id="conflict-theirs" type="checkbox" bind:checked={pickTheirs} aria-label={shell.tr("dialog.mergeKeepSide", { name: view.theirs.label })} title={shell.tr("dialog.mergeKeepSide", { name: view.theirs.label })} />
                     <span class="conflict-link" aria-hidden="true"></span>
-                    <input id="conflict-ours" type="checkbox" bind:checked={pickOurs} aria-label={view.ours.label} />
+                    <input id="conflict-ours" type="checkbox" bind:checked={pickOurs} aria-label={shell.tr("dialog.mergeKeepSide", { name: view.ours.label })} title={shell.tr("dialog.mergeKeepSide", { name: view.ours.label })} />
                   </div>
                   <div class="conflict-end right">{@render conflictCard(view.ours, "ours")}</div>
                 </div>
@@ -211,7 +268,18 @@
             {/if}
           {:else if shell.mode === "live" && shell.section === "changes" && shell.selectedPath}
             <header class="diff-head">
-              <span>{shell.selectedPath}</span>
+              <span title={shell.selectedPath}>{shell.selectedPath}</span>
+              {#if hunkList.length > 0}
+                <div class="hunk-tools" role="group" aria-label={shell.tr("chrome.hunkActions")}>
+                  <button class="hunk-step" type="button" disabled={shell.busy} aria-label={shell.tr("menu.prevHunk")} title={shell.tr("menu.prevHunk")} onclick={() => stepHunk(-1)}>‹</button>
+                  <span class="hunk-pos" aria-live="polite">{activeAt >= 0 ? activeAt + 1 : "–"}/{hunkList.length}</span>
+                  <button class="hunk-step" type="button" disabled={shell.busy} aria-label={shell.tr("menu.nextHunk")} title={shell.tr("menu.nextHunk")} onclick={() => stepHunk(1)}>›</button>
+                  <button class="pane-chip" type="button" disabled={shell.busy || activeHunk == null} title={shell.tr(shell.selectedSide === "staged" ? "menu.unstageHunk" : "menu.stageHunk")} onclick={stageActive}>{shell.tr(shell.selectedSide === "staged" ? "menu.unstageHunk" : "menu.stageHunk")}</button>
+                  {#if shell.selectedSide === "unstaged"}
+                    <button class="pane-chip danger" type="button" disabled={shell.busy || activeHunk == null} title={shell.tr("menu.discardHunk")} onclick={discardActive}>{shell.tr("menu.discardHunk")}</button>
+                  {/if}
+                </div>
+              {/if}
               {#if shell.discardableSelected.length > 1}
                 <button class="pane-chip danger" type="button" disabled={shell.busy} onclick={() => shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(shell.discardableSelected.length) }), () => void shell.applyLineOps("discardLine", shell.discardableSelected))}>{shell.tr("menu.discardLines")}</button>
               {/if}
@@ -245,11 +313,15 @@
                   {@const index = shell.splitWindow.start + offset}
                   {@const leftAt = shell.splitLineAt(row, "left")}
                   {@const rightAt = shell.splitLineAt(row, "right")}
-                  {@const rowHunk = leftAt != null ? shell.hunkOf(leftAt) : rightAt != null ? shell.hunkOf(rightAt) : null}
-                  <div class="split-row" class:hunk-hover={hoveredHunk != null && rowHunk === hoveredHunk}>
-                    {@render splitCell(row, "left", shell.selectedPath ?? "", `l${index}`, leftAt)}
-                    {@render splitCell(row, "right", shell.selectedPath ?? "", `r${index}`, rightAt)}
-                  </div>
+                  {@const rowHunk = row.hunkIndex ?? (leftAt != null ? shell.hunkOf(leftAt) : rightAt != null ? shell.hunkOf(rightAt) : null)}
+                  {#if row.meta}
+                    <div class="split-meta" class:hunk-hover={litHunk != null && rowHunk === litHunk} data-line={row.lineIndex}>{row.left}</div>
+                  {:else}
+                    <div class="split-row" class:hunk-hover={litHunk != null && rowHunk === litHunk}>
+                      {@render splitCell(row, "left", shell.selectedPath ?? "", `l${index}`, leftAt)}
+                      {@render splitCell(row, "right", shell.selectedPath ?? "", `r${index}`, rightAt)}
+                    </div>
+                  {/if}
                 {/each}
                 {#if shell.splitWindow.after > 0}<div class="split-gap" style:height="{shell.splitWindow.after * shell.splitRowHeight}px"></div>{/if}
                 {@render splitBar()}
@@ -263,7 +335,7 @@
                     {@const at = shell.diffWindow.start + index}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={hoveredHunk != null && shell.hunkOf(at) === hoveredHunk} data-line={at} style:top="{at * shell.diffRowHeight}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
+                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={litHunk != null && shell.hunkOf(at) === litHunk} data-line={at} style:top="{at * shell.diffRowHeight}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
                       <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.oldNo ?? ""}</span>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -283,10 +355,14 @@
             {#if shell.settings.diffStyle === "split"}
               <div class="diff-body split pick-{shell.splitPick}" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} role="presentation" onmousedown={shell.pickSplitSide.bind(shell)} use:splitScroller={shell.splitColumnsOf(shell.sampleSplit)}>
                 {#each shell.sampleSplit as row, index (index)}
-                  <div class="split-row">
-                    {@render splitCell(row, "left", shell.selectedPath ?? "", `sl${index}`)}
-                    {@render splitCell(row, "right", shell.selectedPath ?? "", `sr${index}`)}
-                  </div>
+                  {#if row.meta}
+                    <div class="split-meta" data-line={row.lineIndex}>{row.left}</div>
+                  {:else}
+                    <div class="split-row">
+                      {@render splitCell(row, "left", shell.selectedPath ?? "", `sl${index}`)}
+                      {@render splitCell(row, "right", shell.selectedPath ?? "", `sr${index}`)}
+                    </div>
+                  {/if}
                 {/each}
                 {@render splitBar()}
               </div>
@@ -370,8 +446,14 @@
         <figure class="image-frame">
           <div class="image-box">
             <div class="image-overlay">
-              {#if before}<img alt={shell.tr("dialog.imageBefore")} src={before} onload={shell.fitImage.bind(shell)} />{/if}
-              {#if after}<img class="over" alt={shell.tr("dialog.imageAfter")} src={after} style:opacity={shell.imageMode === "onion" ? shell.imagePos / 100 : 1} style:clip-path={shell.imageMode === "swipe" ? `inset(0 ${100 - shell.imagePos}% 0 0)` : "none"} />{/if}
+              {#if before}
+                <img alt={shell.tr("dialog.imageBefore")} src={before} onload={shell.fitImage.bind(shell)} />
+                {#if after}
+                  <img class="over" alt={shell.tr("dialog.imageAfter")} src={after} style:opacity={shell.imageMode === "onion" ? shell.imagePos / 100 : 1} style:clip-path={shell.imageMode === "swipe" ? `inset(0 ${100 - shell.imagePos}% 0 0)` : "none"} />
+                {/if}
+              {:else if after}
+                <img alt={shell.tr("dialog.imageAfter")} src={after} onload={shell.fitImage.bind(shell)} />
+              {/if}
             </div>
           </div>
         </figure>

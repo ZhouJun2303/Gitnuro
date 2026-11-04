@@ -120,6 +120,7 @@
             else void shell.startClone();
           }
           else if (shell.dialog === "command") void shell.runCommand({ command: shell.draftUser || shell.draft, prompt: shell.commandPrompt });
+          else if (shell.dialog === "flow") void shell.mutate({ action: "gitFlowStart", name: shell.draft, kind: shell.flowKind });
           else if (shell.dialog === "prefs") void shell.savePrefs();
           else if (shell.dialog === "tag") {
             await shell.mutate({ action: "tag", name: shell.draft, rev: shell.draftExtra || "HEAD", message: shell.draftUser });
@@ -131,6 +132,8 @@
             const prune = shell.settings.fetchPrune;
             const tags = shell.syncTags;
             if (shell.busy) return;
+            shell.settings = { ...shell.settings, fetchPrune: prune, fetchAllRemotes: shell.syncAll, fetchTags: tags };
+            void shell.savePrefs(false);
             shell.dialog = null;
             void shell.mutate({ action: "fetch", remote, prune, tags });
           }
@@ -139,6 +142,8 @@
               ? { action: "pullRef", remote: shell.draft, branch: shell.draftExtra, rebase: shell.syncRebase, autostash: shell.syncStash }
               : { action: "pull", rebase: shell.syncRebase, autostash: shell.syncStash };
             if (shell.busy) return;
+            shell.settings = { ...shell.settings, pullRebase: shell.syncRebase, pullStash: shell.syncStash };
+            void shell.savePrefs(false);
             shell.dialog = null;
             void shell.mutate(request);
           }
@@ -148,6 +153,8 @@
               ? { action: "pushRef", remote: target.remote, branch: shell.pushBranch, remoteBranch: target.branch, setUpstream: target.setUpstream, tags: shell.syncTags, forceWithLease: shell.syncForce, force: false }
               : { action: "push", remote: shell.draft || null, setUpstream: !shell.refs?.branches.some((branch) => branch.current && branch.upstream), tags: shell.syncTags, forceWithLease: shell.syncForce };
             if (shell.busy) return;
+            shell.settings = { ...shell.settings, pushAllTags: shell.syncTags };
+            void shell.savePrefs(false);
             shell.dialog = null;
             void shell.mutate(request);
           }
@@ -298,7 +305,7 @@
                 <option value="support">support</option>
               </select>
             </label>
-            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "gitFlowStart", name: shell.draft, kind: shell.flowKind })}>{shell.tr("dialog.flowStart")}</button>
+            <button class="text-button" type="submit">{shell.tr("dialog.flowStart")}</button>
             <button class="text-button" type="button" onclick={() => shell.mutate({ action: "gitFlowFinish", name: shell.draft, kind: shell.flowKind })}>{shell.tr("dialog.flowFinish")}</button>
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
           </div>
@@ -385,9 +392,9 @@
               <input placeholder={shell.tr("dialog.remoteName")} bind:value={shell.draft} disabled={shell.syncAll} />
             {/if}
           </label>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncAll} /> {shell.tr("dialog.fetchAllRemotes")}</label>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.settings.fetchPrune} /> {shell.tr("dialog.pruneOnFetch")}</label>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncTags} /> {shell.tr("dialog.includeTags")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncAll} onchange={(event) => { shell.settings = { ...shell.settings, fetchAllRemotes: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.fetchAllRemotes")}</label>
+          <label class="check sync-indent"><input type="checkbox" checked={shell.settings.fetchPrune} onchange={(event) => { shell.settings = { ...shell.settings, fetchPrune: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.pruneOnFetch")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncTags} onchange={(event) => { shell.settings = { ...shell.settings, fetchTags: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.includeTags")}</label>
           <div class="composer-row">
             <button class="commit" type="submit">{shell.tr("chrome.fetch")}</button>
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("dialog.cancel")}</button>
@@ -426,8 +433,8 @@
             <span>{shell.tr("dialog.pullInto")}</span>
             <strong class="sync-value">{shell.snapshot?.branch ?? ""}</strong>
           </div>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncRebase} /> {shell.tr("dialog.pullWithRebase")}</label>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncStash} /> {shell.tr("dialog.pullStash")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncRebase} onchange={(event) => { shell.settings = { ...shell.settings, pullRebase: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.pullWithRebase")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncStash} onchange={(event) => { shell.settings = { ...shell.settings, pullStash: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.pullStash")}</label>
           <div class="composer-row">
             <button class="commit" type="submit">{shell.tr("chrome.pull")}</button>
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("dialog.cancel")}</button>
@@ -457,7 +464,7 @@
               {/each}
             </select>
           </label>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncTags} /> {shell.tr("dialog.pushAllTags")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncTags} onchange={(event) => { shell.settings = { ...shell.settings, pushAllTags: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.pushAllTags")}</label>
           <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncForce} /> {shell.tr("dialog.forcePush")}</label>
           <div class="composer-row">
             <button class="commit" type="submit">{shell.tr("chrome.push")}</button>
@@ -514,7 +521,7 @@
               <span>{step.summary}</span>
             </div>
             {#if step.verb === "reword" || step.verb === "squash" || step.verb === "exec"}
-              <input placeholder={shell.tr("dialog.message")} bind:value={step.message} />
+              <input placeholder={shell.tr("dialog.message")} aria-label={shell.tr("dialog.message")} bind:value={step.message} />
             {/if}
           {/each}
           </div>
@@ -662,7 +669,7 @@
         {:else if shell.dialog === "squash"}
           <h2>{shell.tr("dialog.squash")}</h2>
           <p class="empty">{shell.tr("dialog.squashHint")}</p>
-          <input placeholder={shell.tr("dialog.message")} bind:value={shell.draft} />
+          <input placeholder={shell.tr("dialog.message")} aria-label={shell.tr("dialog.message")} bind:value={shell.draft} />
           <button class="commit" type="submit">{shell.tr("dialog.squash")}</button>
         {:else if shell.dialog === "checkoutDirty"}
           <h2>{shell.tr("menu.checkout")} {shell.pendingCheckout}</h2>
@@ -688,17 +695,17 @@
           <button class="commit" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
         {:else if shell.dialog === "mailmap"}
           <h2>{shell.tr("chrome.mailmap")}</h2>
-          <textarea rows="8" placeholder="Name <email> <alias>" bind:value={shell.draft}></textarea>
+          <textarea rows="8" aria-label={shell.tr("chrome.mailmap")} placeholder="Name <email> <alias>" bind:value={shell.draft}></textarea>
           <button class="commit" type="submit">{shell.tr("dialog.save")}</button>
         {:else if shell.dialog === "accounts"}
           <h2>{shell.tr("chrome.accounts")}</h2>
           {#each shell.settings.accounts as account (account.id)}
             <div class="composer-row">
               <button class="text-button" type="button" onclick={() => { shell.editingAccount = account.id; shell.hostForge = account.forge; shell.draft = account.label; shell.draftExtra = account.host; shell.draftUser = account.token; shell.settings.oauthClientId = account.clientId; }}>{account.forge} {account.label}</button>
-              <button class="text-button" type="button" onclick={() => { shell.settings = { ...shell.settings, accounts: shell.settings.accounts.filter((item) => item.id !== account.id) }; if (shell.editingAccount === account.id) shell.editingAccount = ""; void shell.savePrefs(false); }}>{shell.tr("menu.delete")}</button>
+              <button class="text-button danger" type="button" onclick={() => shell.ask(shell.tr("menu.delete"), `${account.forge} · ${account.label}`, () => { shell.settings = { ...shell.settings, accounts: shell.settings.accounts.filter((item) => item.id !== account.id) }; if (shell.editingAccount === account.id) shell.editingAccount = ""; void shell.savePrefs(false); })}>{shell.tr("menu.delete")}</button>
             </div>
           {/each}
-          <select aria-label="Forge" bind:value={shell.hostForge}>
+          <select aria-label={shell.tr("dialog.forge")} bind:value={shell.hostForge}>
             <option value="github">GitHub</option>
             <option value="gitlab">GitLab</option>
             <option value="bitbucket">Bitbucket</option>
@@ -725,11 +732,11 @@
           {#each shell.staleNames as name (name)}
             <label class="check"><input type="checkbox" checked={shell.stalePicked.includes(name)} onchange={() => { shell.stalePicked = shell.stalePicked.includes(name) ? shell.stalePicked.filter((item) => item !== name) : [...shell.stalePicked, name]; }} /> {name}</label>
           {/each}
-          <button class="commit" type="button" onclick={async () => { const names = [...shell.stalePicked]; shell.dialog = null; for (const name of names) await shell.mutate({ action: "deleteBranch", name, force: false }); }}>{shell.tr("menu.delete")}</button>
+          <button class="commit" type="button" disabled={shell.stalePicked.length === 0} onclick={() => { const names = [...shell.stalePicked]; shell.ask(shell.tr("menu.delete"), names.join(", "), () => { shell.dialog = null; void (async () => { for (const name of names) await shell.mutate({ action: "deleteBranch", name, force: false }); })(); }); }}>{shell.tr("menu.delete")}</button>
         {:else if shell.dialog === "pushAs"}
           <h2>{shell.tr("menu.pushAs")}</h2>
           <label>{shell.tr("dialog.branch")}<input bind:value={shell.draft} /></label>
-          <label>remote<input bind:value={shell.draftExtra} /></label>
+          <label>{shell.tr("dialog.remoteName")}<input bind:value={shell.draftExtra} /></label>
           <label>{shell.tr("dialog.remoteBranch")}<input bind:value={shell.draftUser} /></label>
           <div class="composer-row">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
@@ -810,18 +817,18 @@
             <option value="bitbucket">Bitbucket</option>
             <option value="azure">Azure</option>
           </select>
-          <input placeholder={shell.tr("dialog.name")} bind:value={shell.draft} />
-          <input placeholder={shell.hostForge === "azure" ? "project" : "host"} bind:value={shell.draftExtra} />
-          <input placeholder={shell.hostForge === "bitbucket" ? "workspace" : shell.tr("dialog.remoteBranch")} bind:value={shell.draftUser} />
+          <label>{shell.tr("dialog.name")}<input placeholder={shell.tr("dialog.name")} bind:value={shell.draft} /></label>
+          <label>{shell.hostForge === "azure" ? shell.tr("dialog.project") : shell.tr("dialog.host")}<input placeholder={shell.hostForge === "azure" ? shell.tr("dialog.project") : shell.tr("dialog.host")} bind:value={shell.draftExtra} /></label>
+          <label>{shell.hostForge === "bitbucket" ? shell.tr("dialog.workspaceName") : shell.tr("dialog.org")}<input placeholder={shell.hostForge === "bitbucket" ? shell.tr("dialog.workspaceName") : shell.tr("dialog.org")} bind:value={shell.draftUser} /></label>
           <label class="check"><input type="checkbox" bind:checked={shell.privateRepo} /> {shell.tr("dialog.privateRepo")}</label>
           <button class="commit" type="submit">{shell.tr("dialog.create")}</button>
         {:else if shell.dialog === "stashRename"}
           <h2>{shell.tr("menu.renameStash")}</h2>
-          <input placeholder={shell.tr("dialog.message")} bind:value={shell.draft} />
+          <label>{shell.tr("dialog.message")}<input placeholder={shell.tr("dialog.message")} bind:value={shell.draft} /></label>
           <button class="commit" type="submit">{shell.tr("dialog.save")}</button>
         {:else if shell.dialog === "stashBranch"}
           <h2>{shell.tr("menu.stashBranch")}</h2>
-          <input placeholder={shell.tr("dialog.branch")} bind:value={shell.draft} />
+          <label>{shell.tr("dialog.branch")}<input placeholder={shell.tr("dialog.branch")} bind:value={shell.draft} /></label>
           <button class="commit" type="submit">{shell.tr("dialog.create")}</button>
         {:else if shell.dialog === "credential"}
           <h2>{shell.tr("dialog.httpsLogin")}</h2>
@@ -844,15 +851,15 @@
               <button class="text-button" type="button" onclick={() => shell.removeCommand(command.id)}>{shell.tr("menu.delete")}</button>
             </div>
           {/each}
-          <input placeholder={shell.tr("dialog.name")} bind:value={shell.draft} />
-          <select bind:value={shell.draftExtra}>
+          <input placeholder={shell.tr("dialog.name")} aria-label={shell.tr("dialog.name")} bind:value={shell.draft} />
+          <select aria-label={shell.tr("dialog.commandTarget")} bind:value={shell.draftExtra}>
             <option value="repository">{shell.tr("chrome.repository")}</option>
             <option value="commit">{shell.tr("chrome.commit")}</option>
             <option value="branch">{shell.tr("dialog.branch")}</option>
             <option value="file">{shell.tr("dialog.file")}</option>
           </select>
-          <input placeholder={"${repo} ${sha} ${branch} ${file} ${input}"} bind:value={shell.draftUser} />
-          <textarea rows="3" placeholder={shell.tr("dialog.commandPrompt")} bind:value={shell.commandPrompt}></textarea>
+          <input placeholder={"${repo} ${sha} ${branch} ${file} ${input}"} aria-label={shell.tr("dialog.commandTemplate")} bind:value={shell.draftUser} />
+          <textarea rows="3" placeholder={shell.tr("dialog.commandPrompt")} aria-label={shell.tr("dialog.commandPrompt")} bind:value={shell.commandPrompt}></textarea>
           <label class="check"><input type="checkbox" bind:checked={shell.commandShared} /> {shell.tr("chrome.shared")}</label>
           <div class="composer-row">
             <button class="text-button" type="button" onclick={shell.saveCommand.bind(shell)}>{shell.tr("dialog.save")}</button>

@@ -129,7 +129,11 @@
             data-layer={notice?.dataLayer}
           >
             <button class="icon-btn history-btn" class:on={shell.commandLogOpen} class:alert={shell.unseenErrors > 0} type="button" bind:this={shell.commandButton} title={shell.unseenErrors > 0 ? `${shell.tr("chrome.commandHistory")} (${shell.unseenErrors})` : shell.tr("chrome.commandHistory")} aria-label={shell.unseenErrors > 0 ? `${shell.tr("chrome.commandHistory")} (${shell.unseenErrors})` : shell.tr("chrome.commandHistory")} aria-expanded={shell.commandLogOpen} aria-haspopup="dialog" onclick={() => (shell.commandLogOpen ? (shell.commandLogOpen = false) : shell.openCommandLog())}>
-              <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
+              {#if shell.unseenErrors > 0}
+                <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" stroke="none" d="M12 2.6 23 21.4H1L12 2.6z"/><path d="M12 8.3v6.2" stroke="var(--deleted)" stroke-width="1.6" stroke-linecap="round"/><circle cx="12" cy="17.9" r="1.05" fill="var(--deleted)" stroke="none"/></svg>
+              {:else}
+                <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
+              {/if}
               {#if shell.unseenErrors > 0}<em class="error-count">{shell.unseenErrors > 99 ? "99+" : shell.unseenErrors}</em>{:else if shell.statusNotices.length > 0}<em class="notice-count">{shell.statusNotices.length > 99 ? "99+" : shell.statusNotices.length}</em>{/if}
             </button>
             <button class="identity-copy" type="button" onclick={() => shell.openCommandLog(notice?.id ?? "notices")}>

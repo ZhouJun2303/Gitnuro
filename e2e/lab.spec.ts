@@ -114,6 +114,39 @@ test("confirmation is above a dialog that opened it", async ({ page }) => {
   expect(layers).toBeGreaterThan(50);
 });
 
+test("hunk toolbar selects a hunk without hovering", async ({ page }) => {
+  await openLabScene(page, "diff-text", ".hunk-tools");
+  const stage = page.locator(".hunk-tools .pane-chip").first();
+  await expect(stage).toBeDisabled();
+  await page.locator(".hunk-tools .hunk-step").nth(1).click();
+  await expect(page.locator(".hunk-pos")).toHaveText("1/1");
+  await expect(stage).toBeEnabled();
+});
+
+test("command log keeps focus inside and closes with Escape", async ({ page }) => {
+  await openLabScene(page, "commands", '[data-layer="commands"]');
+  const inside = () => page.evaluate(() => !!document.activeElement?.closest('[data-layer="commands"]'));
+  expect(await inside()).toBe(true);
+  for (let step = 0; step < 4; step += 1) await page.keyboard.press("Tab");
+  expect(await inside()).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-layer="commands"]')).toHaveCount(0);
+});
+
+test("submenu opens and closes with the arrow keys", async ({ page }) => {
+  await openLabScene(page, "menu", '[data-layer="menu"]');
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
+  await expect(page.locator('[data-layer="menu"] button[aria-haspopup="menu"]')).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator('[data-layer="submenu"]')).toBeVisible();
+  await expect(page.locator('[data-layer="submenu"] button').first()).toBeFocused();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator('[data-layer="submenu"]')).toHaveCount(0);
+  await expect(page.locator('[data-layer="menu"] button[aria-haspopup="menu"]')).toBeFocused();
+});
+
 test("history restores its scroll position after switching sections", async ({ page }) => {
   await openLabScene(page, "history", ".history .commit-row");
   await page.locator(".history").evaluate((node) => {
