@@ -3,6 +3,10 @@ name = "awegit"
 version = "2.0.1"
 description = "AweGit desktop shell"
 edition = "2021"
+# Two bins exist (`awegit` shell, `awegit-lab` harness). `tauri dev` runs a
+# bare `cargo run`, which fails without a default. The lab is started
+# explicitly through `--bin awegit-lab` in scripts/lab-serve.mjs.
+default-run = "awegit"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
