@@ -3,12 +3,20 @@
   import "./MergePanel.css";
   import type { ConflictParty } from "../status";
   import type { MergePiece } from "./types";
+  import { hunkIncludes } from "./dialogs.svelte";
 
   const shell = getShell();
   let fileLeft = $state(false);
   let fileRight = $state(false);
   let openFor = "";
   let panel = $state<HTMLElement | null>(null);
+  let hoverHunk = $state<number | null>(null);
+  let hoverSide = $state<"theirs" | "ours" | null>(null);
+  let activeConflict = $state(0);
+  let leftPane = $state<HTMLElement | null>(null);
+  let rightPane = $state<HTMLElement | null>(null);
+  let resultPane = $state<HTMLElement | null>(null);
+  let syncing = false;
 
   $effect(() => {
     if (!shell.textMerge) {
@@ -19,16 +27,35 @@
     openFor = shell.mergeFile;
     fileLeft = false;
     fileRight = false;
+    hoverHunk = null;
+    hoverSide = null;
+    activeConflict = 0;
   });
 
   $effect(() => {
     if (shell.textMerge && panel) panel.focus();
   });
 
-  const textLeft = $derived(shell.mergePieces.every((piece) => piece.kind !== "hunk" || piece.pick === "theirs"));
-  const textRight = $derived(shell.mergePieces.every((piece) => piece.kind !== "hunk" || piece.pick === "ours"));
-  const leftOn = $derived(shell.mergeKind === "file" ? fileLeft : textLeft || !textRight);
-  const rightOn = $derived(shell.mergeKind === "file" ? fileRight : textRight || !textLeft);
+  const hunkIndexes = $derived(
+    shell.mergePieces
+      .map((piece, index) => (piece.kind === "hunk" ? index : -1))
+      .filter((index) => index >= 0),
+  );
+  const conflictTotal = $derived(hunkIndexes.length);
+  const conflictResolved = $derived(
+    hunkIndexes.filter((index) => {
+      const piece = shell.mergePieces[index];
+      return piece?.kind === "hunk" && piece.pick !== "none";
+    }).length,
+  );
+  const textLeft = $derived(
+    conflictTotal > 0 && shell.mergePieces.every((piece) => piece.kind !== "hunk" || hunkIncludes(piece.pick, "theirs")),
+  );
+  const textRight = $derived(
+    conflictTotal > 0 && shell.mergePieces.every((piece) => piece.kind !== "hunk" || hunkIncludes(piece.pick, "ours")),
+  );
+  const leftOn = $derived(shell.mergeKind === "file" ? fileLeft : textLeft);
+  const rightOn = $derived(shell.mergeKind === "file" ? fileRight : textRight);
   const fileSide = $derived<"ours" | "theirs" | "">(fileLeft ? "theirs" : fileRight ? "ours" : "");
   const view = $derived(shell.activeConflict);
 
@@ -39,7 +66,7 @@
       if (fileLeft) fileRight = false;
       return;
     }
-    shell.takeMergeSide("theirs");
+    shell.takeMergeSide("theirs", !leftOn);
   }
 
   function onRight(event: Event) {
@@ -49,14 +76,40 @@
       if (fileRight) fileLeft = false;
       return;
     }
-    shell.takeMergeSide("ours");
+    shell.takeMergeSide("ours", !rightOn);
   }
 
-  function chosen(piece: MergePiece) {
-    if (piece.kind !== "hunk") return "";
-    if (piece.pick === "theirs") return piece.theirs;
-    if (piece.pick === "both") return [piece.ours, piece.theirs].filter((part) => part.length > 0).join("\n");
-    return piece.ours;
+  function show(text: string) {
+    return text.trim() ? text : shell.tr("dialog.mergeEmpty");
+  }
+
+  function sideOn(piece: Extract<MergePiece, { kind: "hunk" }>, side: "theirs" | "ours") {
+    return hunkIncludes(piece.pick, side);
+  }
+
+  function syncScroll(source: "left" | "right", event: Event) {
+    if (syncing) return;
+    const target = event.currentTarget;
+    if (!(target instanceof HTMLElement)) return;
+    const other = source === "left" ? rightPane : leftPane;
+    if (!other) return;
+    syncing = true;
+    other.scrollTop = target.scrollTop;
+    other.scrollLeft = target.scrollLeft;
+    queueMicrotask(() => {
+      syncing = false;
+    });
+  }
+
+  function jumpConflict(delta: number) {
+    if (conflictTotal === 0) return;
+    const next = (activeConflict + delta + conflictTotal) % conflictTotal;
+    activeConflict = next;
+    const index = hunkIndexes[next];
+    if (index == null) return;
+    leftPane?.querySelector<HTMLElement>(`[data-merge-hunk="${index}"]`)?.scrollIntoView({ block: "nearest" });
+    rightPane?.querySelector<HTMLElement>(`[data-merge-hunk="${index}"]`)?.scrollIntoView({ block: "nearest" });
+    resultPane?.querySelector<HTMLElement>(`[data-merge-result="${index}"]`)?.scrollIntoView({ block: "nearest" });
   }
 
   function formatBytes(bytes: number) {
@@ -72,10 +125,6 @@
     if (ext === "xls" || ext === "xlsx" || ext === "xlsm" || ext === "csv" || ext === "ods") return "sheet";
     if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "gif" || ext === "webp" || ext === "bmp" || ext === "svg" || ext === "ico") return "image";
     return "doc";
-  }
-
-  function show(text: string) {
-    return text.trim() ? text : shell.tr("dialog.mergeEmpty");
   }
 
   async function resolve() {
@@ -95,8 +144,15 @@
         <strong>{shell.tr("dialog.mergeTitle")}</strong>
         <span class="merge-title-file">
           {@render mark(fileKind(shell.mergeFile), 16)}
-          <span>{shell.fileName(shell.mergeFile)}</span>
+          <span>{shell.mergeFile}</span>
         </span>
+        {#if shell.mergeKind === "text" && conflictTotal > 0}
+          <div class="merge-nav">
+            <span class="merge-count" class:done={conflictResolved === conflictTotal}>{conflictResolved}/{conflictTotal}</span>
+            <button class="merge-nav-btn" type="button" aria-label={shell.tr("menu.prevHunk")} onclick={() => jumpConflict(-1)}>‹</button>
+            <button class="merge-nav-btn" type="button" aria-label={shell.tr("menu.nextHunk")} onclick={() => jumpConflict(1)}>›</button>
+          </div>
+        {/if}
         <button class="merge-close" type="button" aria-label={shell.tr("chrome.close")} onclick={() => shell.closeTextMerge()}>×</button>
       </header>
       <div class="merge-head">
@@ -104,8 +160,7 @@
           <input type="checkbox" checked={leftOn} aria-label={shell.mergeLeft} onclick={onLeft} />
           <span>{shell.mergeLeft}</span>
         </label>
-        {#if shell.mergeKind === "text"}<span class="merge-result-label">{shell.tr("dialog.result")}</span>{:else}<span></span>{/if}
-        <label class="merge-party">
+        <label class="merge-party right">
           <input type="checkbox" checked={rightOn} aria-label={shell.mergeRight} onclick={onRight} />
           <span>{shell.mergeRight}</span>
         </label>
@@ -113,29 +168,91 @@
       {#if shell.mergeKind === "file"}
         <div class="merge-stage files">
           {@render fileCard(view?.theirs)}
-          <div class="merge-file-slot"></div>
           {@render fileCard(view?.ours)}
         </div>
       {:else}
-        <div class="merge-stage">
-          {#each shell.mergePieces as piece, index (index)}
-            {#if piece.kind === "text"}
-              <pre class="merge-cell context">{piece.text}</pre>
-              <pre class="merge-cell context result">{piece.text}</pre>
-              <pre class="merge-cell context">{piece.text}</pre>
-            {:else}
-              <button class="merge-cell hunk" type="button" class:on={piece.pick === "theirs"} onclick={() => shell.pickHunk(index, "theirs")}>
-                <pre class:empty={!piece.theirs.trim()}>{show(piece.theirs)}</pre>
-              </button>
-              <pre class="merge-cell hunk result pick-{piece.pick}" class:empty={!chosen(piece).trim()}>{show(chosen(piece))}</pre>
-              <button class="merge-cell hunk" type="button" class:on={piece.pick === "ours"} onclick={() => shell.pickHunk(index, "ours")}>
-                <pre class:empty={!piece.ours.trim()}>{show(piece.ours)}</pre>
-              </button>
-            {/if}
-          {/each}
+        <div class="merge-top">
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="merge-side left" bind:this={leftPane} onscroll={(event) => syncScroll("left", event)}>
+            {#each shell.mergePieces as piece, index (index)}
+              {#if piece.kind === "text"}
+                <pre class="merge-cell context">{piece.text}</pre>
+              {:else}
+                {@const on = sideOn(piece, "theirs")}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="merge-cell hunk"
+                  class:on
+                  class:hover={hoverHunk === index && hoverSide === "theirs"}
+                  data-merge-hunk={index}
+                  role="group"
+                  onmouseenter={() => { hoverHunk = index; hoverSide = "theirs"; }}
+                  onmouseleave={() => { if (hoverHunk === index && hoverSide === "theirs") { hoverHunk = null; hoverSide = null; } }}
+                >
+                  <pre class:empty={!piece.theirs.trim()}>{show(piece.theirs)}</pre>
+                  {#if hoverHunk === index && hoverSide === "theirs"}
+                    <button
+                      class="merge-hover-btn"
+                      class:remove={on}
+                      type="button"
+                      onclick={(event) => { event.stopPropagation(); shell.toggleMergeSide(index, "theirs"); activeConflict = Math.max(0, hunkIndexes.indexOf(index)); }}
+                    >{shell.tr(on ? "dialog.removeLeft" : "dialog.selectLeft")}</button>
+                  {/if}
+                </div>
+              {/if}
+            {/each}
+          </div>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="merge-side right" bind:this={rightPane} onscroll={(event) => syncScroll("right", event)}>
+            {#each shell.mergePieces as piece, index (index)}
+              {#if piece.kind === "text"}
+                <pre class="merge-cell context">{piece.text}</pre>
+              {:else}
+                {@const on = sideOn(piece, "ours")}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div
+                  class="merge-cell hunk"
+                  class:on
+                  class:hover={hoverHunk === index && hoverSide === "ours"}
+                  data-merge-hunk={index}
+                  role="group"
+                  onmouseenter={() => { hoverHunk = index; hoverSide = "ours"; }}
+                  onmouseleave={() => { if (hoverHunk === index && hoverSide === "ours") { hoverHunk = null; hoverSide = null; } }}
+                >
+                  <pre class:empty={!piece.ours.trim()}>{show(piece.ours)}</pre>
+                  {#if hoverHunk === index && hoverSide === "ours"}
+                    <button
+                      class="merge-hover-btn"
+                      class:remove={on}
+                      type="button"
+                      onclick={(event) => { event.stopPropagation(); shell.toggleMergeSide(index, "ours"); activeConflict = Math.max(0, hunkIndexes.indexOf(index)); }}
+                    >{shell.tr(on ? "dialog.removeRight" : "dialog.selectRight")}</button>
+                  {/if}
+                </div>
+              {/if}
+            {/each}
+          </div>
+        </div>
+        <div class="merge-result-pane">
+          <div class="merge-result-head">{shell.tr("dialog.result")}</div>
+          <div class="merge-result-scroll" bind:this={resultPane}>
+            {#each shell.mergePieces as piece, index (index)}
+              {#if piece.kind === "text"}
+                <pre class="merge-result-text">{piece.text}</pre>
+              {:else if piece.pick === "none"}
+                <div class="merge-conflict-mark" data-merge-result={index}>{shell.tr("dialog.mergeConflictMark")}</div>
+              {:else}
+                <pre class="merge-result-hunk pick-{piece.pick}" data-merge-result={index}>{shell.chosenHunkText(piece) || shell.tr("dialog.mergeEmpty")}</pre>
+              {/if}
+            {/each}
+          </div>
+          <textarea class="merge-result-edit" aria-label={shell.tr("dialog.result")} spellcheck="false" bind:value={shell.mergeResult}></textarea>
         </div>
       {/if}
       <footer class="merge-panel-foot">
+        {#if shell.mergeKind === "text"}
+          <span class="merge-edit-hint">{shell.tr("dialog.editingAllowed")}</span>
+        {/if}
         <button class="commit" type="button" disabled={shell.mergeKind === "file" ? !fileSide || (shell.mode === "live" && shell.busy) : shell.mode === "live" && shell.busy} onclick={() => void resolve()}>{shell.tr("dialog.mergeResolve")}</button>
         <button class="text-button" type="button" onclick={() => shell.closeTextMerge()}>{shell.tr("chrome.cancel")}</button>
       </footer>

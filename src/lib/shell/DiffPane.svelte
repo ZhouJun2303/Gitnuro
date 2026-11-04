@@ -6,6 +6,7 @@
   import type { Row, Side } from "./types";
   import { applyConflictChoice, mergeToolLabel, openConflictTool } from "./diff.svelte";
   import type { ConflictParty } from "../status";
+  import type { DiffLine } from "../status";
 
   const shell = getShell();
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
@@ -14,6 +15,7 @@
   let pickOurs = $state(true);
   let pickTheirs = $state(true);
   let pickedPath = "";
+  let hoveredHunk = $state<number | null>(null);
 
   $effect(() => {
     const path = shell.selectedPath ?? "";
@@ -21,7 +23,43 @@
     pickedPath = path;
     pickOurs = true;
     pickTheirs = true;
+    hoveredHunk = null;
   });
+
+  const hunkList = $derived(shell.mode === "live" && shell.section === "changes" ? shell.hunkRanges() : []);
+  const hoveredRange = $derived(hoveredHunk == null ? null : hunkList.find((range) => range.index === hoveredHunk) ?? null);
+  const hoveredSelected = $derived(
+    hoveredRange
+      ? shell.diffSelected.filter((index) => index >= hoveredRange.start && index < hoveredRange.end)
+      : [],
+  );
+  const hoveredLineOps = $derived.by(() => {
+    if (hoveredSelected.length === 0) return [] as { line: DiffLine; index: number }[];
+    return hoveredSelected
+      .map((index) => ({ line: shell.diffLines[index], index }))
+      .filter((entry): entry is { line: DiffLine; index: number } => !!entry.line && (entry.line.kind === "add" || entry.line.kind === "delete") && entry.line.stageAt != null);
+  });
+  const hoveredDiscardOps = $derived(hoveredSelected.length > 0 ? shell.discardableEntries(hoveredSelected) : []);
+  const useLineOps = $derived(hoveredLineOps.length > 0 || hoveredDiscardOps.length > 0);
+  const rowHeight = $derived(shell.settings.diffStyle === "split" ? shell.splitRowHeight : 18);
+  const hunkActionTop = $derived.by(() => {
+    if (!hoveredRange) return 0;
+    if (shell.settings.diffStyle !== "split") return hoveredRange.start * rowHeight;
+    for (let at = 0; at < shell.splitRows.length; at += 1) {
+      const row = shell.splitRows[at];
+      if (!row) continue;
+      const left = shell.splitLineAt(row, "left");
+      const right = shell.splitLineAt(row, "right");
+      if ((left != null && left >= hoveredRange.start && left < hoveredRange.end) || (right != null && right >= hoveredRange.start && right < hoveredRange.end)) {
+        return at * rowHeight;
+      }
+    }
+    return hoveredRange.start * rowHeight;
+  });
+  /** Split overlay is on the scrollport; offset by scroll so it tracks the hunk. */
+  const hunkActionScreenTop = $derived(
+    shell.settings.diffStyle === "split" ? Math.max(4, hunkActionTop - shell.diffTop) : hunkActionTop,
+  );
 
   const sideText = (party: ConflictParty) => {
     if (party.state === "added") return shell.tr("chrome.sideAdded");
@@ -29,6 +67,67 @@
     if (party.state === "modified") return shell.tr("chrome.sideModified");
     return "";
   };
+
+  function hoverDiffLine(event: MouseEvent) {
+    const hit = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-line]") : null;
+    const line = Number(hit?.dataset.line);
+    if (!Number.isInteger(line)) {
+      if (!(event.target instanceof Element) || !event.target.closest(".diff-hunk-actions")) hoveredHunk = null;
+      return;
+    }
+    hoveredHunk = shell.hunkOf(line);
+  }
+
+  function clearHunkHover() {
+    hoveredHunk = null;
+  }
+
+  function stageHovered() {
+    const file = shell.selectedPath;
+    if (!file || shell.busy) return;
+    if (useLineOps) {
+      if (hoveredLineOps.length === 0) return;
+      void shell.applyLineOps("stageLine", hoveredLineOps);
+      return;
+    }
+    if (hoveredHunk == null) return;
+    void shell.mutate({ action: "stageHunk", file, index: hoveredHunk, unstage: shell.selectedSide === "staged" });
+  }
+
+  function discardHovered() {
+    const file = shell.selectedPath;
+    if (!file || shell.busy || shell.selectedSide === "staged") return;
+    if (useLineOps) {
+      if (hoveredDiscardOps.length === 0) return;
+      const many = hoveredDiscardOps.length > 1;
+      if (!many) {
+        void shell.applyLineOps("discardLine", hoveredDiscardOps);
+        return;
+      }
+      shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(hoveredDiscardOps.length) }), () => void shell.applyLineOps("discardLine", hoveredDiscardOps));
+      return;
+    }
+    if (hoveredHunk == null) return;
+    const index = hoveredHunk;
+    shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody", { name: file }), () => {
+      void shell.mutate({ action: "discardHunk", file, index });
+    });
+  }
+
+  function stageLabel() {
+    if (useLineOps) {
+      const many = hoveredLineOps.length > 1;
+      return shell.selectedSide === "staged"
+        ? shell.tr(many ? "menu.unstageLines" : "menu.unstageLine")
+        : shell.tr(many ? "menu.stageLines" : "menu.stageLine");
+    }
+    return shell.selectedSide === "staged" ? shell.tr("menu.unstageHunk") : shell.tr("menu.stage");
+  }
+
+  function discardLabel() {
+    if (useLineOps) return shell.tr(hoveredDiscardOps.length > 1 ? "menu.discardLines" : "menu.discardLine");
+    return shell.tr("menu.discard");
+  }
 </script>
 
 <section class="diff flex-fill">
@@ -125,26 +224,32 @@
             {:else if shell.diff.lines.length === 0}
               <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
             {:else if shell.settings.diffStyle === "split"}
-              <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={onDiffScroll} use:splitScroller={shell.splitColumns}>
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover} use:splitScroller={shell.splitColumns}>
                 {#if shell.splitWindow.start > 0}<div class="split-gap" style:height="{shell.splitWindow.start * shell.splitRowHeight}px"></div>{/if}
                 {#each shell.splitWindow.rows as row, offset (shell.splitWindow.start + offset)}
                   {@const index = shell.splitWindow.start + offset}
-                  <div class="split-row">
-                    {@render splitCell(row, "left", shell.selectedPath ?? "", `l${index}`, shell.splitLineAt(row, "left"))}
-                    {@render splitCell(row, "right", shell.selectedPath ?? "", `r${index}`, shell.splitLineAt(row, "right"))}
+                  {@const leftAt = shell.splitLineAt(row, "left")}
+                  {@const rightAt = shell.splitLineAt(row, "right")}
+                  {@const rowHunk = leftAt != null ? shell.hunkOf(leftAt) : rightAt != null ? shell.hunkOf(rightAt) : null}
+                  <div class="split-row" class:hunk-hover={hoveredHunk != null && rowHunk === hoveredHunk}>
+                    {@render splitCell(row, "left", shell.selectedPath ?? "", `l${index}`, leftAt)}
+                    {@render splitCell(row, "right", shell.selectedPath ?? "", `r${index}`, rightAt)}
                   </div>
                 {/each}
                 {#if shell.splitWindow.after > 0}<div class="split-gap" style:height="{shell.splitWindow.after * shell.splitRowHeight}px"></div>{/if}
                 {@render splitBar()}
+                {@render hunkActions(true)}
               </div>
             {:else}
-              <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} onscroll={onDiffScroll}>
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
                 <div class="commit-window" style:height="{shell.diffLines.length * 18}px">
                   {#each shell.diffWindow.rows as line, index (`${shell.diffWindow.start}-${index}`)}
                     {@const at = shell.diffWindow.start + index}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} data-line={at} style:top="{at * 18}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
+                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={hoveredHunk != null && shell.hunkOf(at) === hoveredHunk} data-line={at} style:top="{at * 18}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
                       <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.oldNo ?? ""}</span>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -152,6 +257,7 @@
                       {#each shell.paint(line.text, shell.selectedPath ?? "") as token, tokenIndex (`${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
                     </span>
                   {/each}
+                  {@render hunkActions(false)}
                 </div>
                 {#if shell.diff.truncated}<span class="meta">{shell.tr("chrome.truncated")}</span>{/if}
               </div>
@@ -200,6 +306,20 @@
     <div class="split-bar" data-bar="right"><div></div></div>
     {#if actions}<span class="split-bar-pad"></span>{/if}
   {/snippet}
+
+{#snippet hunkActions(split: boolean)}
+  {#if hoveredRange && shell.mode === "live"}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="diff-hunk-actions" class:split-float={split} style:top="{(split ? hunkActionScreenTop : hunkActionTop)}px" onmouseenter={() => (hoveredHunk = hoveredRange.index)}>
+      {#if !useLineOps || hoveredLineOps.length > 0}
+        <button type="button" disabled={shell.busy} onclick={(event) => { event.stopPropagation(); stageHovered(); }}>{stageLabel()}</button>
+      {/if}
+      {#if shell.selectedSide === "unstaged" && (!useLineOps || hoveredDiscardOps.length > 0)}
+        <button class="danger" type="button" disabled={shell.busy} onclick={(event) => { event.stopPropagation(); discardHovered(); }}>{discardLabel()}</button>
+      {/if}
+    </div>
+  {/if}
+{/snippet}
 
 {#snippet conflictCard(party: ConflictParty, side: "ours" | "theirs")}
   {@const on = side === "ours" ? pickOurs : pickTheirs}

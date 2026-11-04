@@ -507,6 +507,12 @@ export type Messages = {
     useOurs: string;
     useTheirs: string;
     useBoth: string;
+    selectLeft: string;
+    selectRight: string;
+    removeLeft: string;
+    removeRight: string;
+    editingAllowed: string;
+    mergeConflictMark: string;
     mergeUseAll: string;
     mergeEmpty: string;
     mergeDone: string;

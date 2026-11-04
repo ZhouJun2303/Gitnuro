@@ -55,9 +55,11 @@ export type Dialog =
     | "groupRename"
     | null;
 
+export type MergePick = "ours" | "theirs" | "both" | "none";
+
 export type MergePiece =
     | { kind: "text"; text: string }
-    | { kind: "hunk"; ours: string; theirs: string; pick: "ours" | "theirs" | "both" };
+    | { kind: "hunk"; ours: string; theirs: string; pick: MergePick };
 
 export type RepoFacts = {
     ignored: string[];

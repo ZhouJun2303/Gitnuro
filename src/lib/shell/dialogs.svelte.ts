@@ -24,7 +24,7 @@ import {
     type UpdateNotice,
     workspaceTabWidth,
   } from "../status";
-import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StatusNoticeId } from "./types";
+import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StatusNoticeId } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 import type { ShellState } from "./state.svelte";
 import { alignCommitTemplate, isCommentary, isCommitType, splitSubject, withoutRepeatedSubject } from "./commitMessage";
@@ -141,6 +141,32 @@ export async function fillTemplate(shell: ShellState) {
     if (!shell.description.trim() || isCommentary(shell.description)) shell.description = aligned.description;
   }
 
+const MERGE_CONFLICT_MARK = "--- Merge Conflict ---";
+
+export function hunkIncludes(pick: MergePick, side: "ours" | "theirs") {
+    if (pick === "both") return true;
+    if (pick === "none") return false;
+    return pick === side;
+  }
+
+export function pickFromIncludes(theirs: boolean, ours: boolean): MergePick {
+    if (theirs && ours) return "both";
+    if (theirs) return "theirs";
+    if (ours) return "ours";
+    return "none";
+  }
+
+export function chosenHunkText(piece: Extract<MergePiece, { kind: "hunk" }>, emptyMark = MERGE_CONFLICT_MARK) {
+    const left = hunkIncludes(piece.pick, "theirs");
+    const right = hunkIncludes(piece.pick, "ours");
+    if (!left && !right) return emptyMark;
+    const parts: string[] = [];
+    if (left && piece.theirs.length > 0) parts.push(piece.theirs);
+    if (right && piece.ours.length > 0) parts.push(piece.ours);
+    if (parts.length === 0) return emptyMark;
+    return parts.join("\n");
+  }
+
 export function splitConflicts(shell: ShellState, working: string) {
     const lines = working.split("\n");
     const pieces: MergePiece[] = [];
@@ -165,7 +191,7 @@ export function splitConflicts(shell: ShellState, working: string) {
         continue;
       }
       if (mode === "theirs" && line.startsWith(">>>>>>>")) {
-        pieces.push({ kind: "hunk", ours: ours.join("\n"), theirs: theirs.join("\n"), pick: "ours" });
+        pieces.push({ kind: "hunk", ours: ours.join("\n"), theirs: theirs.join("\n"), pick: "none" });
         mode = "text";
         continue;
       }
@@ -181,27 +207,40 @@ export function joinedPieces(shell: ShellState, pieces: MergePiece[]) {
     return pieces
       .map((piece) => {
         if (piece.kind === "text") return piece.text;
-        if (piece.pick === "theirs") return piece.theirs;
-        if (piece.pick === "both") return [piece.ours, piece.theirs].filter((part) => part.length > 0).join("\n");
-        return piece.ours;
+        return chosenHunkText(piece);
       })
       .join("\n");
   }
 
-export function pickHunk(shell: ShellState, index: number, pick: "ours" | "theirs" | "both") {
+export function pickHunk(shell: ShellState, index: number, pick: MergePick) {
     shell.mergePieces = shell.mergePieces.map((piece, at) => (piece.kind === "hunk" && at === index ? { ...piece, pick } : piece));
     shell.mergeResult = shell.joinedPieces(shell.mergePieces);
   }
 
-export function takeMergeSide(shell: ShellState, pick: "ours" | "theirs") {
-    shell.mergePieces = shell.mergePieces.map((piece) => (piece.kind === "hunk" ? { ...piece, pick } : piece));
+/** Toggle one side of a conflict hunk (Fork Select / Remove). */
+export function toggleMergeSide(shell: ShellState, index: number, side: "ours" | "theirs") {
+    const piece = shell.mergePieces[index];
+    if (!piece || piece.kind !== "hunk") return;
+    const theirs = side === "theirs" ? !hunkIncludes(piece.pick, "theirs") : hunkIncludes(piece.pick, "theirs");
+    const ours = side === "ours" ? !hunkIncludes(piece.pick, "ours") : hunkIncludes(piece.pick, "ours");
+    pickHunk(shell, index, pickFromIncludes(theirs, ours));
+  }
+
+/** Set or clear one side across every hunk (header checkboxes). */
+export function takeMergeSide(shell: ShellState, side: "ours" | "theirs", on: boolean) {
+    shell.mergePieces = shell.mergePieces.map((piece) => {
+      if (piece.kind !== "hunk") return piece;
+      const theirs = side === "theirs" ? on : hunkIncludes(piece.pick, "theirs");
+      const ours = side === "ours" ? on : hunkIncludes(piece.pick, "ours");
+      return { ...piece, pick: pickFromIncludes(theirs, ours) };
+    });
     shell.mergeResult = shell.joinedPieces(shell.mergePieces);
   }
 
 function piecesFromSides(shell: ShellState, sides: { ours: string; theirs: string; working: string }) {
     const pieces = shell.splitConflicts(sides.working);
     if (pieces.some((piece) => piece.kind === "hunk")) return pieces;
-    return [{ kind: "hunk" as const, ours: sides.ours, theirs: sides.theirs, pick: "ours" as const }];
+    return [{ kind: "hunk" as const, ours: sides.ours, theirs: sides.theirs, pick: "none" as const }];
   }
 
 /** Past this, drawing every line would stall the window. Show the file card instead. */

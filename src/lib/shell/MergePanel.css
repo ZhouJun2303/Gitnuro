@@ -34,6 +34,7 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  flex: 1;
   color: var(--text-secondary);
   font-size: 13px;
 }
@@ -44,8 +45,46 @@
   white-space: nowrap;
 }
 
+.merge-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+}
+
+.merge-count {
+  min-width: 36px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #d16464 88%, #000);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.merge-count.done {
+  background: color-mix(in srgb, var(--added, #3aa76d) 88%, #000);
+}
+
+.merge-nav-btn {
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--elevated);
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.merge-nav-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
 .merge-close {
-  margin-left: auto;
+  margin-left: 4px;
   width: 28px;
   height: 28px;
   border: 0;
@@ -61,13 +100,9 @@
   color: var(--text);
 }
 
-.merge-head,
-.merge-stage {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
-}
-
 .merge-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   align-items: center;
   min-height: 36px;
   border-bottom: 1px solid var(--line);
@@ -85,6 +120,10 @@
   font-size: 13px;
 }
 
+.merge-party.right {
+  border-left: 1px solid var(--line);
+}
+
 .merge-party span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -99,31 +138,31 @@
   accent-color: var(--accent);
 }
 
-.merge-result-label {
-  padding: 0 12px;
-  color: var(--text-secondary);
-  font-size: 12px;
+.merge-top {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 1.15;
+  min-height: 0;
+  border-bottom: 1px solid var(--line);
 }
 
-.merge-stage {
-  flex: 1;
+.merge-side {
+  min-width: 0;
   min-height: 0;
-  align-content: start;
   overflow: auto;
   background: var(--bg);
 }
 
-.merge-stage.files {
-  align-content: stretch;
+.merge-side.right {
+  border-left: 1px solid var(--line);
 }
 
 .merge-cell {
+  position: relative;
   min-width: 0;
   margin: 0;
   padding: 6px 12px;
   border: 0;
-  border-right: 1px solid var(--line);
-  border-bottom: 1px solid transparent;
   background: transparent;
   color: var(--text);
   font-family: var(--mono);
@@ -139,8 +178,22 @@
 }
 
 .merge-cell.hunk {
-  border-bottom-color: var(--line);
-  cursor: pointer;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  background: color-mix(in srgb, #6ea8fe 12%, var(--bg));
+}
+
+.merge-cell.hunk.hover,
+.merge-cell.hunk.on {
+  background: color-mix(in srgb, #6ea8fe 20%, var(--bg));
+}
+
+.merge-cell.hunk.on {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.merge-side.right .merge-cell.hunk.on {
+  box-shadow: inset 2px 0 0 var(--added, #3aa76d);
 }
 
 .merge-cell.hunk pre {
@@ -150,25 +203,141 @@
   word-break: break-word;
 }
 
-.merge-cell.hunk.on {
-  background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+.merge-cell .empty,
+.merge-cell.empty {
+  color: color-mix(in srgb, #6ea8fe 70%, var(--text-secondary));
+  font-style: italic;
 }
 
-.merge-cell.result {
-  background: color-mix(in srgb, var(--elevated) 88%, var(--bg));
+.merge-hover-btn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 2;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--elevated);
+  color: var(--text);
+  font-family: var(--ui, inherit);
+  font-size: 12px;
+  line-height: 1;
+  box-shadow: var(--shadow);
+  cursor: pointer;
 }
 
-.merge-cell.result.pick-theirs {
-  box-shadow: inset 2px 0 0 var(--added);
+.merge-hover-btn:hover {
+  background: var(--hover);
 }
 
-.merge-cell.result.pick-ours {
+.merge-hover-btn.remove {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 78%, #000);
+  color: #fff;
+}
+
+.merge-hover-btn.remove:hover {
+  background: color-mix(in srgb, var(--text) 88%, #000);
+}
+
+.merge-result-pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 0.95;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.merge-result-head {
+  flex: none;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-secondary);
+  font-size: 12px;
+  background: color-mix(in srgb, var(--field) 65%, var(--elevated));
+}
+
+.merge-result-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 8px;
+}
+
+.merge-result-text,
+.merge-result-hunk {
+  margin: 0;
+  padding: 4px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.merge-result-text {
+  color: var(--text-secondary);
+}
+
+.merge-result-hunk.pick-theirs {
+  background: color-mix(in srgb, #6ea8fe 10%, transparent);
+  box-shadow: inset 2px 0 0 #6ea8fe;
+}
+
+.merge-result-hunk.pick-ours {
+  background: color-mix(in srgb, var(--added, #3aa76d) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--added, #3aa76d);
+}
+
+.merge-result-hunk.pick-both {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.merge-cell .empty,
-.merge-cell.empty {
-  color: var(--text-secondary);
+.merge-conflict-mark {
+  margin: 4px 12px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  background: color-mix(in srgb, #d16464 82%, #000);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: center;
+}
+
+.merge-result-edit {
+  position: absolute;
+  inset: 28px 0 0;
+  z-index: 1;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  resize: none;
+  opacity: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.merge-result-edit:focus {
+  opacity: 1;
+}
+
+.merge-stage.files {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 1;
+  min-height: 0;
+  align-content: stretch;
+  background: var(--bg);
 }
 
 .merge-file-slot {
@@ -176,6 +345,11 @@
   align-items: center;
   justify-content: center;
   min-height: 100%;
+  border-right: 1px solid var(--line);
+}
+
+.merge-file-slot:last-child {
+  border-right: 0;
 }
 
 .merge-file-card {
@@ -209,6 +383,13 @@
   min-height: 52px;
   padding: 0 16px;
   border-top: 1px solid var(--line);
+}
+
+.merge-edit-hint {
+  margin-right: auto;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-style: italic;
 }
 
 .merge-panel-foot .text-button,

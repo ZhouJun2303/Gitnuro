@@ -1112,6 +1112,30 @@ export function hunkOf(shell: ShellState, index: number) {
     return hunk >= 0 ? hunk : null;
   }
 
+/** Inclusive start / exclusive end for each `@@` hunk in the current diff. */
+export function hunkRanges(shell: ShellState) {
+    const ranges: { index: number; start: number; end: number }[] = [];
+    let current: { index: number; start: number; end: number } | null = null;
+    let hunk = -1;
+    for (let cursor = 0; cursor < shell.diffLines.length; cursor += 1) {
+      const kind = shell.diffLines[cursor]?.kind;
+      if (kind === "hunk") {
+        if (current) {
+          current.end = cursor;
+          ranges.push(current);
+        }
+        hunk += 1;
+        current = { index: hunk, start: cursor, end: shell.diffLines.length };
+      } else if (kind === "meta" && current) {
+        current.end = cursor;
+        ranges.push(current);
+        current = null;
+      }
+    }
+    if (current) ranges.push(current);
+    return ranges;
+  }
+
 export function editorLineNo(shell: ShellState, index: number) {
     const row = shell.shownDiffLines[index];
     const number = Number(row?.newNo || row?.oldNo || 0);
