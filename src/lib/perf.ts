@@ -41,16 +41,21 @@ export function logClient(level: Entry["level"], kind: string, name: string, det
 
 async function call<T>(cmd: string, args?: Args, options?: Options): Promise<T> {
   if (live) return rawInvoke<T>(cmd, args, options);
-  const response = await fetch("/__lab/invoke", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ cmd, args: args ?? {} }),
-  });
+  let response: Response;
+  try {
+    response = await fetch("/__lab/invoke", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cmd, args: args ?? {} }),
+    });
+  } catch {
+    throw new Error("试验台未启动，请运行 pnpm dev");
+  }
   let payload: { ok?: boolean; value?: T; error?: string };
   try {
     payload = await response.json();
   } catch {
-    throw new Error(`lab invoke ${cmd} failed`);
+    throw new Error(response.ok ? `lab invoke ${cmd} failed` : "试验台未启动，请运行 pnpm dev");
   }
   if (!payload.ok) throw new Error(payload.error || `lab invoke ${cmd} failed`);
   return payload.value as T;

@@ -18,16 +18,21 @@ export default defineConfig(() => ({
     port,
     strictPort: true,
     host: host || "127.0.0.1",
-    // Lab HTTP lives on 1429 only for `pnpm dev` / `pnpm test:ui` (AWEGIT_LAB set).
-    // Desktop `pnpm start` must not proxy here or Vite logs ECONNREFUSED on /invoke.
-    proxy: process.env.AWEGIT_LAB
-      ? {
-          "/__lab": {
-            target: "http://127.0.0.1:1429",
-            rewrite: (path) => path.replace(/^\/__lab/, "") || "/",
-          },
-        }
-      : undefined,
+    // Browser lab posts to `/__lab/*`; awegit-lab listens on 1429 (`pnpm dev` / `pnpm test:ui`).
+    // Keep the proxy even under `pnpm start` so a browser tab can reuse this Vite once lab is up.
+    proxy: {
+      "/__lab": {
+        target: "http://127.0.0.1:1429",
+        rewrite: (path) => path.replace(/^\/__lab/, "") || "/",
+        configure: (proxy) => {
+          proxy.on("error", (_err, _req, res) => {
+            if (!res || res.headersSent || typeof res.writeHead !== "function") return;
+            res.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
+            res.end(JSON.stringify({ ok: false, error: "试验台未启动，请运行 pnpm dev" }));
+          });
+        },
+      },
+    },
     hmr: host
       ? {
           protocol: "ws",
