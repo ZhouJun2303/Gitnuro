@@ -212,7 +212,7 @@ function Invoke-ReleaseFlow {
             Write-Host "切换到 release，并合并 $branch"
             Invoke-Git checkout release
             $switched = $true
-            & git -C $root merge --no-edit $branch
+            & git -C $root merge -m "chore: 合并 $branch" $branch
             if ($LASTEXITCODE -ne 0) {
                 & git -C $root merge --abort 2>$null
                 throw "没能把 $branch 合并进 release。版本号提交还留在 $branch 上。"
