@@ -27,18 +27,34 @@ function Read-JsonFile([string]$path) {
 $tauriPath = Join-Path $root "src-tauri\tauri.conf.json"
 $packagePath = Join-Path $root "package.json"
 $cargoPath = Join-Path $root "src-tauri\Cargo.toml"
+$gitCargoPath = Join-Path $root "crates\git\Cargo.toml"
 $tauri = Read-JsonFile $tauriPath
 $package = Read-JsonFile $packagePath
 $cargoText = Get-Content -Raw -Encoding UTF8 -Path $cargoPath
+$gitCargoText = Get-Content -Raw -Encoding UTF8 -Path $gitCargoPath
 if ($cargoText -notmatch '(?m)^version = "([^"]+)"') {
     throw "Could not read the version from src-tauri\Cargo.toml"
 }
+$cargoVersion = $Matches[1]
+if ($gitCargoText -notmatch '(?m)^version = "([^"]+)"') {
+    throw "Could not read the version from crates\git\Cargo.toml"
+}
+$gitVersion = $Matches[1]
 $version = [string]$tauri.version
 if ($version -notmatch '^\d+\.\d+\.\d+$') {
     throw "Version must be three numbers, like 1.0.0. Got $version"
 }
-if ($version -ne [string]$package.version -or $version -ne $Matches[1]) {
-    throw "Version mismatch: tauri.conf.json=$version package.json=$($package.version) Cargo.toml=$($Matches[1])"
+if ($version -ne [string]$package.version -or $version -ne $cargoVersion -or $version -ne $gitVersion) {
+    throw "Version mismatch: tauri.conf.json=$version package.json=$($package.version) Cargo.toml=$cargoVersion crates/git=$gitVersion"
+}
+
+cmd /c "gh auth status >nul 2>nul"
+if ($LASTEXITCODE -ne 0) {
+    throw "gh is not logged in. Run gh auth login"
+}
+cmd /c "gh release view v$version --repo $repo >nul 2>nul"
+if ($LASTEXITCODE -eq 0) {
+    throw "GitHub release v$version already exists"
 }
 
 & (Join-Path $root "scripts\package-windows.ps1")

@@ -28,7 +28,7 @@
 - 测试：`pnpm test`（`cargo test -p awegit-git -- --test-threads=1`）
 - 类型检查：`pnpm check`
 - Windows 打包：`pnpm package:windows`
-- Windows 发布：`pnpm publish:windows`（须在 `release` 分支；上传 Release，提交 `latest.json` 并推送 `origin release`）
+- Windows 发布：`publish.bat`（默认定修订号加一后打包并上传）。`pnpm publish:windows` 只在 `release` 分支发布当前版本
 - macOS 打包：`pnpm package:mac`
 - 不提交 `target/`、`node_modules/`、`src-tauri/target/`，也不提交打包进来的 MinGit
 
