@@ -18,12 +18,16 @@ export default defineConfig(() => ({
     port,
     strictPort: true,
     host: host || "127.0.0.1",
-    proxy: {
-      "/__lab": {
-        target: "http://127.0.0.1:1429",
-        rewrite: (path) => path.replace(/^\/__lab/, "") || "/",
-      },
-    },
+    // Lab HTTP lives on 1429 only for `pnpm dev` / `pnpm test:ui` (AWEGIT_LAB set).
+    // Desktop `pnpm start` must not proxy here or Vite logs ECONNREFUSED on /invoke.
+    proxy: process.env.AWEGIT_LAB
+      ? {
+          "/__lab": {
+            target: "http://127.0.0.1:1429",
+            rewrite: (path) => path.replace(/^\/__lab/, "") || "/",
+          },
+        }
+      : undefined,
     hmr: host
       ? {
           protocol: "ws",
