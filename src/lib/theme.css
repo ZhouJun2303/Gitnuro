@@ -1,10 +1,13 @@
 :root {
   color-scheme: light;
+  /* Surfaces */
   --sidebar: #f4f4f5;
   --canvas: #fafafa;
   --elevated: #ffffff;
+  /* Text */
   --text: #18181b;
   --text-secondary: #71717a;
+  /* Lines and interaction */
   --line: rgba(24, 24, 27, 0.08);
   --separator: rgba(24, 24, 27, 0.08);
   --hover: rgba(24, 24, 27, 0.04);
@@ -13,12 +16,16 @@
   --on-accent: #ffffff;
   --selection: color-mix(in srgb, var(--accent) 12%, transparent);
   --field: rgba(24, 24, 27, 0.04);
-  --shadow: 0 24px 64px rgba(24, 24, 27, 0.18);
+  /* Status */
   --added: #1a7f37;
   --deleted: #cf222e;
   --modified: #9a6700;
+  --on-added: #ffffff;
+  --on-deleted: #ffffff;
+  --on-modified: #ffffff;
   --diff-add: #e6ffec;
   --diff-del: #ffebe9;
+  /* Refs */
   --ref-local: #4338ca;
   --ref-local-bg: color-mix(in srgb, var(--ref-local) 14%, transparent);
   --ref-remote: #3f3f46;
@@ -27,46 +34,55 @@
   --ref-tag-bg: color-mix(in srgb, var(--ref-tag) 14%, transparent);
   --ref-stash: #92400e;
   --ref-stash-bg: color-mix(in srgb, var(--ref-stash) 16%, transparent);
+  /* Typography */
   --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --mono: "Cascadia Code", "Segoe UI Mono", ui-monospace, monospace;
+  --ui-scale: 13px;
+  --diff-font: 13px;
+  /* Rows */
   --row-file: 28px;
   --row-commit: 28px;
   --row-side: 28px;
   --row-tree: 24px;
+  --split-row: 19px;
+  --guide: 72;
+  /* Radii, shadows, focus */
+  --radius-sm: 6px;
   --radius: 8px;
-  --scrollbar-thumb: rgba(24, 24, 27, 0.18);
-  --scrollbar-thumb-hover: rgba(24, 24, 27, 0.38);
-}
-
-:root[data-theme="light"] {
-  color-scheme: light;
-  --sidebar: #f4f4f5;
-  --canvas: #fafafa;
-  --elevated: #ffffff;
-  --text: #18181b;
-  --text-secondary: #71717a;
-  --line: rgba(24, 24, 27, 0.08);
-  --separator: rgba(24, 24, 27, 0.08);
-  --hover: rgba(24, 24, 27, 0.04);
-  --pressed: rgba(24, 24, 27, 0.08);
-  --accent: #5b5bd6;
-  --on-accent: #ffffff;
-  --selection: color-mix(in srgb, var(--accent) 12%, transparent);
-  --field: rgba(24, 24, 27, 0.04);
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-pill: 999px;
+  --shadow-sm: 0 8px 24px rgba(24, 24, 27, 0.1);
+  --shadow-menu: 0 16px 40px rgba(24, 24, 27, 0.16);
   --shadow: 0 24px 64px rgba(24, 24, 27, 0.18);
-  --added: #1a7f37;
-  --deleted: #cf222e;
-  --modified: #9a6700;
-  --diff-add: #e6ffec;
-  --diff-del: #ffebe9;
-  --ref-local: #4338ca;
-  --ref-local-bg: color-mix(in srgb, var(--ref-local) 14%, transparent);
-  --ref-remote: #3f3f46;
-  --ref-remote-bg: color-mix(in srgb, var(--ref-remote) 12%, transparent);
-  --ref-tag: #166534;
-  --ref-tag-bg: color-mix(in srgb, var(--ref-tag) 14%, transparent);
-  --ref-stash: #92400e;
-  --ref-stash-bg: color-mix(in srgb, var(--ref-stash) 16%, transparent);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  --guide-line: #d4d4d8;
+  /* Code and icon colors */
+  --tok-word: #7030c0;
+  --tok-string: #1a7f37;
+  --tok-number: #9a6700;
+  --tok-comment: var(--text-secondary);
+  --detail-accent: #2f6fed;
+  --icon-folder: #e8b023;
+  --icon-code: #6a7dff;
+  --icon-json: #c8962e;
+  --icon-markup: #d2693a;
+  --icon-text: #4c8dde;
+  --icon-image: #3c9a6a;
+  --icon-added: #2da44e;
+  --icon-deleted: #cf222e;
+  --icon-type: #8a9099;
+  --mark-amber: #e8b023;
+  --mark-amber-text: #3f2e00;
+  --image-checker-a: #e6e6e6;
+  --image-checker-b: #ffffff;
+  /* Overlay layers */
+  --z-menu: 30;
+  --z-popover: 31;
+  --z-palette: 40;
+  --z-dialog: 50;
+  --z-merge: 55;
+  --z-confirm: 60;
   --scrollbar-thumb: rgba(24, 24, 27, 0.18);
   --scrollbar-thumb-hover: rgba(24, 24, 27, 0.38);
 }
@@ -86,57 +102,47 @@
   --on-accent: #18181b;
   --selection: color-mix(in srgb, var(--accent) 16%, transparent);
   --field: rgba(255, 255, 255, 0.06);
-  --shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
   --added: #3fb950;
   --deleted: #ff7b72;
   --modified: #d4a72c;
+  --on-added: #101411;
+  --on-deleted: #1c1c1f;
+  --on-modified: #1c1c1f;
   --diff-add: #1e3a24;
   --diff-del: #4a1f1f;
   --ref-local: #c7d2fe;
-  --ref-local-bg: color-mix(in srgb, #818cf8 22%, transparent);
+  --ref-local-bg: color-mix(in srgb, var(--ref-local) 22%, transparent);
   --ref-remote: #e4e4e7;
-  --ref-remote-bg: color-mix(in srgb, #e4e4e7 14%, transparent);
+  --ref-remote-bg: color-mix(in srgb, var(--ref-remote) 14%, transparent);
   --ref-tag: #86efac;
-  --ref-tag-bg: color-mix(in srgb, #22c55e 22%, transparent);
+  --ref-tag-bg: color-mix(in srgb, var(--ref-tag) 22%, transparent);
   --ref-stash: #fcd34d;
-  --ref-stash-bg: color-mix(in srgb, #f59e0b 22%, transparent);
+  --ref-stash-bg: color-mix(in srgb, var(--ref-stash) 22%, transparent);
+  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.32);
+  --shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.4);
+  --shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+  --guide-line: #3f3f46;
+  --tok-word: #c9a6ff;
+  --tok-string: #7ee787;
+  --tok-number: #e3b341;
+  --tok-comment: var(--text-secondary);
+  --detail-accent: #6aa7ff;
+  --icon-folder: #e2b33c;
+  --icon-code: #8a9bff;
+  --icon-json: #e0b04a;
+  --icon-markup: #e8895a;
+  --icon-text: #6aa7ff;
+  --icon-image: #5cc08a;
+  --icon-added: #3fb950;
+  --icon-deleted: #ff7b72;
+  --icon-type: #a1a1aa;
+  --mark-amber: #e2b33c;
+  --mark-amber-text: #241a00;
+  --image-checker-a: #2a2a2e;
+  --image-checker-b: #1b1b1e;
   --scrollbar-thumb: rgba(255, 255, 255, 0.2);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --sidebar: #1c1c1f;
-    --canvas: #141416;
-    --elevated: #232326;
-    --text: #f4f4f5;
-    --text-secondary: #a1a1aa;
-    --line: rgba(255, 255, 255, 0.08);
-    --separator: rgba(255, 255, 255, 0.08);
-    --hover: rgba(255, 255, 255, 0.06);
-    --pressed: rgba(255, 255, 255, 0.1);
-    --accent: #8b8cf8;
-    --on-accent: #18181b;
-    --selection: color-mix(in srgb, var(--accent) 16%, transparent);
-    --field: rgba(255, 255, 255, 0.06);
-    --shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
-    --added: #3fb950;
-    --deleted: #ff7b72;
-    --modified: #d4a72c;
-    --diff-add: #1e3a24;
-    --diff-del: #4a1f1f;
-    --ref-local: #c7d2fe;
-    --ref-local-bg: color-mix(in srgb, #818cf8 22%, transparent);
-    --ref-remote: #e4e4e7;
-    --ref-remote-bg: color-mix(in srgb, #e4e4e7 14%, transparent);
-    --ref-tag: #86efac;
-    --ref-tag-bg: color-mix(in srgb, #22c55e 22%, transparent);
-    --ref-stash: #fcd34d;
-    --ref-stash-bg: color-mix(in srgb, #f59e0b 22%, transparent);
-    --scrollbar-thumb: rgba(255, 255, 255, 0.2);
-    --scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
-  }
 }
 
 html,
@@ -146,7 +152,9 @@ body {
   overflow: hidden;
 }
 
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
@@ -163,7 +171,7 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   transition: background 120ms ease;
 }
 
@@ -260,6 +268,19 @@ body {
   .repo-row,
   .command-item,
   .command-filters button,
+  .pane-chip,
+  .suggest-message,
+  .diff-hunk-actions button,
+  .merge-nav-btn,
+  .merge-close,
+  .merge-hover-btn,
+  .conflict-merge,
+  .conflict-tool,
+  .detail-tabs button,
+  .patch-toggle,
+  .expand-all,
+  .sha-link,
+  .timeline-dot,
   button.virtual-row
 ):not(:disabled):not(.on):not(.active):not(.selected):not(.current):active {
   background: var(--pressed);

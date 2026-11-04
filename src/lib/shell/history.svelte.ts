@@ -177,6 +177,8 @@ export function stashParts(summary: string, refs: string[] = []): { branch: stri
 
 export function refKind(shell: ShellState, label: string) {
     if (label === "stash" || label.startsWith("stash")) return "stash";
+    if (shell.refs?.branches.some((branch) => branch.name === label)) return "local";
+    if (shell.refs?.tags.some((tag) => tag.name === label)) return "tag";
     if (label.includes("/")) return "remote";
     if (/^v?\d/.test(label)) return "tag";
     return "local";
@@ -449,14 +451,17 @@ export async function showFileHistory(shell: ShellState, file: string) {
     }
   }
 
+export function formatCommitDate(shell: ShellState, at: number, fallback = "") {
+    if (!at) return fallback;
+    if (shell.settings.dateRelative && fallback) return fallback;
+    let base = shell.settings.dateFormat.trim() || (shell.activeLocale === "zh" ? "yyyy年MM月dd日 HH:mm" : "dd MMM yyyy HH:mm");
+    if (!/[Hh]{2}[:.]?mm/.test(base)) base += shell.settings.date24h ? " HH:mm" : " hh:mm A";
+    const pattern = shell.settings.date24h ? base : base.replace(/HH:mm/g, "hh:mm A");
+    return formatWhen(at, pattern, shell.settings.date24h) || fallback;
+  }
+
 export function forkWhen(shell: ShellState, at: number) {
-    if (!at) return "";
-    const date = new Date(at * 1000);
-    const hours = String(date.getHours()).padStart(2, "0");
-    const minutes = String(date.getMinutes()).padStart(2, "0");
-    if (shell.activeLocale === "zh") return `${date.getDate()} ${date.getMonth() + 1}月 ${date.getFullYear()} ${hours}:${minutes}`;
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()} ${hours}:${minutes}`;
+    return formatCommitDate(shell, at);
   }
 
 export function forkWhenFull(shell: ShellState, at: number) {
@@ -605,8 +610,7 @@ export function selectSample(shell: ShellState, id: string) {
   }
 
 export function whenLabel(shell: ShellState, commit: CommitRow) {
-    if (shell.settings.dateRelative) return commit.when;
-    return formatWhen(commit.at, shell.settings.dateFormat.trim() || "dd MMM yyyy", shell.settings.date24h) || commit.when;
+    return formatCommitDate(shell, commit.at, commit.when);
   }
 
 export function scrollToCommit(shell: ShellState, id: string) {

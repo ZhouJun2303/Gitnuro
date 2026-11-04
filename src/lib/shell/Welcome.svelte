@@ -19,7 +19,7 @@
           </svg>
           <div class="welcome-titles">
             <h1>AweGit</h1>
-            <p>{shell.tr("chrome.openRepo")}</p>
+            <p>{shell.tr("chrome.welcomeTagline")}</p>
           </div>
         </div>
 
@@ -41,7 +41,7 @@
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 11V4a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7M6 14h7M10 11l3 3-3 3"/></svg>
             <div class="btn-meta">
               <strong>{shell.tr("chrome.clone")}</strong>
-              <span>{shell.tr("chrome.clone")}</span>
+              <span>{shell.tr("chrome.cloneHint")}</span>
             </div>
           </button>
           <button class="welcome-btn" type="button" onclick={() => void shell.beginClone("init")}>
@@ -77,7 +77,7 @@
                 {/if}
               </button>
             {:else}
-              <p class="empty">{shell.tr("chrome.noMatch")}</p>
+              <p class="empty">{shell.tr("chrome.noRecentRepos")}</p>
             {/each}
           </div>
         </div>

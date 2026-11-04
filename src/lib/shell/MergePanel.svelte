@@ -17,6 +17,8 @@
   let rightPane = $state<HTMLElement | null>(null);
   let resultPane = $state<HTMLElement | null>(null);
   let syncing = false;
+  let editingResult = $state(false);
+  let resultDirty = $state(false);
 
   $effect(() => {
     if (!shell.textMerge) {
@@ -30,6 +32,8 @@
     hoverHunk = null;
     hoverSide = null;
     activeConflict = 0;
+    editingResult = false;
+    resultDirty = false;
   });
 
   $effect(() => {
@@ -58,6 +62,20 @@
   const rightOn = $derived(shell.mergeKind === "file" ? fileRight : textRight);
   const fileSide = $derived<"ours" | "theirs" | "">(fileLeft ? "theirs" : fileRight ? "ours" : "");
   const view = $derived(shell.activeConflict);
+  const unresolved = $derived(Math.max(0, conflictTotal - conflictResolved));
+  const canResolve = $derived(shell.mergeKind === "file" ? fileSide !== "" : unresolved === 0);
+
+  function withDirtyGuard(run: () => void) {
+    if (!resultDirty) {
+      run();
+      return;
+    }
+    shell.ask(shell.tr("dialog.mergeOverwriteEdits"), shell.tr("dialog.mergeOverwriteEditsBody"), () => {
+      resultDirty = false;
+      editingResult = false;
+      run();
+    });
+  }
 
   function onLeft(event: Event) {
     event.preventDefault();
@@ -66,7 +84,7 @@
       if (fileLeft) fileRight = false;
       return;
     }
-    shell.takeMergeSide("theirs", !leftOn);
+    withDirtyGuard(() => shell.takeMergeSide("theirs", !leftOn));
   }
 
   function onRight(event: Event) {
@@ -76,7 +94,7 @@
       if (fileRight) fileLeft = false;
       return;
     }
-    shell.takeMergeSide("ours", !rightOn);
+    withDirtyGuard(() => shell.takeMergeSide("ours", !rightOn));
   }
 
   function show(text: string) {
@@ -113,10 +131,17 @@
   }
 
   function formatBytes(bytes: number) {
-    const exact = Math.max(0, Math.trunc(bytes)).toLocaleString("en-US");
-    if (bytes < 1024) return `${exact} B`;
-    const shown = (Math.floor((bytes / 1024) * 10) / 10).toFixed(1);
-    return `${shown} KB (${exact} B)`;
+    const units = ["B", "KB", "MB", "GB"];
+    let value = Math.max(0, bytes);
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    const shown = new Intl.NumberFormat(shell.activeLocale === "zh" ? "zh-CN" : "en-US", {
+      maximumFractionDigits: unit === 0 ? 0 : 1,
+    }).format(value);
+    return `${shown} ${units[unit]}`;
   }
 
   function fileKind(path: string) {
@@ -128,6 +153,7 @@
   }
 
   async function resolve() {
+    if (!canResolve) return;
     if (shell.mergeKind === "file") {
       if (fileSide !== "ours" && fileSide !== "theirs") return;
       await shell.applyFileMerge(fileSide);
@@ -195,7 +221,7 @@
                       class="merge-hover-btn"
                       class:remove={on}
                       type="button"
-                      onclick={(event) => { event.stopPropagation(); shell.toggleMergeSide(index, "theirs"); activeConflict = Math.max(0, hunkIndexes.indexOf(index)); }}
+                      onclick={(event) => { event.stopPropagation(); withDirtyGuard(() => { shell.toggleMergeSide(index, "theirs"); activeConflict = Math.max(0, hunkIndexes.indexOf(index)); }); }}
                     >{shell.tr(on ? "dialog.removeLeft" : "dialog.selectLeft")}</button>
                   {/if}
                 </div>
@@ -225,7 +251,7 @@
                       class="merge-hover-btn"
                       class:remove={on}
                       type="button"
-                      onclick={(event) => { event.stopPropagation(); shell.toggleMergeSide(index, "ours"); activeConflict = Math.max(0, hunkIndexes.indexOf(index)); }}
+                      onclick={(event) => { event.stopPropagation(); withDirtyGuard(() => { shell.toggleMergeSide(index, "ours"); activeConflict = Math.max(0, hunkIndexes.indexOf(index)); }); }}
                     >{shell.tr(on ? "dialog.removeRight" : "dialog.selectRight")}</button>
                   {/if}
                 </div>
@@ -234,26 +260,38 @@
           </div>
         </div>
         <div class="merge-result-pane">
-          <div class="merge-result-head">{shell.tr("dialog.result")}</div>
-          <div class="merge-result-scroll" bind:this={resultPane}>
-            {#each shell.mergePieces as piece, index (index)}
-              {#if piece.kind === "text"}
-                <pre class="merge-result-text">{piece.text}</pre>
-              {:else if piece.pick === "none"}
-                <div class="merge-conflict-mark" data-merge-result={index}>{shell.tr("dialog.mergeConflictMark")}</div>
-              {:else}
-                <pre class="merge-result-hunk pick-{piece.pick}" data-merge-result={index}>{shell.chosenHunkText(piece) || shell.tr("dialog.mergeEmpty")}</pre>
-              {/if}
-            {/each}
+          <div class="merge-result-head">
+            <span>{shell.tr("dialog.result")}</span>
+            {#if shell.mergeKind === "text"}
+              <button class="merge-edit-toggle" type="button" aria-pressed={editingResult} onclick={() => (editingResult = !editingResult)}>{editingResult ? shell.tr("dialog.previewResult") : shell.tr("dialog.editResult")}</button>
+            {/if}
           </div>
-          <textarea class="merge-result-edit" aria-label={shell.tr("dialog.result")} spellcheck="false" bind:value={shell.mergeResult}></textarea>
+          {#if editingResult}
+            <textarea class="merge-result-edit" aria-label={shell.tr("dialog.result")} spellcheck="false" bind:value={shell.mergeResult} oninput={() => (resultDirty = true)}></textarea>
+          {:else}
+            <div class="merge-result-scroll" bind:this={resultPane}>
+              {#each shell.mergePieces as piece, index (index)}
+                {#if piece.kind === "text"}
+                  <pre class="merge-result-text">{piece.text}</pre>
+                {:else if piece.pick === "none"}
+                  <div class="merge-conflict-mark" data-merge-result={index}>{shell.tr("dialog.mergeConflictMark")}</div>
+                {:else}
+                  <pre class="merge-result-hunk pick-{piece.pick}" data-merge-result={index}>{shell.chosenHunkText(piece) || shell.tr("dialog.mergeEmpty")}</pre>
+                {/if}
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
       <footer class="merge-panel-foot">
         {#if shell.mergeKind === "text"}
-          <span class="merge-edit-hint">{shell.tr("dialog.editingAllowed")}</span>
+          {#if unresolved > 0}
+            <span class="merge-edit-hint merge-unresolved" role="status">{shell.tr("dialog.mergeUnresolved", { count: String(unresolved) })}</span>
+          {:else}
+            <span class="merge-edit-hint">{shell.tr("dialog.editingAllowed")}</span>
+          {/if}
         {/if}
-        <button class="commit" type="button" disabled={shell.mergeKind === "file" ? !fileSide || (shell.mode === "live" && shell.busy) : shell.mode === "live" && shell.busy} onclick={() => void resolve()}>{shell.tr("dialog.mergeResolve")}</button>
+        <button class="commit" type="button" disabled={shell.busy || !canResolve} title={!canResolve ? shell.tr("dialog.mergeUnresolved", { count: String(unresolved) }) : undefined} onclick={() => void resolve()}>{shell.tr("dialog.mergeResolve")}</button>
         <button class="text-button" type="button" onclick={() => shell.closeTextMerge()}>{shell.tr("chrome.cancel")}</button>
       </footer>
     </div>

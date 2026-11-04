@@ -94,6 +94,10 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.sideQuery = "";
     return;
   }
+  if (id === "vertical-tabs") {
+    shell.settings = { ...shell.settings, verticalTabs: true };
+    return;
+  }
   if (id === "picker") {
     await shell.toggleRepoPicker();
     return;
@@ -264,7 +268,7 @@ async function fillSurface(shell: ShellState, id: string) {
   }
 }
 
-async function fillDialog(shell: ShellState, dialog: LabDialog) {
+async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
   const head = shell.commitsLive[0]?.id ?? "HEAD";
   const parent = (shell.repoPath() ?? "").replace(/[\\/][^\\/]+$/, "");
   switch (dialog) {
@@ -286,7 +290,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
       fillSourceRoots(shell);
       break;
     case "prefs":
-      shell.prefTab = "general";
+      shell.prefTab = sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : sceneId === "prefs-integration" ? "integration" : sceneId === "prefs-updates" ? "updates" : "general";
       fillSourceRoots(shell);
       fillLabTools(shell);
       break;
@@ -529,6 +533,6 @@ function fillLabTools(shell: ShellState) {
 }
 
 export async function applyLabScene(shell: ShellState, item: LabScene) {
-  if (item.dialog) await fillDialog(shell, item.dialog);
+  if (item.dialog) await fillDialog(shell, item.dialog, item.id);
   else await fillSurface(shell, item.id);
 }

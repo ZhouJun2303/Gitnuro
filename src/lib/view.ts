@@ -534,11 +534,13 @@ export function formatWhen(at: number, pattern: string, hour24: boolean) {
     MMM: months[date.getMonth()] ?? "",
     MM: pad(date.getMonth() + 1),
     dd: pad(date.getDate()),
-    HH: pad(hour24 ? hours : hours % 12 || 12),
+    HH: pad(hour24 ? hours : (hours % 12 || 12)),
+    hh: pad(hours % 12 || 12),
+    A: hours < 12 ? "AM" : "PM",
     mm: pad(date.getMinutes()),
     ss: pad(date.getSeconds()),
   };
-  return pattern.replace(/yyyy|MMM|MM|dd|HH|mm|ss/g, (token) => map[token] ?? token);
+  return pattern.replace(/yyyy|MMM|MM|dd|HH|hh|mm|ss|A/g, (token) => map[token] ?? token);
 }
 
 function pad(value: number) {

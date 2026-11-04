@@ -90,6 +90,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "commit", group: "主界面", title: "提交详情", repo: "full", ready: ".detail" }),
   scene({ id: "tree", group: "主界面", title: "文件树", repo: "full", ready: ".tree-row" }),
   scene({ id: "sidebar", group: "主界面", title: "侧栏", repo: "full", ready: ".sidebar" }),
+  scene({ id: "vertical-tabs", group: "主界面", title: "垂直标签", repo: "full", ready: ".vertical-tabs" }),
   scene({ id: "search", group: "主界面", title: "搜索提交", repo: "full", ready: "[data-layer=\"search\"]" }),
   scene({
     id: "file-history",
@@ -139,6 +140,10 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "file-merge", group: "叠层", title: "二进制合并", repo: "conflict", ready: "[data-layer=\"text-merge\"]" }),
   scene({ id: "confirm", group: "叠层", title: "确认框", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "menu", group: "叠层", title: "菜单", repo: "full", ready: "[data-layer=\"menu\"]" }),
+  scene({ id: "prefs-git", group: "弹窗", title: "偏好设置 · Git", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-commit", group: "弹窗", title: "偏好设置 · 提交", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-integration", group: "弹窗", title: "偏好设置 · 集成", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-updates", group: "弹窗", title: "偏好设置 · 更新", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
 ];
 
 export const scenes: LabScene[] = [...surfaceScenes, ...Object.values(dialogScenes)];

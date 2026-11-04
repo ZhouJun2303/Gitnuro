@@ -86,12 +86,12 @@
         <span>AweGit</span>
         <button class="icon-btn" type="button" title={shell.tr("chrome.preferences")} aria-label={shell.tr("chrome.preferences")} onclick={() => (shell.dialog = "prefs")}>{@render glyph("gear")}</button>
       </div>
-      <button class="side nav" type="button" class:selected={shell.section === "changes"} onclick={() => (shell.section = "changes")}>
+      <button class="side nav" type="button" data-section="changes" class:selected={shell.section === "changes"} onclick={() => (shell.section = "changes")}>
         {@render glyph("changes")}
         <span class="name">{shell.tr("chrome.localChanges")}</span>
         {#if shell.changeCount > 0}<span class="count">{shell.changeCount}</span>{/if}
       </button>
-      <button class="side nav" type="button" class:selected={shell.section === "history"} onclick={() => (shell.section = "history")}>
+      <button class="side nav" type="button" data-section="history" class:selected={shell.section === "history"} onclick={() => (shell.section = "history")}>
         {@render glyph("commits")}
         <span class="name">{shell.tr("chrome.allCommits")}</span>
       </button>

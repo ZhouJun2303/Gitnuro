@@ -37,6 +37,7 @@ export async function selectPrefTab(shell: ShellState, tab: PrefTab) {
   }
 
 export async function openLaunch(shell: ShellState) {
+    if (shell.dialog || shell.textMerge || shell.confirmAsk) return;
     shell.repoPickerOpen = false;
     shell.commandLogOpen = false;
     shell.launch = "";
@@ -306,6 +307,16 @@ export function closeTextMerge(shell: ShellState) {
     shell.textMerge = false;
   }
 
+export type RebaseStep = { verb: string; rev: string; summary: string; message: string };
+
+/** Only checked commits are sent to the backend; unchecked rows are excluded. */
+export function buildRebaseSteps(steps: RebaseStep[], picked: string[]): RebaseStep[] {
+    if (picked.length === 0) return [];
+    return steps
+      .filter((step) => picked.includes(step.rev))
+      .map((step) => ({ ...step, message: step.verb === "reword" || step.verb === "squash" || step.verb === "exec" ? step.message : "" }));
+  }
+
 export async function applyTextMerge(shell: ShellState) {
     const file = shell.mergeFile;
     if (!file) return;
@@ -314,6 +325,7 @@ export async function applyTextMerge(shell: ShellState) {
       return;
     }
     if (shell.busy) return;
+    if (shell.mergePieces.some((piece) => piece.kind === "hunk" && piece.pick === "none")) return;
     await shell.mutate({ action: "resolve", file, side: "text", text: shell.mergeResult });
     shell.textMerge = false;
   }
@@ -1029,7 +1041,7 @@ export function openRebase(shell: ShellState) {
     const newer = index > 0 ? source.slice(0, index).slice().reverse() : source.slice(0, 3);
     shell.updateRefs = shell.settings.rebaseUpdateRefs;
     shell.rebaseSteps = newer.map((commit) => ({ verb: "pick", rev: commit.id, summary: commit.summary, message: commit.summary }));
-    shell.rebasePicked = [];
+    shell.rebasePicked = newer.map((commit) => commit.id);
     shell.rebaseConflictFiles = [];
     shell.dialog = "rebase";
     if (shell.mode === "live") {

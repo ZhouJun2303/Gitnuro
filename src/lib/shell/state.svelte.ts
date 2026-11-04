@@ -1502,19 +1502,22 @@ export class ShellState {
   });
 
 
-  diffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.diffLines } : windowSlice(this.diffLines, this.diffTop, 18));
+  diffRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)));
 
 
-  blameWindow = $derived(windowSlice(this.blameLines ?? [], this.blameTop, 18));
+  diffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.diffLines } : windowSlice(this.diffLines, this.diffTop, this.diffRowHeight));
 
 
-  historyDiffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.historyDiff?.lines ?? [] } : windowSlice(this.historyDiff?.lines ?? [], this.historyDiffTop, 18));
+  blameWindow = $derived(windowSlice(this.blameLines ?? [], this.blameTop, this.diffRowHeight));
+
+
+  historyDiffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.historyDiff?.lines ?? [] } : windowSlice(this.historyDiff?.lines ?? [], this.historyDiffTop, this.diffRowHeight));
 
 
   splitRows = $derived(this.settings.diffStyle === "split" ? splitDiff(this.diffLines) : []);
 
 
-  splitRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)));
+  splitRowHeight = $derived(this.diffRowHeight);
 
 
   splitWindow = $derived.by(() => {
@@ -2106,7 +2109,11 @@ export class ShellState {
 
 
   message(error: unknown) {
-    return error instanceof Error ? error.message : String(error);
+    const raw = (error instanceof Error ? error.message : String(error)).trim();
+    const open = /^could not open repository at (.+)$/i.exec(raw);
+    if (open) return this.tr("dialog.errorOpenRepo", { path: open[1] ?? "" });
+    if (/^not a git repository/i.test(raw)) return this.tr("dialog.errorNotRepo");
+    return raw;
   }
 
 
@@ -2568,7 +2575,9 @@ export class ShellState {
       this.noteActivity(`${action}${output ? " output" : " ok"}`);
       this.recordCommand(action, described, value.log || output, true, source);
       if (!background && this.viewing(path)) {
-        if (output) {
+        if (this.dialog === "prefs") {
+          // Preferences stay open for LFS/author actions; the operation is recorded below.
+        } else if (output) {
           this.commandOutput = output;
           this.dialog = "output";
         } else {
@@ -3526,6 +3535,15 @@ export class ShellState {
 
   async openRepo(path: string) {
     if (!this.backend() || !path.trim()) return;
+    this.dialog = null;
+    this.textMerge = false;
+    this.confirmAsk = null;
+    this.menu = null;
+    this.submenu = null;
+    this.launchOpen = false;
+    this.commandLogOpen = false;
+    this.repoPickerOpen = false;
+    this.forgeOpen = null;
     const gen = ++this.openGen;
     this.focusPath = path;
     if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description, commitType: this.commitType });
@@ -4845,6 +4863,7 @@ export class ShellState {
       const target = event.target;
       const inside = target instanceof Element && !!target.closest(".dialog");
       if (inside && (typing(event) || target instanceof HTMLButtonElement)) return false;
+      if (target instanceof HTMLInputElement && ["checkbox", "radio", "range", "color", "file"].includes(target.type)) return false;
       const form = document.querySelector(".scrim .dialog form");
       if (form instanceof HTMLFormElement) {
         event.preventDefault();
@@ -4882,6 +4901,7 @@ export class ShellState {
       }
     }
     if (this.activateLayer(event)) return;
+    if (this.dialog || this.textMerge || this.confirmAsk) return;
     const action = shortcut(event);
     if (!action) return;
     const editor = typing(event);
@@ -4913,7 +4933,6 @@ export class ShellState {
         this.forgeOpen = null;
         return;
       }
-      if (this.dialog === "prefs") void this.savePrefs(true);
       if (this.dialog) {
         this.dialog = null;
         return;
@@ -5085,13 +5104,21 @@ export class ShellState {
     $effect(() => {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
-    if (!this.settings.theme || this.settings.theme === "system") root.removeAttribute("data-theme");
-    else root.setAttribute("data-theme", this.settings.theme);
+    const media = typeof window === "undefined" ? null : window.matchMedia("(prefers-color-scheme: dark)");
+    const resolved = () => (this.settings.theme === "dark" || (this.settings.theme !== "light" && (media?.matches ?? false)) ? "dark" : "light");
+    const paint = () => {
+    root.setAttribute("data-theme", resolved());
+    root.lang = this.activeLocale === "zh" ? "zh-CN" : "en";
+    };
+    paint();
+    media?.addEventListener("change", paint);
     root.style.setProperty("--ui-scale", `${this.settings.uiScale || 13}px`);
     root.style.setProperty("--row-file", this.settings.linesHeight === "spaced" ? "32px" : "28px");
     root.style.setProperty("--row-commit", this.settings.linesHeight === "spaced" ? "36px" : "28px");
     root.style.setProperty("--row-side", `${this.rowSide}px`);
     root.style.setProperty("--row-tree", this.settings.linesHeight === "spaced" ? "28px" : "24px");
+    root.style.setProperty("--diff-row", `${this.diffRowHeight}px`);
+    return () => media?.removeEventListener("change", paint);
     });
     $effect(() => {
     const next = this.snapshotPlace();
@@ -5142,16 +5169,18 @@ export class ShellState {
     history.pushState({ awegit: 1 }, "");
     this.goBack();
     };
-    window.addEventListener("keydown", this.onShortcut.bind(this));
+    const onShortcut = this.onShortcut.bind(this);
+    const onRememberPointer = this.rememberPointer.bind(this);
+    window.addEventListener("keydown", onShortcut);
     window.addEventListener("mousedown", onMouseNav);
-    window.addEventListener("mousedown", this.rememberPointer.bind(this), true);
+    window.addEventListener("mousedown", onRememberPointer, true);
     window.addEventListener("mouseup", onMouseNav);
     history.pushState({ awegit: 1 }, "");
     window.addEventListener("popstate", onPop);
     const detachNav = () => {
-    window.removeEventListener("keydown", this.onShortcut.bind(this));
+    window.removeEventListener("keydown", onShortcut);
     window.removeEventListener("mousedown", onMouseNav);
-    window.removeEventListener("mousedown", this.rememberPointer.bind(this), true);
+    window.removeEventListener("mousedown", onRememberPointer, true);
     window.removeEventListener("mouseup", onMouseNav);
     window.removeEventListener("popstate", onPop);
     };

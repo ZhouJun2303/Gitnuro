@@ -86,7 +86,7 @@
             >
               <span class="history-meta">
                 <span>{commit.author}</span>
-                <span>{commit.at ? shell.forkWhen(commit.at) : commit.when}</span>
+                <span>{shell.whenLabel(commit)}</span>
                 <span class="sha">{commit.shortId}</span>
               </span>
               <span class="subject">{commit.summary}</span>

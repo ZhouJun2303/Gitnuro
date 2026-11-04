@@ -87,6 +87,16 @@
   $effect(() => {
     if (shell.busy) typeOpen = false;
   });
+
+  $effect(() => {
+    const path = shell.selectedPath;
+    const side = shell.selectedSide;
+    if (!path) return;
+    queueMicrotask(() => {
+      document.querySelector<HTMLElement>(".file-list .file.selected")?.scrollIntoView({ block: "nearest" });
+    });
+    void side;
+  });
 </script>
 
 <section class="changes-column" style:width="{shell.changesWidth}px">
@@ -212,7 +222,7 @@
           <textarea class="guided composer-desc flex-fill" class:guide-only={shell.descriptionIsGuide} placeholder={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
-            <button class="text-button more" type="button" onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>
+            <button class="text-button more" type="button" aria-label={shell.tr("chrome.more")} title={shell.tr("chrome.more")} onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>
             <button class="commit" type="submit" disabled={!shell.canCommit}>{shell.busy ? shell.tr("chrome.working") : shell.tr("chrome.commit")}</button>
           </div>
         </form>
@@ -287,22 +297,24 @@
           {@render fileFilter()}
         {:else}
           <div class="pane-label">
-            <span class="pane-title">{shell.tr("chrome.unstaged")}</span>
-            <span class="count">{shell.mode === "loading" ? "…" : shell.mode === "error" ? "—" : shell.shownUnstaged.length}</span>
+            <span class="pane-title">{shell.showIgnored ? shell.tr("chrome.ignored") : shell.tr("chrome.unstaged")}</span>
+            <span class="count">{shell.mode === "loading" ? "…" : shell.mode === "error" ? "—" : shell.showIgnored ? (shell.facts?.ignored.length ?? 0) : shell.shownUnstaged.length}</span>
           </div>
         {/if}
         <div class="pane-tools">
           {@render searchToggle("file", shell.tr("chrome.filterFiles"))}
           {@render fileViewButton()}
-          <button class="pane-chip pane-go" type="button" disabled={shell.mode !== "live" || shell.busy || shell.unstaged.length === 0} onclick={() => shell.runChange("stage_all")}>{shell.tr("chrome.stageAll")}</button>
+          {#if !shell.showIgnored}
+            <button class="pane-chip pane-go" type="button" disabled={shell.mode !== "live" || shell.busy || shell.unstaged.length === 0} onclick={() => shell.runChange("stage_all")}>{shell.tr("chrome.stageAll")}</button>
+          {/if}
         </div>
       </div>
       {@render pickedActions(unstagedPicked, [])}
       <div class="file-list" onscroll={onFileScroll}>
         {#if shell.showIgnored}
-          {#if (shell.facts?.ignored.length ?? 0) === 0}
-            <p class="empty">{shell.tr("chrome.noMatch")}</p>
-          {:else}
+            {#if (shell.facts?.ignored.length ?? 0) === 0}
+              <p class="empty">{shell.tr("chrome.noIgnored")}</p>
+            {:else}
             <div class="commit-window" style:height="{(shell.facts?.ignored.length ?? 0) * shell.fileStride}px">
               {#each shell.ignoredWindow.rows as path, index (path)}
                 <div class="virtual-row side quiet" style:top="{(shell.ignoredWindow.start + index) * shell.fileStride}px"><span class="name">{path}</span></div>
@@ -370,6 +382,7 @@
               <span class="badge {file.tone}">{file.letter}</span>
             {/if}
             <span class="file-name">{shell.fileName(file.path)}</span>
+            {#if file.path.includes("/")}<span class="file-dir" title={file.path}>{file.path.slice(0, file.path.lastIndexOf("/") + 1)}</span>{/if}
           {/if}
         </button>
       </div>

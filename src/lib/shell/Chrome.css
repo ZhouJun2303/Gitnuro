@@ -47,7 +47,7 @@
     border-radius: 13px;
     background: var(--elevated);
     border: 1px solid var(--line);
-    box-shadow: 0 1px 0 color-mix(in srgb, #000 12%, transparent);
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 12%, transparent);
     overflow: hidden;
   }
 
@@ -196,8 +196,8 @@
 
 .history-btn.alert,
   .history-btn.alert:hover:not(:disabled) {
-    background: var(--deleted, #d16464);
-    color: #fff;
+    background: var(--deleted);
+    color: var(--on-deleted);
   }
 
 .history-btn.alert .error-count,
@@ -209,8 +209,8 @@
     height: 16px;
     padding: 0 4px;
     border-radius: 8px;
-    background: #fff;
-    color: var(--deleted, #d16464);
+    background: var(--elevated);
+    color: var(--deleted);
     font-style: normal;
     font-size: 10px;
     font-weight: 700;
@@ -417,7 +417,7 @@
 
 .tab-close { opacity: 0; }
 
-.tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
+.tab:hover .tab-close, .tab.active .tab-close, .tab:focus-within .tab-close { opacity: 1; }
 
 .row-action {
     margin-left: 0;

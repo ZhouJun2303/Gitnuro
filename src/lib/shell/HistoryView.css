@@ -11,6 +11,11 @@
     overflow: hidden;
   }
 
+.history-head {
+    flex: none;
+    background: var(--canvas);
+  }
+
 .history {
     min-width: 0;
     min-height: 0;
@@ -25,13 +30,15 @@
 
 .history .commit-row {
     gap: 0;
-    background: transparent;
   }
 
-.history .commit-row:hover,
-  .history .commit-row.selected,
+.history .commit-row:hover {
+    background: var(--hover);
+  }
+
+.history .commit-row.selected,
   .history .commit-row.selected:hover {
-    background: transparent;
+    background: var(--selection);
   }
 
 .commit-row.virtual {
@@ -153,13 +160,8 @@
     z-index: 1;
     height: 100%;
     padding-left: 8px;
-    background: var(--canvas);
+    background: transparent;
   }
-
-.commit-row:hover .commit-copy { background: var(--hover); }
-
-.commit-row.selected .commit-copy,
-  .commit-row.selected:hover .commit-copy { background: var(--selection); }
 
 .commit-row.unpushed .subject,
   .commit-row.unpushed .badges,

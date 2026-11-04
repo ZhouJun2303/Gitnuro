@@ -313,7 +313,7 @@ export function moveHunk(shell: ShellState, delta: number) {
       shell.diffEl?.querySelector(`[data-line="${index}"]`)?.scrollIntoView({ block: "center" });
       return;
     }
-    const top = Math.max(0, index * 18 - 36);
+    const top = Math.max(0, index * shell.diffRowHeight - 36);
     shell.diffTop = top;
     if (shell.diffEl) shell.diffEl.scrollTop = top;
   }
@@ -1076,8 +1076,8 @@ export function dragDiffLine(shell: ShellState, index: number, event: MouseEvent
       const body = shell.diffEl;
       if (body) {
         const rect = body.getBoundingClientRect();
-        if (ev.clientY < rect.top + 28) body.scrollTop -= 18;
-        else if (ev.clientY > rect.bottom - 28) body.scrollTop += 18;
+        if (ev.clientY < rect.top + 28) body.scrollTop -= shell.diffRowHeight;
+        else if (ev.clientY > rect.bottom - 28) body.scrollTop += shell.diffRowHeight;
       }
       const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-line]");
       const next = Number(hit?.dataset.line);
@@ -1104,11 +1104,21 @@ export function chosenDiffLines(shell: ShellState, clicked: number) {
     return indexes;
   }
 
+const hunkIndexCache = new WeakMap<object, Int32Array>();
+
 export function hunkOf(shell: ShellState, index: number) {
-    let hunk = -1;
-    for (let cursor = 0; cursor <= index && cursor < shell.diffLines.length; cursor += 1) {
-      if (shell.diffLines[cursor]?.kind === "hunk") hunk += 1;
+    const lines = shell.diffLines;
+    let table = hunkIndexCache.get(lines);
+    if (!table) {
+      table = new Int32Array(lines.length);
+      let hunk = -1;
+      for (let cursor = 0; cursor < lines.length; cursor += 1) {
+        if (lines[cursor]?.kind === "hunk") hunk += 1;
+        table[cursor] = hunk;
+      }
+      hunkIndexCache.set(lines, table);
     }
+    const hunk = table[Math.min(index, table.length - 1)] ?? -1;
     return hunk >= 0 ? hunk : null;
   }
 

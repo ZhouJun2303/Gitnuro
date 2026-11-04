@@ -24,6 +24,8 @@
     pickOurs = true;
     pickTheirs = true;
     hoveredHunk = null;
+    shell.pixelUrl = "";
+    shell.imageMode = "side";
   });
 
   const hunkList = $derived(shell.mode === "live" && shell.section === "changes" ? shell.hunkRanges() : []);
@@ -41,9 +43,8 @@
   });
   const hoveredDiscardOps = $derived(hoveredSelected.length > 0 ? shell.discardableEntries(hoveredSelected) : []);
   const useLineOps = $derived(hoveredLineOps.length > 0 || hoveredDiscardOps.length > 0);
-  const rowHeight = $derived(shell.settings.diffStyle === "split" ? shell.splitRowHeight : 18);
-  const hunkActionTop = $derived.by(() => {
-    if (!hoveredRange) return 0;
+  const rowHeight = $derived(shell.settings.diffStyle === "split" ? shell.splitRowHeight : shell.diffRowHeight);
+  const hunkActionTop = $derived.by(() => {    if (!hoveredRange) return 0;
     if (shell.settings.diffStyle !== "split") return hoveredRange.start * rowHeight;
     for (let at = 0; at < shell.splitRows.length; at += 1) {
       const row = shell.splitRows[at];
@@ -56,10 +57,6 @@
     }
     return hoveredRange.start * rowHeight;
   });
-  /** Split overlay is on the scrollport; offset by scroll so it tracks the hunk. */
-  const hunkActionScreenTop = $derived(
-    shell.settings.diffStyle === "split" ? Math.max(4, hunkActionTop - shell.diffTop) : hunkActionTop,
-  );
 
   const sideText = (party: ConflictParty) => {
     if (party.state === "added") return shell.tr("chrome.sideAdded");
@@ -82,33 +79,50 @@
     hoveredHunk = null;
   }
 
+  function goMark(index: number) {
+    const node = shell.diffEl;
+    if (!node) return;
+    if (shell.settings.diffStyle === "split") {
+      node.querySelector<HTMLElement>(`[data-line="${index}"]`)?.scrollIntoView({ block: "center" });
+      return;
+    }
+    node.scrollTop = Math.max(0, index * shell.diffRowHeight);
+    shell.diffTop = node.scrollTop;
+  }
+
   function stageHovered() {
     const file = shell.selectedPath;
     if (!file || shell.busy) return;
-    if (useLineOps) {
-      if (hoveredLineOps.length === 0) return;
-      void shell.applyLineOps("stageLine", hoveredLineOps);
+    const index = hoveredHunk;
+    const lineMode = useLineOps;
+    const lineOps = hoveredLineOps;
+    hoveredHunk = null;
+    if (lineMode) {
+      if (lineOps.length === 0) return;
+      void shell.applyLineOps("stageLine", lineOps);
       return;
     }
-    if (hoveredHunk == null) return;
-    void shell.mutate({ action: "stageHunk", file, index: hoveredHunk, unstage: shell.selectedSide === "staged" });
+    if (index == null) return;
+    void shell.mutate({ action: "stageHunk", file, index, unstage: shell.selectedSide === "staged" });
   }
 
   function discardHovered() {
     const file = shell.selectedPath;
     if (!file || shell.busy || shell.selectedSide === "staged") return;
-    if (useLineOps) {
-      if (hoveredDiscardOps.length === 0) return;
-      const many = hoveredDiscardOps.length > 1;
-      if (!many) {
-        void shell.applyLineOps("discardLine", hoveredDiscardOps);
+    const index = hoveredHunk;
+    const lineMode = useLineOps;
+    const discardOps = hoveredDiscardOps;
+    hoveredHunk = null;
+    if (lineMode) {
+      if (discardOps.length === 0) return;
+      if (discardOps.length === 1) {
+        void shell.applyLineOps("discardLine", discardOps);
         return;
       }
-      shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(hoveredDiscardOps.length) }), () => void shell.applyLineOps("discardLine", hoveredDiscardOps));
+      shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(discardOps.length) }), () => void shell.applyLineOps("discardLine", discardOps));
       return;
     }
-    if (hoveredHunk == null) return;
-    const index = hoveredHunk;
+    if (index == null) return;
     shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody", { name: file }), () => {
       void shell.mutate({ action: "discardHunk", file, index });
     });
@@ -137,10 +151,10 @@
               <button class="text-button" type="button" onclick={() => (shell.blameLines = null)}>{shell.tr("chrome.close")}</button>
             </header>
             <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} onscroll={onBlameScroll}>
-              <div class="commit-window" style:height="{(shell.blameLines?.length ?? 0) * 18}px">
+              <div class="commit-window" style:height="{(shell.blameLines?.length ?? 0) * shell.diffRowHeight}px">
                 {#each shell.blameWindow.rows as line, index (`${line.line}-${line.id}`)}
                   {@const pending = !line.id || /^0+$/.test(line.id)}
-                  <button class="virtual-row blame-line" class:blame-pending={pending} type="button" style:top="{(shell.blameWindow.start + index) * 18}px" title={pending ? shell.tr("dialog.notCommitted") : `${line.author} · ${line.summary}`} onclick={() => { if (pending) return; shell.section = "history"; void shell.selectCommit(line.id); }}>
+                  <button class="virtual-row blame-line" class:blame-pending={pending} type="button" style:top="{(shell.blameWindow.start + index) * shell.diffRowHeight}px" title={pending ? shell.tr("dialog.notCommitted") : `${line.author} · ${line.summary}`} onclick={() => { if (pending) return; shell.section = "history"; void shell.selectCommit(line.id); }}>
                     <span class="blame-gutter">{line.line}</span>
                     <span class="blame-who">{pending ? shell.tr("dialog.notCommitted") : line.author}</span>
                     <span class="blame-code">{line.text}</span>
@@ -203,9 +217,9 @@
               {/if}
             </header>
             {#if shell.diff && shell.diff.lines.length > 0}
-              <div class="minimap">
+              <div class="minimap" role="presentation">
                 {#each shell.minimapMarks as mark (`m-${mark.index}`)}
-                  <button class="mark {mark.kind}" type="button" aria-label={shell.tr("menu.nextHunk")} style:top="{mark.top}%" onclick={() => { const node = document.querySelector<HTMLElement>(".diff-body"); if (node) node.scrollTop = mark.index * 18; shell.diffTop = mark.index * 18; }}></button>
+                  <button class="mark {mark.kind}" type="button" aria-label={`${shell.tr("menu.nextHunk")} ${mark.index + 1}`} title={`${shell.tr("menu.nextHunk")} ${mark.index + 1}`} style:left="{mark.top}%" onclick={() => goMark(mark.index)}></button>
                 {/each}
               </div>
             {/if}
@@ -225,7 +239,7 @@
               <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
             {:else if shell.settings.diffStyle === "split"}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover} use:splitScroller={shell.splitColumns}>
+              <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={(event) => { onDiffScroll(event); hoveredHunk = null; }} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover} use:splitScroller={shell.splitColumns}>
                 {#if shell.splitWindow.start > 0}<div class="split-gap" style:height="{shell.splitWindow.start * shell.splitRowHeight}px"></div>{/if}
                 {#each shell.splitWindow.rows as row, offset (shell.splitWindow.start + offset)}
                   {@const index = shell.splitWindow.start + offset}
@@ -243,13 +257,13 @@
               </div>
             {:else}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
-                <div class="commit-window" style:height="{shell.diffLines.length * 18}px">
+              <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} onscroll={(event) => { onDiffScroll(event); hoveredHunk = null; }} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
+                <div class="commit-window" style:height="{shell.diffLines.length * shell.diffRowHeight}px">
                   {#each shell.diffWindow.rows as line, index (`${shell.diffWindow.start}-${index}`)}
                     {@const at = shell.diffWindow.start + index}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={hoveredHunk != null && shell.hunkOf(at) === hoveredHunk} data-line={at} style:top="{at * 18}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
+                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={hoveredHunk != null && shell.hunkOf(at) === hoveredHunk} data-line={at} style:top="{at * shell.diffRowHeight}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
                       <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.oldNo ?? ""}</span>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -310,7 +324,7 @@
 {#snippet hunkActions(split: boolean)}
   {#if hoveredRange && shell.mode === "live"}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="diff-hunk-actions" class:split-float={split} style:top="{(split ? hunkActionScreenTop : hunkActionTop)}px" onmouseenter={() => (hoveredHunk = hoveredRange.index)}>
+    <div class="diff-hunk-actions" class:split-float={split} style:top="{hunkActionTop}px" onmouseenter={() => (hoveredHunk = hoveredRange.index)}>
       {#if !useLineOps || hoveredLineOps.length > 0}
         <button type="button" disabled={shell.busy} onclick={(event) => { event.stopPropagation(); stageHovered(); }}>{stageLabel()}</button>
       {/if}
@@ -332,32 +346,32 @@
 
 {#snippet imageCompare(before: string | null, after: string | null)}
     <div class="image-toolbar">
-      <button type="button" class:on={shell.imageMode === "side"} onclick={() => (shell.imageMode = "side")}>{shell.tr("dialog.imageSide")}</button>
-      <button type="button" class:on={shell.imageMode === "swipe"} onclick={() => (shell.imageMode = "swipe")}>{shell.tr("dialog.imageSwipe")}</button>
-      <button type="button" class:on={shell.imageMode === "onion"} onclick={() => (shell.imageMode = "onion")}>{shell.tr("dialog.imageOnion")}</button>
-      <button type="button" class:on={shell.imageMode === "pixel"} onclick={() => { shell.imageMode = "pixel"; if (before && after) void shell.paintPixel(before, after); }}>{shell.tr("dialog.imagePixel")}</button>
+      <button type="button" class:on={shell.imageMode === "side"} aria-pressed={shell.imageMode === "side"} onclick={() => (shell.imageMode = "side")}>{shell.tr("dialog.imageSide")}</button>
+      <button type="button" class:on={shell.imageMode === "swipe"} aria-pressed={shell.imageMode === "swipe"} onclick={() => (shell.imageMode = "swipe")}>{shell.tr("dialog.imageSwipe")}</button>
+      <button type="button" class:on={shell.imageMode === "onion"} aria-pressed={shell.imageMode === "onion"} onclick={() => (shell.imageMode = "onion")}>{shell.tr("dialog.imageOnion")}</button>
+      <button type="button" class:on={shell.imageMode === "pixel"} aria-pressed={shell.imageMode === "pixel"} onclick={() => { shell.imageMode = "pixel"; if (before && after) void shell.paintPixel(before, after); }}>{shell.tr("dialog.imagePixel")}</button>
       {#if shell.imageMode === "swipe" || shell.imageMode === "onion"}
         <input type="range" min="0" max="100" bind:value={shell.imagePos} aria-label={shell.imageMode} />
       {/if}
     </div>
     <div class="image-stage" class:pair={shell.imageMode === "side"}>
       {#if shell.imageMode === "pixel" && shell.pixelUrl}
-        <figure class="image-frame"><div class="image-box"><img alt="" src={shell.pixelUrl} onload={shell.fitImage.bind(shell)} /></div></figure>
+        <figure class="image-frame"><div class="image-box"><img alt={shell.tr("dialog.imagePixel")} src={shell.pixelUrl} onload={shell.fitImage.bind(shell)} /></div></figure>
       {:else if shell.imageMode === "side"}
         <figure class="image-frame">
           <figcaption class="del">{shell.tr("dialog.imageBefore")}</figcaption>
-          <div class="image-box">{#if before}<img alt="" src={before} onload={shell.fitImage.bind(shell)} />{:else}<span class="meta">—</span>{/if}</div>
+          <div class="image-box">{#if before}<img alt={shell.tr("dialog.imageBefore")} src={before} onload={shell.fitImage.bind(shell)} />{:else}<span class="meta">—</span>{/if}</div>
         </figure>
         <figure class="image-frame">
           <figcaption class="add">{shell.tr("dialog.imageAfter")}</figcaption>
-          <div class="image-box">{#if after}<img alt="" src={after} onload={shell.fitImage.bind(shell)} />{:else}<span class="meta">—</span>{/if}</div>
+          <div class="image-box">{#if after}<img alt={shell.tr("dialog.imageAfter")} src={after} onload={shell.fitImage.bind(shell)} />{:else}<span class="meta">—</span>{/if}</div>
         </figure>
       {:else}
         <figure class="image-frame">
           <div class="image-box">
             <div class="image-overlay">
-              {#if before}<img alt="" src={before} onload={shell.fitImage.bind(shell)} />{/if}
-              {#if after}<img class="over" alt="" src={after} style:opacity={shell.imageMode === "onion" ? shell.imagePos / 100 : 1} style:clip-path={shell.imageMode === "swipe" ? `inset(0 ${100 - shell.imagePos}% 0 0)` : "none"} />{/if}
+              {#if before}<img alt={shell.tr("dialog.imageBefore")} src={before} onload={shell.fitImage.bind(shell)} />{/if}
+              {#if after}<img class="over" alt={shell.tr("dialog.imageAfter")} src={after} style:opacity={shell.imageMode === "onion" ? shell.imagePos / 100 : 1} style:clip-path={shell.imageMode === "swipe" ? `inset(0 ${100 - shell.imagePos}% 0 0)` : "none"} />{/if}
             </div>
           </div>
         </figure>

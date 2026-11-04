@@ -1,3 +1,38 @@
+.dialog-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 18px;
+    line-height: 1;
+  }
+
+.dialog-close:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+
+.dialog h2 {
+    padding-right: 26px;
+  }
+
+.dialog-error {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--deleted) 12%, transparent);
+    color: var(--deleted);
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
 .swatch {
     width: 18px;
     height: 18px;
@@ -70,7 +105,7 @@
   }
 
 .dialog.prefs {
-    height: min(640px, calc(100vh - 48px));
+    height: min(720px, calc(100vh - 48px));
     overflow: hidden;
   }
 
@@ -257,6 +292,12 @@
   }
 
 .workspace-create { margin-top: 4px; }
+
+.workspace-create label.grow {
+    flex: 1;
+    min-width: 0;
+    margin-left: 0;
+  }
 
 .dialog-scroll {
     display: flex;

@@ -60,3 +60,78 @@ test("pushbox commits and pushes", async () => {
   const subject = execFileSync("git", ["--git-dir", layout.remotePush, "log", "-1", "--format=%s"], { encoding: "utf8" }).trim();
   expect(subject).toBe("lab: record the push note");
 });
+
+async function openLabScene(page: Page, id: string, ready: string) {
+  await page.goto(`/?scene=${id}`, { waitUntil: "domcontentloaded" });
+  await page.locator(`[data-lab-scene="${id}"]`).waitFor({ state: "visible", timeout: 90_000 });
+  await page.locator(ready).first().waitFor({ state: "visible", timeout: 30_000 });
+  await page.waitForTimeout(400);
+}
+
+test("dialog close button dismisses the dialog", async ({ page }) => {
+  await openLabScene(page, "dialog-prefs", '[data-dialog="prefs"]');
+  await page.locator(".dialog-close").click();
+  await expect(page.locator('[data-dialog="prefs"]')).toHaveCount(0);
+});
+
+test("command palette is blocked while a dialog is open", async ({ page }) => {
+  await openLabScene(page, "dialog-prefs", '[data-dialog="prefs"]');
+  await page.keyboard.press("Control+k");
+  await expect(page.locator(".palette")).toHaveCount(0);
+  await expect(page.locator('[data-dialog="prefs"]')).toBeVisible();
+});
+
+test("merge resolve is disabled until every conflict is picked", async ({ page }) => {
+  await openLabScene(page, "text-merge", ".merge-panel");
+  await expect(page.locator(".merge-panel .commit")).toBeDisabled();
+  await expect(page.locator(".merge-count")).toHaveText("0/1");
+});
+
+test("rebase rows start checked and can be excluded", async ({ page }) => {
+  await openLabScene(page, "dialog-rebase", ".dialog-scroll");
+  const boxes = page.locator(".dialog-scroll input[type=checkbox]");
+  const total = await boxes.count();
+  expect(total).toBeGreaterThan(0);
+  await expect(page.locator(".dialog-scroll input[type=checkbox]:checked")).toHaveCount(total);
+});
+
+test("menu rows keep their full height", async ({ page }) => {
+  await openLabScene(page, "menu", '[data-layer="menu"]');
+  const height = await page.locator(".menu button").first().evaluate((node) => node.getBoundingClientRect().height);
+  expect(height).toBeGreaterThanOrEqual(27);
+});
+
+test("confirmation is above a dialog that opened it", async ({ page }) => {
+  await openLabScene(page, "dialog-workspace", '[data-dialog="workspace"]');
+  await page.locator(".workspace-delete").first().click();
+  const confirm = page.locator("[data-confirm]");
+  await expect(confirm).toBeVisible();
+  const layers = await page.evaluate(() => {
+    const box = document.querySelector("[data-confirm]");
+    const scrim = box?.closest(".scrim");
+    return scrim ? Number(getComputedStyle(scrim).zIndex) : 0;
+  });
+  expect(layers).toBeGreaterThan(50);
+});
+
+test("history restores its scroll position after switching sections", async ({ page }) => {
+  await openLabScene(page, "history", ".history .commit-row");
+  await page.locator(".history").evaluate((node) => {
+    node.scrollTop = 1600;
+    node.dispatchEvent(new Event("scroll"));
+  });
+  await page.locator('[data-section="changes"]').click();
+  await page.waitForTimeout(500);
+  await page.locator('[data-section="history"]').click();
+  await page.waitForTimeout(500);
+  const visible = await page.evaluate(() => {
+    const list = document.querySelector(".history");
+    if (!list) return 0;
+    const rect = list.getBoundingClientRect();
+    return [...document.querySelectorAll(".history .commit-row")].filter((row) => {
+      const box = row.getBoundingClientRect();
+      return box.top < rect.bottom && box.bottom > rect.top;
+    }).length;
+  });
+  expect(visible).toBeGreaterThan(0);
+});

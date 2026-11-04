@@ -25,47 +25,87 @@
 
   let dragging = $state(false);
 
+  function commit(next: number) {
+    if (collapsible && next < min * 0.6) {
+      collapsed = true;
+      size = 0;
+    } else {
+      collapsed = false;
+      size = Math.max(min, Math.min(max, next));
+    }
+    onchange?.(collapsed ? 0 : size);
+  }
+
+  function handleKey(e: KeyboardEvent) {
+    const negative = direction === "vertical" ? "ArrowLeft" : "ArrowUp";
+    const positive = direction === "vertical" ? "ArrowRight" : "ArrowDown";
+    const step = e.shiftKey ? 32 : 8;
+    if (e.key === negative || e.key === positive) {
+      e.preventDefault();
+      if (collapsed) {
+        collapsed = false;
+        size = defaultSize;
+        onchange?.(size);
+        return;
+      }
+      const delta = (e.key === negative ? -step : step) * (reverse ? -1 : 1);
+      commit(size + delta);
+      return;
+    }
+    if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      commit(e.key === "Home" ? min : max);
+      return;
+    }
+    if ((e.key === "Enter" || e.key === " ") && collapsible) {
+      e.preventDefault();
+      commit(collapsed ? defaultSize : 0);
+    }
+  }
+
   function handlePointerDown(e: PointerEvent) {
     if (e.button !== 0) return;
     e.preventDefault();
     dragging = true;
-
     const startPos = direction === "vertical" ? e.clientX : e.clientY;
     const startSize = collapsed ? 0 : size;
+    let current = startSize;
 
     function handlePointerMove(moveEvent: PointerEvent) {
       const currentPos = direction === "vertical" ? moveEvent.clientX : moveEvent.clientY;
       const delta = reverse ? startPos - currentPos : currentPos - startPos;
       let newSize = startSize + delta;
-
       if (collapsible && newSize < min * 0.6) {
         collapsed = true;
         size = 0;
-        onchange?.(0);
+        current = 0;
         return;
       }
-
-      if (collapsed) {
-        collapsed = false;
-      }
-
+      if (collapsed) collapsed = false;
       newSize = Math.max(min, Math.min(max, newSize));
       size = newSize;
-      onchange?.(newSize);
+      current = newSize;
     }
 
-    function handlePointerUp() {
+    function cleanup() {
       dragging = false;
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerUp);
       document.body.style.removeProperty("cursor");
       document.body.style.removeProperty("user-select");
+    }
+
+    function handlePointerUp() {
+      cleanup();
+      onchange?.(current);
     }
 
     document.body.style.cursor = direction === "vertical" ? "col-resize" : "row-resize";
     document.body.style.userSelect = "none";
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerUp);
   }
 
   function handleDoubleClick() {
@@ -82,6 +122,8 @@
   }
 </script>
 
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="split-handle {direction}"
@@ -89,10 +131,13 @@
   class:is-collapsed={collapsed}
   onpointerdown={handlePointerDown}
   ondblclick={handleDoubleClick}
+  onkeydown={handleKey}
   role="separator"
   aria-orientation={direction}
   aria-valuenow={collapsed ? 0 : size}
-  tabindex="-1"
+  aria-valuemin={collapsible ? 0 : min}
+  aria-valuemax={max}
+  tabindex="0"
 >
   <div class="line"></div>
 </div>
@@ -139,8 +184,15 @@
   }
 
   .split-handle:hover .line,
-  .split-handle.dragging .line {
+  .split-handle.dragging .line,
+  .split-handle:focus-visible .line {
     background: var(--accent);
+  }
+
+  .split-handle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+    border-radius: 3px;
   }
 
   .split-handle.vertical:hover .line,

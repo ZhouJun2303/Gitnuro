@@ -295,9 +295,9 @@
     min-width: 180px;
     padding: 4px;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--elevated);
-    box-shadow: 0 8px 24px color-mix(in srgb, #000 18%, transparent);
+    box-shadow: var(--shadow-menu);
   }
 
 .side-search-item {

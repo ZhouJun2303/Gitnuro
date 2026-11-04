@@ -13,10 +13,18 @@
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const onHistoryScroll = onVirtualScroll((top) => (shell.historyTop = top));
   const activeColor = $derived(shell.activeLaneColor());
+
+  function restoreHistory(node: HTMLElement) {
+    const top = shell.historyTop;
+    requestAnimationFrame(() => {
+      const max = Math.max(0, node.scrollHeight - node.clientHeight);
+      node.scrollTop = Math.min(top, max);
+    });
+  }
 </script>
 
 <div class="history-stage flex-fill">
-        <section class="history flex-fill" bind:this={shell.historyEl} onscroll={onHistoryScroll}>
+        <div class="history-head">
           {#if shell.filterNames.length > 0}
             <div class="filter-bar">
               <span>{shell.tr("chrome.filteredBy", { name: shell.filterNames.map((name) => `'${name}'`).join(", ") })}</span>
@@ -37,6 +45,8 @@
           {#if shell.historyFilter}
             <div class="pane-head"><span>{shell.historyFilter}</span></div>
           {/if}
+        </div>
+        <section class="history flex-fill" bind:this={shell.historyEl} use:restoreHistory onscroll={onHistoryScroll}>
           {#if shell.contentHits}
             <div class="pane-head"><span>{shell.tr("chrome.contentSearch")}</span><button class="text-button" type="button" onclick={() => (shell.contentHits = null)}>{shell.tr("chrome.close")}</button></div>
             {#each shell.contentHits as hit (hit.id)}
@@ -55,7 +65,7 @@
             {/each}
           {:else if shell.mode !== "sample"}
             {#if shell.shownCommits.length === 0}
-              <p class="empty">{shell.tr("chrome.noCommits")}</p>
+              <p class="empty">{shell.commitQuery.trim() ? shell.tr("chrome.noMatch") : shell.tr("chrome.noCommits")}</p>
             {:else}
               <div class="commit-window" style:height="{shell.historyItems.length * shell.rowCommit}px">
                 {#each shell.historyRows as commit, index (commit.id)}
@@ -103,7 +113,7 @@
                         <span class="meta author" title={commit.author}>{commit.author}</span>
                       </span>
                       <span class="meta sha">{commit.shortId}</span>
-                      <span class="meta date" title={commit.at ? shell.forkWhen(commit.at) : commit.when}>{commit.at ? shell.forkWhen(commit.at) : commit.when}</span>
+                      <span class="meta date" title={commit.at ? shell.forkWhenFull(commit.at) : commit.when}>{shell.whenLabel(commit)}</span>
                     </span>
                   </div>
                 {/each}

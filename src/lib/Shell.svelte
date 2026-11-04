@@ -28,12 +28,35 @@
   const focusWhen = (node: HTMLInputElement, on: boolean) => shell.focusWhen(node, on);
   const fitMenu = (node: HTMLElement, spot: { x: number; y: number; anchorTop?: number }) => shell.fitMenu(node, spot);
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
+
+  function menuKeys(node: HTMLElement, autofocus = true) {
+    const items = () => [...node.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+    if (autofocus) queueMicrotask(() => items()[0]?.focus());
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        const list = items();
+        if (list.length === 0) return;
+        event.preventDefault();
+        const at = list.indexOf(document.activeElement as HTMLButtonElement);
+        const next = event.key === "ArrowDown" ? (at + 1) % list.length : (at - 1 + list.length) % list.length;
+        list[next]?.focus();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        shell.menu = null;
+        shell.submenu = null;
+      }
+    };
+    node.addEventListener("keydown", onKey);
+    return { destroy() { node.removeEventListener("keydown", onKey); } };
+  }
 </script>
 
 <style>
 .menu {
     position: fixed;
-    z-index: 30;
+    z-index: var(--z-menu, 30);
     min-width: 220px;
     max-height: min(70vh, 480px);
     overflow: auto;
@@ -53,6 +76,7 @@
     gap: 16px;
     width: 100%;
     height: 28px;
+    flex: none;
     padding: 0 8px;
     border: 0;
     background: transparent;
@@ -77,6 +101,8 @@
 
 .scrim.menu-dismiss { position: fixed; inset: 0; z-index: 29; background: transparent; border: 0; backdrop-filter: none; animation: none; }
 
+.scrim.confirm-scrim { z-index: var(--z-confirm, 60); }
+
 .shell {
     height: 100vh;
     display: flex;
@@ -90,7 +116,7 @@
 
 .repo-picker {
     position: fixed;
-    z-index: 31;
+    z-index: var(--z-popover, 31);
     width: 292px;
     display: flex;
     flex-direction: column;
@@ -175,7 +201,7 @@
 .repo-glyph.folder {
     fill: currentColor;
     stroke: none;
-    color: #e2a308;
+    color: var(--icon-folder);
   }
 
 .repo-row.current .repo-glyph { color: var(--on-accent); }
@@ -214,7 +240,7 @@
 
 .command-log {
     position: fixed;
-    z-index: 31;
+    z-index: var(--z-popover, 31);
     display: grid;
     grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
     background: var(--elevated);
@@ -333,7 +359,7 @@
     align-items: baseline;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 16px 8px;
+    padding: 12px 40px 8px 16px;
     flex: none;
   }
 
@@ -366,7 +392,7 @@
 .palette-scrim {
     position: fixed;
     inset: 0;
-    z-index: 40;
+    z-index: var(--z-palette, 40);
     background: rgba(24, 24, 27, 0.28);
     display: flex;
     align-items: center;
@@ -393,6 +419,10 @@
     font-size: 15px;
     padding: 0 4px;
     outline: none;
+  }
+
+.palette-query:focus-within {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
   }
 
 .palette-query {
@@ -545,7 +575,7 @@
       {#if item.sep}
         <hr />
       {:else}
-        <button type="button" disabled={item.disabled} aria-checked={item.checked} onmouseenter={(event) => { if (!item.children) { shell.submenu = null; return; } const rect = (event.currentTarget as HTMLElement).getBoundingClientRect(); shell.submenu = { x: rect.right - 4, y: rect.top, items: item.children }; }} onclick={() => { if (item.disabled || item.children || !item.run) return; shell.menu = null; shell.submenu = null; void item.run(); }}>
+        <button type="button" role={item.checked !== undefined ? "menuitemradio" : "menuitem"} disabled={item.disabled} aria-checked={item.checked !== undefined ? item.checked : undefined} aria-haspopup={item.children ? "menu" : undefined} aria-expanded={item.children ? shell.submenu?.items === item.children : undefined} onmouseenter={(event) => { if (!item.children) { shell.submenu = null; return; } const rect = (event.currentTarget as HTMLElement).getBoundingClientRect(); shell.submenu = { x: rect.right - 4, y: rect.top, items: item.children }; }} onclick={() => { if (item.disabled || item.children || !item.run) return; shell.menu = null; shell.submenu = null; void item.run(); }}>
           <span class="menu-main">
             {#if item.checked !== undefined}<span class="menu-check" aria-hidden="true">{item.checked ? "✓" : ""}</span>{/if}
             <span>{item.label}</span>
@@ -560,6 +590,7 @@
   {#if shell.commandLogOpen}
     {@const picked = shell.pickedCommand()}
     <div class="command-log" data-layer="commands" style:left="{shell.commandPos.x}px" style:top="{shell.commandPos.y}px" style:width="{shell.commandPos.width}px" style:height="{shell.commandPos.maxHeight}px" role="dialog" aria-label={shell.tr("chrome.commandHistory")}>
+      <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={() => (shell.commandLogOpen = false)}>×</button>
       <div class="command-list">
         <div class="command-filters">
           <button type="button" class:on={shell.commandFilter === "all"} onclick={() => shell.showCommandFilter("all")}>{shell.tr("chrome.commandAll")}</button>
@@ -611,6 +642,7 @@
   {/if}
   {#if shell.repoPickerOpen}
     <div class="repo-picker" data-layer="repos" style:left="{shell.repoPickerPos.x}px" style:top="{shell.repoPickerPos.y}px" style:max-height="{shell.repoPickerPos.maxHeight}px" role="dialog" aria-label={shell.tr("chrome.manager")}>
+      <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={() => (shell.repoPickerOpen = false)}>×</button>
       <h2>{shell.tr("chrome.manager")}</h2>
       <div class="repo-picker-scroll">
         <button class="repo-section" type="button" aria-expanded={shell.repoPickerRecentOpen} onclick={() => (shell.repoPickerRecentOpen = !shell.repoPickerRecentOpen)}>
@@ -653,19 +685,19 @@
     <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => (shell.repoPickerOpen = false)}></button>
   {/if}
   {#if shell.menu}
-    <div class="menu" data-layer="menu" use:fitMenu={shell.menu} role="menu">
+    <div class="menu" data-layer="menu" use:fitMenu={shell.menu} use:menuKeys role="menu">
       {@render menuList(shell.menu.items)}
     </div>
     {#if shell.submenu}
-      <div class="menu" use:fitMenu={shell.submenu} role="menu">
+      <div class="menu" use:fitMenu={shell.submenu} use:menuKeys={false} role="menu">
         {@render menuList(shell.submenu.items)}
       </div>
     {/if}
     <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => { shell.menu = null; shell.submenu = null; }}></button>
   {/if}
   {#if shell.confirmAsk}
-    <div class="scrim" role="presentation">
-      <div class="dialog sm" data-confirm data-layer="confirm" role="dialog" tabindex="-1">
+    <div class="scrim confirm-scrim" role="presentation">
+      <div class="dialog sm" data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" tabindex="-1">
         <h2>{shell.confirmAsk.title}</h2>
         <p>{shell.confirmAsk.body}</p>
         <div class="composer-row">
@@ -676,11 +708,13 @@
     </div>
   {/if}
   {#if shell.forgeOpen}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="scrim" role="presentation" onclick={() => (shell.forgeOpen = null)} onkeydown={() => {}}>
-      <div class="dialog md" data-layer="forge" role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()}>
+      <div class="dialog md" data-layer="forge" role="dialog" aria-modal="true" tabindex="-1" onclick={(event) => event.stopPropagation()}>
+        <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={() => (shell.forgeOpen = null)}>×</button>
         <h2>{shell.forgeOpen === "notes" ? shell.tr("chrome.notifications") : shell.tr("chrome.pulls")}</h2>
         {#if shell.forgeOpen === "notes"}
-          {#if shell.notices.length === 0}<p class="empty">{shell.tr("dialog.noToken")}</p>{/if}
+          {#if shell.notices.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noNotifications") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.notices as notice (notice.id)}
             <div class="composer-row"><span>{notice.title}</span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => void invoke("mark_notification", { id: notice.id }).then(() => (shell.notices = shell.notices.filter((item) => item.id !== notice.id)))}>{shell.tr("dialog.markRead")}</button></div>
           {/each}
@@ -719,7 +753,7 @@
               <span class="meta">{item.group}</span>
             </button>
           {:else}
-            <p class="empty">{shell.tr("chrome.noMatch")}</p>
+            <p class="empty">{shell.tr("chrome.noPaletteMatch")}</p>
           {/each}
         </div>
         <div class="palette-hint">{shell.tr("chrome.paletteHint")}</div>
