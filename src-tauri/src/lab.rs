@@ -141,9 +141,34 @@ fn layout() -> Result<Value, String> {
     let root = lab_root()?;
     let repos = root.join("repos");
     let text = |path: PathBuf| path.display().to_string();
+    let mut recent = Vec::new();
+    let shelf = repos.join("shelf");
+    if shelf.is_dir() {
+        let mut names = std::fs::read_dir(&shelf)
+            .map_err(|error| error.to_string())?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
+        names.sort();
+        for path in names {
+            if path.join(".git").exists() {
+                recent.push(text(path));
+            }
+        }
+    }
+    if recent.is_empty() {
+        for name in ["full", "ahead", "conflict", "even"] {
+            let path = repos.join(name);
+            if path.join(".git").exists() {
+                recent.push(text(path));
+            }
+        }
+    }
     Ok(json!({
         "root": text(root.clone()),
         "repos": text(repos.clone()),
+        "recentList": recent.join("\n"),
         "remote": text(root.join("remote.git")),
         "remotePush": text(root.join("remote-push.git")),
         "full": text(repos.join("full")),

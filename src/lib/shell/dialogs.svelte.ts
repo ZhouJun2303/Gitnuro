@@ -30,7 +30,7 @@ import { alignCommitTemplate, isCommentary, isCommitType, splitSubject, withoutR
 
 export async function selectPrefTab(shell: ShellState, tab: PrefTab) {
     shell.prefTab = tab;
-    if (tab === "integration") void shell.loadExternalTools();
+    if (tab === "integration" && !shell.labPage) void shell.loadExternalTools();
     await tick();
     shell.prefPage?.scrollTo(0, 0);
   }
@@ -848,6 +848,7 @@ export type ExternalTool = {
   };
 
 export async function loadExternalTools(shell: ShellState) {
+    if (shell.labPage) return;
     if (!shell.backend()) {
       shell.mergeTools = [];
       shell.diffTools = [];

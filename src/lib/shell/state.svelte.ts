@@ -1811,20 +1811,73 @@ export class ShellState {
       if (!item) throw new Error(`未知场景 ${id}`);
       const layout = await invoke<Record<string, string>>("lab_layout");
       const settings = await invoke<Settings>("load_settings");
-      const recent = [layout.full, layout.ahead, layout.conflict, layout.even].filter((path) => !!path);
+      const shelfRecent = (layout.recentList ?? "").split(/\r?\n/).map((path) => path.trim()).filter(Boolean);
+      const recent = shelfRecent.length > 0
+        ? shelfRecent
+        : [layout.full, layout.ahead, layout.conflict, layout.even].filter((path) => !!path);
+      const sourceDirectories = layout.repos ? [layout.repos] : settings.sourceDirectories;
+      const commands = Array.from({ length: 24 }, (_, index) => {
+        const n = String(index + 1).padStart(2, "0");
+        return {
+          id: `lab-${n}`,
+          name: `实验室命令 ${n}`,
+          target: "repository",
+          command: `git status --short # ${n}`,
+          prompt: "",
+          shared: true,
+          repo: "",
+        };
+      });
+      const accounts = Array.from({ length: 24 }, (_, index) => {
+        const n = String(index + 1).padStart(2, "0");
+        return {
+          id: `lab-acct-${n}`,
+          forge: index % 2 === 0 ? "github" : "gitlab",
+          label: `lab-${n}`,
+          token: `lab-token-${n}`,
+          host: index % 2 === 0 ? "github.com" : "gitlab.com",
+          clientId: `lab-client-${n}`,
+        };
+      });
+      const workspaces = Array.from({ length: 24 }, (_, index) => {
+        const n = String(index + 1).padStart(2, "0");
+        return {
+          id: `lab-ws-${n}`,
+          name: `实验室工作区 ${n}`,
+          repositories: recent.slice(0, Math.min(3, recent.length)),
+          openTabs: [],
+          selectedTab: 0,
+          tabsSeeded: true,
+        };
+      });
       this.adoptSettings({
         ...settings,
         authorName: settings.authorName || "AweGit Lab",
         authorEmail: settings.authorEmail || "lab@example.com",
         recent,
-        sourceDirectories: layout.repos ? [layout.repos] : settings.sourceDirectories,
+        sourceDirectories,
+        groupNames: sourceDirectories.map((path) => `${path}\t实验室仓库`),
         cloneDirectory: layout.repos || settings.cloneDirectory,
+        commands,
+        accounts,
+        workspaces,
+        currentWorkspace: "",
         fetchAutomatically: false,
         statusInterval: 0,
         fileLayout: "list",
       });
+      this.collapsedSide = [];
+      this.allBranches = true;
+      this.mergeTools = Array.from({ length: 24 }, (_, index) => {
+        const n = String(index + 1).padStart(2, "0");
+        return { name: `Merge Tool ${n}`, path: `C:\\Tools\\merge-${n}.exe`, args: "$LOCAL $REMOTE $MERGED", primary: index === 0 };
+      });
+      this.diffTools = Array.from({ length: 24 }, (_, index) => {
+        const n = String(index + 1).padStart(2, "0");
+        return { name: `Diff Tool ${n}`, path: `C:\\Tools\\diff-${n}.exe`, args: "$LOCAL $REMOTE", primary: index === 0 };
+      });
+      this.aiModels = Array.from({ length: 24 }, (_, index) => `lab-model-${String(index + 1).padStart(2, "0")}`);
       void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
-      await this.loadExternalTools();
       if (item.repo) {
         const path = layout[item.repo];
         if (!path) throw new Error(`场景 ${item.id} 没有仓库 ${item.repo}`);

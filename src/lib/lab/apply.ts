@@ -4,6 +4,46 @@ import type { ShellState } from "../shell/state.svelte";
 import { fillResolveDialog } from "../shell/dialogs.svelte";
 import type { LabDialog, LabScene } from "./scenes";
 
+const FILL = 24;
+
+function pad(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function lines(count: number, prefix: string) {
+  return Array.from({ length: count }, (_, index) => `${prefix} ${index + 1}`).join("\n");
+}
+
+function manyCommands(): CommandRecord[] {
+  return Array.from({ length: FILL }, (_, index) => {
+    const n = pad(index + 1);
+    return {
+      id: `lab-${n}`,
+      name: `实验室命令 ${n}`,
+      target: "repository",
+      command: `git status --short # ${n}`,
+      prompt: "",
+      shared: true,
+      repo: "",
+    };
+  });
+}
+
+function fillSourceRoots(shell: ShellState) {
+  const recent = shell.settings.recent;
+  const roots = recent.length >= FILL
+    ? recent.slice(0, FILL)
+    : Array.from({ length: FILL }, (_, index) => {
+      const base = shell.settings.cloneDirectory || recent[0] || "D:\\lab";
+      return `${base}\\source-${pad(index + 1)}`;
+    });
+  shell.settings = {
+    ...shell.settings,
+    sourceDirectories: roots,
+    groupNames: roots.map((path, index) => `${path}\t源目录 ${pad(index + 1)}`),
+  };
+}
+
 async function showChange(shell: ShellState, path: string, side: "staged" | "unstaged") {
   shell.section = "changes";
   shell.selectedSide = side;
@@ -34,7 +74,7 @@ async function fillSurface(shell: ShellState, id: string) {
     return;
   }
   if (id === "search") {
-    shell.commitSearch = "merge";
+    shell.commitSearch = "topic";
     shell.showSideSearch();
     shell.queueCommitSearch();
     return;
@@ -49,34 +89,57 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.loadBlobPane();
     return;
   }
+  if (id === "sidebar") {
+    shell.collapsedSide = [];
+    shell.sideQuery = "";
+    return;
+  }
   if (id === "picker") {
     await shell.toggleRepoPicker();
     return;
   }
   if (id === "commands") {
-    shell.commandLog = [
-      {
-        id: 1,
-        title: "git fetch origin",
-        summary: "Already up to date",
-        command: "git fetch --prune origin",
-        output: "Already up to date",
-        ok: true,
-        at: Date.now(),
-        source: "user",
-      },
-    ];
+    const now = Date.now();
+    shell.commandLog = Array.from({ length: FILL }, (_, index) => {
+      const n = pad(index + 1);
+      return {
+        id: index + 1,
+        title: `git status #${n}`,
+        summary: index % 5 === 0 ? "failed in lab" : "ok in lab",
+        command: `git status --short # ${n}`,
+        output: lines(FILL, `output ${n}`),
+        ok: index % 5 !== 0,
+        at: now - index * 60_000,
+        source: index % 3 === 0 ? "background" as const : "user" as const,
+      };
+    });
     shell.commandPick = 1;
     shell.openCommandLog();
     return;
   }
   if (id === "notes") {
-    shell.notices = [{ id: "lab-1", title: "实验室通知", url: "https://example.com/lab/notice", unread: true }];
+    shell.notices = Array.from({ length: FILL }, (_, index) => {
+      const n = pad(index + 1);
+      return {
+        id: `lab-${n}`,
+        title: `实验室通知 ${n}`,
+        url: `https://example.com/lab/notice/${n}`,
+        unread: index % 2 === 0,
+      };
+    });
     shell.forgeOpen = "notes";
     return;
   }
   if (id === "pulls") {
-    shell.pulls = [{ title: "实验室拉取请求", author: "lab", branch: "topic", url: "https://example.com/lab/pull/1" }];
+    shell.pulls = Array.from({ length: FILL }, (_, index) => {
+      const n = pad(index + 1);
+      return {
+        title: `实验室拉取请求 ${n}`,
+        author: `lab-${n}`,
+        branch: `feat/${n}`,
+        url: `https://example.com/lab/pull/${n}`,
+      };
+    });
     shell.forgeOpen = "pulls";
     return;
   }
@@ -109,10 +172,12 @@ async function fillSurface(shell: ShellState, id: string) {
     return;
   }
   if (id === "submodule") {
+    shell.collapsedSide = [];
     shell.sideQuery = "vendor";
     return;
   }
   if (id === "worktree") {
+    shell.collapsedSide = [];
     shell.sideQuery = "extra";
     return;
   }
@@ -142,7 +207,7 @@ async function fillSurface(shell: ShellState, id: string) {
       appVersion: "9.9.9",
       appCode: 999,
       downloadUrl: "https://example.com/awegit",
-      notes: "实验室更新说明",
+      notes: lines(FILL, "实验室更新说明"),
       installable: false,
     };
     return;
@@ -172,12 +237,28 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.menu = {
       x: 72,
       y: 96,
-      items: [
-        { label: "提交", run: () => {} },
-        { label: "更多", children: [{ label: "变基", run: () => {} }] },
-      ],
+      items: Array.from({ length: FILL }, (_, index) => {
+        const n = pad(index + 1);
+        if (index === 1) {
+          return {
+            label: `更多 ${n}`,
+            children: Array.from({ length: FILL }, (_, child) => ({
+              label: `子项 ${pad(child + 1)}`,
+              run: () => {},
+            })),
+          };
+        }
+        return { label: `菜单项 ${n}`, run: () => {} };
+      }),
     };
-    shell.submenu = { x: 300, y: 124, items: [{ label: "变基", run: () => {} }] };
+    shell.submenu = {
+      x: 300,
+      y: 124,
+      items: Array.from({ length: FILL }, (_, index) => ({
+        label: `子项 ${pad(index + 1)}`,
+        run: () => {},
+      })),
+    };
   }
 }
 
@@ -196,9 +277,16 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
     case "clone":
       shell.cloneIntent = "clone";
       shell.draft = "https://example.com/lab/repo.git";
+      fillSourceRoots(shell);
       break;
     case "open":
       shell.draft = shell.repoPath() ?? "";
+      fillSourceRoots(shell);
+      break;
+    case "prefs":
+      shell.prefTab = "general";
+      fillSourceRoots(shell);
+      fillLabTools(shell);
       break;
     case "reset":
       shell.draft = head.slice(0, 7) || "HEAD";
@@ -206,13 +294,11 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
     case "command":
       shell.settings = {
         ...shell.settings,
-        commands: [
-          { id: "lab", name: "状态", target: "repository", command: "git status", prompt: "", shared: true, repo: "" } satisfies CommandRecord,
-        ],
+        commands: manyCommands(),
       };
-      shell.draft = "状态";
+      shell.draft = "实验室命令 01";
       shell.draftExtra = "repository";
-      shell.draftUser = "git status";
+      shell.draftUser = "git status --short # 01";
       break;
     case "tag":
       shell.draft = "v2.0.1";
@@ -240,6 +326,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
       break;
     case "stash":
       shell.draft = "WIP before the palette";
+      shell.stashFiles = Array.from({ length: FILL }, (_, index) => `pending/file-${pad(index + 1)}.txt`);
       break;
     case "rename":
       shell.draft = "main";
@@ -259,7 +346,12 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
       return;
     }
     case "patch":
-      shell.draft = "diff --git a/README.md b/README.md\n";
+      shell.draft = [
+        "diff --git a/README.md b/README.md",
+        "--- a/README.md",
+        "+++ b/README.md",
+        ...Array.from({ length: FILL }, (_, index) => `+patch line ${index + 1}`),
+      ].join("\n");
       break;
     case "submodule":
       shell.draft = "https://example.com/lab/lib.git";
@@ -270,7 +362,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
       shell.draftExtra = "extra";
       break;
     case "output":
-      shell.commandOutput = "实验室审查：这个分支可以合并。";
+      shell.commandOutput = lines(FILL, "实验室审查输出");
       break;
     case "workspace":
       shell.draft = "实验室工作区";
@@ -295,7 +387,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
       shell.draft = "继续变基并保留说明";
       break;
     case "gitignore":
-      shell.draft = "secret.tmp\n";
+      shell.draft = ["secret.tmp", "ignored/", ...Array.from({ length: FILL }, (_, index) => `pattern-${pad(index + 1)}.tmp`)].join("\n") + "\n";
       break;
     case "stats":
     case "lfs":
@@ -324,29 +416,56 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
       shell.pendingCheckout = "topic";
       break;
     case "activity":
-      shell.sessionLog = ["实验室打开了仓库"];
+      shell.sessionLog = Array.from({ length: FILL }, (_, index) => `实验室会话 ${pad(index + 1)}`);
       shell.activityLines = await invoke<string[]>("activity_log").catch(() => []);
+      if (shell.activityLines.length < FILL) {
+        shell.activityLines = [
+          ...shell.activityLines,
+          ...Array.from({ length: FILL - shell.activityLines.length }, (_, index) => `实验室活动 ${pad(index + 1)}`),
+        ];
+      }
       break;
     case "mailmap":
-      shell.draft = "AweGit Lab <lab@example.com> <lab@example.com>\n";
+      shell.draft = Array.from({ length: FILL }, (_, index) => {
+        const n = pad(index + 1);
+        return `Lab Author ${n} <lab${n}@example.com> <alias${n}@example.com>`;
+      }).join("\n") + "\n";
       break;
     case "accounts":
       shell.settings = {
         ...shell.settings,
-        accounts: [{ id: "lab", forge: "github", label: "lab", token: "lab-token", host: "github.com", clientId: "lab-client" }],
+        accounts: Array.from({ length: FILL }, (_, index) => {
+          const n = pad(index + 1);
+          return {
+            id: `lab-acct-${n}`,
+            forge: index % 2 === 0 ? "github" : "gitlab",
+            label: `lab-${n}`,
+            token: `lab-token-${n}`,
+            host: index % 2 === 0 ? "github.com" : "gitlab.com",
+            clientId: `lab-client-${n}`,
+          };
+        }),
       };
       shell.hostForge = "github";
-      shell.draft = "lab";
+      shell.draft = "lab-01";
       shell.draftExtra = "github.com";
-      shell.draftUser = "lab-token";
+      shell.draftUser = "lab-token-01";
       break;
     case "ssh":
-      shell.draft = "Host lab\n  User git\n";
+      shell.draft = Array.from({ length: FILL }, (_, index) => {
+        const n = pad(index + 1);
+        return `Host lab-${n}\n  HostName git.example.com\n  User git\n  IdentityFile ~/.ssh/lab_${n}`;
+      }).join("\n\n") + "\n";
       break;
     case "stale":
       shell.staleNames = await invoke<string[]>("merged_branches", { path: shell.repoPath() }).catch(() => []);
-      if (shell.staleNames.length === 0) shell.staleNames = ["old"];
-      shell.stalePicked = [shell.staleNames[0] ?? "old"];
+      if (shell.staleNames.length < FILL) {
+        shell.staleNames = [
+          ...shell.staleNames,
+          ...Array.from({ length: FILL - shell.staleNames.length }, (_, index) => `merged/${pad(index + 1)}`),
+        ];
+      }
+      shell.stalePicked = shell.staleNames.slice(0, 3);
       break;
     case "pushAs":
       shell.draft = "topic";
@@ -354,7 +473,15 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
       shell.draftUser = "topic";
       break;
     case "askInput":
-      shell.pendingCommand = { id: "lab", name: "状态", target: "repository", command: "git status", prompt: "说明", shared: false, repo: "" };
+      shell.pendingCommand = {
+        id: "lab",
+        name: "状态",
+        target: "repository",
+        command: "git status",
+        prompt: "说明",
+        shared: false,
+        repo: "",
+      };
       shell.commandPrompt = "说明";
       shell.draft = "实验室";
       shell.fieldValues = {};
@@ -372,6 +499,18 @@ async function fillDialog(shell: ShellState, dialog: LabDialog) {
       break;
   }
   shell.dialog = dialog;
+}
+
+function fillLabTools(shell: ShellState) {
+  shell.mergeTools = Array.from({ length: FILL }, (_, index) => {
+    const n = pad(index + 1);
+    return { name: `Merge Tool ${n}`, path: `C:\\Tools\\merge-${n}.exe`, args: "$LOCAL $REMOTE $MERGED", primary: index === 0 };
+  });
+  shell.diffTools = Array.from({ length: FILL }, (_, index) => {
+    const n = pad(index + 1);
+    return { name: `Diff Tool ${n}`, path: `C:\\Tools\\diff-${n}.exe`, args: "$LOCAL $REMOTE", primary: index === 0 };
+  });
+  shell.aiModels = Array.from({ length: FILL }, (_, index) => `lab-model-${pad(index + 1)}`);
 }
 
 export async function applyLabScene(shell: ShellState, item: LabScene) {

@@ -3,17 +3,19 @@
 // and never writes inside the AweGit repository except under .lab/.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const lab = join(root, ".lab");
 const repos = join(lab, "repos");
+const shelf = join(repos, "shelf");
 const remote = join(lab, "remote.git");
 const remotePush = join(lab, "remote-push.git");
 const subBare = join(lab, "sub.git");
 const editor = join(root, "scripts", "lab-break-editor.mjs");
+const FILL = 24;
 
 const pngA = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -28,6 +30,11 @@ const pngC = Buffer.from(
   "base64",
 );
 const xlsx = (mark) => Buffer.concat([Buffer.from("PK\u0003\u0004"), Buffer.from(mark), Buffer.from([0])]);
+
+const textExts = [
+  "js", "py", "rs", "json", "css", "html", "md", "sql", "yml", "toml", "csv", "go", "java", "xml", "sh",
+  "ts", "tsx", "c", "cpp", "h", "rb", "php", "swift", "kt",
+];
 
 const gitEnv = {
   ...process.env,
@@ -76,6 +83,14 @@ function fileUrl(path) {
   return text.startsWith("//") ? `file:${text}` : `file:///${text}`;
 }
 
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+
+function lines(count, prefix) {
+  return Array.from({ length: count }, (_, index) => `${prefix} ${index + 1}`).join("\n") + "\n";
+}
+
 function initBare(path) {
   mkdirSync(dirname(path), { recursive: true });
   git(lab, ["init", "--bare", "-b", "main", path]);
@@ -118,9 +133,81 @@ function pauseIndex(repo, head) {
   if ((left.stdout ?? "").trim()) throw new Error(`${repo} still has conflicts:\n${left.stdout}`);
 }
 
+function dirtyBatch(repo, folder, count = FILL) {
+  for (let i = 1; i <= count; i++) {
+    write(repo, `${folder}/dirty-${pad(i)}.txt`, `${folder} dirty ${i}\n`);
+  }
+}
+
+function conflictRepo(path, pause) {
+  initWork(path);
+  const longBase = lines(40, "both base");
+  const longTopic = lines(40, "both topic");
+  const longMain = lines(40, "both main");
+  commit(path, "src/both-sides.ts", longBase, "base text");
+  commit(path, "docs/removed-there.md", "keep\n", "base doc");
+  commit(path, "docs/removed-here.md", "keep here\n", "base kept here");
+  commit(path, "art/removed-here.png", pngA, "base image");
+  commit(path, "data/sheet.xlsx", xlsx("base"), "base sheet");
+  commit(path, "src/shared.txt", "shared base\n", "shared name");
+  for (let i = 0; i < FILL; i++) {
+    const ext = textExts[i % textExts.length];
+    commit(path, `conflict/file-${pad(i + 1)}.${ext}`, `base ${ext} ${i + 1}\n`, `base conflict ${i + 1}`);
+  }
+  git(path, ["checkout", "-b", "topic"]);
+  write(path, "src/both-sides.ts", longTopic);
+  git(path, ["add", "--", "src/both-sides.ts"]);
+  git(path, ["commit", "-m", "topic text", "--", "src/both-sides.ts"]);
+  git(path, ["rm", "docs/removed-there.md"]);
+  git(path, ["commit", "-m", "topic removes the doc"]);
+  commit(path, "docs/removed-here.md", "keep here\ntopic edit\n", "topic edits kept here");
+  commit(path, "src/both-added.ts", "export const added = \"topic\";\n", "topic adds a file");
+  commit(path, "art/both-added.png", pngB, "topic adds image");
+  commit(path, "art/removed-here.png", pngB, "topic image");
+  commit(path, "data/sheet.xlsx", xlsx("topic"), "topic sheet");
+  git(path, ["mv", "src/shared.txt", "src/shared-topic.txt"]);
+  git(path, ["commit", "-m", "topic renames shared"]);
+  for (let i = 0; i < FILL; i++) {
+    const ext = textExts[i % textExts.length];
+    write(path, `conflict/file-${pad(i + 1)}.${ext}`, `topic ${ext} ${i + 1}\nline two\n`);
+  }
+  git(path, ["add", "--", "conflict"]);
+  git(path, ["commit", "-m", "topic conflict files"]);
+  for (let i = 1; i <= FILL; i++) {
+    commit(path, `topic/extra-${pad(i)}.md`, `topic extra ${i}\n`, `topic extra ${i}`);
+  }
+  git(path, ["checkout", "main"]);
+  write(path, "src/both-sides.ts", longMain);
+  git(path, ["add", "--", "src/both-sides.ts"]);
+  git(path, ["commit", "-m", "main text", "--", "src/both-sides.ts"]);
+  commit(path, "docs/removed-there.md", "keep\nmain edit\n", "main edits the doc");
+  git(path, ["rm", "docs/removed-here.md"]);
+  git(path, ["commit", "-m", "main removes kept here"]);
+  commit(path, "src/both-added.ts", "export const added = \"main\";\n", "main adds a file");
+  commit(path, "art/both-added.png", pngC, "main adds image");
+  commit(path, "art/removed-here.png", pngC, "main image");
+  commit(path, "data/sheet.xlsx", xlsx("main"), "main sheet");
+  git(path, ["mv", "src/shared.txt", "src/shared-main.txt"]);
+  git(path, ["commit", "-m", "main renames shared"]);
+  for (let i = 0; i < FILL; i++) {
+    const ext = textExts[i % textExts.length];
+    write(path, `conflict/file-${pad(i + 1)}.${ext}`, `main ${ext} ${i + 1}\nother\n`);
+  }
+  git(path, ["add", "--", "conflict"]);
+  git(path, ["commit", "-m", "main conflict files"]);
+  const merged = git(path, ["merge", "topic"], { allowFail: true });
+  if (merged.status === 0) throw new Error(`${path} merge did not conflict`);
+  if (!has(path, join(".git", "MERGE_HEAD"))) throw new Error(`${path} has no MERGE_HEAD`);
+  if (pause) {
+    pauseIndex(path, "MERGE_HEAD");
+    dirtyBatch(path, "paused", FILL);
+  }
+}
+
 console.log("seeding", lab);
 wipe(lab);
 mkdirSync(repos, { recursive: true });
+mkdirSync(shelf, { recursive: true });
 writeFileSync(join(lab, "gitconfig"), "");
 
 initBare(remote);
@@ -131,6 +218,7 @@ initWork(subSrc);
 commit(subSrc, "lib.txt", "library\n", "lib");
 git(subSrc, ["remote", "add", "origin", fileUrl(subBare)]);
 git(subSrc, ["push", "-u", "origin", "HEAD:main"]);
+const subSha = git(subSrc, ["rev-parse", "HEAD"]).stdout.trim();
 
 const writer = join(repos, "writer");
 initWork(writer);
@@ -155,11 +243,14 @@ cloneFrom(origin, even);
 cloneFrom(origin, ahead);
 cloneFrom(origin, bisect);
 
-commit(ahead, "local.txt", "only on this machine\n", "local only");
+for (let i = 1; i <= FILL; i++) {
+  commit(ahead, `local/ahead-${pad(i)}.txt`, `ahead ${i}\n`, `local ahead ${i}`);
+}
+dirtyBatch(ahead, "pending", FILL);
 
-commit(bisect, "steps.txt", "one\n", "bisect one");
-commit(bisect, "steps.txt", "two\n", "bisect two");
-commit(bisect, "steps.txt", "three\n", "bisect three");
+for (let i = 1; i <= FILL; i++) {
+  commit(bisect, "steps.txt", `step ${i}\n`, `bisect ${i}`);
+}
 git(bisect, ["bisect", "start", "HEAD", "HEAD~2"]);
 
 commit(full, "src/keep.ts", "export const keep = true;\n", "keep a source file");
@@ -169,43 +260,105 @@ git(full, ["checkout", "main"]);
 git(full, ["merge", "--no-ff", "graph", "-m", "merge graph"]);
 git(full, ["tag", "v1.0.0"]);
 git(full, ["tag", "v2.0.0"]);
+for (let i = 3; i <= FILL; i++) {
+  git(full, ["tag", `v${i}.0.0`]);
+}
 git(full, ["branch", "old", "HEAD~1"]);
+const mergeBase = git(full, ["rev-parse", "HEAD"]).stdout.trim();
+for (let i = 1; i <= FILL; i++) {
+  git(full, ["branch", `merged/${pad(i)}`, mergeBase]);
+}
 git(full, ["checkout", "-b", "topic"]);
 commit(full, "docs/topic.md", "topic notes\n", "topic notes");
+for (let i = 1; i <= FILL; i++) {
+  commit(full, `topic/file-${pad(i)}.txt`, `topic file ${i}\n`, `topic file ${i}`);
+}
 git(full, ["checkout", "main"]);
+for (let i = 1; i <= FILL; i++) {
+  git(full, ["checkout", "-b", `feat/${pad(i)}`]);
+  commit(full, `feat/${pad(i)}.txt`, `feature ${i}\n`, `feature ${i}`);
+  git(full, ["checkout", "main"]);
+}
 git(full, ["-c", "protocol.file.allow=always", "submodule", "add", fileUrl(subBare), "vendor"]);
 git(full, ["commit", "-m", "add vendor"]);
+const moduleLines = ["[submodule \"vendor\"]", "\tpath = vendor", `\turl = ${fileUrl(subBare)}`];
+for (let i = 1; i <= FILL; i++) {
+  const name = `libs/lib-${pad(i)}`;
+  moduleLines.push(`[submodule "${name}"]`, `\tpath = ${name}`, `\turl = ${fileUrl(subBare)}`);
+  git(full, ["update-index", "--add", "--cacheinfo", `160000,${subSha},${name}`]);
+}
+write(full, ".gitmodules", moduleLines.join("\n") + "\n");
+git(full, ["add", ".gitmodules"]);
+git(full, ["commit", "-m", "add lab submodules"]);
 write(full, ".mailmap", "AweGit Lab <lab@example.com> <lab@example.com>\n");
-write(full, ".gitignore", "secret.tmp\n");
+write(full, ".gitignore", "secret.tmp\nignored/\n*.tmp\n");
 git(full, ["add", ".mailmap", ".gitignore"]);
 git(full, ["commit", "-m", "mailmap and ignore"]);
 write(full, "secret.tmp", "secret\n");
+for (let i = 1; i <= FILL; i++) {
+  write(full, `ignored/file-${pad(i)}.tmp`, `ignored ${i}\n`);
+}
 const lfs = spawnSync("git", ["lfs", "version"], { encoding: "utf8" });
 if (lfs.status === 0) {
   git(full, ["lfs", "install", "--local"]);
   write(full, ".gitattributes", "*.bin filter=lfs diff=lfs merge=lfs -text\n");
   write(full, "assets/model.bin", "lab-model\n");
-  git(full, ["add", ".gitattributes", "assets/model.bin"]);
-  git(full, ["commit", "-m", "track a model with lfs"]);
+  for (let i = 1; i <= FILL; i++) {
+    write(full, `assets/model-${pad(i)}.bin`, `lab-model ${i}\n`);
+  }
+  git(full, ["add", ".gitattributes", "assets"]);
+  git(full, ["commit", "-m", "track models with lfs"]);
 }
 git(full, ["worktree", "add", "-b", "extra", join(repos, "full-wt")]);
-write(full, "wip.txt", "wip\n");
-git(full, ["stash", "push", "-u", "-m", "WIP before the palette"]);
-commit(full, "README.md", "base\nremote moved\nhello from main\n", "readme for the diff");
-write(full, "README.md", "base\nremote moved\nhello from the working tree\n");
+for (let i = 1; i <= FILL - 1; i++) {
+  git(full, ["worktree", "add", "-b", `wt/${pad(i)}`, join(repos, `full-wt-${pad(i)}`)]);
+}
+for (let i = 1; i <= FILL; i++) {
+  write(full, `wip/stash-${pad(i)}.txt`, `stash wip ${i}\n`);
+  git(full, ["stash", "push", "-u", "-m", i === 1 ? "WIP before the palette" : `lab stash ${i}`]);
+}
+for (let i = 1; i <= FILL; i++) {
+  git(full, ["remote", "add", `mirror-${pad(i)}`, fileUrl(remote)], { allowFail: true });
+}
+for (let i = 1; i <= FILL; i++) {
+  commit(full, "README.md", lines(i + 2, "readme"), `readme history ${i}`);
+}
+for (let i = 1; i <= FILL; i++) {
+  write(full, `catalog/item-${pad(i)}.txt`, `catalog ${i}\n`);
+}
+git(full, ["add", "--", "catalog"]);
+git(full, ["commit", "-m", "catalog pack"]);
+write(full, "README.md", lines(80, "working readme"));
 commit(full, "art/mark.png", pngA, "add the mark");
 write(full, "art/mark.png", pngB);
 commit(full, "data/sheet.xlsx", xlsx("sheet-a"), "add the sheet");
 write(full, "data/sheet.xlsx", xlsx("sheet-b"));
 commit(full, "src/old-name.txt", "name me\n", "name a file");
 git(full, ["mv", "src/old-name.txt", "src/renamed.txt"]);
-const longBase = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n") + "\n";
-const longNext = Array.from({ length: 220 }, (_, index) => `line ${index + 1} lab`).join("\n") + "\n";
+const longBase = lines(40, "line");
+const longNext = lines(220, "line lab");
 commit(full, "notes/long.txt", longBase, "long note");
 write(full, "notes/long.txt", longNext);
 write(full, "src/staged.ts", "export const staged = true;\n");
 git(full, ["add", "--", "src/staged.ts"]);
+for (let i = 1; i <= FILL; i++) {
+  write(full, `staged/file-${pad(i)}.ts`, `export const staged${i} = true;\n`);
+  git(full, ["add", "--", `staged/file-${pad(i)}.ts`]);
+}
+for (let i = 1; i <= FILL; i++) {
+  write(full, `pending/file-${pad(i)}.txt`, `pending ${i}\n`);
+}
 write(full, "scratch.txt", "untracked\n");
+
+for (let i = 1; i <= FILL; i++) {
+  commit(even, `even/file-${pad(i)}.txt`, `even ${i}\n`, `even ${i}`);
+}
+
+for (let i = 1; i <= FILL; i++) {
+  commit(writer, `remote/behind-${pad(i)}.txt`, `behind ${i}\n`, `remote behind ${i}`);
+}
+git(writer, ["push", "origin", "HEAD:main"]);
+git(behind, ["fetch", "origin"]);
 
 const pushSrc = join(repos, "push-src");
 initWork(pushSrc);
@@ -216,31 +369,6 @@ const pushbox = join(repos, "pushbox");
 cloneFrom(fileUrl(remotePush), pushbox);
 write(pushbox, "note.txt", "lab push note\n");
 
-function conflictRepo(path, pause) {
-  initWork(path);
-  commit(path, "src/both-sides.ts", "export const side = \"base\";\n", "base text");
-  commit(path, "docs/removed-there.md", "keep\n", "base doc");
-  commit(path, "art/removed-here.png", pngA, "base image");
-  commit(path, "data/sheet.xlsx", xlsx("base"), "base sheet");
-  git(path, ["checkout", "-b", "topic"]);
-  commit(path, "src/both-sides.ts", "export const side = \"topic\";\n", "topic text");
-  git(path, ["rm", "docs/removed-there.md"]);
-  git(path, ["commit", "-m", "topic removes the doc"]);
-  commit(path, "src/both-added.ts", "export const added = \"topic\";\n", "topic adds a file");
-  commit(path, "art/removed-here.png", pngB, "topic image");
-  commit(path, "data/sheet.xlsx", xlsx("topic"), "topic sheet");
-  git(path, ["checkout", "main"]);
-  commit(path, "src/both-sides.ts", "export const side = \"main\";\n", "main text");
-  commit(path, "docs/removed-there.md", "keep\nmain edit\n", "main edits the doc");
-  commit(path, "src/both-added.ts", "export const added = \"main\";\n", "main adds a file");
-  commit(path, "art/removed-here.png", pngC, "main image");
-  commit(path, "data/sheet.xlsx", xlsx("main"), "main sheet");
-  const merged = git(path, ["merge", "topic"], { allowFail: true });
-  if (merged.status === 0) throw new Error(`${path} merge did not conflict`);
-  if (!has(path, join(".git", "MERGE_HEAD"))) throw new Error(`${path} has no MERGE_HEAD`);
-  if (pause) pauseIndex(path, "MERGE_HEAD");
-}
-
 conflictRepo(join(repos, "conflict"), null);
 conflictRepo(join(repos, "merge"), pauseIndex);
 
@@ -248,7 +376,9 @@ const rebase = join(repos, "rebase");
 initWork(rebase);
 commit(rebase, "README.md", "rebase base\n", "rebase base");
 git(rebase, ["checkout", "-b", "side"]);
-commit(rebase, "side.txt", "side\n", "side work");
+for (let i = 1; i <= FILL; i++) {
+  commit(rebase, `side/step-${pad(i)}.txt`, `side ${i}\n`, `side work ${i}`);
+}
 git(rebase, ["checkout", "main"]);
 commit(rebase, "main.txt", "main\n", "main work");
 git(rebase, ["checkout", "side"]);
@@ -260,6 +390,7 @@ const paused = git(rebase, ["rebase", "-i", "main"], {
 if (!has(rebase, join(".git", "rebase-merge")) && !has(rebase, join(".git", "rebase-apply"))) {
   throw new Error(`rebase did not pause\n${paused.stdout ?? ""}\n${paused.stderr ?? ""}`);
 }
+dirtyBatch(rebase, "paused", FILL);
 
 function diverge(path, verb) {
   initWork(path);
@@ -272,6 +403,7 @@ function diverge(path, verb) {
     const result = git(path, ["cherry-pick", "side"], { allowFail: true });
     if (result.status === 0) throw new Error(`${path} cherry-pick did not conflict`);
     pauseIndex(path, "CHERRY_PICK_HEAD");
+    dirtyBatch(path, "paused", FILL);
     return;
   }
   commit(path, "a.txt", "one\n", "first");
@@ -280,6 +412,7 @@ function diverge(path, verb) {
   const result = git(path, ["revert", "--no-edit", "HEAD~1"], { allowFail: true });
   if (result.status === 0) throw new Error(`${path} revert did not conflict`);
   pauseIndex(path, "REVERT_HEAD");
+  dirtyBatch(path, "paused", FILL);
 }
 
 diverge(join(repos, "cherry"), "cherry");
@@ -287,13 +420,30 @@ diverge(join(repos, "revert"), "revert");
 
 const detached = join(repos, "detached");
 initWork(detached);
-commit(detached, "README.md", "detached base\n", "detached base");
-commit(detached, "README.md", "detached next\n", "detached next");
+for (let i = 1; i <= FILL; i++) {
+  commit(detached, "README.md", lines(i, "detached"), `detached ${i}`);
+}
 git(detached, ["checkout", "--detach", "HEAD"]);
-write(detached, "README.md", "detached next\nedited while detached\n");
+write(detached, "README.md", lines(FILL + 2, "detached edited"));
+dirtyBatch(detached, "pending", FILL);
 
 const unborn = join(repos, "unborn");
 initWork(unborn);
 write(unborn, "unborn.txt", "no commit yet\n");
+for (let i = 1; i <= FILL; i++) {
+  write(unborn, `pending/unborn-${pad(i)}.txt`, `unborn ${i}\n`);
+}
+
+for (let i = 1; i <= FILL; i++) {
+  const path = join(shelf, `r${pad(i)}`);
+  initWork(path);
+  commit(path, "README.md", `shelf ${i}\n`, `shelf ${i}`);
+}
+
+const recent = readdirSync(shelf)
+  .filter((name) => name.startsWith("r"))
+  .sort()
+  .map((name) => join(shelf, name));
+writeFileSync(join(lab, "recent.txt"), recent.join("\n") + "\n");
 
 console.log("lab repositories ready");
