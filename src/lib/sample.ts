@@ -88,7 +88,7 @@ function files(paths: string[]): FileChange[] {
   return paths.map((path, index) => ({ path, kind: kinds[index % kinds.length] }));
 }
 
-/** Web preview file lists. Paths stay unique so the two panes do not highlight the same row. */
+/** Sample file lists. Paths stay unique so the two panes do not highlight the same row. */
 const sampleUnstagedFiles: FileChange[] = files([
   "app/src/main/kotlin/com/zhoujun/awegit/ui/status/StatusPane.kt",
   "app/src/main/kotlin/com/zhoujun/awegit/theme/Theme.kt",

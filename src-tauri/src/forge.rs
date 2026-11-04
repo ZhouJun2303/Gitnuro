@@ -343,6 +343,7 @@ fn http_get(url: &str, headers: &[(&str, &str)]) -> Result<String, String> {
 
 fn http_send(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<String, String> {
     let mut command = std::process::Command::new("curl");
+    awegit_git::hide_console(&mut command);
     command.args(["--silent", "--show-error", "--fail", "--max-time", "20", "--request", method, "--header", "User-Agent: AweGit"]);
     if let Some(body) = body {
         command.arg("--data").arg(body);

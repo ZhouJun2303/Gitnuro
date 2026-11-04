@@ -2,11 +2,26 @@
   import { getShell } from "./context";
   import "./DialogHost.css";
   import PrefsDialog from "./PrefsDialog.svelte";
-  import { invoke } from "../perf";
+  import { flushClientLog, invoke } from "../perf";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { cloneTarget, cloneUrl } from "../clonePath";
 
   const shell = getShell();
+  let diagnosticsCopied = $state(false);
+
+  async function copyDiagnostics() {
+    try {
+      await flushClientLog();
+      const text = await invoke<string>("diagnostics");
+      shell.copyText(text);
+      diagnosticsCopied = true;
+      window.setTimeout(() => {
+        diagnosticsCopied = false;
+      }, 1500);
+    } catch (error) {
+      shell.actionError = shell.message(error);
+    }
+  }
   let primedDialog = "";
   $effect(() => {
     const dialog = shell.dialog ?? "";
@@ -497,7 +512,10 @@
         {:else if shell.dialog === "about"}
           <h2>AweGit {shell.appVersion}</h2>
           <p class="empty">com.zhoujun.awegit. Windows builds include MinGit 2.56.0. macOS uses the system Git.</p>
-          <button class="commit" type="button" onclick={() => (shell.dialog = null)}>Close</button>
+          <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => void copyDiagnostics()}>{diagnosticsCopied ? shell.tr("chrome.copied") : shell.tr("dialog.copyDiagnostics")}</button>
+            <button class="commit" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
+          </div>
         {:else if shell.dialog === "output"}
           <h2>Command output</h2>
           <pre class="diff-body">{shell.commandOutput}</pre>

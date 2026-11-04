@@ -15,7 +15,7 @@
 
 - `src`：界面
 - `src-tauri`：窗口、命令、设置
-- `crates/git`：状态用 gitoxide，历史和写操作走 `git` porcelain
+- `crates/git`：状态用 gitoxide，差异文本、历史和写操作走 `git` porcelain
 
 约定：
 
@@ -28,6 +28,7 @@
 - 测试：`pnpm test`（`cargo test -p awegit-git -- --test-threads=1`）
 - 类型检查：`pnpm check`
 - Windows 打包：`pnpm package:windows`
+- Windows 发布：`publish.bat`（默认定修订号加一后打包并上传）。`pnpm publish:windows` 只在 `release` 分支发布当前版本
 - macOS 打包：`pnpm package:mac`
 - 不提交 `target/`、`node_modules/`、`src-tauri/target/`，也不提交打包进来的 MinGit
 

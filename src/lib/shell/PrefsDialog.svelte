@@ -208,7 +208,20 @@
                 <option value="dark">{shell.tr("dialog.dark")}</option>
               </select>
             </label>
-            <button class="text-button" type="button" onclick={() => void shell.checkForUpdate()}>{shell.tr("chrome.checkUpdate")}</button>
+            <p class="empty">{shell.tr("chrome.updateVersion", { version: shell.appVersion })}</p>
+            <button class="text-button" type="button" disabled={shell.updatePhase === "checking" || shell.updateBusy} onclick={() => void shell.checkForUpdate()}>{shell.updatePhase === "checking" ? shell.tr("chrome.updateChecking") : shell.tr("chrome.checkUpdate")}</button>
+            {#if shell.updateMessage}<p class="empty">{shell.updateMessage}</p>{/if}
+            {#if shell.updatePhase === "downloading" && shell.updatePercent != null}
+              <div class="update-track" aria-hidden="true"><span style:width={`${shell.updatePercent}%`}></span></div>
+            {/if}
+            {#if shell.updateNotice}
+              <p>{shell.tr("chrome.updateAvailable", { name: `AweGit ${shell.updateNotice.appVersion}` })}</p>
+              {#if shell.updateNotice.notes}<p class="meta">{shell.updateNotice.notes}</p>{/if}
+              <div class="composer-row">
+                <button class="text-button" type="button" disabled={shell.updateBusy} onclick={() => void shell.installUpdate()}>{shell.updateBusy ? shell.tr("chrome.updateDownloading") : shell.tr("chrome.updateInstall")}</button>
+                <button class="text-button" type="button" disabled={shell.updateBusy} onclick={() => shell.dismissUpdate()}>{shell.tr("chrome.updateLater")}</button>
+              </div>
+            {/if}
           {:else}
             <label class="check"><input type="checkbox" bind:checked={shell.settings.pullRebase} /> Pull with rebase</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.fetchPrune} /> Prune on fetch</label>

@@ -134,6 +134,10 @@ export type Messages = {
     updateLater: string;
     updateDownloading: string;
     updateCurrent: string;
+    updateChecking: string;
+    updateProgress: string;
+    updateStarted: string;
+    updateVersion: string;
     readingStatus: string;
     noChanges: string;
     inProgress: string;
@@ -390,6 +394,7 @@ export type Messages = {
     cloneBusy: string;
     open: string;
     about: string;
+    copyDiagnostics: string;
     resetTo: string;
     imageSide: string;
     imageSwipe: string;

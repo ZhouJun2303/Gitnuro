@@ -947,6 +947,21 @@ input[type="checkbox"]:disabled,
 
 .tree-mark.alert { background: #cf222e; color: #fff; }
 
+.update-track {
+  width: 140px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--field);
+  overflow: hidden;
+  flex: none;
+}
+
+.update-track > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
 .issue { color: var(--accent); text-decoration: none; }
 
 .twist { width: 14px; height: 14px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); }

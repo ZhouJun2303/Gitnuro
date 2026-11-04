@@ -1,20 +1,17 @@
 ---
-name: Feature request
-about: Suggest an idea for this project
+name: 功能建议
+about: 建议 AweGit 增加或调整一项功能
 title: ''
 labels: enhancement
 assignees: ''
-
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+**想解决什么**
 
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+**希望怎样工作**
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+**还可以怎么做**
 
-**Additional context**
-Add any other context or screenshots about the feature request here.
+**其他说明**
+
+使用的系统是 Windows 还是 macOS，以及相关的 AweGit 版本。

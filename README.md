@@ -30,6 +30,7 @@ macOS 使用系统 Git 和系统上的 `cargo`，不需要上面的 PATH。
 | 类型检查 | `pnpm check` | Svelte 和 TypeScript，不跑 Git |
 | Rust 测试 | `pnpm test` | `awegit-git` 的全部测试，使用临时仓库 |
 | 打 Windows 安装包 | `pnpm package:windows` | `target\release\bundle` 下的 exe 和 msi |
+| 发布到 GitHub | `publish.bat` | 选择版本号，打包并上传到 Release |
 | 打 macOS 安装包 | `pnpm package:mac` | 只能在 Mac 上运行，产物在 `target/release/bundle` |
 
 `pnpm start` 就是 `pnpm tauri dev`。`pnpm test` 就是 `cargo test -p awegit-git -- --test-threads=1`。
@@ -80,13 +81,11 @@ pnpm package:windows
 - `target\release\bundle\nsis\AweGit_2.0.0_x64-setup.exe`
 - `target\release\bundle\msi\AweGit_2.0.0_x64_en-US.msi`
 
-发布到 GitHub，并让已安装的客户端能检查到这个版本：
+发布到 GitHub 时，在仓库根目录双击或运行 `publish.bat`。第 1 项会把修订号加一（2.0.0 变成 2.0.1），然后打包并上传。也可以选次版本、主版本、指定版本、不改版本，或只打包不上传。
 
-```powershell
-pnpm publish:windows
-```
+不在 `release` 分支上时，脚本会先把当前分支合并进 `release`，发布完成后再回到原来的分支。工作区要是干净的，并且 `gh` 已经登录。
 
-这条命令会先打包，再用 `gh` 创建 Release，然后提交并推送 `latest.json`。需要已经登录的 `gh`。
+已经在 `release` 分支、并且不想改版本号时，仍可以用 `pnpm publish:windows`。
 
 不要提交 `target\`、`src-tauri\target\`、`node_modules\` 和下载下来的 MinGit。
 

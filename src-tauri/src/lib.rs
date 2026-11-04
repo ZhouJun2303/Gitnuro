@@ -1057,6 +1057,7 @@ fn open_terminal(path: Option<String>) -> Result<(), String> {
     }
     let configured = loaded.map(|settings| settings.terminal).unwrap_or_default();
     let mut command = std::process::Command::new("cmd");
+    awegit_git::hide_console(&mut command);
     if configured.trim().is_empty() {
         command.args(["/C", "start", "cmd"]);
     } else {
@@ -1317,8 +1318,10 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
-fn download_update(url: String) -> Result<(), String> {
-    updates::download_and_open(&url)
+fn download_update(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    updates::download_and_open(&url, |percent| {
+        let _ = app.emit("update-progress", updates::UpdateProgress { percent });
+    })
 }
 
 #[tauri::command]
@@ -1436,14 +1439,7 @@ fn forge_notifications() -> Result<Vec<forge::Notice>, String> {
 fn forge_pulls(path: Option<String>) -> Result<Vec<forge::PullRequest>, String> {
     let repo = repo_from(path)?;
     let values = settings::load()?;
-    let url = std::process::Command::new("git")
-        .current_dir(&repo)
-        .args(["remote", "get-url", "origin"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .unwrap_or_default();
+    let url = awegit_git::origin_url(&repo);
     forge::pulls(
         &url,
         &account_token(&values, "github", &values.github_token),
@@ -1487,7 +1483,9 @@ fn generate_ssh_key() -> Result<String, String> {
     if key.exists() {
         return Err("id_ed25519 already exists".into());
     }
-    let output = std::process::Command::new("ssh-keygen")
+    let mut command = std::process::Command::new("ssh-keygen");
+    awegit_git::hide_console(&mut command);
+    let output = command
         .args(["-t", "ed25519", "-f"])
         .arg(&key)
         .args(["-N", "", "-C", "awegit"])
@@ -1797,6 +1795,11 @@ fn perf_snapshot() -> perf::Snapshot {
 }
 
 #[tauri::command]
+fn diagnostics() -> String {
+    perf::diagnostics()
+}
+
+#[tauri::command]
 fn open_log_folder() -> Result<(), String> {
     let dir = perf::dir();
     std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
@@ -1887,6 +1890,7 @@ pub fn run() {
             save_revision,
             log_client,
             perf_snapshot,
+            diagnostics,
             open_log_folder
         ]);
     tauri::Builder::default()
