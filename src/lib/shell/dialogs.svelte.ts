@@ -1055,6 +1055,38 @@ export async function keepPassphrase(shell: ShellState) {
     shell.passphrase = "";
   }
 
+export async function loadMergePreview(shell: ShellState) {
+    const source = shell.draft.trim();
+    const into = shell.snapshot?.branch || "HEAD";
+    shell.mergeInto = into;
+    if (shell.mode !== "live" || !source) {
+      shell.mergeFiles = [];
+      fillMergeText(shell, into, source);
+      return;
+    }
+    const preview = await invoke<{ into: string; files: { status: string; path: string }[] }>("merge_preview", {
+      path: shell.repoPath(),
+      name: source,
+    }).catch(() => null);
+    if (shell.dialog !== "merge" || shell.draft.trim() !== source) return;
+    shell.mergeInto = preview?.into || into;
+    shell.mergeFiles = preview?.files ?? [];
+    fillMergeText(shell, shell.mergeInto, source);
+  }
+
+export function refreshMergeSummary(shell: ShellState) {
+    fillMergeText(shell, shell.mergeInto || shell.snapshot?.branch || "HEAD", shell.draft.trim());
+  }
+
+function fillMergeText(shell: ShellState, into: string, source: string) {
+    const summary = shell.tr(shell.draftExtra === "squash" ? "dialog.mergeSquashTitle" : "dialog.mergeTitleLine", { source, into });
+    const body = shell.mergeFiles.map((file) => `${file.status}\t${file.path}`).join("\n");
+    if (shell.mergeSummary === shell.mergeAutoSummary) shell.mergeSummary = summary;
+    shell.mergeAutoSummary = summary;
+    if (shell.mergeBody === shell.mergeAutoBody) shell.mergeBody = body;
+    shell.mergeAutoBody = body;
+  }
+
 export async function saveWindow(shell: ShellState) {
     if (!shell.inApp()) return;
     const win = getCurrentWindow();

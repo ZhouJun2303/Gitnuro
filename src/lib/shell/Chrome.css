@@ -376,20 +376,48 @@
 
 .tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
 
+.notice-stack {
+    position: fixed;
+    top: 36px;
+    left: 50%;
+    z-index: 70;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    width: min(560px, calc(100vw - 32px));
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
 .banner {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
-    min-height: 28px;
-    padding: 0 12px;
-    background: var(--selection);
+    min-height: 36px;
+    padding: 8px 12px;
+    pointer-events: auto;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--elevated);
+    box-shadow: var(--shadow);
+  }
+
+.banner > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
 .banner .grow { flex: 1; }
 
 .banner.unmerged {
-    background: color-mix(in srgb, var(--modified) 14%, var(--canvas));
+    background: color-mix(in srgb, var(--modified) 14%, var(--elevated));
     color: var(--text);
+  }
+
+.banner.error {
+    background: color-mix(in srgb, var(--deleted) 14%, var(--elevated));
   }
 
 .row-action {

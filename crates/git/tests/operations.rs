@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    conflict_view, file_diff, file_preview, in_progress, launch_merge_tool, perform, repository_refs, search_commits, search_log, stage_hunk, stage_line, status,
+    conflict_view, file_diff, file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs, search_commits, search_log, stage_hunk, stage_line, status,
     stop_process_tree, ChangeKind, InProgress, Mutation, RebaseStep, ResetMode,
 };
 
@@ -176,6 +176,8 @@ fn merge_conflict_rebase_abort_stash_and_tag() {
             squash: false,
             no_ff: false,
             autostash: false,
+            summary: String::new(),
+            description: String::new(),
         },
     );
     assert!(conflict.is_err(), "merge should conflict");
@@ -484,6 +486,8 @@ fn resolve_conflict_keeps_ours() {
             squash: false,
             no_ff: false,
             autostash: false,
+            summary: String::new(),
+            description: String::new(),
         },
     );
     assert!(merge.is_err(), "expected a conflict");
@@ -722,7 +726,7 @@ fn clean_merge_leaves_no_backup() {
     fs::write(repo.path.join("a.txt"), "dirty\n").unwrap();
     perform(
         &repo.path,
-        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false },
+        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false, summary: String::new(), description: String::new() },
     )
     .unwrap();
     assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
@@ -997,7 +1001,7 @@ fn resolve_text_writes_the_editor_result() {
     commit_file(&repo, "a.txt", "main\n", "main");
     let _ = perform(
         &repo.path,
-        Mutation::Merge { name: "side".into(), squash: false, no_ff: false, autostash: false },
+        Mutation::Merge { name: "side".into(), squash: false, no_ff: false, autostash: false, summary: String::new(), description: String::new() },
     );
     perform(
         &repo.path,
@@ -1053,7 +1057,7 @@ fn merge_conflict_names_both_branches() {
     commit_file(&repo, "gone.txt", "edited\n", "edit-gone");
     assert!(perform(
         &repo.path,
-        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false },
+        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false, summary: String::new(), description: String::new() },
     )
     .is_err());
     let edited = conflict_view(&repo.path, "a.txt").unwrap();
@@ -1084,7 +1088,7 @@ fn binary_merge_conflict() -> common::TempRepo {
     repo.git(&["commit", "-am", "main"]);
     assert!(perform(
         &repo.path,
-        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false },
+        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false, summary: String::new(), description: String::new() },
     )
     .is_err());
     repo
@@ -1129,6 +1133,58 @@ fn merge_tool_starts_cmd_without_bad_exe() {
     let launched = launched.trim().trim_matches('"');
     assert!(launched.ends_with("sheet.xlsx"), "{launched}");
     assert_eq!(fs::read(launched).unwrap(), b"PK\x03\x04main");
+}
+
+#[test]
+fn discard_paths_restores_tracked_and_deletes_the_rest() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    commit_file(&repo, "b.txt", "two\n", "base-b");
+    fs::write(repo.path.join("a.txt"), "changed\n").unwrap();
+    fs::write(repo.path.join("b.txt"), "changed\n").unwrap();
+    fs::write(repo.path.join("c.txt"), "new\n").unwrap();
+    fs::write(repo.path.join("e.txt"), "added\n").unwrap();
+    repo.git(&["add", "--", "e.txt"]);
+    perform(
+        &repo.path,
+        Mutation::DiscardPaths {
+            files: vec!["a.txt".into(), "b.txt".into(), "c.txt".into(), "e.txt".into(), "missing.txt".into()],
+        },
+    )
+    .unwrap();
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "one\n");
+    assert_eq!(fs::read_to_string(repo.path.join("b.txt")).unwrap(), "two\n");
+    assert!(!repo.path.join("c.txt").exists());
+    assert!(!repo.path.join("e.txt").exists());
+    let after = status(&repo.path).unwrap();
+    assert!(after.staged.is_empty() && after.unstaged.is_empty(), "{after:?}");
+}
+
+#[test]
+fn merge_preview_fills_message() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "b.txt", "topic\n", "topic");
+    repo.git(&["checkout", "main"]);
+    let preview = merge_preview(&repo.path, "topic").unwrap();
+    assert_eq!(preview.into, "main");
+    assert!(preview.files.iter().any(|file| file.path == "b.txt"), "{:?}", preview.files);
+    perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "topic".into(),
+            squash: false,
+            no_ff: true,
+            autostash: false,
+            summary: "Merge topic into main".into(),
+            description: "A\tb.txt".into(),
+        },
+    )
+    .unwrap();
+    let log = repo.output(&["log", "-1", "--format=%B"]);
+    assert!(log.contains("Merge topic into main"), "{log}");
+    assert!(log.contains("b.txt"), "{log}");
 }
 
 struct RemoveDir(PathBuf);

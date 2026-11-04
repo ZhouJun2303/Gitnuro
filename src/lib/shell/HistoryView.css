@@ -77,6 +77,22 @@
 
 .lane-name.compact { max-width: 88px; }
 
+.lane-name.local-only {
+    position: relative;
+    padding-right: 12px;
+  }
+
+.lane-name.local-only::after {
+    content: "";
+    position: absolute;
+    top: 1px;
+    right: 2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--modified);
+  }
+
 .lane-name > span {
     overflow: hidden;
     text-overflow: ellipsis;

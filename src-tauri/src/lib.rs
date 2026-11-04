@@ -514,7 +514,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::CheckoutRemote { .. } => "checkoutRemote",
         awegit_git::Mutation::PushRef { .. } => "pushRef",
         awegit_git::Mutation::PullRef { .. } => "pullRef",
-        awegit_git::Mutation::Discard { .. } => "discard",
+        awegit_git::Mutation::Discard { .. } | awegit_git::Mutation::DiscardPaths { .. } => "discard",
         awegit_git::Mutation::Delete { .. } => "delete",
         awegit_git::Mutation::ApplyPatch { .. } => "applyPatch",
         awegit_git::Mutation::AddRemote { .. } => "addRemote",
@@ -564,8 +564,8 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::Checkout { name } => scrub(name),
         Mutation::DeleteBranch { name, force } => join([scrub(name), flag("force", *force)]),
         Mutation::CreateBranch { name, start } => join([scrub(name), opt(start)]),
-        Mutation::Merge { name, squash, no_ff, autostash } => {
-            join([scrub(name), flag("squash", *squash), flag("noFf", *no_ff), flag("autostash", *autostash)])
+        Mutation::Merge { name, squash, no_ff, autostash, summary, description } => {
+            join([scrub(name), flag("squash", *squash), flag("noFf", *no_ff), flag("autostash", *autostash), bytes("summary", summary), bytes("description", description)])
         }
         Mutation::Rebase { onto, autostash } => join([scrub(onto), flag("autostash", *autostash)]),
         Mutation::RebaseInteractive { onto, drop, steps, autostash, update_refs } => {
@@ -594,6 +594,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::StagePaths { files, unstage } => join([files.iter().cloned().map(|file| scrub(&file)).collect::<Vec<_>>().join(","), flag("unstage", *unstage)]),
         Mutation::DiscardHunk { file, index } => join([scrub(file), format!("hunk={index}")]),
         Mutation::DiscardLine { file, .. } | Mutation::Discard { file } | Mutation::Delete { file } => scrub(file),
+        Mutation::DiscardPaths { files } => format!("files={}", files.len()),
         Mutation::Resolve { file, side, text } => join([scrub(file), scrub(side), format!("bytes={}", text.len())]),
         Mutation::RenameBranch { name, to } => join([scrub(name), scrub(to)]),
         Mutation::SetUpstream { branch, upstream } => join([scrub(branch), scrub(upstream)]),
@@ -761,7 +762,7 @@ fn heavy_dir(name: &str) -> bool {
         "out",
         "build",
     ];
-    NAMES.iter().any(|item| name.eq_ignore_ascii_case(item))
+    NAMES.iter().any(|item| name.eq_ignore_ascii_case(item)) || awegit_git::codex_scratch_name(name)
 }
 
 fn skipped_path(path: &Path) -> bool {
@@ -1533,6 +1534,12 @@ fn cherry_preview(path: Option<String>, rev: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn merge_preview(path: Option<String>, name: String) -> Result<awegit_git::MergePreview, String> {
+    let repo = repo_from(path)?;
+    awegit_git::merge_preview(&repo, &name).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn merged_branches(path: Option<String>) -> Result<Vec<String>, String> {
     let repo = repo_from(path)?;
     awegit_git::merged_branches(&repo).map_err(|error| error.to_string())
@@ -1875,6 +1882,7 @@ pub fn run() {
             search_commits,
             search_log,
             cherry_preview,
+            merge_preview,
             merged_branches,
             pick_history,
             activity_log,

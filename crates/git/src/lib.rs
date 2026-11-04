@@ -28,8 +28,8 @@ pub use cli::{
     stop_process_tree, use_bundled_git, with_operation_repo, Session, Trace,
 };
 pub use ops::{
-    approve_credential, cherry_preview, merged_branches, perform, pick_history, repo_facts, repo_facts_brief, scan_repositories, search_commits,
-    set_repo_author, HotPath, Mutation, RebaseStep, RepoFacts, ResetMode, SearchHit,
+    approve_credential, cherry_preview, merge_preview, merged_branches, perform, pick_history, repo_facts, repo_facts_brief, scan_repositories,
+    search_commits, set_repo_author, HotPath, MergeFile, MergePreview, Mutation, RebaseStep, RepoFacts, ResetMode, SearchHit,
 };
 
 use gix::bstr::BStr;
@@ -136,6 +136,8 @@ pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSna
 
     sort_changes(&mut staged);
     sort_changes(&mut unstaged);
+    hide_scratch(&mut staged);
+    hide_scratch(&mut unstaged);
     if fakeignore {
         fakeignore::conceal(worktree.as_path(), &repo, &mut staged, &mut unstaged);
     }
@@ -145,6 +147,30 @@ pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSna
         staged,
         unstaged,
     })
+}
+
+/// Codex artifact directories (`.tmp_artifact`, `.tmp_artifact2`, …). They are not repository changes.
+pub fn codex_scratch_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix(".tmp_artifact") else {
+        return false;
+    };
+    rest.is_empty() || rest.chars().all(|ch| ch.is_ascii_digit())
+}
+
+/// True when any path segment is a Codex artifact directory.
+pub fn codex_scratch(path: &str) -> bool {
+    path.split(['/', '\\']).any(codex_scratch_name)
+}
+
+fn hide_scratch(changes: &mut Vec<FileChange>) {
+    changes.retain(|change| !scratch_change(change));
+}
+
+fn scratch_change(change: &FileChange) -> bool {
+    if codex_scratch(&change.path) {
+        return true;
+    }
+    change.previous_path.as_deref().is_some_and(codex_scratch)
 }
 
 /// Unstage index entries that `.fakeignore` matches. Used so stage-all and commit skip local test files.

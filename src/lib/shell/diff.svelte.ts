@@ -552,8 +552,11 @@ export function pickedIn(shell: ShellState, rows: Row[]) {
   }
 
 export async function discardPicked(shell: ShellState, files = [...shell.picked]) {
-    for (const file of files) await shell.mutate({ action: "discard", file });
-    shell.picked = shell.picked.filter((path) => !files.includes(path));
+    const names = [...new Set(files.filter((path) => path.length > 0))];
+    if (names.length === 0 || shell.busy) return;
+    if (names.length === 1) await shell.mutate({ action: "discard", file: names[0] });
+    else await shell.mutate({ action: "discardPaths", files: names });
+    if (!shell.actionError) shell.picked = shell.picked.filter((path) => !names.includes(path));
   }
 
 export async function unstagePicked(shell: ShellState, files = [...shell.picked]) {

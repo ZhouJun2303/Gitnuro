@@ -154,6 +154,7 @@
             class="side nested"
             class:deep={row.deep}
             class:current={row.current}
+            class:local-only={shell.branchMissingRemote(row.name)}
             class:selected={shell.sideSelected === `local:${row.name}`}
             role="group"
             oncontextmenu={(event) => shell.openMenu(event, [
@@ -176,7 +177,7 @@
               ...shell.commandItems("branch"),
             ])}
           >
-            <button class="file-select" type="button" title={row.name} onclick={(event) => { shell.sideSelected = `local:${row.name}`; if (event.ctrlKey || event.metaKey) shell.compareWith = row.name; else void shell.locateRef(row.name); }} ondblclick={() => !row.current && void shell.quickCheckout(row.name)}>
+            <button class="file-select" type="button" title={shell.branchMissingRemote(row.name) ? `${row.name} · ${shell.tr("chrome.localOnly")}` : row.name} onclick={(event) => { shell.sideSelected = `local:${row.name}`; if (event.ctrlKey || event.metaKey) shell.compareWith = row.name; else void shell.locateRef(row.name); }} ondblclick={() => !row.current && void shell.quickCheckout(row.name)}>
               <span class="twist"></span>
               {@render glyph(row.current ? "check" : "branch")}
               <span class="name">{shell.pinnedHere.has(row.name) ? "• " : ""}{row.group ? row.name.slice(row.group.length + 1) : row.name}</span>

@@ -81,6 +81,19 @@
 
 .side.nested { position: relative; }
 
+.side.nested.local-only::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    right: 4px;
+    z-index: 3;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--modified);
+    pointer-events: none;
+  }
+
 .side.nested:hover:has(.branch-switches) .ahead,
   .side.nested:focus-within:has(.branch-switches) .ahead { visibility: hidden; }
 

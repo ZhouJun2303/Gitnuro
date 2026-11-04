@@ -4,11 +4,12 @@
 //! they are placed on the command line. Cancellation of a running command is the
 //! caller's job; these functions wait for `git` to exit.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{check_name, check_path, check_rev, run, run_env, run_output, run_stdin, with_operation_repo};
+use crate::cli::{check_name, check_path, check_rev, commit_config, has_local_author, run, run_env, run_output, run_repo_author, run_stdin, with_operation_repo};
 use crate::model::in_progress;
 use crate::{commit, discard_hunk, discard_line, resolve_conflict, stage_hunk, stage_line, stage_paths, unstage_paths, CommitRequest, Error, InProgress};
 
@@ -109,6 +110,12 @@ pub enum Mutation {
         no_ff: bool,
         #[serde(default)]
         autostash: bool,
+        /// First line of the merge commit. Empty keeps Git's own message.
+        #[serde(default)]
+        summary: String,
+        /// Extra paragraphs, usually the files this merge brings in.
+        #[serde(default)]
+        description: String,
     },
     Rebase {
         onto: String,
@@ -269,6 +276,10 @@ pub enum Mutation {
     },
     Discard {
         file: String,
+    },
+    /// Drop worktree changes for many paths in one pass.
+    DiscardPaths {
+        files: Vec<String>,
     },
     Delete {
         file: String,
@@ -486,7 +497,9 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             squash,
             no_ff,
             autostash,
-        } => merge(repo, &name, squash, no_ff, autostash),
+            summary,
+            description,
+        } => merge(repo, &name, squash, no_ff, autostash, &summary, &description),
         Mutation::Rebase { onto, autostash } => rebase_onto(repo, &onto, autostash),
         Mutation::RebaseInteractive { onto, drop, steps, autostash, update_refs } => {
             rebase_interactive(repo, &onto, &drop, &steps, autostash, update_refs)
@@ -587,6 +600,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             autostash,
         } => pull_ref(repo, &remote, &branch, rebase, autostash),
         Mutation::Discard { file } => discard(repo, &file),
+        Mutation::DiscardPaths { files } => discard_paths(repo, &files),
         Mutation::Delete { file } => delete_path(repo, &file),
         Mutation::ApplyPatch { patch } => run_stdin(repo, &["apply", "--index"], patch.as_bytes()).map(|_| ()),
         Mutation::AddRemote { name, url } => {
@@ -912,20 +926,155 @@ fn create_branch(repo: &Path, name: &str, start: Option<&str>) -> Result<(), Err
     }
 }
 
-fn merge(repo: &Path, name: &str, squash: bool, no_ff: bool, autostash: bool) -> Result<(), Error> {
+fn merge(
+    repo: &Path,
+    name: &str,
+    squash: bool,
+    no_ff: bool,
+    autostash: bool,
+    summary: &str,
+    description: &str,
+) -> Result<(), Error> {
     let name = check_rev(name)?;
-    let mut args = vec!["merge"];
+    let summary = summary.trim();
+    let description = description.trim();
+    let mut message = String::new();
+    if !summary.is_empty() || !description.is_empty() {
+        if summary.is_empty() {
+            message.push_str("Merge ");
+            message.push_str(name);
+        } else {
+            message.push_str(summary);
+        }
+        if !description.is_empty() {
+            message.push_str("\n\n");
+            message.push_str(description);
+        }
+    }
+    let stored = if message.is_empty() { None } else { Some(message_file(&message)?) };
+    let mut args = vec!["merge".to_string()];
     if autostash {
-        args.push("--autostash");
+        args.push("--autostash".into());
     }
     if squash {
-        args.push("--squash");
+        args.push("--squash".into());
     } else if no_ff {
-        args.push("--no-ff");
+        args.push("--no-ff".into());
     }
-    args.push("--no-edit");
-    args.push(name);
-    with_editor(repo, &args)
+    if let Some(file) = stored.as_ref().filter(|_| !squash) {
+        args.push("-F".into());
+        args.push(file.0.display().to_string());
+    } else if !squash {
+        args.push("--no-edit".into());
+    }
+    args.push(name.to_string());
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    with_editor(repo, &refs)?;
+    if squash && !has_unmerged(repo) {
+        let staged = run(repo, &["diff", "--cached", "--name-only"])?;
+        if staged.stdout.iter().any(|byte| !byte.is_ascii_whitespace()) {
+            let fallback = if message.is_empty() { Some(message_file(&format!("Squash {name}"))?) } else { None };
+            let path = fallback.as_ref().or(stored.as_ref()).map(|file| file.0.as_path());
+            if let Some(path) = path {
+                commit_from_file(repo, path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+struct MessageFile(PathBuf);
+
+impl Drop for MessageFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn message_file(text: &str) -> Result<MessageFile, Error> {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let path = std::env::temp_dir().join(format!("awegit-merge-{}-{nanos}.txt", std::process::id()));
+    std::fs::write(&path, text).map_err(|source| Error::Read { path: path.display().to_string(), source })?;
+    Ok(MessageFile(path))
+}
+
+fn commit_from_file(repo: &Path, path: &Path) -> Result<(), Error> {
+    let mut args = commit_config(repo);
+    args.push("commit".into());
+    args.push("-F".into());
+    args.push(path.display().to_string());
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    if has_local_author(repo) {
+        run_repo_author(repo, &borrowed).map(|_| ())
+    } else {
+        run(repo, &borrowed).map(|_| ())
+    }
+}
+
+/// Files the merge would bring in, plus the branch that would receive them.
+pub fn merge_preview(repo: &Path, name: &str) -> Result<MergePreview, Error> {
+    let name = check_rev(name)?;
+    Ok(MergePreview {
+        into: current_branch_name(repo),
+        files: changed_names(repo, name)?,
+    })
+}
+
+fn current_branch_name(repo: &Path) -> String {
+    match run(repo, &["branch", "--show-current"]) {
+        Ok(output) => {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if name.is_empty() { "HEAD".into() } else { name }
+        }
+        Err(_) => "HEAD".into(),
+    }
+}
+
+fn changed_names(repo: &Path, name: &str) -> Result<Vec<MergeFile>, Error> {
+    let triple = format!("HEAD...{name}");
+    let output = match run(repo, &["diff", "--name-status", &triple]) {
+        Ok(output) => output,
+        Err(_) => run(repo, &["diff", "--name-status", &format!("HEAD..{name}")])?,
+    };
+    Ok(parse_name_status(&output.stdout))
+}
+
+fn parse_name_status(stdout: &[u8]) -> Vec<MergeFile> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            let mut parts = line.split('\t');
+            let status = parts.next()?.trim();
+            let path = parts.last()?.trim();
+            if status.is_empty() || path.is_empty() {
+                return None;
+            }
+            Some(MergeFile {
+                status: status.chars().next()?.to_string(),
+                path: path.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// One changed path in a merge preview.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeFile {
+    pub status: String,
+    pub path: String,
+}
+
+/// Where a merge lands, and the paths it would change.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergePreview {
+    pub into: String,
+    pub files: Vec<MergeFile>,
 }
 
 /// Store a credential in the user's installed helper. The password is not written to settings.
@@ -1041,6 +1190,124 @@ fn discard(repo: &Path, file: &str) -> Result<(), Error> {
     } else {
         remove_worktree_file(repo, file)
     }
+}
+
+/// Restore tracked paths from `HEAD`, drop index-only additions, and delete the rest.
+/// One `ls-files` and one `cat-file` cover the whole list. Git itself is called per chunk.
+fn discard_paths(repo: &Path, files: &[String]) -> Result<(), Error> {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    for file in files {
+        let path = check_path(file)?.to_string();
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let indexed = paths_in_index(repo, &paths)?;
+    let headed = paths_in_head(repo, &paths)?;
+    let mut restore = Vec::new();
+    let mut remove_index = Vec::new();
+    let mut remove_disk = Vec::new();
+    for path in &paths {
+        if headed.contains(path) {
+            restore.push(path.clone());
+        } else if indexed.contains(&slash(path)) {
+            remove_index.push(path.clone());
+        } else {
+            remove_disk.push(path.clone());
+        }
+    }
+    git_arg_paths(repo, &["restore", "--worktree", "--source=HEAD", "--"], &restore)?;
+    git_arg_paths(repo, &["rm", "-f", "--"], &remove_index)?;
+    for path in remove_disk {
+        match remove_worktree_file(repo, &path) {
+            Ok(()) => {}
+            Err(Error::Read { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn slash(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+fn paths_in_index(repo: &Path, paths: &[String]) -> Result<HashSet<String>, Error> {
+    let mut found = HashSet::new();
+    for_chunks(paths, |chunk| {
+        let mut args = vec!["--literal-pathspecs".to_string(), "ls-files".into(), "-z".into(), "--".into()];
+        for path in chunk {
+            args.push(check_path(path)?.to_string());
+        }
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        let output = run(repo, &refs)?;
+        for path in output.stdout.split(|byte| *byte == 0) {
+            if path.is_empty() {
+                continue;
+            }
+            found.insert(slash(&String::from_utf8_lossy(path)));
+        }
+        Ok(())
+    })?;
+    Ok(found)
+}
+
+fn paths_in_head(repo: &Path, paths: &[String]) -> Result<HashSet<String>, Error> {
+    let mut body = String::new();
+    for path in paths {
+        body.push_str("HEAD:");
+        body.push_str(path);
+        body.push('\n');
+    }
+    let output = match run_stdin(repo, &["cat-file", "--batch-check"], body.as_bytes()) {
+        Ok(output) => output,
+        Err(_) => return Ok(HashSet::new()),
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut found = HashSet::new();
+    for (path, line) in paths.iter().zip(text.lines()) {
+        let kind = line.split_whitespace().nth(1);
+        if kind == Some("blob") || kind == Some("commit") {
+            found.insert(path.clone());
+        }
+    }
+    Ok(found)
+}
+
+fn git_arg_paths(repo: &Path, prefix: &[&str], paths: &[String]) -> Result<(), Error> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    for_chunks(paths, |chunk| {
+        let mut owned: Vec<String> = prefix.iter().map(|item| (*item).to_string()).collect();
+        for path in chunk {
+            owned.push(check_path(path)?.to_string());
+        }
+        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
+        run(repo, &args).map(|_| ())
+    })
+}
+
+fn for_chunks(paths: &[String], mut run_chunk: impl FnMut(&[String]) -> Result<(), Error>) -> Result<(), Error> {
+    let mut start = 0;
+    while start < paths.len() {
+        let mut end = start;
+        let mut bytes = 0;
+        while end < paths.len() && end - start < 80 && bytes + paths[end].len() + 1 <= 6000 {
+            bytes += paths[end].len() + 1;
+            end += 1;
+        }
+        if end == start {
+            end = start + 1;
+        }
+        run_chunk(&paths[start..end])?;
+        start = end;
+    }
+    Ok(())
 }
 
 fn delete_path(repo: &Path, file: &str) -> Result<(), Error> {

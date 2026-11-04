@@ -187,6 +187,7 @@
     </div>
   </header>
 
+  <div class="notice-stack">
   {#if shell.cloneDone}
     <div class="banner">
       <span>{shell.tr("chrome.cloneReady", { name: shell.folderName(shell.cloneDone) })}</span>
@@ -235,3 +236,10 @@
       <button class="text-button" type="button" disabled={shell.busy || shell.progress === "merge"} onclick={() => shell.mutate({ action: "skip" })}>{shell.tr("chrome.skip")}</button>
     </div>
   {/if}
+  {#if shell.actionError}
+    <div class="banner error">
+      <span>{shell.actionError}</span>
+      <button class="text-button" type="button" onclick={() => shell.closeError()}>{shell.tr("chrome.close")}</button>
+    </div>
+  {/if}
+  </div>

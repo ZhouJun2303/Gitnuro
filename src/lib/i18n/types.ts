@@ -138,6 +138,7 @@ export type Messages = {
     updateProgress: string;
     updateStarted: string;
     updateVersion: string;
+    localOnly: string;
     readingStatus: string;
     noChanges: string;
     inProgress: string;
@@ -362,6 +363,13 @@ export type Messages = {
     tag: string;
     message: string;
     merge: string;
+    mergeTitleLine: string;
+    mergeSquashTitle: string;
+    mergeDetail: string;
+    mergeFileCount: string;
+    mergeFastForwardNote: string;
+    mergeAutostash: string;
+    mergeClean: string;
     fastForward: string;
     noFastForward: string;
     squash: string;

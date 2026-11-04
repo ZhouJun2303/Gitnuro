@@ -644,7 +644,7 @@
   {/if}
   {#if shell.confirmAsk}
     <div class="scrim" role="presentation">
-      <div class="dialog" role="dialog">
+      <div class="dialog sm" data-confirm role="dialog" tabindex="-1">
         <h2>{shell.confirmAsk.title}</h2>
         <p>{shell.confirmAsk.body}</p>
         <div class="composer-row">
@@ -656,7 +656,7 @@
   {/if}
   {#if shell.forgeOpen}
     <div class="scrim" role="presentation" onclick={() => (shell.forgeOpen = null)} onkeydown={() => {}}>
-      <div class="dialog" role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+      <div class="dialog md" role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()}>
         <h2>{shell.forgeOpen === "notes" ? shell.tr("chrome.notifications") : shell.tr("chrome.pulls")}</h2>
         {#if shell.forgeOpen === "notes"}
           {#if shell.notices.length === 0}<p class="empty">{shell.tr("dialog.noToken")}</p>{/if}

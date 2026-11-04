@@ -151,6 +151,28 @@ logs/*.txt
     );
 }
 
+#[test]
+fn codex_scratch_stays_out_of_status() {
+    let repo = common::TempRepo::new();
+    repo.git(&["init", "-b", "main"]);
+    repo.git(&["config", "user.name", "Test"]);
+    repo.git(&["config", "user.email", "test@example.com"]);
+    fs::write(repo.path.join("a.txt"), "one\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    repo.git(&["commit", "-m", "initial"]);
+    fs::create_dir_all(repo.path.join(".tmp_artifact")).unwrap();
+    fs::write(repo.path.join(".tmp_artifact").join("package.json"), "{}\n").unwrap();
+    fs::create_dir_all(repo.path.join(".tmp_artifact2")).unwrap();
+    fs::write(repo.path.join(".tmp_artifact2").join("note.txt"), "x\n").unwrap();
+    fs::write(repo.path.join("b.txt"), "new\n").unwrap();
+    let snapshot = status(&repo.path).unwrap();
+    assert!(snapshot.unstaged.iter().any(|change| change.path == "b.txt"), "{snapshot:?}");
+    assert!(
+        snapshot.unstaged.iter().all(|change| !change.path.contains("tmp_artifact")),
+        "{snapshot:?}"
+    );
+}
+
 fn assert_has(changes: &[FileChange], path: &str, kind: ChangeKind) {
     assert!(
         changes.iter().any(|change| change.path == path && change.kind == kind),

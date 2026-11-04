@@ -23,12 +23,27 @@
     }
   }
   let primedDialog = "";
+  const largeDialogs = new Set(["prefs", "resolve", "stats", "rebase", "accounts"]);
+  const smallDialogs = new Set(["reset", "branch", "tag", "rename", "upstream", "reword", "remote", "submodule", "worktree", "continue", "about", "checkoutNotice", "stashRename", "stashBranch", "renameTab", "colorTab", "groupRename", "askInput", "checkoutDirty", "workspace"]);
+  function dialogSize(kind: string) {
+    if (largeDialogs.has(kind)) return "lg";
+    if (smallDialogs.has(kind)) return "sm";
+    return "md";
+  }
   $effect(() => {
     const dialog = shell.dialog ?? "";
     if (dialog === primedDialog) return;
     primedDialog = dialog;
     if (dialog === "branch") shell.checkoutNewBranch = shell.settings.checkoutAfterCreate;
     if (dialog === "rebase") shell.updateRefs = shell.settings.rebaseUpdateRefs;
+    if (dialog === "merge") {
+      shell.mergeSummary = "";
+      shell.mergeBody = "";
+      shell.mergeAutoSummary = "";
+      shell.mergeAutoBody = "";
+      shell.mergeFiles = [];
+      void shell.loadMergePreview();
+    }
   });
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const focusWhen = (node: HTMLInputElement, on: boolean) => shell.focusWhen(node, on);
@@ -36,7 +51,7 @@
 
 {#if shell.dialog}
     <div class="scrim" role="presentation" onclick={() => { if (shell.dialog === "prefs") void shell.savePrefs(true); else shell.dialog = null; }}>
-      <div class="dialog" class:wide={shell.dialog === "prefs" || shell.dialog === "resolve" || shell.dialog === "stats"} class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+      <div class="dialog {dialogSize(shell.dialog ?? "")}" class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()}>
       <form
         onchange={() => { if (shell.dialog === "prefs") void shell.savePrefs(false); }}
         onsubmit={async (event) => {
@@ -94,7 +109,7 @@
           else if (shell.dialog === "upstream") void shell.mutate({ action: "setUpstream", branch: shell.draft, upstream: shell.draftExtra });
           else if (shell.dialog === "reword") void shell.mutate({ action: "reword", rev: shell.draftExtra || "HEAD", summary: shell.draft });
           else if (shell.dialog === "rebase" && shell.selectedCommit) void shell.mutate({ action: "rebaseInteractive", onto: shell.selectedCommit, drop: [], steps: shell.rebaseSteps.map((step) => ({ verb: step.verb, rev: step.rev, message: step.verb === "reword" || step.verb === "squash" || step.verb === "exec" ? step.message : "" })), autostash: shell.settings.rebaseAutostash, updateRefs: shell.updateRefs });
-          else if (shell.dialog === "merge") void shell.mutate({ action: "merge", name: shell.draft, squash: shell.draftExtra === "squash", noFf: shell.draftExtra === "no-ff", autostash: shell.settings.mergeAutostash });
+          else if (shell.dialog === "merge") void shell.mutate({ action: "merge", name: shell.draft, squash: shell.draftExtra === "squash", noFf: shell.draftExtra === "no-ff", autostash: shell.settings.mergeAutostash, summary: shell.mergeSummary, description: shell.mergeBody });
           else if (shell.dialog === "continue") void shell.mutate({ action: "continue", message: shell.draft });
           else if (shell.dialog === "repo") {
             try {
@@ -488,14 +503,30 @@
           </div>
           <button class="commit" type="submit">Apply {shell.draftExtra || "text"}</button>
         {:else if shell.dialog === "merge"}
-          <h2>Merge {shell.draft}</h2>
-          <select bind:value={shell.draftExtra}>
-            <option value="ff">Fast-forward when possible</option>
-            <option value="no-ff">No fast-forward</option>
-            <option value="squash">Squash</option>
-          </select>
-          <p class="empty">{shell.settings.mergeAutostash ? "Stashes local changes first." : "Local changes must be clean."}</p>
-          <button class="commit" type="submit">Merge</button>
+          {@const into = shell.mergeInto || shell.snapshot?.branch || "HEAD"}
+          <h2>{shell.tr(shell.draftExtra === "squash" ? "dialog.mergeSquashTitle" : "dialog.mergeTitleLine", { source: shell.draft, into })}</h2>
+          <div class="merge-route">
+            <span>{shell.draft}</span>
+            <span class="meta" aria-hidden="true">→</span>
+            <span>{into}</span>
+          </div>
+          <label>{shell.tr("dialog.merge")}
+            <select value={shell.draftExtra} onchange={(event) => { const target = event.currentTarget; if (!(target instanceof HTMLSelectElement)) return; shell.draftExtra = target.value; shell.refreshMergeSummary(); }}>
+              <option value="ff">{shell.tr("dialog.fastForward")}</option>
+              <option value="no-ff">{shell.tr("dialog.noFastForward")}</option>
+              <option value="squash">{shell.tr("dialog.squash")}</option>
+            </select>
+          </label>
+          <label>{shell.tr("dialog.message")}
+            <input bind:value={shell.mergeSummary} />
+          </label>
+          <label>{shell.tr("dialog.mergeDetail")}
+            <textarea class="merge-body" rows="6" bind:value={shell.mergeBody}></textarea>
+          </label>
+          <p class="empty">{shell.tr("dialog.mergeFileCount", { count: String(shell.mergeFiles.length) })}</p>
+          {#if shell.draftExtra === "ff"}<p class="empty">{shell.tr("dialog.mergeFastForwardNote")}</p>{/if}
+          <p class="empty">{shell.settings.mergeAutostash ? shell.tr("dialog.mergeAutostash") : shell.tr("dialog.mergeClean")}</p>
+          <button class="commit" type="submit">{shell.tr("dialog.merge")}</button>
         {:else if shell.dialog === "repo"}
           <h2>Repository</h2>
           <label>Author name <input bind:value={shell.draft} placeholder="uses git config when empty" /></label>

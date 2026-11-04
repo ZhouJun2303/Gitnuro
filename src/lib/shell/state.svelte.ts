@@ -35,7 +35,7 @@ import {
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
-import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
+import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError } from "./types";
 
 const initialErrors = readErrorLog();
@@ -444,6 +444,24 @@ export class ShellState {
 
 
   draftExtra = $state("");
+
+
+  mergeInto = $state("");
+
+
+  mergeSummary = $state("");
+
+
+  mergeBody = $state("");
+
+
+  mergeAutoSummary = $state("");
+
+
+  mergeAutoBody = $state("");
+
+
+  mergeFiles = $state<{ status: string; path: string }[]>([]);
 
 
   /** Fetch, pull, and push dialog options. */
@@ -2018,7 +2036,13 @@ export class ShellState {
       case "checkoutRemote":
         return { title: `${this.tr("menu.checkout")} ${text("name")}`, command: this.gitLine(["checkout", text("name")]) };
       case "merge":
-        return { title: `${this.tr("menu.merge")} ${text("name")}`, command: this.gitLine(["merge", request.noFf ? "--no-ff" : "", text("name")]) };
+        return { title: `${this.tr("menu.merge")} ${text("name")}`, command: this.gitLine(["merge", request.squash ? "--squash" : "", request.noFf ? "--no-ff" : "", text("summary") ? "-m" : "", text("summary"), text("name")]) };
+      case "discard":
+        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--", text("file")]) };
+      case "discardPaths": {
+        const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
+        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--", ...files.slice(0, 8)]) };
+      }
       case "stash":
         return { title: this.tr("chrome.stash"), command: this.gitLine(["stash", "push", text("message") ? "-m" : "", text("message")]) };
       case "stashPop":
@@ -3659,6 +3683,24 @@ export class ShellState {
   }
 
 
+  branchMissingRemote(name: string) {
+    const refs = this.refs;
+    if (!refs) return false;
+    if (!refs.branches.some((branch) => branch.name === name)) return false;
+    return !refs.remotes.some((remote) => remote.branches.includes(name));
+  }
+
+
+  async loadMergePreview() {
+    return loadMergePreview(this);
+  }
+
+
+  refreshMergeSummary() {
+    refreshMergeSummary(this);
+  }
+
+
 
   async unstagePicked(files = [...this.picked]) {
     return unstagePicked(this, files);
@@ -4409,6 +4451,50 @@ export class ShellState {
 
 
 
+  activateLayer(event: KeyboardEvent) {
+    if (event.key === "Escape" && this.confirmAsk) {
+      event.preventDefault();
+      this.confirmAsk = null;
+      return true;
+    }
+    const bare = event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing;
+    if (!bare || this.launchOpen || this.menu) return false;
+    if (this.confirmAsk) {
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-confirm]")) return false;
+      event.preventDefault();
+      const run = this.confirmAsk.run;
+      this.confirmAsk = null;
+      run();
+      return true;
+    }
+    if (this.textMerge) {
+      const target = event.target;
+      const inside = target instanceof Element && !!target.closest(".merge-panel");
+      if (inside && (typing(event) || target instanceof HTMLButtonElement)) return false;
+      const button = document.querySelector<HTMLButtonElement>(".merge-panel .commit");
+      if (button && !button.disabled) {
+        event.preventDefault();
+        button.click();
+        return true;
+      }
+    }
+    if (this.dialog) {
+      const target = event.target;
+      const inside = target instanceof Element && !!target.closest(".dialog");
+      if (inside && (typing(event) || target instanceof HTMLButtonElement)) return false;
+      const form = document.querySelector(".scrim .dialog form");
+      if (form instanceof HTMLFormElement) {
+        event.preventDefault();
+        form.requestSubmit();
+        return true;
+      }
+    }
+    return false;
+  }
+
+
+
   onShortcut(event: KeyboardEvent) {
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c") {
       if (typing(event) || this.dialog || this.launchOpen) return;
@@ -4433,6 +4519,7 @@ export class ShellState {
         return;
       }
     }
+    if (this.activateLayer(event)) return;
     const action = shortcut(event);
     if (!action) return;
     const editor = typing(event);
@@ -4450,11 +4537,38 @@ export class ShellState {
     }
     if (editor && action !== "commit" && action !== "commitPush" && action !== "exit" && action !== "launch") return;
     if (action === "exit") {
-      this.dialog = null;
-      this.closeLaunch();
+      event.preventDefault();
+      if (this.menu) {
+        this.menu = null;
+        this.submenu = null;
+        return;
+      }
+      if (this.textMerge) {
+        this.closeTextMerge();
+        return;
+      }
+      if (this.forgeOpen) {
+        this.forgeOpen = null;
+        return;
+      }
+      if (this.dialog === "prefs") void this.savePrefs(true);
+      if (this.dialog) {
+        this.dialog = null;
+        return;
+      }
+      if (this.launchOpen) {
+        this.closeLaunch();
+        return;
+      }
+      if (this.repoPickerOpen) {
+        this.repoPickerOpen = false;
+        return;
+      }
+      if (this.commandLogOpen) {
+        this.commandLogOpen = false;
+        return;
+      }
       this.blameLines = null;
-      this.repoPickerOpen = false;
-      this.commandLogOpen = false;
       return;
     }
     event.preventDefault();

@@ -76,6 +76,7 @@
     "allow-search-commits",
     "allow-search-log",
     "allow-cherry-preview",
+    "allow-merge-preview",
     "allow-merged-branches",
     "allow-pick-history",
     "allow-activity-log",
