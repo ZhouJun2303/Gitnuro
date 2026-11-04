@@ -115,7 +115,7 @@
                   {#if shell.historyFile}
                     <div class="blob-tab">{@render typeIcon(shell.historyFile)}<span>{shell.fileName(shell.historyFile)}</span></div>
                     {#if shell.preview?.mime.startsWith("image/")}
-                      <img class="blob-image" alt="" src={shell.preview.dataUrl} />
+                      <img class="blob-image" alt={shell.historyFile ?? ""} src={shell.preview.dataUrl} />
                     {:else if shell.preview?.mime === "application/pdf"}
                       <embed class="pdf-view" title={shell.historyFile} src={shell.preview.dataUrl} type="application/pdf" />
                     {:else if shell.treeBinary}

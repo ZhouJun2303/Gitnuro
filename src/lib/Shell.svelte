@@ -801,8 +801,8 @@
   {/if}
   {#if shell.confirmAsk}
     <div class="scrim confirm-scrim" role="presentation">
-      <div class="dialog sm" data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null) }}>
-        <h2>{shell.confirmAsk.title}</h2>
+      <div class="dialog sm" data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null) }}>
+        <h2 id="confirm-title">{shell.confirmAsk.title}</h2>
         <p>{shell.confirmAsk.body}</p>
         <div class="composer-row">
           <button class="text-button" type="button" onclick={() => (shell.confirmAsk = null)}>{shell.tr("dialog.cancel")}</button>
@@ -814,9 +814,9 @@
   {#if shell.forgeOpen}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="scrim" role="presentation" onclick={() => (shell.forgeOpen = null)} onkeydown={() => {}}>
-      <div class="dialog md" data-layer="forge" role="dialog" aria-modal="true" tabindex="-1" use:overlayFocus={{ close: () => (shell.forgeOpen = null) }} onclick={(event) => event.stopPropagation()}>
+      <div class="dialog md" data-layer="forge" role="dialog" aria-modal="true" aria-labelledby="forge-title" tabindex="-1" use:overlayFocus={{ close: () => (shell.forgeOpen = null) }} onclick={(event) => event.stopPropagation()}>
         <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={() => (shell.forgeOpen = null)}>×</button>
-        <h2>{shell.forgeOpen === "notes" ? shell.tr("chrome.notifications") : shell.tr("chrome.pulls")}</h2>
+        <h2 id="forge-title">{shell.forgeOpen === "notes" ? shell.tr("chrome.notifications") : shell.tr("chrome.pulls")}</h2>
         {#if shell.forgeOpen === "notes"}
           {#if shell.notices.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noNotifications") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.notices as notice (notice.id)}

@@ -81,7 +81,7 @@
     if (!dialog) return;
     lastFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     queueMicrotask(() => {
-      const box = document.querySelector<HTMLElement>(".dialog");
+      const box = document.querySelector<HTMLElement>(".dialog[data-dialog]");
       if (!box) return;
       box.setAttribute("aria-modal", "true");
       const title = box.querySelector<HTMLElement>("h2");

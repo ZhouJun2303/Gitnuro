@@ -108,6 +108,13 @@ textarea:focus-visible,
   .patch-toggle:focus-visible,
   .expand-all:focus-visible,
   .sha-link:focus-visible,
+  .tree-row:focus-visible,
+  .hunk-step:focus-visible,
+  .blame-line:focus-visible,
+  .command-item:focus-visible,
+  .repo-row:focus-visible,
+  .repo-section:focus-visible,
+  .menu button:focus-visible,
   .swatch:focus-visible,
   .tab-close:focus-visible {
     outline: 2px solid var(--accent);

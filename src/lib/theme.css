@@ -6,7 +6,7 @@
   --elevated: #ffffff;
   /* Text */
   --text: #18181b;
-  --text-secondary: #71717a;
+  --text-secondary: #65656d;
   /* Lines and interaction */
   --line: rgba(24, 24, 27, 0.08);
   --separator: rgba(24, 24, 27, 0.08);
@@ -62,7 +62,7 @@
   --tok-string: #1a7f37;
   --tok-number: #9a6700;
   --tok-comment: var(--text-secondary);
-  --detail-accent: #2f6fed;
+  --detail-accent: #2a63d6;
   --icon-folder: #e8b023;
   --icon-code: #6a7dff;
   --icon-json: #c8962e;

@@ -201,7 +201,7 @@
                 </div>
               {/if}
             </div>
-            <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength={shell.summaryRoom} aria-invalid={shell.summaryTooLong || (!shell.skipHooks && shell.summary.trim().length > 0 && !shell.summaryFitsConvention)} spellcheck={shell.settings.spellChecking === "enable"} oninput={() => shell.normalizeSummary()} />
+            <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} aria-label={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength={shell.summaryRoom} aria-invalid={shell.summaryTooLong || (!shell.skipHooks && shell.summary.trim().length > 0 && !shell.summaryFitsConvention)} spellcheck={shell.settings.spellChecking === "enable"} oninput={() => shell.normalizeSummary()} />
             <button
               class="suggest-message"
               class:long={shell.settings.aiPromptStyle === "long"}
@@ -219,7 +219,7 @@
           {#if shell.summary.trim() && !shell.skipHooks && !shell.summaryFitsConvention}
             <p class="convention-hint">{shell.tr("chrome.commitConvention")}</p>
           {/if}
-          <textarea class="guided composer-desc flex-fill" class:guide-only={shell.descriptionIsGuide} placeholder={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
+          <textarea class="guided composer-desc flex-fill" class:guide-only={shell.descriptionIsGuide} placeholder={shell.tr("chrome.description")} aria-label={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
             <button class="text-button more" type="button" aria-label={shell.tr("chrome.more")} title={shell.tr("chrome.more")} onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>
