@@ -248,7 +248,7 @@
                   <div class="conflict-end right">{@render conflictCard(view.ours, "ours")}</div>
                 </div>
                 <div class="conflict-actions">
-                  <button class="conflict-merge" type="button" disabled={(!pickOurs && !pickTheirs) || (shell.mode === "live" && shell.busy)} onclick={() => void applyConflictChoice(shell, pickOurs, pickTheirs)}>{only ? shell.tr("chrome.chooseSide", { name: only }) : shell.tr("chrome.mergeAction")}</button>
+                  <button class="conflict-merge" type="button" disabled={(!pickOurs && !pickTheirs) || (shell.mode === "live" && shell.busy)} onclick={() => void applyConflictChoice(shell, pickOurs, pickTheirs)}>{only ? shell.tr("chrome.chooseSide", { name: only }) : pickOurs && pickTheirs ? shell.tr("chrome.mergeBoth") : shell.tr("chrome.mergeAction")}</button>
                   {#if tool && pickOurs && pickTheirs}
                     <button class="conflict-tool" type="button" disabled={shell.mode === "live" && shell.busy} onclick={() => { if (shell.mode === "live") void openConflictTool(shell); }}>
                       {shell.tr("chrome.mergeInTool", { name: tool })}

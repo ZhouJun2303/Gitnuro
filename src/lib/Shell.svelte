@@ -441,6 +441,15 @@
     white-space: nowrap;
   }
 
+.command-item.notice .summary {
+    display: -webkit-box;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    line-height: 1.4;
+  }
+
 .command-item:hover { background: var(--hover); }
 
 .command-item.current,
@@ -696,7 +705,7 @@
         </div>
         <div class="command-items">
           {#each shell.visibleCommands() as item (item.id)}
-            <button class="command-item" class:current={item.id === shell.commandPick} class:failed={!item.ok} type="button" onclick={() => (shell.commandPick = item.id)}>
+            <button class="command-item" class:current={item.id === shell.commandPick} class:failed={!item.ok} class:notice={!!item.noticeId} type="button" onclick={() => (shell.commandPick = item.id)}>
               <span class="title">{item.title}</span>
               <span class="time">{shell.commandClock(item.at)}</span>
               <span class="summary" title={item.summary}>{item.summary}</span>

@@ -147,6 +147,15 @@ test("submenu opens and closes with the arrow keys", async ({ page }) => {
   await expect(page.locator('[data-layer="menu"] button[aria-haspopup="menu"]')).toBeFocused();
 });
 
+test("commit patch renders each hunk header once", async ({ page }) => {
+  await openLabScene(page, "commit", ".detail");
+  await page.locator(".patch-toggle").first().click();
+  const meta = page.locator(".detail .split-meta");
+  await expect(meta.first()).toBeVisible();
+  await expect(meta.filter({ hasText: "@@" })).toHaveCount(1);
+  expect(await page.locator(".detail .split-row").count()).toBeGreaterThan(0);
+});
+
 test("history restores its scroll position after switching sections", async ({ page }) => {
   await openLabScene(page, "history", ".history .commit-row");
   await page.locator(".history").evaluate((node) => {

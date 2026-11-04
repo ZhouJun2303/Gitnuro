@@ -46,7 +46,7 @@
                   {#if shell.differentCommitter(shell.commitDetail)}
                     {@render personBlock(shell.tr("chrome.committer"), shell.commitDetail?.committer ?? "", shell.commitDetail?.committerEmail ?? "", shell.commitDetail?.committerAt ?? 0)}
                   {/if}
-                  <div class="fork-row"><span class="k">{shell.tr("chrome.sha")}</span><button class="sha-link" type="button" onclick={() => shell.copyText(shell.commitDetail?.id || shell.selectedCommit || "")}>{shell.commitDetail?.id || shell.selectedCommit}</button></div>
+                  <div class="fork-row"><span class="k">{shell.tr("chrome.sha")}</span><button class="sha-link" type="button" title={shell.commitDetail?.id || shell.selectedCommit || ""} onclick={() => shell.copyText(shell.commitDetail?.id || shell.selectedCommit || "")}>{shell.commitDetail?.id || shell.selectedCommit}</button></div>
                   {#if (shell.commitDetail?.parents.length ?? 0) > 0}
                     <div class="fork-row"><span class="k">{shell.tr("chrome.parents")}</span>
                       {#each shell.commitDetail?.parents ?? [] as parent (parent)}
@@ -263,10 +263,14 @@
     <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textFile === file} data-file={file} data-select-side={shell.textFile === file ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" onmousedown={shell.pickSplitSide.bind(shell)} use:splitScroller={columns} use:patchWindow={{ file, count: rows.length, rowHeight: shell.splitRowHeight }}>
       {#if view.start > 0}<div class="split-gap" style:height="{view.start * shell.splitRowHeight}px"></div>{/if}
       {#each rows.slice(view.start, view.end) as row, offset (`${file}-s-${view.start + offset}`)}
-        <div class="split-row">
-          {@render splitCell(row, "left", file, `${file}-sl-${view.start + offset}`)}
-          {@render splitCell(row, "right", file, `${file}-sr-${view.start + offset}`)}
-        </div>
+        {#if row.meta}
+          <div class="split-meta" data-line={row.lineIndex}>{row.left}</div>
+        {:else}
+          <div class="split-row">
+            {@render splitCell(row, "left", file, `${file}-sl-${view.start + offset}`)}
+            {@render splitCell(row, "right", file, `${file}-sr-${view.start + offset}`)}
+          </div>
+        {/if}
       {/each}
       {#if rows.length > view.end}<div class="split-gap" style:height="{(rows.length - view.end) * shell.splitRowHeight}px"></div>{/if}
       {@render splitBar()}
@@ -288,11 +292,12 @@
         {#if live.truncated}<p class="meta patch-note">{shell.tr("chrome.truncated")}</p>{/if}
       {:else}
         {@const view = shell.settings.diffWordWrap ? { start: 0, end: live.lines.length } : (shell.patchView[`${file}:uni`] ?? { start: 0, end: 0 })}
+        {@const diffRow = shell.diffRowHeight}
         <div class="diff-body" class:flow={embedded} class:select-all={shell.textFile === file} data-file={file} data-select-side={shell.textFile === file ? shell.textSide : undefined}>
-          <div class="commit-window" style:height={shell.settings.diffWordWrap ? "auto" : `${live.lines.length * 18}px`} use:patchWindow={{ file: `${file}:uni`, count: live.lines.length, rowHeight: 18 }}>
+          <div class="commit-window" style:height={shell.settings.diffWordWrap ? "auto" : `${live.lines.length * diffRow}px`} use:patchWindow={{ file: `${file}:uni`, count: live.lines.length, rowHeight: diffRow }}>
             {#each live.lines.slice(view.start, view.end) as line, offset (`uni-${file}-${view.start + offset}`)}
               {@const index = view.start + offset}
-              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{index * 18}px">{#each shell.paint(line.text, file) as token, tokenIndex (`ut-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{index * diffRow}px">{#each shell.paint(line.text, file) as token, tokenIndex (`ut-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
             {/each}
           </div>
         </div>

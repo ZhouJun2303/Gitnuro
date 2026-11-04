@@ -201,6 +201,18 @@
     border-bottom: 1px solid var(--line);
   }
 
+.filter-bar > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.filter-bar > .text-button {
+    flex: none;
+    margin-left: auto;
+  }
+
 .commit-side {
     margin-left: auto;
     display: flex;
