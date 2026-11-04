@@ -25,7 +25,10 @@ export default defineConfig(() => ({
         target: "http://127.0.0.1:1429",
         rewrite: (path) => path.replace(/^\/__lab/, "") || "/",
         configure: (proxy) => {
-          proxy.on("error", (_err, _req, res) => {
+          // http-proxy types ship without EventEmitter helpers under check.
+          /** @type {any} */
+          const target = proxy;
+          target.on("error", (/** @type {unknown} */ _err, /** @type {unknown} */ _req, /** @type {any} */ res) => {
             if (!res || res.headersSent || typeof res.writeHead !== "function") return;
             res.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
             res.end(JSON.stringify({ ok: false, error: "试验台未启动，请运行 pnpm dev" }));

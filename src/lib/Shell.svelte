@@ -272,6 +272,12 @@
     font-weight: 650;
   }
 
+.notice-actions {
+    flex: none;
+    padding: 10px 14px 14px;
+    border-top: 1px solid var(--line);
+  }
+
 .command-item.failed:not(.current) .title { color: var(--deleted, #d16464); }
 
 .command-items,
@@ -560,6 +566,7 @@
           <button type="button" class:on={shell.commandFilter === "user"} onclick={() => shell.showCommandFilter("user")}>{shell.tr("chrome.commandUser")}</button>
           <button type="button" class:on={shell.commandFilter === "background"} onclick={() => shell.showCommandFilter("background")}>{shell.tr("chrome.commandBackground")}</button>
           <button type="button" class:on={shell.commandFilter === "errors"} class:alert={shell.recentErrors.length > 0} onclick={() => shell.showCommandFilter("errors")}>{shell.tr("chrome.commandErrors")}{#if shell.recentErrors.length > 0}<em>{shell.recentErrors.length}</em>{/if}</button>
+          <button type="button" class:on={shell.commandFilter === "notices"} onclick={() => shell.showCommandFilter("notices")}>{shell.tr("chrome.commandNotices")}{#if shell.statusNotices.length > 0}<em>{shell.statusNotices.length}</em>{/if}</button>
         </div>
         <div class="command-items">
           {#each shell.visibleCommands() as item (item.id)}
@@ -574,7 +581,21 @@
         </div>
       </div>
       <div class="command-detail">
-        {#if picked}
+        {#if picked?.noticeId}
+          {@const notice = shell.pickedNotice()}
+          <header data-layer={notice?.dataLayer}>
+            <strong>{picked.title}</strong>
+            <span>{shell.tr("chrome.commandNotices")}</span>
+          </header>
+          {#if picked.output}<pre>{picked.output}</pre>{/if}
+          {#if notice && notice.actions.length > 0}
+            <div class="composer-row notice-actions">
+              {#each notice.actions as action (action.id)}
+                <button class="text-button" type="button" disabled={action.disabled} onclick={() => shell.runStatusNoticeAction(notice.id, action.id)}>{action.label}</button>
+              {/each}
+            </div>
+          {/if}
+        {:else if picked}
           <header>
             <strong>{picked.title}</strong>
             <span>{picked.ok ? shell.tr("chrome.commandSucceeded") : shell.tr("chrome.commandFailed")} {shell.commandStamp(picked.at)}</span>

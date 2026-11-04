@@ -200,6 +200,7 @@ async function fillSurface(shell: ShellState, id: string) {
   }
   if (id === "clone-done") {
     shell.cloneDone = shell.repoPath() ?? null;
+    shell.openCommandLog("clone-done");
     return;
   }
   if (id === "update") {
@@ -210,6 +211,7 @@ async function fillSurface(shell: ShellState, id: string) {
       notes: lines(FILL, "实验室更新说明"),
       installable: false,
     };
+    shell.openCommandLog("update");
     return;
   }
   if (id === "action-error") {

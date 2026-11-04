@@ -222,6 +222,7 @@ export const zh: Messages = {
     commandUser: "用户",
     commandBackground: "后台",
     commandErrors: "错误",
+    commandNotices: "通知",
     commandSucceeded: "成功",
     commandFailed: "失败",
     commandEmpty: "还没有执行过的命令",

@@ -36,7 +36,8 @@ import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems,
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
-import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError } from "./types";
+import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
+import { STATUS_NOTICE_ENTRY } from "./types";
 
 const initialErrors = readErrorLog();
 
@@ -1141,6 +1142,140 @@ export class ShellState {
     if (!this.showingClone || !this.cloneJob) return null;
     return this.jobs[this.jobKey(this.cloneJob.destination)]?.percent ?? null;
   });
+
+
+  /** Live banners formerly in notice-stack, ordered by priority. */
+  statusNotices = $derived.by((): StatusNotice[] => {
+    const items: StatusNotice[] = [];
+    const live = this.mode === "live";
+    if (live && this.conflictCount > 0) {
+      const actions: StatusNoticeAction[] = [];
+      if (this.progress && this.progress !== "merge") {
+        actions.push({ id: "continue", label: this.tr("chrome.continueAction"), disabled: this.busy || this.conflicted });
+        actions.push({ id: "skip", label: this.tr("chrome.skip"), disabled: this.busy });
+      }
+      actions.push({ id: "abort", label: this.tr("chrome.abort"), disabled: this.busy });
+      items.push({
+        id: "conflicts",
+        priority: 0,
+        tone: "conflict",
+        title: this.conflictCount === 1 ? this.tr("chrome.unmergedOne") : this.tr("chrome.unmergedMany", { count: String(this.conflictCount) }),
+        detail: this.progress ? this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) }) : "",
+        dataLayer: "conflicts",
+        floor: true,
+        actions,
+      });
+    } else if (live && this.progress) {
+      items.push({
+        id: "progress",
+        priority: 1,
+        tone: "progress",
+        title: this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) }),
+        detail: "",
+        dataLayer: "progress",
+        floor: true,
+        actions: [
+          { id: "abort", label: this.tr("chrome.abort"), disabled: this.busy },
+          { id: "continue", label: this.tr("chrome.continueAction"), disabled: this.busy || this.conflicted },
+          { id: "skip", label: this.tr("chrome.skip"), disabled: this.busy || this.progress === "merge" },
+        ],
+      });
+    }
+    if (live && this.facts?.bisectActive) {
+      items.push({
+        id: "bisect",
+        priority: 1,
+        tone: "progress",
+        title: this.tr("chrome.bisect"),
+        detail: "",
+        dataLayer: "bisect",
+        floor: true,
+        actions: [
+          { id: "good", label: this.tr("chrome.good"), disabled: this.busy },
+          { id: "bad", label: this.tr("chrome.bad"), disabled: this.busy },
+          { id: "skip", label: this.tr("chrome.skip"), disabled: this.busy },
+          { id: "abort", label: this.tr("chrome.abort"), disabled: this.busy },
+        ],
+      });
+    }
+    if (this.actionError) {
+      items.push({
+        id: "error",
+        priority: 3,
+        tone: "error",
+        title: this.actionError,
+        detail: "",
+        dataLayer: "error",
+        floor: true,
+        actions: [{ id: "close", label: this.tr("chrome.close") }],
+      });
+    }
+    if (this.cloneDone) {
+      items.push({
+        id: "clone-done",
+        priority: 4,
+        tone: "info",
+        title: this.tr("chrome.cloneReady", { name: this.folderName(this.cloneDone) }),
+        detail: this.cloneDone,
+        dataLayer: "clone-done",
+        floor: false,
+        actions: [{ id: "open", label: this.tr("chrome.open") }],
+      });
+    }
+    if (this.updateNotice) {
+      const notes = [this.updateNotice.notes, this.updateMessage].filter(Boolean).join("\n").trim();
+      items.push({
+        id: "update",
+        priority: 4,
+        tone: "info",
+        title: this.tr("chrome.updateAvailable", { name: `AweGit ${this.updateNotice.appVersion}` }),
+        detail: notes,
+        dataLayer: "update",
+        floor: false,
+        actions: [
+          { id: "install", label: this.updateBusy ? this.tr("chrome.updateDownloading") : this.tr("chrome.updateInstall"), disabled: this.updateBusy },
+          { id: "later", label: this.tr("chrome.updateLater"), disabled: this.updateBusy },
+        ],
+      });
+    } else if ((this.updatePhase === "checking" || this.updatePhase === "current" || this.updatePhase === "error") && this.updateMessage) {
+      items.push({
+        id: "update",
+        priority: 4,
+        tone: "info",
+        title: this.updateMessage,
+        detail: "",
+        dataLayer: "update",
+        floor: false,
+        actions: [],
+      });
+    }
+    return items.sort((left, right) => left.priority - right.priority || left.id.localeCompare(right.id));
+  });
+
+
+  /** Highest-priority notice that may occupy the identity floor (P0–P3). Busy workDepth stays separate. */
+  floorNotice = $derived(this.statusNotices.find((item) => item.floor) ?? null);
+
+
+  identityTone = $derived.by((): StatusTone | null => {
+    if (this.floorNotice) return this.floorNotice.tone;
+    if (this.workDepth > 0) return "busy";
+    return null;
+  });
+
+
+  floorNoticeAction(notice: StatusNotice): StatusNoticeAction | null {
+    const prefer =
+      notice.id === "conflicts" || notice.id === "bisect"
+        ? "abort"
+        : notice.id === "progress"
+          ? "continue"
+          : notice.id === "error"
+            ? "close"
+            : notice.actions[0]?.id;
+    if (!prefer) return null;
+    return notice.actions.find((item) => item.id === prefer) ?? notice.actions[0] ?? null;
+  }
 
 
   canCommit = $derived(
@@ -2264,9 +2399,12 @@ export class ShellState {
   }
 
 
-  visibleCommands() {
+  visibleCommands(): CommandEntry[] {
+    if (this.commandFilter === "notices") {
+      return this.statusNotices.map((item) => this.noticeAsCommand(item));
+    }
     if (this.commandFilter === "errors") {
-      return this.recentErrors.map((item) => ({
+      return this.recentErrors.map((item): CommandEntry => ({
         id: item.id,
         title: item.title || this.tr("chrome.errorTitle"),
         command: item.command,
@@ -2274,15 +2412,78 @@ export class ShellState {
         summary: this.commandExcerpt(item.text) || this.tr("chrome.commandFailed"),
         ok: false,
         at: item.at,
-        source: "user" as const,
+        source: "user",
       }));
     }
     return this.commandFilter === "all" ? this.commandLog : this.commandLog.filter((item) => item.source === this.commandFilter);
   }
 
 
+  noticeAsCommand(item: StatusNotice): CommandEntry {
+    return {
+      id: STATUS_NOTICE_ENTRY[item.id],
+      title: item.title,
+      summary: item.detail || item.actions.map((action) => action.label).join(" · ") || this.tr("chrome.commandNotices"),
+      command: "",
+      output: item.detail,
+      ok: item.tone !== "error",
+      at: Date.now(),
+      source: "user",
+      noticeId: item.id,
+    };
+  }
+
+
   pickedCommand() {
     return this.visibleCommands().find((item) => item.id === this.commandPick);
+  }
+
+
+  pickedNotice(): StatusNotice | null {
+    const pick = this.pickedCommand();
+    if (!pick?.noticeId) return null;
+    return this.statusNotices.find((item) => item.id === pick.noticeId) ?? null;
+  }
+
+
+  statusNotice(id: StatusNoticeId) {
+    return this.statusNotices.find((item) => item.id === id) ?? null;
+  }
+
+
+  runStatusNoticeAction(id: StatusNoticeId, action: string) {
+    if (id === "conflicts" || id === "progress") {
+      if (action === "abort") void this.mutate({ action: "abort" });
+      else if (action === "skip") void this.mutate({ action: "skip" });
+      else if (action === "continue") {
+        if (this.progress === "rebase") {
+          this.draft = "";
+          this.dialog = "continue";
+        } else void this.mutate({ action: "continue" });
+      }
+      return;
+    }
+    if (id === "bisect") {
+      const verb = action === "abort" ? "reset" : action;
+      if (verb === "good" || verb === "bad" || verb === "skip" || verb === "reset") {
+        void this.mutate({ action: "bisect", verb, rev: "" }).then(() => this.loadFacts(true));
+      }
+      return;
+    }
+    if (id === "error" && action === "close") {
+      this.closeError();
+      return;
+    }
+    if (id === "clone-done" && action === "open") {
+      const path = this.cloneDone;
+      this.cloneDone = null;
+      if (path) void this.openRepo(path);
+      return;
+    }
+    if (id === "update") {
+      if (action === "install") void this.installUpdate();
+      else if (action === "later") this.dismissUpdate();
+    }
   }
 
 
@@ -2325,8 +2526,8 @@ export class ShellState {
 
 
 
-  openCommandLog() {
-    return openCommandLog(this);
+  openCommandLog(prefer?: CommandFilter | StatusNoticeId) {
+    return openCommandLog(this, prefer);
   }
 
 

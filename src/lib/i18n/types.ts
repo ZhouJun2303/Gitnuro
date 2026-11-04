@@ -222,6 +222,7 @@ export type Messages = {
     commandUser: string;
     commandBackground: string;
     commandErrors: string;
+    commandNotices: string;
     commandSucceeded: string;
     commandFailed: string;
     commandEmpty: string;

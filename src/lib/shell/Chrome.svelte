@@ -106,43 +106,60 @@
         </button>
       </div>
       <div class="chrome-identity">
-        <div class="identity-floor" class:working={shell.workDepth > 0}>
-          <button class="icon-btn history-btn" class:on={shell.commandLogOpen} class:alert={shell.unseenErrors > 0} type="button" bind:this={shell.commandButton} title={shell.unseenErrors > 0 ? `${shell.tr("chrome.commandHistory")} (${shell.unseenErrors})` : shell.tr("chrome.commandHistory")} aria-label={shell.unseenErrors > 0 ? `${shell.tr("chrome.commandHistory")} (${shell.unseenErrors})` : shell.tr("chrome.commandHistory")} aria-expanded={shell.commandLogOpen} aria-haspopup="dialog" onclick={() => (shell.commandLogOpen ? (shell.commandLogOpen = false) : shell.openCommandLog())}>
-            <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
-            {#if shell.unseenErrors > 0}<em class="error-count">{shell.unseenErrors > 99 ? "99+" : shell.unseenErrors}</em>{/if}
-          </button>
-          <div class="identity-copy">
-            <strong>{shell.focusPath && !shell.viewing(shell.focusPath) ? shell.folderName(shell.focusPath) : shell.snapshot ? shell.folderName(shell.snapshot.path) : shell.mode === "sample" ? "AweGit" : shell.tr("chrome.welcomeTitle")}</strong>
-            <span>
-              {#if shell.showingClone && shell.cloneJob}
-                <em class="identity-branch" data-layer="clone">{shell.tr("chrome.cloning", { name: shell.cloneJob.name })}</em>
-              {:else if shell.workDepth > 0}
-                <em class="identity-branch">{shell.busyLabel ? `${shell.tr("chrome.working")} ${shell.busyLabel}` : shell.tr("chrome.working")}</em>
-              {:else if shell.snapshot || shell.mode === "sample"}
-                <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
-                <em class="identity-branch" data-branch={shell.branchLabel}>{shell.branchLabel}</em>
-              {:else}
-                {shell.tr("chrome.openRepo")}
-              {/if}
-              {#if shell.workPercent != null}<em class="identity-pct">{shell.workPercent}%</em>{/if}
-            </span>
-          </div>
-          {#if shell.workDepth > 0}
-            <button class="text-button identity-cancel" type="button" onclick={() => (shell.showingClone ? shell.cancelClone() : invoke("cancel_operation", { path: shell.meterPath || shell.repoPath() }))}>{shell.tr("chrome.cancel")}</button>
-          {/if}
-          <button class="tool-btn stack branch-chip" type="button" aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.branchItems())}>
-            <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
-            <span>{shell.tr("dialog.branch")}<svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
-          </button>
-          {#if shell.workDepth > 0}
-            {#if shell.workPercent != null}
+        {#if true}
+          {@const notice = shell.floorNotice}
+          {@const tone = shell.identityTone}
+          {@const primary = notice ? shell.floorNoticeAction(notice) : null}
+          <div
+            class="identity-floor"
+            class:working={shell.workDepth > 0 || !!notice}
+            class:tone-conflict={tone === "conflict"}
+            class:tone-progress={tone === "progress"}
+            class:tone-busy={tone === "busy"}
+            class:tone-error={tone === "error"}
+            data-layer={notice?.dataLayer}
+          >
+            <button class="icon-btn history-btn" class:on={shell.commandLogOpen} class:alert={shell.unseenErrors > 0} type="button" bind:this={shell.commandButton} title={shell.unseenErrors > 0 ? `${shell.tr("chrome.commandHistory")} (${shell.unseenErrors})` : shell.tr("chrome.commandHistory")} aria-label={shell.unseenErrors > 0 ? `${shell.tr("chrome.commandHistory")} (${shell.unseenErrors})` : shell.tr("chrome.commandHistory")} aria-expanded={shell.commandLogOpen} aria-haspopup="dialog" onclick={() => (shell.commandLogOpen ? (shell.commandLogOpen = false) : shell.openCommandLog())}>
+              <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
+              {#if shell.unseenErrors > 0}<em class="error-count">{shell.unseenErrors > 99 ? "99+" : shell.unseenErrors}</em>{:else if shell.statusNotices.length > 0}<em class="notice-count">{shell.statusNotices.length > 99 ? "99+" : shell.statusNotices.length}</em>{/if}
+            </button>
+            <button class="identity-copy" type="button" onclick={() => shell.openCommandLog(notice?.id ?? "notices")}>
+              <strong>{shell.focusPath && !shell.viewing(shell.focusPath) ? shell.folderName(shell.focusPath) : shell.snapshot ? shell.folderName(shell.snapshot.path) : shell.mode === "sample" ? "AweGit" : shell.tr("chrome.welcomeTitle")}</strong>
+              <span>
+                {#if notice}
+                  <em class="identity-branch">{notice.title}</em>
+                {:else if shell.showingClone && shell.cloneJob}
+                  <em class="identity-branch" data-layer="clone">{shell.tr("chrome.cloning", { name: shell.cloneJob.name })}</em>
+                {:else if shell.workDepth > 0}
+                  <em class="identity-branch">{shell.busyLabel ? `${shell.tr("chrome.working")} ${shell.busyLabel}` : shell.tr("chrome.working")}</em>
+                {:else if shell.snapshot || shell.mode === "sample"}
+                  <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
+                  <em class="identity-branch" data-branch={shell.branchLabel}>{shell.branchLabel}</em>
+                {:else}
+                  {shell.tr("chrome.openRepo")}
+                {/if}
+                {#if !notice && shell.workPercent != null}<em class="identity-pct">{shell.workPercent}%</em>{/if}
+              </span>
+            </button>
+            {#if notice && primary}
+              <button class="text-button identity-cancel" type="button" disabled={primary.disabled} onclick={() => shell.runStatusNoticeAction(notice.id, primary.id)}>{primary.label}</button>
+            {:else if shell.workDepth > 0}
+              <button class="text-button identity-cancel" type="button" onclick={() => (shell.showingClone ? shell.cancelClone() : invoke("cancel_operation", { path: shell.meterPath || shell.repoPath() }))}>{shell.tr("chrome.cancel")}</button>
+            {/if}
+            <button class="tool-btn stack branch-chip" type="button" aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.branchItems())}>
+              <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
+              <span>{shell.tr("dialog.branch")}<svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
+            </button>
+            {#if shell.workDepth > 0 && !notice && shell.workPercent != null}
               <div class="identity-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={shell.workPercent} aria-valuetext="{shell.workPercent}%">
                 <span style:width="{shell.workPercent}%"></span>
               </div>
             {/if}
-            <div class="identity-sweep" aria-hidden="true"></div>
-          {/if}
-        </div>
+            {#if tone}
+              <div class="identity-sweep" aria-hidden="true"></div>
+            {/if}
+          </div>
+        {/if}
       </div>
       <div class="chrome-right">
         <button class="tool-btn stack" type="button" title={shell.tr("chrome.explorer")} disabled={!shell.snapshot} onclick={() => shell.snapshot && void shell.openLocal(shell.snapshot.path)}>
@@ -186,60 +203,3 @@
       </button>
     </div>
   </header>
-
-  <div class="notice-stack">
-  {#if shell.cloneDone}
-    <div class="banner" data-layer="clone-done">
-      <span>{shell.tr("chrome.cloneReady", { name: shell.folderName(shell.cloneDone) })}</span>
-      <button class="text-button" type="button" onclick={() => { const path = shell.cloneDone; shell.cloneDone = null; if (path) void shell.openRepo(path); }}>{shell.tr("chrome.open")}</button>
-    </div>
-  {/if}
-  {#if shell.updateNotice}
-    <div class="banner" data-layer="update">
-      <span>{shell.tr("chrome.updateAvailable", { name: `AweGit ${shell.updateNotice.appVersion}` })}</span>
-      {#if shell.updateNotice.notes}<span class="meta">{shell.updateNotice.notes}</span>{/if}
-      {#if shell.updatePhase === "downloading" && shell.updatePercent != null}<span class="update-track" aria-hidden="true"><span style:width={`${shell.updatePercent}%`}></span></span>{/if}
-      {#if shell.updatePhase === "checking" || shell.updatePhase === "downloading" || shell.updatePhase === "ready" || shell.updatePhase === "error"}<span>{shell.updateMessage}</span>{/if}
-      <button class="text-button" type="button" disabled={shell.updateBusy} onclick={() => void shell.installUpdate()}>{shell.updateBusy ? shell.tr("chrome.updateDownloading") : shell.tr("chrome.updateInstall")}</button>
-      <button class="text-button" type="button" disabled={shell.updateBusy} onclick={() => shell.dismissUpdate()}>{shell.tr("chrome.updateLater")}</button>
-    </div>
-  {:else if (shell.updatePhase === "checking" || shell.updatePhase === "current" || shell.updatePhase === "error") && shell.updateMessage}
-    <div class="banner">
-      <span>{shell.updateMessage}</span>
-    </div>
-  {/if}
-  {#if shell.mode === "live" && shell.facts?.bisectActive}
-    <div class="banner" data-layer="bisect">
-      <span>{shell.tr("chrome.bisect")}</span>
-      <button class="text-button" type="button" disabled={shell.busy} onclick={() => void shell.mutate({ action: "bisect", verb: "good", rev: "" }).then(() => shell.loadFacts(true))}>{shell.tr("chrome.good")}</button>
-      <button class="text-button" type="button" disabled={shell.busy} onclick={() => void shell.mutate({ action: "bisect", verb: "bad", rev: "" }).then(() => shell.loadFacts(true))}>{shell.tr("chrome.bad")}</button>
-      <button class="text-button" type="button" disabled={shell.busy} onclick={() => void shell.mutate({ action: "bisect", verb: "skip", rev: "" }).then(() => shell.loadFacts(true))}>{shell.tr("chrome.skip")}</button>
-      <button class="text-button" type="button" disabled={shell.busy} onclick={() => void shell.mutate({ action: "bisect", verb: "reset", rev: "" }).then(() => shell.loadFacts(true))}>{shell.tr("chrome.abort")}</button>
-    </div>
-  {/if}
-  {#if shell.mode === "live" && shell.conflictCount > 0}
-    <div class="banner unmerged" data-layer="conflicts">
-      <span>{shell.conflictCount === 1 ? shell.tr("chrome.unmergedOne") : shell.tr("chrome.unmergedMany", { count: String(shell.conflictCount) })}</span>
-      <span class="grow"></span>
-      {#if shell.progress && shell.progress !== "merge"}
-        <button class="text-button" type="button" disabled={shell.busy || shell.conflicted} onclick={() => { if (shell.progress === "rebase") { shell.draft = ""; shell.dialog = "continue"; } else void shell.mutate({ action: "continue" }); }}>{shell.tr("chrome.continueAction")}</button>
-        <button class="text-button" type="button" disabled={shell.busy} onclick={() => shell.mutate({ action: "skip" })}>{shell.tr("chrome.skip")}</button>
-      {/if}
-      <button class="text-button" type="button" disabled={shell.busy} onclick={() => shell.mutate({ action: "abort" })}>{shell.tr("chrome.abort")}</button>
-    </div>
-  {:else if shell.mode === "live" && shell.progress}
-    <div class="banner" data-layer="progress">
-      <span>{shell.tr("chrome.inProgress", { name: shell.progressLabel(shell.progress) })}</span>
-      <span class="grow"></span>
-      <button class="text-button" type="button" disabled={shell.busy} onclick={() => shell.mutate({ action: "abort" })}>{shell.tr("chrome.abort")}</button>
-      <button class="text-button" type="button" disabled={shell.busy || shell.conflicted} onclick={() => { if (shell.progress === "rebase") { shell.draft = ""; shell.dialog = "continue"; } else void shell.mutate({ action: "continue" }); }}>{shell.tr("chrome.continueAction")}</button>
-      <button class="text-button" type="button" disabled={shell.busy || shell.progress === "merge"} onclick={() => shell.mutate({ action: "skip" })}>{shell.tr("chrome.skip")}</button>
-    </div>
-  {/if}
-  {#if shell.actionError}
-    <div class="banner error" data-layer="error">
-      <span>{shell.actionError}</span>
-      <button class="text-button" type="button" onclick={() => shell.closeError()}>{shell.tr("chrome.close")}</button>
-    </div>
-  {/if}
-  </div>

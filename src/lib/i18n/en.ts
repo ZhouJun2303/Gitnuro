@@ -222,6 +222,7 @@ export const en: Messages = {
     commandUser: "User",
     commandBackground: "Background",
     commandErrors: "Errors",
+    commandNotices: "Notices",
     commandSucceeded: "succeeded",
     commandFailed: "failed",
     commandEmpty: "No commands yet",

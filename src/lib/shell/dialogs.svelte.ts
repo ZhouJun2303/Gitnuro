@@ -24,7 +24,8 @@ import {
     type UpdateNotice,
     workspaceTabWidth,
   } from "../status";
-import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
+import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StatusNoticeId } from "./types";
+import { STATUS_NOTICE_ENTRY } from "./types";
 import type { ShellState } from "./state.svelte";
 import { alignCommitTemplate, isCommentary, isCommitType, splitSubject, withoutRepeatedSubject } from "./commitMessage";
 
@@ -96,9 +97,19 @@ export function placeCommandLog(shell: ShellState) {
     };
   }
 
-export function openCommandLog(shell: ShellState) {
+export function openCommandLog(shell: ShellState, prefer?: CommandFilter | StatusNoticeId) {
     shell.pruneErrorLog();
-    if (shell.unseenErrors > 0) shell.commandFilter = "errors";
+    if (prefer === "notices" || (typeof prefer === "string" && prefer in STATUS_NOTICE_ENTRY)) {
+      shell.commandFilter = "notices";
+      if (prefer !== "notices") shell.commandPick = STATUS_NOTICE_ENTRY[prefer as StatusNoticeId];
+    } else if (prefer === "errors" || prefer === "all" || prefer === "user" || prefer === "background") {
+      shell.commandFilter = prefer;
+    } else if (shell.unseenErrors > 0) {
+      shell.commandFilter = "errors";
+    } else if (shell.statusNotices.length > 0) {
+      shell.commandFilter = "notices";
+      if (shell.floorNotice) shell.commandPick = STATUS_NOTICE_ENTRY[shell.floorNotice.id];
+    }
     shell.unseenErrors = 0;
     shell.seedSampleCommands();
     if (!shell.visibleCommands().some((item) => item.id === shell.commandPick)) shell.commandPick = shell.visibleCommands()[0]?.id ?? 0;
