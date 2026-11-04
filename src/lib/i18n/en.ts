@@ -390,6 +390,7 @@ export const en: Messages = {
     cloneBusy: "A clone is already running in the background.",
     open: "Open",
     about: "About AweGit",
+    copyDiagnostics: "Copy diagnostics",
     resetTo: "Reset to {name}",
     imageSide: "Side by side",
     imageSwipe: "Swipe",

@@ -19,8 +19,12 @@ static PROGRESS: Mutex<Option<ProgressHook>> = Mutex::new(None);
 
 type ProgressHook = Arc<dyn Fn(&str, u8) + Send + Sync>;
 
-/// Called after each `git` child exits with its arguments, wall time, and success.
-pub type Trace = fn(&[&str], std::time::Duration, bool);
+/// Called after each `git` child exits.
+///
+/// `ok` is false only when the exit is an error the caller will surface. Expected misses
+/// such as a missing upstream stay successful so they do not look like failures.
+/// `note` is a short stderr tail for a real failure, and empty otherwise.
+pub type Trace = fn(&[&str], std::time::Duration, bool, &str);
 
 pub fn set_trace(hook: Trace) {
     let _ = TRACE.set(hook);
@@ -358,8 +362,9 @@ fn run_prepared(
         child.wait_with_output().map_err(Error::GitMissing)?
     };
     untrack(pid);
+    let note = failure_note(output.status.success(), allow_failure, &output.stderr);
     if let Some(hook) = TRACE.get() {
-        hook(args, started.elapsed(), output.status.success());
+        hook(args, started.elapsed(), output.status.success() || allow_failure, &note);
     }
     note_captured(&output.stdout, &output.stderr);
     if output.status.success() || allow_failure {
@@ -459,6 +464,22 @@ fn percent_in(text: &str) -> Option<u8> {
         }
     }
     found
+}
+
+/// Stderr tail for a failure the caller will surface. Expected non-zero exits stay empty.
+fn failure_note(success: bool, allow_failure: bool, stderr: &[u8]) -> String {
+    if success || allow_failure {
+        return String::new();
+    }
+    tail_text(&settle_stderr(stderr), 500)
+}
+
+fn tail_text(text: &str, max_chars: usize) -> String {
+    let count = text.chars().count();
+    if count <= max_chars {
+        return text.to_string();
+    }
+    text.chars().skip(count - max_chars).collect()
 }
 
 /// Drop overwritten `\r` updates and keep the last copy of each line.
@@ -605,7 +626,7 @@ pub fn check_path(path: &str) -> Result<&str, Error> {
 
 #[cfg(test)]
 mod progress_tests {
-    use super::{percent_in, progress_args, settle_stderr};
+    use super::{failure_note, percent_in, progress_args, settle_stderr};
 
     #[test]
     fn reads_the_latest_git_percent() {
@@ -640,5 +661,15 @@ mod progress_tests {
         );
         assert_eq!(progress_args(&["checkout", "--ours", "--", "file"]), vec!["checkout", "--progress", "--ours", "--", "file"]);
         assert_eq!(progress_args(&["fetch", "--progress"]), vec!["fetch", "--progress"]);
+    }
+
+    #[test]
+    fn failure_note_keeps_stderr_only_for_real_errors() {
+        let stderr = b"Receiving objects:  10% (1/10)\rReceiving objects:  40% (4/10)\r\nfatal: could not read Username\n";
+        assert_eq!(failure_note(true, false, stderr), "");
+        assert_eq!(failure_note(false, true, stderr), "");
+        let note = failure_note(false, false, stderr);
+        assert!(note.contains("could not read Username"));
+        assert!(note.contains("40%"));
     }
 }

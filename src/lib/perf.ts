@@ -56,10 +56,21 @@ export async function invoke<T>(cmd: string, args?: Args, options?: Options): Pr
   }
 }
 
+let flushChain: Promise<void> = Promise.resolve();
+
+/** Write queued webview entries before a diagnostics copy reads the issue log. */
+export function flushClientLog(): Promise<void> {
+  const run = flushChain.then(async () => {
+    if (!queue.length) return;
+    const entries = queue.splice(0, queue.length);
+    await rawInvoke("log_client", { entries }).catch(() => {});
+  });
+  flushChain = run.catch(() => {});
+  return run;
+}
+
 function flush() {
-  if (!queue.length) return;
-  const entries = queue.splice(0, queue.length);
-  void rawInvoke("log_client", { entries }).catch(() => {});
+  void flushClientLog();
 }
 
 function observe(type: string, handle: (entry: PerformanceEntry) => void) {

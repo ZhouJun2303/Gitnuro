@@ -390,6 +390,7 @@ export const zh: Messages = {
     cloneBusy: "已经有一个克隆在后台进行。",
     open: "打开",
     about: "关于 AweGit",
+    copyDiagnostics: "复制诊断信息",
     resetTo: "重置到 {name}",
     imageSide: "并排",
     imageSwipe: "滑动",

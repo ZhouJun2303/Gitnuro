@@ -66,6 +66,7 @@
     "allow-forge-pulls",
     "allow-log-client",
     "allow-perf-snapshot",
+    "allow-diagnostics",
     "allow-open-log-folder",
     "allow-repo-facts",
     "allow-scan-repositories",

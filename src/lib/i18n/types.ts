@@ -390,6 +390,7 @@ export type Messages = {
     cloneBusy: string;
     open: string;
     about: string;
+    copyDiagnostics: string;
     resetTo: string;
     imageSide: string;
     imageSwipe: string;

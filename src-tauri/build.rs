@@ -56,6 +56,7 @@ fn main() {
             "forge_pulls",
             "log_client",
             "perf_snapshot",
+            "diagnostics",
             "open_log_folder",
             "repo_facts",
             "scan_repositories",

@@ -4,7 +4,7 @@
   import { clientStats, frame, type ClientStat } from "./perf";
 
   type Stat = { name: string; count: number; totalMs: number; maxMs: number; lastMs: number; slow: number; onMain: number; failed: number };
-  type Snapshot = { uptimeMs: number; build: string; logFile: string; stalls: number; stallMaxMs: number; stallTotalMs: number; items: Stat[] };
+  type Snapshot = { uptimeMs: number; build: string; logFile: string; issueFile: string; stalls: number; stallMaxMs: number; stallTotalMs: number; items: Stat[] };
 
   let open = $state(false);
   let snap = $state<Snapshot | null>(null);
@@ -58,6 +58,7 @@
     </header>
     {#if snap}
       <p class="path">{snap.logFile}</p>
+      <p class="path">{snap.issueFile}</p>
       <table>
         <thead><tr><th>backend</th><th>count</th><th>avg</th><th>max</th><th>last</th><th>slow</th><th>on main</th><th>failed</th></tr></thead>
         <tbody>

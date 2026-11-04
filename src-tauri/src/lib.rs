@@ -1797,6 +1797,11 @@ fn perf_snapshot() -> perf::Snapshot {
 }
 
 #[tauri::command]
+fn diagnostics() -> String {
+    perf::diagnostics()
+}
+
+#[tauri::command]
 fn open_log_folder() -> Result<(), String> {
     let dir = perf::dir();
     std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
@@ -1887,6 +1892,7 @@ pub fn run() {
             save_revision,
             log_client,
             perf_snapshot,
+            diagnostics,
             open_log_folder
         ]);
     tauri::Builder::default()
