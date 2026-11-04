@@ -602,6 +602,12 @@ export class ShellState {
 
   updateBusy = $state(false);
 
+  updatePhase = $state<"idle" | "checking" | "current" | "available" | "downloading" | "ready" | "error">("idle");
+
+  updateMessage = $state("");
+
+  updatePercent = $state<number | null>(null);
+
   appVersion = $state("2.0.0");
 
 
@@ -2332,29 +2338,42 @@ export class ShellState {
     }
     if (!force && value.appVersion && value.appVersion === this.settings.dismissedUpdate) {
       this.updateNotice = null;
+      if (this.updatePhase === "available") this.updatePhase = "idle";
       return;
     }
     this.updateNotice = value;
+    if (this.updatePhase === "idle") this.updatePhase = "available";
   }
 
   async checkForUpdate() {
+    if (this.updatePhase === "checking" || this.updateBusy) return;
+    this.updatePhase = "checking";
+    this.updateMessage = this.tr("chrome.updateChecking");
+    this.updatePercent = null;
     try {
       const value = await invoke<UpdateNotice | null>("check_for_update");
       this.pendingUpdate = value;
       if (!value) {
         this.updateNotice = null;
-        this.actionError = this.tr("chrome.updateCurrent");
+        this.updatePhase = "current";
+        this.updateMessage = this.tr("chrome.updateCurrent", { version: this.appVersion });
         return;
       }
       this.updateNotice = value;
+      this.updatePhase = "available";
+      this.updateMessage = "";
     } catch (error) {
-      this.actionError = this.message(error);
+      this.updatePhase = "error";
+      this.updateMessage = this.message(error);
     }
   }
 
   dismissUpdate() {
     const version = this.updateNotice?.appVersion ?? "";
     this.updateNotice = null;
+    this.updatePhase = "idle";
+    this.updateMessage = "";
+    this.updatePercent = null;
     if (!version) return;
     this.settings = { ...this.settings, dismissedUpdate: version };
     void this.savePrefs(false);
@@ -2368,10 +2387,17 @@ export class ShellState {
       return;
     }
     this.updateBusy = true;
+    this.updatePhase = "downloading";
+    this.updatePercent = null;
+    this.updateMessage = this.tr("chrome.updateDownloading");
     try {
       await invoke("download_update", { url: notice.downloadUrl });
+      this.updatePhase = "ready";
+      this.updatePercent = 100;
+      this.updateMessage = this.tr("chrome.updateStarted");
     } catch (error) {
-      this.actionError = this.message(error);
+      this.updatePhase = "error";
+      this.updateMessage = this.message(error);
     } finally {
       this.updateBusy = false;
     }
@@ -4662,6 +4688,7 @@ export class ShellState {
     let unresized = () => {};
     let unnav = () => {};
     let unreveal = () => {};
+    let unupdate = () => {};
     let placeTimer = 0;
     let stopped = false;
     this.mode = "loading";
@@ -4697,6 +4724,12 @@ export class ShellState {
     const percent = event.payload?.percent;
     const path = event.payload?.path;
     if (typeof percent === "number" && percent >= 0 && percent <= 100 && path) this.noteProgress(path, percent);
+    });
+    unupdate = await listen<{ percent: number | null }>("update-progress", (event) => {
+    if (this.updatePhase !== "downloading") return;
+    const percent = event.payload?.percent;
+    this.updatePercent = typeof percent === "number" ? percent : null;
+    this.updateMessage = this.updatePercent == null ? this.tr("chrome.updateDownloading") : this.tr("chrome.updateProgress", { percent: String(this.updatePercent) });
     });
     } catch {
     /* the watcher is optional until a repository is open */
@@ -4785,6 +4818,7 @@ export class ShellState {
     unresized();
     unnav();
     unreveal();
+    unupdate();
     };
     });
   }

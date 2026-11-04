@@ -2,6 +2,7 @@
 
 use serde::Serialize;
 use std::cmp::Ordering;
+use std::io::{Read, Write};
 
 const VERSION_CHECK_URL: &str = "https://raw.githubusercontent.com/ZhouJun2303/Gitnuro/release/latest.json";
 const RELEASE_PREFIX: &str = "https://github.com/ZhouJun2303/Gitnuro/releases/download/";
@@ -16,6 +17,11 @@ pub struct UpdateNotice {
     pub notes: String,
     /// True when `download_url` is an installer this machine can open.
     pub installable: bool,
+}
+
+#[derive(Clone, Serialize)]
+pub struct UpdateProgress {
+    pub percent: Option<u8>,
 }
 
 pub fn current_version() -> &'static str {
@@ -39,23 +45,76 @@ pub fn check() -> Result<Option<UpdateNotice>, String> {
     }))
 }
 
-pub fn download_and_open(url: &str) -> Result<(), String> {
+pub fn download_and_open(url: &str, mut progress: impl FnMut(Option<u8>)) -> Result<(), String> {
     let name = installer_name(url)?;
     let dir = std::env::temp_dir().join("awegit-update");
     std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     let dest = dir.join(name);
-    let status = std::process::Command::new("curl")
-        .args(["--silent", "--show-error", "--fail", "--location", "--max-time", "180", "--output"])
-        .arg(&dest)
-        .arg(url)
-        .status()
-        .map_err(|error| error.to_string())?;
-    if !status.success() {
+    let response = agent(600).get(url).call().map_err(|error| error.to_string())?;
+    let total = response.header("content-length").and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
+    if total == 0 {
+        progress(None);
+    }
+    let mut reader = response.into_reader();
+    let mut file = match std::fs::File::create(&dest) {
+        Ok(file) => file,
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut buf = [0u8; 64 * 1024];
+    let mut got = 0u64;
+    let mut reported: Option<u8> = None;
+    loop {
+        let read = match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(count) => count,
+            Err(error) => {
+                drop(file);
+                let _ = std::fs::remove_file(&dest);
+                return Err(error.to_string());
+            }
+        };
+        if let Err(error) = file.write_all(&buf[..read]) {
+            drop(file);
+            let _ = std::fs::remove_file(&dest);
+            return Err(error.to_string());
+        }
+        got += read as u64;
+        if let Some(percent) = percent_of(got, total) {
+            if reported != Some(percent) {
+                reported = Some(percent);
+                progress(Some(percent));
+            }
+        }
+    }
+    if let Some(percent) = percent_of(got, total) {
+        if reported != Some(percent) {
+            progress(Some(percent));
+        }
+    }
+    drop(file);
+    if got == 0 {
         let _ = std::fs::remove_file(&dest);
         return Err("update download failed".into());
     }
     std::process::Command::new(&dest).spawn().map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn agent(read_secs: u64) -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .https_only(true)
+        .redirects(10)
+        .timeout_connect(std::time::Duration::from_secs(20))
+        .timeout_read(std::time::Duration::from_secs(read_secs))
+        .timeout_write(std::time::Duration::from_secs(20))
+        .build()
+}
+
+fn percent_of(got: u64, total: u64) -> Option<u8> {
+    if total == 0 {
+        return None;
+    }
+    Some(((got.saturating_mul(100)) / total).min(100) as u8)
 }
 
 fn platform_download(value: &serde_json::Value) -> (String, bool) {
@@ -100,15 +159,7 @@ fn installer_name(url: &str) -> Result<String, String> {
 }
 
 fn http_get(url: &str) -> Result<String, String> {
-    let output = std::process::Command::new("curl")
-        .args(["--silent", "--show-error", "--fail", "--max-time", "20", url])
-        .output()
-        .map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() { "update check failed".into() } else { stderr });
-    }
-    String::from_utf8(output.stdout).map_err(|error| error.to_string())
+    agent(20).get(url).call().map_err(|error| error.to_string())?.into_string().map_err(|error| error.to_string())
 }
 
 /// `remote` is newer than the version compiled into this build.
@@ -134,7 +185,7 @@ fn parse_version(text: &str) -> Option<[u64; 3]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{installer_name, newer_than};
+    use super::{installer_name, newer_than, percent_of};
 
     #[test]
     fn three_part_versions_compare_by_number() {
@@ -154,5 +205,15 @@ mod tests {
         assert!(installer_name("https://github.com/ZhouJun2303/Gitnuro/releases/latest").is_err());
         assert!(installer_name("https://example.com/AweGit_2.0.1_x64-setup.exe").is_err());
         assert!(installer_name("https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.1/../secret.exe").is_err());
+    }
+
+    #[test]
+    fn download_percent_follows_bytes_received() {
+        assert_eq!(percent_of(0, 0), None);
+        assert_eq!(percent_of(50, 0), None);
+        assert_eq!(percent_of(0, 200), Some(0));
+        assert_eq!(percent_of(50, 200), Some(25));
+        assert_eq!(percent_of(200, 200), Some(100));
+        assert_eq!(percent_of(250, 200), Some(100));
     }
 }

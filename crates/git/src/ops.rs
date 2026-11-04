@@ -1574,6 +1574,7 @@ fn custom(repo: &Path, command: &str, marked: &str, sha: &str, branch: &str, fil
         .replace("${file}", if cfg!(windows) { "%AWEGIT_FILE%" } else { "\"$AWEGIT_FILE\"" });
     let mut process = if cfg!(windows) {
         let mut process = std::process::Command::new("cmd");
+        crate::cli::hide_console(&mut process);
         process.arg("/C").arg(expanded);
         process
     } else {

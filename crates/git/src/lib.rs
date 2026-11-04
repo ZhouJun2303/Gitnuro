@@ -24,9 +24,8 @@ pub use model::{
     RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
 pub use cli::{
-    cancel_repo, cancel_running, capture_output, configure, repo_key, set_http_proxy, set_passphrase, set_progress, set_trace, stop_process_tree,
-    use_bundled_git, with_operation_repo,
-    Session, Trace,
+    cancel_repo, cancel_running, capture_output, configure, hide_console, origin_url, repo_key, set_http_proxy, set_passphrase, set_progress, set_trace,
+    stop_process_tree, use_bundled_git, with_operation_repo, Session, Trace,
 };
 pub use ops::{
     approve_credential, cherry_preview, merged_branches, perform, pick_history, repo_facts, repo_facts_brief, scan_repositories, search_commits,

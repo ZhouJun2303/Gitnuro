@@ -6,6 +6,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::io::Read;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -154,8 +155,121 @@ static PROCESS: Mutex<Process> = Mutex::new(Process {
 });
 
 /// Prefer a Portable Git `cmd` directory shipped beside the executable.
+///
+/// When `mingw64\bin\git.exe` sits beside that directory, later commands start it directly.
+/// The `cmd\git.exe` wrapper would otherwise open a console for the real git.
 pub fn use_bundled_git(dir: &Path) {
     let _ = BUNDLED_GIT.set(dir.display().to_string());
+}
+
+struct GitLaunch {
+    program: OsString,
+    path_prefix: Option<OsString>,
+}
+
+static LAUNCH: std::sync::OnceLock<GitLaunch> = std::sync::OnceLock::new();
+
+/// Stop a console program from opening a window on Windows. A windowed program ignores the flag.
+pub fn hide_console(command: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
+
+fn git_command() -> Command {
+    let launch = LAUNCH.get_or_init(resolve_launch);
+    let mut command = Command::new(&launch.program);
+    hide_console(&mut command);
+    apply_path(&mut command, launch.path_prefix.as_deref());
+    command
+}
+
+fn resolve_launch() -> GitLaunch {
+    if let Some(bundled) = BUNDLED_GIT.get() {
+        let dir = PathBuf::from(bundled);
+        if let Some(found) = launch_beside(&dir) {
+            return found;
+        }
+        return GitLaunch {
+            program: OsString::from("git"),
+            path_prefix: Some(dir.into_os_string()),
+        };
+    }
+    #[cfg(windows)]
+    if let Some(found) = launch_from_system_path() {
+        return found;
+    }
+    GitLaunch {
+        program: OsString::from("git"),
+        path_prefix: None,
+    }
+}
+
+/// `dir` is Git's `cmd` folder. The real binary is `../mingw64/bin/git.exe`.
+fn launch_beside(dir: &Path) -> Option<GitLaunch> {
+    let mingw = dir.join("..").join("mingw64").join("bin");
+    let real = mingw.join("git.exe");
+    if !real.is_file() {
+        return None;
+    }
+    Some(GitLaunch {
+        program: real.into_os_string(),
+        path_prefix: Some(helper_path(&mingw)),
+    })
+}
+
+fn helper_path(mingw_bin: &Path) -> OsString {
+    let mut dirs = vec![mingw_bin.to_path_buf()];
+    if let Some(root) = mingw_bin.parent().and_then(|parent| parent.parent()) {
+        let usr = root.join("usr").join("bin");
+        if usr.is_dir() {
+            dirs.push(usr);
+        }
+    }
+    std::env::join_paths(&dirs).unwrap_or_else(|_| mingw_bin.as_os_str().to_os_string())
+}
+
+#[cfg(windows)]
+fn launch_from_system_path() -> Option<GitLaunch> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        if !dir.join("git.exe").is_file() {
+            continue;
+        }
+        if let Some(found) = launch_beside(&dir) {
+            return Some(found);
+        }
+        return Some(GitLaunch {
+            program: dir.join("git.exe").into_os_string(),
+            path_prefix: Some(dir.into_os_string()),
+        });
+    }
+    None
+}
+
+fn apply_path(command: &mut Command, prefix: Option<&OsStr>) {
+    let Some(prefix) = prefix.filter(|prefix| !prefix.is_empty()) else { return };
+    let mut path = OsString::from(prefix);
+    path.push(if cfg!(windows) { ";" } else { ":" });
+    if let Some(current) = std::env::var_os("PATH") {
+        path.push(current);
+    }
+    command.env("PATH", path);
+}
+
+/// `origin` URL, or empty when this repository has no such remote.
+pub fn origin_url(repo: &Path) -> String {
+    run_output(repo, &["remote", "get-url", "origin"])
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .unwrap_or_default()
 }
 
 /// Replace the session used by later `git` processes. The in-memory passphrase is kept.
@@ -214,9 +328,9 @@ pub fn cancel_repo(repo: &Path) {
 
 pub fn stop_process_tree(pid: u32) {
     if cfg!(windows) {
-        let _ = Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .output();
+        let mut command = Command::new("taskkill");
+        hide_console(&mut command);
+        let _ = command.args(["/F", "/T", "/PID", &pid.to_string()]).output();
     } else {
         let _ = Command::new("kill").args(["-TERM", &format!("-{pid}")]).output();
         let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).output();
@@ -252,21 +366,13 @@ pub(crate) fn run_repo_author(repo: &Path, args: &[&str]) -> Result<std::process
 
 /// True when this repository has its own `user.name`.
 pub(crate) fn has_local_author(repo: &Path) -> bool {
-    let mut command = Command::new("git");
+    let mut command = git_command();
     command
         .current_dir(repo)
         .args(["config", "--local", "--get", "user.name"])
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    if let Some(dir) = BUNDLED_GIT.get() {
-        let mut path = std::ffi::OsString::from(dir);
-        path.push(";");
-        if let Some(current) = std::env::var_os("PATH") {
-            path.push(current);
-        }
-        command.env("PATH", path);
-    }
     match command.output() {
         Ok(output) => output.status.success() && output.stdout.iter().any(|byte| !byte.is_ascii_whitespace()),
         Err(_) => false,
@@ -282,7 +388,7 @@ fn run_prepared(
     allow_failure: bool,
 ) -> Result<std::process::Output, Error> {
     let progress = progress_hook();
-    let mut command = Command::new("git");
+    let mut command = git_command();
     command.current_dir(repo).env("GIT_TERMINAL_PROMPT", "0");
     if progress.is_some() {
         command.env("GIT_LFS_FORCE_PROGRESS", "1");
@@ -294,14 +400,6 @@ fn run_prepared(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(dir) = BUNDLED_GIT.get() {
-        let mut path = std::ffi::OsString::from(dir);
-        path.push(";");
-        if let Some(current) = std::env::var_os("PATH") {
-            path.push(current);
-        }
-        command.env("PATH", path);
-    }
     let (session, passphrase) = session_snapshot();
     if !session.proxy.is_empty() {
         command.env("http_proxy", &session.proxy);
@@ -671,5 +769,35 @@ mod progress_tests {
         let note = failure_note(false, false, stderr);
         assert!(note.contains("could not read Username"));
         assert!(note.contains("40%"));
+    }
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use std::path::Path;
+
+    use super::launch_beside;
+
+    #[test]
+    fn prefers_the_real_git_beside_the_cmd_wrapper() {
+        let root = std::env::temp_dir().join(format!("awegit-git-launch-{}", std::process::id()));
+        let cmd = root.join("cmd");
+        let mingw = root.join("mingw64").join("bin");
+        let usr = root.join("usr").join("bin");
+        std::fs::create_dir_all(&cmd).unwrap();
+        std::fs::create_dir_all(&mingw).unwrap();
+        std::fs::create_dir_all(&usr).unwrap();
+        std::fs::write(cmd.join("git.exe"), b"wrapper").unwrap();
+        std::fs::write(mingw.join("git.exe"), b"real").unwrap();
+        let launch = launch_beside(&cmd).expect("mingw git");
+        let program = Path::new(&launch.program);
+        assert!(program.is_file());
+        assert!(program.components().any(|part| part.as_os_str() == "mingw64"));
+        let prefix = launch.path_prefix.expect("helper path");
+        let text = prefix.to_string_lossy();
+        assert!(text.contains("mingw64"));
+        assert!(text.contains("usr"));
+        assert!(launch_beside(&root).is_none());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

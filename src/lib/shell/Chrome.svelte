@@ -197,8 +197,14 @@
     <div class="banner">
       <span>{shell.tr("chrome.updateAvailable", { name: `AweGit ${shell.updateNotice.appVersion}` })}</span>
       {#if shell.updateNotice.notes}<span class="meta">{shell.updateNotice.notes}</span>{/if}
+      {#if shell.updatePhase === "downloading" && shell.updatePercent != null}<span class="update-track" aria-hidden="true"><span style:width={`${shell.updatePercent}%`}></span></span>{/if}
+      {#if shell.updatePhase === "checking" || shell.updatePhase === "downloading" || shell.updatePhase === "ready" || shell.updatePhase === "error"}<span>{shell.updateMessage}</span>{/if}
       <button class="text-button" type="button" disabled={shell.updateBusy} onclick={() => void shell.installUpdate()}>{shell.updateBusy ? shell.tr("chrome.updateDownloading") : shell.tr("chrome.updateInstall")}</button>
       <button class="text-button" type="button" disabled={shell.updateBusy} onclick={() => shell.dismissUpdate()}>{shell.tr("chrome.updateLater")}</button>
+    </div>
+  {:else if (shell.updatePhase === "checking" || shell.updatePhase === "current" || shell.updatePhase === "error") && shell.updateMessage}
+    <div class="banner">
+      <span>{shell.updateMessage}</span>
     </div>
   {/if}
   {#if shell.mode === "live" && shell.facts?.bisectActive}

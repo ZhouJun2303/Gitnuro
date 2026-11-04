@@ -300,6 +300,7 @@ fn split_status(text: String) -> (u16, String) {
 
 fn http_get(url: &str, key: &str) -> Result<(u16, String), String> {
     let mut command = std::process::Command::new("curl");
+    awegit_git::hide_console(&mut command);
     command.args([
         "-sS",
         "--max-time",
@@ -339,7 +340,9 @@ fn http_get(url: &str, key: &str) -> Result<(u16, String), String> {
 }
 
 fn post_json(url: &str, key: &str, payload: &str) -> Result<String, String> {
-    let mut child = std::process::Command::new("curl")
+    let mut command = std::process::Command::new("curl");
+    awegit_git::hide_console(&mut command);
+    let mut child = command
         .args([
             "-sS",
             "--max-time",
