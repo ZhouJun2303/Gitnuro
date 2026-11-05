@@ -100,6 +100,7 @@ export type SubmoduleRow = { path: string; id: string; ready: boolean };
 export type WorktreeRow = { path: string; branch: string | null; detached: boolean };
 
 export type RefSnapshot = {
+  head?: string | null;
   branches: BranchRow[];
   remotes: RemoteRow[];
   tags: TagRow[];
@@ -122,6 +123,7 @@ export type BlameLine = {
   author: string;
   line: number;
   text: string;
+  truncated?: boolean;
 };
 
 export type Settings = {
@@ -325,10 +327,21 @@ export type ConflictSides = {
   working: string;
 };
 
+export type ConflictCommit = {
+  id: string;
+  short: string;
+  subject: string;
+  author: string;
+  email: string;
+  /** Unix seconds from `%at`. */
+  at: number;
+};
+
 export type ConflictParty = {
   label: string;
   state: "added" | "modified" | "deleted" | "unchanged";
   bytes: number;
+  commit?: ConflictCommit | null;
 };
 
 export type ConflictView = {

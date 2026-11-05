@@ -1,6 +1,6 @@
-.commit-row.good .subject { color: var(--added, #3aa76d); }
+.commit-row.good .subject { color: var(--added); }
 
-.commit-row.bad .subject { color: var(--deleted, #d16464); }
+.commit-row.bad .subject { color: var(--deleted); }
 
 .history-stage {
     flex: 1;
@@ -9,6 +9,11 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+
+.history-head {
+    flex: none;
+    background: var(--canvas);
   }
 
 .history {
@@ -25,13 +30,15 @@
 
 .history .commit-row {
     gap: 0;
-    background: transparent;
   }
 
-.history .commit-row:hover,
-  .history .commit-row.selected,
+.history .commit-row:hover {
+    background: var(--hover);
+  }
+
+.history .commit-row.selected,
   .history .commit-row.selected:hover {
-    background: transparent;
+    background: var(--selection);
   }
 
 .commit-row.virtual {
@@ -76,6 +83,41 @@
   }
 
 .lane-name.compact { max-width: 88px; }
+
+.lane-name.local-only,
+  .lane-name.mirrored {
+    position: relative;
+    padding-right: 12px;
+  }
+
+.lane-name.local-only::after,
+  .lane-name.mirrored::after {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+
+.lane-name.local-only::after {
+    content: "!";
+    width: 9px;
+    height: 9px;
+    background: var(--modified);
+    color: var(--on-modified);
+    font-size: 7px;
+    font-weight: 700;
+    line-height: 9px;
+    text-align: center;
+  }
+
+.lane-name.mirrored::after {
+    content: "";
+    top: 3px;
+    width: 5px;
+    height: 5px;
+    background: var(--added);
+  }
 
 .lane-name > span {
     overflow: hidden;
@@ -137,13 +179,8 @@
     z-index: 1;
     height: 100%;
     padding-left: 8px;
-    background: var(--canvas);
+    background: transparent;
   }
-
-.commit-row:hover .commit-copy { background: var(--hover); }
-
-.commit-row.selected .commit-copy,
-  .commit-row.selected:hover .commit-copy { background: var(--selection); }
 
 .commit-row.unpushed .subject,
   .commit-row.unpushed .badges,
@@ -181,6 +218,18 @@
     color: var(--text-secondary);
     background: var(--sidebar);
     border-bottom: 1px solid var(--line);
+  }
+
+.filter-bar > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.filter-bar > .text-button {
+    flex: none;
+    margin-left: auto;
   }
 
 .commit-side {

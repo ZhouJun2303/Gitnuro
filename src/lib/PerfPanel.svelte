@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
-  import { clientStats, frame, type ClientStat } from "./perf";
+  import { clientStats, frame, invoke, type ClientStat } from "./perf";
 
   type Stat = { name: string; count: number; totalMs: number; maxMs: number; lastMs: number; slow: number; onMain: number; failed: number };
   type Snapshot = { uptimeMs: number; build: string; logFile: string; issueFile: string; stalls: number; stallMaxMs: number; stallTotalMs: number; items: Stat[] };
@@ -11,12 +10,10 @@
   let web = $state<ClientStat[]>([]);
   let tasks = $state({ ...frame });
 
-  const live = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
   async function poll() {
     web = clientStats().slice(0, 30);
     tasks = { ...frame };
-    if (live) snap = await invoke<Snapshot>("perf_snapshot").catch(() => snap);
+    snap = await invoke<Snapshot>("perf_snapshot").catch(() => snap);
   }
 
   function ms(value: number) {
@@ -37,13 +34,21 @@
         open = !open;
       }
     };
+    const onToggle = (event: Event) => {
+      const detail = (event as CustomEvent<{ open?: boolean }>).detail;
+      open = detail?.open ?? !open;
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("awegit-perf", onToggle);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("awegit-perf", onToggle);
+    };
   });
 </script>
 
 {#if open}
-  <aside class="perf">
+  <aside class="perf" data-layer="perf">
     <header>
       <strong>Performance</strong>
       {#if snap}
@@ -53,7 +58,7 @@
       {/if}
       <span class:bad={tasks.longTasks > 0}>long tasks {tasks.longTasks} · max {ms(tasks.longTaskMax)}</span>
       <span class="grow"></span>
-      {#if live}<button type="button" onclick={() => void invoke("open_log_folder")}>Open logs</button>{/if}
+      <button type="button" onclick={() => void invoke("open_log_folder")}>Open logs</button>
       <button type="button" aria-label="Close" onclick={() => (open = false)}>×</button>
     </header>
     {#if snap}

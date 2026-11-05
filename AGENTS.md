@@ -20,6 +20,7 @@
 约定：
 
 - 标识 `com.zhoujun.awegit`，产品名 AweGit
+- `feat/dev` 是日常开发分支，功能和修复提交到这里；`release` 只放发布提交和 `latest.json`
 - 不改全局 gitconfig。仓库本地配置和 `.git/awegit` 可以写
 - 写操作按仓库排队
 - 前端依赖写在 `package.json`，Rust 依赖写在对应的 `Cargo.toml`
@@ -28,9 +29,18 @@
 - 测试：`pnpm test`（`cargo test -p awegit-git -- --test-threads=1`）
 - 类型检查：`pnpm check`
 - Windows 打包：`pnpm package:windows`
-- Windows 发布：`publish.bat`（默认定修订号加一后打包并上传）。`pnpm publish:windows` 只在 `release` 分支发布当前版本
+- Windows 发布：`publish.bat`（默认定修订号加一后打包并上传），在 `feat/dev` 上运行，脚本会合并进 `release`。`pnpm publish:windows` 只在 `release` 分支发布当前版本
 - macOS 打包：`pnpm package:mac`
 - 不提交 `target/`、`node_modules/`、`src-tauri/target/`，也不提交打包进来的 MinGit
+
+## 试验台
+
+浏览器看界面用 `pnpm dev`，自动化用 `pnpm test:ui`。桌面仍是 `pnpm start`。
+
+- `.lab/` 不提交。种子脚本 `scripts/lab-seed.mjs` 和场景清单要提交
+- 改了界面、弹窗或仓库状态后，补场景并跑 `pnpm test:ui`
+- 新弹窗必须记入 `src/lib/lab/scenes.ts`。缺一项时 `pnpm check` 会失败
+- 不拿 AweGit 自身仓库做暂存、提交或推送实验。试验只写 `.lab`
 
 ## 性能
 

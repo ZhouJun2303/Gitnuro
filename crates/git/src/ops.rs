@@ -4,13 +4,14 @@
 //! they are placed on the command line. Cancellation of a running command is the
 //! caller's job; these functions wait for `git` to exit.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{check_name, check_path, check_rev, run, run_env, run_output, run_stdin, with_operation_repo};
+use crate::cli::{check_name, check_path, check_rev, commit_config, has_local_author, run, run_env, run_paths, run_repo_author, run_stdin, with_operation_repo};
 use crate::model::in_progress;
-use crate::{commit, discard_hunk, discard_line, resolve_conflict, stage_hunk, stage_line, stage_paths, unstage_paths, CommitRequest, Error, InProgress};
+use crate::{commit, discard_hunk, discard_line, discard_lines, resolve_conflict, stage_hunk, stage_line, stage_lines, stage_paths, unstage_paths, CommitRequest, Error, InProgress, LineEdit};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,7 +22,7 @@ pub enum ResetMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "camelCase")]
+#[serde(tag = "action", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Mutation {
     Fetch {
         #[serde(default)]
@@ -109,6 +110,12 @@ pub enum Mutation {
         no_ff: bool,
         #[serde(default)]
         autostash: bool,
+        /// First line of the merge commit. Empty keeps Git's own message.
+        #[serde(default)]
+        summary: String,
+        /// Extra paragraphs, usually the files this merge brings in.
+        #[serde(default)]
+        description: String,
     },
     Rebase {
         onto: String,
@@ -196,12 +203,22 @@ pub enum Mutation {
         index: u32,
         #[serde(default)]
         unstage: bool,
+        /// The displayed diff ignored whitespace, so the hunk index must use the same view.
+        #[serde(default)]
+        ignore_space: bool,
     },
     StageLine {
         file: String,
         text: String,
         addition: bool,
         at: u32,
+        #[serde(default)]
+        unstage: bool,
+    },
+    /// Apply many line edits with one index write and one status refresh.
+    StageLines {
+        file: String,
+        lines: Vec<LineEdit>,
         #[serde(default)]
         unstage: bool,
     },
@@ -213,12 +230,20 @@ pub enum Mutation {
     DiscardHunk {
         file: String,
         index: u32,
+        /// The displayed diff ignored whitespace, so the hunk index must use the same view.
+        #[serde(default)]
+        ignore_space: bool,
     },
     DiscardLine {
         file: String,
         text: String,
         addition: bool,
         at: u32,
+    },
+    /// Apply many discards with one file read and one write.
+    DiscardLines {
+        file: String,
+        lines: Vec<LineEdit>,
     },
     Resolve {
         file: String,
@@ -270,8 +295,16 @@ pub enum Mutation {
     Discard {
         file: String,
     },
+    /// Drop worktree changes for many paths in one pass.
+    DiscardPaths {
+        files: Vec<String>,
+    },
     Delete {
         file: String,
+    },
+    /// Remove many paths from the index and the work tree in one pass.
+    DeletePaths {
+        files: Vec<String>,
     },
     ApplyPatch {
         patch: String,
@@ -486,7 +519,9 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             squash,
             no_ff,
             autostash,
-        } => merge(repo, &name, squash, no_ff, autostash),
+            summary,
+            description,
+        } => merge(repo, &name, squash, no_ff, autostash, &summary, &description),
         Mutation::Rebase { onto, autostash } => rebase_onto(repo, &onto, autostash),
         Mutation::RebaseInteractive { onto, drop, steps, autostash, update_refs } => {
             rebase_interactive(repo, &onto, &drop, &steps, autostash, update_refs)
@@ -512,7 +547,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             run(repo, &["push", check_name(&remote)?, &spec]).map(|_| ())
         }
         Mutation::RestoreFile { rev, file } => {
-            run(repo, &["checkout", check_rev(&rev)?, "--", check_path(&file)?]).map(|_| ())
+            run(repo, &["--literal-pathspecs", "checkout", check_rev(&rev)?, "--", check_path(&file)?]).map(|_| ())
         }
         Mutation::Bisect { verb, rev } => bisect(repo, &verb, &rev),
         Mutation::WriteGitignore { text } => write_gitignore(repo, &text),
@@ -529,7 +564,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             append_ignore(repo, &paths, fake, directory)
         }
         Mutation::WriteMailmap { text } => write_mailmap(repo, &text),
-        Mutation::StageHunk { file, index, unstage } => stage_hunk(repo, &file, index, unstage),
+        Mutation::StageHunk { file, index, unstage, ignore_space } => stage_hunk(repo, &file, index, unstage, ignore_space),
         Mutation::StageLine {
             file,
             text,
@@ -537,6 +572,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             at,
             unstage,
         } => stage_line(repo, &file, &text, addition, at, unstage),
+        Mutation::StageLines { file, lines, unstage } => stage_lines(repo, &file, &lines, unstage),
         Mutation::StagePaths { files, unstage } => {
             if unstage {
                 unstage_paths(repo, &files)
@@ -544,13 +580,14 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
                 stage_paths(repo, &files)
             }
         }
-        Mutation::DiscardHunk { file, index } => discard_hunk(repo, &file, index),
+        Mutation::DiscardHunk { file, index, ignore_space } => discard_hunk(repo, &file, index, ignore_space),
         Mutation::DiscardLine {
             file,
             text,
             addition,
             at,
         } => discard_line(repo, &file, &text, addition, at),
+        Mutation::DiscardLines { file, lines } => discard_lines(repo, &file, &lines),
         Mutation::Resolve { file, side, text } => resolve_conflict(repo, &file, &side, &text),
         Mutation::RenameBranch { name, to } => {
             run(repo, &["branch", "-m", check_name(&name)?, check_name(&to)?]).map(|_| ())
@@ -587,7 +624,9 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             autostash,
         } => pull_ref(repo, &remote, &branch, rebase, autostash),
         Mutation::Discard { file } => discard(repo, &file),
+        Mutation::DiscardPaths { files } => discard_paths(repo, &files),
         Mutation::Delete { file } => delete_path(repo, &file),
+        Mutation::DeletePaths { files } => delete_paths(repo, &files),
         Mutation::ApplyPatch { patch } => run_stdin(repo, &["apply", "--index"], patch.as_bytes()).map(|_| ()),
         Mutation::AddRemote { name, url } => {
             run(repo, &["remote", "add", check_name(&name)?, check_url(&url)?]).map(|_| ())
@@ -753,6 +792,9 @@ fn stash_rename(repo: &Path, name: &str, message: &str) -> Result<(), Error> {
 fn stash_index(selector: &str) -> Option<usize> {
     let start = selector.find("{")?;
     let end = selector.find('}')?;
+    if end <= start + 1 {
+        return None;
+    }
     selector[start + 1..end].parse().ok()
 }
 
@@ -878,24 +920,32 @@ fn stash_paths(repo: &Path, files: &[String], message: &str, include_untracked: 
     // to git" unless --include-untracked is given, so a selection that holds an
     // untracked path always asks for it.
     let include_untracked = include_untracked || has_untracked(repo, files);
-    let mut owned = vec!["stash".to_string(), "push".to_string()];
+    let mut prefix: Vec<&str> = vec!["stash", "push"];
     if include_untracked {
-        owned.push("--include-untracked".into());
+        prefix.push("--include-untracked");
     }
     if !message.is_empty() {
-        owned.push("-m".into());
-        owned.push(message.to_string());
+        prefix.push("-m");
+        prefix.push(message);
     }
-    owned.push("--".into());
-    for file in files {
-        owned.push(file.to_string());
-    }
-    let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-    run(repo, &args).map(|_| ())
+    run_paths(repo, &prefix, files).map(|_| ())
 }
 
 /// True when any of `files` is not tracked yet (and not ignored).
 fn has_untracked(repo: &Path, files: &[String]) -> bool {
+    if files.is_empty() {
+        return false;
+    }
+    if files.len() > 40 {
+        // `ls-files` has no --pathspec-from-file, so ask for the untracked set once.
+        let output = run(repo, &["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z"]);
+        let Ok(output) = output else { return false };
+        let wanted: HashSet<String> = files.iter().map(|path| slash(path)).collect();
+        return output
+            .stdout
+            .split(|byte| *byte == 0)
+            .any(|path| !path.is_empty() && wanted.contains(&String::from_utf8_lossy(path).into_owned()));
+    }
     let mut args = vec!["--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "--"];
     args.extend(files.iter().map(String::as_str));
     run(repo, &args)
@@ -912,20 +962,155 @@ fn create_branch(repo: &Path, name: &str, start: Option<&str>) -> Result<(), Err
     }
 }
 
-fn merge(repo: &Path, name: &str, squash: bool, no_ff: bool, autostash: bool) -> Result<(), Error> {
+fn merge(
+    repo: &Path,
+    name: &str,
+    squash: bool,
+    no_ff: bool,
+    autostash: bool,
+    summary: &str,
+    description: &str,
+) -> Result<(), Error> {
     let name = check_rev(name)?;
-    let mut args = vec!["merge"];
+    let summary = summary.trim();
+    let description = description.trim();
+    let mut message = String::new();
+    if !summary.is_empty() || !description.is_empty() {
+        if summary.is_empty() {
+            message.push_str("Merge ");
+            message.push_str(name);
+        } else {
+            message.push_str(summary);
+        }
+        if !description.is_empty() {
+            message.push_str("\n\n");
+            message.push_str(description);
+        }
+    }
+    let stored = if message.is_empty() { None } else { Some(message_file(&message)?) };
+    let mut args = vec!["merge".to_string()];
     if autostash {
-        args.push("--autostash");
+        args.push("--autostash".into());
     }
     if squash {
-        args.push("--squash");
+        args.push("--squash".into());
     } else if no_ff {
-        args.push("--no-ff");
+        args.push("--no-ff".into());
     }
-    args.push("--no-edit");
-    args.push(name);
-    with_editor(repo, &args)
+    if let Some(file) = stored.as_ref().filter(|_| !squash) {
+        args.push("-F".into());
+        args.push(file.0.display().to_string());
+    } else if !squash {
+        args.push("--no-edit".into());
+    }
+    args.push(name.to_string());
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    with_editor(repo, &refs)?;
+    if squash && !has_unmerged(repo) {
+        let staged = run(repo, &["diff", "--cached", "--name-only"])?;
+        if staged.stdout.iter().any(|byte| !byte.is_ascii_whitespace()) {
+            let fallback = if message.is_empty() { Some(message_file(&format!("Squash {name}"))?) } else { None };
+            let path = fallback.as_ref().or(stored.as_ref()).map(|file| file.0.as_path());
+            if let Some(path) = path {
+                commit_from_file(repo, path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+struct MessageFile(PathBuf);
+
+impl Drop for MessageFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn message_file(text: &str) -> Result<MessageFile, Error> {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let path = std::env::temp_dir().join(format!("awegit-merge-{}-{nanos}.txt", std::process::id()));
+    std::fs::write(&path, text).map_err(|source| Error::Read { path: path.display().to_string(), source })?;
+    Ok(MessageFile(path))
+}
+
+fn commit_from_file(repo: &Path, path: &Path) -> Result<(), Error> {
+    let mut args = commit_config(repo);
+    args.push("commit".into());
+    args.push("-F".into());
+    args.push(path.display().to_string());
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    if has_local_author(repo) {
+        run_repo_author(repo, &borrowed).map(|_| ())
+    } else {
+        run(repo, &borrowed).map(|_| ())
+    }
+}
+
+/// Files the merge would bring in, plus the branch that would receive them.
+pub fn merge_preview(repo: &Path, name: &str) -> Result<MergePreview, Error> {
+    let name = check_rev(name)?;
+    Ok(MergePreview {
+        into: current_branch_name(repo),
+        files: changed_names(repo, name)?,
+    })
+}
+
+fn current_branch_name(repo: &Path) -> String {
+    match run(repo, &["branch", "--show-current"]) {
+        Ok(output) => {
+            let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if name.is_empty() { "HEAD".into() } else { name }
+        }
+        Err(_) => "HEAD".into(),
+    }
+}
+
+fn changed_names(repo: &Path, name: &str) -> Result<Vec<MergeFile>, Error> {
+    let triple = format!("HEAD...{name}");
+    let output = match run(repo, &["diff", "--name-status", &triple]) {
+        Ok(output) => output,
+        Err(_) => run(repo, &["diff", "--name-status", &format!("HEAD..{name}")])?,
+    };
+    Ok(parse_name_status(&output.stdout))
+}
+
+fn parse_name_status(stdout: &[u8]) -> Vec<MergeFile> {
+    String::from_utf8_lossy(stdout)
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            let mut parts = line.split('\t');
+            let status = parts.next()?.trim();
+            let path = parts.last()?.trim();
+            if status.is_empty() || path.is_empty() {
+                return None;
+            }
+            Some(MergeFile {
+                status: status.chars().next()?.to_string(),
+                path: path.to_string(),
+            })
+        })
+        .collect()
+}
+
+/// One changed path in a merge preview.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeFile {
+    pub status: String,
+    pub path: String,
+}
+
+/// Where a merge lands, and the paths it would change.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergePreview {
+    pub into: String,
+    pub files: Vec<MergeFile>,
 }
 
 /// Store a credential in the user's installed helper. The password is not written to settings.
@@ -1037,19 +1222,147 @@ fn tag(repo: &Path, name: &str, rev: &str, message: &str) -> Result<(), Error> {
 fn discard(repo: &Path, file: &str) -> Result<(), Error> {
     let file = check_path(file)?;
     if in_index(repo, file)? {
-        run(repo, &["restore", "--worktree", "--source=HEAD", "--", file]).map(|_| ())
+        run(repo, &["--literal-pathspecs", "restore", "--worktree", "--source=HEAD", "--", file]).map(|_| ())
     } else {
         remove_worktree_file(repo, file)
     }
 }
 
-fn delete_path(repo: &Path, file: &str) -> Result<(), Error> {
-    let file = check_path(file)?;
-    if in_index(repo, file)? {
-        run(repo, &["rm", "-f", "--", file]).map(|_| ())
-    } else {
-        remove_worktree_file(repo, file)
+/// Restore tracked paths from `HEAD`, drop index-only additions, and delete the rest.
+/// One `ls-files` and one `cat-file` cover the whole list. Git itself is called per chunk.
+fn discard_paths(repo: &Path, files: &[String]) -> Result<(), Error> {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    for file in files {
+        let path = check_path(file)?.to_string();
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
     }
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let indexed = paths_in_index(repo, &paths)?;
+    let headed = paths_in_head(repo, &paths)?;
+    let mut restore = Vec::new();
+    let mut remove_index = Vec::new();
+    let mut remove_disk = Vec::new();
+    for path in &paths {
+        if headed.contains(path) {
+            restore.push(path.clone());
+        } else if indexed.contains(&slash(path)) {
+            remove_index.push(path.clone());
+        } else {
+            remove_disk.push(path.clone());
+        }
+    }
+    git_arg_paths(repo, &["restore", "--worktree", "--source=HEAD", "--"], &restore)?;
+    git_arg_paths(repo, &["rm", "-f", "--"], &remove_index)?;
+    for path in remove_disk {
+        match remove_worktree_file(repo, &path) {
+            Ok(()) => {}
+            Err(Error::Read { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn slash(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+fn paths_in_index(repo: &Path, paths: &[String]) -> Result<HashSet<String>, Error> {
+    let wanted: HashSet<String> = paths.iter().map(|path| slash(path)).collect();
+    let output = if paths.len() > 200 {
+        // One index listing beats hundreds of `ls-files` processes on a large selection.
+        run(repo, &["--literal-pathspecs", "ls-files", "-z"])?
+    } else {
+        let mut owned: Vec<String> = vec!["--literal-pathspecs".into(), "ls-files".into(), "-z".into(), "--".into()];
+        for path in paths {
+            owned.push(check_path(path)?.to_string());
+        }
+        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
+        run(repo, &args)?
+    };
+    let mut found = HashSet::new();
+    for path in output.stdout.split(|byte| *byte == 0) {
+        if path.is_empty() {
+            continue;
+        }
+        let path = slash(&String::from_utf8_lossy(path));
+        if wanted.contains(&path) {
+            found.insert(path);
+        }
+    }
+    Ok(found)
+}
+
+fn paths_in_head(repo: &Path, paths: &[String]) -> Result<HashSet<String>, Error> {
+    // Paths cannot contain a newline here (check_path), so one batch process is safe.
+    let mut body = Vec::new();
+    for path in paths {
+        body.extend_from_slice(b"HEAD:");
+        body.extend_from_slice(path.as_bytes());
+        body.push(b'\n');
+    }
+    let output = match run_stdin(repo, &["cat-file", "--batch-check"], &body) {
+        Ok(output) => output,
+        Err(_) => return Ok(HashSet::new()),
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut found = HashSet::new();
+    for (path, line) in paths.iter().zip(text.lines()) {
+        let kind = line.split_whitespace().nth(1);
+        if kind == Some("blob") || kind == Some("commit") {
+            found.insert(path.clone());
+        }
+    }
+    Ok(found)
+}
+
+fn git_arg_paths(repo: &Path, prefix: &[&str], paths: &[String]) -> Result<(), Error> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    run_paths(repo, prefix, paths).map(|_| ())
+}
+
+fn delete_paths(repo: &Path, files: &[String]) -> Result<(), Error> {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    for file in files {
+        let path = check_path(file)?.to_string();
+        if seen.insert(path.clone()) {
+            paths.push(path);
+        }
+    }
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let indexed = paths_in_index(repo, &paths)?;
+    let mut tracked = Vec::new();
+    let mut untracked = Vec::new();
+    for path in &paths {
+        if indexed.contains(&slash(path)) {
+            tracked.push(path.clone());
+        } else {
+            untracked.push(path.clone());
+        }
+    }
+    git_arg_paths(repo, &["rm", "-f"], &tracked)?;
+    for path in untracked {
+        match remove_worktree_file(repo, &path) {
+            Ok(()) => {}
+            Err(Error::Read { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn delete_path(repo: &Path, file: &str) -> Result<(), Error> {
+    delete_paths(repo, &[file.to_string()])
 }
 
 fn remove_worktree_file(repo: &Path, file: &str) -> Result<(), Error> {
@@ -1322,27 +1635,15 @@ fn rebase_interactive(
     }
     args.push("-i");
     args.push(onto);
-    let result = run_env(
+    run_env(
         repo,
         &args,
         &[
             ("GIT_SEQUENCE_EDITOR", editor.sequence.as_str()),
             ("GIT_EDITOR", editor.editor.as_str()),
         ],
-    );
-    match result {
-        Ok(_) => Ok(()),
-        Err(error) => {
-            if error.to_string().contains("editor") {
-                if in_progress(repo)?.is_some() {
-                    let _ = run(repo, &["rebase", "--abort"]);
-                }
-                replay_drop(repo, onto, &ids, drop)
-            } else {
-                Err(error)
-            }
-        }
-    }
+    )
+    .map(|_| ())
 }
 
 fn rebase_steps(repo: &Path, onto: &str, steps: &[RebaseStep], autostash: bool, update_refs: bool) -> Result<(), Error> {
@@ -1416,17 +1717,6 @@ fn commit_subject(repo: &Path, rev: &str) -> Result<String, Error> {
 
 fn dropped(id: &str, drop: &[String]) -> bool {
     drop.iter().any(|item| item == id || id.starts_with(item.as_str()) || item.starts_with(id))
-}
-
-fn replay_drop(repo: &Path, onto: &str, ids: &[String], drop: &[String]) -> Result<(), Error> {
-    run(repo, &["reset", "--hard", onto])?;
-    for id in ids {
-        if dropped(id, drop) {
-            continue;
-        }
-        with_editor(repo, &["cherry-pick", id])?;
-    }
-    Ok(())
 }
 
 fn clone_repo(url: &str, destination: &str) -> Result<(), Error> {
@@ -1910,7 +2200,7 @@ pub fn search_commits(repo: &Path, kind: &str, needle: &str) -> Result<Vec<Searc
     if needle.is_empty() || needle.starts_with('-') || needle.contains(['\n', '\r', '\0']) {
         return Err(Error::Rev(needle.to_string()));
     }
-    let output = run(repo, &["log", "-n", "80", "--format=%H%x09%h%x09%s", flag, needle])?;
+    let (output, _) = crate::cli::with_read(|| crate::cli::run_capped(repo, &["log", "-n", "80", "--format=%H%x09%h%x09%s", flag, needle], 1_000_000))?;
     let text = String::from_utf8_lossy(&output.stdout);
     Ok(text
         .lines()
@@ -1936,7 +2226,9 @@ pub struct SearchHit {
 /// `git merge-tree` for a cherry-pick. A conflict still returns the name list.
 pub fn cherry_preview(repo: &Path, rev: &str) -> Result<String, Error> {
     let rev = check_rev(rev)?;
-    let output = run_output(repo, &["merge-tree", "--write-tree", "--name-only", "HEAD", rev])?;
+    let (output, _) = crate::cli::with_read(|| {
+        crate::cli::run_capped(repo, &["merge-tree", "--write-tree", "--name-only", "HEAD", rev], 1_000_000)
+    })?;
     let mut text = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -1952,7 +2244,7 @@ pub fn cherry_preview(repo: &Path, rev: &str) -> Result<String, Error> {
 
 /// Local branches already contained in `HEAD`, excluding the current one.
 pub fn merged_branches(repo: &Path) -> Result<Vec<String>, Error> {
-    let output = run(repo, &["branch", "--merged", "HEAD"])?;
+    let (output, _) = crate::cli::with_read(|| crate::cli::run_capped(repo, &["branch", "--merged", "HEAD"], 1_000_000))?;
     let text = String::from_utf8_lossy(&output.stdout);
     Ok(text
         .lines()
@@ -1969,7 +2261,9 @@ pub fn pick_history(repo: &Path, file: &str, text: &str) -> Result<String, Error
     if text.is_empty() || text.starts_with('-') || text.contains(['\n', '\r', '\0']) {
         return Err(Error::Git("pick a single line".into()));
     }
-    let output = run_output(repo, &["log", "-n", "40", "--format=%h %s", "-S", text, "--", file])?;
+    let (output, _) = crate::cli::with_read(|| {
+        crate::cli::run_capped(repo, &["--literal-pathspecs", "log", "-n", "40", "--format=%h %s", "-S", text, "--", file], 512_000)
+    })?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
@@ -1978,9 +2272,9 @@ fn lines_of(repo: &Path, args: &[&str], limit: usize) -> Vec<String> {
 }
 
 fn text_of(repo: &Path, args: &[&str]) -> String {
-    run_output(repo, args)
+    crate::cli::with_read(|| crate::cli::run_capped(repo, args, 4_000_000))
         .ok()
-        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+        .map(|(output, _)| String::from_utf8_lossy(&output.stdout).into_owned())
         .unwrap_or_default()
 }
 

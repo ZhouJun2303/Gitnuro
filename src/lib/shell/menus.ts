@@ -105,7 +105,7 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
       { sep: true, label: "" },
       { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "branch"; } },
       { label: shell.tr("menu.createTag"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "tag"; } },
-      { label: shell.tr("menu.editMessage"), disabled: locked, run: () => { shell.draft = commit.summary; shell.draftExtra = commit.id; shell.dialog = "reword"; } },
+      { label: shell.tr("menu.editMessage"), disabled: locked || !shell.refs?.head || commit.id !== shell.refs.head, run: () => { shell.draft = commit.summary; shell.draftExtra = commit.id; shell.dialog = "reword"; } },
       { label: shell.tr("menu.interactiveRebase"), run: () => { shell.selectedCommit = commit.id; shell.openRebase(); } },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },
       { label: shell.mergeOpen(commit.id) ? shell.tr("menu.fold") : shell.tr("menu.unfold"), disabled: !shell.mergeOwner(commit.id), run: () => shell.toggleFold(commit.id) },
@@ -182,7 +182,7 @@ export function repositoryItems(shell: ShellState) {
       { label: shell.tr("chrome.stale"), disabled: locked, run: () => void invoke<string[]>("merged_branches", { path: shell.repoPath() }).then((names) => { shell.staleNames = names; shell.stalePicked = []; shell.dialog = "stale"; }) },
       { label: shell.tr("chrome.mailmap"), disabled: locked, run: () => void invoke<{ text?: string }>("blob_view", { path: shell.repoPath(), rev: "HEAD", file: ".mailmap" }).then((view) => { shell.draft = view.text ?? ""; shell.dialog = "mailmap"; }).catch(() => { shell.draft = ""; shell.dialog = "mailmap"; }) },
       { label: shell.tr("chrome.review"), disabled: locked, run: () => void invoke<string>("review_branch", { path: shell.repoPath(), base: shell.snapshot?.branch ?? "HEAD~1" }).then((text) => { shell.commandOutput = text; shell.dialog = "output"; }).catch((error) => (shell.actionError = shell.message(error))) },
-      { label: shell.tr("menu.bareForce"), disabled: locked || shell.busy, run: () => shell.ask(shell.tr("menu.bareForce"), shell.snapshot?.branch ?? "", () => void shell.mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: false, force: true })) },
+      { label: shell.tr("menu.bareForce"), disabled: locked || shell.busy, run: () => shell.ask(shell.tr("menu.bareForce"), shell.tr("dialog.forcePushBody"), () => void shell.mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: false, force: true })) },
       { sep: true, label: "" },
       { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = ""; shell.dialog = "branch"; } },
       { label: shell.tr("menu.createTag"), run: () => { shell.draft = ""; shell.draftExtra = "HEAD"; shell.draftUser = ""; shell.dialog = "tag"; } },
@@ -211,6 +211,7 @@ export function helpItems(shell: ShellState) {
     return [
       { label: shell.tr("chrome.about"), run: () => (shell.dialog = "about") },
       { label: shell.tr("chrome.checkUpdate"), run: () => void shell.checkForUpdate() },
+      { label: shell.tr("chrome.performance"), shortcut: "Ctrl+Alt+P", run: () => window.dispatchEvent(new CustomEvent("awegit-perf")) },
     ];
   }
 
@@ -290,7 +291,7 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
         disabled: locked,
         run: () => {
           shell.diffSelected = [];
-          void shell.mutate({ action: "stageHunk", file, index: hunkIndex, unstage: shell.selectedSide === "staged" });
+          void shell.mutate({ action: "stageHunk", file, index: hunkIndex, unstage: shell.selectedSide === "staged", ignoreSpace: shell.settings.ignoreSpace });
         },
       });
       if (shell.selectedSide === "unstaged") {
@@ -299,7 +300,7 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
           disabled: locked,
           run: () => {
             shell.diffSelected = [];
-            void shell.mutate({ action: "discardHunk", file, index: hunkIndex });
+            void shell.mutate({ action: "discardHunk", file, index: hunkIndex, ignoreSpace: shell.settings.ignoreSpace });
           },
         });
       }

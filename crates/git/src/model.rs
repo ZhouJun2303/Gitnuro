@@ -11,7 +11,7 @@ use std::thread::ScopedJoinHandle;
 use serde::Serialize;
 
 use crate::change::{parse_diff, FileDiff};
-use crate::cli::{check_path, check_rev, run, run_output, run_stdin_output};
+use crate::cli::{check_path, check_rev, run, run_capped, run_output, run_stdin_output, with_read};
 use crate::{ChangeKind, Error, FileChange};
 
 static GIT_DIRS: Mutex<BTreeMap<PathBuf, PathBuf>> = Mutex::new(BTreeMap::new());
@@ -113,6 +113,9 @@ pub struct WorktreeRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefSnapshot {
+    /// Commit HEAD points at, so the UI can tell which history row is rewordable.
+    #[serde(default)]
+    pub head: Option<String>,
     pub branches: Vec<BranchRow>,
     pub remotes: Vec<RemoteRow>,
     pub tags: Vec<TagRow>,
@@ -180,7 +183,8 @@ pub fn search_log(repo: &Path, field: &str, scope: &str, query: &str, limit: usi
     if field == "path" && query.contains("..") {
         return Err(Error::Path(query.to_string()));
     }
-    if run(repo, &["rev-parse", "--verify", "HEAD"]).is_err() {
+    let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]));
+    if !matches!(head, Ok(output) if output.status.success()) {
         return Ok(Vec::new());
     }
     let limit_text = limit.clamp(1, 100_000).to_string();
@@ -215,7 +219,7 @@ pub fn search_log(repo: &Path, field: &str, scope: &str, query: &str, limit: usi
         }
     }
     let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-    let output = run(repo, &args)?;
+    let (output, _) = with_read(|| run_capped(repo, &args, 16_000_000))?;
     let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
     assign_lanes(&mut commits);
     mark_unpushed(repo, &mut commits);
@@ -235,24 +239,28 @@ pub struct LocatedRef {
 /// Searching by decoration name fails when the commit is older than the first page,
 /// and also when two clicks of a double-click race a checkout. The id is resolved
 /// first so the caller can select it even if decorations are missing.
+/// History pages stop growing here. A ref far below this still opens: the commit is
+/// prepended so the UI can select it without materialising the whole repository.
+const MAX_LOCATE_COMMITS: usize = 20_000;
+
 pub fn locate_ref(repo: &Path, name: &str, topo: bool) -> Result<LocatedRef, Error> {
     locate_ref_from(repo, name, topo, 500)
 }
 
 pub(crate) fn locate_ref_from(repo: &Path, name: &str, topo: bool, start: usize) -> Result<LocatedRef, Error> {
     let name = check_rev(name)?;
-    let output = run(repo, &["rev-parse", "--verify", name])?;
+    let output = with_read(|| run(repo, &["rev-parse", "--verify", name]))?;
     let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if id.len() < 7 {
         return Err(Error::Rev(name.to_string()));
     }
-    let mut limit = start.clamp(1, 100_000);
+    let mut limit = start.clamp(1, MAX_LOCATE_COMMITS);
     loop {
         let commits = log_with(repo, limit, true, &[], &[], topo)?;
         if commits.iter().any(|commit| commit.id == id) {
             return Ok(LocatedRef { id, commits });
         }
-        if commits.len() < limit || limit >= 100_000 {
+        if commits.len() < limit || limit >= MAX_LOCATE_COMMITS {
             let mut commits = commits;
             if let Ok(extra) = log_with(repo, 1, false, &[], &[name], topo) {
                 if extra.iter().any(|commit| commit.id == id) && !commits.iter().any(|commit| commit.id == id) {
@@ -261,7 +269,7 @@ pub(crate) fn locate_ref_from(repo: &Path, name: &str, topo: bool, start: usize)
             }
             return Ok(LocatedRef { id, commits });
         }
-        limit = limit.saturating_mul(4).min(100_000);
+        limit = limit.saturating_mul(4).min(MAX_LOCATE_COMMITS);
     }
 }
 
@@ -271,12 +279,14 @@ pub fn file_history(repo: &Path, path: &str, limit: usize) -> Result<Vec<CommitR
 }
 
 fn log_with(repo: &Path, limit: usize, all: bool, path: &[&str], revs: &[&str], topo: bool) -> Result<Vec<CommitRow>, Error> {
-    if run(repo, &["rev-parse", "--verify", "HEAD"]).is_err() {
+    let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]));
+    if !matches!(head, Ok(output) if output.status.success()) {
         return Ok(Vec::new());
     }
     let limit = limit.clamp(1, 100_000).to_string();
     let order = if topo { "--topo-order" } else { "--date-order" };
     let mut args = vec![
+        "--literal-pathspecs",
         "log",
         "-n",
         &limit,
@@ -289,16 +299,16 @@ fn log_with(repo: &Path, limit: usize, all: bool, path: &[&str], revs: &[&str], 
         args.extend_from_slice(revs);
     } else if path.is_empty() && all {
         // Branches and remotes, not `--all`: tags and notes would bury the tips.
-        args.insert(1, "--branches");
-        args.insert(2, "--remotes");
+        args.insert(2, "--branches");
+        args.insert(3, "--remotes");
     } else if !path.is_empty() {
         args.push("--");
         args.extend_from_slice(path);
     }
-    let output = run(repo, &args)?;
+    let (output, _) = with_read(|| run_capped(repo, &args, 16_000_000))?;
     let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
     assign_lanes(&mut commits);
-    mark_unpushed(repo, &mut commits);
+    with_read(|| mark_unpushed(repo, &mut commits));
     Ok(commits)
 }
 
@@ -306,13 +316,10 @@ fn mark_unpushed(repo: &Path, commits: &mut [CommitRow]) {
     if commits.is_empty() {
         return;
     }
-    let has_remotes = run(repo, &["remote"])
-        .map(|out| !out.stdout.is_empty())
-        .unwrap_or(false);
-    if !has_remotes {
+    if !has_remotes(repo) {
         return;
     }
-    if let Ok(output) = run(repo, &["rev-list", "--all", "--not", "--remotes"]) {
+    if let Ok(output) = run(repo, &["rev-list", "--all", "--not", "--remotes", "--max-count=20000"]) {
         let text = String::from_utf8_lossy(&output.stdout);
         let unpushed_set: std::collections::HashSet<&str> = text
             .lines()
@@ -327,6 +334,20 @@ fn mark_unpushed(repo: &Path, commits: &mut [CommitRow]) {
             }
         }
     }
+}
+
+/// A remote adds a section to `.git/config`; reading that file avoids a `git remote`
+/// process on every history refresh. Falls back to the command when the file is unreadable.
+fn has_remotes(repo: &Path) -> bool {
+    let Ok(dir) = absolute_git_dir(repo) else {
+        return run(repo, &["remote"]).map(|out| !out.stdout.is_empty()).unwrap_or(false);
+    };
+    let Ok(text) = std::fs::read_to_string(dir.join("config")) else {
+        return run(repo, &["remote"]).map(|out| !out.stdout.is_empty()).unwrap_or(false);
+    };
+    text.lines()
+        .map(str::trim)
+        .any(|line| line.starts_with("[remote ") || line.starts_with("[remote\""))
 }
 
 fn parse_commits(text: &str) -> Vec<CommitRow> {
@@ -367,12 +388,17 @@ fn parse_commits(text: &str) -> Vec<CommitRow> {
 
 pub fn commit_detail(repo: &Path, id: &str) -> Result<CommitDetail, Error> {
     let id = check_rev(id)?;
-    let output = run(repo, &[
-        "show",
-        "-s",
-        "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%P%x1f%s%x1e%b",
-        id,
-    ])?;
+    let output = with_read(|| {
+        run(
+            repo,
+            &[
+                "show",
+                "-s",
+                "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%P%x1f%s%x1e%b",
+                id,
+            ],
+        )
+    })?;
     let text = String::from_utf8_lossy(&output.stdout);
     let (head, body) = text.split_once('\u{1e}').unwrap_or((text.as_ref(), ""));
     let mut fields = head.split('\u{1f}');
@@ -409,6 +435,10 @@ pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
     let local = local_text(repo);
     let first = |text: &str, section: &str, key: &str| values_in(text, section, key).into_iter().next().unwrap_or_default();
     let sign_off = first(&local, "signoff", "enabled");
+    let head = run(repo, &["rev-parse", "--verify", "--quiet", "HEAD"])
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|id| !id.is_empty());
     std::thread::scope(|scope| {
         let branches = scope.spawn(|| local_branches(repo));
         let remotes = scope.spawn(|| remotes(repo));
@@ -417,6 +447,7 @@ pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
         let submodules = scope.spawn(|| submodules(repo));
         let worktrees = worktrees(repo);
         Ok(RefSnapshot {
+            head,
             branches: joined(branches)?,
             remotes: joined(remotes)?,
             tags: joined(tags)?,
@@ -805,10 +836,11 @@ fn merge_base_of(repo: &Path, id: &str) -> Option<String> {
 
 pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
     let id = check_rev(id)?;
-    let output = match merge_base_of(repo, id) {
-        Some(base) => run(repo, &["diff", "--name-status", "-r", "-M", &base, id])?,
-        None => run(repo, &["diff-tree", "--no-commit-id", "--name-status", "-r", "-M", "--root", id])?,
-    };
+    let base = merge_base_of(repo, id);
+    let (output, _) = with_read(|| match base {
+        Some(ref base) => run_capped(repo, &["diff", "--name-status", "-r", "-M", base, id], 8_000_000),
+        None => run_capped(repo, &["diff-tree", "--no-commit-id", "--name-status", "-r", "-M", "--root", id], 8_000_000),
+    })?;
     let text = String::from_utf8_lossy(&output.stdout);
     let mut files = Vec::new();
     for line in text.lines() {
@@ -849,11 +881,13 @@ pub struct BlameLine {
     pub author: String,
     pub line: u32,
     pub text: String,
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 pub fn blame_file(repo: &Path, path: &str) -> Result<Vec<BlameLine>, Error> {
     let path = check_path(path)?;
-    let output = run(repo, &["blame", "--porcelain", "--", path])?;
+    let (output, capped) = with_read(|| run_capped(repo, &["--literal-pathspecs", "blame", "--porcelain", "--", path], 8_000_000))?;
     let text = String::from_utf8_lossy(&output.stdout);
     let mut lines = Vec::new();
     let mut id = String::new();
@@ -870,6 +904,7 @@ pub fn blame_file(repo: &Path, path: &str) -> Result<Vec<BlameLine>, Error> {
                 author: author.clone(),
                 line: line_no,
                 text: raw[1..].to_string(),
+                truncated: false,
             });
             continue;
         }
@@ -886,6 +921,17 @@ pub fn blame_file(repo: &Path, path: &str) -> Result<Vec<BlameLine>, Error> {
             author = value.to_string();
         }
     }
+    if capped {
+        lines.push(BlameLine {
+            id: String::new(),
+            short_id: String::new(),
+            summary: String::new(),
+            author: String::new(),
+            line: 0,
+            text: "…".into(),
+            truncated: true,
+        });
+    }
     Ok(lines)
 }
 
@@ -897,14 +943,17 @@ pub fn show_commit_file_with(repo: &Path, id: &str, path: &str, context: u32) ->
     let id = check_rev(id)?;
     let path = check_path(path)?;
     let unified = format!("--unified={}", context.min(1_000_000));
-    let output = match merge_base_of(repo, id) {
-        Some(base) => run(
+    let base = merge_base_of(repo, id);
+    let (output, capped) = with_read(|| match base {
+        Some(ref base) => run_capped(
             repo,
-            &["diff", "--no-ext-diff", "--no-color", &unified, &base, id, "--", path],
-        )?,
-        None => run(
+            &["--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", &unified, base, id, "--", path],
+            8_000_000,
+        ),
+        None => run_capped(
             repo,
             &[
+                "--literal-pathspecs",
                 "show",
                 "--no-ext-diff",
                 "--no-color",
@@ -914,16 +963,19 @@ pub fn show_commit_file_with(repo: &Path, id: &str, path: &str, context: u32) ->
                 "--",
                 path,
             ],
-        )?,
-    };
-    Ok(parse_diff(path, false, &String::from_utf8_lossy(&output.stdout)))
+            8_000_000,
+        ),
+    })?;
+    let mut parsed = parse_diff(path, false, &String::from_utf8_lossy(&output.stdout));
+    parsed.truncated |= capped;
+    Ok(parsed)
 }
 
 /// Files that differ between two revisions.
 pub fn compare_files(repo: &Path, from: &str, to: &str) -> Result<Vec<FileChange>, Error> {
     let from = check_rev(from)?;
     let to = check_rev(to)?;
-    let output = run(repo, &["diff", "--name-status", "-r", "-M", from, to])?;
+    let (output, _) = with_read(|| run_capped(repo, &["diff", "--name-status", "-r", "-M", from, to], 8_000_000))?;
     let text = String::from_utf8_lossy(&output.stdout);
     let mut files = Vec::new();
     for line in text.lines() {
@@ -973,11 +1025,16 @@ pub fn compare_file(repo: &Path, from: &str, to: &str, path: &str, context: u32)
     let to = check_rev(to)?;
     let path = check_path(path)?;
     let unified = format!("--unified={}", context.min(1_000_000));
-    let output = run(
-        repo,
-        &["diff", "--no-ext-diff", "--no-color", &unified, from, to, "--", path],
-    )?;
-    Ok(parse_diff(path, false, &String::from_utf8_lossy(&output.stdout)))
+    let (output, capped) = with_read(|| {
+        run_capped(
+            repo,
+            &["--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", &unified, from, to, "--", path],
+            8_000_000,
+        )
+    })?;
+    let mut parsed = parse_diff(path, false, &String::from_utf8_lossy(&output.stdout));
+    parsed.truncated |= capped;
+    Ok(parsed)
 }
 
 pub fn in_progress(repo: &Path) -> Result<Option<InProgress>, Error> {
@@ -1125,7 +1182,7 @@ pub fn reflog(repo: &Path, limit: usize) -> Result<Vec<ReflogRow>, Error> {
 /// Paths in the tree of `rev`.
 pub fn commit_tree(repo: &Path, rev: &str) -> Result<Vec<String>, Error> {
     let rev = check_rev(rev)?;
-    let output = run(repo, &["ls-tree", "-r", "--name-only", rev])?;
+    let (output, _) = with_read(|| run_capped(repo, &["ls-tree", "-r", "--name-only", rev], 8_000_000))?;
     let text = String::from_utf8_lossy(&output.stdout);
     Ok(text.lines().filter(|line| !line.is_empty()).map(str::to_string).collect())
 }
@@ -1304,9 +1361,59 @@ fn submodules(repo: &Path) -> Result<Vec<SubmoduleRow>, Error> {
 }
 
 fn checked_out(dir: &Path) -> Option<String> {
+    if let Some(id) = head_from_files(dir) {
+        return Some(id);
+    }
     let repo = gix::open(dir).ok()?;
     let id = repo.head_id().ok()?;
     Some(id.to_string())
+}
+
+/// Read `HEAD` without opening the whole repository. Submodule refs are small, and
+/// doing this for every gitlink on each refs refresh was the dominant cost.
+fn head_from_files(dir: &Path) -> Option<String> {
+    let dot = dir.join(".git");
+    let git_dir = if dot.is_dir() {
+        dot
+    } else {
+        let text = std::fs::read_to_string(&dot).ok()?;
+        let line = text.lines().find(|line| !line.trim().is_empty())?;
+        let rest = line.trim().strip_prefix("gitdir:")?.trim();
+        let path = PathBuf::from(rest);
+        if path.is_absolute() { path } else { dir.join(path) }
+    };
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    let head = head.trim();
+    let candidate = match head.strip_prefix("ref:") {
+        Some(name) => read_ref(&git_dir, name.trim())?,
+        None => head.to_string(),
+    };
+    let id = candidate.split_whitespace().next().unwrap_or("");
+    (id.len() >= 7 && id.bytes().all(|byte| byte.is_ascii_hexdigit())).then(|| id.to_string())
+}
+
+fn read_ref(git_dir: &Path, name: &str) -> Option<String> {
+    if let Ok(text) = std::fs::read_to_string(git_dir.join(name)) {
+        return Some(text);
+    }
+    let common = std::fs::read_to_string(git_dir.join("commondir"))
+        .ok()
+        .map(|text| {
+            let path = PathBuf::from(text.trim());
+            if path.is_absolute() { path } else { git_dir.join(path) }
+        })
+        .unwrap_or_else(|| git_dir.to_path_buf());
+    if let Ok(text) = std::fs::read_to_string(common.join(name)) {
+        return Some(text);
+    }
+    let packed = std::fs::read_to_string(common.join("packed-refs")).ok()?;
+    packed
+        .lines()
+        .filter(|line| !line.starts_with(['#', '^']))
+        .find_map(|line| {
+            let (id, path) = line.split_once(' ')?;
+            (path.trim() == name).then(|| id.to_string())
+        })
 }
 
 fn worktrees(repo: &Path) -> Result<Vec<WorktreeRow>, Error> {
@@ -1351,12 +1458,23 @@ fn parse_track(text: &str) -> (u32, u32) {
 }
 
 fn parse_decoration(text: &str) -> Vec<String> {
+    const MAX_REFS: usize = 32;
+    const MAX_REF_CHARS: usize = 120;
     text.split(',')
         .map(str::trim)
         .filter(|item| !item.is_empty())
         .map(clean_ref)
         .filter(|item| *item != "HEAD" && !item.is_empty())
-        .map(str::to_string)
+        .take(MAX_REFS)
+        .map(|item| {
+            if item.chars().count() <= MAX_REF_CHARS {
+                item.to_string()
+            } else {
+                let mut short: String = item.chars().take(MAX_REF_CHARS).collect();
+                short.push('…');
+                short
+            }
+        })
         .collect()
 }
 

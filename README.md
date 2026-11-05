@@ -4,6 +4,13 @@ AweGit 是 Windows 和 macOS 上的 Git 客户端。界面用 Tauri 2 和 Svelte
 
 命令都在仓库根目录执行。下面的 `pnpm` 脚本定义在 `package.json`。
 
+## 分支
+
+- `feat/dev`：日常开发分支，功能和修复都提交到这里
+- `release`：发布分支，只接收从 `feat/dev` 合并过来的发布提交，`latest.json` 也放在这个分支
+
+发布在 `feat/dev` 上运行 `publish.bat`。脚本提交版本号，切到 `release` 合并，打包上传，最后回到 `feat/dev`。
+
 ## 准备
 
 每个新终端先装好依赖。`pnpm start`、`pnpm test`、`pnpm tauri` 和 `pnpm package:windows` 会自己把 WinLibs 和 `%USERPROFILE%\.cargo\bin` 排到 PATH 前面。`pnpm check` 不编译 Rust。
@@ -83,7 +90,7 @@ pnpm package:windows
 
 发布到 GitHub 时，在仓库根目录双击或运行 `publish.bat`。第 1 项会把修订号加一（2.0.0 变成 2.0.1），然后打包并上传。也可以选次版本、主版本、指定版本、不改版本，或只打包不上传。
 
-不在 `release` 分支上时，脚本会先把当前分支合并进 `release`，发布完成后再回到原来的分支。工作区要是干净的，并且 `gh` 已经登录。
+在 `feat/dev` 上发布时，脚本会先提交版本号，再切到 `release` 合并这个分支，打包上传后回到 `feat/dev`。从其他分支发布也走同一条合并路径。工作区要是干净的，并且 `gh` 已经登录。
 
 已经在 `release` 分支、并且不想改版本号时，仍可以用 `pnpm publish:windows`。
 

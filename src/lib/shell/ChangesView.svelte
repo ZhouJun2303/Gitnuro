@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { onMount, tick } from "svelte";
   import { getShell } from "./context";
   import "./ChangesView.css";
   import SplitHandle from "../SplitHandle.svelte";
@@ -12,7 +12,17 @@
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const onStagedScroll = onVirtualScroll((top) => (shell.stagedTop = top));
   const onFileScroll = onVirtualScroll((top) => (shell.fileTop = top));
+  const onCombinedScroll = onVirtualScroll((top) => (shell.combinedTop = top));
   let typeOpen = $state(false);
+
+  onMount(() => {
+    // A refresh while the history view was open clears the diff; reload it here
+    // instead of leaving the pane on its "reading" placeholder.
+    const stale = !!shell.diff && shell.diff.path !== shell.selectedPath;
+    if (shell.mode === "live" && shell.selectedPath && (stale || (!shell.diff && !shell.diffError && !shell.conflictView))) {
+      void shell.loadDiff();
+    }
+  });
 
   function flipFile(event: MouseEvent, path: string, side: Side) {
     if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.button !== 0) return;
@@ -87,6 +97,16 @@
   $effect(() => {
     if (shell.busy) typeOpen = false;
   });
+
+  $effect(() => {
+    const path = shell.selectedPath;
+    const side = shell.selectedSide;
+    if (!path) return;
+    queueMicrotask(() => {
+      document.querySelector<HTMLElement>(".file-list .file.selected")?.scrollIntoView({ block: "nearest" });
+    });
+    void side;
+  });
 </script>
 
 <section class="changes-column" style:width="{shell.changesWidth}px">
@@ -103,6 +123,7 @@
             min={100}
             max={650}
             defaultSize={280}
+            label={shell.tr("chrome.resizeStage")}
             onchange={shell.handleLayoutChange.bind(shell)}
           />
 
@@ -120,6 +141,7 @@
             min={100}
             max={650}
             defaultSize={280}
+            label={shell.tr("chrome.resizeStage")}
             onchange={shell.handleLayoutChange.bind(shell)}
           />
 
@@ -135,6 +157,7 @@
         min={220}
         max={650}
         defaultSize={300}
+        label={shell.tr("chrome.resizeFiles")}
         onchange={shell.handleLayoutChange.bind(shell)}
       />
 
@@ -148,6 +171,7 @@
           max={450}
           defaultSize={170}
           reverse
+          label={shell.tr("chrome.resizeComposer")}
           onchange={shell.handleLayoutChange.bind(shell)}
         />
 
@@ -191,7 +215,7 @@
                 </div>
               {/if}
             </div>
-            <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength={shell.summaryRoom} aria-invalid={shell.summaryTooLong || (!shell.skipHooks && shell.summary.trim().length > 0 && !shell.summaryFitsConvention)} spellcheck={shell.settings.spellChecking === "enable"} oninput={() => shell.normalizeSummary()} />
+            <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} aria-label={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength={shell.summaryRoom} aria-invalid={shell.summaryTooLong || (!shell.skipHooks && shell.summary.trim().length > 0 && !shell.summaryFitsConvention)} spellcheck={shell.settings.spellChecking === "enable"} oninput={() => shell.normalizeSummary()} />
             <button
               class="suggest-message"
               class:long={shell.settings.aiPromptStyle === "long"}
@@ -209,11 +233,11 @@
           {#if shell.summary.trim() && !shell.skipHooks && !shell.summaryFitsConvention}
             <p class="convention-hint">{shell.tr("chrome.commitConvention")}</p>
           {/if}
-          <textarea class="guided composer-desc flex-fill" class:guide-only={shell.descriptionIsGuide} placeholder={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
+          <textarea class="guided composer-desc flex-fill" class:guide-only={shell.descriptionIsGuide} placeholder={shell.tr("chrome.description")} aria-label={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
-            <button class="text-button more" type="button" onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>
-            <button class="commit" type="submit" disabled={!shell.canCommit}>{shell.busy ? shell.tr("chrome.working") : shell.tr("chrome.commit")}</button>
+            <button class="text-button more" type="button" aria-label={shell.tr("chrome.more")} title={shell.tr("chrome.more")} onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>
+            <button class="commit" type="submit" disabled={!shell.canCommit || shell.mode !== "live"}>{shell.busy ? shell.tr("chrome.working") : shell.tr("chrome.commit")}</button>
           </div>
         </form>
       </div>
@@ -239,13 +263,25 @@
         </div>
       </div>
       {@render pickedActions(shell.pickedIn(shell.shownUnstaged), shell.pickedIn(shell.shownStaged))}
-      <div class="file-list">
-        {#each shell.shownStaged as file (`s:${file.path}`)}
-          <button class="side" type="button" class:selected={shell.selectedPath === file.path && shell.selectedSide === "staged"} class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && shell.selectedSide === "staged")} onclick={() => shell.selectFile(file.path, "staged")} ondblclick={(event) => flipFile(event, file.path, "staged")}><span class="meta">{shell.tr("chrome.staged")}</span> <span class="name">{file.path}</span></button>
-        {/each}
-        {#each shell.shownUnstaged as file (`u:${file.path}`)}
-          <button class="side" type="button" class:selected={shell.selectedPath === file.path && shell.selectedSide === "unstaged"} class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && shell.selectedSide === "unstaged")} onclick={() => shell.selectFile(file.path, "unstaged")} ondblclick={(event) => flipFile(event, file.path, "unstaged")}>{#if file.letter === "C"}{@render conflictMark()}{/if}<span class="meta">{shell.tr("chrome.unstaged")}</span> <span class="name">{file.path}</span></button>
-        {/each}
+      <div class="file-list" onscroll={onCombinedScroll} bind:clientHeight={shell.combinedHeight}>
+        <div class="commit-window" style:height="{shell.combinedRows.length * shell.rowFile}px">
+          {#each shell.combinedWindow.rows as entry, index (entry.key)}
+            <div class="virtual-row" style:top="{(shell.combinedWindow.start + index) * shell.rowFile}px">
+              <button
+                class="side"
+                type="button"
+                class:selected={shell.selectedPath === entry.file.path && shell.selectedSide === entry.side}
+                class:picked={shell.picked.includes(entry.file.path) && !(shell.selectedPath === entry.file.path && shell.selectedSide === entry.side)}
+                onclick={() => shell.selectFile(entry.file.path, entry.side)}
+                ondblclick={(event) => flipFile(event, entry.file.path, entry.side)}
+              >
+                {#if entry.file.letter === "C"}{@render conflictMark()}{/if}
+                <span class="meta">{shell.tr(entry.side === "staged" ? "chrome.staged" : "chrome.unstaged")}</span>
+                <span class="name">{entry.file.path}</span>
+              </button>
+            </div>
+          {/each}
+        </div>
       </div>
     {/snippet}
 
@@ -287,22 +323,24 @@
           {@render fileFilter()}
         {:else}
           <div class="pane-label">
-            <span class="pane-title">{shell.tr("chrome.unstaged")}</span>
-            <span class="count">{shell.mode === "loading" ? "…" : shell.mode === "error" ? "—" : shell.shownUnstaged.length}</span>
+            <span class="pane-title">{shell.showIgnored ? shell.tr("chrome.ignored") : shell.tr("chrome.unstaged")}</span>
+            <span class="count">{shell.mode === "loading" ? "…" : shell.mode === "error" ? "—" : shell.showIgnored ? (shell.facts?.ignored.length ?? 0) : shell.shownUnstaged.length}</span>
           </div>
         {/if}
         <div class="pane-tools">
           {@render searchToggle("file", shell.tr("chrome.filterFiles"))}
           {@render fileViewButton()}
-          <button class="pane-chip pane-go" type="button" disabled={shell.mode !== "live" || shell.busy || shell.unstaged.length === 0} onclick={() => shell.runChange("stage_all")}>{shell.tr("chrome.stageAll")}</button>
+          {#if !shell.showIgnored}
+            <button class="pane-chip pane-go" type="button" disabled={shell.mode !== "live" || shell.busy || shell.unstaged.length === 0} onclick={() => shell.runChange("stage_all")}>{shell.tr("chrome.stageAll")}</button>
+          {/if}
         </div>
       </div>
       {@render pickedActions(unstagedPicked, [])}
       <div class="file-list" onscroll={onFileScroll}>
         {#if shell.showIgnored}
-          {#if (shell.facts?.ignored.length ?? 0) === 0}
-            <p class="empty">{shell.tr("chrome.noMatch")}</p>
-          {:else}
+            {#if (shell.facts?.ignored.length ?? 0) === 0}
+              <p class="empty">{shell.tr("chrome.noIgnored")}</p>
+            {:else}
             <div class="commit-window" style:height="{(shell.facts?.ignored.length ?? 0) * shell.fileStride}px">
               {#each shell.ignoredWindow.rows as path, index (path)}
                 <div class="virtual-row side quiet" style:top="{(shell.ignoredWindow.start + index) * shell.fileStride}px"><span class="name">{path}</span></div>
@@ -360,7 +398,7 @@
         oncontextmenu={(event) => shell.openMenu(event, shell.fileMenu(file, side))}
         ondblclick={(event) => flipFile(event, file.path, side)}
       >
-        <button class="file-select" type="button" onclick={(event) => shell.selectFile(file.path, side, event)}>
+        <button class="file-select" type="button" title={file.path} onclick={(event) => shell.selectFile(file.path, side, event)}>
           {#if shell.fileLayout === "tree"}
             {@render treeLine(false, false, file.path, file.letter)}
           {:else}
@@ -370,6 +408,7 @@
               <span class="badge {file.tone}">{file.letter}</span>
             {/if}
             <span class="file-name">{shell.fileName(file.path)}</span>
+            {#if file.path.includes("/")}<span class="file-dir" title={file.path}>{file.path.slice(0, file.path.lastIndexOf("/") + 1)}</span>{/if}
           {/if}
         </button>
       </div>

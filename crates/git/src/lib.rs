@@ -11,25 +11,25 @@ mod ops;
 use std::path::{Path, PathBuf};
 
 pub use change::{
-    blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line, file_diff, file_diff_with, file_preview,
-    launch_diff_pair, launch_diff_tool, launch_merge_tool, range_diff, resolve_conflict, revision_bytes, stage_all, stage_hunk, stage_line, stage_paths, staged_diff,
+    blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line, discard_lines, file_diff, file_diff_with, file_preview,
+    launch_diff_pair, launch_diff_tool, launch_merge_tool, range_diff, resolve_conflict, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths, staged_diff,
     unstage_all, unstage_paths, workspace_diff, BlobView, CommitRequest, ConflictSides, ConflictView, DiffLine, DiffLineKind, FileDiff,
-    FilePreview,
+    FilePreview, LineEdit,
 };
 pub use model::{
     blame_file, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log, commit_log_sorted,
     commit_tree, commits_from, compare_file, compare_files, file_history, ignored_paths, in_progress, lfs_available, lfs_locks,
     locate_ref, prompt_facts, rebase_conflicts, reflog, repo_sign_off_format, repository_refs, repository_summary, search_log, show_commit_file,
     show_commit_file_with, BlameLine, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, LocatedRef, RefSnapshot, ReflogRow,
-    RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow,
+    RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow, write_expanded_groups, write_hidden_refs, write_sign_off,
 };
 pub use cli::{
-    cancel_repo, cancel_running, capture_output, configure, hide_console, origin_url, repo_key, set_http_proxy, set_passphrase, set_progress, set_trace,
+    cancel_reads, cancel_repo, cancel_running, capture_output, configure, hide_console, origin_url, repo_key, set_http_proxy, set_passphrase, set_progress, set_trace,
     stop_process_tree, use_bundled_git, with_operation_repo, Session, Trace,
 };
 pub use ops::{
-    approve_credential, cherry_preview, merged_branches, perform, pick_history, repo_facts, repo_facts_brief, scan_repositories, search_commits,
-    set_repo_author, HotPath, Mutation, RebaseStep, RepoFacts, ResetMode, SearchHit,
+    approve_credential, cherry_preview, merge_preview, merged_branches, perform, pick_history, repo_facts, repo_facts_brief, scan_repositories,
+    search_commits, set_repo_author, HotPath, MergeFile, MergePreview, Mutation, RebaseStep, RepoFacts, ResetMode, SearchHit,
 };
 
 use gix::bstr::BStr;
@@ -136,6 +136,8 @@ pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSna
 
     sort_changes(&mut staged);
     sort_changes(&mut unstaged);
+    hide_scratch(&mut staged);
+    hide_scratch(&mut unstaged);
     if fakeignore {
         fakeignore::conceal(worktree.as_path(), &repo, &mut staged, &mut unstaged);
     }
@@ -145,6 +147,30 @@ pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSna
         staged,
         unstaged,
     })
+}
+
+/// Codex artifact directories (`.tmp_artifact`, `.tmp_artifact2`, …). They are not repository changes.
+pub fn codex_scratch_name(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix(".tmp_artifact") else {
+        return false;
+    };
+    rest.is_empty() || rest.chars().all(|ch| ch.is_ascii_digit())
+}
+
+/// True when any path segment is a Codex artifact directory.
+pub fn codex_scratch(path: &str) -> bool {
+    path.split(['/', '\\']).any(codex_scratch_name)
+}
+
+fn hide_scratch(changes: &mut Vec<FileChange>) {
+    changes.retain(|change| !scratch_change(change));
+}
+
+fn scratch_change(change: &FileChange) -> bool {
+    if codex_scratch(&change.path) {
+        return true;
+    }
+    change.previous_path.as_deref().is_some_and(codex_scratch)
 }
 
 /// Unstage index entries that `.fakeignore` matches. Used so stage-all and commit skip local test files.

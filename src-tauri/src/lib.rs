@@ -1,9 +1,12 @@
 mod ai;
 mod forge;
+mod lab;
 mod perf;
 mod settings;
 mod tools;
 mod updates;
+
+pub use lab::run_lab;
 
 use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
@@ -152,12 +155,20 @@ fn prefer_bundled_git() {
 fn repo_from(path: Option<String>) -> Result<PathBuf, String> {
     let start = match path {
         Some(path) if !path.is_empty() => PathBuf::from(path),
-        _ => std::env::current_dir().map_err(|error| error.to_string())?,
+        _ => {
+            if lab::lab_guarded() {
+                return Err("lab command needs a repository path".into());
+            }
+            std::env::current_dir().map_err(|error| error.to_string())?
+        }
     };
     if !start.exists() {
         return Err(format!("could not open repository at {}: missing", start.display()));
     }
-    Ok(awegit_git::discover(&start).unwrap_or(start))
+    let found = awegit_git::discover(&start).unwrap_or_else(|| start.clone());
+    lab::ensure_lab_path(&start)?;
+    lab::ensure_lab_path(&found)?;
+    Ok(found)
 }
 
 fn read_status(repo: &Path) -> Result<awegit_git::StatusSnapshot, String> {
@@ -504,9 +515,11 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::WriteMailmap { .. } => "writeMailmap",
         awegit_git::Mutation::StageHunk { .. } => "stageHunk",
         awegit_git::Mutation::StageLine { .. } => "stageLine",
+        awegit_git::Mutation::StageLines { .. } => "stageLines",
         awegit_git::Mutation::StagePaths { .. } => "stagePaths",
         awegit_git::Mutation::DiscardHunk { .. } => "discardHunk",
         awegit_git::Mutation::DiscardLine { .. } => "discardLine",
+        awegit_git::Mutation::DiscardLines { .. } => "discardLines",
         awegit_git::Mutation::Resolve { .. } => "resolve",
         awegit_git::Mutation::RenameBranch { .. } => "renameBranch",
         awegit_git::Mutation::SetUpstream { .. } => "setUpstream",
@@ -514,8 +527,9 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::CheckoutRemote { .. } => "checkoutRemote",
         awegit_git::Mutation::PushRef { .. } => "pushRef",
         awegit_git::Mutation::PullRef { .. } => "pullRef",
-        awegit_git::Mutation::Discard { .. } => "discard",
+        awegit_git::Mutation::Discard { .. } | awegit_git::Mutation::DiscardPaths { .. } => "discard",
         awegit_git::Mutation::Delete { .. } => "delete",
+        awegit_git::Mutation::DeletePaths { .. } => "deletePaths",
         awegit_git::Mutation::ApplyPatch { .. } => "applyPatch",
         awegit_git::Mutation::AddRemote { .. } => "addRemote",
         awegit_git::Mutation::RemoveRemote { .. } => "removeRemote",
@@ -564,8 +578,8 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::Checkout { name } => scrub(name),
         Mutation::DeleteBranch { name, force } => join([scrub(name), flag("force", *force)]),
         Mutation::CreateBranch { name, start } => join([scrub(name), opt(start)]),
-        Mutation::Merge { name, squash, no_ff, autostash } => {
-            join([scrub(name), flag("squash", *squash), flag("noFf", *no_ff), flag("autostash", *autostash)])
+        Mutation::Merge { name, squash, no_ff, autostash, summary, description } => {
+            join([scrub(name), flag("squash", *squash), flag("noFf", *no_ff), flag("autostash", *autostash), bytes("summary", summary), bytes("description", description)])
         }
         Mutation::Rebase { onto, autostash } => join([scrub(onto), flag("autostash", *autostash)]),
         Mutation::RebaseInteractive { onto, drop, steps, autostash, update_refs } => {
@@ -589,11 +603,15 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
             };
             join([names, flag("fake", *fake), flag("directory", *directory)])
         }
-        Mutation::StageHunk { file, index, unstage } => join([scrub(file), format!("hunk={index}"), flag("unstage", *unstage)]),
+        Mutation::StageHunk { file, index, unstage, .. } => join([scrub(file), format!("hunk={index}"), flag("unstage", *unstage)]),
         Mutation::StageLine { file, unstage, .. } => join([scrub(file), flag("unstage", *unstage)]),
+        Mutation::StageLines { file, lines, unstage } => join([scrub(file), format!("lines={}", lines.len()), flag("unstage", *unstage)]),
         Mutation::StagePaths { files, unstage } => join([files.iter().cloned().map(|file| scrub(&file)).collect::<Vec<_>>().join(","), flag("unstage", *unstage)]),
-        Mutation::DiscardHunk { file, index } => join([scrub(file), format!("hunk={index}")]),
+        Mutation::DiscardHunk { file, index, .. } => join([scrub(file), format!("hunk={index}")]),
         Mutation::DiscardLine { file, .. } | Mutation::Discard { file } | Mutation::Delete { file } => scrub(file),
+        Mutation::DiscardLines { file, lines } => join([scrub(file), format!("lines={}", lines.len())]),
+        Mutation::DiscardPaths { files } => format!("files={}", files.len()),
+        Mutation::DeletePaths { files } => format!("files={}", files.len()),
         Mutation::Resolve { file, side, text } => join([scrub(file), scrub(side), format!("bytes={}", text.len())]),
         Mutation::RenameBranch { name, to } => join([scrub(name), scrub(to)]),
         Mutation::SetUpstream { branch, upstream } => join([scrub(branch), scrub(upstream)]),
@@ -761,7 +779,7 @@ fn heavy_dir(name: &str) -> bool {
         "out",
         "build",
     ];
-    NAMES.iter().any(|item| name.eq_ignore_ascii_case(item))
+    NAMES.iter().any(|item| name.eq_ignore_ascii_case(item)) || awegit_git::codex_scratch_name(name)
 }
 
 fn skipped_path(path: &Path) -> bool {
@@ -998,8 +1016,9 @@ fn settle_changes(
         }
         attach_new_dirs(repo, git_dir.as_deref(), &paths, &mut watched, &slot);
         if overflow {
-            perf::write("INFO", "watch", "repo-changed refs=false paths=overflow");
-            let _ = app.emit("repo-changed", RepoChange { refs: false });
+            // The dropped events may have included refs; a full refresh is the safe answer.
+            perf::write("INFO", "watch", "repo-changed refs=true paths=overflow");
+            let _ = app.emit("repo-changed", RepoChange { refs: true });
             continue;
         }
         let Some(change) = classify_changes(repo, &paths) else { continue };
@@ -1291,6 +1310,38 @@ fn cancel_operation(path: Option<String>) -> Result<(), String> {
     Ok(())
 }
 
+/// Stop history/diff/blame reads without touching a queued write.
+#[tauri::command]
+fn cancel_reads(path: Option<String>) -> Result<(), String> {
+    if let Some(path) = path.filter(|path| !path.trim().is_empty()) {
+        awegit_git::cancel_reads(Path::new(&path));
+    }
+    Ok(())
+}
+
+/// Sidebar preferences live in `.git/awegit`; none of them changes the work tree,
+/// so these skip the status scan that `mutate` would run.
+#[tauri::command]
+fn save_hidden_refs(path: Option<String>, names: Vec<String>) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let _turn = repo_turn(&repo);
+    awegit_git::write_hidden_refs(&repo, &names).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_expanded_groups(path: Option<String>, names: Vec<String>) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let _turn = repo_turn(&repo);
+    awegit_git::write_expanded_groups(&repo, &names).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_sign_off(path: Option<String>, enabled: bool, format: String) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let _turn = repo_turn(&repo);
+    awegit_git::write_sign_off(&repo, enabled, &format).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn set_passphrase(user: String, secret: String) -> Result<(), String> {
     awegit_git::set_passphrase(user, secret);
@@ -1533,6 +1584,12 @@ fn cherry_preview(path: Option<String>, rev: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn merge_preview(path: Option<String>, name: String) -> Result<awegit_git::MergePreview, String> {
+    let repo = repo_from(path)?;
+    awegit_git::merge_preview(&repo, &name).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn merged_branches(path: Option<String>) -> Result<Vec<String>, String> {
     let repo = repo_from(path)?;
     awegit_git::merged_branches(&repo).map_err(|error| error.to_string())
@@ -1727,7 +1784,9 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
         query.push('=');
         query.push_str(&encode_query(value));
     }
-    let url = if query.is_empty() { "index.html".to_string() } else { format!("index.html?{query}") };
+    // Keep the root path: SvelteKit's dev server and client router both 404 on `/index.html`.
+    // A query-only relative reference resolves against the dev server or the tauri protocol base.
+    let url = if query.is_empty() { "index.html".to_string() } else { format!("?{query}") };
     let window = tauri::webview::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
         .title("AweGit")
         .inner_size(1100.0, 720.0)
@@ -1847,6 +1906,10 @@ pub fn run() {
             list_ai_models,
             file_preview,
             cancel_operation,
+            cancel_reads,
+            save_hidden_refs,
+            save_expanded_groups,
+            save_sign_off,
             set_passphrase,
             approve_credential,
             check_for_update,
@@ -1875,6 +1938,7 @@ pub fn run() {
             search_commits,
             search_log,
             cherry_preview,
+            merge_preview,
             merged_branches,
             pick_history,
             activity_log,

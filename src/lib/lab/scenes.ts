@@ -1,0 +1,158 @@
+import type { Dialog } from "../shell/types";
+
+export type LabDialog = Exclude<Dialog, null>;
+
+export type LabScene = {
+  id: string;
+  group: string;
+  title: string;
+  repo: string;
+  ready: string;
+  dialog?: LabDialog;
+  href: string;
+};
+
+function scene(item: Omit<LabScene, "href"> & { href?: string }): LabScene {
+  return { ...item, href: item.href ?? `/?scene=${item.id}` };
+}
+
+function dialog(name: LabDialog, title: string, repo = "full", group = "弹窗"): LabScene {
+  return scene({
+    id: `dialog-${name}`,
+    group,
+    title,
+    repo,
+    ready: `[data-dialog="${name}"]`,
+    dialog: name,
+  });
+}
+
+export const dialogScenes = {
+  branch: dialog("branch", "新建分支"),
+  flow: dialog("flow", "Git Flow"),
+  clone: dialog("clone", "克隆"),
+  open: dialog("open", "打开仓库"),
+  prefs: dialog("prefs", "偏好设置"),
+  reset: dialog("reset", "重置"),
+  command: dialog("command", "自定义命令"),
+  tag: dialog("tag", "新建标签"),
+  remote: dialog("remote", "远程"),
+  squash: dialog("squash", "压缩提交"),
+  credential: dialog("credential", "HTTPS 登录", "full", "叠层"),
+  fetch: dialog("fetch", "获取"),
+  pull: dialog("pull", "拉取"),
+  push: dialog("push", "推送", "ahead"),
+  stash: dialog("stash", "贮藏"),
+  rename: dialog("rename", "重命名分支"),
+  upstream: dialog("upstream", "上游"),
+  resolve: dialog("resolve", "解决冲突", "conflict"),
+  rebase: dialog("rebase", "交互式变基"),
+  patch: dialog("patch", "应用补丁", "full", "叠层"),
+  about: dialog("about", "关于"),
+  submodule: dialog("submodule", "添加子模块"),
+  worktree: dialog("worktree", "添加工作区"),
+  output: dialog("output", "命令输出", "full", "叠层"),
+  mergeConflict: dialog("mergeConflict", "合并冲突结果", "conflict", "叠层"),
+  workspace: dialog("workspace", "工作区"),
+  reword: dialog("reword", "改写说明"),
+  merge: dialog("merge", "合并"),
+  repo: dialog("repo", "仓库设置"),
+  continue: dialog("continue", "继续变基", "rebase"),
+  gitignore: dialog("gitignore", "忽略文件"),
+  stats: dialog("stats", "统计"),
+  lfs: dialog("lfs", "LFS"),
+  github: dialog("github", "创建托管仓库"),
+  stashRename: dialog("stashRename", "重命名贮藏"),
+  stashBranch: dialog("stashBranch", "贮藏建分支"),
+  checkoutDirty: dialog("checkoutDirty", "检出脏工作区"),
+  checkoutNotice: dialog("checkoutNotice", "检出后的贮藏"),
+  activity: dialog("activity", "活动"),
+  mailmap: dialog("mailmap", "mailmap"),
+  accounts: dialog("accounts", "账户", "full", "叠层"),
+  ssh: dialog("ssh", "SSH 配置", "full", "叠层"),
+  stale: dialog("stale", "已合并分支"),
+  pushAs: dialog("pushAs", "推送到指定分支", "ahead"),
+  askInput: dialog("askInput", "命令提问", "full", "叠层"),
+  renameTab: dialog("renameTab", "重命名标签页"),
+  colorTab: dialog("colorTab", "标签页颜色"),
+  groupRename: dialog("groupRename", "重命名分组"),
+} satisfies Record<LabDialog, LabScene>;
+
+export const surfaceScenes: LabScene[] = [
+  scene({ id: "welcome", group: "主界面", title: "欢迎页", repo: "", ready: ".welcome-view" }),
+  scene({ id: "changes", group: "主界面", title: "变更", repo: "full", ready: ".file-list" }),
+  scene({ id: "changes-combined", group: "主界面", title: "合并列表", repo: "full", ready: ".status-pane .virtual-row" }),
+  scene({ id: "diff-text", group: "主界面", title: "文本差异", repo: "full", ready: ".diff-body" }),
+  scene({ id: "diff-image", group: "主界面", title: "图片差异", repo: "full", ready: ".image-stage" }),
+  scene({ id: "diff-binary", group: "主界面", title: "二进制差异", repo: "full", ready: ".diff-empty" }),
+  scene({ id: "diff-rename", group: "主界面", title: "重命名", repo: "full", ready: "text=renamed.txt" }),
+  scene({ id: "diff-long", group: "主界面", title: "长差异", repo: "full", ready: ".diff-body" }),
+  scene({ id: "diff-wrap", group: "主界面", title: "自动换行差异", repo: "full", ready: ".diff-body" }),
+  scene({ id: "diff-wrap-unified", group: "主界面", title: "自动换行统一视图", repo: "full", ready: ".diff-body" }),
+  scene({ id: "history", group: "主界面", title: "历史", repo: "full", ready: ".commit-row" }),
+  scene({ id: "commit", group: "主界面", title: "提交详情", repo: "full", ready: ".detail" }),
+  scene({ id: "tree", group: "主界面", title: "文件树", repo: "full", ready: ".tree-row" }),
+  scene({ id: "sidebar", group: "主界面", title: "侧栏", repo: "full", ready: ".sidebar" }),
+  scene({ id: "branch-badges", group: "主界面", title: "分支角标", repo: "full", ready: ".sidebar .side.nested.local-only" }),
+  scene({ id: "vertical-tabs", group: "主界面", title: "垂直标签", repo: "full", ready: ".vertical-tabs" }),
+  scene({ id: "search", group: "主界面", title: "搜索提交", repo: "full", ready: "[data-layer=\"search\"]" }),
+  scene({
+    id: "file-history",
+    group: "主界面",
+    title: "文件历史",
+    repo: "full",
+    ready: ".history-commit",
+    href: "/?scene=file-history&view=history&file=README.md",
+  }),
+  scene({
+    id: "blob",
+    group: "主界面",
+    title: "文件内容",
+    repo: "full",
+    ready: "header",
+    href: "/?scene=blob&view=blob&file=README.md&rev=HEAD",
+  }),
+  scene({ id: "picker", group: "主界面", title: "仓库选择器", repo: "full", ready: "[data-layer=\"repos\"]" }),
+  scene({ id: "commands", group: "主界面", title: "命令记录", repo: "full", ready: "[data-layer=\"commands\"]" }),
+  scene({ id: "notes", group: "主界面", title: "通知", repo: "full", ready: "[data-layer=\"forge\"]" }),
+  scene({ id: "pulls", group: "主界面", title: "拉取请求", repo: "full", ready: "[data-layer=\"forge\"]" }),
+  scene({ id: "launch", group: "主界面", title: "快速启动", repo: "full", ready: "[data-layer=\"launch\"]" }),
+  scene({ id: "launch-files", group: "主界面", title: "启动器文件", repo: "full", ready: "[data-layer=\"launch\"]" }),
+  scene({ id: "perf", group: "主界面", title: "性能", repo: "full", ready: "[data-layer=\"perf\"]" }),
+  scene({ id: "clean", group: "仓库状态", title: "干净仓库", repo: "even", ready: ".file-list .empty" }),
+  scene({ id: "conflict", group: "仓库状态", title: "文本冲突", repo: "conflict", ready: ".conflict-pane" }),
+  scene({ id: "conflict-banner", group: "仓库状态", title: "冲突横幅", repo: "conflict", ready: ".identity-floor[data-layer=\"conflicts\"]" }),
+  scene({ id: "merge-progress", group: "仓库状态", title: "合并进行中", repo: "merge", ready: ".identity-floor[data-layer=\"progress\"]" }),
+  scene({ id: "rebase-progress", group: "仓库状态", title: "变基进行中", repo: "rebase", ready: ".identity-floor[data-layer=\"progress\"]" }),
+  scene({ id: "cherry-progress", group: "仓库状态", title: "拣选进行中", repo: "cherry", ready: ".identity-floor[data-layer=\"progress\"]" }),
+  scene({ id: "revert-progress", group: "仓库状态", title: "还原进行中", repo: "revert", ready: ".identity-floor[data-layer=\"progress\"]" }),
+  scene({ id: "bisect", group: "仓库状态", title: "二分", repo: "bisect", ready: ".identity-floor[data-layer=\"bisect\"]" }),
+  scene({ id: "detached", group: "仓库状态", title: "分离 HEAD", repo: "detached", ready: "[data-branch=\"HEAD\"]" }),
+  scene({ id: "unborn", group: "仓库状态", title: "尚无提交", repo: "unborn", ready: "text=unborn.txt" }),
+  scene({ id: "ahead", group: "仓库状态", title: "未推送", repo: "ahead", ready: ".sync-count" }),
+  scene({ id: "behind", group: "仓库状态", title: "未拉取", repo: "behind", ready: ".sync-count" }),
+  scene({ id: "ignored", group: "仓库状态", title: "忽略文件", repo: "full", ready: "text=secret.tmp" }),
+  scene({ id: "blame", group: "仓库状态", title: "追溯", repo: "full", ready: "[data-layer=\"blame\"]" }),
+  scene({ id: "reflog", group: "仓库状态", title: "引用日志", repo: "full", ready: "[data-layer=\"reflog\"]" }),
+  scene({ id: "submodule", group: "仓库状态", title: "子模块", repo: "full", ready: "text=vendor" }),
+  scene({ id: "worktree", group: "仓库状态", title: "工作区列表", repo: "full", ready: "text=extra" }),
+  scene({ id: "clone-progress", group: "仓库状态", title: "克隆进度", repo: "even", ready: "[data-layer=\"clone\"]" }),
+  scene({ id: "clone-done", group: "仓库状态", title: "克隆完成", repo: "even", ready: ".command-log [data-layer=\"clone-done\"]" }),
+  scene({ id: "update", group: "仓库状态", title: "更新提示", repo: "even", ready: ".command-log [data-layer=\"update\"]" }),
+  scene({ id: "action-error", group: "仓库状态", title: "操作错误", repo: "even", ready: ".identity-floor[data-layer=\"error\"]" }),
+  scene({ id: "text-merge", group: "叠层", title: "文本合并", repo: "conflict", ready: "[data-layer=\"text-merge\"]" }),
+  scene({ id: "text-merge-many", group: "叠层", title: "多块冲突", repo: "conflict", ready: ".merge-count" }),
+  scene({ id: "file-merge", group: "叠层", title: "二进制合并", repo: "conflict", ready: "[data-layer=\"text-merge\"]" }),
+  scene({ id: "confirm", group: "叠层", title: "确认框", repo: "full", ready: "[data-layer=\"confirm\"]" }),
+  scene({ id: "menu", group: "叠层", title: "菜单", repo: "full", ready: "[data-layer=\"menu\"]" }),
+  scene({ id: "prefs-git", group: "弹窗", title: "偏好设置 · Git", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-commit", group: "弹窗", title: "偏好设置 · 提交", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-integration", group: "弹窗", title: "偏好设置 · 集成", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-updates", group: "弹窗", title: "偏好设置 · 更新", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+];
+
+export const scenes: LabScene[] = [...surfaceScenes, ...Object.values(dialogScenes)];
+
+export function sceneById(id: string) {
+  return scenes.find((item) => item.id === id);
+}

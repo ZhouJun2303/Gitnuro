@@ -13,10 +13,18 @@
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const onHistoryScroll = onVirtualScroll((top) => (shell.historyTop = top));
   const activeColor = $derived(shell.activeLaneColor());
+
+  function restoreHistory(node: HTMLElement) {
+    const top = shell.historyTop;
+    requestAnimationFrame(() => {
+      const max = Math.max(0, node.scrollHeight - node.clientHeight);
+      node.scrollTop = Math.min(top, max);
+    });
+  }
 </script>
 
 <div class="history-stage flex-fill">
-        <section class="history flex-fill" bind:this={shell.historyEl} onscroll={onHistoryScroll}>
+        <div class="history-head">
           {#if shell.filterNames.length > 0}
             <div class="filter-bar">
               <span>{shell.tr("chrome.filteredBy", { name: shell.filterNames.map((name) => `'${name}'`).join(", ") })}</span>
@@ -34,9 +42,8 @@
               <button class="text-button" type="button" onclick={() => { shell.historyFilter = ""; void shell.loadContext(); }}>{shell.tr("chrome.allCommits")}</button>
             {/if}
           </div>
-          {#if shell.historyFilter}
-            <div class="pane-head"><span>{shell.historyFilter}</span></div>
-          {/if}
+        </div>
+        <section class="history flex-fill" bind:this={shell.historyEl} bind:clientHeight={shell.historyHeight} use:restoreHistory onscroll={onHistoryScroll}>
           {#if shell.contentHits}
             <div class="pane-head"><span>{shell.tr("chrome.contentSearch")}</span><button class="text-button" type="button" onclick={() => (shell.contentHits = null)}>{shell.tr("chrome.close")}</button></div>
             {#each shell.contentHits as hit (hit.id)}
@@ -44,18 +51,22 @@
             {/each}
           {/if}
           {#if shell.reflogOn}
-            {#each shell.reflogRows as row (`${row.selector}-${row.id}`)}
-              <button class="commit-row" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
-                <span class="subject">{row.summary}</span>
-                <span class="commit-side">
-                  <span class="meta selector" title={row.selector}>{row.selector}</span>
-                  <span class="meta sha">{row.shortId}</span>
-                </span>
-              </button>
-            {/each}
+            {#if shell.reflogRows.length === 0}
+              <p class="empty">{shell.tr("chrome.noReflog")}</p>
+            {:else}
+              {#each shell.reflogRows as row (`${row.selector}-${row.id}`)}
+                <button class="commit-row" data-layer="reflog" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
+                  <span class="subject">{row.summary}</span>
+                  <span class="commit-side">
+                    <span class="meta selector" title={row.selector}>{row.selector}</span>
+                    <span class="meta sha" title={row.shortId}>{row.shortId}</span>
+                  </span>
+                </button>
+              {/each}
+            {/if}
           {:else if shell.mode !== "sample"}
             {#if shell.shownCommits.length === 0}
-              <p class="empty">{shell.tr("chrome.noCommits")}</p>
+              <p class="empty">{shell.commitQuery.trim() || shell.historyFilter ? shell.tr("chrome.noMatch") : shell.tr("chrome.noCommits")}</p>
             {:else}
               <div class="commit-window" style:height="{shell.historyItems.length * shell.rowCommit}px">
                 {#each shell.historyRows as commit, index (commit.id)}
@@ -76,7 +87,13 @@
                     ondragover={(event) => event.preventDefault()}
                     ondrop={(event) => { event.preventDefault(); const from = event.dataTransfer?.getData("text/plain") ?? ""; if (from && from !== commit.id) { shell.drops = [from, commit.id]; shell.draft = ""; shell.dialog = "squash"; } }}
                     onclick={(event) => shell.selectCommit(commit.id, event)}
-                    onkeydown={(event) => { if (event.key === "Enter") void shell.selectCommit(commit.id); }}
+                    onkeydown={(event) => {
+                      if (event.target !== event.currentTarget) return;
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      void shell.selectCommit(commit.id);
+                    }}
                     oncontextmenu={(event) => shell.openMenu(event, shell.commitMenu(commit))}
                   >
                     {@render laneGraph(graphRow, commit.id)}
@@ -103,7 +120,7 @@
                         <span class="meta author" title={commit.author}>{commit.author}</span>
                       </span>
                       <span class="meta sha">{commit.shortId}</span>
-                      <span class="meta date" title={commit.at ? shell.forkWhen(commit.at) : commit.when}>{commit.at ? shell.forkWhen(commit.at) : commit.when}</span>
+                      <span class="meta date" title={commit.at ? shell.forkWhenFull(commit.at) : commit.when}>{shell.whenLabel(commit)}</span>
                     </span>
                   </div>
                 {/each}
@@ -115,7 +132,7 @@
             {/if}
             {#if shell.reflogOn}
               {#each sampleReflog as row (row.selector)}
-                <button class="commit-row" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
+                <button class="commit-row" data-layer="reflog" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
                   <span class="subject">{row.summary}</span>
                   <span class="commit-side">
                     <span class="meta selector" title={row.selector}>{row.selector}</span>
@@ -166,6 +183,7 @@
           max={650}
           defaultSize={280}
           reverse
+          label={shell.tr("chrome.resizeDetail")}
           onchange={shell.handleLayoutChange.bind(shell)}
         />
 
@@ -196,8 +214,9 @@
       {#if labels.length > 0}
         <span class="lane-names">
           {#each labels as label (label)}
-            <span class="lane-name" class:compact={shell.settings.compactBranchLabels} class:quiet={active !== null && tone !== laneColors[active]} style:--lane={tone ?? "var(--text-secondary)"} title={label}>
-              {#if shell.refKind(label) === "remote"}
+            {@const remoteState = shell.branchRemoteState(label)}
+            <span class="lane-name" class:local-only={remoteState === "missing"} class:mirrored={remoteState === "mirrored"} class:compact={shell.settings.compactBranchLabels} class:quiet={active !== null && tone !== laneColors[active]} style:--lane={tone ?? "var(--text-secondary)"} title={remoteState === "missing" ? `${label} · ${shell.tr("chrome.localOnly")}` : label}>
+              {#if shell.refKind(label) === "remote" && !shell.refs?.branches.some((branch) => branch.name === label)}
                 <svg class="lane-remote" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.2" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="6" cy="6" r="1.15" fill="currentColor"/></svg>
               {/if}
               <span>{label}</span>

@@ -49,12 +49,23 @@
   }
 
 .welcome-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
     padding: 8px 12px;
     background: color-mix(in srgb, var(--deleted) 10%, transparent);
     border: 1px solid color-mix(in srgb, var(--deleted) 30%, transparent);
     border-radius: var(--radius);
     color: var(--deleted);
     font-size: 13px;
+    line-height: 1.45;
+  }
+
+.welcome-error-icon {
+    width: 14px;
+    height: 14px;
+    margin-top: 2px;
+    flex: none;
   }
 
 .welcome-actions {

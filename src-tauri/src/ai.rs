@@ -28,14 +28,7 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
     } else {
         settings.ai_max_chars as usize
     };
-    if diff.len() > limit {
-        let mut end = limit;
-        while end > 0 && !diff.is_char_boundary(end) {
-            end -= 1;
-        }
-        diff.truncate(end);
-        diff.push_str("\n\n[diff truncated]");
-    }
+    limit_diff(&mut diff, limit);
     let key = if settings.ai_api_key.trim().is_empty() {
         std::env::var("XAI_API_KEY")
             .or_else(|_| std::env::var("OPENAI_API_KEY"))
@@ -133,11 +126,8 @@ pub fn review(repo: &std::path::Path, settings: &Settings, base: &str) -> Result
     } else {
         settings.ai_max_chars as usize
     };
-    let diff = if output.len() > limit {
-        output[..limit].to_string()
-    } else {
-        output
-    };
+    let mut diff = output;
+    limit_diff(&mut diff, limit);
     let key = ai_key(settings)?;
     let base_url = settings
         .ai_base_url
@@ -567,6 +557,18 @@ fn parse_suggestion(text: &str) -> Result<Suggestion, String> {
     })
 }
 
+fn limit_diff(diff: &mut String, limit: usize) {
+    if diff.len() <= limit {
+        return;
+    }
+    let mut end = limit;
+    while end > 0 && !diff.is_char_boundary(end) {
+        end -= 1;
+    }
+    diff.truncate(end);
+    diff.push_str("\n\n[diff truncated]");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -733,5 +735,14 @@ mod tests {
         let error = parse_suggestion("updated the button").unwrap_err();
         assert!(error.contains("does not match"));
         assert!(error.contains("updated the button"));
+    }
+
+    #[test]
+    fn truncates_a_diff_on_a_character_boundary() {
+        let mut diff = "中".repeat(5_000);
+        limit_diff(&mut diff, 12_001);
+        assert!(diff.ends_with("[diff truncated]"));
+        assert!(diff.len() <= 12_001 + "\n\n[diff truncated]".len());
+        assert!(diff.trim_end_matches("\n\n[diff truncated]").chars().all(|ch| ch == '中'));
     }
 }

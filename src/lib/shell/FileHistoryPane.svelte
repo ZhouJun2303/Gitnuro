@@ -5,6 +5,7 @@
 
   const shell = getShell();
   const rowHeight = 48;
+  const diffRow = $derived(shell.diffRowHeight);
   let listTop = $state(0);
   const onListScroll = onVirtualScroll((top) => (listTop = top));
   const onDiffScroll = onVirtualScroll((top) => (shell.historyDiffTop = top));
@@ -41,19 +42,32 @@
     if (!file || !shell.inApp()) return;
     void getCurrentWindow().setTitle(`${shell.tr("menu.history")} — ${file}`).catch(() => {});
   });
+
+  function closePane() {
+    if (shell.inApp()) {
+      void getCurrentWindow().close();
+      return;
+    }
+    window.location.href = "/";
+  }
 </script>
 
 <div class="file-history">
-  <header class="history-file"><strong>{shell.historyFilter || shell.tr("menu.history")}</strong></header>
+  <header class="history-file">
+    <strong>{shell.historyFilter || shell.tr("menu.history")}</strong>
+    <button class="text-button" type="button" aria-label={shell.tr("chrome.close")} onclick={closePane}>{shell.tr("chrome.close")}</button>
+  </header>
   {#if span}
     <div class="history-time">
       {#each years as year (year)}
         {@const at = span ? Math.min(span.max, Math.max(span.min, new Date(year, 0, 1).getTime() / 1000)) : 0}
-        <span style:left="{place(at)}%">{year}</span>
+        {@const pos = place(at)}
+        <span style:left="{pos}%" style:transform={pos < 4 ? "none" : pos > 96 ? "translateX(-100%)" : undefined}>{year}</span>
       {/each}
       {#each shell.commitsLive as commit (commit.id)}
         {#if commit.at}
-          <button type="button" class:on={shell.selectedCommit === commit.id} style:left="{place(commit.at)}%" aria-label={commit.summary} onclick={() => void choose(commit.id)}></button>
+          {@const pos = Math.max(1, Math.min(99, place(commit.at)))}
+          <button type="button" class:on={shell.selectedCommit === commit.id} style:left="{pos}%" aria-label={`${commit.summary} · ${shell.whenLabel(commit)}`} title={commit.summary} onclick={() => void choose(commit.id)}></button>
         {/if}
       {/each}
     </div>
@@ -75,7 +89,7 @@
             >
               <span class="history-meta">
                 <span>{commit.author}</span>
-                <span>{commit.at ? shell.forkWhen(commit.at) : commit.when}</span>
+                <span>{shell.whenLabel(commit)}</span>
                 <span class="sha">{commit.shortId}</span>
               </span>
               <span class="subject">{commit.summary}</span>
@@ -101,10 +115,10 @@
         <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
       {:else}
         <div class="diff-body">
-          <div class="commit-window" style:height="{shell.historyDiff.lines.length * 18}px">
+          <div class="commit-window" style:height="{shell.historyDiff.lines.length * diffRow}px">
             {#each shell.historyDiffWindow.rows as line, index (`h-${shell.historyDiffWindow.start + index}`)}
               {@const at = shell.historyDiffWindow.start + index}
-              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{at * 18}px">{line.text}</span>
+              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{at * diffRow}px" style:height="{diffRow}px" style:line-height="{diffRow}px">{line.text}</span>
             {/each}
           </div>
         </div>
@@ -124,11 +138,27 @@
   }
 
   .history-file {
-    height: 36px;
+    height: 28px;
     display: flex;
     align-items: center;
-    padding: 0 14px;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 10px 0 12px;
     border-bottom: 1px solid var(--line);
+    flex: none;
+    font-size: 12px;
+  }
+
+  .history-file strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  .history-file :global(.text-button) {
+    margin-left: 0;
     flex: none;
   }
 
@@ -146,6 +176,7 @@
     font-size: 10px;
     color: var(--text-secondary);
     transform: translateX(-50%);
+    white-space: nowrap;
   }
 
   .history-time button {
@@ -221,4 +252,20 @@
   }
 
   .history-diff .diff-body { overflow: visible; height: auto; }
+
+  .history-diff .virtual-row {
+    position: absolute;
+    left: 0;
+    right: 0;
+    padding: 0 12px;
+    overflow: hidden;
+    white-space: pre;
+  }
+
+  .history-diff .virtual-row.add { background: var(--diff-add); }
+
+  .history-diff .virtual-row.del { background: var(--diff-del); }
+
+  .history-diff .virtual-row.hunk,
+  .history-diff .virtual-row.meta { color: var(--text-secondary); }
 </style>

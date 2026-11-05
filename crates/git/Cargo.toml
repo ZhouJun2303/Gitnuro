@@ -1,6 +1,6 @@
 [package]
 name = "awegit-git"
-version = "2.0.1"
+version = "2.0.2"
 edition = "2021"
 description = "Git status, diff, and index changes for AweGit"
 
@@ -8,3 +8,6 @@ description = "Git status, diff, and index changes for AweGit"
 gix = { version = "0.73", default-features = false, features = ["status", "parallel"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"

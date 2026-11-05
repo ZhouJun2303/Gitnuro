@@ -24,18 +24,20 @@ import {
     type UpdateNotice,
     workspaceTabWidth,
   } from "../status";
-import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
+import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StatusNoticeId } from "./types";
+import { STATUS_NOTICE_ENTRY } from "./types";
 import type { ShellState } from "./state.svelte";
 import { alignCommitTemplate, isCommentary, isCommitType, splitSubject, withoutRepeatedSubject } from "./commitMessage";
 
 export async function selectPrefTab(shell: ShellState, tab: PrefTab) {
     shell.prefTab = tab;
-    if (tab === "integration") void shell.loadExternalTools();
+    if (tab === "integration" && !shell.labPage) void shell.loadExternalTools();
     await tick();
     shell.prefPage?.scrollTo(0, 0);
   }
 
 export async function openLaunch(shell: ShellState) {
+    if (shell.dialog || shell.textMerge || shell.confirmAsk || shell.forgeOpen) return;
     shell.repoPickerOpen = false;
     shell.commandLogOpen = false;
     shell.launch = "";
@@ -96,16 +98,25 @@ export function placeCommandLog(shell: ShellState) {
     };
   }
 
-export function openCommandLog(shell: ShellState) {
+export function openCommandLog(shell: ShellState, prefer?: CommandFilter | StatusNoticeId) {
     shell.pruneErrorLog();
-    if (shell.unseenErrors > 0) shell.commandFilter = "errors";
+    if (prefer === "notices" || (typeof prefer === "string" && prefer in STATUS_NOTICE_ENTRY)) {
+      shell.commandFilter = "notices";
+      if (prefer !== "notices") shell.commandPick = STATUS_NOTICE_ENTRY[prefer as StatusNoticeId];
+    } else if (prefer === "errors" || prefer === "all" || prefer === "user" || prefer === "background") {
+      shell.commandFilter = prefer;
+    } else if (shell.unseenErrors > 0) {
+      shell.commandFilter = "errors";
+    } else if (shell.statusNotices.length > 0) {
+      shell.commandFilter = "notices";
+      if (shell.floorNotice) shell.commandPick = STATUS_NOTICE_ENTRY[shell.floorNotice.id];
+    }
     shell.unseenErrors = 0;
     shell.seedSampleCommands();
     if (!shell.visibleCommands().some((item) => item.id === shell.commandPick)) shell.commandPick = shell.visibleCommands()[0]?.id ?? 0;
     shell.repoPickerOpen = false;
     shell.closeLaunch();
-    shell.menu = null;
-    shell.submenu = null;
+    shell.dismissMenu(false);
     shell.placeCommandLog();
     shell.commandLogOpen = true;
   }
@@ -128,6 +139,32 @@ export async function fillTemplate(shell: ShellState) {
     // `feat:` with an empty subject is the template placeholder. Keep the chosen type.
     if (!shell.summary.trim() && splitSubject(aligned.subject).text.trim()) shell.applySubject(aligned.subject);
     if (!shell.description.trim() || isCommentary(shell.description)) shell.description = aligned.description;
+  }
+
+const MERGE_CONFLICT_MARK = "--- Merge Conflict ---";
+
+export function hunkIncludes(pick: MergePick, side: "ours" | "theirs") {
+    if (pick === "both") return true;
+    if (pick === "none") return false;
+    return pick === side;
+  }
+
+export function pickFromIncludes(theirs: boolean, ours: boolean): MergePick {
+    if (theirs && ours) return "both";
+    if (theirs) return "theirs";
+    if (ours) return "ours";
+    return "none";
+  }
+
+export function chosenHunkText(piece: Extract<MergePiece, { kind: "hunk" }>, emptyMark = MERGE_CONFLICT_MARK) {
+    const left = hunkIncludes(piece.pick, "theirs");
+    const right = hunkIncludes(piece.pick, "ours");
+    if (!left && !right) return emptyMark;
+    const parts: string[] = [];
+    if (left && piece.theirs.length > 0) parts.push(piece.theirs);
+    if (right && piece.ours.length > 0) parts.push(piece.ours);
+    if (parts.length === 0) return emptyMark;
+    return parts.join("\n");
   }
 
 export function splitConflicts(shell: ShellState, working: string) {
@@ -154,7 +191,7 @@ export function splitConflicts(shell: ShellState, working: string) {
         continue;
       }
       if (mode === "theirs" && line.startsWith(">>>>>>>")) {
-        pieces.push({ kind: "hunk", ours: ours.join("\n"), theirs: theirs.join("\n"), pick: "ours" });
+        pieces.push({ kind: "hunk", ours: ours.join("\n"), theirs: theirs.join("\n"), pick: "none" });
         mode = "text";
         continue;
       }
@@ -170,27 +207,40 @@ export function joinedPieces(shell: ShellState, pieces: MergePiece[]) {
     return pieces
       .map((piece) => {
         if (piece.kind === "text") return piece.text;
-        if (piece.pick === "theirs") return piece.theirs;
-        if (piece.pick === "both") return [piece.ours, piece.theirs].filter((part) => part.length > 0).join("\n");
-        return piece.ours;
+        return chosenHunkText(piece);
       })
       .join("\n");
   }
 
-export function pickHunk(shell: ShellState, index: number, pick: "ours" | "theirs" | "both") {
+export function pickHunk(shell: ShellState, index: number, pick: MergePick) {
     shell.mergePieces = shell.mergePieces.map((piece, at) => (piece.kind === "hunk" && at === index ? { ...piece, pick } : piece));
     shell.mergeResult = shell.joinedPieces(shell.mergePieces);
   }
 
-export function takeMergeSide(shell: ShellState, pick: "ours" | "theirs") {
-    shell.mergePieces = shell.mergePieces.map((piece) => (piece.kind === "hunk" ? { ...piece, pick } : piece));
+/** Toggle one side of a conflict hunk (Fork Select / Remove). */
+export function toggleMergeSide(shell: ShellState, index: number, side: "ours" | "theirs") {
+    const piece = shell.mergePieces[index];
+    if (!piece || piece.kind !== "hunk") return;
+    const theirs = side === "theirs" ? !hunkIncludes(piece.pick, "theirs") : hunkIncludes(piece.pick, "theirs");
+    const ours = side === "ours" ? !hunkIncludes(piece.pick, "ours") : hunkIncludes(piece.pick, "ours");
+    pickHunk(shell, index, pickFromIncludes(theirs, ours));
+  }
+
+/** Set or clear one side across every hunk (header checkboxes). */
+export function takeMergeSide(shell: ShellState, side: "ours" | "theirs", on: boolean) {
+    shell.mergePieces = shell.mergePieces.map((piece) => {
+      if (piece.kind !== "hunk") return piece;
+      const theirs = side === "theirs" ? on : hunkIncludes(piece.pick, "theirs");
+      const ours = side === "ours" ? on : hunkIncludes(piece.pick, "ours");
+      return { ...piece, pick: pickFromIncludes(theirs, ours) };
+    });
     shell.mergeResult = shell.joinedPieces(shell.mergePieces);
   }
 
 function piecesFromSides(shell: ShellState, sides: { ours: string; theirs: string; working: string }) {
     const pieces = shell.splitConflicts(sides.working);
     if (pieces.some((piece) => piece.kind === "hunk")) return pieces;
-    return [{ kind: "hunk" as const, ours: sides.ours, theirs: sides.theirs, pick: "ours" as const }];
+    return [{ kind: "hunk" as const, ours: sides.ours, theirs: sides.theirs, pick: "none" as const }];
   }
 
 /** Past this, drawing every line would stall the window. Show the file card instead. */
@@ -256,6 +306,16 @@ export function closeTextMerge(shell: ShellState) {
     shell.textMerge = false;
   }
 
+export type RebaseStep = { verb: string; rev: string; summary: string; message: string };
+
+/** Only checked commits are sent to the backend; unchecked rows are excluded. */
+export function buildRebaseSteps(steps: RebaseStep[], picked: string[]): RebaseStep[] {
+    if (picked.length === 0) return [];
+    return steps
+      .filter((step) => picked.includes(step.rev))
+      .map((step) => ({ ...step, message: step.verb === "reword" || step.verb === "squash" || step.verb === "exec" ? step.message : "" }));
+  }
+
 export async function applyTextMerge(shell: ShellState) {
     const file = shell.mergeFile;
     if (!file) return;
@@ -264,6 +324,7 @@ export async function applyTextMerge(shell: ShellState) {
       return;
     }
     if (shell.busy) return;
+    if (shell.mergePieces.some((piece) => piece.kind === "hunk" && piece.pick === "none")) return;
     await shell.mutate({ action: "resolve", file, side: "text", text: shell.mergeResult });
     shell.textMerge = false;
   }
@@ -282,6 +343,26 @@ export async function applyFileMerge(shell: ShellState, side: "ours" | "theirs")
 
 export async function openResolve(shell: ShellState, file: string) {
     await openTextMerge(shell, file);
+  }
+
+export async function fillResolveDialog(shell: ShellState, file: string) {
+    shell.draft = file;
+    shell.draftExtra = "text";
+    try {
+      const sides = await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
+      shell.conflict = sides;
+      if (!sides || textTooBig(sides.working) || textTooBig(sides.ours) || textTooBig(sides.theirs)) {
+        shell.mergePieces = [];
+        shell.mergeResult = sides?.working ?? "";
+        return;
+      }
+      shell.mergePieces = piecesFromSides(shell, sides);
+      shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+    } catch {
+      shell.conflict = null;
+      shell.mergePieces = [];
+      shell.mergeResult = "";
+    }
   }
 
 export function bisectMark(shell: ShellState, id: string) {
@@ -424,8 +505,7 @@ export async function openForge(shell: ShellState, kind: "notes" | "pulls") {
   }
 
 export function setRebaseVerb(shell: ShellState, rev: string, verb: string) {
-    const targets = shell.rebasePicked.includes(rev) && shell.rebasePicked.length > 1 ? new Set(shell.rebasePicked) : new Set([rev]);
-    shell.rebaseSteps = shell.rebaseSteps.map((step) => (targets.has(step.rev) ? { ...step, verb } : step));
+    shell.rebaseSteps = shell.rebaseSteps.map((step) => (step.rev === rev ? { ...step, verb } : step));
   }
 
 export function quick(shell: ShellState, event: MouseEvent, dialogName: Dialog, run: () => void) {
@@ -586,7 +666,7 @@ export function applyToolSettings(shell: ShellState) {
 export async function savePrefs(shell: ShellState, close = true) {
     shell.applyToolSettings();
     if (close) shell.dialog = null;
-    if (!shell.inApp()) return;
+    if (!shell.backend()) return;
     const ticket = ++shell.prefsSave;
     const values = shell.settings;
     try {
@@ -735,7 +815,7 @@ export async function browseCloneRoot(shell: ShellState) {
 export async function startClone(shell: ShellState) {
     const url = cloneUrl(shell.draft);
     const destination = shell.cloneTargetPath;
-    if (!shell.inApp()) return;
+    if (!shell.backend()) return;
     if (shell.cloneJob) {
       shell.actionError = shell.tr("dialog.cloneBusy");
       return;
@@ -768,7 +848,7 @@ export async function startClone(shell: ShellState) {
 
 export async function startInit(shell: ShellState) {
     const destination = shell.cloneTargetPath;
-    if (!shell.inApp()) return;
+    if (!shell.backend()) return;
     if (shell.cloneJob) {
       shell.actionError = shell.tr("dialog.cloneBusy");
       return;
@@ -828,7 +908,8 @@ export type ExternalTool = {
   };
 
 export async function loadExternalTools(shell: ShellState) {
-    if (!shell.inApp()) {
+    if (shell.labPage) return;
+    if (!shell.backend()) {
       shell.mergeTools = [];
       shell.diffTools = [];
       return;
@@ -955,10 +1036,14 @@ export function openRebase(shell: ShellState) {
     if (!shell.selectedCommit) return;
     const source = shell.mode === "live" ? shell.commitsLive : commits.map((commit) => ({ id: commit.id, summary: commit.summary }));
     const index = source.findIndex((commit) => commit.id === shell.selectedCommit);
-    const newer = index > 0 ? source.slice(0, index).slice().reverse() : source.slice(0, 3);
+    const newer = index > 0 ? source.slice(0, index).slice().reverse() : [];
+    if (newer.length === 0) {
+      shell.actionError = shell.tr("dialog.rebaseNothing");
+      return;
+    }
     shell.updateRefs = shell.settings.rebaseUpdateRefs;
     shell.rebaseSteps = newer.map((commit) => ({ verb: "pick", rev: commit.id, summary: commit.summary, message: commit.summary }));
-    shell.rebasePicked = [];
+    shell.rebasePicked = newer.map((commit) => commit.id);
     shell.rebaseConflictFiles = [];
     shell.dialog = "rebase";
     if (shell.mode === "live") {
@@ -1053,6 +1138,38 @@ export function openRepoSettings(shell: ShellState) {
 export async function keepPassphrase(shell: ShellState) {
     await invoke("set_passphrase", { user: shell.passUser, secret: shell.passphrase });
     shell.passphrase = "";
+  }
+
+export async function loadMergePreview(shell: ShellState) {
+    const source = shell.draft.trim();
+    const into = shell.snapshot?.branch || "HEAD";
+    shell.mergeInto = into;
+    if (shell.mode !== "live" || !source) {
+      shell.mergeFiles = [];
+      fillMergeText(shell, into, source);
+      return;
+    }
+    const preview = await invoke<{ into: string; files: { status: string; path: string }[] }>("merge_preview", {
+      path: shell.repoPath(),
+      name: source,
+    }).catch(() => null);
+    if (shell.dialog !== "merge" || shell.draft.trim() !== source) return;
+    shell.mergeInto = preview?.into || into;
+    shell.mergeFiles = preview?.files ?? [];
+    fillMergeText(shell, shell.mergeInto, source);
+  }
+
+export function refreshMergeSummary(shell: ShellState) {
+    fillMergeText(shell, shell.mergeInto || shell.snapshot?.branch || "HEAD", shell.draft.trim());
+  }
+
+function fillMergeText(shell: ShellState, into: string, source: string) {
+    const summary = shell.tr(shell.draftExtra === "squash" ? "dialog.mergeSquashTitle" : "dialog.mergeTitleLine", { source, into });
+    const body = shell.mergeFiles.map((file) => `${file.status}\t${file.path}`).join("\n");
+    if (shell.mergeSummary === shell.mergeAutoSummary) shell.mergeSummary = summary;
+    shell.mergeAutoSummary = summary;
+    if (shell.mergeBody === shell.mergeAutoBody) shell.mergeBody = body;
+    shell.mergeAutoBody = body;
   }
 
 export async function saveWindow(shell: ShellState) {

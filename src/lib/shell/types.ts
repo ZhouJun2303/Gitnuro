@@ -29,6 +29,7 @@ export type Dialog =
     | "submodule"
     | "worktree"
     | "output"
+    | "mergeConflict"
     | "workspace"
     | "reword"
     | "merge"
@@ -54,9 +55,11 @@ export type Dialog =
     | "groupRename"
     | null;
 
+export type MergePick = "ours" | "theirs" | "both" | "none";
+
 export type MergePiece =
     | { kind: "text"; text: string }
-    | { kind: "hunk"; ours: string; theirs: string; pick: "ours" | "theirs" | "both" };
+    | { kind: "hunk"; ours: string; theirs: string; pick: MergePick };
 
 export type RepoFacts = {
     ignored: string[];
@@ -80,7 +83,7 @@ export type RepoEntry =
     | { kind: "folder"; path: string; name: string; repos: string[] }
     | { kind: "repo"; path: string };
 
-export type CommandFilter = "all" | "user" | "background" | "errors";
+export type CommandFilter = "all" | "user" | "background" | "errors" | "notices";
 
 export type StoredError = {
     id: number;
@@ -99,6 +102,41 @@ export type CommandEntry = {
     ok: boolean;
     at: number;
     source: "user" | "background";
+    /** When set, this row is a live status notice, not a git command. */
+    noticeId?: StatusNoticeId;
+  };
+
+export type StatusNoticeId = "conflicts" | "progress" | "bisect" | "error" | "update" | "clone-done";
+
+export type StatusTone = "conflict" | "progress" | "busy" | "error" | "info";
+
+export type StatusNoticeAction = {
+    id: string;
+    label: string;
+    disabled?: boolean;
+  };
+
+export type StatusNotice = {
+    id: StatusNoticeId;
+    /** Lower wins the identity floor. */
+    priority: number;
+    tone: StatusTone;
+    title: string;
+    detail: string;
+    dataLayer: string;
+    /** True when this notice may occupy the identity floor. */
+    floor: boolean;
+    actions: StatusNoticeAction[];
+  };
+
+/** Stable negative ids so notice rows do not collide with command log ids. */
+export const STATUS_NOTICE_ENTRY: Record<StatusNoticeId, number> = {
+    conflicts: -101,
+    progress: -102,
+    bisect: -103,
+    error: -104,
+    update: -105,
+    "clone-done": -106,
   };
 
 export type RepoJob = { label: string; percent: number | null; depth: number };

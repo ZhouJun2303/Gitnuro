@@ -16,7 +16,7 @@ const stats = new Map<string, ClientStat>();
 export const frame = { longTasks: 0, longTaskMs: 0, longTaskMax: 0 };
 
 function push(entry: Entry) {
-  if (!live) return;
+  if (typeof window === "undefined") return;
   queue.push(entry);
   if (queue.length > 500) queue.splice(0, queue.length - 500);
 }
@@ -39,11 +39,33 @@ export function logClient(level: Entry["level"], kind: string, name: string, det
   push({ level, kind, name, detail, ms });
 }
 
-/** Same as `invoke` from `@tauri-apps/api/core`, with round-trip time and failures logged. */
+async function call<T>(cmd: string, args?: Args, options?: Options): Promise<T> {
+  if (live) return rawInvoke<T>(cmd, args, options);
+  let response: Response;
+  try {
+    response = await fetch("/__lab/invoke", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cmd, args: args ?? {} }),
+    });
+  } catch {
+    throw new Error("试验台未启动，请运行 pnpm dev");
+  }
+  let payload: { ok?: boolean; value?: T; error?: string };
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(response.ok ? `lab invoke ${cmd} failed` : "试验台未启动，请运行 pnpm dev");
+  }
+  if (!payload.ok) throw new Error(payload.error || `lab invoke ${cmd} failed`);
+  return payload.value as T;
+}
+
+/** Desktop calls Tauri. The browser lab posts the same command to `/__lab`. */
 export async function invoke<T>(cmd: string, args?: Args, options?: Options): Promise<T> {
   const start = performance.now();
   try {
-    const value = await rawInvoke<T>(cmd, args, options);
+    const value = await call<T>(cmd, args, options);
     const ms = performance.now() - start;
     record(cmd, ms, true);
     if (ms >= SLOW_INVOKE_MS) push({ level: "slow", kind: "invoke", name: cmd, ms });
@@ -63,7 +85,7 @@ export function flushClientLog(): Promise<void> {
   const run = flushChain.then(async () => {
     if (!queue.length) return;
     const entries = queue.splice(0, queue.length);
-    await rawInvoke("log_client", { entries }).catch(() => {});
+    await call("log_client", { entries }).catch(() => {});
   });
   flushChain = run.catch(() => {});
   return run;
@@ -81,7 +103,7 @@ function observe(type: string, handle: (entry: PerformanceEntry) => void) {
   }
 }
 
-if (live) {
+if (typeof window !== "undefined") {
   observe("longtask", (entry) => {
     frame.longTasks += 1;
     frame.longTaskMs += entry.duration;

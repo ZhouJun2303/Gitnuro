@@ -1,3 +1,39 @@
+.dialog-close {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    z-index: 3;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 18px;
+    line-height: 1;
+  }
+
+.dialog-close:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+
+.dialog h2 {
+    padding-right: 26px;
+  }
+
+.dialog-error {
+    margin: 0;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--deleted) 12%, transparent);
+    color: var(--deleted);
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
 .swatch {
     width: 18px;
     height: 18px;
@@ -33,7 +69,7 @@
 
 .treemap { display: flex; flex-wrap: wrap; gap: 4px; min-height: 72px; }
 
-.treemap span { flex-basis: 48px; padding: 6px; overflow: hidden; background: color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 6px; font-size: 11px; }
+.treemap span { flex: 1 1 88px; min-width: 72px; padding: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 6px; font-size: 11px; }
 
 .stats-row {
     display: flex;
@@ -54,14 +90,23 @@
     white-space: pre-wrap;
   }
 
-.dialog.wide {
-    width: min(760px, calc(100vw - 32px));
-    min-height: 520px;
+.merge-conflict-log {
+    max-height: min(320px, 42vh);
+    margin: 0;
+    overflow: auto;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--canvas);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-size: 12px;
+    line-height: 1.45;
   }
 
-.dialog.wide.prefs {
-    height: min(640px, calc(100vh - 48px));
-    min-height: 0;
+.dialog.prefs {
+    height: min(720px, calc(100vh - 48px));
     overflow: hidden;
   }
 
@@ -72,7 +117,7 @@
   }
 
 .dialog.path-dialog {
-    width: min(520px, calc(100vw - 32px));
+    width: min(560px, calc(100vw - 32px));
   }
 
 .dialog .text-button.left {
@@ -90,6 +135,19 @@
     overflow: auto;
   }
 
+.open-col > .text-button {
+    flex: none;
+    min-height: 30px;
+  }
+
+.account-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
+    overflow: auto;
+  }
+
 .dialog .text-button.pick {
     display: block;
     width: 100%;
@@ -101,9 +159,15 @@
   }
 
 .dialog .text-button.pick.clone-root {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 2px;
     height: auto;
-    min-height: 44px;
+    min-height: 48px;
     padding: 8px 12px;
+    line-height: 1.35;
     white-space: normal;
   }
 
@@ -117,7 +181,7 @@
 
 .dialog .text-button.pick.clone-root span {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 11.5px;
   }
 
 .dialog .text-button.pick.clone-root[aria-pressed="true"] {
@@ -157,7 +221,30 @@
 
 .dialog.workspace {
     overflow: hidden;
-    width: 420px;
+  }
+
+.merge-route {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--canvas);
+  }
+
+.merge-route span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.merge-route .meta { flex: none; }
+
+.dialog textarea.merge-body {
+    max-height: 180px;
   }
 
 .workspace-list {
@@ -225,3 +312,18 @@
   }
 
 .workspace-create { margin-top: 4px; }
+
+.workspace-create label.grow {
+    flex: 1;
+    min-width: 0;
+    margin-left: 0;
+  }
+
+.dialog-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 0;
+    max-height: min(420px, calc(100vh - 300px));
+    overflow: auto;
+}

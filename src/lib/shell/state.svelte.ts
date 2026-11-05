@@ -1,4 +1,5 @@
 import { onMount, tick } from "svelte";
+import { pushState } from "$app/navigation";
 import { invoke } from "../perf";
 import { listen } from "@tauri-apps/api/event";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
@@ -33,10 +34,11 @@ import {
     workspaceTabWidth,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
-import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
+import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
-import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
-import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError } from "./types";
+import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
+import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
+import { STATUS_NOTICE_ENTRY } from "./types";
 
 const initialErrors = readErrorLog();
 
@@ -49,11 +51,74 @@ function standaloneView(): "" | "history" | "blob" {
   return view === "history" || view === "blob" ? view : "";
 }
 
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function sameCommitRow(left: CommitRow, right: CommitRow): boolean {
+  return (
+    left.id === right.id &&
+    left.shortId === right.shortId &&
+    left.summary === right.summary &&
+    left.author === right.author &&
+    left.when === right.when &&
+    left.lane === right.lane &&
+    left.at === right.at &&
+    left.email === right.email &&
+    left.unpushed === right.unpushed &&
+    sameStrings(left.parents, right.parents) &&
+    sameStrings(left.refs, right.refs)
+  );
+}
+
+function sameCommitRows(left: readonly CommitRow[], right: readonly CommitRow[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (!sameCommitRow(left[index]!, right[index]!)) return false;
+  }
+  return true;
+}
+
+function sameStatusFile(left: StatusFile, right: StatusFile): boolean {
+  return left.path === right.path && left.kind === right.kind && left.previousPath === right.previousPath;
+}
+
+function sameStatusFiles(left: readonly StatusFile[], right: readonly StatusFile[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (!sameStatusFile(left[index]!, right[index]!)) return false;
+  }
+  return true;
+}
+
+function sameSnapshot(left: StatusSnapshot | null, right: StatusSnapshot | null): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.path === right.path && left.branch === right.branch && sameStatusFiles(left.staged, right.staged) && sameStatusFiles(left.unstaged, right.unstaged);
+}
+
 function sameValue(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
   if (typeof left !== "object" || typeof right !== "object" || left === null || right === null) return false;
   if (Array.isArray(left) || Array.isArray(right)) {
     if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    const first = left[0] as Record<string, unknown> | undefined;
+    const other = right[0] as Record<string, unknown> | undefined;
+    if (first && other && typeof first === "object" && typeof other === "object") {
+      if ("shortId" in first && "parents" in first && "shortId" in other) {
+        return sameCommitRows(left as CommitRow[], right as CommitRow[]);
+      }
+      if ("kind" in first && "path" in first && "kind" in other) {
+        return sameStatusFiles(left as StatusFile[], right as StatusFile[]);
+      }
+    }
     for (let index = 0; index < left.length; index += 1) {
       if (!sameValue(left[index], right[index])) return false;
     }
@@ -204,10 +269,14 @@ export class ShellState {
   desktopApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 
+  /** Browser scene page. The desktop app keeps using Tauri. */
+  labPage = typeof window !== "undefined" && !this.desktopApp && new URLSearchParams(window.location.search).has("scene");
+
+
   section = $state<"changes" | "history">("changes");
 
 
-  selectedPath = $state<string | null>(this.desktopApp ? null : (sampleUnstaged[0]?.path ?? null));
+  selectedPath = $state<string | null>(this.desktopApp || this.labPage ? null : (sampleUnstaged[0]?.path ?? null));
 
 
   summary = $state("");
@@ -234,10 +303,13 @@ export class ShellState {
   selectedSide = $state<Side>("unstaged");
 
 
-  mode = $state<Mode>(this.desktopApp ? "loading" : "sample");
+  mode = $state<Mode>(this.desktopApp || this.labPage ? "loading" : "sample");
 
 
-  snapshot = $state<StatusSnapshot | null>(null);
+  labSceneId = $state("");
+
+
+  snapshot = $state.raw<StatusSnapshot | null>(null);
 
 
   loadError = $state<string | null>(null);
@@ -272,7 +344,7 @@ export class ShellState {
   errorCopied = $state(false);
 
 
-  diff = $state<FileDiff | null>(null);
+  diff = $state.raw<FileDiff | null>(null);
 
 
   diffError = $state<string | null>(null);
@@ -299,10 +371,14 @@ export class ShellState {
   refreshQueued: "status" | "full" | null = null;
 
 
+  /** A watcher event that arrived while a write was running. */
+  watchQueued: "status" | "full" | null = null;
+
+
   refs = $state<RefSnapshot | null>(null);
 
 
-  commitsLive = $state<CommitRow[]>([]);
+  commitsLive = $state.raw<CommitRow[]>([]);
 
 
   progress = $state<InProgress | null>(null);
@@ -311,19 +387,24 @@ export class ShellState {
   selectedCommit = $state<string | null>(null);
 
 
-  commitFiles = $state<StatusFile[]>([]);
+  selectedCommitRow = $derived(this.mode === "live" && this.selectedCommit ? (this.commitsLive.find((row) => row.id === this.selectedCommit) ?? null) : null);
+
+
+  commitFiles = $state.raw<StatusFile[]>([]);
 
 
   historyFile = $state<string | null>(null);
 
 
-  historyDiff = $state<FileDiff | null>(null);
+  historyDiff = $state.raw<FileDiff | null>(null);
 
 
-  patchCache = $state<Record<string, FileDiff>>({});
+  patchCache = $state.raw<Record<string, FileDiff>>({});
+  /** Bumped when a patch is added in place, so readers do not copy the whole map. */
+  patchVersion = $state(0);
 
 
-  openPatches = $state<string[]>([]);
+  openPatches = $state.raw<string[]>([]);
 
 
   treeCollapsed = $state<string[]>([]);
@@ -333,6 +414,7 @@ export class ShellState {
 
 
   treeBinary = $state(false);
+  treeTruncated = $state(false);
 
 
   blobTop = $state(0);
@@ -347,7 +429,10 @@ export class ShellState {
   historyTop = $state(0);
 
 
-  blameLines = $state<BlameLine[] | null>(null);
+  historyHeight = $state(0);
+
+
+  blameLines = $state.raw<BlameLine[] | null>(null);
 
 
   settingsPath = $state("");
@@ -446,6 +531,24 @@ export class ShellState {
   draftExtra = $state("");
 
 
+  mergeInto = $state("");
+
+
+  mergeSummary = $state("");
+
+
+  mergeBody = $state("");
+
+
+  mergeAutoSummary = $state("");
+
+
+  mergeAutoBody = $state("");
+
+
+  mergeFiles = $state<{ status: string; path: string }[]>([]);
+
+
   /** Fetch, pull, and push dialog options. */
   syncAll = $state(false);
 
@@ -525,6 +628,13 @@ export class ShellState {
   blobText = $state("");
 
 
+  blobLoaded = $state(false);
+  blobTruncated = $state(false);
+
+
+  blobError = $state("");
+
+
   blobBinary = $state(false);
 
 
@@ -548,6 +658,26 @@ export class ShellState {
 
 
   fileTop = $state(0);
+
+
+  /** Combined staged+unstaged list scrolls as one virtual list. */
+  combinedTop = $state(0);
+
+
+  combinedHeight = $state(0);
+
+
+  /** Commit-detail file list: scroll offset and measured patch heights. */
+  commitScrollTop = $state(0);
+
+
+  commitViewport = $state(0);
+
+
+  commitListTop = $state(0);
+
+
+  patchHeights = $state.raw<Record<string, number>>({});
 
 
   sideTop = $state(0);
@@ -576,6 +706,10 @@ export class ShellState {
 
 
   graphColumns: Array<string | null> = [];
+
+
+  /** Plain counter: the graph effect must not read the signal it writes. */
+  graphEpoch = 0;
 
 
   graphVersion = $state(0);
@@ -799,6 +933,9 @@ export class ShellState {
   submenu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
 
+  menuOpener: HTMLElement | null = null;
+
+
   confirmAsk = $state<ConfirmAsk | null>(null);
 
 
@@ -826,7 +963,7 @@ export class ShellState {
   reflogRows = $state<{ id: string; shortId: string; selector: string; summary: string }[]>([]);
 
 
-  treePaths = $state<string[]>([]);
+  treePaths = $state.raw<string[]>([]);
 
 
   treeText = $state("");
@@ -900,6 +1037,7 @@ export class ShellState {
 
 
   recentStats = $state<Record<string, { branch: string; ahead: number; behind: number; lastSummary: string }>>({});
+  recentAsked = new Set<string>();
 
 
   commandOutput = $state("");
@@ -1046,9 +1184,12 @@ export class ShellState {
   );
 
 
-  conflictCount = $derived(
-    [...(this.snapshot?.staged ?? []), ...(this.snapshot?.unstaged ?? [])].filter((file) => file.kind === "conflict").length,
-  );
+  conflictCount = $derived.by(() => {
+    let count = 0;
+    for (const file of this.snapshot?.staged ?? []) if (file.kind === "conflict") count += 1;
+    for (const file of this.snapshot?.unstaged ?? []) if (file.kind === "conflict") count += 1;
+    return count;
+  });
 
 
   conflicted = $derived(this.conflictCount > 0);
@@ -1115,6 +1256,140 @@ export class ShellState {
     if (!this.showingClone || !this.cloneJob) return null;
     return this.jobs[this.jobKey(this.cloneJob.destination)]?.percent ?? null;
   });
+
+
+  /** Live banners formerly in notice-stack, ordered by priority. */
+  statusNotices = $derived.by((): StatusNotice[] => {
+    const items: StatusNotice[] = [];
+    const live = this.mode === "live";
+    if (live && this.conflictCount > 0) {
+      const actions: StatusNoticeAction[] = [];
+      if (this.progress && this.progress !== "merge") {
+        actions.push({ id: "continue", label: this.tr("chrome.continueAction"), disabled: this.busy || this.conflicted });
+        actions.push({ id: "skip", label: this.tr("chrome.skip"), disabled: this.busy });
+      }
+      actions.push({ id: "abort", label: this.tr("chrome.abort"), disabled: this.busy });
+      items.push({
+        id: "conflicts",
+        priority: 0,
+        tone: "conflict",
+        title: this.conflictCount === 1 ? this.tr("chrome.unmergedOne") : this.tr("chrome.unmergedMany", { count: String(this.conflictCount) }),
+        detail: this.progress ? this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) }) : "",
+        dataLayer: "conflicts",
+        floor: true,
+        actions,
+      });
+    } else if (live && this.progress) {
+      items.push({
+        id: "progress",
+        priority: 1,
+        tone: "progress",
+        title: this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) }),
+        detail: "",
+        dataLayer: "progress",
+        floor: true,
+        actions: [
+          { id: "abort", label: this.tr("chrome.abort"), disabled: this.busy },
+          { id: "continue", label: this.tr("chrome.continueAction"), disabled: this.busy || this.conflicted },
+          { id: "skip", label: this.tr("chrome.skip"), disabled: this.busy || this.progress === "merge" },
+        ],
+      });
+    }
+    if (live && this.facts?.bisectActive) {
+      items.push({
+        id: "bisect",
+        priority: 1,
+        tone: "progress",
+        title: this.tr("chrome.bisect"),
+        detail: "",
+        dataLayer: "bisect",
+        floor: true,
+        actions: [
+          { id: "good", label: this.tr("chrome.good"), disabled: this.busy },
+          { id: "bad", label: this.tr("chrome.bad"), disabled: this.busy },
+          { id: "skip", label: this.tr("chrome.skip"), disabled: this.busy },
+          { id: "abort", label: this.tr("chrome.abort"), disabled: this.busy },
+        ],
+      });
+    }
+    if (this.actionError) {
+      items.push({
+        id: "error",
+        priority: 3,
+        tone: "error",
+        title: this.actionError,
+        detail: "",
+        dataLayer: "error",
+        floor: true,
+        actions: [{ id: "close", label: this.tr("chrome.close") }],
+      });
+    }
+    if (this.cloneDone) {
+      items.push({
+        id: "clone-done",
+        priority: 4,
+        tone: "info",
+        title: this.tr("chrome.cloneReady", { name: this.folderName(this.cloneDone) }),
+        detail: this.cloneDone,
+        dataLayer: "clone-done",
+        floor: false,
+        actions: [{ id: "open", label: this.tr("chrome.open") }],
+      });
+    }
+    if (this.updateNotice) {
+      const notes = [this.updateNotice.notes, this.updateMessage].filter(Boolean).join("\n").trim();
+      items.push({
+        id: "update",
+        priority: 4,
+        tone: "info",
+        title: this.tr("chrome.updateAvailable", { name: `AweGit ${this.updateNotice.appVersion}` }),
+        detail: notes,
+        dataLayer: "update",
+        floor: false,
+        actions: [
+          { id: "install", label: this.updateBusy ? this.tr("chrome.updateDownloading") : this.tr("chrome.updateInstall"), disabled: this.updateBusy },
+          { id: "later", label: this.tr("chrome.updateLater"), disabled: this.updateBusy },
+        ],
+      });
+    } else if ((this.updatePhase === "checking" || this.updatePhase === "current" || this.updatePhase === "error") && this.updateMessage) {
+      items.push({
+        id: "update",
+        priority: 4,
+        tone: "info",
+        title: this.updateMessage,
+        detail: "",
+        dataLayer: "update",
+        floor: false,
+        actions: [],
+      });
+    }
+    return items.sort((left, right) => left.priority - right.priority || left.id.localeCompare(right.id));
+  });
+
+
+  /** Highest-priority notice that may occupy the identity floor (P0–P3). Busy workDepth stays separate. */
+  floorNotice = $derived(this.statusNotices.find((item) => item.floor) ?? null);
+
+
+  identityTone = $derived.by((): StatusTone | null => {
+    if (this.floorNotice) return this.floorNotice.tone;
+    if (this.workDepth > 0) return "busy";
+    return null;
+  });
+
+
+  floorNoticeAction(notice: StatusNotice): StatusNoticeAction | null {
+    const prefer =
+      notice.id === "conflicts" || notice.id === "bisect"
+        ? "abort"
+        : notice.id === "progress"
+          ? "continue"
+          : notice.id === "error"
+            ? "close"
+            : notice.actions[0]?.id;
+    if (!prefer) return null;
+    return notice.actions.find((item) => item.id === prefer) ?? notice.actions[0] ?? null;
+  }
 
 
   canCommit = $derived(
@@ -1186,7 +1461,193 @@ export class ShellState {
   repoTree = $derived(this.asTree((this.mode === "live" ? this.treePaths : this.sampleTree).map((path) => ({ path, letter: "", tone: "modified" as const })), this.treeCollapsed));
 
 
-  allPatchesOpen = $derived(this.commitFiles.length > 0 && this.commitFiles.every((file) => this.openPatches.includes(file.path)));
+  openPatchSet = $derived(new Set(this.openPatches));
+
+
+  allPatchesOpen = $derived(this.commitFiles.length > 0 && this.commitFiles.every((file) => this.openPatchSet.has(file.path)));
+
+
+  /** Measured height wins; the estimate only positions rows before they first mount. */
+  commitPatchHeight(path: string) {
+    this.patchVersion;
+    const measured = this.patchHeights[path];
+    if (measured) return measured;
+    const cached = this.patchCache[path];
+    if (!cached || cached.binary || cached.lines.length === 0) return 34;
+    const stride = this.settings.diffStyle === "split" ? this.splitRowHeight : this.diffRowHeight;
+    return Math.max(34, cached.lines.length * stride + (cached.truncated ? 22 : 2));
+  }
+
+
+  commitRows = $derived.by(() => {
+    const open = this.openPatchSet;
+    const rows: { key: string; kind: "file" | "patch"; path: string; file: StatusFile; top: number; height: number }[] = [];
+    let top = 0;
+    for (const file of this.commitFiles) {
+      rows.push({ key: `f:${file.path}`, kind: "file", path: file.path, file, top, height: 30 });
+      top += 30;
+      if (open.has(file.path)) {
+        const height = this.commitPatchHeight(file.path);
+        rows.push({ key: `p:${file.path}`, kind: "patch", path: file.path, file, top, height });
+        top += height;
+      }
+    }
+    return { rows, total: top };
+  });
+
+
+  commitWindow = $derived.by(() => {
+    const { rows, total } = this.commitRows;
+    if (rows.length <= 80) return { rows, topSpacer: 0, bottomSpacer: 0 };
+    const offset = Math.max(0, this.commitScrollTop - this.commitListTop);
+    const viewport = this.commitViewport || 600;
+    const from = Math.max(0, offset - 200);
+    const to = offset + viewport + 400;
+    let low = 0;
+    let high = rows.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      const row = rows[middle]!;
+      if (row.top + row.height < from) low = middle + 1;
+      else high = middle;
+    }
+    const start = Math.min(low, rows.length - 1);
+    low = start;
+    high = rows.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (rows[middle]!.top < to) low = middle + 1;
+      else high = middle;
+    }
+    const end = Math.min(rows.length, Math.max(low, start + 1));
+    const first = rows[start]!;
+    const last = rows[end - 1]!;
+    return {
+      rows: rows.slice(start, end),
+      topSpacer: first.top,
+      bottomSpacer: Math.max(0, total - (last.top + last.height)),
+    };
+  });
+
+
+  trackCommitScroll(node: HTMLElement) {
+    let frame = 0;
+    const read = () => {
+      frame = 0;
+      this.commitScrollTop = node.scrollTop;
+      this.commitViewport = node.clientHeight;
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(read);
+    };
+    node.addEventListener("scroll", schedule, { passive: true });
+    const resize = new ResizeObserver(schedule);
+    resize.observe(node);
+    read();
+    return {
+      destroy() {
+        if (frame) cancelAnimationFrame(frame);
+        node.removeEventListener("scroll", schedule);
+        resize.disconnect();
+      },
+    };
+  }
+
+
+  trackCommitList(node: HTMLElement) {
+    const scroller = node.closest(".detail-scroll");
+    if (!(scroller instanceof HTMLElement)) return;
+    const measure = () => {
+      this.commitListTop = node.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    };
+    const resize = new ResizeObserver(measure);
+    resize.observe(node);
+    if (node.parentElement) {
+      resize.observe(node.parentElement);
+      // The commit card above the list grows when its body arrives; observe it too.
+      for (const sibling of Array.from(node.parentElement.children)) {
+        if (sibling !== node) resize.observe(sibling);
+      }
+    }
+    resize.observe(scroller);
+    measure();
+    return {
+      destroy() {
+        resize.disconnect();
+      },
+    };
+  }
+
+
+  measureCommitPatch(node: HTMLElement, path: string) {
+    let current = path;
+    let last = 0;
+    const measure = () => {
+      const height = Math.ceil(node.getBoundingClientRect().height);
+      if (height <= 0 || Math.abs(height - last) <= 1) return;
+      last = height;
+      this.patchHeights = { ...this.patchHeights, [current]: height };
+    };
+    const resize = new ResizeObserver(measure);
+    resize.observe(node);
+    measure();
+    return {
+      update(next: string) {
+        current = next;
+        last = 0;
+        measure();
+      },
+      destroy() {
+        resize.disconnect();
+      },
+    };
+  }
+
+
+  loadCommitPatch(node: HTMLElement, path: string) {
+    let current = path;
+    const load = (file: string) => {
+      if (!this.patchCache[file]) this.requestPatch(file);
+    };
+    load(current);
+    return {
+      update(next: string) {
+        if (next === current) return;
+        current = next;
+        load(current);
+      },
+    };
+  }
+
+
+  /** Patches loading for on-screen rows. Four at a time keeps a fast scroll from
+   * spawning dozens of git processes. */
+  private patchQueue: string[] = [];
+  private patchLoading = new Set<string>();
+
+  requestPatch(file: string) {
+    if (this.patchCache[file] || this.patchLoading.has(file) || this.patchQueue.includes(file)) return;
+    this.patchQueue.push(file);
+    this.pumpPatches();
+  }
+
+  private pumpPatches() {
+    while (this.patchLoading.size < 4 && this.patchQueue.length > 0) {
+      const file = this.patchQueue.shift();
+      if (!file || this.patchCache[file]) continue;
+      this.patchLoading.add(file);
+      void this.ensurePatch(file).finally(() => {
+        this.patchLoading.delete(file);
+        this.pumpPatches();
+      });
+    }
+  }
+
+  clearPatchQueue() {
+    this.patchQueue = [];
+    this.patchLoading.clear();
+  }
 
 
   blobLines = $derived.by(() => {
@@ -1245,7 +1706,7 @@ export class ShellState {
   });
 
 
-  historyWindow = $derived(windowSlice(this.historyItems, this.historyTop, this.rowCommit));
+  historyWindow = $derived(windowSlice(this.historyItems, this.historyTop, this.rowCommit, 80, this.windowRows(this.historyHeight, this.rowCommit)));
 
 
   historyStart = $derived(this.historyWindow.start);
@@ -1258,6 +1719,15 @@ export class ShellState {
 
 
   shownStaged = $derived(this.staged.filter((file) => this.matchesQuery(file.path, this.fileQuery) && (!this.conflictsOnly || file.letter === "C")));
+
+
+  combinedRows = $derived.by(() => [
+    ...this.shownStaged.map((file) => ({ key: `s:${file.path}`, file, side: "staged" as Side })),
+    ...this.shownUnstaged.map((file) => ({ key: `u:${file.path}`, file, side: "unstaged" as Side })),
+  ]);
+
+
+  combinedWindow = $derived(windowSlice(this.combinedRows, this.combinedTop, this.rowFile, 80, this.windowRows(this.combinedHeight, this.rowFile)));
 
 
   fileLayout = $derived(this.settings.fileLayout || (this.settings.treeFiles ? "tree" : "list"));
@@ -1287,7 +1757,9 @@ export class ShellState {
   /** Wrapped diffs draw every line, so large ones stay plain text instead of highlighting each one. */
   heavyWrap = $derived.by(() => {
     if (!this.settings.diffWordWrap) return false;
+    this.patchVersion;
     if (this.section === "changes") return this.diffLines.length > 300;
+    if (this.openPatches.length > 500) return true;
     for (const file of this.openPatches) {
       const lines = this.patchCache[file]?.lines.length ?? (this.historyDiff?.path === file ? this.historyDiff.lines.length : 0);
       if (lines > 300) return true;
@@ -1341,26 +1813,29 @@ export class ShellState {
   });
 
 
-  diffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.diffLines } : windowSlice(this.diffLines, this.diffTop, 18));
+  diffRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)));
 
 
-  blameWindow = $derived(windowSlice(this.blameLines ?? [], this.blameTop, 18));
+  diffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.diffLines } : windowSlice(this.diffLines, this.diffTop, this.diffRowHeight, 80, this.windowRows(this.diffHeight, this.diffRowHeight)));
 
 
-  historyDiffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.historyDiff?.lines ?? [] } : windowSlice(this.historyDiff?.lines ?? [], this.historyDiffTop, 18));
+  blameWindow = $derived(windowSlice(this.blameLines ?? [], this.blameTop, this.diffRowHeight, 80, this.windowRows(this.diffHeight, this.diffRowHeight)));
+
+
+  historyDiffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.historyDiff?.lines ?? [] } : windowSlice(this.historyDiff?.lines ?? [], this.historyDiffTop, this.diffRowHeight, 80, this.windowRows(this.historyDetailHeight, this.diffRowHeight)));
 
 
   splitRows = $derived(this.settings.diffStyle === "split" ? splitDiff(this.diffLines) : []);
 
 
-  splitRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)));
+  splitRowHeight = $derived(this.diffRowHeight);
 
 
   splitWindow = $derived.by(() => {
     if (this.settings.diffWordWrap) return { start: 0, rows: this.splitRows, after: 0 };
-    const count = Math.ceil(Math.max(this.diffHeight, 600) / this.splitRowHeight) + 24;
+    const count = Math.ceil(Math.max(this.diffHeight, 600) / this.splitRowHeight) + 36;
     if (this.splitRows.length <= count + 40) return { start: 0, rows: this.splitRows, after: 0 };
-    const start = Math.min(Math.max(0, Math.floor(this.diffTop / this.splitRowHeight) - 12), Math.max(0, this.splitRows.length - count));
+    const start = Math.min(Math.max(0, Math.floor(this.diffTop / this.splitRowHeight) - 16), Math.max(0, this.splitRows.length - count));
     const rows = this.splitRows.slice(start, start + count);
     return { start, rows, after: this.splitRows.length - start - rows.length };
   });
@@ -1445,6 +1920,16 @@ export class ShellState {
 
 
   currentBranch = $derived(this.refs?.branches.find((branch) => branch.current) ?? null);
+
+
+  localBranchNames = $derived(new Set((this.refs?.branches ?? []).map((branch) => branch.name)));
+
+
+  remoteBranchNames = $derived.by(() => {
+    const names = new Set<string>();
+    for (const remote of this.refs?.remotes ?? []) for (const branch of remote.branches) names.add(branch);
+    return names;
+  });
 
 
   visibleTags = $derived.by(() => {
@@ -1625,14 +2110,24 @@ export class ShellState {
 
   async loadBlobPane() {
     if (!this.blobFile) return;
+    this.blobLoaded = false;
+    this.blobError = "";
     try {
-      const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null }>("blob_view", { path: this.repoPath(), rev: this.blobRev || "HEAD", file: this.blobFile });
+      const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null; truncated?: boolean }>("blob_view", { path: this.repoPath(), rev: this.blobRev || "HEAD", file: this.blobFile });
       this.blobBinary = view.binary && !view.preview && !view.text;
       this.blobPreview = view.preview;
       this.blobText = view.text;
+      this.blobTruncated = view.truncated === true;
       if (this.inApp()) await getCurrentWindow().setTitle(this.fileName(this.blobFile)).catch(() => {});
     } catch (error) {
       this.actionError = this.message(error);
+      this.blobError = this.message(error);
+      this.blobText = "";
+      this.blobPreview = null;
+      this.blobBinary = false;
+      this.blobTruncated = false;
+    } finally {
+      this.blobLoaded = true;
     }
   }
 
@@ -1769,6 +2264,125 @@ export class ShellState {
 
 
 
+  /** Desktop commands, or the browser lab when a scene is open. */
+  backend() {
+    return this.inApp() || this.labPage;
+  }
+
+
+
+  async bootLab() {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("scene") ?? "";
+    try {
+      const [{ sceneById }, { applyLabScene }] = await Promise.all([import("../lab/scenes"), import("../lab/apply")]);
+      const item = sceneById(id);
+      if (!item) throw new Error(`未知场景 ${id}`);
+      const layout = await invoke<Record<string, string>>("lab_layout");
+      const settings = await invoke<Settings>("load_settings");
+      const shelfRecent = (layout.recentList ?? "").split(/\r?\n/).map((path) => path.trim()).filter(Boolean);
+      const recent = shelfRecent.length > 0
+        ? shelfRecent
+        : [layout.full, layout.ahead, layout.conflict, layout.even].filter((path) => !!path);
+      const sourceDirectories = layout.repos ? [layout.repos] : settings.sourceDirectories;
+      const commands = Array.from({ length: 24 }, (_, index) => {
+        const n = String(index + 1).padStart(2, "0");
+        return {
+          id: `lab-${n}`,
+          name: `实验室命令 ${n}`,
+          target: "repository",
+          command: `git status --short # ${n}`,
+          prompt: "",
+          shared: true,
+          repo: "",
+        };
+      });
+      const accounts = Array.from({ length: 24 }, (_, index) => {
+        const n = String(index + 1).padStart(2, "0");
+        return {
+          id: `lab-acct-${n}`,
+          forge: index % 2 === 0 ? "github" : "gitlab",
+          label: `lab-${n}`,
+          token: `lab-token-${n}`,
+          host: index % 2 === 0 ? "github.com" : "gitlab.com",
+          clientId: `lab-client-${n}`,
+        };
+      });
+      const workspaces = Array.from({ length: 24 }, (_, index) => {
+        const n = String(index + 1).padStart(2, "0");
+        return {
+          id: `lab-ws-${n}`,
+          name: `实验室工作区 ${n}`,
+          repositories: recent.slice(0, Math.min(3, recent.length)),
+          openTabs: [],
+          selectedTab: 0,
+          tabsSeeded: true,
+        };
+      });
+      this.adoptSettings({
+        ...settings,
+        authorName: settings.authorName || "AweGit Lab",
+        authorEmail: settings.authorEmail || "lab@example.com",
+        recent,
+        sourceDirectories,
+        groupNames: sourceDirectories.map((path) => `${path}\t实验室仓库`),
+        cloneDirectory: layout.repos || settings.cloneDirectory,
+        commands,
+        accounts,
+        workspaces,
+        currentWorkspace: "",
+        fetchAutomatically: false,
+        statusInterval: 0,
+        fileLayout: "list",
+      });
+      this.collapsedSide = [];
+      this.allBranches = true;
+      this.mergeTools = Array.from({ length: 24 }, (_, index) => {
+        const n = String(index + 1).padStart(2, "0");
+        return { name: `Merge Tool ${n}`, path: `C:\\Tools\\merge-${n}.exe`, args: "$LOCAL $REMOTE $MERGED", primary: index === 0 };
+      });
+      this.diffTools = Array.from({ length: 24 }, (_, index) => {
+        const n = String(index + 1).padStart(2, "0");
+        return { name: `Diff Tool ${n}`, path: `C:\\Tools\\diff-${n}.exe`, args: "$LOCAL $REMOTE", primary: index === 0 };
+      });
+      this.aiModels = Array.from({ length: 24 }, (_, index) => `lab-model-${String(index + 1).padStart(2, "0")}`);
+      void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
+      if (item.repo) {
+        const path = layout[item.repo];
+        if (!path) throw new Error(`场景 ${item.id} 没有仓库 ${item.repo}`);
+        if (["conflict", "merge", "rebase", "cherry", "revert", "bisect"].includes(item.repo)) {
+          const progress = await invoke<string | null>("in_progress", { path }).catch(() => null);
+          const facts = await invoke<{ bisectActive?: boolean }>("repo_facts", { path, full: false }).catch(() => null);
+          const status = await invoke<{ staged?: { kind: string }[]; unstaged?: { kind: string }[] }>("workspace_status", { path }).catch(() => null);
+          const conflicts = [...(status?.staged ?? []), ...(status?.unstaged ?? [])].some((file) => file.kind === "conflict");
+          const need = item.repo === "conflict"
+            ? !conflicts
+            : item.repo === "bisect"
+              ? !facts?.bisectActive
+              : !progress;
+          if (need) await invoke("lab_restore", { name: item.repo });
+        }
+        const file = params.get("file");
+        if (item.id === "file-history" && file) this.historyFilter = file;
+        await this.openRepo(path);
+        if (!this.snapshot) throw new Error(this.actionError || `打不开 ${item.repo}`);
+      } else {
+        this.snapshot = null;
+        this.mode = "error";
+        this.loadError = "";
+      }
+      await applyLabScene(this, item);
+      this.labSceneId = item.id;
+    } catch (error) {
+      const text = this.message(error);
+      this.loadError = text;
+      if (!this.snapshot) this.mode = "error";
+      console.error(text);
+    }
+  }
+
+
+
   repoPath() {
     return this.snapshot?.path;
   }
@@ -1794,6 +2408,26 @@ export class ShellState {
     if (!current) return;
     if (current.depth <= 1) delete this.jobs[key];
     else this.jobs[key] = { ...current, depth: current.depth - 1 };
+    this.releaseWriteWaiters();
+  }
+
+
+  /** User writes wait for background reads instead of being dropped. */
+  writeWaiters: Array<() => void> = [];
+
+
+  async waitForWriteSlot() {
+    while (this.busy) {
+      await new Promise<void>((resolve) => this.writeWaiters.push(resolve));
+    }
+  }
+
+
+  releaseWriteWaiters() {
+    if (this.busy || this.writeWaiters.length === 0) return;
+    const waiting = this.writeWaiters;
+    this.writeWaiters = [];
+    for (const resolve of waiting) resolve();
   }
 
 
@@ -1826,7 +2460,11 @@ export class ShellState {
 
 
   message(error: unknown) {
-    return error instanceof Error ? error.message : String(error);
+    const raw = (error instanceof Error ? error.message : String(error)).trim();
+    const open = /^could not open repository at (.+)$/i.exec(raw);
+    if (open) return this.tr("dialog.errorOpenRepo", { path: open[1] ?? "" });
+    if (/^not a git repository/i.test(raw)) return this.tr("dialog.errorNotRepo");
+    return raw;
   }
 
 
@@ -1837,10 +2475,15 @@ export class ShellState {
   }
 
 
+  windowRows(height: number, rowHeight: number) {
+    return Math.max(72, Math.ceil(Math.max(height, 0) / Math.max(rowHeight, 1)) + 48);
+  }
+
+
 
   applySnapshot(value: StatusSnapshot) {
     this.statusGen += 1;
-    if (!this.same(this.snapshot, value)) this.snapshot = value;
+    if (!sameSnapshot(this.snapshot, value)) this.snapshot = value;
     this.mode = "live";
     this.loadError = "";
     if (value.path && !this.repos.includes(value.path)) this.repos = [...this.repos, value.path];
@@ -1898,7 +2541,7 @@ export class ShellState {
   /** `status` reads the work tree and the open diff only; `full` also reloads branches and history. */
   async refresh(scope: "status" | "full" = "full", silent = false) {
     const path = this.repoPath();
-    if (!this.inApp() || !path || this.busy || this.backgroundFetch.has(this.jobKey(path))) return;
+    if (!this.backend() || !path || this.busy || this.backgroundFetch.has(this.jobKey(path))) return;
     if (this.refreshing) {
       if (this.refreshQueued !== "full") this.refreshQueued = scope;
       return;
@@ -1944,7 +2587,11 @@ export class ShellState {
   async runChange(command: string, extra: Record<string, unknown> = {}, duringRead = false) {
     const path = this.repoPath();
     const reading = duringRead && !this.switching && this.currentJob?.label === this.tr("chrome.readingFile");
-    if (this.mode !== "live" || !path || (this.busy && !reading)) return undefined;
+    if (this.mode !== "live" || !path) return undefined;
+    if (this.busy && !reading) {
+      await this.waitForWriteSlot();
+      if (this.mode !== "live" || this.repoPath() !== path) return undefined;
+    }
     this.actionError = null;
     this.startWork(this.tr("chrome.working"), path);
     try {
@@ -1964,7 +2611,23 @@ export class ShellState {
 
 
 
-  quietGit = new Set(["stageHunk", "stageLine", "discardHunk", "discardLine", "setExpanded", "setHidden", "setSignOff"]);
+  quietGit = new Set(["stageHunk", "stageLine", "stageLines", "discardHunk", "discardLine", "discardLines", "setExpanded", "setHidden", "setSignOff"]);
+
+
+  /** Writes that can move refs or history. Everything else only needs the status snapshot. */
+  contextActions = new Set([
+    "fetch", "pull", "push", "checkout", "checkoutRemote", "createBranch", "deleteBranch", "renameBranch",
+    "merge", "rebase", "rebaseInteractive", "abort", "continue", "skip", "reset", "cherryPick", "revert",
+    "reword", "tag", "deleteTag", "deleteRemoteTag", "stash", "stashPop", "stashApply", "stashDrop",
+    "stashRename", "stashBranch", "stashPaths", "pushRef", "pullRef", "setUpstream", "deleteRemoteBranch",
+    "addRemote", "removeRemote", "setRemoteUrl", "submoduleAdd", "submoduleInit", "submoduleSync", "submoduleRemove",
+    "gitFlowInit", "gitFlowStart", "gitFlowFinish", "squash", "clone", "init", "setHidden", "setExpanded",
+  ]);
+
+
+  needsContext(action: string) {
+    return this.contextActions.has(action);
+  }
 
 
 
@@ -2018,7 +2681,13 @@ export class ShellState {
       case "checkoutRemote":
         return { title: `${this.tr("menu.checkout")} ${text("name")}`, command: this.gitLine(["checkout", text("name")]) };
       case "merge":
-        return { title: `${this.tr("menu.merge")} ${text("name")}`, command: this.gitLine(["merge", request.noFf ? "--no-ff" : "", text("name")]) };
+        return { title: `${this.tr("menu.merge")} ${text("name")}`, command: this.gitLine(["merge", request.squash ? "--squash" : "", request.noFf ? "--no-ff" : "", text("summary") ? "-m" : "", text("summary"), text("name")]) };
+      case "discard":
+        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--", text("file")]) };
+      case "discardPaths": {
+        const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
+        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--", ...files.slice(0, 8)]) };
+      }
       case "stash":
         return { title: this.tr("chrome.stash"), command: this.gitLine(["stash", "push", text("message") ? "-m" : "", text("message")]) };
       case "stashPop":
@@ -2113,9 +2782,12 @@ export class ShellState {
   }
 
 
-  visibleCommands() {
+  visibleCommands(): CommandEntry[] {
+    if (this.commandFilter === "notices") {
+      return this.statusNotices.map((item) => this.noticeAsCommand(item));
+    }
     if (this.commandFilter === "errors") {
-      return this.recentErrors.map((item) => ({
+      return this.recentErrors.map((item): CommandEntry => ({
         id: item.id,
         title: item.title || this.tr("chrome.errorTitle"),
         command: item.command,
@@ -2123,15 +2795,78 @@ export class ShellState {
         summary: this.commandExcerpt(item.text) || this.tr("chrome.commandFailed"),
         ok: false,
         at: item.at,
-        source: "user" as const,
+        source: "user",
       }));
     }
     return this.commandFilter === "all" ? this.commandLog : this.commandLog.filter((item) => item.source === this.commandFilter);
   }
 
 
+  noticeAsCommand(item: StatusNotice): CommandEntry {
+    return {
+      id: STATUS_NOTICE_ENTRY[item.id],
+      title: item.title,
+      summary: item.detail || item.actions.map((action) => action.label).join(" · ") || this.tr("chrome.commandNotices"),
+      command: "",
+      output: item.detail,
+      ok: item.tone !== "error",
+      at: Date.now(),
+      source: "user",
+      noticeId: item.id,
+    };
+  }
+
+
   pickedCommand() {
     return this.visibleCommands().find((item) => item.id === this.commandPick);
+  }
+
+
+  pickedNotice(): StatusNotice | null {
+    const pick = this.pickedCommand();
+    if (!pick?.noticeId) return null;
+    return this.statusNotices.find((item) => item.id === pick.noticeId) ?? null;
+  }
+
+
+  statusNotice(id: StatusNoticeId) {
+    return this.statusNotices.find((item) => item.id === id) ?? null;
+  }
+
+
+  runStatusNoticeAction(id: StatusNoticeId, action: string) {
+    if (id === "conflicts" || id === "progress") {
+      if (action === "abort") void this.mutate({ action: "abort" });
+      else if (action === "skip") void this.mutate({ action: "skip" });
+      else if (action === "continue") {
+        if (this.progress === "rebase") {
+          this.draft = "";
+          this.dialog = "continue";
+        } else void this.mutate({ action: "continue" });
+      }
+      return;
+    }
+    if (id === "bisect") {
+      const verb = action === "abort" ? "reset" : action;
+      if (verb === "good" || verb === "bad" || verb === "skip" || verb === "reset") {
+        void this.mutate({ action: "bisect", verb, rev: "" }).then(() => this.loadFacts(true));
+      }
+      return;
+    }
+    if (id === "error" && action === "close") {
+      this.closeError();
+      return;
+    }
+    if (id === "clone-done" && action === "open") {
+      const path = this.cloneDone;
+      this.cloneDone = null;
+      if (path) void this.openRepo(path);
+      return;
+    }
+    if (id === "update") {
+      if (action === "install") void this.installUpdate();
+      else if (action === "later") this.dismissUpdate();
+    }
   }
 
 
@@ -2149,7 +2884,7 @@ export class ShellState {
 
 
   seedSampleCommands() {
-    if (this.inApp() || this.commandLog.length > 0) return;
+    if (this.inApp() || this.labPage || this.commandLog.length > 0) return;
     const now = Date.now();
     const samples: Array<Omit<CommandEntry, "id">> = [
       { title: this.tr("chrome.commandFetchFrom", { name: "origin" }), summary: "Already up to date", command: "git fetch --prune origin", output: "Already up to date", ok: true, at: now - 4 * 60 * 1000, source: "user" },
@@ -2174,8 +2909,8 @@ export class ShellState {
 
 
 
-  openCommandLog() {
-    return openCommandLog(this);
+  openCommandLog(prefer?: CommandFilter | StatusNoticeId) {
+    return openCommandLog(this, prefer);
   }
 
 
@@ -2188,11 +2923,18 @@ export class ShellState {
 
   async mutate(request: Record<string, unknown>, source: "user" | "background" = "user") {
     const path = this.repoPath();
-    if (!this.inApp() || !path || this.busy) return;
+    if (!this.backend() || !path) return;
     const background = source === "background";
+    if (this.busy) {
+      if (background) return;
+      await this.waitForWriteSlot();
+      if (this.repoPath() !== path) return;
+    }
     if (!background) this.actionError = null;
     const described = this.describeRequest(request);
     const action = String(request.action ?? "");
+    const dialogBefore = this.dialog;
+    const refreshContext = this.needsContext(action);
     const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
     if (!background) this.startWork(described.title, path);
     try {
@@ -2202,21 +2944,20 @@ export class ShellState {
       const superseded = background && this.busy;
       if (this.viewing(path) && !superseded) {
         this.applySnapshot(value);
-        await this.loadContext();
+        if (refreshContext) await this.loadContext();
         if (!background && this.viewing(path)) await this.loadDiff();
       }
       if (followSubmodules) {
         const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request: { action: "submoduleUpdate" } });
-        if (this.viewing(path)) {
-          this.applySnapshot(follow);
-          await this.loadContext();
-        }
+        if (this.viewing(path)) this.applySnapshot(follow);
         this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
       }
       this.noteActivity(`${action}${output ? " output" : " ok"}`);
       this.recordCommand(action, described, value.log || output, true, source);
-      if (!background && this.viewing(path)) {
-        if (output) {
+      if (!background && this.viewing(path) && this.dialog === dialogBefore) {
+        if (dialogBefore === "prefs") {
+          // Preferences stay open for LFS/author actions; the operation is recorded below.
+        } else if (output) {
           this.commandOutput = output;
           this.dialog = "output";
         } else {
@@ -2228,13 +2969,19 @@ export class ShellState {
       this.noteActivity(`${String(request.action ?? "")} failed`);
       this.recordCommand(String(request.action ?? ""), described, text, false, source);
       if (this.viewing(path) && !(background && this.busy)) {
-        this.actionError = text;
-        if (String(request.action ?? "") === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
         try {
           this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
-          await this.loadContext();
+          if (refreshContext) await this.loadContext();
         } catch {
           /* keep the action error */
+        }
+        if (this.shouldShowMergeConflict(action, text)) {
+          this.commandOutput = text.trim();
+          this.dialog = "mergeConflict";
+          this.actionError = null;
+        } else {
+          this.actionError = text;
+          if (action === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
         }
       }
     } finally {
@@ -2274,6 +3021,16 @@ export class ShellState {
 
   doPull() {
     return this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: this.settings.pullStash });
+  }
+
+
+  /** Pull/merge-style writes that leave unmerged paths get Fork-style conflict dialog. */
+  shouldShowMergeConflict(action: string, text: string) {
+    const ops = new Set(["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashPop", "stashApply", "continue"]);
+    if (!ops.has(action)) return false;
+    if (this.conflictCount > 0) return true;
+    const lower = text.toLowerCase();
+    return /conflict|fix conflicts|merge failed|could not apply|needs merge|unmerged paths|自动合并失败/.test(lower);
   }
 
 
@@ -2324,7 +3081,7 @@ export class ShellState {
     if (!this.settings.errorLogDays) this.settings = { ...this.settings, errorLogDays: 7 };
     this.pruneErrorLog();
     if (!this.snapshot && isCommitType(this.settings.commitType)) this.commitType = this.settings.commitType;
-    const limit = Math.max(1, this.settings.maxCommits || 500);
+    const limit = Math.min(100000, Math.max(1, this.settings.maxCommits || 500));
     if (resetHistory || this.logLimit === 500) this.logLimit = limit;
     this.signOff = this.settings.signOff;
     this.showPendingUpdate(false);
@@ -2439,7 +3196,7 @@ export class ShellState {
 
   /** `full` adds the ignored files, statistics, and LFS list, which take seconds in a large work tree. */
   async loadFacts(force = false, full = false) {
-    if (!this.inApp() || this.mode !== "live") return null;
+    if (!this.backend() || this.mode !== "live") return null;
     const path = this.repoPath() ?? "";
     if (!force && this.facts && this.factsPath === path) return this.facts;
     try {
@@ -2514,8 +3271,20 @@ export class ShellState {
 
 
 
-  pickHunk(index: number, pick: "ours" | "theirs" | "both") {
+  pickHunk(index: number, pick: MergePick) {
     return pickHunk(this, index, pick);
+  }
+
+  toggleMergeSide(index: number, side: "ours" | "theirs") {
+    return toggleMergeSide(this, index, side);
+  }
+
+  hunkIncludes(pick: MergePick, side: "ours" | "theirs") {
+    return hunkIncludes(pick, side);
+  }
+
+  chosenHunkText(piece: Extract<MergePiece, { kind: "hunk" }>) {
+    return chosenHunkText(piece);
   }
 
 
@@ -2817,7 +3586,23 @@ export class ShellState {
     event.preventDefault();
     event.stopPropagation();
     this.submenu = null;
+    this.menuOpener = event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
     this.menu = { x: Math.min(event.clientX, window.innerWidth - 240), y: Math.min(event.clientY, window.innerHeight - 40), items };
+  }
+
+
+
+  dismissMenu(restore = true) {
+    const opener = this.menuOpener;
+    this.menu = null;
+    this.submenu = null;
+    this.menuOpener = null;
+    if (!restore || !opener) return;
+    requestAnimationFrame(() => {
+      if (!opener.isConnected) return;
+      const active = document.activeElement;
+      if (!active || active === document.body) opener.focus();
+    });
   }
 
 
@@ -2950,7 +3735,7 @@ export class ShellState {
 
 
 
-  rememberRepo(path: string) {
+  async rememberRepo(path: string) {
     const recent = [path, ...this.settings.recent.filter((item) => item !== path)].slice(0, 12);
     const currentId = this.settings.currentWorkspace;
     const workspaces = this.settings.workspaces.map((workspace) => {
@@ -2966,7 +3751,7 @@ export class ShellState {
       };
     });
     this.settings = { ...this.settings, recent, workspaces };
-    void invoke("save_settings", { values: this.settings });
+    await invoke("save_settings", { values: this.settings }).catch(() => {});
   }
 
   /** Path inside `could not open repository at {path}: missing`. Other open errors stay put. */
@@ -3016,7 +3801,9 @@ export class ShellState {
     if (Object.keys(this.recentStats).some((key) => match(key))) {
       const stats = { ...this.recentStats };
       for (const key of Object.keys(stats)) {
-        if (match(key)) delete stats[key];
+        if (!match(key)) continue;
+        delete stats[key];
+        this.recentAsked.delete(key);
       }
       this.recentStats = stats;
     }
@@ -3143,8 +3930,17 @@ export class ShellState {
 
 
   async openRepo(path: string) {
-    if (!this.inApp() || !path.trim()) return;
+    if (!this.backend() || !path.trim()) return;
+    this.dialog = null;
+    this.textMerge = false;
+    this.confirmAsk = null;
+    this.dismissMenu(false);
+    this.launchOpen = false;
+    this.commandLogOpen = false;
+    this.repoPickerOpen = false;
+    this.forgeOpen = null;
     const gen = ++this.openGen;
+    if (this.snapshot?.path && !this.viewing(path)) void invoke("cancel_reads", { path: this.snapshot.path }).catch(() => {});
     this.focusPath = path;
     if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description, commitType: this.commitType });
     const running = (this.jobs[this.jobKey(path)]?.depth ?? 0) > 0;
@@ -3161,6 +3957,28 @@ export class ShellState {
       this.applySnapshot(value);
       if (!staying) {
         this.sideTop = 0;
+        this.resetCommitView();
+        this.selectedCommit = null;
+        this.commitDetail = null;
+        this.commitFiles = [];
+        this.historyDiff = null;
+        this.graphSolo = null;
+        this.drops = [];
+        this.contentHits = null;
+        this.comparePair = null;
+        this.blameLines = null;
+        this.expandedMerges = [];
+        this.historyTab = "commit";
+        this.historyTop = 0;
+        this.fileTop = 0;
+        this.stagedTop = 0;
+        this.combinedTop = 0;
+        this.commitScrollTop = 0;
+        this.commitListTop = 0;
+        this.selectedIndex = 0;
+        this.diffTop = 0;
+        this.blameTop = 0;
+        this.historyDiffTop = 0;
         const saved = this.drafts.get(path) ?? this.drafts.get(value.path);
         const savedType = saved?.commitType ?? "";
         this.commitType = isCommitType(savedType) ? savedType : this.preferredCommitType();
@@ -3173,7 +3991,10 @@ export class ShellState {
       if (gen !== this.openGen) return;
       await this.loadDiff();
       if (gen !== this.openGen) return;
-      await invoke("watch_repository", { path: this.repoPath() });
+      // Arming the watcher walks every work-tree directory; on a huge repository that
+      // must not hold up the first paint. Changes before it arms are rare and recover
+      // on the next refresh.
+      void invoke("watch_repository", { path: this.repoPath() }).catch(() => {});
       void invoke<{ available: boolean }>("lfs_locks", { path: this.repoPath(), list: false })
         .then((locks) => {
           if (gen === this.openGen) this.lfsAvailable = locks.available;
@@ -3181,7 +4002,7 @@ export class ShellState {
         .catch(() => {
           if (gen === this.openGen) this.lfsAvailable = false;
         });
-      this.rememberRepo(path);
+      await this.rememberRepo(path);
       this.dialog = null;
       this.facts = null;
       this.factsPath = "";
@@ -3365,7 +4186,10 @@ export class ShellState {
     const saved = this.refs?.expandedGroups ?? [];
     const next = saved.includes(group) ? saved.filter((item) => item !== group) : [...saved, group];
     if (this.refs) this.refs = { ...this.refs, expandedGroups: next };
-    void this.mutate({ action: "setExpanded", names: next });
+    // This only writes `.git/awegit`; a status scan and history reload would both be wasted.
+    void invoke("save_expanded_groups", { path: this.repoPath(), names: next }).catch((error) => {
+      this.actionError = this.message(error);
+    });
   }
 
 
@@ -3402,8 +4226,19 @@ export class ShellState {
 
 
 
+  private hiddenRefSource: RefSnapshot | null = null;
+  private hiddenRefExact = new Set<string>();
+  private hiddenRefPrefix: string[] = [];
+
   refHidden(name: string) {
-    return (this.refs?.hiddenRefs ?? []).some((token) => name === token || (token.endsWith("/") && name.startsWith(token)));
+    if (this.hiddenRefSource !== this.refs) {
+      const tokens = this.refs?.hiddenRefs ?? [];
+      this.hiddenRefSource = this.refs;
+      this.hiddenRefExact = new Set(tokens.filter((token) => !token.endsWith("/")));
+      this.hiddenRefPrefix = tokens.filter((token) => token.endsWith("/"));
+    }
+    if (this.hiddenRefExact.has(name)) return true;
+    return this.hiddenRefPrefix.some((token) => name.startsWith(token));
   }
 
 
@@ -3411,7 +4246,10 @@ export class ShellState {
   hideRef(name: string) {
     const names = [...(this.refs?.hiddenRefs ?? [])];
     if (!names.includes(name)) names.push(name);
-    void this.mutate({ action: "setHidden", names });
+    if (this.refs) this.refs = { ...this.refs, hiddenRefs: names };
+    void invoke("save_hidden_refs", { path: this.repoPath(), names }).catch((error) => {
+      this.actionError = this.message(error);
+    });
   }
 
 
@@ -3423,7 +4261,10 @@ export class ShellState {
 
 
   showAllRefs() {
-    void this.mutate({ action: "setHidden", names: [] });
+    if (this.refs) this.refs = { ...this.refs, hiddenRefs: [] };
+    void invoke("save_hidden_refs", { path: this.repoPath(), names: [] }).catch((error) => {
+      this.actionError = this.message(error);
+    });
   }
 
 
@@ -3563,6 +4404,7 @@ export class ShellState {
   openBar(event: MouseEvent, items: MenuItem[]) {
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     this.submenu = null;
+    this.menuOpener = event.currentTarget as HTMLElement;
     this.menu = { x: rect.left, y: rect.bottom + 2, items, anchorTop: rect.top };
   }
 
@@ -3656,6 +4498,22 @@ export class ShellState {
 
   async discardPicked(files = [...this.picked]) {
     return discardPicked(this, files);
+  }
+
+
+  branchRemoteState(name: string): "missing" | "mirrored" | null {
+    if (!this.localBranchNames.has(name)) return null;
+    return this.remoteBranchNames.has(name) ? "mirrored" : "missing";
+  }
+
+
+  async loadMergePreview() {
+    return loadMergePreview(this);
+  }
+
+
+  refreshMergeSummary() {
+    refreshMergeSummary(this);
   }
 
 
@@ -3895,8 +4753,8 @@ export class ShellState {
   }
 
 
-  takeMergeSide(pick: "ours" | "theirs") {
-    return takeMergeSide(this, pick);
+  takeMergeSide(side: "ours" | "theirs", on: boolean) {
+    return takeMergeSide(this, side, on);
   }
 
 
@@ -4008,7 +4866,7 @@ export class ShellState {
 
 
   previewRepos() {
-    return !this.inApp() && this.settings.recent.length === 0 && this.repos.length === 0;
+    return !this.backend() && this.settings.recent.length === 0 && this.repos.length === 0;
   }
 
 
@@ -4125,11 +4983,10 @@ export class ShellState {
     }
     this.closeLaunch();
     this.commandLogOpen = false;
-    this.menu = null;
-    this.submenu = null;
+    this.dismissMenu(false);
     this.placeRepoPicker();
     this.repoPickerOpen = true;
-    if (!this.inApp()) return;
+    if (!this.backend()) return;
     const token = ++this.repoScanToken;
     this.repoScanning = true;
     const found: string[] = [];
@@ -4220,6 +5077,10 @@ export class ShellState {
     return hunkOf(this, index);
   }
 
+  hunkRanges() {
+    return hunkRanges(this);
+  }
+
 
 
   editorLineNo(index: number) {
@@ -4253,12 +5114,23 @@ export class ShellState {
 
 
   moveSelection(delta: number) {
-    const rows = this.section === "history" ? this.shownCommits : this.selectedSide === "staged" ? this.staged : this.unstaged;
+    if (this.section === "history") {
+      const rows = this.historyItems;
+      if (rows.length === 0) return;
+      this.selectedIndex = Math.min(rows.length - 1, Math.max(0, this.selectedIndex + delta));
+      const row = rows[this.selectedIndex];
+      if (row) void this.selectCommit(row.id);
+      return;
+    }
+    const { target, rows } = this.fileTargetRows();
     if (rows.length === 0) return;
-    this.selectedIndex = Math.min(rows.length - 1, Math.max(0, this.selectedIndex + delta));
+    const current = rows.findIndex((row) => row.path === this.selectedPath);
+    const base = current >= 0 ? current : this.selectedIndex;
+    this.selectedIndex = Math.min(rows.length - 1, Math.max(0, base + delta));
     const row = rows[this.selectedIndex];
-    if (this.section === "history" && "id" in row) void this.selectCommit(row.id);
-    else if ("path" in row) this.selectFile(row.path, this.selectedSide);
+    if (!row) return;
+    const side: Side = target === "staged" ? "staged" : target === "unstaged" ? "unstaged" : this.shownStaged.some((file) => file.path === row.path) ? "staged" : "unstaged";
+    this.selectFile(row.path, side);
   }
 
 
@@ -4409,7 +5281,64 @@ export class ShellState {
 
 
 
+  activateLayer(event: KeyboardEvent) {
+    if (event.key === "Escape" && this.confirmAsk) {
+      event.preventDefault();
+      this.confirmAsk = null;
+      return true;
+    }
+    if (event.key === "Escape" && this.textMerge) {
+      event.preventDefault();
+      this.closeTextMerge();
+      return true;
+    }
+    if (event.key === "Escape" && this.dialog && !this.busy) {
+      event.preventDefault();
+      if (this.dialog === "prefs") void this.savePrefs(true);
+      this.dialog = null;
+      return true;
+    }
+    const bare = event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing;
+    if (!bare || this.launchOpen || this.menu) return false;
+    if (this.confirmAsk) {
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-confirm]")) return false;
+      event.preventDefault();
+      const run = this.confirmAsk.run;
+      this.confirmAsk = null;
+      run();
+      return true;
+    }
+    if (this.textMerge) {
+      const target = event.target;
+      const inside = target instanceof Element && !!target.closest(".merge-panel");
+      if (inside && (typing(event) || target instanceof HTMLButtonElement)) return false;
+      const button = document.querySelector<HTMLButtonElement>(".merge-panel .commit");
+      if (button && !button.disabled) {
+        event.preventDefault();
+        button.click();
+        return true;
+      }
+    }
+    if (this.dialog) {
+      const target = event.target;
+      const inside = target instanceof Element && !!target.closest(".dialog");
+      if (inside && (typing(event) || target instanceof HTMLButtonElement)) return false;
+      if (target instanceof HTMLInputElement && ["checkbox", "radio", "range", "color", "file"].includes(target.type)) return false;
+      const form = document.querySelector(".scrim .dialog form");
+      if (form instanceof HTMLFormElement) {
+        event.preventDefault();
+        form.requestSubmit();
+        return true;
+      }
+    }
+    return false;
+  }
+
+
+
   onShortcut(event: KeyboardEvent) {
+    if (event.defaultPrevented) return;
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c") {
       if (typing(event) || this.dialog || this.launchOpen) return;
       if (this.heldText) {
@@ -4433,8 +5362,18 @@ export class ShellState {
         return;
       }
     }
+    if (this.activateLayer(event)) return;
+    if (this.dialog || this.textMerge || this.confirmAsk) return;
     const action = shortcut(event);
     if (!action) return;
+    // Command log, repository picker, menus, quick launch and forge are modal enough
+    // that shortcuts must not write behind them. Escape still closes the top layer.
+    const overlay = this.menu || this.launchOpen || this.commandLogOpen || this.repoPickerOpen || this.forgeOpen;
+    const launchKeys = this.launchOpen && (action === "up" || action === "down");
+    if (overlay && action !== "exit" && !launchKeys) {
+      if (action === "launch" && this.launchOpen) this.closeLaunch();
+      return;
+    }
     const editor = typing(event);
     if (this.launchOpen && (action === "up" || action === "down" || action === "exit")) {
       event.preventDefault();
@@ -4450,11 +5389,36 @@ export class ShellState {
     }
     if (editor && action !== "commit" && action !== "commitPush" && action !== "exit" && action !== "launch") return;
     if (action === "exit") {
-      this.dialog = null;
-      this.closeLaunch();
+      event.preventDefault();
+      if (this.menu) {
+        this.dismissMenu();
+        return;
+      }
+      if (this.textMerge) {
+        this.closeTextMerge();
+        return;
+      }
+      if (this.forgeOpen) {
+        this.forgeOpen = null;
+        return;
+      }
+      if (this.dialog) {
+        this.dialog = null;
+        return;
+      }
+      if (this.launchOpen) {
+        this.closeLaunch();
+        return;
+      }
+      if (this.repoPickerOpen) {
+        this.repoPickerOpen = false;
+        return;
+      }
+      if (this.commandLogOpen) {
+        this.commandLogOpen = false;
+        return;
+      }
       this.blameLines = null;
-      this.repoPickerOpen = false;
-      this.commandLogOpen = false;
       return;
     }
     event.preventDefault();
@@ -4542,6 +5506,31 @@ export class ShellState {
 
   constructor() {
     $effect(() => {
+      if (!this.busy) this.releaseWriteWaiters();
+    });
+    $effect(() => {
+      // Measured heights belong to one diff style; drop them when the layout can have changed.
+      this.settings.diffStyle;
+      this.settings.diffWordWrap;
+      this.settings.diffFontSize;
+      this.settings.linesHeight;
+      this.patchHeights = {};
+    });
+    $effect(() => {
+      // Leaving History cleared the diff; opening Changes again must start the read,
+      // otherwise the pane sits on "Reading…" until the file is clicked again.
+      if (this.section !== "changes" || this.mode !== "live" || !this.selectedPath || this.busy) return;
+      if (!this.diff && !this.diffError && !this.conflictView) void this.loadDiff();
+    });
+    $effect(() => {
+      if (this.busy || !this.watchQueued) return;
+      const scope = this.watchQueued;
+      this.watchQueued = null;
+      void this.refresh(scope, true);
+    });
+    $effect(() => {
+      const visible = this.section === "history" || this.standalone === "history";
+      if (!visible) return;
       const straight = this.liveFold.straight;
       const items = this.historyItems;
       if (items.length <= GRAPH_SYNC_LIMIT) {
@@ -4560,7 +5549,7 @@ export class ShellState {
         this.graphWidth = width;
         this.graphColumns = columns;
         this.graphItems = items;
-        this.graphVersion += 1;
+        this.graphVersion = ++this.graphEpoch;
       };
       if (count >= commits.length && prev) {
         publish(prev.rows, prev.width, prev.columns);
@@ -4609,13 +5598,21 @@ export class ShellState {
     $effect(() => {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
-    if (!this.settings.theme || this.settings.theme === "system") root.removeAttribute("data-theme");
-    else root.setAttribute("data-theme", this.settings.theme);
+    const media = typeof window === "undefined" ? null : window.matchMedia("(prefers-color-scheme: dark)");
+    const resolved = () => (this.settings.theme === "dark" || (this.settings.theme !== "light" && (media?.matches ?? false)) ? "dark" : "light");
+    const paint = () => {
+    root.setAttribute("data-theme", resolved());
+    root.lang = this.activeLocale === "zh" ? "zh-CN" : "en";
+    };
+    paint();
+    media?.addEventListener("change", paint);
     root.style.setProperty("--ui-scale", `${this.settings.uiScale || 13}px`);
     root.style.setProperty("--row-file", this.settings.linesHeight === "spaced" ? "32px" : "28px");
     root.style.setProperty("--row-commit", this.settings.linesHeight === "spaced" ? "36px" : "28px");
     root.style.setProperty("--row-side", `${this.rowSide}px`);
     root.style.setProperty("--row-tree", this.settings.linesHeight === "spaced" ? "28px" : "24px");
+    root.style.setProperty("--diff-row", `${this.diffRowHeight}px`);
+    return () => media?.removeEventListener("change", paint);
     });
     $effect(() => {
     const next = this.snapshotPlace();
@@ -4642,14 +5639,17 @@ export class ShellState {
     queueMicrotask(() => this.launchList?.querySelector(".on")?.scrollIntoView({ block: "nearest" }));
     });
     $effect(() => {
-    if (this.mode !== "error" || !this.inApp()) return;
+    if (this.mode !== "error" || !this.backend()) return;
     for (const path of this.settings.recent.slice(0, 12)) {
-    if (this.recentStats[path]) continue;
+    if (this.recentStats[path] || this.recentAsked.has(path)) continue;
+    this.recentAsked.add(path);
     void invoke<{ branch: string; ahead: number; behind: number; lastSummary: string }>("repository_summary", { path })
     .then((value) => {
     this.recentStats = { ...this.recentStats, [path]: value };
     })
-    .catch(() => {});
+    .catch(() => {
+    this.recentAsked.delete(path);
+    });
     }
     });
     onMount(() => {
@@ -4659,23 +5659,32 @@ export class ShellState {
     if (event.button === 3) this.goBack();
     else this.goForward();
     };
+    const addHistoryEntry = () => pushState("", { awegit: 1 });
     const onPop = () => {
-    history.pushState({ awegit: 1 }, "");
+    addHistoryEntry();
     this.goBack();
     };
-    window.addEventListener("keydown", this.onShortcut.bind(this));
+    const onShortcut = this.onShortcut.bind(this);
+    const onRememberPointer = this.rememberPointer.bind(this);
+    window.addEventListener("keydown", onShortcut);
     window.addEventListener("mousedown", onMouseNav);
-    window.addEventListener("mousedown", this.rememberPointer.bind(this), true);
+    window.addEventListener("mousedown", onRememberPointer, true);
     window.addEventListener("mouseup", onMouseNav);
-    history.pushState({ awegit: 1 }, "");
+    // SvelteKit's router is initialized after hydration; wait a task before touching history.
+    const historyTimer = window.setTimeout(addHistoryEntry, 0);
     window.addEventListener("popstate", onPop);
     const detachNav = () => {
-    window.removeEventListener("keydown", this.onShortcut.bind(this));
+    window.clearTimeout(historyTimer);
+    window.removeEventListener("keydown", onShortcut);
     window.removeEventListener("mousedown", onMouseNav);
-    window.removeEventListener("mousedown", this.rememberPointer.bind(this), true);
+    window.removeEventListener("mousedown", onRememberPointer, true);
     window.removeEventListener("mouseup", onMouseNav);
     window.removeEventListener("popstate", onPop);
     };
+    if (this.labPage) {
+    void this.bootLab();
+    return detachNav;
+    }
     if (!this.inApp()) {
     this.notices = sampleNotices;
     this.pulls = samplePulls;
@@ -4718,7 +5727,13 @@ export class ShellState {
     }
     try {
     unlisten = await listen<{ refs?: boolean } | null>("repo-changed", (event) => {
-    if (!this.busy) void this.refresh(event.payload?.refs === false ? "status" : "full", true);
+      const scope = event.payload?.refs === false ? "status" : "full";
+      if (this.busy) {
+        // A write ignores refreshes for its whole duration; replay the newest event when it ends.
+        if (this.watchQueued !== "full") this.watchQueued = scope;
+        return;
+      }
+      void this.refresh(scope, true);
     });
     unprogress = await listen<{ path: string; percent: number }>("git-progress", (event) => {
     const percent = event.payload?.percent;

@@ -81,6 +81,37 @@
 
 .side.nested { position: relative; }
 
+.side.nested.local-only::after,
+  .side.nested.mirrored::after {
+    content: "";
+    position: absolute;
+    z-index: 3;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+
+.side.nested.local-only::after {
+    content: "!";
+    top: 2px;
+    right: 3px;
+    width: 10px;
+    height: 10px;
+    background: var(--modified);
+    color: var(--on-modified);
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 10px;
+    text-align: center;
+  }
+
+.side.nested.mirrored::after {
+    top: 3px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+    background: var(--added);
+  }
+
 .side.nested:hover:has(.branch-switches) .ahead,
   .side.nested:focus-within:has(.branch-switches) .ahead { visibility: hidden; }
 
@@ -133,7 +164,28 @@
   .ahead {
     margin-left: auto;
     font-size: 11px;
+    font-variant-numeric: tabular-nums;
   }
+
+.ahead.up,
+  .ahead.down {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+.ahead.up::after,
+  .ahead.down::after {
+    content: "";
+    width: 0;
+    height: 0;
+    border-left: 3.5px solid transparent;
+    border-right: 3.5px solid transparent;
+  }
+
+.ahead.up::after { border-bottom: 5px solid var(--added); }
+
+.ahead.down::after { border-top: 5px solid var(--deleted); }
 
 .side-brand {
     display: flex;
@@ -208,7 +260,7 @@
 
 .side-filter:focus-within {
     background: var(--elevated);
-    box-shadow: inset 0 0 0 1px var(--line);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
   }
 
 .side-search {
@@ -258,12 +310,12 @@
     top: calc(100% + 4px);
     left: 0;
     z-index: 5;
-    min-width: 180px;
+    min-width: min(180px, calc(var(--sidebar-w, 240px) - 24px));
     padding: 4px;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--elevated);
-    box-shadow: 0 8px 24px color-mix(in srgb, #000 18%, transparent);
+    box-shadow: var(--shadow-menu);
   }
 
 .side-search-item {

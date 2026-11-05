@@ -28,12 +28,132 @@
   const focusWhen = (node: HTMLInputElement, on: boolean) => shell.focusWhen(node, on);
   const fitMenu = (node: HTMLElement, spot: { x: number; y: number; anchorTop?: number }) => shell.fitMenu(node, spot);
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
+
+  let submenuAnchor: HTMLElement | null = null;
+  const focusTraps: HTMLElement[] = [];
+
+  $effect(() => {
+    if (!shell.dialog && !shell.textMerge) return;
+    if (shell.commandLogOpen) shell.commandLogOpen = false;
+    if (shell.repoPickerOpen) shell.repoPickerOpen = false;
+    if (shell.menu) shell.dismissMenu(false);
+    if (shell.launchOpen) shell.closeLaunch();
+    if (shell.forgeOpen) shell.forgeOpen = null;
+  });
+
+  function openSubmenu(item: MenuItem, anchor: HTMLElement, focus = false) {
+    if (!item.children) return;
+    submenuAnchor = anchor;
+    const rect = anchor.getBoundingClientRect();
+    shell.submenu = { x: rect.right - 4, y: rect.top, items: item.children };
+    if (focus) requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-layer="submenu"] button:not(:disabled)')?.focus());
+  }
+
+  function menuKeys(node: HTMLElement, autofocus = true) {
+    const items = () => [...node.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+    if (autofocus) queueMicrotask(() => items()[0]?.focus());
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+        const list = items();
+        if (list.length === 0) return;
+        event.preventDefault();
+        const at = list.indexOf(document.activeElement as HTMLButtonElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? list.length - 1 : event.key === "ArrowDown" ? (at + 1) % list.length : (at - 1 + list.length) % list.length;
+        list[next]?.focus();
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        const active = document.activeElement as HTMLButtonElement | null;
+        if (active?.getAttribute("aria-haspopup") === "menu") {
+          event.preventDefault();
+          active.click();
+        }
+        return;
+      }
+      if (event.key === "ArrowLeft" && node.dataset.layer === "submenu") {
+        event.preventDefault();
+        shell.submenu = null;
+        requestAnimationFrame(() => submenuAnchor?.isConnected && submenuAnchor.focus());
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (node.dataset.layer === "submenu") {
+          shell.submenu = null;
+          requestAnimationFrame(() => submenuAnchor?.isConnected && submenuAnchor.focus());
+          return;
+        }
+        shell.dismissMenu();
+      }
+    };
+    node.addEventListener("keydown", onKey);
+    return { destroy() { node.removeEventListener("keydown", onKey); } };
+  }
+
+  function overlayFocus(node: HTMLElement, initial: { close: () => void; focus?: string }) {
+    let options = initial;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusables = () => [...node.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')].filter((item) => item.offsetParent !== null);
+    const focusFirst = () => {
+      const preferred = options.focus ? node.querySelector<HTMLElement>(options.focus) : null;
+      if (preferred) {
+        preferred.focus();
+        return;
+      }
+      const list = focusables();
+      (list[0] ?? node).focus();
+    };
+    node.setAttribute("tabindex", node.getAttribute("tabindex") ?? "-1");
+    queueMicrotask(focusFirst);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        options.close();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const list = focusables();
+      if (list.length === 0) {
+        event.preventDefault();
+        node.focus();
+        return;
+      }
+      const first = list[0];
+      const last = list[list.length - 1];
+      if (event.shiftKey && (document.activeElement === first || !node.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !node.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      if (focusTraps[focusTraps.length - 1] !== node) return;
+      if (!node.contains(event.target as Node)) focusFirst();
+    };
+    focusTraps.push(node);
+    node.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocusIn);
+    return {
+      update(next: { close: () => void; focus?: string }) { options = next; },
+      destroy() {
+        const at = focusTraps.indexOf(node);
+        if (at >= 0) focusTraps.splice(at, 1);
+        node.removeEventListener("keydown", onKey);
+        document.removeEventListener("focusin", onFocusIn);
+        if (focusTraps[focusTraps.length - 1]?.isConnected) focusTraps[focusTraps.length - 1].focus();
+        else if (previous?.isConnected) previous.focus();
+      },
+    };
+  }
 </script>
 
 <style>
 .menu {
     position: fixed;
-    z-index: 30;
+    z-index: var(--z-menu, 30);
     min-width: 220px;
     max-height: min(70vh, 480px);
     overflow: auto;
@@ -53,6 +173,7 @@
     gap: 16px;
     width: 100%;
     height: 28px;
+    flex: none;
     padding: 0 8px;
     border: 0;
     background: transparent;
@@ -77,6 +198,8 @@
 
 .scrim.menu-dismiss { position: fixed; inset: 0; z-index: 29; background: transparent; border: 0; backdrop-filter: none; animation: none; }
 
+.scrim.confirm-scrim { z-index: var(--z-confirm, 60); }
+
 .shell {
     height: 100vh;
     display: flex;
@@ -90,7 +213,7 @@
 
 .repo-picker {
     position: fixed;
-    z-index: 31;
+    z-index: var(--z-popover, 31);
     width: 292px;
     display: flex;
     flex-direction: column;
@@ -175,7 +298,7 @@
 .repo-glyph.folder {
     fill: currentColor;
     stroke: none;
-    color: #e2a308;
+    color: var(--icon-folder);
   }
 
 .repo-row.current .repo-glyph { color: var(--on-accent); }
@@ -214,7 +337,7 @@
 
 .command-log {
     position: fixed;
-    z-index: 31;
+    z-index: var(--z-popover, 31);
     display: grid;
     grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
     background: var(--elevated);
@@ -258,12 +381,12 @@
   }
 
 .command-filters button.alert {
-    color: var(--deleted, #d16464);
+    color: var(--deleted);
   }
 
 .command-filters button.alert.on {
-    color: var(--deleted, #d16464);
-    border-bottom-color: var(--deleted, #d16464);
+    color: var(--deleted);
+    border-bottom-color: var(--deleted);
   }
 
 .command-filters button em {
@@ -272,7 +395,13 @@
     font-weight: 650;
   }
 
-.command-item.failed:not(.current) .title { color: var(--deleted, #d16464); }
+.notice-actions {
+    flex: none;
+    padding: 10px 14px 14px;
+    border-top: 1px solid var(--line);
+  }
+
+.command-item.failed:not(.current) .title { color: var(--deleted); }
 
 .command-items,
   .command-detail pre {
@@ -314,6 +443,15 @@
     white-space: nowrap;
   }
 
+.command-item.notice .summary {
+    display: -webkit-box;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    white-space: normal;
+    line-height: 1.4;
+  }
+
 .command-item:hover { background: var(--hover); }
 
 .command-item.current,
@@ -327,7 +465,7 @@
     align-items: baseline;
     justify-content: space-between;
     gap: 12px;
-    padding: 12px 16px 8px;
+    padding: 12px 40px 8px 16px;
     flex: none;
   }
 
@@ -360,7 +498,7 @@
 .palette-scrim {
     position: fixed;
     inset: 0;
-    z-index: 40;
+    z-index: var(--z-palette, 40);
     background: rgba(24, 24, 27, 0.28);
     display: flex;
     align-items: center;
@@ -387,6 +525,10 @@
     font-size: 15px;
     padding: 0 4px;
     outline: none;
+  }
+
+.palette-query:focus-within {
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
   }
 
 .palette-query {
@@ -455,7 +597,7 @@
 
 <PerfPanel />
 
-<div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.settings.diffFontSize || 13}px" style:--guide="{shell.settings.pageGuide || 72}">
+<div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.settings.diffFontSize || 13}px" style:--guide="{shell.settings.pageGuide || 72}" data-lab-scene={shell.labSceneId || undefined} data-lab-error={shell.labPage && !shell.labSceneId && shell.loadError ? shell.loadError : undefined}>
   {#if shell.standalone === "history"}
     <FileHistoryPane />
   {:else if shell.standalone === "blob"}
@@ -478,6 +620,7 @@
       max={480}
       defaultSize={240}
       collapsible
+      label={shell.tr("chrome.resizeSidebar")}
       bind:collapsed={shell.sidebarCollapsed}
       onchange={shell.handleLayoutChange.bind(shell)}
     />
@@ -539,7 +682,7 @@
       {#if item.sep}
         <hr />
       {:else}
-        <button type="button" disabled={item.disabled} aria-checked={item.checked} onmouseenter={(event) => { if (!item.children) { shell.submenu = null; return; } const rect = (event.currentTarget as HTMLElement).getBoundingClientRect(); shell.submenu = { x: rect.right - 4, y: rect.top, items: item.children }; }} onclick={() => { if (item.disabled || item.children || !item.run) return; shell.menu = null; shell.submenu = null; void item.run(); }}>
+        <button type="button" role={item.checked !== undefined ? "menuitemradio" : "menuitem"} disabled={item.disabled} aria-checked={item.checked !== undefined ? item.checked : undefined} aria-haspopup={item.children ? "menu" : undefined} aria-expanded={item.children ? shell.submenu?.items === item.children : undefined} onmouseenter={(event) => { if (!item.children) { shell.submenu = null; return; } openSubmenu(item, event.currentTarget as HTMLElement); }} onclick={(event) => { if (item.disabled) return; if (item.children) { openSubmenu(item, event.currentTarget as HTMLElement, true); return; } if (!item.run) return; shell.dismissMenu(); void item.run(); }}>
           <span class="menu-main">
             {#if item.checked !== undefined}<span class="menu-check" aria-hidden="true">{item.checked ? "✓" : ""}</span>{/if}
             <span>{item.label}</span>
@@ -553,20 +696,22 @@
 
   {#if shell.commandLogOpen}
     {@const picked = shell.pickedCommand()}
-    <div class="command-log" style:left="{shell.commandPos.x}px" style:top="{shell.commandPos.y}px" style:width="{shell.commandPos.width}px" style:height="{shell.commandPos.maxHeight}px" role="dialog" aria-label={shell.tr("chrome.commandHistory")}>
+    <div class="command-log" data-layer="commands" style:left="{shell.commandPos.x}px" style:top="{shell.commandPos.y}px" style:width="{shell.commandPos.width}px" style:height="{shell.commandPos.maxHeight}px" role="dialog" aria-modal="true" aria-label={shell.tr("chrome.commandHistory")} tabindex="-1" use:overlayFocus={{ close: () => (shell.commandLogOpen = false), focus: ".command-item.current" }}>
+      <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={() => (shell.commandLogOpen = false)}>×</button>
       <div class="command-list">
         <div class="command-filters">
           <button type="button" class:on={shell.commandFilter === "all"} onclick={() => shell.showCommandFilter("all")}>{shell.tr("chrome.commandAll")}</button>
           <button type="button" class:on={shell.commandFilter === "user"} onclick={() => shell.showCommandFilter("user")}>{shell.tr("chrome.commandUser")}</button>
           <button type="button" class:on={shell.commandFilter === "background"} onclick={() => shell.showCommandFilter("background")}>{shell.tr("chrome.commandBackground")}</button>
           <button type="button" class:on={shell.commandFilter === "errors"} class:alert={shell.recentErrors.length > 0} onclick={() => shell.showCommandFilter("errors")}>{shell.tr("chrome.commandErrors")}{#if shell.recentErrors.length > 0}<em>{shell.recentErrors.length}</em>{/if}</button>
+          <button type="button" class:on={shell.commandFilter === "notices"} onclick={() => shell.showCommandFilter("notices")}>{shell.tr("chrome.commandNotices")}{#if shell.statusNotices.length > 0}<em>{shell.statusNotices.length}</em>{/if}</button>
         </div>
         <div class="command-items">
           {#each shell.visibleCommands() as item (item.id)}
-            <button class="command-item" class:current={item.id === shell.commandPick} class:failed={!item.ok} type="button" onclick={() => (shell.commandPick = item.id)}>
+            <button class="command-item" class:current={item.id === shell.commandPick} class:failed={!item.ok} class:notice={!!item.noticeId} type="button" onclick={() => (shell.commandPick = item.id)}>
               <span class="title">{item.title}</span>
               <span class="time">{shell.commandClock(item.at)}</span>
-              <span class="summary">{item.summary}</span>
+              <span class="summary" title={item.summary}>{item.summary}</span>
             </button>
           {:else}
             <p class="repo-empty">{shell.tr("chrome.commandEmpty")}</p>
@@ -574,7 +719,21 @@
         </div>
       </div>
       <div class="command-detail">
-        {#if picked}
+        {#if picked?.noticeId}
+          {@const notice = shell.pickedNotice()}
+          <header data-layer={notice?.dataLayer}>
+            <strong>{picked.title}</strong>
+            <span>{shell.tr("chrome.commandNotices")}</span>
+          </header>
+          {#if picked.output}<pre>{picked.output}</pre>{/if}
+          {#if notice && notice.actions.length > 0}
+            <div class="composer-row notice-actions">
+              {#each notice.actions as action (action.id)}
+                <button class="text-button" type="button" disabled={action.disabled} onclick={() => shell.runStatusNoticeAction(notice.id, action.id)}>{action.label}</button>
+              {/each}
+            </div>
+          {/if}
+        {:else if picked}
           <header>
             <strong>{picked.title}</strong>
             <span>{picked.ok ? shell.tr("chrome.commandSucceeded") : shell.tr("chrome.commandFailed")} {shell.commandStamp(picked.at)}</span>
@@ -589,7 +748,8 @@
     <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => (shell.commandLogOpen = false)}></button>
   {/if}
   {#if shell.repoPickerOpen}
-    <div class="repo-picker" style:left="{shell.repoPickerPos.x}px" style:top="{shell.repoPickerPos.y}px" style:max-height="{shell.repoPickerPos.maxHeight}px" role="dialog" aria-label={shell.tr("chrome.manager")}>
+    <div class="repo-picker" data-layer="repos" style:left="{shell.repoPickerPos.x}px" style:top="{shell.repoPickerPos.y}px" style:max-height="{shell.repoPickerPos.maxHeight}px" role="dialog" aria-modal="true" aria-label={shell.tr("chrome.manager")} tabindex="-1" use:overlayFocus={{ close: () => (shell.repoPickerOpen = false), focus: ".repo-row.current" }}>
+      <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={() => (shell.repoPickerOpen = false)}>×</button>
       <h2>{shell.tr("chrome.manager")}</h2>
       <div class="repo-picker-scroll">
         <button class="repo-section" type="button" aria-expanded={shell.repoPickerRecentOpen} onclick={() => (shell.repoPickerRecentOpen = !shell.repoPickerRecentOpen)}>
@@ -632,20 +792,20 @@
     <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => (shell.repoPickerOpen = false)}></button>
   {/if}
   {#if shell.menu}
-    <div class="menu" use:fitMenu={shell.menu} role="menu">
+    <div class="menu" data-layer="menu" use:fitMenu={shell.menu} use:menuKeys role="menu">
       {@render menuList(shell.menu.items)}
     </div>
     {#if shell.submenu}
-      <div class="menu" use:fitMenu={shell.submenu} role="menu">
+      <div class="menu" data-layer="submenu" use:fitMenu={shell.submenu} use:menuKeys={false} role="menu">
         {@render menuList(shell.submenu.items)}
       </div>
     {/if}
-    <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => { shell.menu = null; shell.submenu = null; }}></button>
+    <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => shell.dismissMenu()}></button>
   {/if}
   {#if shell.confirmAsk}
-    <div class="scrim" role="presentation">
-      <div class="dialog" role="dialog">
-        <h2>{shell.confirmAsk.title}</h2>
+    <div class="scrim confirm-scrim" role="presentation">
+      <div class="dialog sm" data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null) }}>
+        <h2 id="confirm-title">{shell.confirmAsk.title}</h2>
         <p>{shell.confirmAsk.body}</p>
         <div class="composer-row">
           <button class="text-button" type="button" onclick={() => (shell.confirmAsk = null)}>{shell.tr("dialog.cancel")}</button>
@@ -655,14 +815,21 @@
     </div>
   {/if}
   {#if shell.forgeOpen}
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="scrim" role="presentation" onclick={() => (shell.forgeOpen = null)} onkeydown={() => {}}>
-      <div class="dialog" role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
-        <h2>{shell.forgeOpen === "notes" ? shell.tr("chrome.notifications") : shell.tr("chrome.pulls")}</h2>
+      <div class="dialog md" data-layer="forge" role="dialog" aria-modal="true" aria-labelledby="forge-title" tabindex="-1" use:overlayFocus={{ close: () => (shell.forgeOpen = null) }} onclick={(event) => event.stopPropagation()}>
+        <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={() => (shell.forgeOpen = null)}>×</button>
+        <h2 id="forge-title">{shell.forgeOpen === "notes" ? shell.tr("chrome.notifications") : shell.tr("chrome.pulls")}</h2>
         {#if shell.forgeOpen === "notes"}
-          {#if shell.notices.length === 0}<p class="empty">{shell.tr("dialog.noToken")}</p>{/if}
+          {#if shell.notices.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noNotifications") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.notices as notice (notice.id)}
-            <div class="composer-row"><span>{notice.title}</span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => void invoke("mark_notification", { id: notice.id }).then(() => (shell.notices = shell.notices.filter((item) => item.id !== notice.id)))}>{shell.tr("dialog.markRead")}</button></div>
+            <div class="composer-row"><span>{notice.title}</span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => { if (shell.mode === "live") void invoke("mark_notification", { id: notice.id }).then(() => (shell.notices = shell.notices.filter((item) => item.id !== notice.id))); else shell.notices = shell.notices.filter((item) => item.id !== notice.id); }}>{shell.tr("dialog.markRead")}</button></div>
           {/each}
+          {#if shell.notices.length > 0}
+            <div class="composer-row">
+              <button class="text-button" type="button" onclick={() => { const ids = shell.notices.map((item) => item.id); if (shell.mode === "live") void Promise.all(ids.map((id) => invoke("mark_notification", { id }))).then(() => (shell.notices = [])).catch((error) => (shell.actionError = shell.message(error))); else shell.notices = []; }}>{shell.tr("dialog.markAllRead")}</button>
+            </div>
+          {/if}
         {:else}
           {#if shell.pulls.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noPulls") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.pulls as pull (pull.url)}
@@ -676,7 +843,7 @@
   <MergePanel />
   {#if shell.launchOpen}
     <div class="palette-scrim" role="presentation" onclick={() => shell.closeLaunch()}>
-      <div class="palette" role="dialog" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+      <div class="palette" data-layer="launch" role="dialog" aria-modal="true" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} use:overlayFocus={{ close: () => shell.closeLaunch() }} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
         <div class="palette-query">
           {#if shell.launchMode === "files"}
             <span class="palette-chip">{shell.tr("chrome.fileHistory")}</span>
@@ -698,7 +865,7 @@
               <span class="meta">{item.group}</span>
             </button>
           {:else}
-            <p class="empty">{shell.tr("chrome.noMatch")}</p>
+            <p class="empty">{shell.tr("chrome.noPaletteMatch")}</p>
           {/each}
         </div>
         <div class="palette-hint">{shell.tr("chrome.paletteHint")}</div>

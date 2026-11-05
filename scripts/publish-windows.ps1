@@ -1,5 +1,6 @@
 ﻿# Package AweGit for Windows, upload the installers, and publish the version manifest.
-# Run this on the release branch. It commits latest.json at the repo root and pushes origin release.
+# Run this on the release branch. publish.bat merges feat/dev into release first.
+# It commits latest.json at the repo root and pushes origin release.
 
 param(
     [string]$Notes = ""
@@ -13,7 +14,7 @@ Push-Location $root
 try {
     $current = (git rev-parse --abbrev-ref HEAD).Trim()
     if ($current -ne "release") {
-        throw "Publish from the release branch. Current branch is $current"
+        throw "Publish from the release branch; publish.bat merges feat/dev there first. Current branch is $current"
     }
 }
 finally {

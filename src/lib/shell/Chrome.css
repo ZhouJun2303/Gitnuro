@@ -12,6 +12,7 @@
     align-items: center;
     gap: 8px;
     padding: 0 8px;
+    container-type: inline-size;
   }
 
 .chrome-left,
@@ -20,6 +21,7 @@
     align-items: center;
     gap: 2px;
     min-width: 0;
+    overflow: hidden;
   }
 
 .chrome-right { justify-content: flex-end; }
@@ -45,8 +47,20 @@
     border-radius: 13px;
     background: var(--elevated);
     border: 1px solid var(--line);
-    box-shadow: 0 1px 0 color-mix(in srgb, #000 12%, transparent);
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 12%, transparent);
     overflow: hidden;
+  }
+
+.identity-floor.tone-conflict {
+    background: color-mix(in srgb, var(--modified) 14%, var(--elevated));
+  }
+
+.identity-floor.tone-progress {
+    background: color-mix(in srgb, var(--accent) 10%, var(--elevated));
+  }
+
+.identity-floor.tone-error {
+    background: color-mix(in srgb, var(--deleted) 14%, var(--elevated));
   }
 
 .identity-copy {
@@ -59,8 +73,19 @@
     min-width: 0;
     margin-right: 2px;
     padding: 0 12px 0 8px;
+    border: 0;
     border-right: 1px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
     line-height: 1.15;
+  }
+
+.identity-copy:hover {
+    background: color-mix(in srgb, var(--hover) 55%, transparent);
   }
 
 .identity-copy strong,
@@ -100,6 +125,19 @@
   .identity-floor.working > .branch-chip {
     position: relative;
     z-index: 1;
+  }
+
+.identity-floor.tone-conflict .identity-sweep::before {
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--modified) 42%, white), transparent);
+  }
+
+.identity-floor.tone-progress .identity-sweep::before,
+  .identity-floor.tone-busy .identity-sweep::before {
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 34%, white), transparent);
+  }
+
+.identity-floor.tone-error .identity-sweep::before {
+    background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--deleted) 42%, white), transparent);
   }
 
 .identity-floor > .identity-cancel {
@@ -158,11 +196,12 @@
 
 .history-btn.alert,
   .history-btn.alert:hover:not(:disabled) {
-    background: var(--deleted, #d16464);
-    color: #fff;
+    background: var(--deleted);
+    color: var(--on-deleted);
   }
 
-.history-btn.alert .error-count {
+.history-btn.alert .error-count,
+  .history-btn .notice-count {
     position: absolute;
     top: -4px;
     right: -4px;
@@ -170,8 +209,8 @@
     height: 16px;
     padding: 0 4px;
     border-radius: 8px;
-    background: #fff;
-    color: var(--deleted, #d16464);
+    background: var(--elevated);
+    color: var(--deleted);
     font-style: normal;
     font-size: 10px;
     font-weight: 700;
@@ -179,6 +218,10 @@
     text-align: center;
     pointer-events: none;
     animation: error-pop 280ms ease;
+  }
+
+.history-btn .notice-count {
+    color: var(--accent);
   }
 
 @keyframes error-pop {
@@ -372,25 +415,11 @@
     flex: none;
   }
 
-.tab-close { opacity: 0; }
+.tab-close { opacity: 0; pointer-events: none; }
 
-.tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
-
-.banner {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 28px;
-    padding: 0 12px;
-    background: var(--selection);
-  }
-
-.banner .grow { flex: 1; }
-
-.banner.unmerged {
-    background: color-mix(in srgb, var(--modified) 14%, var(--canvas));
-    color: var(--text);
-  }
+.tab:hover .tab-close,
+  .tab.active .tab-close,
+  .tab:focus-within .tab-close { opacity: 1; pointer-events: auto; }
 
 .row-action {
     margin-left: 0;
@@ -426,3 +455,30 @@
     background: var(--modified);
     flex: none;
   }
+
+@container (max-width: 1080px) {
+  .chrome-left .tool-btn.stack > span,
+    .chrome-right .tool-btn.stack > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .chrome-left .tool-btn.stack,
+    .chrome-right .tool-btn.stack {
+    min-width: 36px;
+    padding: 0 4px;
+  }
+
+  .identity-floor {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+  }
+}

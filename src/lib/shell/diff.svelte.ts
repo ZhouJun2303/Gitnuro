@@ -241,9 +241,11 @@ export async function loadDiff(shell: ShellState) {
         if (!shell.same(shell.diff, value)) shell.diff = value;
         shell.diffError = null;
         if (value.binary) {
-          shell.preview = await invoke<FilePreview | null>("file_preview", { path, file });
+          const preview = await invoke<FilePreview | null>("file_preview", { path, file });
           const older = await invoke<FilePreview | null>("revision_preview", { path, rev: "HEAD", file }).catch(() => null);
-          shell.imageNew = shell.preview?.dataUrl ?? null;
+          if (token !== shell.diffToken || !shell.viewing(path) || shell.selectedPath !== file) return;
+          shell.preview = preview;
+          shell.imageNew = preview?.dataUrl ?? null;
           shell.imageOld = older?.dataUrl ?? null;
         } else {
           shell.preview = null;
@@ -313,7 +315,7 @@ export function moveHunk(shell: ShellState, delta: number) {
       shell.diffEl?.querySelector(`[data-line="${index}"]`)?.scrollIntoView({ block: "center" });
       return;
     }
-    const top = Math.max(0, index * 18 - 36);
+    const top = Math.max(0, index * shell.diffRowHeight - 36);
     shell.diffTop = top;
     if (shell.diffEl) shell.diffEl.scrollTop = top;
   }
@@ -429,6 +431,17 @@ export function flatEntries(shell: ShellState, files: Row[]) {
 export function asTree(shell: ShellState, files: Row[], collapsed = shell.collapsedDirs) {
     type Node = { name: string; path: string; kind: "dir" | "file"; file?: Row; children: Node[] };
     const root: Node = { name: "", path: "", kind: "dir", children: [] };
+    // A map per directory keeps sibling lookup O(1); scanning `children` for every
+    // path segment turned a flat 50k-file list into minutes of work.
+    const lookup = new Map<Node, Map<string, Node>>();
+    const childrenOf = (node: Node) => {
+      let map = lookup.get(node);
+      if (!map) {
+        map = new Map();
+        lookup.set(node, map);
+      }
+      return map;
+    };
     for (const file of files) {
       const parts = file.path.split(/[/\\]/);
       let node = root;
@@ -436,9 +449,11 @@ export function asTree(shell: ShellState, files: Row[], collapsed = shell.collap
       parts.forEach((part, index) => {
         acc = acc ? `${acc}/${part}` : part;
         const last = index === parts.length - 1;
-        let child = node.children.find((item) => item.name === part);
+        const siblings = childrenOf(node);
+        let child = siblings.get(part);
         if (!child) {
           child = { name: part, path: acc, kind: last ? "file" : "dir", file: last ? file : undefined, children: [] };
+          siblings.set(part, child);
           node.children.push(child);
         } else if (last) {
           child.kind = "file";
@@ -543,6 +558,7 @@ export function markedLine(shell: ShellState, text: string, other: string, path:
   }
 
 export function patchOf(shell: ShellState, file: string) {
+    shell.patchVersion;
     return shell.patchCache[file] ?? (shell.historyDiff?.path === file ? shell.historyDiff : null);
   }
 
@@ -552,8 +568,11 @@ export function pickedIn(shell: ShellState, rows: Row[]) {
   }
 
 export async function discardPicked(shell: ShellState, files = [...shell.picked]) {
-    for (const file of files) await shell.mutate({ action: "discard", file });
-    shell.picked = shell.picked.filter((path) => !files.includes(path));
+    const names = [...new Set(files.filter((path) => path.length > 0))];
+    if (names.length === 0 || shell.busy) return;
+    if (names.length === 1) await shell.mutate({ action: "discard", file: names[0] });
+    else await shell.mutate({ action: "discardPaths", files: names });
+    if (!shell.actionError) shell.picked = shell.picked.filter((path) => !names.includes(path));
   }
 
 export async function unstagePicked(shell: ShellState, files = [...shell.picked]) {
@@ -641,10 +660,6 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
     if (!repo || !file) return;
     const key = `${shell.jobKey(repo)}\0${side}\0${path}`;
     if (flipping.has(key)) return;
-    if (shell.busy && !readingOnly(shell)) {
-      shell.actionError = shell.tr("chrome.stageBusy");
-      return;
-    }
     flipping.add(key);
     try {
       if (file.letter === "C") {
@@ -653,22 +668,18 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
         if (!rowOnSide(shell, path, side)) return;
       }
       const reading = readingOnly(shell);
-      if (shell.busy && !reading) {
-        shell.actionError = shell.tr("chrome.stageBusy");
-        return;
-      }
-      const changed = await shell.runChange(side === "staged" ? "unstage_path" : "stage_path", { file: path }, reading);
-      if (changed === undefined && shell.mode === "live" && shell.repoPath() === repo) {
-        shell.actionError = shell.tr("chrome.stageBusy");
-      }
+      await shell.runChange(side === "staged" ? "unstage_path" : "stage_path", { file: path }, reading);
     } finally {
       flipping.delete(key);
     }
   }
 
 export async function deletePicked(shell: ShellState, files = [...shell.picked]) {
-    for (const file of files) await shell.mutate({ action: "delete", file });
-    shell.picked = shell.picked.filter((path) => !files.includes(path));
+    const names = [...new Set(files.filter((path) => path.length > 0))];
+    if (names.length === 0) return;
+    if (names.length === 1) await shell.mutate({ action: "delete", file: names[0] });
+    else await shell.mutate({ action: "deletePaths", files: names });
+    shell.picked = shell.picked.filter((path) => !names.includes(path));
   }
 
 export function confirmPicked(shell: ShellState, files: string[], title: string, run: (files: string[]) => Promise<void>) {
@@ -905,7 +916,8 @@ export function collapseFileSelection(shell: ShellState, rows: Row[]) {
 
 export function toggleAllDiffLines(shell: ShellState) {
     if (shell.blameLines || shell.section !== "changes" || shell.diffLines.length === 0) return false;
-    const complete = shell.diffSelected.length === shell.diffLines.length && shell.diffLines.every((_, index) => shell.diffSelected.includes(index));
+    const selected = new Set(shell.diffSelected);
+    const complete = selected.size === shell.diffLines.length && shell.diffLines.every((_, index) => selected.has(index));
     shell.clearTextSelection();
     if (complete) {
       shell.diffSelected = [];
@@ -992,6 +1004,9 @@ export function selectFile(shell: ShellState, path: string, side: Side, event?: 
       shell.picked = shell.picked.includes(path) ? shell.picked.filter((item) => item !== path) : [...shell.picked, path];
     } else {
       shell.picked = [path];
+      const rows = side === "staged" ? shell.shownStaged : shell.shownUnstaged;
+      const at = rows.findIndex((row) => row.path === path);
+      if (at >= 0) shell.selectedIndex = at;
     }
     if (shell.mode === "live") void shell.loadDiff();
   }
@@ -1073,10 +1088,15 @@ export function dragDiffLine(shell: ShellState, index: number, event: MouseEvent
       const body = shell.diffEl;
       if (body) {
         const rect = body.getBoundingClientRect();
-        if (ev.clientY < rect.top + 28) body.scrollTop -= 18;
-        else if (ev.clientY > rect.bottom - 28) body.scrollTop += 18;
+        if (ev.clientY < rect.top + 28) body.scrollTop -= shell.diffRowHeight;
+        else if (ev.clientY > rect.bottom - 28) body.scrollTop += shell.diffRowHeight;
       }
-      const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-line]");
+      const hit = body
+        ? document.elementsFromPoint(ev.clientX, ev.clientY).find(
+            (node): node is HTMLElement =>
+              node instanceof HTMLElement && body.contains(node) && Number.isInteger(Number(node.dataset.line)),
+          )
+        : undefined;
       const next = Number(hit?.dataset.line);
       if (Number.isInteger(next)) shell.selectDiffRange(anchor, next);
     };
@@ -1101,12 +1121,46 @@ export function chosenDiffLines(shell: ShellState, clicked: number) {
     return indexes;
   }
 
+const hunkIndexCache = new WeakMap<object, Int32Array>();
+
 export function hunkOf(shell: ShellState, index: number) {
-    let hunk = -1;
-    for (let cursor = 0; cursor <= index && cursor < shell.diffLines.length; cursor += 1) {
-      if (shell.diffLines[cursor]?.kind === "hunk") hunk += 1;
+    const lines = shell.diffLines;
+    let table = hunkIndexCache.get(lines);
+    if (!table) {
+      table = new Int32Array(lines.length);
+      let hunk = -1;
+      for (let cursor = 0; cursor < lines.length; cursor += 1) {
+        if (lines[cursor]?.kind === "hunk") hunk += 1;
+        table[cursor] = hunk;
+      }
+      hunkIndexCache.set(lines, table);
     }
+    const hunk = table[Math.min(index, table.length - 1)] ?? -1;
     return hunk >= 0 ? hunk : null;
+  }
+
+/** Inclusive start / exclusive end for each `@@` hunk in the current diff. */
+export function hunkRanges(shell: ShellState) {
+    const ranges: { index: number; start: number; end: number }[] = [];
+    let current: { index: number; start: number; end: number } | null = null;
+    let hunk = -1;
+    for (let cursor = 0; cursor < shell.diffLines.length; cursor += 1) {
+      const kind = shell.diffLines[cursor]?.kind;
+      if (kind === "hunk") {
+        if (current) {
+          current.end = cursor;
+          ranges.push(current);
+        }
+        hunk += 1;
+        current = { index: hunk, start: cursor, end: shell.diffLines.length };
+      } else if (kind === "meta" && current) {
+        current.end = cursor;
+        ranges.push(current);
+        current = null;
+      }
+    }
+    if (current) ranges.push(current);
+    return ranges;
   }
 
 export function editorLineNo(shell: ShellState, index: number) {
@@ -1122,7 +1176,7 @@ export function removesOnApply(shell: ShellState, line: DiffLine, action: "stage
 
 export async function applyLineOps(shell: ShellState, action: "stageLine" | "discardLine", entries: { line: DiffLine; index: number }[]) {
     const file = shell.selectedPath;
-    if (!file || entries.length === 0 || !shell.inApp() || shell.busy) return;
+    if (!file || entries.length === 0 || !shell.backend() || shell.busy) return;
     const unstage = shell.selectedSide === "staged";
     const ordered = [...entries]
       .filter((entry) => (action === "stageLine" ? entry.line.stageAt : entry.line.workAt) != null)
@@ -1144,25 +1198,19 @@ export async function applyLineOps(shell: ShellState, action: "stageLine" | "dis
     shell.startWork(shell.tr("chrome.working"), path);
     shell.diffSelected = [];
     try {
-      let value: (StatusSnapshot & { output?: string }) | null = null;
-      for (const entry of ordered) {
+      const lines = ordered.flatMap((entry) => {
         const at = action === "stageLine" ? entry.line.stageAt : entry.line.workAt;
-        if (at == null) continue;
-        value = await invoke<StatusSnapshot & { output?: string }>("mutate", {
-          path,
-          request: {
-            action,
-            file,
-            text: shell.lineText(entry.line),
-            addition: entry.line.kind === "add",
-            at,
-            ...(action === "stageLine" ? { unstage } : {}),
-          },
-        });
-      }
+        return at == null ? [] : [{ text: shell.lineText(entry.line), addition: entry.line.kind === "add", at }];
+      });
+      if (lines.length === 0) return;
+      const value = await invoke<StatusSnapshot & { output?: string }>("mutate", {
+        path,
+        request: action === "stageLine"
+          ? { action: "stageLines", file, lines, unstage }
+          : { action: "discardLines", file, lines },
+      });
       if (shell.viewing(path)) {
-        if (value) shell.applySnapshot(value);
-        await shell.loadContext();
+        shell.applySnapshot(value);
         await shell.loadDiff();
       }
     } catch (error) {
@@ -1171,7 +1219,6 @@ export async function applyLineOps(shell: ShellState, action: "stageLine" | "dis
       if (action === "stageLine" && shell.settings.ignoreSpace) shell.actionError = `${shell.actionError} ${shell.tr("dialog.spaceHint")}`;
       try {
         shell.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
-        await shell.loadContext();
         await shell.loadDiff();
       } catch {
         /* keep the action error */

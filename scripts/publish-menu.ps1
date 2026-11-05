@@ -15,6 +15,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -Er
 
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $repo = "ZhouJun2303/Gitnuro"
+$devBranch = "feat/dev"
 
 function Invoke-Git {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$GitArgs)
@@ -178,10 +179,12 @@ function Invoke-ReleaseFlow {
         Write-Host "会在 $branch 上提交这个版本号"
     }
     if ($Publish) {
-        if ($branch -ne "release") {
-            Write-Host "然后把 $branch 合并进 release，打包并上传，完成后回到 $branch"
-        } else {
+        if ($branch -eq "release") {
             Write-Host "在 release 上打包并上传"
+        } elseif ($branch -eq $devBranch) {
+            Write-Host "把 $devBranch 合并进 release，打包并上传，完成后回到 $devBranch"
+        } else {
+            Write-Host "当前不在 $devBranch 或 release 上。会把 $branch 合并进 release，打包并上传，完成后回到 $branch"
         }
         if (-not $ReleaseNotes -and -not $Confirm) {
             $ReleaseNotes = Read-Host "更新说明（直接回车留空）"
@@ -246,6 +249,7 @@ function Show-Menu {
     Write-Host "AweGit 发布"
     Write-Host "当前版本 $current"
     Write-Host "当前分支 $branch"
+    Write-Host "日常开发 $devBranch，发布 release"
     Write-Host ""
     Write-Host "1  修订号 +1 并发布到 GitHub    $current -> $patch"
     Write-Host "2  次版本 +1 并发布到 GitHub    $current -> $minor"

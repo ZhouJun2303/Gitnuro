@@ -66,6 +66,7 @@ fn main() {
             "search_commits",
             "search_log",
             "cherry_preview",
+            "merge_preview",
             "merged_branches",
             "pick_history",
             "activity_log",

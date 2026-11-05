@@ -67,7 +67,7 @@
             <label class="pref-inline">{shell.tr("dialog.diffContext")} <input type="number" min="0" max="100" bind:value={shell.settings.diffContext} /></label>
             <label class="pref-inline">{shell.tr("dialog.statusInterval")} <input type="number" min="0" max="3600" bind:value={shell.settings.statusInterval} /></label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.showWorktrees} /> {shell.tr("dialog.showWorktrees")}</label>
-            <label class="pref-inline">{shell.tr("dialog.maxCommits")} <input type="number" min="50" bind:value={shell.settings.maxCommits} onchange={() => { shell.logLimit = Math.max(1, shell.settings.maxCommits || 500); if (shell.mode === "live") void shell.loadContext(); }} /></label>
+            <label class="pref-inline">{shell.tr("dialog.maxCommits")} <input type="number" min="50" max="100000" bind:value={shell.settings.maxCommits} onchange={() => { shell.settings.maxCommits = Math.min(100000, Math.max(50, Math.round(shell.settings.maxCommits || 500))); shell.logLimit = shell.settings.maxCommits; if (shell.mode === "live") void shell.loadContext(); }} /></label>
             <label class="pref-inline">{shell.tr("dialog.scanDepth")} <input type="number" min="1" max="20" bind:value={shell.settings.scanDepth} /></label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.workspaceShowTitle} /> {shell.tr("dialog.workspaceTitle")}</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.rebaseAutostash} /> {shell.tr("dialog.rebaseAutostash")}</label>
@@ -178,21 +178,21 @@
               <div class="composer-row">
                 <span>{command.name}</span>
                 <span class="meta">{command.target}</span>
-                <button class="text-button" type="button" onclick={() => shell.runCommand(command)}>Run</button>
-                <button class="text-button" type="button" onclick={() => shell.removeCommand(command.id)}>Delete</button>
+                <button class="text-button" type="button" onclick={() => shell.runCommand(command)}>{shell.tr("dialog.run")}</button>
+                <button class="text-button" type="button" onclick={() => shell.removeCommand(command.id)}>{shell.tr("menu.delete")}</button>
               </div>
             {/each}
-            <input placeholder="Name" bind:value={shell.draft} />
+            <input placeholder={shell.tr("dialog.name")} bind:value={shell.draft} />
             <select bind:value={shell.draftExtra}>
-              <option value="repository">Repository</option>
-              <option value="commit">Commit</option>
-              <option value="branch">Branch</option>
-              <option value="file">File</option>
+              <option value="repository">{shell.tr("chrome.repository")}</option>
+              <option value="commit">{shell.tr("chrome.commit")}</option>
+              <option value="branch">{shell.tr("dialog.branch")}</option>
+              <option value="file">{shell.tr("dialog.file")}</option>
             </select>
             <input placeholder={"${repo} ${sha} ${branch} ${file} ${input} https://"} bind:value={shell.draftUser} />
             <textarea rows="3" placeholder={shell.tr("dialog.commandPrompt")} bind:value={shell.commandPrompt}></textarea>
             <label class="check"><input type="checkbox" bind:checked={shell.commandShared} /> {shell.tr("chrome.shared")}</label>
-            <button class="text-button" type="button" onclick={shell.saveCommand.bind(shell)}>Save</button>
+            <button class="text-button" type="button" onclick={shell.saveCommand.bind(shell)}>{shell.tr("dialog.save")}</button>
           {:else if shell.prefTab === "updates"}
             <label>{shell.tr("dialog.language")}
               <select bind:value={shell.settings.locale}>
@@ -222,77 +222,103 @@
                 <button class="text-button" type="button" disabled={shell.updateBusy} onclick={() => shell.dismissUpdate()}>{shell.tr("chrome.updateLater")}</button>
               </div>
             {/if}
-          {:else}
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.pullRebase} /> Pull with rebase</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.fetchPrune} /> Prune on fetch</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.swapPanes} /> Show staged above unstaged</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.treeFiles} /> {shell.tr("chrome.treeView")}</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.verticalTabs} /> {shell.tr("dialog.verticalTabs")}</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.ignoreSpace} /> {shell.tr("dialog.ignoreSpace")}</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.showWhitespace} /> {shell.tr("dialog.showSpace")}</label>
-            <button class="text-button" type="button" onclick={() => { shell.dialog = "accounts"; }}>{shell.tr("chrome.accounts")}</button>
-            <button class="text-button" type="button" onclick={() => void invoke<string>("read_ssh_config").then((text) => { shell.draft = text; shell.dialog = "ssh"; }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("chrome.sshConfig")}</button>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.mergeNoFf} /> Merge with --no-ff</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.mergeAutostash} /> Autostash before merge</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.signCommits} /> Sign commits with git</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.signOff} onchange={() => (shell.signOff = shell.settings.signOff)} /> Sign-off by default</label>
-            <label>Sign-off format <input bind:value={shell.settings.signOffFormat} /></label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.forceWithLease} /> Push with --force-with-lease</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.gravatar} /> Gravatar avatars</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.dateRelative} /> Relative dates</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.date24h} /> 24-hour clock</label>
-            <label>Date pattern <input bind:value={shell.settings.dateFormat} placeholder="dd MMM yyyy" /></label>
-            <label>Diff
-              <select bind:value={shell.settings.diffStyle}>
-                <option value="split">Split</option>
-                <option value="unified">Unified</option>
-              </select>
-            </label>
-            <label>Line height
-              <select bind:value={shell.settings.linesHeight}>
-                <option value="compact">Compact</option>
-                <option value="spaced">Spaced</option>
-              </select>
-            </label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.showEntireFile} /> Show the whole file in diffs</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.aiEnabled} /> AI commit messages</label>
-            <label>AI language <input bind:value={shell.settings.aiLanguage} placeholder="English" /></label>
-            <label>AI max characters <input type="number" bind:value={shell.settings.aiMaxChars} /></label>
-            <label>{shell.tr("dialog.promptExtra")} <input bind:value={shell.settings.aiPrompt} placeholder={shell.tr("dialog.promptExtra")} /></label>
-            <label>AI temperature <input type="number" step="0.1" bind:value={shell.settings.aiTemperature} /></label>
-            <label>Author name <input bind:value={shell.settings.authorName} placeholder="uses git config when empty" /></label>
-            <label>Author email <input bind:value={shell.settings.authorEmail} /></label>
-            <label>Log directory <input bind:value={shell.settings.logDirectory} /></label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.sslVerify} /> Verify SSL</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.proxyEnabled} /> Use proxy host</label>
-            <label>Proxy type
-              <select bind:value={shell.settings.proxyType}>
-                <option value="http">HTTP</option>
-                <option value="socks">SOCKS</option>
-              </select>
-            </label>
-            <label>Proxy host <input bind:value={shell.settings.proxyHost} /></label>
-            <label>Proxy port <input type="number" bind:value={shell.settings.proxyPort} /></label>
-            <label>Proxy user <input bind:value={shell.settings.proxyUser} /></label>
-            <label>Proxy password <input type="password" bind:value={shell.settings.proxyPassword} /></label>
-            <label>Proxy URL <input bind:value={shell.settings.proxy} /></label>
-            <label>CA file <input bind:value={shell.settings.sslCaFile} /></label>
-            <label>{shell.tr("dialog.githubToken")} <input type="password" bind:value={shell.settings.githubToken} /></label>
-            <label>{shell.tr("dialog.gitlabToken")} <input type="password" bind:value={shell.settings.gitlabToken} /></label>
-            <label>{shell.tr("dialog.gitlabHost")} <input bind:value={shell.settings.gitlabHost} placeholder="gitlab.com" /></label>
-            <label>Signing passphrase <input type="password" bind:value={shell.passphrase} /></label>
-            <label>Askpass user <input bind:value={shell.passUser} /></label>
-            <div class="composer-row">
-              <button class="text-button" type="button" onclick={() => shell.keepPassphrase()}>Use passphrase</button>
-              <button class="text-button" type="button" onclick={() => { shell.draft = "https"; shell.draftExtra = ""; shell.draftUser = ""; shell.draftSecret = ""; shell.dialog = "credential"; }}>Save HTTPS login</button>
-              <button class="text-button" type="button" onclick={() => shell.mutate({ action: "lfsPull" })}>LFS pull</button>
-              <button class="text-button" type="button" onclick={() => shell.mutate({ action: "lfsPush" })}>LFS push</button>
-              <button class="text-button" type="button" onclick={() => (shell.dialog = "patch")}>Apply patch</button>
-              <button class="text-button" type="button" onclick={() => invoke("set_repo_author", { path: shell.repoPath(), name: shell.settings.authorName, email: shell.settings.authorEmail })}>Save author in this repo</button>
-              <button class="text-button" type="button" onclick={() => void invoke<string>("generate_ssh_key").then((key) => { shell.commandOutput = key; shell.dialog = "output"; }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("dialog.sshKey")}</button>
+          {:else if shell.prefTab === "git"}
+            <div class="pref-section">
+              <div class="k">{shell.tr("dialog.gitBehavior")}</div>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.pullRebase} /> {shell.tr("dialog.pullWithRebase")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.fetchPrune} /> {shell.tr("dialog.pruneOnFetch")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.swapPanes} /> {shell.tr("dialog.swapPanes")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.treeFiles} /> {shell.tr("chrome.treeView")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.verticalTabs} /> {shell.tr("dialog.verticalTabs")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.ignoreSpace} /> {shell.tr("dialog.ignoreSpace")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.showWhitespace} /> {shell.tr("dialog.showSpace")}</label>
+              <div class="composer-row">
+                <button class="text-button" type="button" onclick={() => (shell.dialog = "accounts")}>{shell.tr("chrome.accounts")}</button>
+                <button class="text-button" type="button" onclick={() => void invoke<string>("read_ssh_config").then((text) => { shell.draft = text; shell.dialog = "ssh"; }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("chrome.sshConfig")}</button>
+              </div>
             </div>
+            <div class="pref-section">
+              <div class="k">{shell.tr("dialog.dates")}</div>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.dateRelative} /> {shell.tr("dialog.dateRelative")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.date24h} /> {shell.tr("dialog.date24")}</label>
+              <label>{shell.tr("dialog.dateFormat")} <input bind:value={shell.settings.dateFormat} placeholder="dd MMM yyyy" /></label>
+            </div>
+            <div class="pref-section">
+              <div class="k">{shell.tr("dialog.diff")}</div>
+              <label>{shell.tr("dialog.diffStyle")}
+                <select bind:value={shell.settings.diffStyle}>
+                  <option value="split">{shell.tr("dialog.diffSplit")}</option>
+                  <option value="unified">{shell.tr("dialog.diffUnified")}</option>
+                </select>
+              </label>
+              <label>{shell.tr("dialog.linesHeight")}
+                <select bind:value={shell.settings.linesHeight}>
+                  <option value="compact">{shell.tr("dialog.lineCompact")}</option>
+                  <option value="spaced">{shell.tr("dialog.lineSpaced")}</option>
+                </select>
+              </label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.showEntireFile} /> {shell.tr("dialog.wholeFile")}</label>
+            </div>
+            <div class="pref-section">
+              <div class="k">{shell.tr("dialog.merge")}</div>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.mergeNoFf} /> {shell.tr("dialog.mergeNoFfPref")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.mergeAutostash} /> {shell.tr("dialog.mergeAutostashPref")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.signCommits} /> {shell.tr("dialog.signCommits")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.signOff} onchange={() => (shell.signOff = shell.settings.signOff)} /> {shell.tr("dialog.signOffDefault")}</label>
+              <label>{shell.tr("dialog.signOffFormat")} <input bind:value={shell.settings.signOffFormat} /></label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.forceWithLease} /> {shell.tr("dialog.forceWithLease")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.gravatar} /> {shell.tr("dialog.gravatar")}</label>
+            </div>
+            <div class="pref-section">
+              <div class="k">{shell.tr("dialog.ai")}</div>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.aiEnabled} /> {shell.tr("dialog.aiEnabled")}</label>
+              <label>{shell.tr("dialog.aiLanguage")} <input bind:value={shell.settings.aiLanguage} placeholder="English" /></label>
+              <label>{shell.tr("dialog.aiMaxChars")} <input type="number" bind:value={shell.settings.aiMaxChars} /></label>
+              <label>{shell.tr("dialog.promptExtra")} <input bind:value={shell.settings.aiPrompt} placeholder={shell.tr("dialog.promptExtra")} /></label>
+              <label>{shell.tr("dialog.aiTemperature")} <input type="number" step="0.1" bind:value={shell.settings.aiTemperature} /></label>
+              <label>{shell.tr("dialog.authorName")} <input bind:value={shell.settings.authorName} placeholder={shell.tr("dialog.authorPlaceholder")} /></label>
+              <label>{shell.tr("dialog.authorEmail")} <input bind:value={shell.settings.authorEmail} /></label>
+              <label>{shell.tr("dialog.logDirectory")} <input bind:value={shell.settings.logDirectory} /></label>
+            </div>
+            <div class="pref-section">
+              <div class="k">{shell.tr("dialog.network")}</div>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.sslVerify} /> {shell.tr("dialog.sslVerify")}</label>
+              <label class="check"><input type="checkbox" bind:checked={shell.settings.proxyEnabled} /> {shell.tr("dialog.proxyEnabled")}</label>
+              <label>{shell.tr("dialog.proxyType")}
+                <select bind:value={shell.settings.proxyType}>
+                  <option value="http">HTTP</option>
+                  <option value="socks">SOCKS</option>
+                </select>
+              </label>
+              <label>{shell.tr("dialog.proxyHost")} <input bind:value={shell.settings.proxyHost} /></label>
+              <label>{shell.tr("dialog.proxyPort")} <input type="number" bind:value={shell.settings.proxyPort} /></label>
+              <label>{shell.tr("dialog.proxyUser")} <input bind:value={shell.settings.proxyUser} /></label>
+              <label>{shell.tr("dialog.proxyPassword")} <input type="password" bind:value={shell.settings.proxyPassword} /></label>
+              <label>{shell.tr("dialog.proxyUrl")} <input bind:value={shell.settings.proxy} /></label>
+              <label>{shell.tr("dialog.sslCaFile")} <input bind:value={shell.settings.sslCaFile} /></label>
+              <label>{shell.tr("dialog.githubToken")} <input type="password" bind:value={shell.settings.githubToken} /></label>
+              <label>{shell.tr("dialog.gitlabToken")} <input type="password" bind:value={shell.settings.gitlabToken} /></label>
+              <label>{shell.tr("dialog.gitlabHost")} <input bind:value={shell.settings.gitlabHost} placeholder="gitlab.com" /></label>
+            </div>
+            <div class="pref-section">
+              <div class="k">{shell.tr("dialog.advanced")}</div>
+              <label>{shell.tr("dialog.signingPassphrase")} <input type="password" bind:value={shell.passphrase} /></label>
+              <label>{shell.tr("dialog.askpassUser")} <input bind:value={shell.passUser} /></label>
+              <div class="composer-row">
+                <button class="text-button" type="button" onclick={() => shell.keepPassphrase()}>{shell.tr("dialog.usePassphrase")}</button>
+                <button class="text-button" type="button" onclick={() => { shell.draft = "https"; shell.draftExtra = ""; shell.draftUser = ""; shell.draftSecret = ""; shell.dialog = "credential"; }}>{shell.tr("dialog.httpsLogin")}</button>
+                <button class="text-button" type="button" onclick={() => shell.mutate({ action: "lfsPull" })}>{shell.tr("dialog.lfsPull")}</button>
+                <button class="text-button" type="button" onclick={() => shell.mutate({ action: "lfsPush" })}>{shell.tr("dialog.lfsPush")}</button>
+                <button class="text-button" type="button" onclick={() => (shell.dialog = "patch")}>{shell.tr("dialog.applyPatch")}</button>
+                <button class="text-button" type="button" onclick={() => invoke("set_repo_author", { path: shell.repoPath(), name: shell.settings.authorName, email: shell.settings.authorEmail }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("dialog.saveAuthorRepo")}</button>
+                <button class="text-button" type="button" onclick={() => void invoke<string>("generate_ssh_key").then((key) => { shell.commandOutput = key; shell.dialog = "output"; }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("dialog.sshKey")}</button>
+              </div>
+            </div>
+          {:else}
+            <p class="empty">{shell.tr("dialog.settingsSaveHint")}</p>
           {/if}
           </div>
-          <div class="composer-row">
-            <button class="commit" type="button" onclick={() => shell.savePrefs(true)}>{shell.tr("chrome.close")}</button>
+          <div class="composer-row prefs-foot">
+            <span class="meta">{shell.tr("dialog.settingsSaveHint")}</span>
+            <button class="commit" type="button" onclick={() => shell.savePrefs(true)}>{shell.tr("dialog.done")}</button>
           </div>

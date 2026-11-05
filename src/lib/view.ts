@@ -202,6 +202,9 @@ export function foldedMerges(commits: { id: string; parents?: string[] }[], expa
   const owner = new Map<string, string>();
   const n = commits.length;
   if (n === 0) return { hidden, straight, owner };
+  // The ancestor bitsets cost O(n²/32) time and memory. Past this size the graph still
+  // draws every branch, but merges are no longer folded; the list stays interactive.
+  if (n > 25_000) return { hidden, straight, owner };
 
   // Ancestor bitsets, one per commit, freed once every child has been folded.
   // Walking each merge back to the root is quadratic and freezes a long history.
@@ -296,13 +299,13 @@ export function foldedMerges(commits: { id: string; parents?: string[] }[], expa
   // A branch that merged this line in from the side must not erase the line itself.
   // The first-parent chain stays visible, so the collapsed graph is one continuous stroke.
   const byId = new Map(commits.map((commit) => [commit.id, commit]));
-  let cursor = commits[0]?.id;
+  let cursor: string | undefined = commits[0]?.id;
   const seen = new Set<string>();
-  while (cursor && !seen.has(cursor)) {
+  while (cursor !== undefined && !seen.has(cursor)) {
     seen.add(cursor);
     hidden.delete(cursor);
-    const next = byId.get(cursor)?.parents?.[0];
-    cursor = next && byId.has(next) ? next : undefined;
+    const next: string | undefined = byId.get(cursor)?.parents?.[0];
+    cursor = next !== undefined && byId.has(next) ? next : undefined;
   }
   return { hidden, straight, owner };
 }
@@ -346,9 +349,9 @@ export function numberedDiff(lines: DiffLine[]) {
   });
 }
 
-export function windowSlice<T>(items: T[], scrollTop: number, rowHeight: number, limit = 80, size = 48) {
+export function windowSlice<T>(items: T[], scrollTop: number, rowHeight: number, limit = 80, size = 72) {
   if (items.length <= limit) return { start: 0, rows: items };
-  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 12);
+  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 16);
   return { start, rows: items.slice(start, Math.min(items.length, start + size)) };
 }
 
@@ -379,6 +382,8 @@ export type SplitRow = {
   rightIndex?: number;
   lineIndex?: number;
   hunkIndex?: number;
+  /** Diff metadata (hunk header, file header) shown once across both columns. */
+  meta?: boolean;
 };
 
 /** Pair removed and added lines inside each hunk for a split diff. */
@@ -435,6 +440,7 @@ export function splitDiff(lines: DiffLine[]): SplitRow[] {
         rightKind: "meta",
         lineIndex: index,
         hunkIndex: line.kind === "hunk" ? hunkIndex : undefined,
+        meta: true,
       });
     }
   });
@@ -534,11 +540,13 @@ export function formatWhen(at: number, pattern: string, hour24: boolean) {
     MMM: months[date.getMonth()] ?? "",
     MM: pad(date.getMonth() + 1),
     dd: pad(date.getDate()),
-    HH: pad(hour24 ? hours : hours % 12 || 12),
+    HH: pad(hour24 ? hours : (hours % 12 || 12)),
+    hh: pad(hours % 12 || 12),
+    A: hours < 12 ? "AM" : "PM",
     mm: pad(date.getMinutes()),
     ss: pad(date.getSeconds()),
   };
-  return pattern.replace(/yyyy|MMM|MM|dd|HH|mm|ss/g, (token) => map[token] ?? token);
+  return pattern.replace(/yyyy|MMM|MM|dd|HH|hh|mm|ss|A/g, (token) => map[token] ?? token);
 }
 
 function pad(value: number) {

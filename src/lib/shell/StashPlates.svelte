@@ -9,7 +9,7 @@
 {#if branch}
   <span class="name-plate" style:--lane="var(--ref-local)" title={branch}><span>{branch}</span></span>
 {/if}
-<span class="name-plate grow" style:--lane="var(--ref-stash)" title={message}>
+<span class="name-plate" style:--lane="var(--ref-stash)" title={message}>
   <span>
     {#each shell.linkParts(message) as part, index (`${index}-${part.text}`)}
       {#if part.href}
