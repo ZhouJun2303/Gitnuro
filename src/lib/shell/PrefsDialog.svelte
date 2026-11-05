@@ -67,7 +67,7 @@
             <label class="pref-inline">{shell.tr("dialog.diffContext")} <input type="number" min="0" max="100" bind:value={shell.settings.diffContext} /></label>
             <label class="pref-inline">{shell.tr("dialog.statusInterval")} <input type="number" min="0" max="3600" bind:value={shell.settings.statusInterval} /></label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.showWorktrees} /> {shell.tr("dialog.showWorktrees")}</label>
-            <label class="pref-inline">{shell.tr("dialog.maxCommits")} <input type="number" min="50" bind:value={shell.settings.maxCommits} onchange={() => { shell.logLimit = Math.max(1, shell.settings.maxCommits || 500); if (shell.mode === "live") void shell.loadContext(); }} /></label>
+            <label class="pref-inline">{shell.tr("dialog.maxCommits")} <input type="number" min="50" max="100000" bind:value={shell.settings.maxCommits} onchange={() => { shell.settings.maxCommits = Math.min(100000, Math.max(50, Math.round(shell.settings.maxCommits || 500))); shell.logLimit = shell.settings.maxCommits; if (shell.mode === "live") void shell.loadContext(); }} /></label>
             <label class="pref-inline">{shell.tr("dialog.scanDepth")} <input type="number" min="1" max="20" bind:value={shell.settings.scanDepth} /></label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.workspaceShowTitle} /> {shell.tr("dialog.workspaceTitle")}</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.rebaseAutostash} /> {shell.tr("dialog.rebaseAutostash")}</label>

@@ -105,7 +105,7 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
       { sep: true, label: "" },
       { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "branch"; } },
       { label: shell.tr("menu.createTag"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "tag"; } },
-      { label: shell.tr("menu.editMessage"), disabled: locked, run: () => { shell.draft = commit.summary; shell.draftExtra = commit.id; shell.dialog = "reword"; } },
+      { label: shell.tr("menu.editMessage"), disabled: locked || !shell.refs?.head || commit.id !== shell.refs.head, run: () => { shell.draft = commit.summary; shell.draftExtra = commit.id; shell.dialog = "reword"; } },
       { label: shell.tr("menu.interactiveRebase"), run: () => { shell.selectedCommit = commit.id; shell.openRebase(); } },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },
       { label: shell.mergeOpen(commit.id) ? shell.tr("menu.fold") : shell.tr("menu.unfold"), disabled: !shell.mergeOwner(commit.id), run: () => shell.toggleFold(commit.id) },

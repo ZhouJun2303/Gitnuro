@@ -2109,6 +2109,26 @@ export class ShellState {
     if (!current) return;
     if (current.depth <= 1) delete this.jobs[key];
     else this.jobs[key] = { ...current, depth: current.depth - 1 };
+    this.releaseWriteWaiters();
+  }
+
+
+  /** User writes wait for background reads instead of being dropped. */
+  writeWaiters: Array<() => void> = [];
+
+
+  async waitForWriteSlot() {
+    while (this.busy) {
+      await new Promise<void>((resolve) => this.writeWaiters.push(resolve));
+    }
+  }
+
+
+  releaseWriteWaiters() {
+    if (this.busy || this.writeWaiters.length === 0) return;
+    const waiting = this.writeWaiters;
+    this.writeWaiters = [];
+    for (const resolve of waiting) resolve();
   }
 
 
@@ -2263,7 +2283,11 @@ export class ShellState {
   async runChange(command: string, extra: Record<string, unknown> = {}, duringRead = false) {
     const path = this.repoPath();
     const reading = duringRead && !this.switching && this.currentJob?.label === this.tr("chrome.readingFile");
-    if (this.mode !== "live" || !path || (this.busy && !reading)) return undefined;
+    if (this.mode !== "live" || !path) return undefined;
+    if (this.busy && !reading) {
+      await this.waitForWriteSlot();
+      if (this.mode !== "live" || this.repoPath() !== path) return undefined;
+    }
     this.actionError = null;
     this.startWork(this.tr("chrome.working"), path);
     try {
@@ -2579,8 +2603,13 @@ export class ShellState {
 
   async mutate(request: Record<string, unknown>, source: "user" | "background" = "user") {
     const path = this.repoPath();
-    if (!this.backend() || !path || this.busy) return;
+    if (!this.backend() || !path) return;
     const background = source === "background";
+    if (this.busy) {
+      if (background) return;
+      await this.waitForWriteSlot();
+      if (this.repoPath() !== path) return;
+    }
     if (!background) this.actionError = null;
     const described = this.describeRequest(request);
     const action = String(request.action ?? "");
@@ -2733,7 +2762,7 @@ export class ShellState {
     if (!this.settings.errorLogDays) this.settings = { ...this.settings, errorLogDays: 7 };
     this.pruneErrorLog();
     if (!this.snapshot && isCommitType(this.settings.commitType)) this.commitType = this.settings.commitType;
-    const limit = Math.max(1, this.settings.maxCommits || 500);
+    const limit = Math.min(100000, Math.max(1, this.settings.maxCommits || 500));
     if (resetHistory || this.logLimit === 500) this.logLimit = limit;
     this.signOff = this.settings.signOff;
     this.showPendingUpdate(false);
@@ -3387,7 +3416,7 @@ export class ShellState {
 
 
 
-  rememberRepo(path: string) {
+  async rememberRepo(path: string) {
     const recent = [path, ...this.settings.recent.filter((item) => item !== path)].slice(0, 12);
     const currentId = this.settings.currentWorkspace;
     const workspaces = this.settings.workspaces.map((workspace) => {
@@ -3403,7 +3432,7 @@ export class ShellState {
       };
     });
     this.settings = { ...this.settings, recent, workspaces };
-    void invoke("save_settings", { values: this.settings });
+    await invoke("save_settings", { values: this.settings }).catch(() => {});
   }
 
   /** Path inside `could not open repository at {path}: missing`. Other open errors stay put. */
@@ -3628,7 +3657,7 @@ export class ShellState {
         .catch(() => {
           if (gen === this.openGen) this.lfsAvailable = false;
         });
-      this.rememberRepo(path);
+      await this.rememberRepo(path);
       this.dialog = null;
       this.facts = null;
       this.factsPath = "";
@@ -4882,6 +4911,17 @@ export class ShellState {
       this.confirmAsk = null;
       return true;
     }
+    if (event.key === "Escape" && this.textMerge && !this.menu && !this.launchOpen) {
+      event.preventDefault();
+      this.closeTextMerge();
+      return true;
+    }
+    if (event.key === "Escape" && this.dialog && !this.busy && !this.menu && !this.launchOpen) {
+      event.preventDefault();
+      if (this.dialog === "prefs") void this.savePrefs(true);
+      this.dialog = null;
+      return true;
+    }
     const bare = event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && !event.isComposing;
     if (!bare || this.launchOpen || this.menu) return false;
     if (this.confirmAsk) {
@@ -5081,6 +5121,9 @@ export class ShellState {
   }
 
   constructor() {
+    $effect(() => {
+      if (!this.busy) this.releaseWriteWaiters();
+    });
     $effect(() => {
       const straight = this.liveFold.straight;
       const items = this.historyItems;

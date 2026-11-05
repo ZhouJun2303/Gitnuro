@@ -100,6 +100,7 @@ export type SubmoduleRow = { path: string; id: string; ready: boolean };
 export type WorktreeRow = { path: string; branch: string | null; detached: boolean };
 
 export type RefSnapshot = {
+  head?: string | null;
   branches: BranchRow[];
   remotes: RemoteRow[];
   tags: TagRow[];

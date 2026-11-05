@@ -154,6 +154,119 @@ test("hunk toolbar selects a hunk without hovering", async ({ page }) => {
   await expect(stage).toBeEnabled();
 });
 
+test("floating hunk actions stay inside the pane while scrolling", async ({ page }) => {
+  await openLabScene(page, "diff-long", ".diff-body .split-code, .diff-body .virtual-row");
+  const body = page.locator("section.diff .diff-body");
+  await body.locator(".split-code, .virtual-row").nth(6).hover();
+  const actions = page.locator(".diff-hunk-actions");
+  await expect(actions).toBeVisible();
+  const pane = await body.boundingBox();
+  await body.evaluate((node) => {
+    node.scrollTop = 1600;
+    node.dispatchEvent(new Event("scroll"));
+  });
+  await page.waitForTimeout(300);
+  await expect(actions).toBeVisible();
+  const box = await actions.boundingBox();
+  expect(pane).not.toBeNull();
+  expect(box).not.toBeNull();
+  expect(box!.y).toBeGreaterThanOrEqual(pane!.y - 1);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(pane!.y + pane!.height + 1);
+});
+
+test("dragging lines selects rows beneath the floating hunk actions", async ({ page }) => {
+  await openLabScene(page, "diff-long", ".diff-body .split-code");
+  const body = page.locator("section.diff .diff-body");
+  await body.locator(".split-code").nth(20).hover();
+  const actions = page.locator(".diff-hunk-actions");
+  await expect(actions).toBeVisible();
+  const bar = await actions.boundingBox();
+  const start = await body.locator(".split-no").nth(40).boundingBox();
+  expect(bar).not.toBeNull();
+  expect(start).not.toBeNull();
+  const firstCode = await page.evaluate(() =>
+    Math.min(
+      ...[...document.querySelectorAll<HTMLElement>("section.diff .split-code")]
+        .map((node) => Number(node.dataset.line))
+        .filter(Number.isFinite),
+    ),
+  );
+  await page.mouse.move(start!.x + start!.width / 2, start!.y + start!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bar!.x + bar!.width / 2, bar!.y + bar!.height / 2, { steps: 8 });
+  const picked = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>("section.diff .split-code.picked")].map((node) => Number(node.dataset.line)),
+  );
+  await page.mouse.up();
+  expect(picked.length).toBeGreaterThan(0);
+  expect(Math.min(...picked)).toBe(firstCode);
+});
+
+test("wrapped hunk actions anchor to the hunk under the pointer", async ({ page }) => {
+  const scenes: Array<[string, string]> = [
+    ["diff-wrap", ".split-meta"],
+    ["diff-wrap-unified", ".virtual-row.hunk"],
+  ];
+  for (const [scene, selector] of scenes) {
+    await openLabScene(page, scene, selector);
+    const body = page.locator("section.diff .diff-body");
+    const header = body.locator(selector, { hasText: "@@" }).nth(1);
+    await header.scrollIntoViewIfNeeded();
+    await header.hover();
+    const actions = page.locator(".diff-hunk-actions");
+    await expect(actions).toBeVisible();
+    const bar = await actions.boundingBox();
+    const at = await header.boundingBox();
+    expect(bar, scene).not.toBeNull();
+    expect(at, scene).not.toBeNull();
+    expect(bar!.y, scene).toBeGreaterThanOrEqual(at!.y - 4);
+    expect(bar!.y, scene).toBeLessThanOrEqual(at!.y + at!.height + 24);
+  }
+});
+
+test("Escape closes a dialog and a text merge panel", async ({ page }) => {
+  await openLabScene(page, "dialog-prefs", '[data-dialog="prefs"]');
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-dialog="prefs"]')).toHaveCount(0);
+  await openLabScene(page, "text-merge", '[data-layer="text-merge"]');
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-layer="text-merge"]')).toHaveCount(0);
+});
+
+test("open dialog keeps every source row readable", async ({ page }) => {
+  await openLabScene(page, "dialog-open", '[data-dialog="open"] .open-col');
+  const rows = page.locator('[data-dialog="open"] .open-col .text-button');
+  expect(await rows.count()).toBeGreaterThan(10);
+  const height = await rows.first().evaluate((node) => node.getBoundingClientRect().height);
+  expect(height).toBeGreaterThanOrEqual(28);
+});
+
+test("long dialogs keep their title and first field in view", async ({ page }) => {
+  await openLabScene(page, "dialog-accounts", '[data-dialog="accounts"]');
+  await expect(page.locator('[data-dialog="accounts"] h2')).toBeInViewport();
+  const scrolled = await page.locator('[data-dialog="accounts"] form').evaluate((node) => node.scrollTop);
+  expect(scrolled).toBe(0);
+  await openLabScene(page, "prefs-git", '[data-dialog="prefs"]');
+  const prefScroll = await page.locator('[data-dialog="prefs"] .pref-page').evaluate((node) => node.scrollTop);
+  expect(prefScroll).toBe(0);
+  await openLabScene(page, "dialog-gitignore", '[data-dialog="gitignore"]');
+  const area = await page.locator('[data-dialog="gitignore"] textarea').evaluate((node) => {
+    const field = node as HTMLTextAreaElement;
+    return { top: field.scrollTop, start: field.selectionStart };
+  });
+  expect(area.top).toBe(0);
+  expect(area.start).toBe(0);
+});
+
+test("push and pull dialogs start with a branch", async ({ page }) => {
+  await openLabScene(page, "dialog-push", '[data-dialog="push"]');
+  const push = await page.locator('[data-dialog="push"] select').first().inputValue();
+  expect(push).not.toBe("");
+  await openLabScene(page, "dialog-pull", '[data-dialog="pull"]');
+  const pull = await page.locator('[data-dialog="pull"] select').nth(1).inputValue();
+  expect(pull).not.toBe("");
+});
+
 test("command log keeps focus inside and closes with Escape", async ({ page }) => {
   await openLabScene(page, "commands", '[data-layer="commands"]');
   const inside = () => page.evaluate(() => !!document.activeElement?.closest('[data-layer="commands"]'));

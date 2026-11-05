@@ -92,7 +92,13 @@
         box.setAttribute("aria-label", shell.tr("dialog.preferences"));
       }
       const fields = [...box.querySelectorAll<HTMLElement>('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select, textarea')];
-      (fields.find((item) => item.offsetParent !== null) ?? box.querySelector<HTMLElement>(".dialog-close"))?.focus();
+      const target = fields.find((item) => item.offsetParent !== null) ?? box.querySelector<HTMLElement>(".dialog-close");
+      target?.focus({ preventScroll: true });
+      if (target instanceof HTMLTextAreaElement) {
+        target.setSelectionRange(0, 0);
+        target.scrollTop = 0;
+      }
+      (target?.closest<HTMLElement>(".pref-page") ?? box.querySelector<HTMLElement>(".pref-page, form"))?.scrollTo({ top: 0 });
     });
     return () => {
       if (!shell.dialog) lastFocus?.focus?.();
@@ -131,7 +137,6 @@
             const remote = shell.syncAll ? null : shell.draft || null;
             const prune = shell.settings.fetchPrune;
             const tags = shell.syncTags;
-            if (shell.busy) return;
             shell.settings = { ...shell.settings, fetchPrune: prune, fetchAllRemotes: shell.syncAll, fetchTags: tags };
             void shell.savePrefs(false);
             shell.dialog = null;
@@ -141,7 +146,6 @@
             const request = shell.draft && shell.draftExtra
               ? { action: "pullRef", remote: shell.draft, branch: shell.draftExtra, rebase: shell.syncRebase, autostash: shell.syncStash }
               : { action: "pull", rebase: shell.syncRebase, autostash: shell.syncStash };
-            if (shell.busy) return;
             shell.settings = { ...shell.settings, pullRebase: shell.syncRebase, pullStash: shell.syncStash };
             void shell.savePrefs(false);
             shell.dialog = null;
@@ -152,7 +156,6 @@
             const request = target && shell.pushBranch
               ? { action: "pushRef", remote: target.remote, branch: shell.pushBranch, remoteBranch: target.branch, setUpstream: target.setUpstream, tags: shell.syncTags, forceWithLease: shell.syncForce, force: false }
               : { action: "push", remote: shell.draft || null, setUpstream: !shell.refs?.branches.some((branch) => branch.current && branch.upstream), tags: shell.syncTags, forceWithLease: shell.syncForce };
-            if (shell.busy) return;
             shell.settings = { ...shell.settings, pushAllTags: shell.syncTags };
             void shell.savePrefs(false);
             shell.dialog = null;
@@ -602,6 +605,7 @@
           <button class="commit" type="submit">{shell.tr("dialog.applyNow")}</button>
         {:else if shell.dialog === "merge"}
           {@const into = shell.mergeInto || shell.snapshot?.branch || "HEAD"}
+          {@const dirty = (shell.snapshot?.staged.length ?? 0) > 0 || (shell.snapshot?.unstaged.some((file) => file.kind !== "untracked") ?? false)}
           <h2>{shell.tr(shell.draftExtra === "squash" ? "dialog.mergeSquashTitle" : "dialog.mergeTitleLine", { source: shell.draft, into })}</h2>
           <div class="merge-route">
             <span>{shell.draft}</span>
@@ -623,8 +627,12 @@
           </label>
           <p class="empty">{shell.tr("dialog.mergeFileCount", { count: String(shell.mergeFiles.length) })}</p>
           {#if shell.draftExtra === "ff"}<p class="empty">{shell.tr("dialog.mergeFastForwardNote")}</p>{/if}
-          <p class="empty">{shell.settings.mergeAutostash ? shell.tr("dialog.mergeAutostash") : shell.tr("dialog.mergeClean")}</p>
-          <button class="commit" type="submit">{shell.tr("dialog.merge")}</button>
+          {#if shell.settings.mergeAutostash}
+            <p class="empty">{shell.tr("dialog.mergeAutostash")}</p>
+          {:else if dirty}
+            <p class="dialog-error">{shell.tr("dialog.mergeClean")}</p>
+          {/if}
+          <button class="commit" type="submit" disabled={dirty && !shell.settings.mergeAutostash}>{shell.tr("dialog.merge")}</button>
         {:else if shell.dialog === "repo"}
           <h2>{shell.tr("chrome.repoSettings")}</h2>
           <label>{shell.tr("dialog.authorName")} <input bind:value={shell.draft} placeholder={shell.tr("dialog.authorEmpty")} /></label>
@@ -699,12 +707,14 @@
           <button class="commit" type="submit">{shell.tr("dialog.save")}</button>
         {:else if shell.dialog === "accounts"}
           <h2>{shell.tr("chrome.accounts")}</h2>
-          {#each shell.settings.accounts as account (account.id)}
-            <div class="composer-row">
-              <button class="text-button" type="button" onclick={() => { shell.editingAccount = account.id; shell.hostForge = account.forge; shell.draft = account.label; shell.draftExtra = account.host; shell.draftUser = account.token; shell.settings.oauthClientId = account.clientId; }}>{account.forge} {account.label}</button>
-              <button class="text-button danger" type="button" onclick={() => shell.ask(shell.tr("menu.delete"), `${account.forge} · ${account.label}`, () => { shell.settings = { ...shell.settings, accounts: shell.settings.accounts.filter((item) => item.id !== account.id) }; if (shell.editingAccount === account.id) shell.editingAccount = ""; void shell.savePrefs(false); })}>{shell.tr("menu.delete")}</button>
-            </div>
-          {/each}
+          <div class="account-list">
+            {#each shell.settings.accounts as account (account.id)}
+              <div class="composer-row">
+                <button class="text-button" type="button" onclick={() => { shell.editingAccount = account.id; shell.hostForge = account.forge; shell.draft = account.label; shell.draftExtra = account.host; shell.draftUser = account.token; shell.settings.oauthClientId = account.clientId; }}>{account.forge} {account.label}</button>
+                <button class="text-button danger" type="button" onclick={() => shell.ask(shell.tr("menu.delete"), `${account.forge} · ${account.label}`, () => { shell.settings = { ...shell.settings, accounts: shell.settings.accounts.filter((item) => item.id !== account.id) }; if (shell.editingAccount === account.id) shell.editingAccount = ""; void shell.savePrefs(false); })}>{shell.tr("menu.delete")}</button>
+              </div>
+            {/each}
+          </div>
           <select aria-label={shell.tr("dialog.forge")} bind:value={shell.hostForge}>
             <option value="github">GitHub</option>
             <option value="gitlab">GitLab</option>

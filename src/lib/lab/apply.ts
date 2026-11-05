@@ -67,6 +67,14 @@ async function fillSurface(shell: ShellState, id: string) {
   if (id === "diff-binary") return showChange(shell, "data/sheet.xlsx", "unstaged");
   if (id === "diff-rename") return showChange(shell, "src/renamed.txt", "staged");
   if (id === "diff-long") return showChange(shell, "notes/long.txt", "unstaged");
+  if (id === "diff-wrap") {
+    shell.settings = { ...shell.settings, diffWordWrap: true };
+    return showChange(shell, "notes/wrap.txt", "unstaged");
+  }
+  if (id === "diff-wrap-unified") {
+    shell.settings = { ...shell.settings, diffWordWrap: true, diffStyle: "unified" };
+    return showChange(shell, "notes/wrap.txt", "unstaged");
+  }
   if (id === "history" || id === "commit") return showHistory(shell);
   if (id === "tree") {
     await showHistory(shell);
@@ -331,8 +339,15 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draftSecret = "lab-secret";
       break;
     case "fetch":
+      shell.draft = "origin";
+      break;
     case "pull":
+      shell.draft = "origin";
+      shell.draftExtra = shell.pullBranchFor("origin") || "main";
+      break;
     case "push":
+      shell.pushBranch = shell.refs?.branches.find((branch) => branch.current)?.name ?? shell.snapshot?.branch ?? "main";
+      shell.pushTo = "";
       shell.draft = "origin";
       break;
     case "stash":

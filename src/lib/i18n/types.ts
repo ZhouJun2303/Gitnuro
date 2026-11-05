@@ -190,7 +190,6 @@ export type Messages = {
     deleteSelected: string;
     unstageSelected: string;
     stageSelected: string;
-    stageBusy: string;
     stageConflictBinary: string;
     bisect: string;
     ignored: string;

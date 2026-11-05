@@ -532,6 +532,12 @@ const longBase = lines(40, "line");
 const longNext = lines(220, "line lab");
 commit(full, "notes/long.txt", longBase, "long note");
 write(full, "notes/long.txt", longNext);
+const wrapBase = Array.from({ length: 90 }, (_, index) => `const wrap${index + 1} = "${"base text ".repeat(18)}";`);
+commit(full, "notes/wrap.txt", wrapBase.join("\n") + "\n", "wrap note");
+const wrapNext = [...wrapBase];
+wrapNext[8] = `const wrap9 = "${"changed first hunk ".repeat(10)}";`;
+wrapNext[70] = `const wrap71 = "${"changed second hunk ".repeat(10)}";`;
+write(full, "notes/wrap.txt", wrapNext.join("\n") + "\n");
 write(full, "src/staged.ts", "export const staged = true;\n");
 git(full, ["add", "--", "src/staged.ts"]);
 for (let i = 1; i <= FILL; i++) {

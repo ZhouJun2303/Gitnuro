@@ -120,7 +120,7 @@ const base: Array<[Shortcut, Chord[]]> = [
   ["stageAll", [{ key: "s", ctrl: true, alt: true, shift: true }]],
   ["discard", [{ key: "Delete" }, { key: "d", ctrl: true, shift: true }, { key: "Backspace" }]],
   ["explorer", [{ key: "o", ctrl: true, alt: true }]],
-  ["terminal", [{ key: "t", ctrl: true, alt: true }]],
+  ["terminal", [{ key: "t", ctrl: true, alt: true, shift: true }]],
   ["filterBranch", [{ key: "a", ctrl: true, shift: true }]],
   ["selectAll", [{ key: "a", ctrl: true }]],
   ["reopen", [{ key: "t", ctrl: true, shift: true }]],

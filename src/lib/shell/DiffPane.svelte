@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { getShell } from "./context";
   import "./DiffPane.css";
   import { sampleImages } from "../sample";
@@ -10,13 +11,20 @@
 
   const shell = getShell();
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
-  const onDiffScroll = onVirtualScroll((top) => (shell.diffTop = top));
+  const onDiffScroll = onVirtualScroll((top) => {
+    shell.diffTop = top;
+    if (hoveredHunk != null && pointerInside) void hoverUnderPointer();
+  });
   const onBlameScroll = onVirtualScroll((top) => (shell.blameTop = top));
   let pickOurs = $state(true);
   let pickTheirs = $state(true);
   let pickedPath = "";
   let hoveredHunk = $state<number | null>(null);
+  let hoveredLine = $state<number | null>(null);
   let activeHunk = $state<number | null>(null);
+  let pointerX = 0;
+  let pointerY = 0;
+  let pointerInside = false;
 
   $effect(() => {
     const path = shell.selectedPath ?? "";
@@ -25,6 +33,7 @@
     pickOurs = true;
     pickTheirs = true;
     hoveredHunk = null;
+    hoveredLine = null;
     activeHunk = null;
     shell.pixelUrl = "";
     shell.imageMode = "side";
@@ -53,18 +62,22 @@
   const hoveredDiscardOps = $derived(hoveredSelected.length > 0 ? shell.discardableEntries(hoveredSelected) : []);
   const useLineOps = $derived(hoveredLineOps.length > 0 || hoveredDiscardOps.length > 0);
   const rowHeight = $derived(shell.settings.diffStyle === "split" ? shell.splitRowHeight : shell.diffRowHeight);
-  const hunkActionTop = $derived.by(() => {    if (!hoveredRange) return 0;
-    if (shell.settings.diffStyle !== "split") return hoveredRange.start * rowHeight;
-    for (let at = 0; at < shell.splitRows.length; at += 1) {
-      const row = shell.splitRows[at];
-      if (!row) continue;
-      const left = shell.splitLineAt(row, "left");
-      const right = shell.splitLineAt(row, "right");
-      if ((left != null && left >= hoveredRange.start && left < hoveredRange.end) || (right != null && right >= hoveredRange.start && right < hoveredRange.end)) {
-        return at * rowHeight;
-      }
-    }
-    return hoveredRange.start * rowHeight;
+  /** The hunk's first rendered row decides the spot; wrapped rows are not a fixed height. */
+  const hunkActionTop = $derived.by(() => {
+    const body = shell.diffEl;
+    const range = hoveredRange;
+    if (!body || !range) return 4;
+    // Re-measure as the scrollport moves or wrapping and font sizes change.
+    void shell.diffTop;
+    void shell.settings.diffWordWrap;
+    void shell.settings.diffFontSize;
+    void shell.settings.uiScale;
+    const bodyTop = body.getBoundingClientRect().top;
+    const anchor =
+      body.querySelector<HTMLElement>(`[data-line="${range.start}"]`) ??
+      (hoveredLine == null ? null : body.querySelector<HTMLElement>(`[data-line="${hoveredLine}"]`));
+    if (!anchor) return Math.max(4, Math.min(range.start * rowHeight + 8 - shell.diffTop, shell.diffHeight - 30));
+    return Math.min(Math.max(anchor.getBoundingClientRect().top - bodyTop, 4), Math.max(4, shell.diffHeight - 30));
   });
 
   const sideText = (party: ConflictParty) => {
@@ -75,17 +88,51 @@
   };
 
   function hoverDiffLine(event: MouseEvent) {
+    pointerX = event.clientX;
+    pointerY = event.clientY;
+    pointerInside = true;
     const hit = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-line]") : null;
     const line = Number(hit?.dataset.line);
     if (!Number.isInteger(line)) {
       if (!(event.target instanceof Element) || !event.target.closest(".diff-hunk-actions")) hoveredHunk = null;
       return;
     }
+    hoveredLine = line;
     hoveredHunk = shell.hunkOf(line);
   }
 
-  function clearHunkHover() {
+  function clearHunkHover(event: MouseEvent) {
+    pointerInside = false;
+    if (event.relatedTarget instanceof Element && event.relatedTarget.closest(".diff-hunk-actions")) return;
     hoveredHunk = null;
+    hoveredLine = null;
+  }
+
+  function leaveHunkActions() {
+    pointerInside = false;
+    hoveredHunk = null;
+    hoveredLine = null;
+  }
+
+  async function hoverUnderPointer() {
+    await tick();
+    let overBar = false;
+    for (const node of document.elementsFromPoint(pointerX, pointerY)) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (node.closest(".diff-hunk-actions")) {
+        overBar = true;
+        continue;
+      }
+      const at = Number(node.dataset.line);
+      if (!Number.isInteger(at)) continue;
+      hoveredLine = at;
+      hoveredHunk = shell.hunkOf(at);
+      return;
+    }
+    if (!overBar) {
+      hoveredHunk = null;
+      hoveredLine = null;
+    }
   }
 
   function goMark(index: number) {
@@ -306,8 +353,9 @@
             {:else if shell.diff.lines.length === 0}
               <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
             {:else if shell.settings.diffStyle === "split"}
+              <div class="diff-viewport">
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={(event) => { onDiffScroll(event); hoveredHunk = null; }} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover} use:splitScroller={shell.splitColumns}>
+              <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover} use:splitScroller={shell.splitColumns}>
                 {#if shell.splitWindow.start > 0}<div class="split-gap" style:height="{shell.splitWindow.start * shell.splitRowHeight}px"></div>{/if}
                 {#each shell.splitWindow.rows as row, offset (shell.splitWindow.start + offset)}
                   {@const index = shell.splitWindow.start + offset}
@@ -325,11 +373,13 @@
                 {/each}
                 {#if shell.splitWindow.after > 0}<div class="split-gap" style:height="{shell.splitWindow.after * shell.splitRowHeight}px"></div>{/if}
                 {@render splitBar()}
-                {@render hunkActions(true)}
+              </div>
+              {@render hunkActions()}
               </div>
             {:else}
+              <div class="diff-viewport">
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} onscroll={(event) => { onDiffScroll(event); hoveredHunk = null; }} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
+              <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
                 <div class="commit-window" style:height="{shell.diffLines.length * shell.diffRowHeight}px">
                   {#each shell.diffWindow.rows as line, index (`${shell.diffWindow.start}-${index}`)}
                     {@const at = shell.diffWindow.start + index}
@@ -343,9 +393,10 @@
                       {#each shell.paint(line.text, shell.selectedPath ?? "") as token, tokenIndex (`${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
                     </span>
                   {/each}
-                  {@render hunkActions(false)}
                 </div>
                 {#if shell.diff.truncated}<span class="meta">{shell.tr("chrome.truncated")}</span>{/if}
+              </div>
+              {@render hunkActions()}
               </div>
             {/if}
           {:else if shell.section === "changes" && shell.selectedPath && shell.selectedDiff.length > 0}
@@ -397,10 +448,10 @@
     {#if actions}<span class="split-bar-pad"></span>{/if}
   {/snippet}
 
-{#snippet hunkActions(split: boolean)}
+{#snippet hunkActions()}
   {#if hoveredRange && shell.mode === "live"}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="diff-hunk-actions" class:split-float={split} style:top="{hunkActionTop}px" onmouseenter={() => (hoveredHunk = hoveredRange.index)}>
+    <div class="diff-hunk-actions" style:top="{hunkActionTop}px" onmouseenter={() => { if (hoveredRange) hoveredHunk = hoveredRange.index; }} onmouseleave={leaveHunkActions}>
       {#if !useLineOps || hoveredLineOps.length > 0}
         <button type="button" disabled={shell.busy} onclick={(event) => { event.stopPropagation(); stageHovered(); }}>{stageLabel()}</button>
       {/if}

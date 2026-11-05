@@ -17,20 +17,28 @@
   background: color-mix(in srgb, var(--diff-del) 78%, var(--elevated));
 }
 
+.diff-viewport {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.diff-viewport > .diff-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
 .diff-hunk-actions {
   position: absolute;
-  right: 10px;
+  right: 16px;
   z-index: 5;
   display: flex;
   gap: 6px;
   padding: 2px;
   pointer-events: auto;
-}
-
-.diff-body.split > .diff-hunk-actions.split-float {
-  position: absolute;
-  right: 10px;
-  grid-column: unset;
 }
 
 .diff-hunk-actions button {
@@ -104,6 +112,7 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    container-type: inline-size;
   }
 
 .diff-head {
@@ -180,7 +189,7 @@
     font-variant-numeric: tabular-nums;
   }
 
-section.diff > .diff-body {
+section.diff > .diff-viewport {
     flex: 1;
     min-height: 0;
   }
@@ -416,6 +425,30 @@ section.diff > .diff-body {
     width: 12px;
     height: 12px;
   }
+
+/* Narrow diff panes would truncate both branch names to a couple of letters. */
+@container (max-width: 520px) {
+  .conflict-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .conflict-bridge {
+    width: auto;
+    justify-content: center;
+  }
+
+  .conflict-link {
+    display: none;
+  }
+
+  .conflict-end.left,
+  .conflict-end.right {
+    justify-content: stretch;
+  }
+}
 
 .split-gap { grid-column: 1 / -1; }
 

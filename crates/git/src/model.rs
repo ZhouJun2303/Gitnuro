@@ -113,6 +113,9 @@ pub struct WorktreeRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefSnapshot {
+    /// Commit HEAD points at, so the UI can tell which history row is rewordable.
+    #[serde(default)]
+    pub head: Option<String>,
     pub branches: Vec<BranchRow>,
     pub remotes: Vec<RemoteRow>,
     pub tags: Vec<TagRow>,
@@ -409,6 +412,10 @@ pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
     let local = local_text(repo);
     let first = |text: &str, section: &str, key: &str| values_in(text, section, key).into_iter().next().unwrap_or_default();
     let sign_off = first(&local, "signoff", "enabled");
+    let head = run(repo, &["rev-parse", "--verify", "--quiet", "HEAD"])
+        .ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|id| !id.is_empty());
     std::thread::scope(|scope| {
         let branches = scope.spawn(|| local_branches(repo));
         let remotes = scope.spawn(|| remotes(repo));
@@ -417,6 +424,7 @@ pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
         let submodules = scope.spawn(|| submodules(repo));
         let worktrees = worktrees(repo);
         Ok(RefSnapshot {
+            head,
             branches: joined(branches)?,
             remotes: joined(remotes)?,
             tags: joined(tags)?,

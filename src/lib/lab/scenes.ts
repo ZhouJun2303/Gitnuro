@@ -86,6 +86,8 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "diff-binary", group: "主界面", title: "二进制差异", repo: "full", ready: ".diff-empty" }),
   scene({ id: "diff-rename", group: "主界面", title: "重命名", repo: "full", ready: "text=renamed.txt" }),
   scene({ id: "diff-long", group: "主界面", title: "长差异", repo: "full", ready: ".diff-body" }),
+  scene({ id: "diff-wrap", group: "主界面", title: "自动换行差异", repo: "full", ready: ".diff-body" }),
+  scene({ id: "diff-wrap-unified", group: "主界面", title: "自动换行统一视图", repo: "full", ready: ".diff-body" }),
   scene({ id: "history", group: "主界面", title: "历史", repo: "full", ready: ".commit-row" }),
   scene({ id: "commit", group: "主界面", title: "提交详情", repo: "full", ready: ".detail" }),
   scene({ id: "tree", group: "主界面", title: "文件树", repo: "full", ready: ".tree-row" }),

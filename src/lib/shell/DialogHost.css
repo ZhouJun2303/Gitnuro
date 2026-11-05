@@ -2,6 +2,7 @@
     position: absolute;
     top: 10px;
     right: 10px;
+    z-index: 3;
     width: 28px;
     height: 28px;
     padding: 0;
@@ -131,6 +132,19 @@
     gap: 4px;
     min-width: 0;
     max-height: 280px;
+    overflow: auto;
+  }
+
+.open-col > .text-button {
+    flex: none;
+    min-height: 30px;
+  }
+
+.account-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 220px;
     overflow: auto;
   }
 

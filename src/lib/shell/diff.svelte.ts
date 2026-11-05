@@ -644,10 +644,6 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
     if (!repo || !file) return;
     const key = `${shell.jobKey(repo)}\0${side}\0${path}`;
     if (flipping.has(key)) return;
-    if (shell.busy && !readingOnly(shell)) {
-      shell.actionError = shell.tr("chrome.stageBusy");
-      return;
-    }
     flipping.add(key);
     try {
       if (file.letter === "C") {
@@ -656,14 +652,7 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
         if (!rowOnSide(shell, path, side)) return;
       }
       const reading = readingOnly(shell);
-      if (shell.busy && !reading) {
-        shell.actionError = shell.tr("chrome.stageBusy");
-        return;
-      }
-      const changed = await shell.runChange(side === "staged" ? "unstage_path" : "stage_path", { file: path }, reading);
-      if (changed === undefined && shell.mode === "live" && shell.repoPath() === repo) {
-        shell.actionError = shell.tr("chrome.stageBusy");
-      }
+      await shell.runChange(side === "staged" ? "unstage_path" : "stage_path", { file: path }, reading);
     } finally {
       flipping.delete(key);
     }
@@ -1079,7 +1068,12 @@ export function dragDiffLine(shell: ShellState, index: number, event: MouseEvent
         if (ev.clientY < rect.top + 28) body.scrollTop -= shell.diffRowHeight;
         else if (ev.clientY > rect.bottom - 28) body.scrollTop += shell.diffRowHeight;
       }
-      const hit = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>("[data-line]");
+      const hit = body
+        ? document.elementsFromPoint(ev.clientX, ev.clientY).find(
+            (node): node is HTMLElement =>
+              node instanceof HTMLElement && body.contains(node) && Number.isInteger(Number(node.dataset.line)),
+          )
+        : undefined;
       const next = Number(hit?.dataset.line);
       if (Number.isInteger(next)) shell.selectDiffRange(anchor, next);
     };
