@@ -452,10 +452,6 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draft = "from-stash";
       shell.draftExtra = "stash@{0}";
       break;
-    case "checkoutDirty":
-      shell.pendingCheckout = "topic";
-      shell.draftExtra = "stash";
-      break;
     case "checkoutNotice":
       shell.pendingCheckout = "topic";
       break;

@@ -68,8 +68,6 @@ pub struct Settings {
     #[serde(default)]
     pub merge_no_ff: bool,
     #[serde(default)]
-    pub merge_autostash: bool,
-    #[serde(default)]
     pub clone_directory: String,
     #[serde(default)]
     pub window_x: i32,
@@ -238,9 +236,6 @@ pub struct Settings {
     /// Fetch dialog starts with every remote selected.
     #[serde(default)]
     pub fetch_all_remotes: bool,
-    /// Pull stashes local edits and puts them back. Separate from merge autostash.
-    #[serde(default)]
-    pub pull_stash: bool,
     /// Push dialog starts with every tag included.
     #[serde(default)]
     pub push_all_tags: bool,
@@ -264,17 +259,12 @@ pub struct Settings {
     #[serde(default = "max_commits_default")]
     pub max_commits: u32,
     #[serde(default)]
-    pub rebase_autostash: bool,
-    #[serde(default)]
     pub rebase_update_refs: bool,
     /// Applying a stash drops it afterwards. Pop already drops the stash.
     #[serde(default)]
     pub apply_stash_delete: bool,
     #[serde(default)]
     pub push_tag_on_create: bool,
-    /// A dirty checkout stashes, switches, then restores. A conflict keeps the stash notice.
-    #[serde(default)]
-    pub checkout_stash: bool,
     #[serde(default)]
     pub workspace_show_title: bool,
     /// How deep a source folder is walked when looking for repositories.
@@ -461,7 +451,6 @@ impl Default for Settings {
             proxy_port: 0,
             sign_commits: false,
             merge_no_ff: false,
-            merge_autostash: false,
             clone_directory: String::new(),
             window_x: 0,
             window_y: 0,
@@ -538,7 +527,6 @@ impl Default for Settings {
             azure_org: String::new(),
             oauth_client_id: String::new(),
             fetch_all_remotes: false,
-            pull_stash: false,
             push_all_tags: false,
             checkout_after_create: true,
             stash_include_untracked: false,
@@ -547,11 +535,9 @@ impl Default for Settings {
             status_interval: 0,
             show_worktrees: true,
             max_commits: max_commits_default(),
-            rebase_autostash: false,
             rebase_update_refs: false,
             apply_stash_delete: false,
             push_tag_on_create: false,
-            checkout_stash: false,
             workspace_show_title: false,
             scan_depth: scan_depth_default(),
             commit_type: commit_type_default(),
@@ -720,12 +706,6 @@ pub fn apply_fork(
     );
     take_bool(
         fork,
-        "Pull_StashAndReapply",
-        &mut settings.pull_stash,
-        &mut preferences,
-    );
-    take_bool(
-        fork,
         "Push_PushAllTags",
         &mut settings.push_all_tags,
         &mut preferences,
@@ -756,20 +736,8 @@ pub fn apply_fork(
     );
     take_bool(
         fork,
-        "Checkout_StashAndReapply",
-        &mut settings.checkout_stash,
-        &mut preferences,
-    );
-    take_bool(
-        fork,
         "ShowWorktrees",
         &mut settings.show_worktrees,
-        &mut preferences,
-    );
-    take_bool(
-        fork,
-        "RebaseAutostash",
-        &mut settings.rebase_autostash,
         &mut preferences,
     );
     take_bool(

@@ -455,15 +455,12 @@ test("shortcuts do not open layers behind a menu or the forge dialog", async ({ 
   await expect(page.locator('[data-layer="forge"]')).toHaveCount(0);
 });
 
-test("checkout discard confirmation names the current and target branch", async ({ page }) => {
-  await openLabScene(page, "dialog-checkoutDirty", '[data-dialog="checkoutDirty"]');
-  await page.locator('[data-dialog="checkoutDirty"] .text-button.danger').click();
-  await page.locator('[data-dialog="checkoutDirty"] .commit').click();
-  const confirm = page.locator("[data-confirm]");
-  await expect(confirm).toBeVisible();
-  await expect(confirm).toContainText(/current branch/i);
-  await expect(confirm).toContainText("topic");
-  await page.keyboard.press("Escape");
+test("merge stays available with local changes and stashes them", async ({ page }) => {
+  await openLabScene(page, "dialog-merge", '[data-dialog="merge"]');
+  const dialog = page.locator('[data-dialog="merge"]');
+  await expect(dialog.locator(".commit")).toBeEnabled();
+  await expect(dialog.locator(".dialog-error")).toHaveCount(0);
+  await expect(dialog).toContainText("Local changes are stashed first.");
 });
 
 test("unified diff keeps row nodes while scrolling", async ({ page }) => {

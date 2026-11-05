@@ -229,7 +229,7 @@
                 { label: shell.tr("menu.compareBranches"), disabled: !shell.compareWith || shell.compareWith === row.name, run: () => { shell.drops = [shell.compareWith, row.name]; void shell.compareDrops(); } },
                 { label: shell.tr("menu.pushAs"), run: () => { shell.draft = row.name; shell.draftExtra = shell.refs?.remotes[0]?.name ?? "origin"; shell.draftUser = row.name; shell.dialog = "pushAs"; } },
                 { label: shell.tr("menu.merge"), run: () => { shell.draft = row.name; shell.draftExtra = shell.settings.mergeNoFf ? "no-ff" : "ff"; shell.dialog = "merge"; } },
-                { label: shell.tr("menu.rebaseOnto"), run: () => shell.mutate({ action: "rebase", onto: row.name, autostash: shell.settings.mergeAutostash }) },
+                { label: shell.tr("menu.rebaseOnto"), run: () => shell.mutate({ action: "rebase", onto: row.name, autostash: true }) },
                 { label: shell.tr("menu.delete"), run: () => shell.removeBranch(row.name) },
                 { label: shell.tr("menu.forceDelete"), run: () => shell.ask(shell.tr("menu.forceDelete"), row.name, () => void shell.mutate({ action: "deleteBranch", name: row.name, force: true })) },
               ] : []),
@@ -274,7 +274,7 @@
             role="group"
             oncontextmenu={(event) => shell.openMenu(event, [
               { label: shell.tr("menu.checkout"), run: () => shell.mutate({ action: "checkoutRemote", remote: row.remote, branch: row.name }) },
-              { label: shell.tr("menu.pullInto"), run: () => shell.mutate({ action: "pullRef", remote: row.remote, branch: row.name, rebase: shell.settings.pullRebase, autostash: shell.settings.mergeAutostash }) },
+              { label: shell.tr("menu.pullInto"), run: () => shell.mutate({ action: "pullRef", remote: row.remote, branch: row.name, rebase: shell.settings.pullRebase, autostash: true }) },
               { label: shell.tr("menu.pushHere"), run: () => shell.mutate({ action: "pushRef", remote: row.remote, branch: row.name, forceWithLease: shell.settings.forceWithLease }) },
               { label: shell.tr("menu.deleteRemote"), run: () => shell.ask(shell.tr("menu.deleteRemote"), shell.tr("dialog.deleteRemoteBody", { name: `${row.remote}/${row.name}` }), () => void shell.mutate({ action: "deleteRemoteBranch", remote: row.remote, branch: row.name })) },
               { label: shell.tr("menu.copyName"), run: () => shell.copyText(`${row.remote}/${row.name}`) },

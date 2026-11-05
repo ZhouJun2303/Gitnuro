@@ -156,7 +156,6 @@ export type Settings = {
   proxyPort: number;
   signCommits: boolean;
   mergeNoFf: boolean;
-  mergeAutostash: boolean;
   cloneDirectory: string;
   windowX: number;
   windowY: number;
@@ -233,7 +232,6 @@ export type Settings = {
   azureOrg: string;
   oauthClientId: string;
   fetchAllRemotes: boolean;
-  pullStash: boolean;
   pushAllTags: boolean;
   checkoutAfterCreate: boolean;
   stashIncludeUntracked: boolean;
@@ -242,11 +240,9 @@ export type Settings = {
   statusInterval: number;
   showWorktrees: boolean;
   maxCommits: number;
-  rebaseAutostash: boolean;
   rebaseUpdateRefs: boolean;
   applyStashDelete: boolean;
   pushTagOnCreate: boolean;
-  checkoutStash: boolean;
   workspaceShowTitle: boolean;
   scanDepth: number;
   /** Last commit-message type chosen in the composer. */

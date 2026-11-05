@@ -347,7 +347,6 @@ export type Messages = {
     deleteWorkspaceBody: string;
     restoreFileBody: string;
     discardBody: string;
-    discardCheckoutBody: string;
     discardFilesBody: string;
     stashFiles: string;
     stashFile: string;
@@ -371,7 +370,6 @@ export type Messages = {
     mergeFileCount: string;
     mergeFastForwardNote: string;
     mergeAutostash: string;
-    mergeClean: string;
     fastForward: string;
     noFastForward: string;
     squash: string;
@@ -484,7 +482,6 @@ export type Messages = {
     pushBody: string;
     fetchAllRemotes: string;
     pullInto: string;
-    pullStash: string;
     pushTo: string;
     pushDefault: string;
     pushAllTags: string;
@@ -527,8 +524,6 @@ export type Messages = {
     result: string;
     verticalTabs: string;
     showSpace: string;
-    bringChanges: string;
-    stashFirst: string;
     discardChanges: string;
     checkoutStashMessage: string;
     checkoutStashed: string;
@@ -552,8 +547,6 @@ export type Messages = {
     maxCommits: string;
     scanDepth: string;
     workspaceTitle: string;
-    checkoutStash: string;
-    rebaseAutostash: string;
     rebaseUpdateRefs: string;
     applyStashDelete: string;
     pushTagOnCreate: string;
@@ -621,7 +614,6 @@ export type Messages = {
     dates: string;
     swapPanes: string;
     mergeNoFfPref: string;
-    mergeAutostashPref: string;
     signCommits: string;
     signOffDefault: string;
     gravatar: string;

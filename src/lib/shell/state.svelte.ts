@@ -167,7 +167,6 @@ export class ShellState {
     proxyPort: 0,
     signCommits: false,
     mergeNoFf: false,
-    mergeAutostash: false,
     cloneDirectory: "",
     windowX: 0,
     windowY: 0,
@@ -244,7 +243,6 @@ export class ShellState {
     azureOrg: "",
     oauthClientId: "",
     fetchAllRemotes: false,
-    pullStash: false,
     pushAllTags: false,
     checkoutAfterCreate: true,
     stashIncludeUntracked: false,
@@ -253,11 +251,9 @@ export class ShellState {
     statusInterval: 0,
     showWorktrees: true,
     maxCommits: 500,
-    rebaseAutostash: false,
     rebaseUpdateRefs: false,
     applyStashDelete: false,
     pushTagOnCreate: false,
-    checkoutStash: false,
     workspaceShowTitle: false,
     scanDepth: 5,
     commitType: "feat",
@@ -557,9 +553,6 @@ export class ShellState {
 
 
   syncRebase = $state(false);
-
-
-  syncStash = $state(false);
 
 
   syncForce = $state(false);
@@ -3020,7 +3013,7 @@ export class ShellState {
 
 
   doPull() {
-    return this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: this.settings.pullStash });
+    return this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: true });
   }
 
 

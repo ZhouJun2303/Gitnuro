@@ -26,7 +26,7 @@
   let primedDialog = "";
   let lastFocus: HTMLElement | null = null;
   const largeDialogs = new Set(["prefs", "resolve", "stats", "rebase", "accounts", "output", "mergeConflict"]);
-  const smallDialogs = new Set(["reset", "branch", "tag", "rename", "upstream", "reword", "remote", "submodule", "worktree", "continue", "about", "checkoutNotice", "stashRename", "stashBranch", "renameTab", "colorTab", "groupRename", "askInput", "checkoutDirty", "workspace", "credential"]);
+  const smallDialogs = new Set(["reset", "branch", "tag", "rename", "upstream", "reword", "remote", "submodule", "worktree", "continue", "about", "checkoutNotice", "stashRename", "stashBranch", "renameTab", "colorTab", "groupRename", "askInput", "workspace", "credential"]);
   function dialogSize(kind: string) {
     if (largeDialogs.has(kind)) return "lg";
     if (smallDialogs.has(kind)) return "sm";
@@ -53,10 +53,6 @@
       first.focus();
     }
   }
-
-  const checkoutLabel = $derived(
-    shell.draftExtra === "stash" ? shell.tr("dialog.stashFirst") : shell.draftExtra === "discard" ? shell.tr("dialog.discardChanges") : shell.tr("dialog.bringChanges"),
-  );
 
   $effect(() => {
     const dialog = shell.dialog ?? "";
@@ -144,9 +140,9 @@
           }
           else if (shell.dialog === "pull") {
             const request = shell.draft && shell.draftExtra
-              ? { action: "pullRef", remote: shell.draft, branch: shell.draftExtra, rebase: shell.syncRebase, autostash: shell.syncStash }
-              : { action: "pull", rebase: shell.syncRebase, autostash: shell.syncStash };
-            shell.settings = { ...shell.settings, pullRebase: shell.syncRebase, pullStash: shell.syncStash };
+              ? { action: "pullRef", remote: shell.draft, branch: shell.draftExtra, rebase: shell.syncRebase, autostash: true }
+              : { action: "pull", rebase: shell.syncRebase, autostash: true };
+            shell.settings = { ...shell.settings, pullRebase: shell.syncRebase };
             void shell.savePrefs(false);
             shell.dialog = null;
             void shell.mutate(request);
@@ -172,8 +168,8 @@
           else if (shell.dialog === "rename") void shell.mutate({ action: "renameBranch", name: shell.draft, to: shell.draftExtra });
           else if (shell.dialog === "upstream") void shell.mutate({ action: "setUpstream", branch: shell.draft, upstream: shell.draftExtra });
           else if (shell.dialog === "reword") void shell.mutate({ action: "reword", rev: shell.draftExtra || "HEAD", summary: shell.draft });
-          else if (shell.dialog === "rebase" && shell.selectedCommit) void shell.mutate({ action: "rebaseInteractive", onto: shell.selectedCommit, drop: [], steps: buildRebaseSteps(shell.rebaseSteps, shell.rebasePicked), autostash: shell.settings.rebaseAutostash, updateRefs: shell.updateRefs });
-          else if (shell.dialog === "merge") void shell.mutate({ action: "merge", name: shell.draft, squash: shell.draftExtra === "squash", noFf: shell.draftExtra === "no-ff", autostash: shell.settings.mergeAutostash, summary: shell.mergeSummary, description: shell.mergeBody });
+          else if (shell.dialog === "rebase" && shell.selectedCommit) void shell.mutate({ action: "rebaseInteractive", onto: shell.selectedCommit, drop: [], steps: buildRebaseSteps(shell.rebaseSteps, shell.rebasePicked), autostash: true, updateRefs: shell.updateRefs });
+          else if (shell.dialog === "merge") void shell.mutate({ action: "merge", name: shell.draft, squash: shell.draftExtra === "squash", noFf: shell.draftExtra === "no-ff", autostash: true, summary: shell.mergeSummary, description: shell.mergeBody });
           else if (shell.dialog === "continue") void shell.mutate({ action: "continue", message: shell.draft });
           else if (shell.dialog === "repo") {
             try {
@@ -239,22 +235,6 @@
             shell.settings = { ...shell.settings, groupNames: [...shell.settings.groupNames.filter((item) => !item.startsWith(`${folder}\t`)), `${folder}\t${shell.draft.trim()}`] };
             void shell.savePrefs(false);
             shell.dialog = null;
-          }
-          else if (shell.dialog === "checkoutDirty") {
-            const name = shell.pendingCheckout;
-            if (shell.draftExtra === "discard") {
-              shell.ask(shell.tr("dialog.discardChanges"), shell.tr("dialog.discardCheckoutBody", { current: shell.branchLabel, target: name }), async () => {
-                await shell.mutate({ action: "reset", rev: "HEAD", mode: "hard" });
-                if (!shell.actionError) await shell.mutate({ action: "checkout", name });
-                shell.dialog = null;
-              });
-              return;
-            }
-            shell.dialog = null;
-            if (shell.draftExtra === "stash") {
-              await shell.mutate({ action: "stash", message: "", includeUntracked: false });
-              if (!shell.actionError) await shell.mutate({ action: "checkout", name });
-            } else await shell.mutate({ action: "checkout", name });
           }
           else if (shell.dialog === "squash" && shell.selectedCommit) {
             const chosen = shell.shownCommits.filter((commit) => shell.drops.includes(commit.id));
@@ -437,7 +417,6 @@
             <strong class="sync-value">{shell.snapshot?.branch ?? ""}</strong>
           </div>
           <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncRebase} onchange={(event) => { shell.settings = { ...shell.settings, pullRebase: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.pullWithRebase")}</label>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncStash} onchange={(event) => { shell.settings = { ...shell.settings, pullStash: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.pullStash")}</label>
           <div class="composer-row">
             <button class="commit" type="submit">{shell.tr("chrome.pull")}</button>
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("dialog.cancel")}</button>
@@ -627,12 +606,8 @@
           </label>
           <p class="empty">{shell.tr("dialog.mergeFileCount", { count: String(shell.mergeFiles.length) })}</p>
           {#if shell.draftExtra === "ff"}<p class="empty">{shell.tr("dialog.mergeFastForwardNote")}</p>{/if}
-          {#if shell.settings.mergeAutostash}
-            <p class="empty">{shell.tr("dialog.mergeAutostash")}</p>
-          {:else if dirty}
-            <p class="dialog-error">{shell.tr("dialog.mergeClean")}</p>
-          {/if}
-          <button class="commit" type="submit" disabled={dirty && !shell.settings.mergeAutostash}>{shell.tr("dialog.merge")}</button>
+          {#if dirty}<p class="empty">{shell.tr("dialog.mergeAutostash")}</p>{/if}
+          <button class="commit" type="submit">{shell.tr("dialog.merge")}</button>
         {:else if shell.dialog === "repo"}
           <h2>{shell.tr("chrome.repoSettings")}</h2>
           <label>{shell.tr("dialog.authorName")} <input bind:value={shell.draft} placeholder={shell.tr("dialog.authorEmpty")} /></label>
@@ -679,17 +654,6 @@
           <p class="empty">{shell.tr("dialog.squashHint")}</p>
           <input placeholder={shell.tr("dialog.message")} aria-label={shell.tr("dialog.message")} bind:value={shell.draft} />
           <button class="commit" type="submit">{shell.tr("dialog.squash")}</button>
-        {:else if shell.dialog === "checkoutDirty"}
-          <h2>{shell.tr("menu.checkout")} {shell.pendingCheckout}</h2>
-          <div class="composer-row">
-            <button class="text-button" class:on={shell.draftExtra === "bring"} aria-pressed={shell.draftExtra === "bring"} type="button" onclick={() => { shell.draftExtra = "bring"; }}>{shell.tr("dialog.bringChanges")}</button>
-            <button class="text-button" class:on={shell.draftExtra === "stash"} aria-pressed={shell.draftExtra === "stash"} type="button" onclick={() => { shell.draftExtra = "stash"; }}>{shell.tr("dialog.stashFirst")}</button>
-            <button class="text-button danger" class:on={shell.draftExtra === "discard"} aria-pressed={shell.draftExtra === "discard"} type="button" onclick={() => { shell.draftExtra = "discard"; }}>{shell.tr("dialog.discardChanges")}</button>
-          </div>
-          <div class="composer-row">
-            <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="submit">{checkoutLabel}</button>
-          </div>
         {:else if shell.dialog === "checkoutNotice"}
           <h2>{shell.tr("menu.checkout")}</h2>
           <p class="empty">{shell.tr("dialog.checkoutStashed", { name: shell.pendingCheckout })}</p>

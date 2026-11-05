@@ -371,7 +371,7 @@ fn squash_replays_commits_after_the_range() {
     let third = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
     commit_file(&repo, "d.txt", "d\n", "fourth");
     fs::write(repo.path.join("dirty.txt"), "nope\n").unwrap();
-    let dirty = perform(
+    perform(
         &repo.path,
         Mutation::Squash {
             from: second.clone(),
@@ -379,18 +379,9 @@ fn squash_replays_commits_after_the_range() {
             summary: "squashed".into(),
         },
     )
-    .unwrap_err();
-    assert!(dirty.to_string().contains("clean"), "{dirty}");
-    fs::remove_file(repo.path.join("dirty.txt")).unwrap();
-    perform(
-        &repo.path,
-        Mutation::Squash {
-            from: second,
-            to: third,
-            summary: "squashed".into(),
-        },
-    )
     .unwrap();
+    assert_eq!(fs::read_to_string(repo.path.join("dirty.txt")).unwrap(), "nope\n");
+    assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
     let log = repo.output(&["log", "--format=%s"]);
     assert!(log.contains("base"), "{log}");
     assert!(log.contains("squashed"), "{log}");
@@ -917,6 +908,19 @@ fn stash_paths_takes_untracked_files_without_the_flag() {
     assert!(!repo.path.join("new.txt").exists());
     assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "a\n");
     assert_eq!(repository_refs(&repo.path).unwrap().stashes.len(), 1);
+}
+
+#[test]
+fn checkout_stashes_local_changes_and_puts_them_back() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "b.txt", "b\n", "topic");
+    repo.git(&["checkout", "main"]);
+    fs::write(repo.path.join("a.txt"), "dirty\n").unwrap();
+    perform(&repo.path, Mutation::Checkout { name: "topic".into() }).unwrap();
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "dirty\n");
+    assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
 }
 
 #[test]

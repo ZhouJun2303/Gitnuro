@@ -64,7 +64,6 @@ export const dialogScenes = {
   github: dialog("github", "创建托管仓库"),
   stashRename: dialog("stashRename", "重命名贮藏"),
   stashBranch: dialog("stashBranch", "贮藏建分支"),
-  checkoutDirty: dialog("checkoutDirty", "检出脏工作区"),
   checkoutNotice: dialog("checkoutNotice", "检出后的贮藏"),
   activity: dialog("activity", "活动"),
   mailmap: dialog("mailmap", "mailmap"),

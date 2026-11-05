@@ -413,17 +413,11 @@ export function requestCheckout(shell: ShellState, name: string) {
       void shell.mutate({ action: "checkout", name });
       return;
     }
-    if (shell.settings.checkoutStash) {
-      void checkoutWithStash(shell, name);
-      return;
-    }
-    shell.pendingCheckout = name;
-    shell.draftExtra = "bring";
-    shell.dialog = "checkoutDirty";
+    void checkoutWithStash(shell, name);
   }
 
 async function checkoutWithStash(shell: ShellState, name: string, remote?: { remote: string; branch: string }) {
-    await shell.mutate({ action: "stash", message: shell.tr("dialog.checkoutStashMessage", { name }), includeUntracked: shell.settings.stashIncludeUntracked });
+    await shell.mutate({ action: "stash", message: shell.tr("dialog.checkoutStashMessage", { name }), includeUntracked: true });
     if (shell.actionError) return;
     if (remote) await shell.mutate({ action: "checkoutRemote", remote: remote.remote, branch: remote.branch });
     else await shell.mutate({ action: "checkout", name });
@@ -438,21 +432,12 @@ async function checkoutWithStash(shell: ShellState, name: string, remote?: { rem
 export async function quickCheckout(shell: ShellState, name: string, remote?: { remote: string; branch: string }) {
     if (shell.mode !== "live") return;
     const dirty = (shell.snapshot?.staged.length ?? 0) + (shell.snapshot?.unstaged.length ?? 0) > 0;
-    if (dirty && shell.settings.checkoutStash) {
+    if (dirty) {
       await checkoutWithStash(shell, name, remote);
       return;
     }
-    if (dirty) {
-      await shell.mutate({ action: "stash", message: shell.tr("dialog.checkoutStashMessage", { name }), includeUntracked: true });
-      if (shell.actionError) return;
-    }
     if (remote) await shell.mutate({ action: "checkoutRemote", remote: remote.remote, branch: remote.branch });
     else await shell.mutate({ action: "checkout", name });
-    if (shell.actionError) return;
-    if (dirty) {
-      shell.pendingCheckout = name;
-      shell.dialog = "checkoutNotice";
-    }
   }
 
 export function reopenClosed(shell: ShellState) {
@@ -476,7 +461,6 @@ export function confirmSync(shell: ShellState, kind: "fetch" | "pull" | "push") 
     shell.syncAll = shell.settings.fetchAllRemotes;
     shell.syncTags = kind === "fetch" ? shell.settings.fetchTags : shell.settings.pushAllTags;
     shell.syncRebase = shell.settings.pullRebase;
-    shell.syncStash = shell.settings.pullStash;
     shell.syncForce = false;
     shell.pushBranch = current?.name ?? shell.snapshot?.branch ?? "";
     shell.pushTo = "";

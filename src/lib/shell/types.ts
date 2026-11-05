@@ -41,7 +41,6 @@ export type Dialog =
     | "github"
     | "stashRename"
     | "stashBranch"
-    | "checkoutDirty"
     | "checkoutNotice"
     | "activity"
     | "mailmap"

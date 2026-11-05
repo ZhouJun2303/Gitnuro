@@ -759,7 +759,7 @@ export function dropCommits(shell: ShellState) {
       return;
     }
     shell.drops = [];
-    void shell.mutate({ action: "rebaseInteractive", onto: parent, drop: chosen.map((commit) => commit.id), autostash: shell.settings.mergeAutostash });
+    void shell.mutate({ action: "rebaseInteractive", onto: parent, drop: chosen.map((commit) => commit.id), autostash: true });
   }
 
 export function toggleDrop(shell: ShellState, id: string) {
