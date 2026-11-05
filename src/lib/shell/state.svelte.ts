@@ -1,4 +1,5 @@
 import { onMount, tick } from "svelte";
+import { pushState } from "$app/navigation";
 import { invoke } from "../perf";
 import { listen } from "@tauri-apps/api/event";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
@@ -5201,8 +5202,9 @@ export class ShellState {
     if (event.button === 3) this.goBack();
     else this.goForward();
     };
+    const addHistoryEntry = () => pushState("", { awegit: 1 });
     const onPop = () => {
-    history.pushState({ awegit: 1 }, "");
+    addHistoryEntry();
     this.goBack();
     };
     const onShortcut = this.onShortcut.bind(this);
@@ -5211,9 +5213,11 @@ export class ShellState {
     window.addEventListener("mousedown", onMouseNav);
     window.addEventListener("mousedown", onRememberPointer, true);
     window.addEventListener("mouseup", onMouseNav);
-    history.pushState({ awegit: 1 }, "");
+    // SvelteKit's router is initialized after hydration; wait a task before touching history.
+    const historyTimer = window.setTimeout(addHistoryEntry, 0);
     window.addEventListener("popstate", onPop);
     const detachNav = () => {
+    window.clearTimeout(historyTimer);
     window.removeEventListener("keydown", onShortcut);
     window.removeEventListener("mousedown", onMouseNav);
     window.removeEventListener("mousedown", onRememberPointer, true);
