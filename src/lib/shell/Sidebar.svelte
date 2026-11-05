@@ -215,12 +215,11 @@
           </button>
         {:else if row.kind === "local"}
           {@const remoteState = shell.branchRemoteState(row.name)}
+          {@const syncTitle = [row.ahead > 0 ? shell.tr("chrome.syncAhead", { count: String(row.ahead) }) : "", row.behind > 0 ? shell.tr("chrome.syncBehind", { count: String(row.behind) }) : ""].filter(Boolean).join(" · ") + (row.upstream ? ` · ${row.upstream}` : "")}
           <div
             class="side nested"
             class:deep={row.deep}
             class:current={row.current}
-            class:local-only={remoteState === "missing"}
-            class:mirrored={remoteState === "mirrored"}
             class:selected={shell.sideSelected === `local:${row.name}`}
             role="group"
             oncontextmenu={(event) => shell.openMenu(event, [
@@ -246,9 +245,18 @@
             <button class="file-select" type="button" title={remoteState === "missing" ? `${row.name} · ${shell.tr("chrome.localOnly")}` : row.name} onclick={(event) => { shell.sideSelected = `local:${row.name}`; if (event.ctrlKey || event.metaKey) shell.compareWith = row.name; else void shell.locateRef(row.name); }} ondblclick={() => !row.current && void shell.quickCheckout(row.name)}>
               <span class="twist"></span>
               {@render glyph(row.current ? "check" : "branch")}
+              {#if remoteState === "missing"}
+                <span class="track-dot missing" title={shell.tr("chrome.localOnly")}></span>
+              {:else if remoteState === "mirrored"}
+                <span class="track-dot mirrored" title={shell.tr("chrome.trackedRemote")}></span>
+              {/if}
               <span class="name">{shell.pinnedHere.has(row.name) ? "• " : ""}{row.group ? row.name.slice(row.group.length + 1) : row.name}</span>
-              {#if row.ahead > 0}<span class="ahead up">{row.ahead}</span>{/if}
-              {#if row.behind > 0}<span class="ahead down">{row.behind}</span>{/if}
+              {#if row.ahead > 0 || row.behind > 0}
+                <span class="sync" title={syncTitle}>
+                  {#if row.ahead > 0}<span class="ahead up">{row.ahead}</span>{/if}
+                  {#if row.behind > 0}<span class="ahead down">{row.behind}</span>{/if}
+                </span>
+              {/if}
             </button>
             {@render branchSwitches(row.name, !row.current && shell.mode === "live")}
           </div>
@@ -366,7 +374,7 @@
             <span class="twist"></span>
             {@render glyph("check")}
             <span class="name">{shell.branchLabel}</span>
-            {#if shell.mode === "sample"}<span class="ahead up">5</span>{/if}
+            {#if shell.mode === "sample"}<span class="sync"><span class="ahead up">5</span></span>{/if}
           </button>
           {@render branchSwitches(shell.branchLabel, false)}
         </div>

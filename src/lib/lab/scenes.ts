@@ -92,7 +92,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "commit", group: "主界面", title: "提交详情", repo: "full", ready: ".detail" }),
   scene({ id: "tree", group: "主界面", title: "文件树", repo: "full", ready: ".tree-row" }),
   scene({ id: "sidebar", group: "主界面", title: "侧栏", repo: "full", ready: ".sidebar" }),
-  scene({ id: "branch-badges", group: "主界面", title: "分支角标", repo: "full", ready: ".sidebar .side.nested.local-only" }),
+  scene({ id: "branch-badges", group: "主界面", title: "分支角标", repo: "full", ready: ".sidebar .track-dot.missing" }),
   scene({ id: "vertical-tabs", group: "主界面", title: "垂直标签", repo: "full", ready: ".vertical-tabs" }),
   scene({ id: "search", group: "主界面", title: "搜索提交", repo: "full", ready: "[data-layer=\"search\"]" }),
   scene({

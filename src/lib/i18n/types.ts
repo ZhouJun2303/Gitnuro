@@ -144,6 +144,9 @@ export type Messages = {
     updateStarted: string;
     updateVersion: string;
     localOnly: string;
+    trackedRemote: string;
+    syncAhead: string;
+    syncBehind: string;
     readingStatus: string;
     noChanges: string;
     inProgress: string;
