@@ -205,14 +205,9 @@ fn git_command() -> Command {
 
 fn resolve_launch() -> GitLaunch {
     if let Some(bundled) = BUNDLED_GIT.get() {
-        let dir = PathBuf::from(bundled);
-        if let Some(found) = launch_beside(&dir) {
+        if let Some(found) = bundled_launch(Path::new(bundled)) {
             return found;
         }
-        return GitLaunch {
-            program: OsString::from("git"),
-            path_prefix: Some(dir.into_os_string()),
-        };
     }
     #[cfg(windows)]
     if let Some(found) = launch_from_system_path() {
@@ -224,28 +219,46 @@ fn resolve_launch() -> GitLaunch {
     }
 }
 
-/// `dir` is Git's `cmd` folder. The real binary is `../mingw64/bin/git.exe`.
-fn launch_beside(dir: &Path) -> Option<GitLaunch> {
-    let mingw = dir.join("..").join("mingw64").join("bin");
-    let real = mingw.join("git.exe");
-    if !real.is_file() {
-        return None;
+/// How to start the Git under `dir` (its `cmd` folder), when that copy can run.
+fn bundled_launch(dir: &Path) -> Option<GitLaunch> {
+    if let Some(found) = launch_beside(dir) {
+        return Some(found);
     }
-    Some(GitLaunch {
-        program: real.into_os_string(),
-        path_prefix: Some(helper_path(&mingw)),
+    // Only the shim is left. Start it by absolute path: a bare `git` would be
+    // looked up in the parent's PATH, which often has no Git at all.
+    let shim = dir.join(if cfg!(windows) { "git.exe" } else { "git" });
+    shim.is_file().then(|| GitLaunch {
+        program: shim.into_os_string(),
+        path_prefix: Some(dir.as_os_str().to_os_string()),
     })
 }
 
-fn helper_path(mingw_bin: &Path) -> OsString {
-    let mut dirs = vec![mingw_bin.to_path_buf()];
-    if let Some(root) = mingw_bin.parent().and_then(|parent| parent.parent()) {
+/// `dir` is Git's `cmd` folder. The real binary sits in `<arch>/bin/git.exe`;
+/// recent MinGit uses `ucrt64`, older installs use `mingw64`.
+fn launch_beside(dir: &Path) -> Option<GitLaunch> {
+    let root = dir.parent()?;
+    for arch in ["ucrt64", "mingw64", "clang64", "clangarm64", "mingw32"] {
+        let bin = root.join(arch).join("bin");
+        let real = bin.join("git.exe");
+        if real.is_file() {
+            return Some(GitLaunch {
+                program: real.into_os_string(),
+                path_prefix: Some(helper_path(&bin)),
+            });
+        }
+    }
+    None
+}
+
+fn helper_path(bin: &Path) -> OsString {
+    let mut dirs = vec![bin.to_path_buf()];
+    if let Some(root) = bin.parent().and_then(|parent| parent.parent()) {
         let usr = root.join("usr").join("bin");
         if usr.is_dir() {
             dirs.push(usr);
         }
     }
-    std::env::join_paths(&dirs).unwrap_or_else(|_| mingw_bin.as_os_str().to_os_string())
+    std::env::join_paths(&dirs).unwrap_or_else(|_| bin.as_os_str().to_os_string())
 }
 
 #[cfg(windows)]
@@ -955,29 +968,65 @@ mod progress_tests {
 
 #[cfg(test)]
 mod launch_tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    use super::launch_beside;
+    use super::{bundled_launch, launch_beside};
+
+    fn bundle(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("awegit-git-launch-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("cmd")).unwrap();
+        std::fs::create_dir_all(root.join("usr").join("bin")).unwrap();
+        std::fs::write(root.join("cmd").join("git.exe"), b"shim").unwrap();
+        root
+    }
+
+    fn real_git(root: &Path, arch: &str) -> PathBuf {
+        let bin = root.join(arch).join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let real = bin.join("git.exe");
+        std::fs::write(&real, b"real").unwrap();
+        real
+    }
 
     #[test]
-    fn prefers_the_real_git_beside_the_cmd_wrapper() {
-        let root = std::env::temp_dir().join(format!("awegit-git-launch-{}", std::process::id()));
-        let cmd = root.join("cmd");
-        let mingw = root.join("mingw64").join("bin");
-        let usr = root.join("usr").join("bin");
-        std::fs::create_dir_all(&cmd).unwrap();
-        std::fs::create_dir_all(&mingw).unwrap();
-        std::fs::create_dir_all(&usr).unwrap();
-        std::fs::write(cmd.join("git.exe"), b"wrapper").unwrap();
-        std::fs::write(mingw.join("git.exe"), b"real").unwrap();
-        let launch = launch_beside(&cmd).expect("mingw git");
-        let program = Path::new(&launch.program);
-        assert!(program.is_file());
-        assert!(program.components().any(|part| part.as_os_str() == "mingw64"));
-        let prefix = launch.path_prefix.expect("helper path");
-        let text = prefix.to_string_lossy();
-        assert!(text.contains("mingw64"));
-        assert!(text.contains("usr"));
+    fn finds_the_real_git_in_every_layout() {
+        for arch in ["ucrt64", "mingw64", "clang64"] {
+            let root = bundle(arch);
+            let real = real_git(&root, arch);
+            let launch = launch_beside(&root.join("cmd")).expect("real git");
+            assert_eq!(Path::new(&launch.program), real);
+            let prefix = launch.path_prefix.expect("helper path").to_string_lossy().to_string();
+            assert!(prefix.contains(arch));
+            assert!(prefix.contains("usr"));
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    #[test]
+    fn ucrt64_wins_when_several_layouts_exist() {
+        let root = bundle("both");
+        real_git(&root, "mingw64");
+        let real = real_git(&root, "ucrt64");
+        let launch = launch_beside(&root.join("cmd")).expect("real git");
+        assert_eq!(Path::new(&launch.program), real);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn falls_back_to_the_shim_by_absolute_path() {
+        let root = bundle("shim");
+        let launch = bundled_launch(&root.join("cmd")).expect("shim");
+        assert_eq!(Path::new(&launch.program), root.join("cmd").join("git.exe"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn gives_up_when_the_bundle_has_no_git() {
+        let root = std::env::temp_dir().join(format!("awegit-git-empty-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("cmd")).unwrap();
+        assert!(bundled_launch(&root.join("cmd")).is_none());
         assert!(launch_beside(&root).is_none());
         let _ = std::fs::remove_dir_all(&root);
     }

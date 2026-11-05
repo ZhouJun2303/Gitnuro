@@ -85,7 +85,7 @@ pub enum Error {
     Item(#[from] gix::status::iter::Error),
     #[error(transparent)]
     Head(#[from] gix::reference::find::existing::Error),
-    #[error("git is not on PATH")]
+    #[error("could not start git: {0}")]
     GitMissing(#[source] std::io::Error),
     #[error("{0}")]
     Git(String),

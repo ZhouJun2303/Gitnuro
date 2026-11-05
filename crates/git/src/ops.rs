@@ -1807,7 +1807,7 @@ fn clone_repo(url: &str, destination: &str) -> Result<(), Error> {
         source,
     })?;
     let cwd = if parent.as_os_str().is_empty() {
-        std::env::current_dir().map_err(Error::GitMissing)?
+        std::env::current_dir().map_err(|source| Error::Git(format!("could not read the current directory: {source}")))?
     } else {
         parent.to_path_buf()
     };
@@ -1958,7 +1958,7 @@ fn custom(repo: &Path, command: &str, marked: &str, sha: &str, branch: &str, fil
         .env("AWEGIT_BRANCH", branch)
         .env("AWEGIT_FILE", file)
         .output()
-        .map_err(Error::GitMissing)?;
+        .map_err(|source| Error::Git(format!("could not start the custom command: {source}")))?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if output.status.success() {
