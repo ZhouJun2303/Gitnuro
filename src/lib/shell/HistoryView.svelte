@@ -216,9 +216,14 @@
         <span class="lane-names">
           {#each labels as label (label)}
             {@const remoteState = shell.branchRemoteState(label)}
-            <span class="lane-name" class:local-only={remoteState === "missing"} class:mirrored={remoteState === "mirrored"} class:compact={shell.settings.compactBranchLabels} class:quiet={active !== null && tone !== laneColors[active]} style:--lane={tone ?? "var(--text-secondary)"} title={remoteState === "missing" ? `${label} · ${shell.tr("chrome.localOnly")}` : label}>
+            <span class="lane-name" class:compact={shell.settings.compactBranchLabels} class:quiet={active !== null && tone !== laneColors[active]} style:--lane={tone ?? "var(--text-secondary)"} title={remoteState === "missing" ? `${label} · ${shell.tr("chrome.localOnly")}` : label}>
               {#if shell.refKind(label) === "remote" && !shell.refs?.branches.some((branch) => branch.name === label)}
                 <svg class="lane-remote" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.2" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="6" cy="6" r="1.15" fill="currentColor"/></svg>
+              {/if}
+              {#if remoteState === "missing"}
+                <span class="lane-dot missing"></span>
+              {:else if remoteState === "mirrored"}
+                <span class="lane-dot mirrored"></span>
               {/if}
               <span>{label}</span>
             </span>

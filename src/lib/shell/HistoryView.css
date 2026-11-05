@@ -84,38 +84,20 @@
 
 .lane-name.compact { gap: 2px; padding: 0 4px; }
 
-.lane-name.local-only,
-  .lane-name.mirrored {
-    position: relative;
-    padding-right: 12px;
-  }
-
-.lane-name.local-only::after,
-  .lane-name.mirrored::after {
-    position: absolute;
-    top: 2px;
-    right: 2px;
+.lane-dot {
+    width: 5px;
+    height: 5px;
+    flex: none;
     border-radius: 50%;
     pointer-events: none;
   }
 
-.lane-name.local-only::after {
-    content: "!";
-    width: 9px;
-    height: 9px;
-    background: var(--modified);
-    color: var(--on-modified);
-    font-size: 7px;
-    font-weight: 700;
-    line-height: 9px;
-    text-align: center;
+.lane-dot.missing {
+    border: 1px solid var(--text-secondary);
+    opacity: 0.55;
   }
 
-.lane-name.mirrored::after {
-    content: "";
-    top: 3px;
-    width: 5px;
-    height: 5px;
+.lane-dot.mirrored {
     background: var(--added);
   }
 
