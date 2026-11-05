@@ -610,6 +610,10 @@ export class ShellState {
   graphColumns: Array<string | null> = [];
 
 
+  /** Plain counter: the graph effect must not read the signal it writes. */
+  graphEpoch = 0;
+
+
   graphVersion = $state(0);
 
 
@@ -5087,7 +5091,7 @@ export class ShellState {
         this.graphWidth = width;
         this.graphColumns = columns;
         this.graphItems = items;
-        this.graphVersion += 1;
+        this.graphVersion = ++this.graphEpoch;
       };
       if (count >= commits.length && prev) {
         publish(prev.rows, prev.width, prev.columns);
