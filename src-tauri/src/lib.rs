@@ -1745,7 +1745,9 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
         query.push('=');
         query.push_str(&encode_query(value));
     }
-    let url = if query.is_empty() { "index.html".to_string() } else { format!("index.html?{query}") };
+    // Keep the root path: SvelteKit's dev server and client router both 404 on `/index.html`.
+    // A query-only relative reference resolves against the dev server or the tauri protocol base.
+    let url = if query.is_empty() { "index.html".to_string() } else { format!("?{query}") };
     let window = tauri::webview::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
         .title("AweGit")
         .inner_size(1100.0, 720.0)
