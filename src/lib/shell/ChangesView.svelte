@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { onMount, tick } from "svelte";
   import { getShell } from "./context";
   import "./ChangesView.css";
   import SplitHandle from "../SplitHandle.svelte";
@@ -13,6 +13,15 @@
   const onStagedScroll = onVirtualScroll((top) => (shell.stagedTop = top));
   const onFileScroll = onVirtualScroll((top) => (shell.fileTop = top));
   let typeOpen = $state(false);
+
+  onMount(() => {
+    // A refresh while the history view was open clears the diff; reload it here
+    // instead of leaving the pane on its "reading" placeholder.
+    const stale = !!shell.diff && shell.diff.path !== shell.selectedPath;
+    if (shell.mode === "live" && shell.selectedPath && (stale || (!shell.diff && !shell.diffError && !shell.conflictView))) {
+      void shell.loadDiff();
+    }
+  });
 
   function flipFile(event: MouseEvent, path: string, side: Side) {
     if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.button !== 0) return;

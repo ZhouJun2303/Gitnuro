@@ -291,7 +291,7 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
         disabled: locked,
         run: () => {
           shell.diffSelected = [];
-          void shell.mutate({ action: "stageHunk", file, index: hunkIndex, unstage: shell.selectedSide === "staged" });
+          void shell.mutate({ action: "stageHunk", file, index: hunkIndex, unstage: shell.selectedSide === "staged", ignoreSpace: shell.settings.ignoreSpace });
         },
       });
       if (shell.selectedSide === "unstaged") {
@@ -300,7 +300,7 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
           disabled: locked,
           run: () => {
             shell.diffSelected = [];
-            void shell.mutate({ action: "discardHunk", file, index: hunkIndex });
+            void shell.mutate({ action: "discardHunk", file, index: hunkIndex, ignoreSpace: shell.settings.ignoreSpace });
           },
         });
       }

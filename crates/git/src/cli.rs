@@ -440,25 +440,54 @@ fn run_prepared(
     if let Ok(mut guard) = CHILDREN.lock() {
         guard.push((repo_key(&owned), pid));
     }
-    if let Some(bytes) = stdin_bytes {
-        use std::io::Write;
-        let write_result = child.stdin.as_mut().map(|stdin| stdin.write_all(bytes));
-        if let Some(Err(source)) = write_result {
+    let output = std::thread::scope(|scope| {
+        // Feed stdin while stdout is drained. Writing the whole input first deadlocks
+        // as soon as the child fills its stdout pipe and stops reading.
+        let writer = stdin_bytes.and_then(|bytes| {
+            child.stdin.take().map(|mut stdin| {
+                scope.spawn(move || {
+                    use std::io::Write;
+                    let result = stdin.write_all(bytes);
+                    drop(stdin);
+                    result
+                })
+            })
+        });
+        let output = if let Some(progress) = progress {
+            stream_output(&mut child, progress, owned.display().to_string())
+        } else {
+            child.wait_with_output().map_err(Error::GitMissing)
+        };
+        if output.is_err() {
+            // Unblock the writer before joining it if reading output failed mid-flight.
             stop_process_tree(pid);
-            let _ = child.wait();
+        }
+        let write_result = writer.map(|handle| {
+            handle
+                .join()
+                .unwrap_or_else(|_| Err(std::io::Error::new(std::io::ErrorKind::Other, "git stdin writer panicked")))
+        });
+        (output, write_result)
+    });
+    let (output, write_result) = output;
+    let output = match output {
+        Ok(output) => output,
+        Err(error) => {
+            untrack(pid);
+            return Err(error);
+        }
+    };
+    // A command that exits before reading all of stdin produces a broken pipe; that is
+    // not more interesting than the command's own exit status.
+    if let Some(Err(source)) = write_result {
+        if source.kind() != std::io::ErrorKind::BrokenPipe {
             untrack(pid);
             return Err(Error::Read {
                 path: "git stdin".to_string(),
                 source,
             });
         }
-        drop(child.stdin.take());
     }
-    let output = if let Some(progress) = progress {
-        stream_output(&mut child, progress, owned.display().to_string())?
-    } else {
-        child.wait_with_output().map_err(Error::GitMissing)?
-    };
     untrack(pid);
     let note = failure_note(output.status.success(), allow_failure, &output.stderr);
     if let Some(hook) = TRACE.get() {

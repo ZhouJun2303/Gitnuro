@@ -397,3 +397,102 @@ test("dialogs focus the first field and fall back to close", async ({ page }) =>
   await openLabScene(page, "dialog-about", '[data-dialog="about"]');
   await expect(page.locator('[data-dialog="about"] .dialog-close')).toBeFocused();
 });
+
+test("returning to changes reloads a diff cleared by a history refresh", async ({ page }) => {
+  await openLabScene(page, "changes", "section.diff .diff-body");
+  await page.locator('[data-section="history"]').click();
+  await page.waitForTimeout(400);
+  await page.locator(".menubar button", { hasText: "View" }).click();
+  await page.locator(".menu button", { hasText: "Refresh" }).click();
+  await page.waitForTimeout(1200);
+  await page.locator('[data-section="changes"]').click();
+  await expect(page.locator("section.diff .diff-body")).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator("section.diff .diff-empty")).toHaveCount(0);
+});
+
+test("switching repositories clears the previous commit detail", async ({ page }) => {
+  const layout = (await lab("lab_layout")) as { even: string };
+  await openLabScene(page, "history", ".commit-row");
+  await page.locator(".commit-row").nth(1).click();
+  await expect(page.locator(".detail").getByText("AweGit Lab").first()).toBeVisible();
+  await page.locator(".tab-add").click();
+  await page.locator(".repo-row", { hasText: "even" }).first().click();
+  await expect(page.locator(".chrome-side .tab.active")).toContainText("even", { timeout: 30_000 });
+  await expect(page.locator(".detail .empty")).toContainText(/Select a file|选择/, { timeout: 20_000 });
+  expect(layout.even).not.toBe("");
+});
+
+test("interactive rebase from HEAD explains there is nothing newer", async ({ page }) => {
+  await openLabScene(page, "history", ".commit-row");
+  await page.locator(".commit-row").first().click({ button: "right" });
+  await page.locator('[data-layer="menu"] button', { hasText: /Interactive rebase/ }).click();
+  await expect(page.locator('[data-dialog="rebase"]')).toHaveCount(0);
+  await expect(page.locator('.identity-floor[data-layer="error"]')).toContainText(/no newer commits/i);
+});
+
+test("changing one rebase verb leaves the other rows alone", async ({ page }) => {
+  await openLabScene(page, "dialog-rebase", ".dialog-scroll");
+  const selects = page.locator(".dialog-scroll select");
+  expect(await selects.count()).toBeGreaterThan(1);
+  await selects.first().selectOption("drop");
+  await expect(selects.first()).toHaveValue("drop");
+  await expect(selects.nth(1)).toHaveValue("pick");
+});
+
+test("shortcuts do not open layers behind a menu or the forge dialog", async ({ page }) => {
+  await openLabScene(page, "history", ".commit-row");
+  await page.locator(".menubar button", { hasText: "View" }).click();
+  await page.keyboard.press("Control+,");
+  await expect(page.locator('[data-dialog="prefs"]')).toHaveCount(0);
+  await expect(page.locator('[data-layer="menu"]')).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-layer="menu"]')).toHaveCount(0);
+
+  await openLabScene(page, "notes", '[data-layer="forge"]');
+  await page.keyboard.press("Control+k");
+  await expect(page.locator(".palette")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-layer="forge"]')).toHaveCount(0);
+});
+
+test("checkout discard confirmation names the current and target branch", async ({ page }) => {
+  await openLabScene(page, "dialog-checkoutDirty", '[data-dialog="checkoutDirty"]');
+  await page.locator('[data-dialog="checkoutDirty"] .text-button.danger').click();
+  await page.locator('[data-dialog="checkoutDirty"] .commit').click();
+  const confirm = page.locator("[data-confirm]");
+  await expect(confirm).toBeVisible();
+  await expect(confirm).toContainText(/current branch/i);
+  await expect(confirm).toContainText("topic");
+  await page.keyboard.press("Escape");
+});
+
+test("unified diff keeps row nodes while scrolling", async ({ page }) => {
+  await openLabScene(page, "prefs-git", '[data-dialog="prefs"]');
+  const style = page.locator('[data-dialog="prefs"] label', { hasText: "Diff view" }).locator("select");
+  await style.selectOption("unified");
+  await page.locator('[data-dialog="prefs"] .commit').click();
+  await page.waitForTimeout(500);
+  await openLabScene(page, "diff-long", ".diff-body");
+  await expect(page.locator("section.diff .diff-body")).not.toHaveClass(/split/);
+  expect(await page.locator("section.diff .diff-body .virtual-row").count()).toBeGreaterThan(20);
+  const result = await page.evaluate(async () => {
+    const body = document.querySelector<HTMLElement>("section.diff .diff-body");
+    const windowBox = body?.querySelector<HTMLElement>(".commit-window");
+    if (!body || !windowBox) return null;
+    let added = 0;
+    const observer = new MutationObserver((records) => {
+      for (const record of records) added += record.addedNodes.length;
+    });
+    observer.observe(windowBox, { childList: true });
+    for (let step = 0; step < 3; step += 1) {
+      body.scrollTop = 500 + step * 160;
+      body.dispatchEvent(new Event("scroll"));
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    }
+    observer.disconnect();
+    return added;
+  });
+  expect(result).not.toBeNull();
+  expect(result ?? 0).toBeLessThan(80);
+});

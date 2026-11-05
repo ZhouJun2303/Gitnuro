@@ -338,29 +338,34 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
       parents: row?.parents ?? [],
     };
     try {
-      shell.commitDetail = await invoke<CommitDetail>("commit_detail", { path: shell.repoPath(), id });
+      const detail = await invoke<CommitDetail>("commit_detail", { path: shell.repoPath(), id });
+      if (gen !== shell.patchGen || shell.selectedCommit !== id) return;
+      shell.commitDetail = detail;
     } catch (error) {
-      shell.actionError = shell.message(error);
+      if (gen === shell.patchGen && shell.selectedCommit === id) shell.actionError = shell.message(error);
     }
     try {
-      shell.commitFiles = await invoke<StatusFile[]>("commit_files", { path: shell.repoPath(), id });
-      if (gen !== shell.patchGen) return;
-      shell.historyFile = shell.commitFiles[0]?.path ?? null;
-      shell.historyDiff = shell.historyFile
+      const files = await invoke<StatusFile[]>("commit_files", { path: shell.repoPath(), id });
+      if (gen !== shell.patchGen || shell.selectedCommit !== id) return;
+      shell.commitFiles = files;
+      const file = files[0]?.path ?? null;
+      shell.historyFile = file;
+      const diff = file
         ? await invoke<FileDiff>("show_commit_file", {
             path: shell.repoPath(),
             id,
-            file: shell.historyFile,
+            file,
             unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
           })
         : null;
-      if (gen !== shell.patchGen) return;
-      if (shell.historyFile && shell.historyDiff) {
-        shell.patchCache = { [shell.historyFile]: shell.historyDiff };
+      if (gen !== shell.patchGen || shell.selectedCommit !== id || shell.historyFile !== file) return;
+      shell.historyDiff = diff;
+      if (file && diff) {
+        shell.patchCache = { [file]: diff };
         shell.openPatches = [];
       }
     } catch (error) {
-      if (gen === shell.patchGen) shell.actionError = shell.message(error);
+      if (gen === shell.patchGen && shell.selectedCommit === id) shell.actionError = shell.message(error);
     }
     });
   }

@@ -28,9 +28,77 @@ pub fn stage_paths(repo: &Path, paths: &[String]) -> Result<(), Error> {
     git_paths(repo, &["add", "--"], paths)
 }
 
-/// Stage every change in the work tree. Ignored files stay ignored.
+/// Stage every change in the work tree. Ignored files stay ignored, and unresolved conflicts are left alone.
 pub fn stage_all(repo: &Path) -> Result<(), Error> {
-    run(repo, &["add", "-A", "--", "."]).map(|_| ())
+    let unmerged = unmerged_paths(repo)?;
+    if unmerged.is_empty() {
+        return run(repo, &["add", "-A", "--", "."]).map(|_| ());
+    }
+    let blocked: std::collections::HashSet<String> = unmerged.into_iter().collect();
+    let status = run(repo, &["status", "--porcelain", "-z"])?;
+    let parts: Vec<&[u8]> = status.stdout.split(|byte| *byte == 0).collect();
+    let mut paths = Vec::new();
+    let mut index = 0;
+    while index < parts.len() {
+        let part = parts[index];
+        index += 1;
+        if part.len() < 4 {
+            continue;
+        }
+        let code = &part[..2];
+        let path = String::from_utf8_lossy(&part[3..]).into_owned();
+        if !blocked.contains(&path) {
+            paths.push(path);
+        }
+        if code.iter().any(|byte| *byte == b'R' || *byte == b'C') {
+            if let Some(next) = parts.get(index) {
+                let other = String::from_utf8_lossy(next).into_owned();
+                if !other.is_empty() && !blocked.contains(&other) {
+                    paths.push(other);
+                }
+                index += 1;
+            }
+        }
+    }
+    stage_path_chunks(repo, &paths)
+}
+
+fn stage_path_chunks(repo: &Path, paths: &[String]) -> Result<(), Error> {
+    let mut start = 0;
+    while start < paths.len() {
+        let mut end = start;
+        let mut bytes = 0;
+        while end < paths.len() && end - start < 80 && bytes + paths[end].len() + 1 <= 6000 {
+            bytes += paths[end].len() + 1;
+            end += 1;
+        }
+        if end == start {
+            end = start + 1;
+        }
+        let mut owned = vec!["--literal-pathspecs".to_string(), "add".to_string(), "-A".to_string(), "--".to_string()];
+        for path in &paths[start..end] {
+            owned.push(check_path(path)?.to_string());
+        }
+        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
+        run(repo, &args)?;
+        start = end;
+    }
+    Ok(())
+}
+
+/// Paths that still have unmerged index entries.
+fn unmerged_paths(repo: &Path) -> Result<Vec<String>, Error> {
+    let output = run(repo, &["ls-files", "-u", "-z"])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut paths = std::collections::BTreeSet::new();
+    for entry in text.split('\0') {
+        if let Some((_, path)) = entry.split_once('\t') {
+            if !path.is_empty() {
+                paths.insert(path.to_string());
+            }
+        }
+    }
+    Ok(paths.into_iter().collect())
 }
 
 /// Remove the given paths from the index and leave the work tree as it is.
@@ -61,6 +129,9 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
     let summary = request.summary.trim();
     if summary.is_empty() {
         return Err(Error::EmptySummary);
+    }
+    if !unmerged_paths(repo)?.is_empty() {
+        return Err(Error::Git("resolve all conflicts before committing".into()));
     }
     if request.convention && !commit_subject_allowed(summary) {
         return Err(Error::Git(CONVENTION_ERROR.into()));
@@ -240,9 +311,12 @@ const MAX_DIFF_LINES: usize = 4_000;
 const MAX_UNTRACKED_BYTES: u64 = 1_048_576;
 
 /// Stage or unstage a single hunk. Hunks come from a zero-context diff, so adjacent edits stay separate.
-pub fn stage_hunk(repo: &Path, path: &str, index: u32, unstage: bool) -> Result<(), Error> {
+pub fn stage_hunk(repo: &Path, path: &str, index: u32, unstage: bool, ignore_space: bool) -> Result<(), Error> {
     let path = check_path(path)?;
     let mut args = vec!["diff", "--no-ext-diff", "--no-color", "--unified=0"];
+    if ignore_space {
+        args.push("--ignore-all-space");
+    }
     if unstage {
         args.push("--cached");
     }
@@ -277,29 +351,29 @@ pub fn stage_line(repo: &Path, path: &str, text: &str, addition: bool, at: u32, 
         return Err(Error::Git("a staged line cannot contain a newline".into()));
     }
     let current = index_blob(repo, path)?;
-    let (mut lines, trailing) = split_lines(&current);
+    let current = decode_text(&current, path, "stage the whole file instead")?;
+    let (mut lines, eol) = split_keep_eol(&current);
     let remove = unstage == addition;
     if remove {
-        let index = at as usize;
-        if lines.get(index).map(String::as_str) != Some(text) {
+        if !remove_line(&mut lines, at as usize, text) {
             return Err(Error::Git(format!("line {at} is not in {path}")));
         }
-        lines.remove(index);
     } else {
-        let index = (at as usize).min(lines.len());
-        lines.insert(index, text.to_string());
+        insert_line(&mut lines, at as usize, text, &eol);
     }
-    let mut body = lines.join("\n");
-    if trailing || !body.is_empty() {
-        body.push('\n');
-    }
-    write_index(repo, path, &body)
+    write_index(repo, path, lines.concat().as_bytes())
 }
 
 /// Drop one unstaged hunk from the work tree. The index is left alone.
-pub fn discard_hunk(repo: &Path, path: &str, index: u32) -> Result<(), Error> {
+pub fn discard_hunk(repo: &Path, path: &str, index: u32, ignore_space: bool) -> Result<(), Error> {
     let path = check_path(path)?;
-    let output = run(repo, &["diff", "--no-ext-diff", "--no-color", "--unified=0", "--", path])?;
+    let mut args = vec!["diff", "--no-ext-diff", "--no-color", "--unified=0"];
+    if ignore_space {
+        args.push("--ignore-all-space");
+    }
+    args.push("--");
+    args.push(path);
+    let output = run(repo, &args)?;
     let text = String::from_utf8_lossy(&output.stdout);
     let (preamble, hunks) = split_hunks(&text);
     let hunk = hunks.get(index as usize).ok_or_else(|| Error::Git(format!("hunk {index} is not in {path}")))?;
@@ -321,21 +395,23 @@ pub fn discard_line(repo: &Path, path: &str, text: &str, addition: bool, at: u32
     if !full.starts_with(repo) {
         return Err(Error::Path(path.to_string()));
     }
-    let current = std::fs::read_to_string(&full).unwrap_or_default();
-    let (mut lines, trailing) = split_lines(&current);
+    let current = match std::fs::read(&full) {
+        Ok(bytes) => decode_text(&bytes, path, "discard the whole file instead")?,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(source) => {
+            return Err(Error::Read {
+                path: path.to_string(),
+                source,
+            })
+        }
+    };
+    let (mut lines, eol) = split_keep_eol(&current);
     if addition {
-        let index = at as usize;
-        if lines.get(index).map(String::as_str) != Some(text) {
+        if !remove_line(&mut lines, at as usize, text) {
             return Err(Error::Git(format!("line {at} is not in {path}")));
         }
-        lines.remove(index);
     } else {
-        let index = (at as usize).min(lines.len());
-        lines.insert(index, text.to_string());
-    }
-    let mut body = lines.join("\n");
-    if trailing || !body.is_empty() {
-        body.push('\n');
+        insert_line(&mut lines, at as usize, text, &eol);
     }
     if let Some(parent) = full.parent() {
         std::fs::create_dir_all(parent).map_err(|source| Error::Read {
@@ -343,10 +419,62 @@ pub fn discard_line(repo: &Path, path: &str, text: &str, addition: bool, at: u32
             source,
         })?;
     }
-    std::fs::write(&full, body).map_err(|source| Error::Read {
+    std::fs::write(&full, lines.concat().as_bytes()).map_err(|source| Error::Read {
         path: path.to_string(),
         source,
     })
+}
+
+fn decode_text(bytes: &[u8], path: &str, hint: &str) -> Result<String, Error> {
+    String::from_utf8(bytes.to_vec()).map_err(|_| Error::Git(format!("{path} is not valid UTF-8; {hint}")))
+}
+
+/// Split text into lines that keep their CRLF/LF terminator.
+fn split_keep_eol(text: &str) -> (Vec<String>, String) {
+    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    (text.split_inclusive('\n').map(str::to_string).collect(), eol.to_string())
+}
+
+fn line_text(line: &str) -> &str {
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    line.strip_suffix('\r').unwrap_or(line)
+}
+
+fn remove_line(lines: &mut Vec<String>, index: usize, text: &str) -> bool {
+    if lines.get(index).map(|line| line_text(line)) != Some(text) {
+        return false;
+    }
+    let removed = lines.remove(index);
+    // The removed line was the unterminated last line: the new last line must not
+    // gain a trailing newline just because the old separator became the end.
+    if !removed.ends_with('\n') {
+        if let Some(last) = lines.last_mut() {
+            if last.ends_with('\n') {
+                last.pop();
+                if last.ends_with('\r') {
+                    last.pop();
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Insert a line using the file's line ending and keep a missing trailing newline missing.
+fn insert_line(lines: &mut Vec<String>, index: usize, text: &str, eol: &str) {
+    if lines.is_empty() {
+        lines.push(format!("{text}{eol}"));
+        return;
+    }
+    let index = index.min(lines.len());
+    if index == lines.len() && !lines.last().is_some_and(|line| line.ends_with('\n')) {
+        if let Some(last) = lines.last_mut() {
+            last.push_str(eol);
+        }
+        lines.push(text.to_string());
+        return;
+    }
+    lines.insert(index, format!("{text}{eol}"));
 }
 
 /// The two conflict stages plus the working tree text.
@@ -688,28 +816,16 @@ pub fn resolve_conflict(repo: &Path, path: &str, side: &str, text: &str) -> Resu
     }
 }
 
-fn index_blob(repo: &Path, path: &str) -> Result<String, Error> {
+fn index_blob(repo: &Path, path: &str) -> Result<Vec<u8>, Error> {
     match run(repo, &["show", &format!(":{path}")]) {
-        Ok(output) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
-        Err(Error::Git(_)) => Ok(String::new()),
+        Ok(output) => Ok(output.stdout),
+        Err(Error::Git(_)) if !in_index(repo, path)? => Ok(Vec::new()),
         Err(error) => Err(error),
     }
 }
 
-fn split_lines(text: &str) -> (Vec<String>, bool) {
-    if text.is_empty() {
-        return (Vec::new(), true);
-    }
-    let trailing = text.ends_with('\n');
-    let mut lines: Vec<String> = text.split('\n').map(|line| line.trim_end_matches('\r').to_string()).collect();
-    if trailing {
-        lines.pop();
-    }
-    (lines, trailing)
-}
-
-fn write_index(repo: &Path, path: &str, body: &str) -> Result<(), Error> {
-    let hashed = run_stdin(repo, &["hash-object", "-w", "--stdin"], body.as_bytes())?;
+fn write_index(repo: &Path, path: &str, body: &[u8]) -> Result<(), Error> {
+    let hashed = run_stdin(repo, &["hash-object", "-w", "--stdin"], body)?;
     let hash = String::from_utf8_lossy(&hashed.stdout).trim().to_string();
     if hash.len() < 40 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(Error::Git("git hash-object returned no id".into()));
@@ -796,7 +912,7 @@ pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignor
         return diff_untracked(repo, path);
     }
     let mut parsed = parse_diff(path, staged, &text);
-    parsed.hunks = zero_hunks(repo, path, staged).unwrap_or(0);
+    parsed.hunks = zero_hunks(repo, path, staged, ignore_space).unwrap_or(0);
     if text.contains("git-lfs.github.com/spec") {
         parsed.lines.insert(
             0,
@@ -861,8 +977,11 @@ fn lfs_pointer(bytes: &[u8]) -> Option<String> {
     }
 }
 
-fn zero_hunks(repo: &Path, path: &str, staged: bool) -> Result<u32, Error> {
+fn zero_hunks(repo: &Path, path: &str, staged: bool, ignore_space: bool) -> Result<u32, Error> {
     let mut args = vec!["diff", "--no-ext-diff", "--no-color", "--unified=0"];
+    if ignore_space {
+        args.push("--ignore-all-space");
+    }
     if staged {
         args.push("--cached");
     }

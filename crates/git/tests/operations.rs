@@ -309,7 +309,7 @@ fn hunk_stage_keeps_only_that_hunk() {
     repo.git(&["commit", "-m", "base"]);
     fs::write(repo.path.join("a.txt"), "1\n2-changed\n3\n4\n5-changed\n").unwrap();
 
-    stage_hunk(&repo.path, "a.txt", 0, false).unwrap();
+    stage_hunk(&repo.path, "a.txt", 0, false, false).unwrap();
     let cached = repo.output(&["diff", "--cached"]);
     assert!(cached.contains("2-changed"), "{cached}");
     assert!(!cached.contains("5-changed"), "{cached}");
@@ -463,6 +463,7 @@ fn discard_hunk_keeps_the_other_change() {
         Mutation::DiscardHunk {
             file: "a.txt".into(),
             index: 0,
+            ignore_space: false,
         },
     )
     .unwrap();

@@ -243,7 +243,7 @@
           else if (shell.dialog === "checkoutDirty") {
             const name = shell.pendingCheckout;
             if (shell.draftExtra === "discard") {
-              shell.ask(shell.tr("dialog.discardChanges"), shell.tr("dialog.discardBody", { name }), async () => {
+              shell.ask(shell.tr("dialog.discardChanges"), shell.tr("dialog.discardCheckoutBody", { current: shell.branchLabel, target: name }), async () => {
                 await shell.mutate({ action: "reset", rev: "HEAD", mode: "hard" });
                 if (!shell.actionError) await shell.mutate({ action: "checkout", name });
                 shell.dialog = null;

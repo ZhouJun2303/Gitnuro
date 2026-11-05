@@ -347,6 +347,7 @@ export type Messages = {
     deleteWorkspaceBody: string;
     restoreFileBody: string;
     discardBody: string;
+    discardCheckoutBody: string;
     discardFilesBody: string;
     stashFiles: string;
     stashFile: string;
@@ -421,6 +422,7 @@ export type Messages = {
     gitlabHost: string;
     toolHint: string;
     startRebase: string;
+    rebaseNothing: string;
     newTag: string;
     remoteName: string;
     path: string;

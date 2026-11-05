@@ -600,10 +600,10 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
             };
             join([names, flag("fake", *fake), flag("directory", *directory)])
         }
-        Mutation::StageHunk { file, index, unstage } => join([scrub(file), format!("hunk={index}"), flag("unstage", *unstage)]),
+        Mutation::StageHunk { file, index, unstage, .. } => join([scrub(file), format!("hunk={index}"), flag("unstage", *unstage)]),
         Mutation::StageLine { file, unstage, .. } => join([scrub(file), flag("unstage", *unstage)]),
         Mutation::StagePaths { files, unstage } => join([files.iter().cloned().map(|file| scrub(&file)).collect::<Vec<_>>().join(","), flag("unstage", *unstage)]),
-        Mutation::DiscardHunk { file, index } => join([scrub(file), format!("hunk={index}")]),
+        Mutation::DiscardHunk { file, index, .. } => join([scrub(file), format!("hunk={index}")]),
         Mutation::DiscardLine { file, .. } | Mutation::Discard { file } | Mutation::Delete { file } => scrub(file),
         Mutation::DiscardPaths { files } => format!("files={}", files.len()),
         Mutation::Resolve { file, side, text } => join([scrub(file), scrub(side), format!("bytes={}", text.len())]),

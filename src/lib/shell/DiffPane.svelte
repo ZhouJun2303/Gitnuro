@@ -182,7 +182,7 @@
   function stageActive() {
     const file = shell.selectedPath;
     if (!file || shell.busy || activeHunk == null) return;
-    void shell.mutate({ action: "stageHunk", file, index: activeHunk, unstage: shell.selectedSide === "staged" });
+    void shell.mutate({ action: "stageHunk", file, index: activeHunk, unstage: shell.selectedSide === "staged", ignoreSpace: shell.settings.ignoreSpace });
   }
 
   function discardActive() {
@@ -190,7 +190,7 @@
     if (!file || shell.busy || activeHunk == null || shell.selectedSide === "staged") return;
     const index = activeHunk;
     shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody", { name: file }), () => {
-      void shell.mutate({ action: "discardHunk", file, index });
+      void shell.mutate({ action: "discardHunk", file, index, ignoreSpace: shell.settings.ignoreSpace });
     });
   }
 
@@ -207,7 +207,7 @@
       return;
     }
     if (index == null) return;
-    void shell.mutate({ action: "stageHunk", file, index, unstage: shell.selectedSide === "staged" });
+    void shell.mutate({ action: "stageHunk", file, index, unstage: shell.selectedSide === "staged", ignoreSpace: shell.settings.ignoreSpace });
   }
 
   function discardHovered() {
@@ -228,7 +228,7 @@
     }
     if (index == null) return;
     shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody", { name: file }), () => {
-      void shell.mutate({ action: "discardHunk", file, index });
+      void shell.mutate({ action: "discardHunk", file, index, ignoreSpace: shell.settings.ignoreSpace });
     });
   }
 
@@ -381,7 +381,7 @@
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
                 <div class="commit-window" style:height="{shell.diffLines.length * shell.diffRowHeight}px">
-                  {#each shell.diffWindow.rows as line, index (`${shell.diffWindow.start}-${index}`)}
+                  {#each shell.diffWindow.rows as line, index (`d${shell.diffWindow.start + index}`)}
                     {@const at = shell.diffWindow.start + index}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -390,7 +390,7 @@
                       <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.oldNo ?? ""}</span>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
                       <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.newNo ?? ""}</span>
-                      {#each shell.paint(line.text, shell.selectedPath ?? "") as token, tokenIndex (`${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
+                      {#each shell.paint(line.text, shell.selectedPath ?? "") as token, tokenIndex (`d${at}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
                     </span>
                   {/each}
                 </div>

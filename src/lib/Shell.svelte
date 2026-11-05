@@ -36,6 +36,9 @@
     if (!shell.dialog && !shell.textMerge) return;
     if (shell.commandLogOpen) shell.commandLogOpen = false;
     if (shell.repoPickerOpen) shell.repoPickerOpen = false;
+    if (shell.menu) shell.dismissMenu(false);
+    if (shell.launchOpen) shell.closeLaunch();
+    if (shell.forgeOpen) shell.forgeOpen = null;
   });
 
   function openSubmenu(item: MenuItem, anchor: HTMLElement, focus = false) {

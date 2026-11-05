@@ -241,9 +241,11 @@ export async function loadDiff(shell: ShellState) {
         if (!shell.same(shell.diff, value)) shell.diff = value;
         shell.diffError = null;
         if (value.binary) {
-          shell.preview = await invoke<FilePreview | null>("file_preview", { path, file });
+          const preview = await invoke<FilePreview | null>("file_preview", { path, file });
           const older = await invoke<FilePreview | null>("revision_preview", { path, rev: "HEAD", file }).catch(() => null);
-          shell.imageNew = shell.preview?.dataUrl ?? null;
+          if (token !== shell.diffToken || !shell.viewing(path) || shell.selectedPath !== file) return;
+          shell.preview = preview;
+          shell.imageNew = preview?.dataUrl ?? null;
           shell.imageOld = older?.dataUrl ?? null;
         } else {
           shell.preview = null;

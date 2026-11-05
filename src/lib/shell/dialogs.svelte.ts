@@ -37,7 +37,7 @@ export async function selectPrefTab(shell: ShellState, tab: PrefTab) {
   }
 
 export async function openLaunch(shell: ShellState) {
-    if (shell.dialog || shell.textMerge || shell.confirmAsk) return;
+    if (shell.dialog || shell.textMerge || shell.confirmAsk || shell.forgeOpen) return;
     shell.repoPickerOpen = false;
     shell.commandLogOpen = false;
     shell.launch = "";
@@ -505,8 +505,7 @@ export async function openForge(shell: ShellState, kind: "notes" | "pulls") {
   }
 
 export function setRebaseVerb(shell: ShellState, rev: string, verb: string) {
-    const targets = shell.rebasePicked.includes(rev) && shell.rebasePicked.length > 1 ? new Set(shell.rebasePicked) : new Set([rev]);
-    shell.rebaseSteps = shell.rebaseSteps.map((step) => (targets.has(step.rev) ? { ...step, verb } : step));
+    shell.rebaseSteps = shell.rebaseSteps.map((step) => (step.rev === rev ? { ...step, verb } : step));
   }
 
 export function quick(shell: ShellState, event: MouseEvent, dialogName: Dialog, run: () => void) {
@@ -1037,7 +1036,11 @@ export function openRebase(shell: ShellState) {
     if (!shell.selectedCommit) return;
     const source = shell.mode === "live" ? shell.commitsLive : commits.map((commit) => ({ id: commit.id, summary: commit.summary }));
     const index = source.findIndex((commit) => commit.id === shell.selectedCommit);
-    const newer = index > 0 ? source.slice(0, index).slice().reverse() : source.slice(0, 3);
+    const newer = index > 0 ? source.slice(0, index).slice().reverse() : [];
+    if (newer.length === 0) {
+      shell.actionError = shell.tr("dialog.rebaseNothing");
+      return;
+    }
     shell.updateRefs = shell.settings.rebaseUpdateRefs;
     shell.rebaseSteps = newer.map((commit) => ({ verb: "pick", rev: commit.id, summary: commit.summary, message: commit.summary }));
     shell.rebasePicked = newer.map((commit) => commit.id);

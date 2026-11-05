@@ -22,7 +22,7 @@ pub enum ResetMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "camelCase")]
+#[serde(tag = "action", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Mutation {
     Fetch {
         #[serde(default)]
@@ -203,6 +203,9 @@ pub enum Mutation {
         index: u32,
         #[serde(default)]
         unstage: bool,
+        /// The displayed diff ignored whitespace, so the hunk index must use the same view.
+        #[serde(default)]
+        ignore_space: bool,
     },
     StageLine {
         file: String,
@@ -220,6 +223,9 @@ pub enum Mutation {
     DiscardHunk {
         file: String,
         index: u32,
+        /// The displayed diff ignored whitespace, so the hunk index must use the same view.
+        #[serde(default)]
+        ignore_space: bool,
     },
     DiscardLine {
         file: String,
@@ -542,7 +548,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             append_ignore(repo, &paths, fake, directory)
         }
         Mutation::WriteMailmap { text } => write_mailmap(repo, &text),
-        Mutation::StageHunk { file, index, unstage } => stage_hunk(repo, &file, index, unstage),
+        Mutation::StageHunk { file, index, unstage, ignore_space } => stage_hunk(repo, &file, index, unstage, ignore_space),
         Mutation::StageLine {
             file,
             text,
@@ -557,7 +563,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
                 stage_paths(repo, &files)
             }
         }
-        Mutation::DiscardHunk { file, index } => discard_hunk(repo, &file, index),
+        Mutation::DiscardHunk { file, index, ignore_space } => discard_hunk(repo, &file, index, ignore_space),
         Mutation::DiscardLine {
             file,
             text,
@@ -767,6 +773,9 @@ fn stash_rename(repo: &Path, name: &str, message: &str) -> Result<(), Error> {
 fn stash_index(selector: &str) -> Option<usize> {
     let start = selector.find("{")?;
     let end = selector.find('}')?;
+    if end <= start + 1 {
+        return None;
+    }
     selector[start + 1..end].parse().ok()
 }
 
@@ -1589,27 +1598,15 @@ fn rebase_interactive(
     }
     args.push("-i");
     args.push(onto);
-    let result = run_env(
+    run_env(
         repo,
         &args,
         &[
             ("GIT_SEQUENCE_EDITOR", editor.sequence.as_str()),
             ("GIT_EDITOR", editor.editor.as_str()),
         ],
-    );
-    match result {
-        Ok(_) => Ok(()),
-        Err(error) => {
-            if error.to_string().contains("editor") {
-                if in_progress(repo)?.is_some() {
-                    let _ = run(repo, &["rebase", "--abort"]);
-                }
-                replay_drop(repo, onto, &ids, drop)
-            } else {
-                Err(error)
-            }
-        }
-    }
+    )
+    .map(|_| ())
 }
 
 fn rebase_steps(repo: &Path, onto: &str, steps: &[RebaseStep], autostash: bool, update_refs: bool) -> Result<(), Error> {
@@ -1683,17 +1680,6 @@ fn commit_subject(repo: &Path, rev: &str) -> Result<String, Error> {
 
 fn dropped(id: &str, drop: &[String]) -> bool {
     drop.iter().any(|item| item == id || id.starts_with(item.as_str()) || item.starts_with(id))
-}
-
-fn replay_drop(repo: &Path, onto: &str, ids: &[String], drop: &[String]) -> Result<(), Error> {
-    run(repo, &["reset", "--hard", onto])?;
-    for id in ids {
-        if dropped(id, drop) {
-            continue;
-        }
-        with_editor(repo, &["cherry-pick", id])?;
-    }
-    Ok(())
 }
 
 fn clone_repo(url: &str, destination: &str) -> Result<(), Error> {

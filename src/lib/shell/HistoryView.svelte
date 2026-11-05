@@ -43,7 +43,7 @@
             {/if}
           </div>
         </div>
-        <section class="history flex-fill" bind:this={shell.historyEl} use:restoreHistory onscroll={onHistoryScroll}>
+        <section class="history flex-fill" bind:this={shell.historyEl} bind:clientHeight={shell.historyHeight} use:restoreHistory onscroll={onHistoryScroll}>
           {#if shell.contentHits}
             <div class="pane-head"><span>{shell.tr("chrome.contentSearch")}</span><button class="text-button" type="button" onclick={() => (shell.contentHits = null)}>{shell.tr("chrome.close")}</button></div>
             {#each shell.contentHits as hit (hit.id)}

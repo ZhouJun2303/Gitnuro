@@ -356,6 +356,9 @@ export class ShellState {
   historyTop = $state(0);
 
 
+  historyHeight = $state(0);
+
+
   blameLines = $state<BlameLine[] | null>(null);
 
 
@@ -1420,7 +1423,7 @@ export class ShellState {
   });
 
 
-  historyWindow = $derived(windowSlice(this.historyItems, this.historyTop, this.rowCommit));
+  historyWindow = $derived(windowSlice(this.historyItems, this.historyTop, this.rowCommit, 80, this.windowRows(this.historyHeight, this.rowCommit)));
 
 
   historyStart = $derived(this.historyWindow.start);
@@ -1519,13 +1522,13 @@ export class ShellState {
   diffRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)));
 
 
-  diffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.diffLines } : windowSlice(this.diffLines, this.diffTop, this.diffRowHeight));
+  diffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.diffLines } : windowSlice(this.diffLines, this.diffTop, this.diffRowHeight, 80, this.windowRows(this.diffHeight, this.diffRowHeight)));
 
 
-  blameWindow = $derived(windowSlice(this.blameLines ?? [], this.blameTop, this.diffRowHeight));
+  blameWindow = $derived(windowSlice(this.blameLines ?? [], this.blameTop, this.diffRowHeight, 80, this.windowRows(this.diffHeight, this.diffRowHeight)));
 
 
-  historyDiffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.historyDiff?.lines ?? [] } : windowSlice(this.historyDiff?.lines ?? [], this.historyDiffTop, this.diffRowHeight));
+  historyDiffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.historyDiff?.lines ?? [] } : windowSlice(this.historyDiff?.lines ?? [], this.historyDiffTop, this.diffRowHeight, 80, this.windowRows(this.historyDetailHeight, this.diffRowHeight)));
 
 
   splitRows = $derived(this.settings.diffStyle === "split" ? splitDiff(this.diffLines) : []);
@@ -2173,6 +2176,11 @@ export class ShellState {
   /** Unchanged data keeps its old object so lists and diffs are not rendered again. */
   same(left: unknown, right: unknown) {
     return sameValue(left, right);
+  }
+
+
+  windowRows(height: number, rowHeight: number) {
+    return Math.max(48, Math.ceil(Math.max(height, 0) / Math.max(rowHeight, 1)) + 24);
   }
 
 
@@ -3637,6 +3645,24 @@ export class ShellState {
       this.applySnapshot(value);
       if (!staying) {
         this.sideTop = 0;
+        this.resetCommitView();
+        this.selectedCommit = null;
+        this.commitDetail = null;
+        this.commitFiles = [];
+        this.historyDiff = null;
+        this.graphSolo = null;
+        this.drops = [];
+        this.contentHits = null;
+        this.comparePair = null;
+        this.blameLines = null;
+        this.expandedMerges = [];
+        this.historyTab = "commit";
+        this.historyTop = 0;
+        this.fileTop = 0;
+        this.stagedTop = 0;
+        this.diffTop = 0;
+        this.blameTop = 0;
+        this.historyDiffTop = 0;
         const saved = this.drafts.get(path) ?? this.drafts.get(value.path);
         const savedType = saved?.commitType ?? "";
         this.commitType = isCommitType(savedType) ? savedType : this.preferredCommitType();
@@ -4911,12 +4937,12 @@ export class ShellState {
       this.confirmAsk = null;
       return true;
     }
-    if (event.key === "Escape" && this.textMerge && !this.menu && !this.launchOpen) {
+    if (event.key === "Escape" && this.textMerge) {
       event.preventDefault();
       this.closeTextMerge();
       return true;
     }
-    if (event.key === "Escape" && this.dialog && !this.busy && !this.menu && !this.launchOpen) {
+    if (event.key === "Escape" && this.dialog && !this.busy) {
       event.preventDefault();
       if (this.dialog === "prefs") void this.savePrefs(true);
       this.dialog = null;
@@ -4990,6 +5016,14 @@ export class ShellState {
     if (this.dialog || this.textMerge || this.confirmAsk) return;
     const action = shortcut(event);
     if (!action) return;
+    // Command log, repository picker, menus, quick launch and forge are modal enough
+    // that shortcuts must not write behind them. Escape still closes the top layer.
+    const overlay = this.menu || this.launchOpen || this.commandLogOpen || this.repoPickerOpen || this.forgeOpen;
+    const launchKeys = this.launchOpen && (action === "up" || action === "down");
+    if (overlay && action !== "exit" && !launchKeys) {
+      if (action === "launch" && this.launchOpen) this.closeLaunch();
+      return;
+    }
     const editor = typing(event);
     if (this.launchOpen && (action === "up" || action === "down" || action === "exit")) {
       event.preventDefault();

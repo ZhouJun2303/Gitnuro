@@ -249,6 +249,7 @@ version = "2.0.1"
 dependencies = [
  "gix",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
 ]
 

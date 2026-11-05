@@ -5,8 +5,9 @@
 
   const shell = getShell();
   let top = $state(0);
+  let viewport = $state(0);
   const lines = $derived(shell.blobText ? shell.blobText.split("\n") : []);
-  const view = $derived(windowSlice(lines, top, 18));
+  const view = $derived(windowSlice(lines, top, 18, 80, Math.max(48, Math.ceil(Math.max(viewport, 0) / 18) + 24)));
   const onScroll = onVirtualScroll((value) => (top = value));
 
   function closePane() {
@@ -34,7 +35,7 @@
   {:else if lines.length === 0}
     <p class="empty">{shell.tr("chrome.emptyFile")}</p>
   {:else}
-    <div class="blob-scroll" onscroll={onScroll}>
+    <div class="blob-scroll" onscroll={onScroll} bind:clientHeight={viewport}>
       <div class="commit-window" style:height="{lines.length * 18}px">
         {#each view.rows as line, index (`b-${view.start + index}`)}
           <div class="blob-row" style:top="{(view.start + index) * 18}px">
