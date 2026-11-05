@@ -21,6 +21,8 @@
 
 - 标识 `com.zhoujun.awegit`，产品名 AweGit
 - `feat/dev` 是日常开发分支，功能和修复提交到这里；`release` 只放发布提交和 `latest.json`
+- `release` 受 GitHub 规则集保护，只有仓库所有者能直接推送。协作者从 `feat/dev` 开分支，向 `feat/dev` 提 PR
+- 协作者开 PR 时 base 选 `feat/dev`。仓库默认分支是 `release`，不选会指错
 - 不改全局 gitconfig。仓库本地配置和 `.git/awegit` 可以写
 - 写操作按仓库排队
 - 前端依赖写在 `package.json`，Rust 依赖写在对应的 `Cargo.toml`
