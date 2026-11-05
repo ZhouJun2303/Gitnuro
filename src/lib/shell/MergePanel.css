@@ -259,22 +259,29 @@
 }
 
 .merge-cell.hunk {
-  border-top: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-  background: color-mix(in srgb, var(--detail-accent) 12%, var(--canvas));
+  border-top: 1px dashed color-mix(in srgb, var(--modified) 55%, var(--line));
+  border-bottom: 1px dashed color-mix(in srgb, var(--modified) 55%, var(--line));
+  background: color-mix(in srgb, var(--modified) 5%, var(--canvas));
 }
 
-.merge-cell.hunk.hover,
-.merge-cell.hunk.on {
-  background: color-mix(in srgb, var(--detail-accent) 20%, var(--canvas));
+.merge-cell.hunk.hover {
+  background: color-mix(in srgb, var(--modified) 14%, var(--canvas));
 }
 
 .merge-cell.hunk.on {
-  box-shadow: inset 2px 0 0 var(--accent);
+  border-top-style: solid;
+  border-bottom-style: solid;
+  border-top-color: color-mix(in srgb, var(--detail-accent) 50%, var(--line));
+  border-bottom-color: color-mix(in srgb, var(--detail-accent) 50%, var(--line));
+  background: color-mix(in srgb, var(--detail-accent) 22%, var(--canvas));
+  box-shadow: inset 3px 0 0 var(--detail-accent);
 }
 
 .merge-side.right .merge-cell.hunk.on {
-  box-shadow: inset 2px 0 0 var(--added);
+  border-top-color: color-mix(in srgb, var(--added) 50%, var(--line));
+  border-bottom-color: color-mix(in srgb, var(--added) 50%, var(--line));
+  background: color-mix(in srgb, var(--added) 20%, var(--canvas));
+  box-shadow: inset 3px 0 0 var(--added);
 }
 
 .merge-cell.hunk pre {

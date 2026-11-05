@@ -222,6 +222,11 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.actionError = "实验室操作错误：推送被拒绝";
     return;
   }
+  if (id === "text-merge-many") {
+    await showChange(shell, "src/many-hunks.ts", "unstaged");
+    await shell.openTextMerge("src/many-hunks.ts");
+    return;
+  }
   if (id === "text-merge") {
     await showChange(shell, "src/both-sides.ts", "unstaged");
     await shell.openTextMerge("src/both-sides.ts");

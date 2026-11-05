@@ -139,12 +139,105 @@ function dirtyBatch(repo, folder, count = FILL) {
   }
 }
 
+// Every entry is either shared context or one region both branches rewrite.
+// Together they merge into many separate conflict hunks in one file.
+const manyHunkSpec = [
+  {
+    base: ['export const project = "base";'],
+    topic: ['export const project = "topic";'],
+    main: ['export const project = "main";'],
+  },
+  {
+    stable: ["", 'import { readFile } from "node:fs/promises";', "", "// 02 · both sides replace one line"],
+    base: ['export const mode = "base";'],
+    topic: ['export const mode = "topic";'],
+    main: ['export const mode = "main";'],
+  },
+  {
+    stable: ["", "const stableOne = 1;", "const stableTwo = 2;", "", "// 03 · topic deletes, main edits"],
+    base: ['const legacyA = "base";', 'const legacyB = "base";'],
+    topic: [],
+    main: ['const legacyA = "main";', 'const legacyB = "main";'],
+  },
+  {
+    stable: ["", "const stableThree = 3;", "const stableFour = 4;", "", "// 04 · main deletes, topic edits"],
+    base: ['const retiredA = "base";', 'const retiredB = "base";'],
+    topic: ['const retiredA = "topic";', 'const retiredB = "topic";'],
+    main: [],
+  },
+  {
+    stable: ["", "const stableFive = 5;", "", "// 05 · both sides insert in the same spot", 'const beforeInsert = "kept";'],
+    base: [],
+    topic: ['const insertedByTopic = true;', "const topicKeepsOrder = 1;"],
+    main: ['const insertedByMain = true;'],
+  },
+  {
+    stable: ["", 'const afterInsert = "kept";', "", "const stableSix = 6;", "const stableSeven = 7;", "", "// 06 · one line on topic, four on main"],
+    base: ["function settle() {", '  return "base";', "}"],
+    topic: ['const settle = () => "topic";'],
+    main: ["function settle() {", "  const rate = 2;", "  const fee = 1;", "  return rate + fee;", "}"],
+  },
+  {
+    stable: ["", "const stableEight = 8;", "", "// 07 · blank line inside the block"],
+    base: ['const blankA = "base";', "", 'const blankB = "base";'],
+    topic: ['const blankA = "topic";', "", 'const blankB = "topic";'],
+    main: ['const blankA = "main";', "", 'const blankB = "main";'],
+  },
+  {
+    stable: ["", "const stableNine = 9;", "", "// 08 · overlapping but offset edits"],
+    base: ["const overlapA = 1;", "const overlapB = 2;", "const overlapC = 3;"],
+    topic: ["const overlapA = 10;", "const overlapB = 20;", "const overlapC = 3;"],
+    main: ["const overlapA = 1;", "const overlapB = 200;", "const overlapC = 300;"],
+  },
+  {
+    stable: ["", "const stableTen = 10;", "", "// 09 · tabs and Chinese text"],
+    base: ['const greeting = "你好";', '\tconst indented = "base";'],
+    topic: ['const greeting = "你好，主题";', '\tconst indented = "topic";'],
+    main: ['const greeting = "你好，主分支";', '\tconst indented = "main";'],
+  },
+  {
+    stable: ["", "const stableEleven = 11;", "", "// 10 · whitespace-only reindent"],
+    base: ['const spaced = "base";'],
+    topic: ['\tconst spaced = "base";'],
+    main: ['    const spaced = "base";'],
+  },
+  {
+    stable: ["", "const stableTwelve = 12;", "", "// 11 · long line replaced on both sides"],
+    base: ['const notice = "base notice — every side rewrites this long sentence so the row overflows the pane and the merger has to wrap or scroll it horizontally";'],
+    topic: ['const notice = "topic notice — the topic branch rewrites the same long sentence with its own wording, keeping the line long enough to overflow the pane";'],
+    main: ['const notice = "main notice — the main branch rewrites the same long sentence with different wording, also wide enough to overflow the pane";'],
+  },
+  {
+    stable: ["", "const stableThirteen = 13;", "", "// 12 · edits one kept line apart coalesce into one block"],
+    base: ['const pairA = "base";', 'const gap = "kept";', 'const pairB = "base";'],
+    topic: ['const pairA = "topic";', 'const gap = "kept";', 'const pairB = "topic";'],
+    main: ['const pairA = "main";', 'const gap = "kept";', 'const pairB = "main";'],
+  },
+  {
+    stable: ["", "const stableFourteen = 14;", "", "// 13 · tall block on both sides"],
+    base: Array.from({ length: 12 }, (_, index) => `const tall${index + 1} = "base";`),
+    topic: Array.from({ length: 12 }, (_, index) => `const tall${index + 1} = "topic";`),
+    main: Array.from({ length: 12 }, (_, index) => `const tall${index + 1} = "main";`),
+  },
+  {
+    stable: ["", "const stableFifteen = 15;", "const stableSixteen = 16;", "", "// 14 · last line replaced on both sides"],
+    base: ['const closing = "base";'],
+    topic: ['const closing = "topic";'],
+    main: ['const closing = "main";'],
+  },
+];
+
+function manyHunkText(side) {
+  return manyHunkSpec.flatMap((part) => [...(part.stable ?? []), ...(part[side] ?? [])]).join("\n") + "\n";
+}
+
 function conflictRepo(path, pause) {
   initWork(path);
   const longBase = lines(40, "both base");
   const longTopic = lines(40, "both topic");
   const longMain = lines(40, "both main");
   commit(path, "src/both-sides.ts", longBase, "base text");
+  commit(path, "src/many-hunks.ts", manyHunkText("base"), "base many hunks");
   commit(path, "docs/removed-there.md", "keep\n", "base doc");
   commit(path, "docs/removed-here.md", "keep here\n", "base kept here");
   commit(path, "art/removed-here.png", pngA, "base image");
@@ -158,6 +251,7 @@ function conflictRepo(path, pause) {
   write(path, "src/both-sides.ts", longTopic);
   git(path, ["add", "--", "src/both-sides.ts"]);
   git(path, ["commit", "-m", "topic text", "--", "src/both-sides.ts"]);
+  commit(path, "src/many-hunks.ts", manyHunkText("topic"), "topic many hunks");
   git(path, ["rm", "docs/removed-there.md"]);
   git(path, ["commit", "-m", "topic removes the doc"]);
   commit(path, "docs/removed-here.md", "keep here\ntopic edit\n", "topic edits kept here");
@@ -180,6 +274,7 @@ function conflictRepo(path, pause) {
   write(path, "src/both-sides.ts", longMain);
   git(path, ["add", "--", "src/both-sides.ts"]);
   git(path, ["commit", "-m", "main text", "--", "src/both-sides.ts"]);
+  commit(path, "src/many-hunks.ts", manyHunkText("main"), "main many hunks");
   commit(path, "docs/removed-there.md", "keep\nmain edit\n", "main edits the doc");
   git(path, ["rm", "docs/removed-here.md"]);
   git(path, ["commit", "-m", "main removes kept here"]);

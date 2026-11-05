@@ -138,6 +138,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "update", group: "仓库状态", title: "更新提示", repo: "even", ready: ".command-log [data-layer=\"update\"]" }),
   scene({ id: "action-error", group: "仓库状态", title: "操作错误", repo: "even", ready: ".identity-floor[data-layer=\"error\"]" }),
   scene({ id: "text-merge", group: "叠层", title: "文本合并", repo: "conflict", ready: "[data-layer=\"text-merge\"]" }),
+  scene({ id: "text-merge-many", group: "叠层", title: "多块冲突", repo: "conflict", ready: ".merge-count" }),
   scene({ id: "file-merge", group: "叠层", title: "二进制合并", repo: "conflict", ready: "[data-layer=\"text-merge\"]" }),
   scene({ id: "confirm", group: "叠层", title: "确认框", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "menu", group: "叠层", title: "菜单", repo: "full", ready: "[data-layer=\"menu\"]" }),
