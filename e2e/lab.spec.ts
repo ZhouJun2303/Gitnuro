@@ -87,6 +87,28 @@ test("merge resolve is disabled until every conflict is picked", async ({ page }
   await expect(page.locator(".merge-count")).toHaveText("0/1");
 });
 
+test("merge side checkboxes toggle and stay exclusive", async ({ page }) => {
+  await openLabScene(page, "file-merge", ".merge-panel");
+  const boxes = page.locator(".merge-party input[type=checkbox]");
+  const resolve = page.locator(".merge-panel .commit");
+  await boxes.first().check();
+  await expect(boxes.first()).toBeChecked();
+  await expect(boxes.nth(1)).not.toBeChecked();
+  await expect(resolve).toBeEnabled();
+  await boxes.nth(1).check();
+  await expect(boxes.nth(1)).toBeChecked();
+  await expect(boxes.first()).not.toBeChecked();
+  await expect(resolve).toBeEnabled();
+});
+
+test("merge panel names the commit behind each side", async ({ page }) => {
+  await openLabScene(page, "file-merge", ".merge-panel");
+  await expect(page.locator(".merge-party-subject")).toHaveCount(2);
+  await expect(page.locator(".merge-party-meta code")).toHaveCount(2);
+  await expect(page.locator(".merge-file-subject")).toHaveCount(2);
+  await expect(page.locator(".merge-file-meta dd").first()).not.toBeEmpty();
+});
+
 test("rebase rows start checked and can be excluded", async ({ page }) => {
   await openLabScene(page, "dialog-rebase", ".dialog-scroll");
   const boxes = page.locator(".dialog-scroll input[type=checkbox]");

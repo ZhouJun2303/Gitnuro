@@ -1036,6 +1036,12 @@ fn stash_conflict_names_the_patch_and_abort_clears_it() {
     assert_eq!(view.theirs.label, "stash/patch");
     assert_eq!(view.theirs.state, "modified");
     assert!(!view.binary);
+    let ours = view.ours.commit.as_ref().expect("ours commit");
+    assert_eq!(ours.subject, "main-edit");
+    assert_eq!(ours.author, "Test");
+    assert!(ours.at > 0 && !ours.short.is_empty());
+    let theirs = view.theirs.commit.as_ref().expect("stash commit");
+    assert!(theirs.subject.contains("wip"), "{}", theirs.subject);
     perform(&repo.path, Mutation::Abort).unwrap();
     let after = status(&repo.path).unwrap();
     assert!(after.unstaged.is_empty() && after.staged.is_empty(), "{after:?}");
@@ -1066,6 +1072,9 @@ fn merge_conflict_names_both_branches() {
     assert_eq!(edited.theirs.label, "topic");
     assert_eq!(edited.theirs.state, "modified");
     assert!(edited.ours.bytes > 0 && edited.theirs.bytes > 0);
+    assert_eq!(edited.ours.commit.as_ref().unwrap().subject, "edit-gone");
+    assert_eq!(edited.theirs.commit.as_ref().unwrap().subject, "drop");
+    assert_eq!(edited.ours.commit.as_ref().unwrap().author, "Test");
     let removed = conflict_view(&repo.path, "gone.txt").unwrap();
     assert_eq!(removed.ours.label, "main");
     assert_eq!(removed.ours.state, "modified");

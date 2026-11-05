@@ -325,10 +325,21 @@ export type ConflictSides = {
   working: string;
 };
 
+export type ConflictCommit = {
+  id: string;
+  short: string;
+  subject: string;
+  author: string;
+  email: string;
+  /** Unix seconds from `%at`. */
+  at: number;
+};
+
 export type ConflictParty = {
   label: string;
   state: "added" | "modified" | "deleted" | "unchanged";
   bytes: number;
+  commit?: ConflictCommit | null;
 };
 
 export type ConflictView = {

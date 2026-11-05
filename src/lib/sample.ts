@@ -1,13 +1,21 @@
+import type { ConflictCommit } from "./status";
+
 export type FileChange = {
   path: string;
   kind: "M" | "A" | "D" | "C";
 };
 
 export type SampleConflictView = {
-  ours: { label: string; state: "added" | "modified" | "deleted" | "unchanged"; bytes: number };
-  theirs: { label: string; state: "added" | "modified" | "deleted" | "unchanged"; bytes: number };
+  ours: { label: string; state: "added" | "modified" | "deleted" | "unchanged"; bytes: number; commit?: ConflictCommit | null };
+  theirs: { label: string; state: "added" | "modified" | "deleted" | "unchanged"; bytes: number; commit?: ConflictCommit | null };
   binary: boolean;
 };
+
+const sampleAuthors = { name: "AweGit Lab", email: "lab@example.com" };
+
+function sampleCommit(short: string, subject: string, at: number): ConflictCommit {
+  return { id: `${short}${"0".repeat(40 - short.length)}`, short, subject, author: sampleAuthors.name, email: sampleAuthors.email, at };
+}
 
 /** Working copies with conflict markers, so sample data can open the text merger. */
 export const sampleConflictText: Record<string, { ours: string; theirs: string; working: string }> = {
@@ -46,28 +54,38 @@ export const sampleConflictText: Record<string, { ours: string; theirs: string; 
 export const sampleConflictViews: Record<string, SampleConflictView> = {
   "data/Y语言表_Data_Language.xlsx": {
     binary: true,
-    theirs: { label: "stash/patch", state: "modified", bytes: 56484 },
-    ours: { label: "main", state: "modified", bytes: 54061 },
+    theirs: {
+      label: "stash/patch",
+      state: "modified",
+      bytes: 56484,
+      commit: sampleCommit("7c41e0a", "WIP on main: 3f9a2c1 语言表补充越南语", 1793758920),
+    },
+    ours: {
+      label: "main",
+      state: "modified",
+      bytes: 54061,
+      commit: sampleCommit("3f9a2c1", "整理语言表列宽", 1793600000),
+    },
   },
   "src/merge/both-sides.ts": {
     binary: false,
-    theirs: { label: "feature", state: "modified", bytes: 48 },
-    ours: { label: "main", state: "modified", bytes: 46 },
+    theirs: { label: "feature", state: "modified", bytes: 48, commit: sampleCommit("b2d9f41", "调整结算汇率", 1793700000) },
+    ours: { label: "main", state: "modified", bytes: 46, commit: sampleCommit("3f9a2c1", "重构结算函数", 1793600000) },
   },
   "src/merge/both-added.ts": {
     binary: false,
-    theirs: { label: "feature", state: "added", bytes: 34 },
-    ours: { label: "main", state: "added", bytes: 31 },
+    theirs: { label: "feature", state: "added", bytes: 34, commit: sampleCommit("b2d9f41", "新增语言表导出", 1793700000) },
+    ours: { label: "main", state: "added", bytes: 31, commit: sampleCommit("3f9a2c1", "新增语言表入口", 1793600000) },
   },
   "docs/removed-there.md": {
     binary: false,
-    theirs: { label: "feature", state: "deleted", bytes: 0 },
-    ours: { label: "main", state: "modified", bytes: 28 },
+    theirs: { label: "feature", state: "deleted", bytes: 0, commit: sampleCommit("b2d9f41", "移除旧文档", 1793700000) },
+    ours: { label: "main", state: "modified", bytes: 28, commit: sampleCommit("3f9a2c1", "更新文档标题", 1793600000) },
   },
   "art/removed-here.png": {
     binary: true,
-    theirs: { label: "feature", state: "modified", bytes: 18432 },
-    ours: { label: "main", state: "deleted", bytes: 0 },
+    theirs: { label: "feature", state: "modified", bytes: 18432, commit: sampleCommit("b2d9f41", "替换标记图", 1793700000) },
+    ours: { label: "main", state: "deleted", bytes: 0, commit: sampleCommit("3f9a2c1", "删除旧标记图", 1793600000) },
   },
 };
 

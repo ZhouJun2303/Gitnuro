@@ -520,6 +520,7 @@ export const en: Messages = {
     mergeKeepSide: "Keep {name}",
     mergePickFile: "Pick the file version to keep",
     mergeOverviewHint: "Check the side to keep. Keeping both joins them in order. Conflicts with no side checked are left out of the result.",
+    mergeTime: "Time",
     mergeOverwriteEdits: "Overwrite manual edits?",
     mergeOverwriteEditsBody: "Changing a conflict side rebuilds the result and discards your manual edits.",
     result: "Result",

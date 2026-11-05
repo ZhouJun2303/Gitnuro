@@ -520,6 +520,7 @@ export type Messages = {
     mergeKeepSide: string;
     mergePickFile: string;
     mergeOverviewHint: string;
+    mergeTime: string;
     mergeOverwriteEdits: string;
     mergeOverwriteEditsBody: string;
     result: string;

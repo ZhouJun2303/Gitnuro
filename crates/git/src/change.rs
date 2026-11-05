@@ -374,6 +374,19 @@ fn show_stage(repo: &Path, path: &str, stage: u8) -> String {
     }
 }
 
+/// The commit a conflict side comes from, so the merge panel can name it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictCommit {
+    pub id: String,
+    pub short: String,
+    pub subject: String,
+    pub author: String,
+    pub email: String,
+    /// Unix seconds from `%at`.
+    pub at: i64,
+}
+
 /// One side of an unmerged path: the name Git would show, and how it differs from the base.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -381,6 +394,7 @@ pub struct ConflictParty {
     pub label: String,
     pub state: String,
     pub bytes: u64,
+    pub commit: Option<ConflictCommit>,
 }
 
 /// Labels and change kinds for the two sides of an unmerged file.
@@ -403,19 +417,37 @@ pub fn conflict_view(repo: &Path, path: &str) -> Result<ConflictView, Error> {
         return Err(Error::Git(format!("{path} is not unmerged")));
     }
     let base = stages[1].as_deref();
+    let (their_label, their_rev) = theirs_party(repo, path, stages[3].as_deref());
     Ok(ConflictView {
         ours: ConflictParty {
             label: ours_label(repo),
             state: side_state(base, stages[2].as_deref()).into(),
             bytes: oid_size(repo, stages[2].as_deref()),
+            commit: commit_info(repo, "HEAD"),
         },
         theirs: ConflictParty {
-            label: theirs_label(repo, path, stages[3].as_deref()),
+            label: their_label,
             state: side_state(base, stages[3].as_deref()).into(),
             bytes: oid_size(repo, stages[3].as_deref()),
+            commit: their_rev.as_deref().and_then(|rev| commit_info(repo, rev)),
         },
         binary: conflict_is_binary(repo, path, &stages),
     })
+}
+
+fn commit_info(repo: &Path, rev: &str) -> Option<ConflictCommit> {
+    let text = git_text(repo, &["log", "-1", "--format=%H%x1f%h%x1f%s%x1f%an%x1f%ae%x1f%at", rev])?;
+    let mut fields = text.split('\x1f');
+    let id = fields.next()?.trim().to_string();
+    let short = fields.next()?.trim().to_string();
+    let subject = fields.next()?.trim().to_string();
+    let author = fields.next()?.trim().to_string();
+    let email = fields.next().unwrap_or("").trim().to_string();
+    let at = fields.next()?.trim().parse().ok()?;
+    if id.is_empty() {
+        return None;
+    }
+    Some(ConflictCommit { id, short, subject, author, email, at })
 }
 
 fn stage_oids(repo: &Path, path: &str) -> Result<[Option<String>; 4], Error> {
@@ -457,20 +489,34 @@ fn ours_label(repo: &Path) -> String {
     head_label(repo)
 }
 
-fn theirs_label(repo: &Path, path: &str, theirs: Option<&str>) -> String {
+/// Label for the incoming side plus the revision its commit details come from.
+fn theirs_party(repo: &Path, path: &str, theirs: Option<&str>) -> (String, Option<String>) {
     match in_progress(repo).ok().flatten() {
-        Some(InProgress::Merge) => named_ref(repo, "MERGE_HEAD")
-            .or_else(|| merge_message_name(repo))
-            .or_else(|| subject_of(repo, "MERGE_HEAD"))
-            .unwrap_or_else(|| "theirs".into()),
-        Some(InProgress::Rebase) => rebase_head_label(repo)
-            .or_else(|| subject_of(repo, "REBASE_HEAD"))
-            .unwrap_or_else(|| "theirs".into()),
-        Some(InProgress::CherryPick) => subject_of(repo, "CHERRY_PICK_HEAD").unwrap_or_else(|| "cherry-pick".into()),
-        Some(InProgress::Revert) => subject_of(repo, "REVERT_HEAD").unwrap_or_else(|| "revert".into()),
-        None => theirs
-            .and_then(|oid| stash_label(repo, path, oid))
-            .unwrap_or_else(|| "theirs".into()),
+        Some(InProgress::Merge) => (
+            named_ref(repo, "MERGE_HEAD")
+                .or_else(|| merge_message_name(repo))
+                .or_else(|| subject_of(repo, "MERGE_HEAD"))
+                .unwrap_or_else(|| "theirs".into()),
+            Some("MERGE_HEAD".into()),
+        ),
+        Some(InProgress::Rebase) => (
+            rebase_head_label(repo)
+                .or_else(|| subject_of(repo, "REBASE_HEAD"))
+                .unwrap_or_else(|| "theirs".into()),
+            Some("REBASE_HEAD".into()),
+        ),
+        Some(InProgress::CherryPick) => (
+            subject_of(repo, "CHERRY_PICK_HEAD").unwrap_or_else(|| "cherry-pick".into()),
+            Some("CHERRY_PICK_HEAD".into()),
+        ),
+        Some(InProgress::Revert) => (
+            subject_of(repo, "REVERT_HEAD").unwrap_or_else(|| "revert".into()),
+            Some("REVERT_HEAD".into()),
+        ),
+        None => match theirs.and_then(|oid| stash_party(repo, path, oid)) {
+            Some((label, rev)) => (label, Some(rev)),
+            None => ("theirs".into(), None),
+        },
     }
 }
 
@@ -543,16 +589,17 @@ fn short_ref(name: &str) -> String {
 }
 
 /// `stash/patch` is the stash commit's work tree. `stash/index` is its index parent.
-fn stash_label(repo: &Path, path: &str, oid: &str) -> Option<String> {
+/// The returned revision is the stash entry itself, which is what the stash list shows.
+fn stash_party(repo: &Path, path: &str, oid: &str) -> Option<(String, String)> {
     let list = git_text(repo, &["stash", "list", "--format=%H"])?;
     for hash in list.lines().map(str::trim).filter(|line| !line.is_empty()).take(30) {
         let spec = format!("{hash}:{path}");
         if git_text(repo, &["rev-parse", "--verify", "--quiet", &spec]).as_deref() == Some(oid) {
-            return Some("stash/patch".into());
+            return Some(("stash/patch".into(), hash.to_string()));
         }
         let index = format!("{hash}^2:{path}");
         if git_text(repo, &["rev-parse", "--verify", "--quiet", &index]).as_deref() == Some(oid) {
-            return Some("stash/index".into());
+            return Some(("stash/index".into(), hash.to_string()));
         }
     }
     None

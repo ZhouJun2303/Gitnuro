@@ -62,6 +62,8 @@
   const rightOn = $derived(shell.mergeKind === "file" ? fileRight : textRight);
   const fileSide = $derived<"ours" | "theirs" | "">(fileLeft ? "theirs" : fileRight ? "ours" : "");
   const view = $derived(shell.activeConflict);
+  const leftParty = $derived(view?.theirs ?? null);
+  const rightParty = $derived(view?.ours ?? null);
   const unresolved = $derived(Math.max(0, conflictTotal - conflictResolved));
   const canResolve = $derived(shell.mergeKind === "file" ? fileSide !== "" : unresolved === 0);
 
@@ -93,23 +95,37 @@
   }
 
   function onLeft(event: Event) {
-    event.preventDefault();
     if (shell.mergeKind === "file") {
       fileLeft = !fileLeft;
       if (fileLeft) fileRight = false;
       return;
     }
-    withDirtyGuard(() => shell.takeMergeSide("theirs", !leftOn));
+    const next = !leftOn;
+    // The confirm may be cancelled, so hold the browser's toggle until the state moves.
+    if (resultDirty && event.currentTarget instanceof HTMLInputElement) event.currentTarget.checked = leftOn;
+    withDirtyGuard(() => shell.takeMergeSide("theirs", next));
   }
 
   function onRight(event: Event) {
-    event.preventDefault();
     if (shell.mergeKind === "file") {
       fileRight = !fileRight;
       if (fileRight) fileLeft = false;
       return;
     }
-    withDirtyGuard(() => shell.takeMergeSide("ours", !rightOn));
+    const next = !rightOn;
+    if (resultDirty && event.currentTarget instanceof HTMLInputElement) event.currentTarget.checked = rightOn;
+    withDirtyGuard(() => shell.takeMergeSide("ours", next));
+  }
+
+  function stateText(state: ConflictParty["state"]) {
+    if (state === "added") return shell.tr("chrome.sideAdded");
+    if (state === "modified") return shell.tr("chrome.sideModified");
+    if (state === "deleted") return shell.tr("chrome.sideDeleted");
+    return "";
+  }
+
+  function isoAt(at: number) {
+    return at ? new Date(at * 1000).toISOString() : undefined;
   }
 
   function show(text: string) {
@@ -198,14 +214,48 @@
       </header>
       <div class="merge-head">
         <div class="merge-parties">
-          <label class="merge-party">
-            <input type="checkbox" checked={leftOn} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })} onclick={onLeft} />
-            <span>{shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })}</span>
-          </label>
-          <label class="merge-party right">
-            <input type="checkbox" checked={rightOn} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })} onclick={onRight} />
-            <span>{shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })}</span>
-          </label>
+          <div class="merge-party">
+            <label class="merge-party-pick">
+              <input type="checkbox" checked={leftOn} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })} onclick={onLeft} />
+              <span>{shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })}</span>
+              {#if leftParty && leftParty.state !== "unchanged"}<span class="merge-party-state">{stateText(leftParty.state)}</span>{/if}
+            </label>
+            {#if leftParty}
+              <div class="merge-party-info">
+                {#if leftParty.commit}
+                  <span class="merge-party-subject" title={leftParty.commit.subject}>{leftParty.commit.subject}</span>
+                  <span class="merge-party-meta">
+                    <code>{leftParty.commit.short}</code>
+                    <span title={leftParty.commit.email}>{leftParty.commit.author}</span>
+                    {#if leftParty.commit.at}<time datetime={isoAt(leftParty.commit.at)}>{shell.forkWhen(leftParty.commit.at)}</time>{/if}
+                  </span>
+                {:else}
+                  <span class="merge-party-meta">{formatBytes(leftParty.bytes)}</span>
+                {/if}
+              </div>
+            {/if}
+          </div>
+          <div class="merge-party right">
+            <label class="merge-party-pick">
+              <input type="checkbox" checked={rightOn} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })} onclick={onRight} />
+              <span>{shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })}</span>
+              {#if rightParty && rightParty.state !== "unchanged"}<span class="merge-party-state">{stateText(rightParty.state)}</span>{/if}
+            </label>
+            {#if rightParty}
+              <div class="merge-party-info">
+                {#if rightParty.commit}
+                  <span class="merge-party-subject" title={rightParty.commit.subject}>{rightParty.commit.subject}</span>
+                  <span class="merge-party-meta">
+                    <code>{rightParty.commit.short}</code>
+                    <span title={rightParty.commit.email}>{rightParty.commit.author}</span>
+                    {#if rightParty.commit.at}<time datetime={isoAt(rightParty.commit.at)}>{shell.forkWhen(rightParty.commit.at)}</time>{/if}
+                  </span>
+                {:else}
+                  <span class="merge-party-meta">{formatBytes(rightParty.bytes)}</span>
+                {/if}
+              </div>
+            {/if}
+          </div>
         </div>
         {#if shell.mergeKind === "text"}
           <p class="merge-overview-hint">{shell.tr("dialog.mergeOverviewHint")}</p>
@@ -329,14 +379,28 @@
 
 {#snippet fileCard(party: ConflictParty | undefined)}
   <div class="merge-file-slot">
-    {#if party?.state === "deleted"}
-      <p class="merge-file-gone">{shell.tr("chrome.sideDeleted")}</p>
-    {:else}
-      <div class="merge-file-card">
+    <div class="merge-file-card">
+      {#if party?.state === "deleted"}
+        <p class="merge-file-gone">{shell.tr("chrome.sideDeleted")}</p>
+      {:else}
         {@render mark(fileKind(shell.mergeFile), 56)}
-        {#if party}<span>{formatBytes(party.bytes)}</span>{/if}
-      </div>
-    {/if}
+        {#if party}<span class="merge-file-size">{formatBytes(party.bytes)}</span>{/if}
+      {/if}
+      {#if party}
+        <div class="merge-file-title">
+          <strong class="merge-file-side">{party.label}</strong>
+          {#if party.state !== "unchanged"}<span class="merge-file-state">{stateText(party.state)}</span>{/if}
+        </div>
+        {#if party.commit}
+          <p class="merge-file-subject" title={party.commit.subject}>{party.commit.subject}</p>
+          <dl class="merge-file-meta">
+            <div><dt>{shell.tr("chrome.commit")}</dt><dd><code>{party.commit.short}</code></dd></div>
+            <div><dt>{shell.tr("chrome.author")}</dt><dd title={party.commit.email}>{party.commit.author}</dd></div>
+            <div><dt>{shell.tr("dialog.mergeTime")}</dt><dd>{shell.forkWhen(party.commit.at)}</dd></div>
+          </dl>
+        {/if}
+      {/if}
+    </div>
   </div>
 {/snippet}
 

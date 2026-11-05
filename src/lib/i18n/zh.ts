@@ -520,6 +520,7 @@ export const zh: Messages = {
     mergeKeepSide: "保留 {name}",
     mergePickFile: "先选择要保留的文件版本",
     mergeOverviewHint: "勾选要保留的一侧；两侧都选会按顺序拼接。未选择任何一侧的冲突不会写入结果。",
+    mergeTime: "时间",
     mergeOverwriteEdits: "覆盖手动修改？",
     mergeOverwriteEditsBody: "切换冲突选择会重新生成结果，你手动修改的内容会丢失。",
     result: "结果",
