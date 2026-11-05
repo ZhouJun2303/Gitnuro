@@ -1625,6 +1625,16 @@ export class ShellState {
   currentBranch = $derived(this.refs?.branches.find((branch) => branch.current) ?? null);
 
 
+  localBranchNames = $derived(new Set((this.refs?.branches ?? []).map((branch) => branch.name)));
+
+
+  remoteBranchNames = $derived.by(() => {
+    const names = new Set<string>();
+    for (const remote of this.refs?.remotes ?? []) for (const branch of remote.branches) names.add(branch);
+    return names;
+  });
+
+
   visibleTags = $derived.by(() => {
     const rows = (this.refs?.tags ?? []).filter((tag) => !this.refHidden(tag.name) && this.matchesQuery(tag.name, this.sideQuery));
     const order = new Map(orderRefNames(rows.map((tag) => tag.name)).map((name, index) => [name, index]));
@@ -4097,11 +4107,9 @@ export class ShellState {
   }
 
 
-  branchMissingRemote(name: string) {
-    const refs = this.refs;
-    if (!refs) return false;
-    if (!refs.branches.some((branch) => branch.name === name)) return false;
-    return !refs.remotes.some((remote) => remote.branches.includes(name));
+  branchRemoteState(name: string): "missing" | "mirrored" | null {
+    if (!this.localBranchNames.has(name)) return null;
+    return this.remoteBranchNames.has(name) ? "mirrored" : "missing";
   }
 
 

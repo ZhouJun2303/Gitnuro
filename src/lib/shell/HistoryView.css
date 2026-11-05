@@ -84,20 +84,39 @@
 
 .lane-name.compact { max-width: 88px; }
 
-.lane-name.local-only {
+.lane-name.local-only,
+  .lane-name.mirrored {
     position: relative;
     padding-right: 12px;
   }
 
-.lane-name.local-only::after {
-    content: "";
+.lane-name.local-only::after,
+  .lane-name.mirrored::after {
     position: absolute;
-    top: 1px;
+    top: 2px;
     right: 2px;
-    width: 6px;
-    height: 6px;
     border-radius: 50%;
+    pointer-events: none;
+  }
+
+.lane-name.local-only::after {
+    content: "!";
+    width: 9px;
+    height: 9px;
     background: var(--modified);
+    color: var(--on-modified);
+    font-size: 7px;
+    font-weight: 700;
+    line-height: 9px;
+    text-align: center;
+  }
+
+.lane-name.mirrored::after {
+    content: "";
+    top: 3px;
+    width: 5px;
+    height: 5px;
+    background: var(--added);
   }
 
 .lane-name > span {

@@ -81,17 +81,35 @@
 
 .side.nested { position: relative; }
 
-.side.nested.local-only::after {
+.side.nested.local-only::after,
+  .side.nested.mirrored::after {
     content: "";
     position: absolute;
+    z-index: 3;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+
+.side.nested.local-only::after {
+    content: "!";
+    top: 2px;
+    right: 3px;
+    width: 10px;
+    height: 10px;
+    background: var(--modified);
+    color: var(--on-modified);
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 10px;
+    text-align: center;
+  }
+
+.side.nested.mirrored::after {
     top: 3px;
     right: 4px;
-    z-index: 3;
     width: 6px;
     height: 6px;
-    border-radius: 50%;
-    background: var(--modified);
-    pointer-events: none;
+    background: var(--added);
   }
 
 .side.nested:hover:has(.branch-switches) .ahead,

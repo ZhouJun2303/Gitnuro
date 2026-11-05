@@ -81,6 +81,15 @@ test("command palette is blocked while a dialog is open", async ({ page }) => {
   await expect(page.locator('[data-dialog="prefs"]')).toBeVisible();
 });
 
+test("branch rows mark local-only and mirrored branches", async ({ page }) => {
+  await openLabScene(page, "branch-badges", ".sidebar .side.nested.local-only");
+  const missing = page.locator(".sidebar .side.nested.local-only").first();
+  const mirrored = page.locator(".sidebar .side.nested.mirrored").first();
+  await expect(mirrored).toBeVisible();
+  expect(await missing.evaluate((node) => getComputedStyle(node, "::after").content)).toBe('"!"');
+  expect(await mirrored.evaluate((node) => getComputedStyle(node, "::after").borderRadius)).toBe("50%");
+});
+
 test("merge resolve is disabled until every conflict is picked", async ({ page }) => {
   await openLabScene(page, "text-merge", ".merge-panel");
   await expect(page.locator(".merge-panel .commit")).toBeDisabled();
