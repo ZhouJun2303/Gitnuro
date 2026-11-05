@@ -278,6 +278,18 @@ test("command log keeps focus inside and closes with Escape", async ({ page }) =
   await expect(page.locator('[data-layer="commands"]')).toHaveCount(0);
 });
 
+test("command log opens on the newest row even when a stale id matches an old error", async ({ page }) => {
+  await openLabScene(page, "commands-errors", '[data-layer="commands"]');
+  const state = await page.evaluate(() => {
+    const box = document.querySelector(".command-items");
+    const items = [...document.querySelectorAll(".command-item")];
+    const current = document.querySelector(".command-item.current");
+    return { scrollTop: box?.scrollTop ?? -1, index: current ? items.indexOf(current) : -1 };
+  });
+  expect(state.scrollTop).toBe(0);
+  expect(state.index).toBe(0);
+});
+
 test("submenu opens and closes with the arrow keys", async ({ page }) => {
   await openLabScene(page, "menu", '[data-layer="menu"]');
   await page.keyboard.press("ArrowDown");

@@ -974,6 +974,32 @@ fn skip_hooks_commits_past_a_failing_hook() {
 }
 
 #[test]
+fn commits_a_description_longer_than_the_windows_command_line() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    fs::write(repo.path.join("a.txt"), "two\n").unwrap();
+    repo.git(&["add", "--", "a.txt"]);
+    let description: String = (0..2000).map(|index| format!("M\tAssets/Editor/File{index}.asset\n")).collect();
+    assert!(description.len() > 32_767, "the test needs a body Windows cannot pass as one argument");
+    awegit_git::commit(
+        &repo.path,
+        awegit_git::CommitRequest {
+            summary: "Merge develop into main".into(),
+            description: description.clone(),
+            amend: false,
+            sign_off: false,
+            sign_off_format: String::new(),
+            skip_hooks: false,
+            convention: false,
+        },
+    )
+    .unwrap();
+    let message = repo.output(&["log", "-1", "--format=%B"]);
+    assert!(message.contains("Merge develop into main"));
+    assert!(message.contains("Assets/Editor/File1999.asset"));
+}
+
+#[test]
 fn stash_records_its_parent() {
     let repo = repo();
     commit_file(&repo, "a.txt", "one\n", "base");

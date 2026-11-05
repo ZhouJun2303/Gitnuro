@@ -145,12 +145,10 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
     }
     let mut args = commit_config(repo);
     args.push("commit".to_string());
-    args.push("-m".to_string());
-    args.push(summary.to_string());
-    if !description.is_empty() {
-        args.push("-m".to_string());
-        args.push(description);
-    }
+    // The message goes through stdin: a merge body can list hundreds of files and
+    // Windows rejects a command line longer than 32K characters.
+    args.push("-F".to_string());
+    args.push("-".to_string());
     if request.amend {
         args.push("--amend".to_string());
     }
@@ -160,11 +158,16 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
     if request.skip_hooks {
         args.push("--no-verify".to_string());
     }
+    let mut message = summary.to_string();
+    if !description.is_empty() {
+        message.push_str("\n\n");
+        message.push_str(&description);
+    }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     if crate::cli::has_local_author(repo) {
-        crate::cli::run_repo_author(repo, &borrowed).map(|_| ())
+        crate::cli::run_stdin_repo_author(repo, &borrowed, message.as_bytes()).map(|_| ())
     } else {
-        run(repo, &borrowed).map(|_| ())
+        run_stdin(repo, &borrowed, message.as_bytes()).map(|_| ())
     }
 }
 

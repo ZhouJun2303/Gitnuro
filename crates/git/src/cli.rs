@@ -398,6 +398,11 @@ pub(crate) fn run_stdin_output(repo: &Path, args: &[&str], stdin: &[u8]) -> Resu
     run_prepared(repo, args, &[], Some(stdin), true, true)
 }
 
+/// Like `run_stdin`, but keeps a repository-local `user.name`.
+pub(crate) fn run_stdin_repo_author(repo: &Path, args: &[&str], stdin: &[u8]) -> Result<std::process::Output, Error> {
+    run_prepared(repo, args, &[], Some(stdin), false, false)
+}
+
 /// Run git without replacing a repository-local `user.name`.
 pub(crate) fn run_repo_author(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
     run_prepared(repo, args, &[], None, false, false)

@@ -14,6 +14,23 @@ function lines(count: number, prefix: string) {
   return Array.from({ length: count }, (_, index) => `${prefix} ${index + 1}`).join("\n");
 }
 
+function fillCommandLog(shell: ShellState) {
+  const now = Date.now();
+  shell.commandLog = Array.from({ length: FILL }, (_, index) => {
+    const n = pad(index + 1);
+    return {
+      id: index + 1,
+      title: `git status #${n}`,
+      summary: index % 5 === 0 ? "failed in lab" : "ok in lab",
+      command: `git status --short # ${n}`,
+      output: lines(FILL, `output ${n}`),
+      ok: index % 5 !== 0,
+      at: now - index * 60_000,
+      source: index % 3 === 0 ? "background" as const : "user" as const,
+    };
+  });
+}
+
 function manyCommands(): CommandRecord[] {
   return Array.from({ length: FILL }, (_, index) => {
     const n = pad(index + 1);
@@ -116,20 +133,23 @@ async function fillSurface(shell: ShellState, id: string) {
     return;
   }
   if (id === "commands") {
-    const now = Date.now();
-    shell.commandLog = Array.from({ length: FILL }, (_, index) => {
-      const n = pad(index + 1);
-      return {
-        id: index + 1,
-        title: `git status #${n}`,
-        summary: index % 5 === 0 ? "failed in lab" : "ok in lab",
-        command: `git status --short # ${n}`,
-        output: lines(FILL, `output ${n}`),
-        ok: index % 5 !== 0,
-        at: now - index * 60_000,
-        source: index % 3 === 0 ? "background" as const : "user" as const,
-      };
-    });
+    fillCommandLog(shell);
+    shell.commandPick = 1;
+    shell.openCommandLog();
+    return;
+  }
+  if (id === "commands-errors") {
+    fillCommandLog(shell);
+    // Saved errors keep their own id counter, so a stale command id can happen to match one.
+    shell.errorLog = Array.from({ length: 80 }, (_, index) => ({
+      id: 80 - index,
+      at: Date.now() - index * 60_000,
+      title: `lab error ${index + 1}`,
+      text: `lab error text ${index + 1}`,
+      command: "",
+    }));
+    shell.errorSeq = 80;
+    shell.unseenErrors = 1;
     shell.commandPick = 1;
     shell.openCommandLog();
     return;

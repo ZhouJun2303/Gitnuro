@@ -43,6 +43,9 @@ import { STATUS_NOTICE_ENTRY } from "./types";
 
 const initialErrors = readErrorLog();
 
+/** Ids below this belong only to error rows. Notices use small negatives (-101…-106). */
+const ERROR_ENTRY_ID = -1_000_000;
+
 /** Histories up to this length are drawn in one pass. Longer ones continue across frames. */
 const GRAPH_SYNC_LIMIT = 1500;
 
@@ -2818,7 +2821,9 @@ export class ShellState {
     }
     if (this.commandFilter === "errors") {
       return this.recentErrors.map((item): CommandEntry => ({
-        id: item.id,
+        // Saved errors count from 1 on their own, so they take a separate id band.
+        // Otherwise a stale command id could select an old error and open scrolled down.
+        id: ERROR_ENTRY_ID - item.id,
         title: item.title || this.tr("chrome.errorTitle"),
         command: item.command,
         output: item.text,
