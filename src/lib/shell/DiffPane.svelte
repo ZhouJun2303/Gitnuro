@@ -257,11 +257,11 @@
             <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} onscroll={onBlameScroll}>
               <div class="commit-window" style:height="{(shell.blameLines?.length ?? 0) * shell.diffRowHeight}px">
                 {#each shell.blameWindow.rows as line, index (`${line.line}-${line.id}`)}
-                  {@const pending = !line.id || /^0+$/.test(line.id)}
-                  <button class="virtual-row blame-line" class:blame-pending={pending} type="button" style:top="{(shell.blameWindow.start + index) * shell.diffRowHeight}px" title={pending ? shell.tr("dialog.notCommitted") : `${line.author} · ${line.summary}`} onclick={() => { if (pending) return; shell.section = "history"; void shell.selectCommit(line.id); }}>
-                    <span class="blame-gutter">{line.line}</span>
-                    <span class="blame-who">{pending ? shell.tr("dialog.notCommitted") : line.author}</span>
-                    <span class="blame-code">{line.text}</span>
+                  {@const pending = !line.truncated && (!line.id || /^0+$/.test(line.id))}
+                  <button class="virtual-row blame-line" class:blame-pending={pending} type="button" style:top="{(shell.blameWindow.start + index) * shell.diffRowHeight}px" title={line.truncated ? shell.tr("chrome.truncated") : pending ? shell.tr("dialog.notCommitted") : `${line.author} · ${line.summary}`} onclick={() => { if (pending || line.truncated) return; shell.section = "history"; void shell.selectCommit(line.id); }}>
+                    <span class="blame-gutter">{line.truncated ? "…" : line.line}</span>
+                    <span class="blame-who">{line.truncated ? "" : pending ? shell.tr("dialog.notCommitted") : line.author}</span>
+                    <span class="blame-code">{line.truncated ? shell.tr("chrome.truncated") : line.text}</span>
                   </button>
                 {/each}
               </div>
@@ -375,6 +375,7 @@
                 {@render splitBar()}
               </div>
               {@render hunkActions()}
+              {#if shell.diff.truncated}<span class="meta">{shell.tr("chrome.truncated")}</span>{/if}
               </div>
             {:else}
               <div class="diff-viewport">

@@ -123,6 +123,7 @@ export type BlameLine = {
   author: string;
   line: number;
   text: string;
+  truncated?: boolean;
 };
 
 export type Settings = {

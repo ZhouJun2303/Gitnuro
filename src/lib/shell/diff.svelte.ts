@@ -431,6 +431,17 @@ export function flatEntries(shell: ShellState, files: Row[]) {
 export function asTree(shell: ShellState, files: Row[], collapsed = shell.collapsedDirs) {
     type Node = { name: string; path: string; kind: "dir" | "file"; file?: Row; children: Node[] };
     const root: Node = { name: "", path: "", kind: "dir", children: [] };
+    // A map per directory keeps sibling lookup O(1); scanning `children` for every
+    // path segment turned a flat 50k-file list into minutes of work.
+    const lookup = new Map<Node, Map<string, Node>>();
+    const childrenOf = (node: Node) => {
+      let map = lookup.get(node);
+      if (!map) {
+        map = new Map();
+        lookup.set(node, map);
+      }
+      return map;
+    };
     for (const file of files) {
       const parts = file.path.split(/[/\\]/);
       let node = root;
@@ -438,9 +449,11 @@ export function asTree(shell: ShellState, files: Row[], collapsed = shell.collap
       parts.forEach((part, index) => {
         acc = acc ? `${acc}/${part}` : part;
         const last = index === parts.length - 1;
-        let child = node.children.find((item) => item.name === part);
+        const siblings = childrenOf(node);
+        let child = siblings.get(part);
         if (!child) {
           child = { name: part, path: acc, kind: last ? "file" : "dir", file: last ? file : undefined, children: [] };
+          siblings.set(part, child);
           node.children.push(child);
         } else if (last) {
           child.kind = "file";
@@ -545,6 +558,7 @@ export function markedLine(shell: ShellState, text: string, other: string, path:
   }
 
 export function patchOf(shell: ShellState, file: string) {
+    shell.patchVersion;
     return shell.patchCache[file] ?? (shell.historyDiff?.path === file ? shell.historyDiff : null);
   }
 
@@ -661,8 +675,11 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
   }
 
 export async function deletePicked(shell: ShellState, files = [...shell.picked]) {
-    for (const file of files) await shell.mutate({ action: "delete", file });
-    shell.picked = shell.picked.filter((path) => !files.includes(path));
+    const names = [...new Set(files.filter((path) => path.length > 0))];
+    if (names.length === 0) return;
+    if (names.length === 1) await shell.mutate({ action: "delete", file: names[0] });
+    else await shell.mutate({ action: "deletePaths", files: names });
+    shell.picked = shell.picked.filter((path) => !names.includes(path));
   }
 
 export function confirmPicked(shell: ShellState, files: string[], title: string, run: (files: string[]) => Promise<void>) {
@@ -899,7 +916,8 @@ export function collapseFileSelection(shell: ShellState, rows: Row[]) {
 
 export function toggleAllDiffLines(shell: ShellState) {
     if (shell.blameLines || shell.section !== "changes" || shell.diffLines.length === 0) return false;
-    const complete = shell.diffSelected.length === shell.diffLines.length && shell.diffLines.every((_, index) => shell.diffSelected.includes(index));
+    const selected = new Set(shell.diffSelected);
+    const complete = selected.size === shell.diffLines.length && shell.diffLines.every((_, index) => selected.has(index));
     shell.clearTextSelection();
     if (complete) {
       shell.diffSelected = [];
@@ -986,6 +1004,9 @@ export function selectFile(shell: ShellState, path: string, side: Side, event?: 
       shell.picked = shell.picked.includes(path) ? shell.picked.filter((item) => item !== path) : [...shell.picked, path];
     } else {
       shell.picked = [path];
+      const rows = side === "staged" ? shell.shownStaged : shell.shownUnstaged;
+      const at = rows.findIndex((row) => row.path === path);
+      if (at >= 0) shell.selectedIndex = at;
     }
     if (shell.mode === "live") void shell.loadDiff();
   }
@@ -1177,25 +1198,19 @@ export async function applyLineOps(shell: ShellState, action: "stageLine" | "dis
     shell.startWork(shell.tr("chrome.working"), path);
     shell.diffSelected = [];
     try {
-      let value: (StatusSnapshot & { output?: string }) | null = null;
-      for (const entry of ordered) {
+      const lines = ordered.flatMap((entry) => {
         const at = action === "stageLine" ? entry.line.stageAt : entry.line.workAt;
-        if (at == null) continue;
-        value = await invoke<StatusSnapshot & { output?: string }>("mutate", {
-          path,
-          request: {
-            action,
-            file,
-            text: shell.lineText(entry.line),
-            addition: entry.line.kind === "add",
-            at,
-            ...(action === "stageLine" ? { unstage } : {}),
-          },
-        });
-      }
+        return at == null ? [] : [{ text: shell.lineText(entry.line), addition: entry.line.kind === "add", at }];
+      });
+      if (lines.length === 0) return;
+      const value = await invoke<StatusSnapshot & { output?: string }>("mutate", {
+        path,
+        request: action === "stageLine"
+          ? { action: "stageLines", file, lines, unstage }
+          : { action: "discardLines", file, lines },
+      });
       if (shell.viewing(path)) {
-        if (value) shell.applySnapshot(value);
-        await shell.loadContext();
+        shell.applySnapshot(value);
         await shell.loadDiff();
       }
     } catch (error) {
@@ -1204,7 +1219,6 @@ export async function applyLineOps(shell: ShellState, action: "stageLine" | "dis
       if (action === "stageLine" && shell.settings.ignoreSpace) shell.actionError = `${shell.actionError} ${shell.tr("dialog.spaceHint")}`;
       try {
         shell.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
-        await shell.loadContext();
         await shell.loadDiff();
       } catch {
         /* keep the action error */

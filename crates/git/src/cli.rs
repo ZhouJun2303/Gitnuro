@@ -15,6 +15,7 @@ use crate::Error;
 
 static BUNDLED_GIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 static CHILDREN: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
+static READS: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
 static TRACE: std::sync::OnceLock<Trace> = std::sync::OnceLock::new();
 static PROGRESS: Mutex<Option<ProgressHook>> = Mutex::new(None);
 
@@ -52,6 +53,18 @@ pub fn repo_key(path: &Path) -> String {
 
 thread_local! {
     static OPERATION_REPO: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    static READ_SCOPE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Mark `git` processes started inside `body` as reads, so a newer read can stop them
+/// without touching a queued write. Nested scopes restore the previous value.
+pub fn with_read<T>(body: impl FnOnce() -> T) -> T {
+    READ_SCOPE.with(|slot| {
+        let previous = slot.replace(true);
+        let value = body();
+        slot.set(previous);
+        value
+    })
 }
 
 /// Attribute git progress and cancellation to `path` while `body` runs on this thread.
@@ -324,6 +337,19 @@ pub fn cancel_repo(repo: &Path) {
     for pid in pids {
         stop_process_tree(pid);
     }
+    cancel_reads(repo);
+}
+
+/// Stop reads (history, diff, blame, search) for this repository. Writes keep running.
+pub fn cancel_reads(repo: &Path) {
+    let key = repo_key(repo);
+    let pids = READS
+        .lock()
+        .map(|guard| guard.iter().filter(|(item, _)| item == &key).map(|(_, pid)| *pid).collect::<Vec<_>>())
+        .unwrap_or_default();
+    for pid in pids {
+        stop_process_tree(pid);
+    }
 }
 
 pub fn stop_process_tree(pid: u32) {
@@ -387,10 +413,65 @@ fn run_prepared(
     apply_author: bool,
     allow_failure: bool,
 ) -> Result<std::process::Output, Error> {
+    run_prepared_capped(repo, args, env, stdin_bytes, apply_author, allow_failure, None).map(|(output, _)| output)
+}
+
+/// Like `run`, but stops reading after `limit` bytes and kills the child.
+///
+/// A huge diff, blame, or log would otherwise be buffered in full before the UI can
+/// truncate it. The returned flag says the output is incomplete.
+pub fn run_capped(repo: &Path, args: &[&str], limit: usize) -> Result<(std::process::Output, bool), Error> {
+    run_prepared_capped(repo, args, &[], None, true, false, Some(limit))
+}
+
+/// Run a command with many pathspecs. Short lists stay on the command line; long
+/// ones go through `--pathspec-from-file=-` so Windows never hits the 32K limit.
+pub(crate) fn run_paths(repo: &Path, prefix: &[&str], paths: &[String]) -> Result<std::process::Output, Error> {
+    if paths.is_empty() {
+        return run(repo, prefix);
+    }
+    for path in paths {
+        check_path(path)?;
+    }
+    let prefix = prefix.strip_suffix(&["--"]).unwrap_or(prefix);
+    let bytes: usize = paths.iter().map(|path| path.len() + 1).sum();
+    if paths.len() <= 40 && bytes <= 4_000 {
+        let mut owned: Vec<String> = Vec::with_capacity(prefix.len() + paths.len() + 2);
+        owned.push("--literal-pathspecs".into());
+        owned.extend(prefix.iter().map(|part| (*part).to_string()));
+        owned.push("--".into());
+        owned.extend(paths.iter().cloned());
+        let borrowed: Vec<&str> = owned.iter().map(String::as_str).collect();
+        return run(repo, &borrowed);
+    }
+    let mut owned: Vec<String> = Vec::with_capacity(prefix.len() + 4);
+    owned.push("--literal-pathspecs".into());
+    owned.extend(prefix.iter().map(|part| (*part).to_string()));
+    owned.push("--pathspec-from-file=-".into());
+    owned.push("--pathspec-file-nul".into());
+    let mut input = Vec::with_capacity(bytes);
+    for path in paths {
+        input.extend_from_slice(path.as_bytes());
+        input.push(0);
+    }
+    let borrowed: Vec<&str> = owned.iter().map(String::as_str).collect();
+    run_stdin(repo, &borrowed, &input)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_prepared_capped(
+    repo: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+    stdin_bytes: Option<&[u8]>,
+    apply_author: bool,
+    allow_failure: bool,
+    cap: Option<usize>,
+) -> Result<(std::process::Output, bool), Error> {
     let progress = progress_hook();
     let mut command = git_command();
     command.current_dir(repo).env("GIT_TERMINAL_PROMPT", "0");
-    if progress.is_some() {
+    if progress.is_some() && cap.is_none() {
         command.env("GIT_LFS_FORCE_PROGRESS", "1");
         command.args(progress_args(args));
     } else {
@@ -437,10 +518,17 @@ fn run_prepared(
     let owned = operation_path(repo);
     let mut child = command.spawn().map_err(Error::GitMissing)?;
     let pid = child.id();
+    let key = repo_key(&owned);
     if let Ok(mut guard) = CHILDREN.lock() {
-        guard.push((repo_key(&owned), pid));
+        guard.push((key.clone(), pid));
     }
-    let output = std::thread::scope(|scope| {
+    let is_read = READ_SCOPE.with(|slot| slot.get());
+    if is_read {
+        if let Ok(mut guard) = READS.lock() {
+            guard.push((key, pid));
+        }
+    }
+    let (output, write_result, truncated) = std::thread::scope(|scope| {
         // Feed stdin while stdout is drained. Writing the whole input first deadlocks
         // as soon as the child fills its stdout pipe and stops reading.
         let writer = stdin_bytes.and_then(|bytes| {
@@ -453,10 +541,13 @@ fn run_prepared(
                 })
             })
         });
-        let output = if let Some(progress) = progress {
-            stream_output(&mut child, progress, owned.display().to_string())
+        let (output, truncated) = if let Some(limit) = cap {
+            let (output, truncated) = stream_output_capped(&mut child, limit);
+            (output, truncated)
+        } else if let Some(progress) = progress {
+            (stream_output(&mut child, progress, owned.display().to_string()), false)
         } else {
-            child.wait_with_output().map_err(Error::GitMissing)
+            (child.wait_with_output().map_err(Error::GitMissing), false)
         };
         if output.is_err() {
             // Unblock the writer before joining it if reading output failed mid-flight.
@@ -467,9 +558,8 @@ fn run_prepared(
                 .join()
                 .unwrap_or_else(|_| Err(std::io::Error::new(std::io::ErrorKind::Other, "git stdin writer panicked")))
         });
-        (output, write_result)
+        (output, write_result, truncated)
     });
-    let (output, write_result) = output;
     let output = match output {
         Ok(output) => output,
         Err(error) => {
@@ -489,13 +579,21 @@ fn run_prepared(
         }
     }
     untrack(pid);
+    if truncated {
+        let note = failure_note(output.status.success(), true, &output.stderr);
+        if let Some(hook) = TRACE.get() {
+            hook(args, started.elapsed(), true, &note);
+        }
+        note_captured(&output.stdout, &output.stderr);
+        return Ok((output, true));
+    }
     let note = failure_note(output.status.success(), allow_failure, &output.stderr);
     if let Some(hook) = TRACE.get() {
         hook(args, started.elapsed(), output.status.success() || allow_failure, &note);
     }
     note_captured(&output.stdout, &output.stderr);
     if output.status.success() || allow_failure {
-        return Ok(output);
+        return Ok((output, false));
     }
     let stderr = settle_stderr(&output.stderr);
     Err(Error::Git(if stderr.is_empty() {
@@ -503,6 +601,52 @@ fn run_prepared(
     } else {
         stderr
     }))
+}
+
+/// Read stdout until `limit` bytes, then stop the child. Stderr is drained in parallel.
+fn stream_output_capped(child: &mut Child, limit: usize) -> (Result<std::process::Output, Error>, bool) {
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+    let stderr_task = std::thread::Builder::new()
+        .name("awegit-output".into())
+        .spawn(move || drain(stderr_pipe));
+    let mut stdout = Vec::new();
+    let mut truncated = false;
+    if let Some(mut pipe) = stdout_pipe {
+        let mut chunk = [0u8; 16 * 1024];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(read) => {
+                    let room = limit.saturating_sub(stdout.len());
+                    if read > room {
+                        stdout.extend_from_slice(&chunk[..room]);
+                        truncated = true;
+                        stop_process_tree(child.id());
+                        break;
+                    }
+                    stdout.extend_from_slice(&chunk[..read]);
+                }
+                Err(_) => break,
+            }
+        }
+    }
+    let status = match child.wait() {
+        Ok(status) => status,
+        Err(source) => return (Err(Error::GitMissing(source)), truncated),
+    };
+    let stderr = stderr_task
+        .ok()
+        .and_then(|task| task.join().ok())
+        .unwrap_or_default();
+    (Ok(std::process::Output { status, stdout, stderr }), truncated)
+}
+
+fn drain(pipe: Option<impl Read>) -> Vec<u8> {
+    let Some(mut pipe) = pipe else { return Vec::new() };
+    let mut buf = Vec::new();
+    let _ = pipe.read_to_end(&mut buf);
+    buf
 }
 
 /// Read both pipes while `git` runs. Stderr is scanned for `45% (12/30)` lines.
@@ -656,6 +800,9 @@ fn untrack(pid: u32) {
     if let Ok(mut guard) = CHILDREN.lock() {
         guard.retain(|(_, item)| *item != pid);
     }
+    if let Ok(mut guard) = READS.lock() {
+        guard.retain(|(_, item)| *item != pid);
+    }
 }
 
 /// `-c` arguments that keep commit signing on only when the session asked for it.
@@ -737,10 +884,15 @@ pub fn check_name(name: &str) -> Result<&str, Error> {
 }
 
 /// Reject absolute paths and `..` so a command cannot leave the work tree.
+///
+/// Newlines and NUL cannot be sent through line-based porcelain, and a lossy
+/// non-UTF-8 conversion would point at a different file; both are refused instead
+/// of risking a write to the wrong path.
 pub fn check_path(path: &str) -> Result<&str, Error> {
     let escapes = path.is_empty()
         || path.starts_with(['/', '\\'])
         || path.contains(':')
+        || path.contains(['\n', '\r', '\0', '\u{FFFD}'])
         || path
             .split(['/', '\\'])
             .any(|part| part.is_empty() || part == "." || part == "..");

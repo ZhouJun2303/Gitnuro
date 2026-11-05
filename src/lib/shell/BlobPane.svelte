@@ -7,7 +7,7 @@
   let top = $state(0);
   let viewport = $state(0);
   const lines = $derived(shell.blobText ? shell.blobText.split("\n") : []);
-  const view = $derived(windowSlice(lines, top, 18, 80, Math.max(48, Math.ceil(Math.max(viewport, 0) / 18) + 24)));
+  const view = $derived(windowSlice(lines, top, 18, 80, Math.max(72, Math.ceil(Math.max(viewport, 0) / 18) + 48)));
   const onScroll = onVirtualScroll((value) => (top = value));
 
   function closePane() {
@@ -32,9 +32,14 @@
     <img alt={shell.blobFile} src={shell.blobPreview.dataUrl} />
   {:else if shell.blobBinary}
     <p class="empty">{shell.tr("chrome.binary")}</p>
+  {:else if shell.blobTruncated && lines.length === 0}
+    <p class="empty">{shell.tr("chrome.truncated")}</p>
   {:else if lines.length === 0}
     <p class="empty">{shell.tr("chrome.emptyFile")}</p>
   {:else}
+    {#if shell.blobTruncated}
+      <p class="empty">{shell.tr("chrome.truncated")}</p>
+    {/if}
     <div class="blob-scroll" onscroll={onScroll} bind:clientHeight={viewport}>
       <div class="commit-window" style:height="{lines.length * 18}px">
         {#each view.rows as line, index (`b-${view.start + index}`)}

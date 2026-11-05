@@ -515,9 +515,11 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::WriteMailmap { .. } => "writeMailmap",
         awegit_git::Mutation::StageHunk { .. } => "stageHunk",
         awegit_git::Mutation::StageLine { .. } => "stageLine",
+        awegit_git::Mutation::StageLines { .. } => "stageLines",
         awegit_git::Mutation::StagePaths { .. } => "stagePaths",
         awegit_git::Mutation::DiscardHunk { .. } => "discardHunk",
         awegit_git::Mutation::DiscardLine { .. } => "discardLine",
+        awegit_git::Mutation::DiscardLines { .. } => "discardLines",
         awegit_git::Mutation::Resolve { .. } => "resolve",
         awegit_git::Mutation::RenameBranch { .. } => "renameBranch",
         awegit_git::Mutation::SetUpstream { .. } => "setUpstream",
@@ -527,6 +529,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::PullRef { .. } => "pullRef",
         awegit_git::Mutation::Discard { .. } | awegit_git::Mutation::DiscardPaths { .. } => "discard",
         awegit_git::Mutation::Delete { .. } => "delete",
+        awegit_git::Mutation::DeletePaths { .. } => "deletePaths",
         awegit_git::Mutation::ApplyPatch { .. } => "applyPatch",
         awegit_git::Mutation::AddRemote { .. } => "addRemote",
         awegit_git::Mutation::RemoveRemote { .. } => "removeRemote",
@@ -602,10 +605,13 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         }
         Mutation::StageHunk { file, index, unstage, .. } => join([scrub(file), format!("hunk={index}"), flag("unstage", *unstage)]),
         Mutation::StageLine { file, unstage, .. } => join([scrub(file), flag("unstage", *unstage)]),
+        Mutation::StageLines { file, lines, unstage } => join([scrub(file), format!("lines={}", lines.len()), flag("unstage", *unstage)]),
         Mutation::StagePaths { files, unstage } => join([files.iter().cloned().map(|file| scrub(&file)).collect::<Vec<_>>().join(","), flag("unstage", *unstage)]),
         Mutation::DiscardHunk { file, index, .. } => join([scrub(file), format!("hunk={index}")]),
         Mutation::DiscardLine { file, .. } | Mutation::Discard { file } | Mutation::Delete { file } => scrub(file),
+        Mutation::DiscardLines { file, lines } => join([scrub(file), format!("lines={}", lines.len())]),
         Mutation::DiscardPaths { files } => format!("files={}", files.len()),
+        Mutation::DeletePaths { files } => format!("files={}", files.len()),
         Mutation::Resolve { file, side, text } => join([scrub(file), scrub(side), format!("bytes={}", text.len())]),
         Mutation::RenameBranch { name, to } => join([scrub(name), scrub(to)]),
         Mutation::SetUpstream { branch, upstream } => join([scrub(branch), scrub(upstream)]),
@@ -1010,8 +1016,9 @@ fn settle_changes(
         }
         attach_new_dirs(repo, git_dir.as_deref(), &paths, &mut watched, &slot);
         if overflow {
-            perf::write("INFO", "watch", "repo-changed refs=false paths=overflow");
-            let _ = app.emit("repo-changed", RepoChange { refs: false });
+            // The dropped events may have included refs; a full refresh is the safe answer.
+            perf::write("INFO", "watch", "repo-changed refs=true paths=overflow");
+            let _ = app.emit("repo-changed", RepoChange { refs: true });
             continue;
         }
         let Some(change) = classify_changes(repo, &paths) else { continue };
@@ -1301,6 +1308,38 @@ fn cancel_operation(path: Option<String>) -> Result<(), String> {
         _ => awegit_git::cancel_running(),
     }
     Ok(())
+}
+
+/// Stop history/diff/blame reads without touching a queued write.
+#[tauri::command]
+fn cancel_reads(path: Option<String>) -> Result<(), String> {
+    if let Some(path) = path.filter(|path| !path.trim().is_empty()) {
+        awegit_git::cancel_reads(Path::new(&path));
+    }
+    Ok(())
+}
+
+/// Sidebar preferences live in `.git/awegit`; none of them changes the work tree,
+/// so these skip the status scan that `mutate` would run.
+#[tauri::command]
+fn save_hidden_refs(path: Option<String>, names: Vec<String>) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let _turn = repo_turn(&repo);
+    awegit_git::write_hidden_refs(&repo, &names).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_expanded_groups(path: Option<String>, names: Vec<String>) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let _turn = repo_turn(&repo);
+    awegit_git::write_expanded_groups(&repo, &names).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_sign_off(path: Option<String>, enabled: bool, format: String) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let _turn = repo_turn(&repo);
+    awegit_git::write_sign_off(&repo, enabled, &format).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1867,6 +1906,10 @@ pub fn run() {
             list_ai_models,
             file_preview,
             cancel_operation,
+            cancel_reads,
+            save_hidden_refs,
+            save_expanded_groups,
+            save_sign_off,
             set_passphrase,
             approve_credential,
             check_for_update,

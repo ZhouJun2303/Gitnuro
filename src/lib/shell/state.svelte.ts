@@ -51,11 +51,74 @@ function standaloneView(): "" | "history" | "blob" {
   return view === "history" || view === "blob" ? view : "";
 }
 
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
+}
+
+function sameCommitRow(left: CommitRow, right: CommitRow): boolean {
+  return (
+    left.id === right.id &&
+    left.shortId === right.shortId &&
+    left.summary === right.summary &&
+    left.author === right.author &&
+    left.when === right.when &&
+    left.lane === right.lane &&
+    left.at === right.at &&
+    left.email === right.email &&
+    left.unpushed === right.unpushed &&
+    sameStrings(left.parents, right.parents) &&
+    sameStrings(left.refs, right.refs)
+  );
+}
+
+function sameCommitRows(left: readonly CommitRow[], right: readonly CommitRow[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (!sameCommitRow(left[index]!, right[index]!)) return false;
+  }
+  return true;
+}
+
+function sameStatusFile(left: StatusFile, right: StatusFile): boolean {
+  return left.path === right.path && left.kind === right.kind && left.previousPath === right.previousPath;
+}
+
+function sameStatusFiles(left: readonly StatusFile[], right: readonly StatusFile[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (!sameStatusFile(left[index]!, right[index]!)) return false;
+  }
+  return true;
+}
+
+function sameSnapshot(left: StatusSnapshot | null, right: StatusSnapshot | null): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.path === right.path && left.branch === right.branch && sameStatusFiles(left.staged, right.staged) && sameStatusFiles(left.unstaged, right.unstaged);
+}
+
 function sameValue(left: unknown, right: unknown): boolean {
   if (Object.is(left, right)) return true;
   if (typeof left !== "object" || typeof right !== "object" || left === null || right === null) return false;
   if (Array.isArray(left) || Array.isArray(right)) {
     if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    const first = left[0] as Record<string, unknown> | undefined;
+    const other = right[0] as Record<string, unknown> | undefined;
+    if (first && other && typeof first === "object" && typeof other === "object") {
+      if ("shortId" in first && "parents" in first && "shortId" in other) {
+        return sameCommitRows(left as CommitRow[], right as CommitRow[]);
+      }
+      if ("kind" in first && "path" in first && "kind" in other) {
+        return sameStatusFiles(left as StatusFile[], right as StatusFile[]);
+      }
+    }
     for (let index = 0; index < left.length; index += 1) {
       if (!sameValue(left[index], right[index])) return false;
     }
@@ -246,7 +309,7 @@ export class ShellState {
   labSceneId = $state("");
 
 
-  snapshot = $state<StatusSnapshot | null>(null);
+  snapshot = $state.raw<StatusSnapshot | null>(null);
 
 
   loadError = $state<string | null>(null);
@@ -281,7 +344,7 @@ export class ShellState {
   errorCopied = $state(false);
 
 
-  diff = $state<FileDiff | null>(null);
+  diff = $state.raw<FileDiff | null>(null);
 
 
   diffError = $state<string | null>(null);
@@ -308,10 +371,14 @@ export class ShellState {
   refreshQueued: "status" | "full" | null = null;
 
 
+  /** A watcher event that arrived while a write was running. */
+  watchQueued: "status" | "full" | null = null;
+
+
   refs = $state<RefSnapshot | null>(null);
 
 
-  commitsLive = $state<CommitRow[]>([]);
+  commitsLive = $state.raw<CommitRow[]>([]);
 
 
   progress = $state<InProgress | null>(null);
@@ -320,19 +387,24 @@ export class ShellState {
   selectedCommit = $state<string | null>(null);
 
 
-  commitFiles = $state<StatusFile[]>([]);
+  selectedCommitRow = $derived(this.mode === "live" && this.selectedCommit ? (this.commitsLive.find((row) => row.id === this.selectedCommit) ?? null) : null);
+
+
+  commitFiles = $state.raw<StatusFile[]>([]);
 
 
   historyFile = $state<string | null>(null);
 
 
-  historyDiff = $state<FileDiff | null>(null);
+  historyDiff = $state.raw<FileDiff | null>(null);
 
 
-  patchCache = $state<Record<string, FileDiff>>({});
+  patchCache = $state.raw<Record<string, FileDiff>>({});
+  /** Bumped when a patch is added in place, so readers do not copy the whole map. */
+  patchVersion = $state(0);
 
 
-  openPatches = $state<string[]>([]);
+  openPatches = $state.raw<string[]>([]);
 
 
   treeCollapsed = $state<string[]>([]);
@@ -342,6 +414,7 @@ export class ShellState {
 
 
   treeBinary = $state(false);
+  treeTruncated = $state(false);
 
 
   blobTop = $state(0);
@@ -359,7 +432,7 @@ export class ShellState {
   historyHeight = $state(0);
 
 
-  blameLines = $state<BlameLine[] | null>(null);
+  blameLines = $state.raw<BlameLine[] | null>(null);
 
 
   settingsPath = $state("");
@@ -556,6 +629,7 @@ export class ShellState {
 
 
   blobLoaded = $state(false);
+  blobTruncated = $state(false);
 
 
   blobError = $state("");
@@ -584,6 +658,26 @@ export class ShellState {
 
 
   fileTop = $state(0);
+
+
+  /** Combined staged+unstaged list scrolls as one virtual list. */
+  combinedTop = $state(0);
+
+
+  combinedHeight = $state(0);
+
+
+  /** Commit-detail file list: scroll offset and measured patch heights. */
+  commitScrollTop = $state(0);
+
+
+  commitViewport = $state(0);
+
+
+  commitListTop = $state(0);
+
+
+  patchHeights = $state.raw<Record<string, number>>({});
 
 
   sideTop = $state(0);
@@ -869,7 +963,7 @@ export class ShellState {
   reflogRows = $state<{ id: string; shortId: string; selector: string; summary: string }[]>([]);
 
 
-  treePaths = $state<string[]>([]);
+  treePaths = $state.raw<string[]>([]);
 
 
   treeText = $state("");
@@ -1090,9 +1184,12 @@ export class ShellState {
   );
 
 
-  conflictCount = $derived(
-    [...(this.snapshot?.staged ?? []), ...(this.snapshot?.unstaged ?? [])].filter((file) => file.kind === "conflict").length,
-  );
+  conflictCount = $derived.by(() => {
+    let count = 0;
+    for (const file of this.snapshot?.staged ?? []) if (file.kind === "conflict") count += 1;
+    for (const file of this.snapshot?.unstaged ?? []) if (file.kind === "conflict") count += 1;
+    return count;
+  });
 
 
   conflicted = $derived(this.conflictCount > 0);
@@ -1364,7 +1461,193 @@ export class ShellState {
   repoTree = $derived(this.asTree((this.mode === "live" ? this.treePaths : this.sampleTree).map((path) => ({ path, letter: "", tone: "modified" as const })), this.treeCollapsed));
 
 
-  allPatchesOpen = $derived(this.commitFiles.length > 0 && this.commitFiles.every((file) => this.openPatches.includes(file.path)));
+  openPatchSet = $derived(new Set(this.openPatches));
+
+
+  allPatchesOpen = $derived(this.commitFiles.length > 0 && this.commitFiles.every((file) => this.openPatchSet.has(file.path)));
+
+
+  /** Measured height wins; the estimate only positions rows before they first mount. */
+  commitPatchHeight(path: string) {
+    this.patchVersion;
+    const measured = this.patchHeights[path];
+    if (measured) return measured;
+    const cached = this.patchCache[path];
+    if (!cached || cached.binary || cached.lines.length === 0) return 34;
+    const stride = this.settings.diffStyle === "split" ? this.splitRowHeight : this.diffRowHeight;
+    return Math.max(34, cached.lines.length * stride + (cached.truncated ? 22 : 2));
+  }
+
+
+  commitRows = $derived.by(() => {
+    const open = this.openPatchSet;
+    const rows: { key: string; kind: "file" | "patch"; path: string; file: StatusFile; top: number; height: number }[] = [];
+    let top = 0;
+    for (const file of this.commitFiles) {
+      rows.push({ key: `f:${file.path}`, kind: "file", path: file.path, file, top, height: 30 });
+      top += 30;
+      if (open.has(file.path)) {
+        const height = this.commitPatchHeight(file.path);
+        rows.push({ key: `p:${file.path}`, kind: "patch", path: file.path, file, top, height });
+        top += height;
+      }
+    }
+    return { rows, total: top };
+  });
+
+
+  commitWindow = $derived.by(() => {
+    const { rows, total } = this.commitRows;
+    if (rows.length <= 80) return { rows, topSpacer: 0, bottomSpacer: 0 };
+    const offset = Math.max(0, this.commitScrollTop - this.commitListTop);
+    const viewport = this.commitViewport || 600;
+    const from = Math.max(0, offset - 200);
+    const to = offset + viewport + 400;
+    let low = 0;
+    let high = rows.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      const row = rows[middle]!;
+      if (row.top + row.height < from) low = middle + 1;
+      else high = middle;
+    }
+    const start = Math.min(low, rows.length - 1);
+    low = start;
+    high = rows.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (rows[middle]!.top < to) low = middle + 1;
+      else high = middle;
+    }
+    const end = Math.min(rows.length, Math.max(low, start + 1));
+    const first = rows[start]!;
+    const last = rows[end - 1]!;
+    return {
+      rows: rows.slice(start, end),
+      topSpacer: first.top,
+      bottomSpacer: Math.max(0, total - (last.top + last.height)),
+    };
+  });
+
+
+  trackCommitScroll(node: HTMLElement) {
+    let frame = 0;
+    const read = () => {
+      frame = 0;
+      this.commitScrollTop = node.scrollTop;
+      this.commitViewport = node.clientHeight;
+    };
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(read);
+    };
+    node.addEventListener("scroll", schedule, { passive: true });
+    const resize = new ResizeObserver(schedule);
+    resize.observe(node);
+    read();
+    return {
+      destroy() {
+        if (frame) cancelAnimationFrame(frame);
+        node.removeEventListener("scroll", schedule);
+        resize.disconnect();
+      },
+    };
+  }
+
+
+  trackCommitList(node: HTMLElement) {
+    const scroller = node.closest(".detail-scroll");
+    if (!(scroller instanceof HTMLElement)) return;
+    const measure = () => {
+      this.commitListTop = node.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    };
+    const resize = new ResizeObserver(measure);
+    resize.observe(node);
+    if (node.parentElement) {
+      resize.observe(node.parentElement);
+      // The commit card above the list grows when its body arrives; observe it too.
+      for (const sibling of Array.from(node.parentElement.children)) {
+        if (sibling !== node) resize.observe(sibling);
+      }
+    }
+    resize.observe(scroller);
+    measure();
+    return {
+      destroy() {
+        resize.disconnect();
+      },
+    };
+  }
+
+
+  measureCommitPatch(node: HTMLElement, path: string) {
+    let current = path;
+    let last = 0;
+    const measure = () => {
+      const height = Math.ceil(node.getBoundingClientRect().height);
+      if (height <= 0 || Math.abs(height - last) <= 1) return;
+      last = height;
+      this.patchHeights = { ...this.patchHeights, [current]: height };
+    };
+    const resize = new ResizeObserver(measure);
+    resize.observe(node);
+    measure();
+    return {
+      update(next: string) {
+        current = next;
+        last = 0;
+        measure();
+      },
+      destroy() {
+        resize.disconnect();
+      },
+    };
+  }
+
+
+  loadCommitPatch(node: HTMLElement, path: string) {
+    let current = path;
+    const load = (file: string) => {
+      if (!this.patchCache[file]) this.requestPatch(file);
+    };
+    load(current);
+    return {
+      update(next: string) {
+        if (next === current) return;
+        current = next;
+        load(current);
+      },
+    };
+  }
+
+
+  /** Patches loading for on-screen rows. Four at a time keeps a fast scroll from
+   * spawning dozens of git processes. */
+  private patchQueue: string[] = [];
+  private patchLoading = new Set<string>();
+
+  requestPatch(file: string) {
+    if (this.patchCache[file] || this.patchLoading.has(file) || this.patchQueue.includes(file)) return;
+    this.patchQueue.push(file);
+    this.pumpPatches();
+  }
+
+  private pumpPatches() {
+    while (this.patchLoading.size < 4 && this.patchQueue.length > 0) {
+      const file = this.patchQueue.shift();
+      if (!file || this.patchCache[file]) continue;
+      this.patchLoading.add(file);
+      void this.ensurePatch(file).finally(() => {
+        this.patchLoading.delete(file);
+        this.pumpPatches();
+      });
+    }
+  }
+
+  clearPatchQueue() {
+    this.patchQueue = [];
+    this.patchLoading.clear();
+  }
 
 
   blobLines = $derived.by(() => {
@@ -1438,6 +1721,15 @@ export class ShellState {
   shownStaged = $derived(this.staged.filter((file) => this.matchesQuery(file.path, this.fileQuery) && (!this.conflictsOnly || file.letter === "C")));
 
 
+  combinedRows = $derived.by(() => [
+    ...this.shownStaged.map((file) => ({ key: `s:${file.path}`, file, side: "staged" as Side })),
+    ...this.shownUnstaged.map((file) => ({ key: `u:${file.path}`, file, side: "unstaged" as Side })),
+  ]);
+
+
+  combinedWindow = $derived(windowSlice(this.combinedRows, this.combinedTop, this.rowFile, 80, this.windowRows(this.combinedHeight, this.rowFile)));
+
+
   fileLayout = $derived(this.settings.fileLayout || (this.settings.treeFiles ? "tree" : "list"));
 
 
@@ -1465,7 +1757,9 @@ export class ShellState {
   /** Wrapped diffs draw every line, so large ones stay plain text instead of highlighting each one. */
   heavyWrap = $derived.by(() => {
     if (!this.settings.diffWordWrap) return false;
+    this.patchVersion;
     if (this.section === "changes") return this.diffLines.length > 300;
+    if (this.openPatches.length > 500) return true;
     for (const file of this.openPatches) {
       const lines = this.patchCache[file]?.lines.length ?? (this.historyDiff?.path === file ? this.historyDiff.lines.length : 0);
       if (lines > 300) return true;
@@ -1539,9 +1833,9 @@ export class ShellState {
 
   splitWindow = $derived.by(() => {
     if (this.settings.diffWordWrap) return { start: 0, rows: this.splitRows, after: 0 };
-    const count = Math.ceil(Math.max(this.diffHeight, 600) / this.splitRowHeight) + 24;
+    const count = Math.ceil(Math.max(this.diffHeight, 600) / this.splitRowHeight) + 36;
     if (this.splitRows.length <= count + 40) return { start: 0, rows: this.splitRows, after: 0 };
-    const start = Math.min(Math.max(0, Math.floor(this.diffTop / this.splitRowHeight) - 12), Math.max(0, this.splitRows.length - count));
+    const start = Math.min(Math.max(0, Math.floor(this.diffTop / this.splitRowHeight) - 16), Math.max(0, this.splitRows.length - count));
     const rows = this.splitRows.slice(start, start + count);
     return { start, rows, after: this.splitRows.length - start - rows.length };
   });
@@ -1819,10 +2113,11 @@ export class ShellState {
     this.blobLoaded = false;
     this.blobError = "";
     try {
-      const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null }>("blob_view", { path: this.repoPath(), rev: this.blobRev || "HEAD", file: this.blobFile });
+      const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null; truncated?: boolean }>("blob_view", { path: this.repoPath(), rev: this.blobRev || "HEAD", file: this.blobFile });
       this.blobBinary = view.binary && !view.preview && !view.text;
       this.blobPreview = view.preview;
       this.blobText = view.text;
+      this.blobTruncated = view.truncated === true;
       if (this.inApp()) await getCurrentWindow().setTitle(this.fileName(this.blobFile)).catch(() => {});
     } catch (error) {
       this.actionError = this.message(error);
@@ -1830,6 +2125,7 @@ export class ShellState {
       this.blobText = "";
       this.blobPreview = null;
       this.blobBinary = false;
+      this.blobTruncated = false;
     } finally {
       this.blobLoaded = true;
     }
@@ -2180,14 +2476,14 @@ export class ShellState {
 
 
   windowRows(height: number, rowHeight: number) {
-    return Math.max(48, Math.ceil(Math.max(height, 0) / Math.max(rowHeight, 1)) + 24);
+    return Math.max(72, Math.ceil(Math.max(height, 0) / Math.max(rowHeight, 1)) + 48);
   }
 
 
 
   applySnapshot(value: StatusSnapshot) {
     this.statusGen += 1;
-    if (!this.same(this.snapshot, value)) this.snapshot = value;
+    if (!sameSnapshot(this.snapshot, value)) this.snapshot = value;
     this.mode = "live";
     this.loadError = "";
     if (value.path && !this.repos.includes(value.path)) this.repos = [...this.repos, value.path];
@@ -2315,7 +2611,23 @@ export class ShellState {
 
 
 
-  quietGit = new Set(["stageHunk", "stageLine", "discardHunk", "discardLine", "setExpanded", "setHidden", "setSignOff"]);
+  quietGit = new Set(["stageHunk", "stageLine", "stageLines", "discardHunk", "discardLine", "discardLines", "setExpanded", "setHidden", "setSignOff"]);
+
+
+  /** Writes that can move refs or history. Everything else only needs the status snapshot. */
+  contextActions = new Set([
+    "fetch", "pull", "push", "checkout", "checkoutRemote", "createBranch", "deleteBranch", "renameBranch",
+    "merge", "rebase", "rebaseInteractive", "abort", "continue", "skip", "reset", "cherryPick", "revert",
+    "reword", "tag", "deleteTag", "deleteRemoteTag", "stash", "stashPop", "stashApply", "stashDrop",
+    "stashRename", "stashBranch", "stashPaths", "pushRef", "pullRef", "setUpstream", "deleteRemoteBranch",
+    "addRemote", "removeRemote", "setRemoteUrl", "submoduleAdd", "submoduleInit", "submoduleSync", "submoduleRemove",
+    "gitFlowInit", "gitFlowStart", "gitFlowFinish", "squash", "clone", "init", "setHidden", "setExpanded",
+  ]);
+
+
+  needsContext(action: string) {
+    return this.contextActions.has(action);
+  }
 
 
 
@@ -2621,6 +2933,8 @@ export class ShellState {
     if (!background) this.actionError = null;
     const described = this.describeRequest(request);
     const action = String(request.action ?? "");
+    const dialogBefore = this.dialog;
+    const refreshContext = this.needsContext(action);
     const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
     if (!background) this.startWork(described.title, path);
     try {
@@ -2630,21 +2944,18 @@ export class ShellState {
       const superseded = background && this.busy;
       if (this.viewing(path) && !superseded) {
         this.applySnapshot(value);
-        await this.loadContext();
+        if (refreshContext) await this.loadContext();
         if (!background && this.viewing(path)) await this.loadDiff();
       }
       if (followSubmodules) {
         const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request: { action: "submoduleUpdate" } });
-        if (this.viewing(path)) {
-          this.applySnapshot(follow);
-          await this.loadContext();
-        }
+        if (this.viewing(path)) this.applySnapshot(follow);
         this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
       }
       this.noteActivity(`${action}${output ? " output" : " ok"}`);
       this.recordCommand(action, described, value.log || output, true, source);
-      if (!background && this.viewing(path)) {
-        if (this.dialog === "prefs") {
+      if (!background && this.viewing(path) && this.dialog === dialogBefore) {
+        if (dialogBefore === "prefs") {
           // Preferences stay open for LFS/author actions; the operation is recorded below.
         } else if (output) {
           this.commandOutput = output;
@@ -2660,7 +2971,7 @@ export class ShellState {
       if (this.viewing(path) && !(background && this.busy)) {
         try {
           this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
-          await this.loadContext();
+          if (refreshContext) await this.loadContext();
         } catch {
           /* keep the action error */
         }
@@ -3629,6 +3940,7 @@ export class ShellState {
     this.repoPickerOpen = false;
     this.forgeOpen = null;
     const gen = ++this.openGen;
+    if (this.snapshot?.path && !this.viewing(path)) void invoke("cancel_reads", { path: this.snapshot.path }).catch(() => {});
     this.focusPath = path;
     if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description, commitType: this.commitType });
     const running = (this.jobs[this.jobKey(path)]?.depth ?? 0) > 0;
@@ -3660,6 +3972,10 @@ export class ShellState {
         this.historyTop = 0;
         this.fileTop = 0;
         this.stagedTop = 0;
+        this.combinedTop = 0;
+        this.commitScrollTop = 0;
+        this.commitListTop = 0;
+        this.selectedIndex = 0;
         this.diffTop = 0;
         this.blameTop = 0;
         this.historyDiffTop = 0;
@@ -3675,7 +3991,10 @@ export class ShellState {
       if (gen !== this.openGen) return;
       await this.loadDiff();
       if (gen !== this.openGen) return;
-      await invoke("watch_repository", { path: this.repoPath() });
+      // Arming the watcher walks every work-tree directory; on a huge repository that
+      // must not hold up the first paint. Changes before it arms are rare and recover
+      // on the next refresh.
+      void invoke("watch_repository", { path: this.repoPath() }).catch(() => {});
       void invoke<{ available: boolean }>("lfs_locks", { path: this.repoPath(), list: false })
         .then((locks) => {
           if (gen === this.openGen) this.lfsAvailable = locks.available;
@@ -3867,7 +4186,10 @@ export class ShellState {
     const saved = this.refs?.expandedGroups ?? [];
     const next = saved.includes(group) ? saved.filter((item) => item !== group) : [...saved, group];
     if (this.refs) this.refs = { ...this.refs, expandedGroups: next };
-    void this.mutate({ action: "setExpanded", names: next });
+    // This only writes `.git/awegit`; a status scan and history reload would both be wasted.
+    void invoke("save_expanded_groups", { path: this.repoPath(), names: next }).catch((error) => {
+      this.actionError = this.message(error);
+    });
   }
 
 
@@ -3904,8 +4226,19 @@ export class ShellState {
 
 
 
+  private hiddenRefSource: RefSnapshot | null = null;
+  private hiddenRefExact = new Set<string>();
+  private hiddenRefPrefix: string[] = [];
+
   refHidden(name: string) {
-    return (this.refs?.hiddenRefs ?? []).some((token) => name === token || (token.endsWith("/") && name.startsWith(token)));
+    if (this.hiddenRefSource !== this.refs) {
+      const tokens = this.refs?.hiddenRefs ?? [];
+      this.hiddenRefSource = this.refs;
+      this.hiddenRefExact = new Set(tokens.filter((token) => !token.endsWith("/")));
+      this.hiddenRefPrefix = tokens.filter((token) => token.endsWith("/"));
+    }
+    if (this.hiddenRefExact.has(name)) return true;
+    return this.hiddenRefPrefix.some((token) => name.startsWith(token));
   }
 
 
@@ -3913,7 +4246,10 @@ export class ShellState {
   hideRef(name: string) {
     const names = [...(this.refs?.hiddenRefs ?? [])];
     if (!names.includes(name)) names.push(name);
-    void this.mutate({ action: "setHidden", names });
+    if (this.refs) this.refs = { ...this.refs, hiddenRefs: names };
+    void invoke("save_hidden_refs", { path: this.repoPath(), names }).catch((error) => {
+      this.actionError = this.message(error);
+    });
   }
 
 
@@ -3925,7 +4261,10 @@ export class ShellState {
 
 
   showAllRefs() {
-    void this.mutate({ action: "setHidden", names: [] });
+    if (this.refs) this.refs = { ...this.refs, hiddenRefs: [] };
+    void invoke("save_hidden_refs", { path: this.repoPath(), names: [] }).catch((error) => {
+      this.actionError = this.message(error);
+    });
   }
 
 
@@ -4775,12 +5114,23 @@ export class ShellState {
 
 
   moveSelection(delta: number) {
-    const rows = this.section === "history" ? this.shownCommits : this.selectedSide === "staged" ? this.staged : this.unstaged;
+    if (this.section === "history") {
+      const rows = this.historyItems;
+      if (rows.length === 0) return;
+      this.selectedIndex = Math.min(rows.length - 1, Math.max(0, this.selectedIndex + delta));
+      const row = rows[this.selectedIndex];
+      if (row) void this.selectCommit(row.id);
+      return;
+    }
+    const { target, rows } = this.fileTargetRows();
     if (rows.length === 0) return;
-    this.selectedIndex = Math.min(rows.length - 1, Math.max(0, this.selectedIndex + delta));
+    const current = rows.findIndex((row) => row.path === this.selectedPath);
+    const base = current >= 0 ? current : this.selectedIndex;
+    this.selectedIndex = Math.min(rows.length - 1, Math.max(0, base + delta));
     const row = rows[this.selectedIndex];
-    if (this.section === "history" && "id" in row) void this.selectCommit(row.id);
-    else if ("path" in row) this.selectFile(row.path, this.selectedSide);
+    if (!row) return;
+    const side: Side = target === "staged" ? "staged" : target === "unstaged" ? "unstaged" : this.shownStaged.some((file) => file.path === row.path) ? "staged" : "unstaged";
+    this.selectFile(row.path, side);
   }
 
 
@@ -5159,6 +5509,28 @@ export class ShellState {
       if (!this.busy) this.releaseWriteWaiters();
     });
     $effect(() => {
+      // Measured heights belong to one diff style; drop them when the layout can have changed.
+      this.settings.diffStyle;
+      this.settings.diffWordWrap;
+      this.settings.diffFontSize;
+      this.settings.linesHeight;
+      this.patchHeights = {};
+    });
+    $effect(() => {
+      // Leaving History cleared the diff; opening Changes again must start the read,
+      // otherwise the pane sits on "Reading…" until the file is clicked again.
+      if (this.section !== "changes" || this.mode !== "live" || !this.selectedPath || this.busy) return;
+      if (!this.diff && !this.diffError && !this.conflictView) void this.loadDiff();
+    });
+    $effect(() => {
+      if (this.busy || !this.watchQueued) return;
+      const scope = this.watchQueued;
+      this.watchQueued = null;
+      void this.refresh(scope, true);
+    });
+    $effect(() => {
+      const visible = this.section === "history" || this.standalone === "history";
+      if (!visible) return;
       const straight = this.liveFold.straight;
       const items = this.historyItems;
       if (items.length <= GRAPH_SYNC_LIMIT) {
@@ -5355,7 +5727,13 @@ export class ShellState {
     }
     try {
     unlisten = await listen<{ refs?: boolean } | null>("repo-changed", (event) => {
-    if (!this.busy) void this.refresh(event.payload?.refs === false ? "status" : "full", true);
+      const scope = event.payload?.refs === false ? "status" : "full";
+      if (this.busy) {
+        // A write ignores refreshes for its whole duration; replay the newest event when it ends.
+        if (this.watchQueued !== "full") this.watchQueued = scope;
+        return;
+      }
+      void this.refresh(scope, true);
     });
     unprogress = await listen<{ path: string; percent: number }>("git-progress", (event) => {
     const percent = event.payload?.percent;

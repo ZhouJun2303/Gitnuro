@@ -140,6 +140,14 @@
 
 .expand-all { border: 0; background: transparent; color: var(--detail-accent); font: inherit; flex: none; padding: 0; }
 
+.commit-files-head { justify-content: space-between; }
+
+/* Offsets assume exactly 30px per file header. */
+.commit-files .patch-head { height: 30px; }
+
+/* The virtual list sets a measured height; clip a stale one-pixel overshoot. */
+.commit-patch { overflow: hidden; }
+
 .patch-note { margin: 4px 12px 8px; }
 
 .detail-split { flex: 1; min-height: 0; min-width: 0; display: flex; }

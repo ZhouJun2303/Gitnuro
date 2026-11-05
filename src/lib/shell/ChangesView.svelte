@@ -12,6 +12,7 @@
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const onStagedScroll = onVirtualScroll((top) => (shell.stagedTop = top));
   const onFileScroll = onVirtualScroll((top) => (shell.fileTop = top));
+  const onCombinedScroll = onVirtualScroll((top) => (shell.combinedTop = top));
   let typeOpen = $state(false);
 
   onMount(() => {
@@ -262,13 +263,25 @@
         </div>
       </div>
       {@render pickedActions(shell.pickedIn(shell.shownUnstaged), shell.pickedIn(shell.shownStaged))}
-      <div class="file-list">
-        {#each shell.shownStaged as file (`s:${file.path}`)}
-          <button class="side" type="button" class:selected={shell.selectedPath === file.path && shell.selectedSide === "staged"} class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && shell.selectedSide === "staged")} onclick={() => shell.selectFile(file.path, "staged")} ondblclick={(event) => flipFile(event, file.path, "staged")}><span class="meta">{shell.tr("chrome.staged")}</span> <span class="name">{file.path}</span></button>
-        {/each}
-        {#each shell.shownUnstaged as file (`u:${file.path}`)}
-          <button class="side" type="button" class:selected={shell.selectedPath === file.path && shell.selectedSide === "unstaged"} class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && shell.selectedSide === "unstaged")} onclick={() => shell.selectFile(file.path, "unstaged")} ondblclick={(event) => flipFile(event, file.path, "unstaged")}>{#if file.letter === "C"}{@render conflictMark()}{/if}<span class="meta">{shell.tr("chrome.unstaged")}</span> <span class="name">{file.path}</span></button>
-        {/each}
+      <div class="file-list" onscroll={onCombinedScroll} bind:clientHeight={shell.combinedHeight}>
+        <div class="commit-window" style:height="{shell.combinedRows.length * shell.rowFile}px">
+          {#each shell.combinedWindow.rows as entry, index (entry.key)}
+            <div class="virtual-row" style:top="{(shell.combinedWindow.start + index) * shell.rowFile}px">
+              <button
+                class="side"
+                type="button"
+                class:selected={shell.selectedPath === entry.file.path && shell.selectedSide === entry.side}
+                class:picked={shell.picked.includes(entry.file.path) && !(shell.selectedPath === entry.file.path && shell.selectedSide === entry.side)}
+                onclick={() => shell.selectFile(entry.file.path, entry.side)}
+                ondblclick={(event) => flipFile(event, entry.file.path, entry.side)}
+              >
+                {#if entry.file.letter === "C"}{@render conflictMark()}{/if}
+                <span class="meta">{shell.tr(entry.side === "staged" ? "chrome.staged" : "chrome.unstaged")}</span>
+                <span class="name">{entry.file.path}</span>
+              </button>
+            </div>
+          {/each}
+        </div>
       </div>
     {/snippet}
 

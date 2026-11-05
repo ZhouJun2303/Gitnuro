@@ -85,17 +85,16 @@ export async function loadContext(shell: ShellState) {
     const nextRefs = await invoke<RefSnapshot>("repository_refs", { path });
     if (gen !== shell.contextGen) return;
     if (!shell.same(shell.refs, nextRefs)) shell.refs = nextRefs;
-    const [rows, stats, state] = await Promise.all([
+    const [rows, state] = await Promise.all([
       shell.loadCommits(path),
-      invoke<NonNullable<({ branch: string; ahead: number; behind: number; commits: number; branches: number; lastSummary: string } | null)>>("repository_summary", { path }).catch(() => shell.repoStats),
       invoke<InProgress | null>("in_progress", { path }),
     ]);
     if (gen !== shell.contextGen) return;
     if (!shell.same(shell.commitsLive, rows)) shell.commitsLive = rows;
-    if (!shell.same(shell.repoStats, stats)) shell.repoStats = stats;
     shell.signOff = nextRefs.signOffSet ? !!nextRefs.signOff : shell.settings.signOff;
     shell.progress = state;
   }
+
 
 export async function previewCherry(shell: ShellState, rev: string, record: boolean) {
     const text = await invoke<string>("cherry_preview", { path: shell.repoPath(), rev }).catch(() => "");
@@ -115,6 +114,7 @@ export function showSideRefs(shell: ShellState) {
     shell.commitSearchOpen = false;
     shell.commitSearchGen += 1;
     window.clearTimeout(shell.commitSearchTimer);
+    void invoke("cancel_reads", { path: shell.repoPath() }).catch(() => {});
     void tick().then(() => shell.sideFilter?.focus());
     if (restore && shell.mode === "live") void shell.loadContext();
   }
@@ -130,6 +130,7 @@ export function showSideSearch(shell: ShellState) {
 export function queueCommitSearch(shell: ShellState) {
     window.clearTimeout(shell.commitSearchTimer);
     const gen = ++shell.commitSearchGen;
+    void invoke("cancel_reads", { path: shell.repoPath() }).catch(() => {});
     shell.commitSearchTimer = window.setTimeout(() => {
       if (gen !== shell.commitSearchGen || shell.sideView !== "search" || shell.mode !== "live") return;
       void refreshSearchedCommits(shell, gen);
@@ -177,10 +178,23 @@ export function stashParts(summary: string, refs: string[] = []): { branch: stri
   return null;
 }
 
+let refKindCache: { refs: RefSnapshot | null; branches: Set<string>; tags: Set<string> } = {
+  refs: null,
+  branches: new Set(),
+  tags: new Set(),
+};
+
 export function refKind(shell: ShellState, label: string) {
     if (label === "stash" || label.startsWith("stash")) return "stash";
-    if (shell.refs?.branches.some((branch) => branch.name === label)) return "local";
-    if (shell.refs?.tags.some((tag) => tag.name === label)) return "tag";
+    if (refKindCache.refs !== shell.refs) {
+      refKindCache = {
+        refs: shell.refs,
+        branches: new Set((shell.refs?.branches ?? []).map((branch) => branch.name)),
+        tags: new Set((shell.refs?.tags ?? []).map((tag) => tag.name)),
+      };
+    }
+    if (refKindCache.branches.has(label)) return "local";
+    if (refKindCache.tags.has(label)) return "tag";
     if (label.includes("/")) return "remote";
     if (/^v?\d/.test(label)) return "tag";
     return "local";
@@ -275,9 +289,10 @@ export async function openTreeFile(shell: ShellState, file: string) {
     if (!shell.selectedCommit) return;
     shell.historyFile = file;
     shell.blobTop = 0;
-    const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null }>("blob_view", { path: shell.repoPath(), rev: shell.selectedCommit, file });
+    const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null; truncated?: boolean }>("blob_view", { path: shell.repoPath(), rev: shell.selectedCommit, file });
     if (shell.historyFile !== file) return;
     shell.treeBinary = view.binary && !view.preview && !view.text;
+    shell.treeTruncated = view.truncated === true;
     if (view.preview) {
       shell.imageOld = null;
       shell.imageNew = view.preview.dataUrl;
@@ -319,6 +334,8 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
     }
     shell.comparePair = null;
     shell.selectedCommit = id;
+    const rowAt = shell.historyItems.findIndex((row) => row.id === id);
+    if (rowAt >= 0) shell.selectedIndex = rowAt;
     shell.blameLines = null;
     shell.historyTab = "commit";
     shell.resetCommitView();
@@ -338,15 +355,19 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
       parents: row?.parents ?? [],
     };
     try {
-      const detail = await invoke<CommitDetail>("commit_detail", { path: shell.repoPath(), id });
-      if (gen !== shell.patchGen || shell.selectedCommit !== id) return;
-      shell.commitDetail = detail;
-    } catch (error) {
-      if (gen === shell.patchGen && shell.selectedCommit === id) shell.actionError = shell.message(error);
-    }
-    try {
+      const detailTask = invoke<CommitDetail>("commit_detail", { path: shell.repoPath(), id })
+        .then((detail) => {
+          if (gen !== shell.patchGen || shell.selectedCommit !== id) return;
+          shell.commitDetail = detail;
+        })
+        .catch((error) => {
+          if (gen === shell.patchGen && shell.selectedCommit === id) shell.actionError = shell.message(error);
+        });
       const files = await invoke<StatusFile[]>("commit_files", { path: shell.repoPath(), id });
-      if (gen !== shell.patchGen || shell.selectedCommit !== id) return;
+      if (gen !== shell.patchGen || shell.selectedCommit !== id) {
+        await detailTask;
+        return;
+      }
       shell.commitFiles = files;
       const file = files[0]?.path ?? null;
       shell.historyFile = file;
@@ -358,12 +379,18 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
             unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
           })
         : null;
-      if (gen !== shell.patchGen || shell.selectedCommit !== id || shell.historyFile !== file) return;
+      if (gen !== shell.patchGen || shell.selectedCommit !== id || shell.historyFile !== file) {
+        await detailTask;
+        return;
+      }
       shell.historyDiff = diff;
       if (file && diff) {
         shell.patchCache = { [file]: diff };
+        shell.patchVersion += 1;
+        shell.patchHeights = {};
         shell.openPatches = [];
       }
+      await detailTask;
     } catch (error) {
       if (gen === shell.patchGen && shell.selectedCommit === id) shell.actionError = shell.message(error);
     }
@@ -398,7 +425,14 @@ export async function pickCommitFile(shell: ShellState, file: string) {
             });
         if (gen !== shell.patchGen) return;
         shell.historyDiff = diff;
-        shell.patchCache = { ...shell.patchCache, [file]: diff };
+        shell.patchCache[file] = diff;
+        shell.patchVersion += 1;
+        // The placeholder height must not clip the loaded patch.
+        if (shell.patchHeights[file] !== undefined) {
+          const heights = { ...shell.patchHeights };
+          delete heights[file];
+          shell.patchHeights = heights;
+        }
       } catch (error) {
         if (gen === shell.patchGen) shell.actionError = shell.message(error);
       }
@@ -411,31 +445,25 @@ export async function ensurePatch(shell: ShellState, file: string) {
   }
 
 export function togglePatch(shell: ShellState, path: string) {
-    if (shell.openPatches.includes(path)) {
+    if (shell.openPatchSet.has(path)) {
       shell.openPatches = shell.openPatches.filter((item) => item !== path);
       return;
     }
     shell.openPatches = [...shell.openPatches, path];
     shell.historyFile = path;
-    void shell.ensurePatch(path);
+    shell.requestPatch(path);
   }
 
 export async function toggleAllPatches(shell: ShellState) {
     const paths = shell.commitFiles.map((file) => file.path);
-    if (paths.length > 0 && paths.every((path) => shell.openPatches.includes(path))) {
+    if (paths.length > 0 && paths.every((path) => shell.openPatchSet.has(path))) {
       shell.openPatches = [];
       return;
     }
+    // Opening every file only mounts the visible patches; each body loads as it scrolls in.
     shell.openPatches = paths;
-    const gen = shell.patchGen;
-    const pending = paths.filter((path) => !shell.patchCache[path]);
-    const workers = Array.from({ length: Math.min(4, pending.length) }, async () => {
-      while (gen === shell.patchGen && pending.length > 0) {
-        const path = pending.shift();
-        if (path) await shell.ensurePatch(path);
-      }
-    });
-    await Promise.all(workers);
+    const first = shell.historyFile ?? paths[0];
+    if (first) shell.requestPatch(first);
   }
 
 export async function showFileHistory(shell: ShellState, file: string) {
@@ -485,24 +513,24 @@ export function forkWhenFull(shell: ShellState, at: number) {
   }
 
 export function commitSubject(shell: ShellState) {
-    return shell.commitDetail?.summary || (shell.mode === "live" ? shell.commitsLive.find((row) => row.id === shell.selectedCommit)?.summary : shell.sampleRows.find((row) => row.id === shell.selectedCommit)?.summary) || "";
+    return shell.commitDetail?.summary || (shell.mode === "live" ? shell.selectedCommitRow?.summary : shell.sampleRows.find((row) => row.id === shell.selectedCommit)?.summary) || "";
   }
 
 export function commitAuthorName(shell: ShellState) {
-    return shell.commitDetail?.author || (shell.mode === "live" ? shell.commitsLive.find((row) => row.id === shell.selectedCommit)?.author : shell.sampleRows.find((row) => row.id === shell.selectedCommit)?.author) || "";
+    return shell.commitDetail?.author || (shell.mode === "live" ? shell.selectedCommitRow?.author : shell.sampleRows.find((row) => row.id === shell.selectedCommit)?.author) || "";
   }
 
 export function commitWhenShort(shell: ShellState) {
     if (shell.commitDetail?.authorAt) return shell.forkWhen(shell.commitDetail.authorAt);
     if (shell.mode === "live") {
-      const row = shell.commitsLive.find((item) => item.id === shell.selectedCommit);
+      const row = shell.selectedCommitRow;
       return row?.at ? shell.forkWhen(row.at) : (row?.when ?? "");
     }
     return shell.sampleRows.find((row) => row.id === shell.selectedCommit)?.when ?? "";
   }
 
 export function commitRefs(shell: ShellState) {
-    if (shell.mode === "live") return shell.commitsLive.find((row) => row.id === shell.selectedCommit)?.refs ?? [];
+    if (shell.mode === "live") return shell.selectedCommitRow?.refs ?? [];
     return shell.sampleRows.find((row) => row.id === shell.selectedCommit)?.badges ?? [];
   }
 
@@ -514,12 +542,16 @@ export function differentCommitter(shell: ShellState, detail: CommitDetail | nul
 export function resetCommitView(shell: ShellState) {
     shell.patchGen += 1;
     shell.patchCache = {};
+    shell.patchVersion += 1;
+    shell.patchHeights = {};
     shell.openPatches = [];
+    shell.clearPatchQueue();
     shell.treePaths = [];
     shell.treeText = "";
     shell.treeCollapsed = [];
     shell.treePrepared = null;
     shell.treeBinary = false;
+    shell.treeTruncated = false;
     shell.preview = null;
     shell.blobTop = 0;
     shell.commitCollapsed = [];
@@ -643,7 +675,14 @@ export async function locateRef(shell: ShellState, name: string) {
     if (shell.commitQuery.trim()) shell.commitQuery = "";
     if (shell.historyFilter) shell.historyFilter = "";
     shell.actionError = null;
-    if (!shell.allBranches) {
+    // A branch or tag resolves to a filtered log page. `locate_ref` would otherwise
+    // walk and materialise every commit above it just to scroll to one row.
+    const namedRef =
+      (shell.refs?.branches.some((branch) => branch.name === name) ?? false) ||
+      (shell.refs?.tags.some((tag) => tag.name === name) ?? false) ||
+      (shell.refs?.remotes.some((remote) => name === remote.name || name.startsWith(`${remote.name}/`)) ?? false);
+    if (!shell.allBranches || namedRef) {
+      shell.allBranches = false;
       shell.graphSolo = name;
       await shell.withWork(shell.tr("chrome.locating", { name }), async () => {
         try {
@@ -676,7 +715,7 @@ export async function locateRef(shell: ShellState, name: string) {
           order: shell.settings.commitSort === "topo" ? "topo" : "date",
         });
         if (seq !== shell.locateSeq) return;
-        shell.logLimit = Math.max(shell.logLimit, found.commits.length);
+        shell.logLimit = Math.min(20_000, Math.max(shell.logLimit, found.commits.length));
         if (!shell.same(shell.commitsLive, found.commits)) shell.commitsLive = found.commits;
         await tick();
         await shell.selectCommit(found.id);

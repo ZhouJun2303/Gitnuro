@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::cli::{check_path, commit_config, run, run_stdin};
+use crate::cli::{check_path, commit_config, run, run_capped, run_paths, run_stdin};
 use crate::{in_progress, Error, InProgress};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +25,10 @@ pub struct CommitRequest {
 
 /// Stage the given work-tree paths, including new files.
 pub fn stage_paths(repo: &Path, paths: &[String]) -> Result<(), Error> {
-    git_paths(repo, &["add", "--"], paths)
+    if paths.is_empty() {
+        return Ok(());
+    }
+    run_paths(repo, &["add"], paths).map(|_| ())
 }
 
 /// Stage every change in the work tree. Ignored files stay ignored, and unresolved conflicts are left alone.
@@ -64,26 +67,7 @@ pub fn stage_all(repo: &Path) -> Result<(), Error> {
 }
 
 fn stage_path_chunks(repo: &Path, paths: &[String]) -> Result<(), Error> {
-    let mut start = 0;
-    while start < paths.len() {
-        let mut end = start;
-        let mut bytes = 0;
-        while end < paths.len() && end - start < 80 && bytes + paths[end].len() + 1 <= 6000 {
-            bytes += paths[end].len() + 1;
-            end += 1;
-        }
-        if end == start {
-            end = start + 1;
-        }
-        let mut owned = vec!["--literal-pathspecs".to_string(), "add".to_string(), "-A".to_string(), "--".to_string()];
-        for path in &paths[start..end] {
-            owned.push(check_path(path)?.to_string());
-        }
-        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-        run(repo, &args)?;
-        start = end;
-    }
-    Ok(())
+    run_paths(repo, &["add", "-A"], paths).map(|_| ())
 }
 
 /// Paths that still have unmerged index entries.
@@ -103,11 +87,14 @@ fn unmerged_paths(repo: &Path) -> Result<Vec<String>, Error> {
 
 /// Remove the given paths from the index and leave the work tree as it is.
 pub fn unstage_paths(repo: &Path, paths: &[String]) -> Result<(), Error> {
-    match git_paths(repo, &["restore", "--staged", "--"], paths) {
-        Ok(()) => Ok(()),
+    if paths.is_empty() {
+        return Ok(());
+    }
+    match run_paths(repo, &["restore", "--staged"], paths) {
+        Ok(_) => Ok(()),
         // A repository with no commits yet has nothing to restore from.
         Err(Error::Git(message)) if message.contains("HEAD") => {
-            git_paths(repo, &["rm", "--cached", "--ignore-unmatch", "--"], paths)
+            run_paths(repo, &["rm", "--cached", "--ignore-unmatch"], paths).map(|_| ())
         }
         Err(error) => Err(error),
     }
@@ -259,16 +246,13 @@ fn config_value(repo: &Path, key: &str) -> Option<String> {
     if text.is_empty() { None } else { Some(text) }
 }
 
-fn git_paths(repo: &Path, prefix: &[&str], paths: &[String]) -> Result<(), Error> {
-    if paths.is_empty() {
-        return Ok(());
-    }
-    let mut owned: Vec<String> = prefix.iter().map(|part| (*part).to_string()).collect();
-    for path in paths {
-        owned.push(check_path(path)?.to_string());
-    }
-    let borrowed: Vec<&str> = owned.iter().map(String::as_str).collect();
-    run(repo, &borrowed).map(|_| ())
+/// First bytes of a file, for format sniffing without reading a huge payload.
+fn file_prefix(path: PathBuf, count: usize) -> Option<Vec<u8>> {
+    let mut file = File::open(path).ok()?;
+    let mut bytes = vec![0u8; count];
+    let read = file.read(&mut bytes).ok()?;
+    bytes.truncate(read);
+    Some(bytes)
 }
 
 /// One line of a unified diff, ready for the file view.
@@ -309,11 +293,16 @@ pub struct FileDiff {
 
 const MAX_DIFF_LINES: usize = 4_000;
 const MAX_UNTRACKED_BYTES: u64 = 1_048_576;
+const MAX_DIFF_BYTES: usize = 8_000_000;
+const MAX_LARGE_FILE: u64 = 2_000_000;
+const MAX_PREVIEW_BYTES: u64 = 8_000_000;
+const MAX_BLOB_READ_BYTES: u64 = 8_000_000;
+const MAX_BLOB_TEXT_BYTES: usize = 200_000;
 
 /// Stage or unstage a single hunk. Hunks come from a zero-context diff, so adjacent edits stay separate.
 pub fn stage_hunk(repo: &Path, path: &str, index: u32, unstage: bool, ignore_space: bool) -> Result<(), Error> {
     let path = check_path(path)?;
-    let mut args = vec!["diff", "--no-ext-diff", "--no-color", "--unified=0"];
+    let mut args = vec!["--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", "--unified=0"];
     if ignore_space {
         args.push("--ignore-all-space");
     }
@@ -367,7 +356,7 @@ pub fn stage_line(repo: &Path, path: &str, text: &str, addition: bool, at: u32, 
 /// Drop one unstaged hunk from the work tree. The index is left alone.
 pub fn discard_hunk(repo: &Path, path: &str, index: u32, ignore_space: bool) -> Result<(), Error> {
     let path = check_path(path)?;
-    let mut args = vec!["diff", "--no-ext-diff", "--no-color", "--unified=0"];
+    let mut args = vec!["--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", "--unified=0"];
     if ignore_space {
         args.push("--ignore-all-space");
     }
@@ -477,6 +466,95 @@ fn insert_line(lines: &mut Vec<String>, index: usize, text: &str, eol: &str) {
     lines.insert(index, format!("{text}{eol}"));
 }
 
+/// One line to stage, unstage, or discard. `at` uses the index carried on the diff line.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineEdit {
+    pub text: String,
+    pub addition: bool,
+    pub at: u32,
+}
+
+/// Apply several line edits to the index blob in one write.
+pub fn stage_lines(repo: &Path, path: &str, lines: &[LineEdit], unstage: bool) -> Result<(), Error> {
+    let path = check_path(path)?;
+    for line in lines {
+        check_line_text(line, "staged")?;
+    }
+    let current = index_blob(repo, path)?;
+    if current.len() > 16_000_000 {
+        return Err(Error::Git(format!("{path} is too large for line staging; stage the whole file instead")));
+    }
+    let current = decode_text(&current, path, "stage the whole file instead")?;
+    let (mut body, eol) = split_keep_eol(&current);
+    apply_line_edits(&mut body, lines, &eol, |edit| unstage == edit.addition)?;
+    write_index(repo, path, body.concat().as_bytes())
+}
+
+/// Drop several unstaged lines from the work tree in one read and one write.
+pub fn discard_lines(repo: &Path, path: &str, lines: &[LineEdit]) -> Result<(), Error> {
+    let path = check_path(path)?;
+    for line in lines {
+        check_line_text(line, "discarded")?;
+    }
+    let full = repo.join(path);
+    if !full.starts_with(repo) {
+        return Err(Error::Path(path.to_string()));
+    }
+    let current = match std::fs::read(&full) {
+        Ok(bytes) => decode_text(&bytes, path, "discard the whole file instead")?,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(source) => {
+            return Err(Error::Read {
+                path: path.to_string(),
+                source,
+            })
+        }
+    };
+    let (mut body, eol) = split_keep_eol(&current);
+    apply_line_edits(&mut body, lines, &eol, |edit| edit.addition)?;
+    if let Some(parent) = full.parent() {
+        std::fs::create_dir_all(parent).map_err(|source| Error::Read {
+            path: path.to_string(),
+            source,
+        })?;
+    }
+    std::fs::write(&full, body.concat().as_bytes()).map_err(|source| Error::Read {
+        path: path.to_string(),
+        source,
+    })
+}
+
+fn check_line_text(line: &LineEdit, verb: &str) -> Result<(), Error> {
+    if line.text.contains(['\n', '\r', '\0']) {
+        return Err(Error::Git(format!("a {verb} line cannot contain a newline")));
+    }
+    Ok(())
+}
+
+fn apply_line_edits(
+    body: &mut Vec<String>,
+    edits: &[LineEdit],
+    eol: &str,
+    remove: impl Fn(&LineEdit) -> bool,
+) -> Result<(), Error> {
+    let mut ordered: Vec<&LineEdit> = edits.iter().collect();
+    ordered.sort_by(|left, right| {
+        right.at.cmp(&left.at).then_with(|| remove(right).cmp(&remove(left)))
+    });
+    for edit in ordered {
+        let at = edit.at as usize;
+        if remove(edit) {
+            if !remove_line(body, at, &edit.text) {
+                return Err(Error::Git(format!("line {} is not in the file", edit.at)));
+            }
+        } else {
+            insert_line(body, at, &edit.text, eol);
+        }
+    }
+    Ok(())
+}
+
 /// The two conflict stages plus the working tree text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -579,7 +657,7 @@ fn commit_info(repo: &Path, rev: &str) -> Option<ConflictCommit> {
 }
 
 fn stage_oids(repo: &Path, path: &str) -> Result<[Option<String>; 4], Error> {
-    let output = run(repo, &["ls-files", "-u", "--stage", "--", path])?;
+    let output = run(repo, &["--literal-pathspecs", "ls-files", "-u", "--stage", "--", path])?;
     let text = String::from_utf8_lossy(&output.stdout);
     let mut stages = [None, None, None, None];
     for line in text.lines() {
@@ -720,7 +798,9 @@ fn short_ref(name: &str) -> String {
 /// The returned revision is the stash entry itself, which is what the stash list shows.
 fn stash_party(repo: &Path, path: &str, oid: &str) -> Option<(String, String)> {
     let list = git_text(repo, &["stash", "list", "--format=%H"])?;
-    for hash in list.lines().map(str::trim).filter(|line| !line.is_empty()).take(30) {
+    // A stash conflict is rare; checking the first few entries is enough and avoids
+    // dozens of `rev-parse` processes when a repository keeps a long stash list.
+    for hash in list.lines().map(str::trim).filter(|line| !line.is_empty()).take(10) {
         let spec = format!("{hash}:{path}");
         if git_text(repo, &["rev-parse", "--verify", "--quiet", &spec]).as_deref() == Some(oid) {
             return Some(("stash/patch".into(), hash.to_string()));
@@ -782,16 +862,16 @@ pub fn resolve_conflict(repo: &Path, path: &str, side: &str, text: &str) -> Resu
             path: path.to_string(),
             source,
         })?;
-        return run(repo, &["add", "--", path]).map(|_| ());
+        return run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ());
     }
     match side {
         "ours" => {
-            run(repo, &["checkout", "--ours", "--", path])?;
-            run(repo, &["add", "--", path]).map(|_| ())
+            run(repo, &["--literal-pathspecs", "checkout", "--ours", "--", path])?;
+            run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ())
         }
         "theirs" => {
-            run(repo, &["checkout", "--theirs", "--", path])?;
-            run(repo, &["add", "--", path]).map(|_| ())
+            run(repo, &["--literal-pathspecs", "checkout", "--theirs", "--", path])?;
+            run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ())
         }
         "both" => {
             let ours = show_stage(repo, path, 2);
@@ -809,9 +889,9 @@ pub fn resolve_conflict(repo: &Path, path: &str, side: &str, text: &str) -> Resu
                 path: path.to_string(),
                 source,
             })?;
-            run(repo, &["add", "--", path]).map(|_| ())
+            run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ())
         }
-        "mark" => run(repo, &["add", "--", path]).map(|_| ()),
+        "mark" => run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ()),
         other => Err(Error::Git(format!("unknown conflict side {other}"))),
     }
 }
@@ -831,12 +911,12 @@ fn write_index(repo: &Path, path: &str, body: &[u8]) -> Result<(), Error> {
         return Err(Error::Git("git hash-object returned no id".into()));
     }
     let mode = index_mode(repo, path);
-    let info = format!("{mode},{hash},{path}");
-    run(repo, &["update-index", "--add", "--cacheinfo", &info]).map(|_| ())
+    // The three-argument form keeps commas in a path out of the `mode,hash,path` split.
+    run(repo, &["update-index", "--add", "--cacheinfo", &mode, &hash, path]).map(|_| ())
 }
 
 fn index_mode(repo: &Path, path: &str) -> String {
-    let Ok(output) = run(repo, &["ls-files", "-s", "--", path]) else {
+    let Ok(output) = run(repo, &["--literal-pathspecs", "ls-files", "-s", "--", path]) else {
         return "100644".into();
     };
     let text = String::from_utf8_lossy(&output.stdout);
@@ -880,24 +960,32 @@ pub fn file_diff(repo: &Path, path: &str, staged: bool) -> Result<FileDiff, Erro
 pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignore_space: bool) -> Result<FileDiff, Error> {
     let path = check_path(path)?;
     if let Ok(meta) = std::fs::metadata(repo.join(path)) {
-        if meta.is_file() && meta.len() > 2_000_000 {
+        if meta.is_file() && meta.len() > MAX_LARGE_FILE {
+            let previewable = file_prefix(repo.join(path), 32).is_some_and(|bytes| {
+                image_kind(&bytes).is_some()
+                    || (bytes.len() >= 18 && bytes[2] == 2 && matches!(bytes[16], 24 | 32))
+            });
             return Ok(FileDiff {
                 path: path.to_string(),
                 staged,
-                binary: true,
+                binary: previewable,
                 truncated: true,
-                lines: vec![DiffLine {
-                    kind: DiffLineKind::Meta,
-                    text: "large file skipped".into(),
-                    stage_at: None,
-                    work_at: None,
-                }],
+                lines: if previewable {
+                    Vec::new()
+                } else {
+                    vec![DiffLine {
+                        kind: DiffLineKind::Meta,
+                        text: "large file skipped".into(),
+                        stage_at: None,
+                        work_at: None,
+                    }]
+                },
                 hunks: 0,
             });
         }
     }
     let unified = format!("--unified={}", context.min(1_000_000));
-    let mut args = vec!["diff", "--no-ext-diff", "--no-color", unified.as_str()];
+    let mut args = vec!["--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", unified.as_str()];
     if ignore_space {
         args.push("--ignore-all-space");
     }
@@ -906,13 +994,21 @@ pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignor
     }
     args.push("--");
     args.push(path);
-    let output = run(repo, &args)?;
+    // The displayed diff and the zero-context hunk count are independent; running them
+    // together removes one process round-trip from every file open.
+    let (output, capped, hunks) = std::thread::scope(|scope| {
+      let hunks = scope.spawn(|| crate::cli::with_read(|| zero_hunks(repo, path, staged, ignore_space)));
+      let (output, capped) = crate::cli::with_read(|| run_capped(repo, &args, MAX_DIFF_BYTES))?;
+      let hunks = hunks.join().unwrap_or(Ok(0));
+      Ok::<_, Error>((output, capped, hunks))
+    })?;
     let text = String::from_utf8_lossy(&output.stdout);
     if !staged && text.trim().is_empty() && !in_index(repo, path)? {
         return diff_untracked(repo, path);
     }
     let mut parsed = parse_diff(path, staged, &text);
-    parsed.hunks = zero_hunks(repo, path, staged, ignore_space).unwrap_or(0);
+    parsed.truncated |= capped;
+    parsed.hunks = hunks.unwrap_or(0);
     if text.contains("git-lfs.github.com/spec") {
         parsed.lines.insert(
             0,
@@ -978,7 +1074,7 @@ fn lfs_pointer(bytes: &[u8]) -> Option<String> {
 }
 
 fn zero_hunks(repo: &Path, path: &str, staged: bool, ignore_space: bool) -> Result<u32, Error> {
-    let mut args = vec!["diff", "--no-ext-diff", "--no-color", "--unified=0"];
+    let mut args = vec!["--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", "--unified=0"];
     if ignore_space {
         args.push("--ignore-all-space");
     }
@@ -987,7 +1083,7 @@ fn zero_hunks(repo: &Path, path: &str, staged: bool, ignore_space: bool) -> Resu
     }
     args.push("--");
     args.push(path);
-    let output = run(repo, &args)?;
+    let (output, _) = run_capped(repo, &args, 1_000_000)?;
     let text = String::from_utf8_lossy(&output.stdout);
     Ok(text.lines().filter(|line| line.starts_with("@@")).count() as u32)
 }
@@ -999,20 +1095,20 @@ pub fn range_diff(repo: &Path, base: &str) -> Result<String, Error> {
         return Err(Error::Rev(base.to_string()));
     }
     let spec = format!("{base}...HEAD");
-    let output = run(repo, &["diff", "--no-color", "--no-ext-diff", &spec])?;
+    let (output, _) = run_capped(repo, &["diff", "--no-color", "--no-ext-diff", &spec], 4_000_000)?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Staged diff only. Commit suggestions must not describe unstaged work.
 pub fn staged_diff(repo: &Path) -> Result<String, Error> {
-    let staged = run(repo, &["diff", "--cached", "--no-color", "--no-ext-diff"])?;
+    let (staged, _) = run_capped(repo, &["diff", "--cached", "--no-color", "--no-ext-diff"], 1_000_000)?;
     Ok(String::from_utf8_lossy(&staged.stdout).into_owned())
 }
 
 /// Staged and unstaged diffs, capped, for a commit-message suggestion.
 pub fn workspace_diff(repo: &Path) -> Result<String, Error> {
-    let staged = run(repo, &["diff", "--cached", "--no-color", "--no-ext-diff"])?;
-    let work = run(repo, &["diff", "--no-color", "--no-ext-diff"])?;
+    let (staged, _) = run_capped(repo, &["diff", "--cached", "--no-color", "--no-ext-diff"], 200_000)?;
+    let (work, _) = run_capped(repo, &["diff", "--no-color", "--no-ext-diff"], 200_000)?;
     let mut text = String::new();
     if !staged.stdout.is_empty() {
         text.push_str("STAGED\n");
@@ -1024,13 +1120,17 @@ pub fn workspace_diff(repo: &Path) -> Result<String, Error> {
     }
     const LIMIT: usize = 12_000;
     if text.len() > LIMIT {
-        text.truncate(LIMIT);
+        let mut at = LIMIT;
+        while at > 0 && !text.is_char_boundary(at) {
+            at -= 1;
+        }
+        text.truncate(at);
     }
     Ok(text)
 }
 
 fn in_index(repo: &Path, path: &str) -> Result<bool, Error> {
-    let output = run(repo, &["ls-files", "--", path])?;
+    let output = run(repo, &["--literal-pathspecs", "ls-files", "--", path])?;
     Ok(!output.stdout.is_empty())
 }
 
@@ -1222,6 +1322,19 @@ fn split_count(text: &str) -> Option<(u32, u32)> {
 pub fn file_preview(repo: &Path, path: &str) -> Result<Option<FilePreview>, Error> {
     let path = check_path(path)?;
     let full = repo.join(path);
+    let metadata = match std::fs::metadata(&full) {
+        Ok(metadata) => metadata,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(Error::Read {
+                path: path.to_string(),
+                source,
+            })
+        }
+    };
+    if !metadata.is_file() || metadata.len() > MAX_PREVIEW_BYTES {
+        return Ok(None);
+    }
     let bytes = match std::fs::read(&full) {
         Ok(bytes) => bytes,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -1232,9 +1345,6 @@ pub fn file_preview(repo: &Path, path: &str) -> Result<Option<FilePreview>, Erro
             })
         }
     };
-    if bytes.len() > 8_000_000 {
-        return Ok(None);
-    }
     let Some((mime, animated)) = image_kind(&bytes) else {
         return Ok(None);
     };
@@ -1255,24 +1365,37 @@ pub struct FilePreview {
 
 /// Image stored at `rev:path`, using the same formats as [`file_preview`].
 pub fn blob_preview(repo: &Path, rev: &str, path: &str) -> Result<Option<FilePreview>, Error> {
+    if blob_size(repo, rev, path)? > MAX_PREVIEW_BYTES {
+        return Ok(None);
+    }
     let bytes = blob_bytes(repo, rev, path)?;
     Ok(preview_from_bytes(&bytes))
 }
 
 /// Text or image at `rev:path`. Text is capped so a huge blob does not fill the window.
 pub fn blob_view(repo: &Path, rev: &str, path: &str) -> Result<BlobView, Error> {
+    let size = blob_size(repo, rev, path)?;
+    if size > MAX_BLOB_READ_BYTES {
+        return Ok(BlobView {
+            binary: false,
+            text: String::new(),
+            preview: None,
+            truncated: true,
+        });
+    }
     let bytes = blob_bytes(repo, rev, path)?;
     if let Some(preview) = preview_from_bytes(&bytes) {
-        return Ok(BlobView { binary: true, text: String::new(), preview: Some(preview) });
+        return Ok(BlobView { binary: true, text: String::new(), preview: Some(preview), truncated: false });
     }
     if bytes.iter().take(800).any(|byte| *byte == 0) {
-        return Ok(BlobView { binary: true, text: String::new(), preview: None });
+        return Ok(BlobView { binary: true, text: String::new(), preview: None, truncated: false });
     }
-    let end = bytes.len().min(200_000);
+    let end = bytes.len().min(MAX_BLOB_TEXT_BYTES);
     Ok(BlobView {
         binary: false,
         text: String::from_utf8_lossy(&bytes[..end]).into_owned(),
         preview: None,
+        truncated: bytes.len() > end,
     })
 }
 
@@ -1282,6 +1405,15 @@ pub struct BlobView {
     pub binary: bool,
     pub text: String,
     pub preview: Option<FilePreview>,
+    pub truncated: bool,
+}
+
+fn blob_size(repo: &Path, rev: &str, path: &str) -> Result<u64, Error> {
+    let rev = crate::cli::check_rev(rev)?;
+    let path = check_path(path)?;
+    let spec = format!("{rev}:{path}");
+    let output = crate::cli::run(repo, &["cat-file", "-s", &spec])?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0))
 }
 
 fn blob_bytes(repo: &Path, rev: &str, path: &str) -> Result<Vec<u8>, Error> {

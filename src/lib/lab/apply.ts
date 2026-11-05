@@ -62,6 +62,11 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.section = "changes";
     return;
   }
+  if (id === "changes-combined") {
+    shell.section = "changes";
+    shell.setLayout("combined");
+    return;
+  }
   if (id === "diff-text") return showChange(shell, "README.md", "unstaged");
   if (id === "diff-image") return showChange(shell, "art/mark.png", "unstaged");
   if (id === "diff-binary") return showChange(shell, "data/sheet.xlsx", "unstaged");

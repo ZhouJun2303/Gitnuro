@@ -12,6 +12,10 @@
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
   const onBlobScroll = onVirtualScroll((top) => (shell.blobTop = top));
   const patchWindow = (node: HTMLElement, spec: { file: string; count: number; rowHeight: number }) => shell.trackPatch(node, spec);
+  const commitScroll = (node: HTMLElement) => shell.trackCommitScroll(node);
+  const commitList = (node: HTMLElement) => shell.trackCommitList(node);
+  const measureCommitPatch = (node: HTMLElement, path: string) => shell.measureCommitPatch(node, path);
+  const loadCommitPatch = (node: HTMLElement, path: string) => shell.loadCommitPatch(node, path);
 </script>
 
 <section class="detail" style:height="{shell.historyDetailHeight}px">
@@ -40,7 +44,7 @@
               <p class="empty">{shell.tr("chrome.selectCommitFile")}</p>
             {:else if shell.historyTab === "commit"}
               {@const plate = shell.stashParts(shell.commitSubject(), shell.commitRefs())}
-              <div class="detail-scroll">
+              <div class="detail-scroll" use:commitScroll>
                 <div class="fork-card" class:select-all={shell.textWhere === "detail"}>
                   {@render personBlock(shell.tr("chrome.author"), shell.commitDetail?.author || shell.commitAuthorName(), shell.commitDetail?.authorEmail ?? "", shell.commitDetail?.authorAt ?? 0)}
                   {#if shell.differentCommitter(shell.commitDetail)}
@@ -66,22 +70,41 @@
                   {/if}
                   {#if shell.commitDetail?.body}<pre class="detail-body-text">{@render linked(shell.commitDetail.body)}</pre>{/if}
                 </div>
-                {#each shell.commitFiles as file, index (file.path)}
-                  <div class="patch-head">
-                    <button class="patch-toggle" type="button" onclick={() => shell.togglePatch(file.path)} oncontextmenu={(event) => shell.openMenu(event, shell.revisionFileMenu(file.path))}>
-                      {@render disclosure(shell.openPatches.includes(file.path))}
-                      {@render statusBadge(shell.toRow(file).letter)}
-                      {@render typeIcon(file.path)}
-                      <span class="patch-path" title={file.path}>{file.path}</span>
-                    </button>
-                    {#if index === 0}
-                      <button class="expand-all" type="button" onclick={() => void shell.toggleAllPatches()}>{shell.allPatchesOpen ? shell.tr("chrome.collapseAll") : shell.tr("chrome.expandAll")}</button>
-                    {/if}
-                  </div>
-                  {#if shell.openPatches.includes(file.path)}
-                    {@render filePatch(file.path, false)}
+                <div class="patch-head commit-files-head">
+                  <span class="meta">{shell.commitFiles.length}</span>
+                  {#if shell.commitFiles.length > 0}
+                    <button class="expand-all" type="button" onclick={() => void shell.toggleAllPatches()}>{shell.allPatchesOpen ? shell.tr("chrome.collapseAll") : shell.tr("chrome.expandAll")}</button>
                   {/if}
-                {/each}
+                </div>
+                <div class="commit-files" use:commitList>
+                  {#if shell.commitWindow.topSpacer > 0}
+                    <div style:height="{shell.commitWindow.topSpacer}px"></div>
+                  {/if}
+                  {#each shell.commitWindow.rows as entry (entry.key)}
+                    {#if entry.kind === "file"}
+                      <div class="patch-head">
+                        <button class="patch-toggle" type="button" onclick={() => shell.togglePatch(entry.path)} oncontextmenu={(event) => shell.openMenu(event, shell.revisionFileMenu(entry.path))}>
+                          {@render disclosure(shell.openPatchSet.has(entry.path))}
+                          {@render statusBadge(shell.toRow(entry.file).letter)}
+                          {@render typeIcon(entry.path)}
+                          <span class="patch-path" title={entry.path}>{entry.path}</span>
+                        </button>
+                      </div>
+                    {:else}
+                      <div
+                        class="commit-patch"
+                        style:height={shell.patchHeights[entry.path] ? `${shell.patchHeights[entry.path]}px` : undefined}
+                        use:measureCommitPatch={entry.path}
+                        use:loadCommitPatch={entry.path}
+                      >
+                        {@render filePatch(entry.path, false)}
+                      </div>
+                    {/if}
+                  {/each}
+                  {#if shell.commitWindow.bottomSpacer > 0}
+                    <div style:height="{shell.commitWindow.bottomSpacer}px"></div>
+                  {/if}
+                </div>
               </div>
             {:else if shell.historyTab === "changes"}
               <div class="detail-split">
@@ -120,7 +143,10 @@
                       <embed class="pdf-view" title={shell.historyFile} src={shell.preview.dataUrl} type="application/pdf" />
                     {:else if shell.treeBinary}
                       <p class="diff-empty">{shell.tr("chrome.binary")}</p>
+                    {:else if shell.treeTruncated && shell.blobLines.length === 0}
+                      <p class="diff-empty">{shell.tr("chrome.truncated")}</p>
                     {:else if shell.blobLines.length > 0}
+                      {#if shell.treeTruncated}<p class="meta patch-note">{shell.tr("chrome.truncated")}</p>{/if}
                       <div class="blob-body" class:select-all={shell.textWhere === "blob"} onscroll={onBlobScroll}>
                         <div class="blob-window" style:height="{shell.blobLines.length * 18}px">
                           {#each shell.blobWindow.rows as line, index (`b-${shell.blobWindow.start + index}`)}

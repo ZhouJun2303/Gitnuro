@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    conflict_view, file_diff, file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs, search_commits, search_log, stage_hunk, stage_line, status,
-    stop_process_tree, ChangeKind, InProgress, Mutation, RebaseStep, ResetMode,
+    blob_view, conflict_view, discard_lines, file_diff, file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs, search_commits,
+    search_log, stage_hunk, stage_line, stage_lines, stage_paths, status, stop_process_tree, ChangeKind, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
 };
 
 fn repo() -> common::TempRepo {
@@ -273,6 +273,22 @@ fn line_stage_keeps_the_other_line() {
     assert!(!cached.contains("THREE"), "{cached}");
     let pending = repo.output(&["diff"]);
     assert!(pending.contains("THREE"), "{pending}");
+}
+
+#[test]
+fn line_stage_handles_a_comma_in_the_path() {
+    let repo = repo();
+    fs::write(repo.path.join("a,b.txt"), "1\n2\n").unwrap();
+    repo.git(&["add", "-A", "--", "."]);
+    repo.git(&["commit", "-m", "base"]);
+    fs::write(repo.path.join("a,b.txt"), "1\nTWO\n2\n").unwrap();
+
+    let diff = file_diff(&repo.path, "a,b.txt", false).unwrap();
+    let line = diff.lines.iter().find(|line| line.text == "+TWO").expect("added line");
+    stage_line(&repo.path, "a,b.txt", "TWO", true, line.stage_at.expect("stage index"), false).unwrap();
+
+    let cached = repo.output(&["diff", "--cached"]);
+    assert!(cached.contains("TWO"), "{cached}");
 }
 
 #[test]
@@ -1146,6 +1162,83 @@ fn merge_tool_starts_cmd_without_bad_exe() {
 }
 
 #[test]
+fn literal_pathspecs_only_stage_the_named_file() {
+    let repo = repo();
+    fs::write(repo.path.join("foo1.txt"), "one\n").unwrap();
+    fs::write(repo.path.join("foo[1].txt"), "one\n").unwrap();
+    repo.git(&["add", "-A", "--", "."]);
+    repo.git(&["commit", "-m", "base"]);
+    fs::write(repo.path.join("foo1.txt"), "one\nother\n").unwrap();
+    fs::write(repo.path.join("foo[1].txt"), "one\nglob\n").unwrap();
+
+    stage_paths(&repo.path, &["foo[1].txt".into()]).unwrap();
+    let cached = repo.output(&["diff", "--cached", "--name-only"]);
+    assert!(cached.contains("foo[1].txt"), "{cached}");
+    assert!(!cached.contains("foo1.txt"), "{cached}");
+}
+
+#[test]
+fn stage_lines_applies_every_selected_line_in_one_pass() {
+    let repo = repo();
+    fs::write(repo.path.join("a.txt"), "1\n2\n3\n4\n5\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    repo.git(&["commit", "-m", "base"]);
+    fs::write(repo.path.join("a.txt"), "1\nTWO\nTHREE\nFOUR\n5\n").unwrap();
+
+    let diff = file_diff(&repo.path, "a.txt", false).unwrap();
+    let mut lines = Vec::new();
+    for (text, addition) in [("+TWO", true), ("+FOUR", true)] {
+        let line = diff.lines.iter().find(|line| line.text == text).expect(text);
+        lines.push(LineEdit {
+            text: text[1..].to_string(),
+            addition,
+            at: line.stage_at.expect("stage index"),
+        });
+    }
+    stage_lines(&repo.path, "a.txt", &lines, false).unwrap();
+
+    let cached = repo.output(&["diff", "--cached"]);
+    assert!(cached.contains("TWO"), "{cached}");
+    assert!(cached.contains("FOUR"), "{cached}");
+    assert!(!cached.contains("THREE"), "{cached}");
+}
+
+#[test]
+fn discard_lines_removes_only_the_selected_lines() {
+    let repo = repo();
+    fs::write(repo.path.join("a.txt"), "1\n2\n3\n4\n5\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    repo.git(&["commit", "-m", "base"]);
+    fs::write(repo.path.join("a.txt"), "1\nTWO\nTHREE\nFOUR\n5\n").unwrap();
+
+    let diff = file_diff(&repo.path, "a.txt", false).unwrap();
+    let mut lines = Vec::new();
+    for text in ["+TWO", "+FOUR"] {
+        let line = diff.lines.iter().find(|line| line.text == text).expect(text);
+        lines.push(LineEdit {
+            text: text[1..].to_string(),
+            addition: true,
+            at: line.work_at.expect("work index"),
+        });
+    }
+    discard_lines(&repo.path, "a.txt", &lines).unwrap();
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "1\nTHREE\n5\n");
+}
+
+#[test]
+fn blob_view_reports_a_truncated_large_text() {
+    let repo = repo();
+    fs::write(repo.path.join("big.txt"), "x".repeat(300_000)).unwrap();
+    repo.git(&["add", "big.txt"]);
+    repo.git(&["commit", "-m", "base"]);
+
+    let view = blob_view(&repo.path, "HEAD", "big.txt").unwrap();
+    assert!(!view.binary);
+    assert!(view.truncated);
+    assert_eq!(view.text.len(), 200_000);
+}
+
+#[test]
 fn discard_paths_restores_tracked_and_deletes_the_rest() {
     let repo = repo();
     commit_file(&repo, "a.txt", "one\n", "base");
@@ -1168,6 +1261,31 @@ fn discard_paths_restores_tracked_and_deletes_the_rest() {
     assert!(!repo.path.join("e.txt").exists());
     let after = status(&repo.path).unwrap();
     assert!(after.staged.is_empty() && after.unstaged.is_empty(), "{after:?}");
+}
+
+#[test]
+fn delete_paths_removes_tracked_and_untracked_files() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    fs::write(repo.path.join("added.txt"), "new\n").unwrap();
+    repo.git(&["add", "--", "added.txt"]);
+    fs::write(repo.path.join("loose.txt"), "loose\n").unwrap();
+
+    perform(
+        &repo.path,
+        Mutation::DeletePaths {
+            files: vec!["a.txt".into(), "added.txt".into(), "loose.txt".into()],
+        },
+    )
+    .unwrap();
+    assert!(!repo.path.join("a.txt").exists());
+    assert!(!repo.path.join("added.txt").exists());
+    assert!(!repo.path.join("loose.txt").exists());
+    let after = status(&repo.path).unwrap();
+    assert!(after.unstaged.is_empty(), "{after:?}");
+    assert_eq!(after.staged.len(), 1, "{after:?}");
+    assert_eq!(after.staged[0].path, "a.txt");
+    assert_eq!(after.staged[0].kind, ChangeKind::Deleted);
 }
 
 #[test]

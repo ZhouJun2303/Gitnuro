@@ -81,6 +81,7 @@ export const dialogScenes = {
 export const surfaceScenes: LabScene[] = [
   scene({ id: "welcome", group: "主界面", title: "欢迎页", repo: "", ready: ".welcome-view" }),
   scene({ id: "changes", group: "主界面", title: "变更", repo: "full", ready: ".file-list" }),
+  scene({ id: "changes-combined", group: "主界面", title: "合并列表", repo: "full", ready: ".status-pane .virtual-row" }),
   scene({ id: "diff-text", group: "主界面", title: "文本差异", repo: "full", ready: ".diff-body" }),
   scene({ id: "diff-image", group: "主界面", title: "图片差异", repo: "full", ready: ".image-stage" }),
   scene({ id: "diff-binary", group: "主界面", title: "二进制差异", repo: "full", ready: ".diff-empty" }),

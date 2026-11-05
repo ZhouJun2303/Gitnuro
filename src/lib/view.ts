@@ -202,6 +202,9 @@ export function foldedMerges(commits: { id: string; parents?: string[] }[], expa
   const owner = new Map<string, string>();
   const n = commits.length;
   if (n === 0) return { hidden, straight, owner };
+  // The ancestor bitsets cost O(n²/32) time and memory. Past this size the graph still
+  // draws every branch, but merges are no longer folded; the list stays interactive.
+  if (n > 25_000) return { hidden, straight, owner };
 
   // Ancestor bitsets, one per commit, freed once every child has been folded.
   // Walking each merge back to the root is quadratic and freezes a long history.
@@ -346,9 +349,9 @@ export function numberedDiff(lines: DiffLine[]) {
   });
 }
 
-export function windowSlice<T>(items: T[], scrollTop: number, rowHeight: number, limit = 80, size = 48) {
+export function windowSlice<T>(items: T[], scrollTop: number, rowHeight: number, limit = 80, size = 72) {
   if (items.length <= limit) return { start: 0, rows: items };
-  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 12);
+  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 16);
   return { start, rows: items.slice(start, Math.min(items.length, start + size)) };
 }
 
