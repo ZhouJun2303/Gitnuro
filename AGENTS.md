@@ -20,6 +20,7 @@
 约定：
 
 - 标识 `com.zhoujun.awegit`，产品名 AweGit
+- `feat/dev` 是日常开发分支，功能和修复提交到这里；`release` 只放发布提交和 `latest.json`
 - 不改全局 gitconfig。仓库本地配置和 `.git/awegit` 可以写
 - 写操作按仓库排队
 - 前端依赖写在 `package.json`，Rust 依赖写在对应的 `Cargo.toml`
@@ -28,7 +29,7 @@
 - 测试：`pnpm test`（`cargo test -p awegit-git -- --test-threads=1`）
 - 类型检查：`pnpm check`
 - Windows 打包：`pnpm package:windows`
-- Windows 发布：`publish.bat`（默认定修订号加一后打包并上传）。`pnpm publish:windows` 只在 `release` 分支发布当前版本
+- Windows 发布：`publish.bat`（默认定修订号加一后打包并上传），在 `feat/dev` 上运行，脚本会合并进 `release`。`pnpm publish:windows` 只在 `release` 分支发布当前版本
 - macOS 打包：`pnpm package:mac`
 - 不提交 `target/`、`node_modules/`、`src-tauri/target/`，也不提交打包进来的 MinGit
 
