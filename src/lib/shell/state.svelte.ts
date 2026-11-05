@@ -1225,6 +1225,10 @@ export class ShellState {
   }
 
 
+  /** Counts user writes in flight; repeated clicks while one runs are ignored. */
+  userWrites = $state(0);
+
+
   switching = $derived(!!this.focusPath && this.jobKey(this.focusPath) !== this.jobKey(this.snapshot?.path));
 
 
@@ -1235,6 +1239,10 @@ export class ShellState {
 
 
   busy = $derived(this.switching || (this.jobs[this.jobKey(this.snapshot?.path)]?.depth ?? 0) > 0);
+
+
+  /** A user write is running; further clicks must not queue another one. */
+  writing = $derived(this.userWrites > 0);
 
 
   busyLabel = $derived(this.currentJob?.label ?? "");
@@ -2947,67 +2955,79 @@ export class ShellState {
     const path = this.repoPath();
     if (!this.backend() || !path) return;
     const background = source === "background";
-    if (this.busy) {
-      if (background) return;
-      await this.waitForWriteSlot();
-      if (this.repoPath() !== path) return;
+    if (!background) {
+      if (this.userWrites > 0) return;
+      this.userWrites += 1;
     }
-    if (!background) this.actionError = null;
-    const described = this.describeRequest(request);
-    const action = String(request.action ?? "");
-    const dialogBefore = this.dialog;
-    const refreshContext = this.needsContext(action);
-    const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
-    if (!background) this.startWork(described.title, path);
+    let started = false;
     try {
-      const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request });
-      const output = value.output ?? "";
-      // A foreground write started while this was running will paint the later status itself.
-      const superseded = background && this.busy;
-      if (this.viewing(path) && !superseded) {
-        this.applySnapshot(value);
-        if (refreshContext) await this.loadContext();
-        if (!background && this.viewing(path)) await this.loadDiff();
+      if (this.busy) {
+        if (background) return;
+        await this.waitForWriteSlot();
+        if (this.repoPath() !== path) return;
       }
-      if (followSubmodules) {
-        const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request: { action: "submoduleUpdate" } });
-        if (this.viewing(path)) this.applySnapshot(follow);
-        this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
+      if (!background) this.actionError = null;
+      const described = this.describeRequest(request);
+      const action = String(request.action ?? "");
+      const dialogBefore = this.dialog;
+      const refreshContext = this.needsContext(action);
+      const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
+      if (!background) {
+        this.startWork(described.title, path);
+        started = true;
       }
-      this.noteActivity(`${action}${output ? " output" : " ok"}`);
-      this.recordCommand(action, described, value.log || output, true, source);
-      if (!background && this.viewing(path) && this.dialog === dialogBefore) {
-        if (dialogBefore === "prefs") {
-          // Preferences stay open for LFS/author actions; the operation is recorded below.
-        } else if (output) {
-          this.commandOutput = output;
-          this.dialog = "output";
-        } else {
-          this.dialog = null;
-        }
-      }
-    } catch (error) {
-      const text = this.message(error);
-      this.noteActivity(`${String(request.action ?? "")} failed`);
-      this.recordCommand(String(request.action ?? ""), described, text, false, source);
-      if (this.viewing(path) && !(background && this.busy)) {
-        try {
-          this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
+      try {
+        const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request });
+        const output = value.output ?? "";
+        // A foreground write started while this was running will paint the later status itself.
+        const superseded = background && this.busy;
+        if (this.viewing(path) && !superseded) {
+          this.applySnapshot(value);
           if (refreshContext) await this.loadContext();
-        } catch {
-          /* keep the action error */
+          if (!background && this.viewing(path)) await this.loadDiff();
         }
-        if (this.shouldShowMergeConflict(action, text)) {
-          this.commandOutput = text.trim();
-          this.dialog = "mergeConflict";
-          this.actionError = null;
-        } else {
-          this.actionError = text;
-          if (action === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
+        if (followSubmodules) {
+          const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request: { action: "submoduleUpdate" } });
+          if (this.viewing(path)) this.applySnapshot(follow);
+          this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
         }
+        this.noteActivity(`${action}${output ? " output" : " ok"}`);
+        this.recordCommand(action, described, value.log || output, true, source);
+        if (!background && this.viewing(path) && this.dialog === dialogBefore) {
+          if (dialogBefore === "prefs") {
+            // Preferences stay open for LFS/author actions; the operation is recorded below.
+          } else if (output) {
+            this.commandOutput = output;
+            this.dialog = "output";
+          } else {
+            this.dialog = null;
+          }
+        }
+      } catch (error) {
+        const text = this.message(error);
+        this.noteActivity(`${String(request.action ?? "")} failed`);
+        this.recordCommand(String(request.action ?? ""), described, text, false, source);
+        if (this.viewing(path) && !(background && this.busy)) {
+          try {
+            this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
+            if (refreshContext) await this.loadContext();
+          } catch {
+            /* keep the action error */
+          }
+          if (this.shouldShowMergeConflict(action, text)) {
+            this.commandOutput = text.trim();
+            this.dialog = "mergeConflict";
+            this.actionError = null;
+          } else {
+            this.actionError = text;
+            if (action === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
+          }
+        }
+      } finally {
+        if (started) this.stopWork(path);
       }
     } finally {
-      if (!background) this.stopWork(path);
+      if (!background) this.userWrites -= 1;
     }
   }
 
@@ -3052,7 +3072,7 @@ export class ShellState {
     if (!ops.has(action)) return false;
     if (this.conflictCount > 0) return true;
     const lower = text.toLowerCase();
-    return /conflict|fix conflicts|merge failed|could not apply|needs merge|unmerged paths|自动合并失败/.test(lower);
+    return /conflict|fix conflicts|merge failed|could not apply|needs merge|unmerged (paths|files)|merging is not possible|自动合并失败/.test(lower);
   }
 
 

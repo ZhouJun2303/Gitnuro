@@ -23,6 +23,7 @@ import {
   } from "../status";
 import type { StoredError } from "./types";
 import type { ShellState } from "./state.svelte";
+import { isCommentary } from "./commitMessage";
 
 const ERROR_KEY = "awegit-errors";
 
@@ -114,7 +115,8 @@ function fillMergeProgress(shell: ShellState, state: MergeState) {
     const body = state.files.map((file) => `${file.status}\t${file.path}`).join("\n");
     if (!shell.summary.trim() || shell.summary === shell.mergeProgressAutoSummary) shell.summary = summary;
     shell.mergeProgressAutoSummary = summary;
-    if (!shell.description.trim() || shell.description === shell.mergeProgressAutoBody) shell.description = body;
+    // The commit template only looks filled; replace it so the merge's files show up as the body.
+    if (!shell.description.trim() || isCommentary(shell.description) || shell.description === shell.mergeProgressAutoBody) shell.description = body;
     shell.mergeProgressAutoBody = body;
   }
 

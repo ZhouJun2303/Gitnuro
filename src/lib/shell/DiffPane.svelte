@@ -41,6 +41,7 @@
   });
 
   const hunkList = $derived(shell.mode === "live" && shell.section === "changes" ? shell.hunkRanges() : []);
+  const conflictSelection = $derived(shell.section === "changes" ? shell.pickedConflicts() : []);
   const activeAt = $derived(hunkList.findIndex((range) => range.index === activeHunk));
 
   $effect(() => {
@@ -274,16 +275,20 @@
               {@const view = shell.activeConflict}
               {@const tool = shell.mode === "sample" ? (view.binary ? "ExcelMergeFork" : "") : mergeToolLabel(shell)}
               {@const only = pickTheirs !== pickOurs ? (pickTheirs ? view.theirs.label : view.ours.label) : ""}
+              {@const batch = conflictSelection.length > 1}
               <div class="conflict-pane">
                 <div class="conflict-title">
                   <svg class="conflict-warn" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.4 14.8 13.4H1.2L8 1.4z"/><path d="M8 6.1v3.3" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r=".75" fill="#fff"/></svg>
                   <strong>{shell.tr("chrome.mergeConflict")}</strong>
                 </div>
-                <p class="conflict-hint">{shell.tr("chrome.mergeConflictHint")}</p>
+                <p class="conflict-hint">{shell.tr("chrome.mergeConflictHint", { theirs: view.theirs.label, ours: view.ours.label })}</p>
                 <div class="conflict-file">
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.2" d="M3.2 1.5h6L12.8 5v9.5H3.2z"/><path fill="none" stroke="currentColor" stroke-width="1.2" d="M9.1 1.6V5.1h3.6"/></svg>
                   <span>{shell.fileName(shell.selectedPath)}</span>
                 </div>
+                {#if batch}
+                  <p class="conflict-selection" role="status">{shell.tr("chrome.conflictSelected", { count: String(conflictSelection.length) })}</p>
+                {/if}
                 <div class="conflict-cluster">
                 <div class="conflict-row" class:pick-one={pickTheirs !== pickOurs}>
                   <div class="conflict-end left">{@render conflictCard(view.theirs, "theirs")}</div>
@@ -295,7 +300,7 @@
                   <div class="conflict-end right">{@render conflictCard(view.ours, "ours")}</div>
                 </div>
                 <div class="conflict-actions">
-                  <button class="conflict-merge" type="button" disabled={(!pickOurs && !pickTheirs) || (shell.mode === "live" && shell.busy)} onclick={() => void applyConflictChoice(shell, pickOurs, pickTheirs)}>{only ? shell.tr("chrome.chooseSide", { name: only }) : pickOurs && pickTheirs ? shell.tr("chrome.mergeBoth") : shell.tr("chrome.mergeAction")}</button>
+                  <button class="conflict-merge" type="button" disabled={(!pickOurs && !pickTheirs) || (shell.mode === "live" && shell.busy)} onclick={() => { if (batch && only && shell.mode === "live") void shell.resolvePicked(pickOurs ? "ours" : "theirs", conflictSelection); else void applyConflictChoice(shell, pickOurs, pickTheirs); }}>{only ? (batch ? shell.tr("menu.keepSideCount", { name: only, count: String(conflictSelection.length) }) : shell.tr("chrome.chooseSide", { name: only })) : pickOurs && pickTheirs ? shell.tr("chrome.mergeBoth") : shell.tr("chrome.mergeAction")}</button>
                   {#if tool && pickOurs && pickTheirs}
                     <button class="conflict-tool" type="button" disabled={shell.mode === "live" && shell.busy} onclick={() => { if (shell.mode === "live") void openConflictTool(shell); }}>
                       {shell.tr("chrome.mergeInTool", { name: tool })}
@@ -468,6 +473,7 @@
   <label class="conflict-card" class:on for="conflict-{side}">
     <svg class="branch" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M4 2.2v7.2a2.2 2.2 0 1 0 2.2 2.2"/><circle cx="4" cy="12.2" r="1.35"/><circle cx="12" cy="3.6" r="1.35"/><path fill="none" stroke="currentColor" stroke-width="1.3" d="M12 5a4.2 4.2 0 0 1-6 2.6"/></svg>
     <span class="name" title={party.label}>{party.label}</span>
+    {#if party.commit?.short}<code class="conflict-commit" title={party.commit.subject}>{party.commit.short}</code>{/if}
     {#if sideText(party)}<span class="conflict-pill {party.state}">{sideText(party)}</span>{/if}
   </label>
 {/snippet}

@@ -569,20 +569,20 @@ export function pickedIn(shell: ShellState, rows: Row[]) {
 
 export async function discardPicked(shell: ShellState, files = [...shell.picked]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
-    if (names.length === 0 || shell.busy) return;
+    if (names.length === 0 || shell.busy || shell.writing) return;
     if (names.length === 1) await shell.mutate({ action: "discard", file: names[0] });
     else await shell.mutate({ action: "discardPaths", files: names });
     if (!shell.actionError) shell.picked = shell.picked.filter((path) => !names.includes(path));
   }
 
 export async function unstagePicked(shell: ShellState, files = [...shell.picked]) {
-    if (files.length === 0) return;
+    if (files.length === 0 || shell.writing) return;
     await shell.mutate({ action: "stagePaths", files, unstage: true });
     shell.picked = shell.picked.filter((path) => !files.includes(path));
   }
 
 export async function stagePicked(shell: ShellState, files = [...shell.picked]) {
-    if (files.length === 0) return;
+    if (files.length === 0 || shell.writing) return;
     await shell.mutate({ action: "stagePaths", files, unstage: false });
     shell.picked = shell.picked.filter((path) => !files.includes(path));
   }
@@ -596,7 +596,7 @@ export function pickedConflicts(shell: ShellState, files = [...shell.picked]) {
 /** Keep `ours` or `theirs` for every picked conflict in one write. */
 export async function resolvePicked(shell: ShellState, side: "ours" | "theirs", files = [...shell.picked]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
-    if (names.length === 0 || shell.mode !== "live") return;
+    if (names.length === 0 || shell.mode !== "live" || shell.writing) return;
     await shell.mutate({ action: "resolvePaths", files: names, side });
     if (!shell.actionError) shell.picked = shell.picked.filter((path) => !names.includes(path));
   }
@@ -690,7 +690,7 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
 
 export async function deletePicked(shell: ShellState, files = [...shell.picked]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
-    if (names.length === 0) return;
+    if (names.length === 0 || shell.writing) return;
     if (names.length === 1) await shell.mutate({ action: "delete", file: names[0] });
     else await shell.mutate({ action: "deletePaths", files: names });
     shell.picked = shell.picked.filter((path) => !names.includes(path));

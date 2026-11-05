@@ -481,12 +481,17 @@ test("batch conflict actions keep one side for the selected files", async ({ pag
   await rows.nth(1).click({ modifiers: ["Control"] });
   await expect(page.locator(".pick-bar")).toBeVisible();
   await expect(page.locator(".pick-count")).toHaveText(/2/);
+  const pane = page.locator(".conflict-pane");
+  await expect(pane.locator(".conflict-selection")).toContainText("2");
+  await pane.locator("#conflict-theirs").click();
+  await expect(pane.locator(".conflict-merge")).toContainText(/Keep main|保留 main/);
+  await pane.locator("#conflict-theirs").click();
   await rows.nth(1).click({ button: "right" });
   const menu = page.locator('[data-layer="menu"]');
   await expect(menu).toBeVisible();
-  const ours = menu.locator("button").filter({ hasText: /Keep ours|保留 ours/ });
+  const ours = menu.locator("button").filter({ hasText: /Keep main|保留 main/ });
   await expect(ours).toContainText("2");
-  await expect(menu.locator("button").filter({ hasText: /Keep theirs|保留 theirs/ })).toBeVisible();
+  await expect(menu.locator("button").filter({ hasText: /Keep topic|保留 topic/ })).toBeVisible();
   await ours.click();
   for (const path of paths) {
     await expect(page.locator(`.unstaged-pane .file-list .file-select[title="${path}"]`)).toHaveCount(0);

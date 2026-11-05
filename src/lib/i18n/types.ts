@@ -154,6 +154,7 @@ export type Messages = {
     unmergedMany: string;
     mergeConflict: string;
     mergeConflictHint: string;
+    conflictSelected: string;
     mergeAction: string;
     mergeBoth: string;
     chooseSide: string;
@@ -280,8 +281,7 @@ export type Messages = {
     copyPath: string;
     copyRelative: string;
     resolve: string;
-    keepOursCount: string;
-    keepTheirsCount: string;
+    keepSideCount: string;
     apply: string;
     pop: string;
     drop: string;

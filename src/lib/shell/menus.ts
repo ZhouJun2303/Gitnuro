@@ -63,6 +63,10 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
     const many = targets.length > 1;
     const count = String(targets.length);
     const conflicts = shell.pickedConflicts(targets);
+    const sideName = (party: { label: string; commit?: { short: string } | null } | undefined | null, fallback: string) =>
+      party ? (party.commit?.short ? `${party.label} · ${party.commit.short}` : party.label) : fallback;
+    const oursName = sideName(shell.activeConflict?.ours, shell.mergeState?.into || shell.tr("dialog.useOurs"));
+    const theirsName = sideName(shell.activeConflict?.theirs, shell.mergeState?.source || shell.tr("dialog.useTheirs"));
     return [
       { label: many ? `${shell.tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected")} (${count})` : shell.tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked, shortcut: shortcutLabel("stageToggle"), run: () => shell.stageChosen(side, targets) },
       { label: many ? shell.tr("menu.discardSelected", { count }) : shell.tr("menu.discard"), disabled: locked || (side === "staged" && many), shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(targets) },
@@ -84,8 +88,8 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { label: shell.tr("menu.copyPath"), run: () => shell.copyText(shell.fullPath(file.path)) },
       { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(file.path) },
       ...(file.letter === "C" ? [
-        { label: shell.tr("menu.keepOursCount", { count: String(conflicts.length) }), disabled: locked, run: () => void shell.resolvePicked("ours", conflicts) },
-        { label: shell.tr("menu.keepTheirsCount", { count: String(conflicts.length) }), disabled: locked, run: () => void shell.resolvePicked("theirs", conflicts) },
+        { label: shell.tr("menu.keepSideCount", { name: oursName, count: String(conflicts.length) }), disabled: locked, run: () => void shell.resolvePicked("ours", conflicts) },
+        { label: shell.tr("menu.keepSideCount", { name: theirsName, count: String(conflicts.length) }), disabled: locked, run: () => void shell.resolvePicked("theirs", conflicts) },
         { label: shell.tr("menu.resolve"), disabled: locked, run: () => shell.openResolve(file.path) },
       ] : []),
       ...shell.commandItems("file"),
