@@ -100,3 +100,20 @@ test("merge panel keeps both sides scrolled together", async ({ page }) => {
   ]);
   expect(Math.abs(leftTop - rightTop)).toBeLessThanOrEqual(1);
 });
+
+test("merge panel scrolls the result to the picked hunk", async ({ page }) => {
+  await openLabScene(page, "text-merge-many", ".merge-panel");
+  const resultPane = page.locator(".merge-result-scroll");
+  const target = page.locator(".merge-side.left .merge-cell.hunk").nth(9);
+  await target.hover();
+  await target.locator(".merge-hover-btn").click();
+  const mark = page.locator(".merge-result-scroll [data-merge-result]").nth(9);
+  await expect(mark).toHaveClass(/pick-theirs/);
+  await expect.poll(() => resultPane.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  const paneBox = await resultPane.boundingBox();
+  const markBox = await mark.boundingBox();
+  expect(paneBox).not.toBeNull();
+  expect(markBox).not.toBeNull();
+  expect(markBox!.y).toBeGreaterThanOrEqual(paneBox!.y - 1);
+  expect(markBox!.y + markBox!.height).toBeLessThanOrEqual(paneBox!.y + paneBox!.height + 1);
+});

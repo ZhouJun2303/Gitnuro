@@ -150,15 +150,20 @@
     });
   }
 
-  function jumpConflict(delta: number) {
-    if (conflictTotal === 0) return;
-    const next = (activeConflict + delta + conflictTotal) % conflictTotal;
-    activeConflict = next;
-    const index = hunkIndexes[next];
-    if (index == null) return;
+  function revealHunk(index: number) {
+    const at = hunkIndexes.indexOf(index);
+    if (at >= 0) activeConflict = at;
     leftPane?.querySelector<HTMLElement>(`[data-merge-hunk="${index}"]`)?.scrollIntoView({ block: "nearest" });
     rightPane?.querySelector<HTMLElement>(`[data-merge-hunk="${index}"]`)?.scrollIntoView({ block: "nearest" });
     resultPane?.querySelector<HTMLElement>(`[data-merge-result="${index}"]`)?.scrollIntoView({ block: "nearest" });
+  }
+
+  function jumpConflict(delta: number) {
+    if (conflictTotal === 0) return;
+    const next = (activeConflict + delta + conflictTotal) % conflictTotal;
+    const index = hunkIndexes[next];
+    if (index == null) return;
+    revealHunk(index);
   }
 
   function formatBytes(bytes: number) {
@@ -291,7 +296,7 @@
                       class="merge-hover-btn"
                       class:remove={on}
                       type="button"
-                      onclick={(event) => { event.stopPropagation(); withDirtyGuard(() => { shell.toggleMergeSide(index, "theirs"); activeConflict = Math.max(0, hunkIndexes.indexOf(index)); }); }}
+                      onclick={(event) => { event.stopPropagation(); withDirtyGuard(() => { shell.toggleMergeSide(index, "theirs"); revealHunk(index); }); }}
                     >{shell.tr(on ? "dialog.removeLeft" : "dialog.selectLeft")}</button>
                   {/if}
                 </div>
@@ -321,7 +326,7 @@
                       class="merge-hover-btn"
                       class:remove={on}
                       type="button"
-                      onclick={(event) => { event.stopPropagation(); withDirtyGuard(() => { shell.toggleMergeSide(index, "ours"); activeConflict = Math.max(0, hunkIndexes.indexOf(index)); }); }}
+                      onclick={(event) => { event.stopPropagation(); withDirtyGuard(() => { shell.toggleMergeSide(index, "ours"); revealHunk(index); }); }}
                     >{shell.tr(on ? "dialog.removeRight" : "dialog.selectRight")}</button>
                   {/if}
                 </div>
