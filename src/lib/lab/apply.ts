@@ -80,7 +80,7 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.settings = { ...shell.settings, diffWordWrap: true, diffStyle: "unified" };
     return showChange(shell, "notes/wrap.txt", "unstaged");
   }
-  if (id === "history" || id === "commit") return showHistory(shell);
+  if (id === "history" || id === "commit" || id === "history-remote") return showHistory(shell);
   if (id === "tree") {
     await showHistory(shell);
     await shell.openHistoryTab("tree");

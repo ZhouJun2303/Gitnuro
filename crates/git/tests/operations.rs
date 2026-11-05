@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    blob_view, conflict_view, discard_lines, file_diff, file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs, search_commits,
+    blob_view, commit_log, conflict_view, discard_lines, file_diff, file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs, search_commits,
     search_log, stage_hunk, stage_line, stage_lines, stage_paths, status, stop_process_tree, ChangeKind, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
 };
 
@@ -113,6 +113,7 @@ fn fetch_push_and_fast_forward() {
     git_at(&std::env::temp_dir(), &["clone", &url, other.to_str().unwrap()]);
     let _cleanup = RemoveDir(other.clone());
     git_at(&other, &["config", "commit.gpgsign", "false"]);
+    git_at(&other, &["config", "core.hooksPath", ".git/no-hooks"]);
     git_at(&other, &["config", "user.name", "Test"]);
     git_at(&other, &["config", "user.email", "test@example.com"]);
 
@@ -138,6 +139,55 @@ fn fetch_push_and_fast_forward() {
     let log = git_at(&other, &["log", "--format=%s"]);
     assert!(log.contains("second"), "{log}");
     assert!(log.contains("first"), "{log}");
+}
+
+#[test]
+fn marks_commits_that_exist_only_on_a_remote() {
+    let origin = bare();
+    let local = repo();
+    commit_file(&local, "a.txt", "one\n", "first");
+    let url = file_url(&origin.path);
+    perform(&local.path, Mutation::AddRemote { name: "origin".into(), url: url.clone() }).unwrap();
+    perform(
+        &local.path,
+        Mutation::Push {
+            remote: Some("origin".into()),
+            set_upstream: true,
+            tags: false,
+            force_with_lease: false,
+            force: false,
+        },
+    )
+    .unwrap();
+
+    let other = std::env::temp_dir().join(format!(
+        "awegit-remote-only-{}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    git_at(&std::env::temp_dir(), &["clone", &url, other.to_str().unwrap()]);
+    let _cleanup = RemoveDir(other.clone());
+    git_at(&other, &["config", "commit.gpgsign", "false"]);
+    git_at(&other, &["config", "core.hooksPath", ".git/no-hooks"]);
+    git_at(&other, &["config", "user.name", "Test"]);
+    git_at(&other, &["config", "user.email", "test@example.com"]);
+    fs::write(other.join("a.txt"), "two\n").unwrap();
+    git_at(&other, &["add", "--", "a.txt"]);
+    git_at(&other, &["commit", "-m", "second"]);
+    git_at(&other, &["push", "origin", "HEAD:main"]);
+    perform(&local.path, Mutation::Fetch { remote: Some("origin".into()), prune: false, tags: false }).unwrap();
+
+    let rows = commit_log(&local.path, 50).unwrap();
+    let second = rows.iter().find(|row| row.summary == "second").expect("remote tip missing");
+    assert!(second.remote_only, "remote tip should be remote-only: {second:?}");
+    assert!(!second.unpushed, "remote tip should not be unpushed: {second:?}");
+    let first = rows.iter().find(|row| row.summary == "first").expect("local tip missing");
+    assert!(!first.remote_only && !first.unpushed, "shared base should be plain: {first:?}");
+
+    commit_file(&local, "b.txt", "local\n", "local work");
+    let rows = commit_log(&local.path, 50).unwrap();
+    let work = rows.iter().find(|row| row.summary == "local work").expect("local commit missing");
+    assert!(work.unpushed, "local commit should be unpushed: {work:?}");
+    assert!(!work.remote_only, "local commit should not be remote-only: {work:?}");
 }
 
 #[test]

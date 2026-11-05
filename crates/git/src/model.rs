@@ -37,6 +37,9 @@ pub struct CommitRow {
     /// Whether this commit has not been pushed to any remote.
     #[serde(default)]
     pub unpushed: bool,
+    /// Whether this commit is on a remote but not yet reachable from a local branch.
+    #[serde(default)]
+    pub remote_only: bool,
 }
 
 /// Author, committer, and message body for the history detail pane.
@@ -222,7 +225,7 @@ pub fn search_log(repo: &Path, field: &str, scope: &str, query: &str, limit: usi
     let (output, _) = with_read(|| run_capped(repo, &args, 16_000_000))?;
     let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
     assign_lanes(&mut commits);
-    mark_unpushed(repo, &mut commits);
+    mark_remote_state(repo, &mut commits);
     Ok(commits)
 }
 
@@ -308,11 +311,11 @@ fn log_with(repo: &Path, limit: usize, all: bool, path: &[&str], revs: &[&str], 
     let (output, _) = with_read(|| run_capped(repo, &args, 16_000_000))?;
     let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
     assign_lanes(&mut commits);
-    with_read(|| mark_unpushed(repo, &mut commits));
+    with_read(|| mark_remote_state(repo, &mut commits));
     Ok(commits)
 }
 
-fn mark_unpushed(repo: &Path, commits: &mut [CommitRow]) {
+fn mark_remote_state(repo: &Path, commits: &mut [CommitRow]) {
     if commits.is_empty() {
         return;
     }
@@ -321,15 +324,30 @@ fn mark_unpushed(repo: &Path, commits: &mut [CommitRow]) {
     }
     if let Ok(output) = run(repo, &["rev-list", "--all", "--not", "--remotes", "--max-count=20000"]) {
         let text = String::from_utf8_lossy(&output.stdout);
-        let unpushed_set: std::collections::HashSet<&str> = text
+        let local_only: std::collections::HashSet<&str> = text
             .lines()
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .collect();
-        if !unpushed_set.is_empty() {
+        if !local_only.is_empty() {
             for commit in commits.iter_mut() {
-                if unpushed_set.contains(commit.id.as_str()) {
+                if local_only.contains(commit.id.as_str()) {
                     commit.unpushed = true;
+                }
+            }
+        }
+    }
+    if let Ok(output) = run(repo, &["rev-list", "--remotes", "--not", "--branches", "HEAD", "--max-count=20000"]) {
+        let text = String::from_utf8_lossy(&output.stdout);
+        let remote_only: std::collections::HashSet<&str> = text
+            .lines()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !remote_only.is_empty() {
+            for commit in commits.iter_mut() {
+                if remote_only.contains(commit.id.as_str()) {
+                    commit.remote_only = true;
                 }
             }
         }
@@ -381,6 +399,7 @@ fn parse_commits(text: &str) -> Vec<CommitRow> {
             at,
             email,
             unpushed: false,
+            remote_only: false,
         });
     }
     commits
@@ -1460,15 +1479,34 @@ fn parse_track(text: &str) -> (u32, u32) {
 fn parse_decoration(text: &str) -> Vec<String> {
     const MAX_REFS: usize = 32;
     const MAX_REF_CHARS: usize = 120;
-    text.split(',')
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
-        .map(clean_ref)
-        .filter(|item| *item != "HEAD" && !item.is_empty())
-        .take(MAX_REFS)
+    let mut names: Vec<String> = Vec::new();
+    for item in text.split(',').map(str::trim).filter(|item| !item.is_empty()) {
+        // `origin/HEAD -> origin/main` and bare `origin/HEAD` alias a remote
+        // branch that is already decorated on the same commit.
+        let source = item
+            .split_once("->")
+            .or_else(|| item.split_once('→'))
+            .map(|(source, _)| source.trim())
+            .unwrap_or(item);
+        if source != "HEAD" && source.ends_with("/HEAD") {
+            continue;
+        }
+        let name = clean_ref(item);
+        if name.is_empty() || name == "HEAD" || name.ends_with("/HEAD") {
+            continue;
+        }
+        if !names.iter().any(|seen| seen == name) {
+            names.push(name.to_string());
+        }
+        if names.len() >= MAX_REFS {
+            break;
+        }
+    }
+    names
+        .into_iter()
         .map(|item| {
             if item.chars().count() <= MAX_REF_CHARS {
-                item.to_string()
+                item
             } else {
                 let mut short: String = item.chars().take(MAX_REF_CHARS).collect();
                 short.push('…');

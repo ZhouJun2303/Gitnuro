@@ -63,7 +63,7 @@
     gap: 4px;
     flex: 0 1 auto;
     min-width: 0;
-    max-width: min(46%, 320px);
+    max-width: min(56%, 360px);
   }
 
 .lane-name {
@@ -71,7 +71,7 @@
     align-items: center;
     gap: 4px;
     min-width: 0;
-    max-width: 200px;
+    max-width: 100%;
     height: 18px;
     padding: 0 6px;
     border: 1px solid var(--lane);
@@ -82,7 +82,7 @@
     line-height: 16px;
   }
 
-.lane-name.compact { max-width: 88px; }
+.lane-name.compact { gap: 2px; padding: 0 4px; }
 
 .lane-name.local-only,
   .lane-name.mirrored {
@@ -192,6 +192,31 @@
 
 .commit-row.unpushed .graph-node:not(.dim) {
     opacity: 0.65;
+  }
+
+.commit-row.remote-only .subject,
+  .commit-row.remote-only .badges,
+  .commit-row.remote-only .lane-names,
+  .commit-row.remote-only .commit-side {
+    opacity: 0.55;
+    transition: opacity 120ms ease;
+  }
+
+.commit-row.remote-only .graph-node:not(.dim) {
+    opacity: 0.55;
+  }
+
+.commit-row.remote-only:hover .subject,
+  .commit-row.remote-only:hover .badges,
+  .commit-row.remote-only:hover .lane-names,
+  .commit-row.remote-only:hover .commit-side,
+  .commit-row.remote-only:hover .graph-node:not(.dim),
+  .commit-row.remote-only.selected .subject,
+  .commit-row.remote-only.selected .badges,
+  .commit-row.remote-only.selected .lane-names,
+  .commit-row.remote-only.selected .commit-side,
+  .commit-row.remote-only.selected .graph-node:not(.dim) {
+    opacity: 1;
   }
 
 .commit-row.unpushed:hover .subject,

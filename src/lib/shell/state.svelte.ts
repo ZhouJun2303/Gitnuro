@@ -72,6 +72,7 @@ function sameCommitRow(left: CommitRow, right: CommitRow): boolean {
     left.at === right.at &&
     left.email === right.email &&
     left.unpushed === right.unpushed &&
+    left.remoteOnly === right.remoteOnly &&
     sameStrings(left.parents, right.parents) &&
     sameStrings(left.refs, right.refs)
   );

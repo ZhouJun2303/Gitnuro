@@ -77,6 +77,7 @@ export type CommitRow = {
   at: number;
   email?: string;
   unpushed?: boolean;
+  remoteOnly?: boolean;
 };
 
 export type BranchRow = {
