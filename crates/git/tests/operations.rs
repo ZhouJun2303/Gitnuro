@@ -924,6 +924,50 @@ fn checkout_stashes_local_changes_and_puts_them_back() {
 }
 
 #[test]
+fn checkout_keeps_the_autostash_when_restoring_conflicts() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "a.txt", "topic\n", "topic");
+    repo.git(&["checkout", "main"]);
+    fs::write(repo.path.join("a.txt"), "local\n").unwrap();
+    assert!(perform(&repo.path, Mutation::Checkout { name: "topic".into() }).is_err());
+    let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
+    assert!(text.contains("<<<<<<<"), "{text}");
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    assert!(stashes.iter().any(|stash| stash.summary.contains("autostash")), "{stashes:?}");
+}
+
+#[test]
+fn conflicting_merge_keeps_a_backup() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "a.txt", "topic\n", "topic");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main");
+    fs::write(repo.path.join("a.txt"), "local\n").unwrap();
+    assert!(perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "topic".into(),
+            squash: false,
+            no_ff: false,
+            autostash: true,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .is_err());
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    let backup = stashes.iter().find(|stash| stash.summary.contains("conflict backup")).expect("conflict backup");
+    assert_eq!(
+        repo.output(&["show", &format!("{}:a.txt", backup.name)]).replace("\r\n", "\n"),
+        "local\n"
+    );
+}
+
+#[test]
 fn branch_and_tag_names_may_use_any_language() {
     let repo = repo();
     commit_file(&repo, "a.txt", "a\n", "base");

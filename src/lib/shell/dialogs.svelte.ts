@@ -421,7 +421,12 @@ async function checkoutWithStash(shell: ShellState, name: string, remote?: { rem
     if (shell.actionError) return;
     if (remote) await shell.mutate({ action: "checkoutRemote", remote: remote.remote, branch: remote.branch });
     else await shell.mutate({ action: "checkout", name });
-    if (shell.actionError) return;
+    if (shell.actionError) {
+      const failure = shell.actionError;
+      await shell.mutate({ action: "stashPop", name: "stash@{0}" });
+      shell.actionError = shell.actionError ? `${failure}\n${shell.actionError}` : failure;
+      return;
+    }
     await shell.mutate({ action: "stashPop", name: "stash@{0}" });
     if (shell.actionError) {
       shell.pendingCheckout = name;
