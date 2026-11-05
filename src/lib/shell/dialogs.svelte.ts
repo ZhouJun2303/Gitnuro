@@ -1152,11 +1152,8 @@ export function refreshMergeSummary(shell: ShellState) {
 
 function fillMergeText(shell: ShellState, into: string, source: string) {
     const summary = shell.tr(shell.draftExtra === "squash" ? "dialog.mergeSquashTitle" : "dialog.mergeTitleLine", { source, into });
-    const body = shell.mergeFiles.map((file) => `${file.status}\t${file.path}`).join("\n");
     if (shell.mergeSummary === shell.mergeAutoSummary) shell.mergeSummary = summary;
     shell.mergeAutoSummary = summary;
-    if (shell.mergeBody === shell.mergeAutoBody) shell.mergeBody = body;
-    shell.mergeAutoBody = body;
   }
 
 export async function saveWindow(shell: ShellState) {

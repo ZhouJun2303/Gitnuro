@@ -66,7 +66,6 @@
       shell.mergeSummary = "";
       shell.mergeBody = "";
       shell.mergeAutoSummary = "";
-      shell.mergeAutoBody = "";
       shell.mergeFiles = [];
       void shell.loadMergePreview();
     }

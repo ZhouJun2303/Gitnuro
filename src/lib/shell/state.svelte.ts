@@ -544,9 +544,6 @@ export class ShellState {
   mergeAutoSummary = $state("");
 
 
-  mergeAutoBody = $state("");
-
-
   mergeFiles = $state<{ status: string; path: string }[]>([]);
 
 
@@ -554,9 +551,6 @@ export class ShellState {
 
 
   mergeProgressAutoSummary = $state("");
-
-
-  mergeProgressAutoBody = $state("");
 
 
   /** Fetch, pull, and push dialog options. */

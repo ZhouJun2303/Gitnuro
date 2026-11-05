@@ -23,7 +23,6 @@ import {
   } from "../status";
 import type { StoredError } from "./types";
 import type { ShellState } from "./state.svelte";
-import { isCommentary } from "./commitMessage";
 
 const ERROR_KEY = "awegit-errors";
 
@@ -112,19 +111,13 @@ function sameMergeState(left: MergeState | null, right: MergeState | null) {
 /** Fill the composer for a paused merge without replacing a draft the user wrote. */
 function fillMergeProgress(shell: ShellState, state: MergeState) {
     const summary = shell.tr("dialog.mergeTitleLine", { source: state.source, into: state.into });
-    const body = state.files.map((file) => `${file.status}\t${file.path}`).join("\n");
     if (!shell.summary.trim() || shell.summary === shell.mergeProgressAutoSummary) shell.summary = summary;
     shell.mergeProgressAutoSummary = summary;
-    // The commit template only looks filled; replace it so the merge's files show up as the body.
-    if (!shell.description.trim() || isCommentary(shell.description) || shell.description === shell.mergeProgressAutoBody) shell.description = body;
-    shell.mergeProgressAutoBody = body;
   }
 
 function clearMergeProgress(shell: ShellState) {
     if (shell.mergeProgressAutoSummary && shell.summary === shell.mergeProgressAutoSummary) shell.summary = "";
-    if (shell.mergeProgressAutoBody && shell.description === shell.mergeProgressAutoBody) shell.description = "";
     shell.mergeProgressAutoSummary = "";
-    shell.mergeProgressAutoBody = "";
   }
 
 

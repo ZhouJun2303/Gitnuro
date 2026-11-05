@@ -480,7 +480,7 @@ test("batch conflict actions keep one side for the selected files", async ({ pag
   await openLabScene(page, "conflict-batch", ".file-list .file");
   await expect(page.locator(".composer .summary-input")).toHaveValue(/topic/);
   await expect(page.locator(".composer .summary-input")).toHaveValue(/main/);
-  await expect(page.locator(".composer textarea")).toHaveValue(/conflict\/file-/);
+  await expect(page.locator(".composer textarea")).not.toHaveValue(/conflict\/file-/);
   await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("topic");
   await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("main");
   const rows = page.locator(".unstaged-pane .file-list .file");
