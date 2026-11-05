@@ -178,6 +178,11 @@ async function fillSurface(shell: ShellState, id: string) {
     return;
   }
   if (id === "conflict") return showChange(shell, "src/both-sides.ts", "unstaged");
+  if (id === "conflict-batch") {
+    shell.section = "changes";
+    shell.picked = [];
+    return;
+  }
   if (id === "bisect") {
     await shell.loadFacts(true, false);
     return;

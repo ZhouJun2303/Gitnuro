@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 pub use change::{
     blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line, discard_lines, file_diff, file_diff_with, file_preview,
-    launch_diff_pair, launch_diff_tool, launch_merge_tool, range_diff, resolve_conflict, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths, staged_diff,
+    launch_diff_pair, launch_diff_tool, launch_merge_tool, range_diff, resolve_conflict, resolve_conflicts, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths, staged_diff,
     unstage_all, unstage_paths, workspace_diff, BlobView, CommitRequest, ConflictSides, ConflictView, DiffLine, DiffLineKind, FileDiff,
     FilePreview, LineEdit,
 };

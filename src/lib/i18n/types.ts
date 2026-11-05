@@ -190,6 +190,10 @@ export type Messages = {
     deleteSelected: string;
     unstageSelected: string;
     stageSelected: string;
+    takeLocal: string;
+    takeRemote: string;
+    takeLocalHint: string;
+    takeRemoteHint: string;
     stageConflictBinary: string;
     bisect: string;
     ignored: string;

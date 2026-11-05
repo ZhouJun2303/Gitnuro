@@ -521,6 +521,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::DiscardLine { .. } => "discardLine",
         awegit_git::Mutation::DiscardLines { .. } => "discardLines",
         awegit_git::Mutation::Resolve { .. } => "resolve",
+        awegit_git::Mutation::ResolvePaths { .. } => "resolvePaths",
         awegit_git::Mutation::RenameBranch { .. } => "renameBranch",
         awegit_git::Mutation::SetUpstream { .. } => "setUpstream",
         awegit_git::Mutation::DeleteRemoteBranch { .. } => "deleteRemoteBranch",
@@ -613,6 +614,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::DiscardPaths { files } => format!("files={}", files.len()),
         Mutation::DeletePaths { files } => format!("files={}", files.len()),
         Mutation::Resolve { file, side, text } => join([scrub(file), scrub(side), format!("bytes={}", text.len())]),
+        Mutation::ResolvePaths { files, side } => join([format!("files={}", files.len()), scrub(side)]),
         Mutation::RenameBranch { name, to } => join([scrub(name), scrub(to)]),
         Mutation::SetUpstream { branch, upstream } => join([scrub(branch), scrub(upstream)]),
         Mutation::DeleteRemoteBranch { remote, branch }

@@ -864,15 +864,10 @@ pub fn resolve_conflict(repo: &Path, path: &str, side: &str, text: &str) -> Resu
         })?;
         return run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ());
     }
+    if side == "ours" || side == "theirs" {
+        return resolve_conflicts(repo, &[path.to_string()], side);
+    }
     match side {
-        "ours" => {
-            run(repo, &["--literal-pathspecs", "checkout", "--ours", "--", path])?;
-            run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ())
-        }
-        "theirs" => {
-            run(repo, &["--literal-pathspecs", "checkout", "--theirs", "--", path])?;
-            run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ())
-        }
         "both" => {
             let ours = show_stage(repo, path, 2);
             let theirs = show_stage(repo, path, 3);
@@ -894,6 +889,60 @@ pub fn resolve_conflict(repo: &Path, path: &str, side: &str, text: &str) -> Resu
         "mark" => run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ()),
         other => Err(Error::Git(format!("unknown conflict side {other}"))),
     }
+}
+
+/// Keep `ours` or `theirs` for many unmerged paths with one index write.
+///
+/// A side that deleted the file has no stage entry, so those paths are removed
+/// instead of checked out. Taking that side through `checkout` would fail.
+pub fn resolve_conflicts(repo: &Path, paths: &[String], side: &str) -> Result<(), Error> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let (flag, stage) = match side {
+        "ours" => ("--ours", 2),
+        "theirs" => ("--theirs", 3),
+        other => return Err(Error::Git(format!("unknown conflict side {other}"))),
+    };
+    let stages = unmerged_stages(repo)?;
+    let mut kept = Vec::new();
+    let mut removed = Vec::new();
+    for path in paths {
+        check_path(path)?;
+        if stages.get(path).map_or(true, |entry| entry[stage]) {
+            kept.push(path.clone());
+        } else {
+            removed.push(path.clone());
+        }
+    }
+    if !kept.is_empty() {
+        run_paths(repo, &["checkout", flag], &kept)?;
+        run_paths(repo, &["add"], &kept)?;
+    }
+    if !removed.is_empty() {
+        run_paths(repo, &["rm", "-q", "-f"], &removed)?;
+    }
+    Ok(())
+}
+
+/// Index stages present for each unmerged path, indexed by stage number.
+fn unmerged_stages(repo: &Path) -> Result<std::collections::BTreeMap<String, [bool; 4]>, Error> {
+    let output = run(repo, &["ls-files", "-u", "-z"])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut stages: std::collections::BTreeMap<String, [bool; 4]> = std::collections::BTreeMap::new();
+    for entry in text.split('\0') {
+        let Some((meta, path)) = entry.split_once('\t') else { continue };
+        if path.is_empty() {
+            continue;
+        }
+        let Some(stage) = meta.split_whitespace().nth(2).and_then(|value| value.parse::<usize>().ok()) else {
+            continue;
+        };
+        if stage < 4 {
+            stages.entry(path.to_string()).or_insert([false; 4])[stage] = true;
+        }
+    }
+    Ok(stages)
 }
 
 fn index_blob(repo: &Path, path: &str) -> Result<Vec<u8>, Error> {

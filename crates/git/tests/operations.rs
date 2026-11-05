@@ -514,6 +514,75 @@ fn resolve_conflict_keeps_ours() {
 }
 
 #[test]
+fn resolve_paths_keeps_the_chosen_side_for_every_file() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base a\n", "base a");
+    commit_file(&repo, "b.txt", "base b\n", "base b");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side a\n", "side a");
+    commit_file(&repo, "b.txt", "side b\n", "side b");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main a\n", "main a");
+    commit_file(&repo, "b.txt", "main b\n", "main b");
+    let merge = perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    );
+    assert!(merge.is_err(), "expected a conflict");
+    perform(
+        &repo.path,
+        Mutation::ResolvePaths {
+            files: vec!["a.txt".into(), "b.txt".into()],
+            side: "theirs".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "side a\n");
+    assert_eq!(fs::read_to_string(repo.path.join("b.txt")).unwrap(), "side b\n");
+    assert!(repo.output(&["ls-files", "-u"]).trim().is_empty());
+}
+
+#[test]
+fn resolve_paths_can_take_a_side_that_deleted_the_file() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    repo.git(&["rm", "a.txt"]);
+    repo.git(&["commit", "-m", "side removes"]);
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main edits");
+    let merge = perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    );
+    assert!(merge.is_err(), "expected a modify/delete conflict");
+    perform(
+        &repo.path,
+        Mutation::ResolvePaths {
+            files: vec!["a.txt".into()],
+            side: "theirs".into(),
+        },
+    )
+    .unwrap();
+    assert!(!repo.path.join("a.txt").exists());
+    assert!(repo.output(&["ls-files", "-u"]).trim().is_empty());
+}
+
+#[test]
 fn rename_and_reword_during_rebase() {
     let repo = repo();
     commit_file(&repo, "a.txt", "a\n", "base");

@@ -463,6 +463,27 @@ test("merge stays available with local changes and stashes them", async ({ page 
   await expect(dialog).toContainText("Local changes are stashed first.");
 });
 
+test("batch conflict actions keep one side for the selected files", async ({ page }) => {
+  await openLabScene(page, "conflict-batch", ".file-list .file");
+  const rows = page.locator(".unstaged-pane .file-list .file");
+  const paths = await rows.evaluateAll((nodes) =>
+    nodes.slice(0, 2).map((node) => node.querySelector<HTMLElement>(".file-select")?.title ?? ""),
+  );
+  expect(paths).toHaveLength(2);
+  expect(paths.every((path) => path !== "")).toBe(true);
+  await rows.nth(0).click();
+  await rows.nth(1).click({ modifiers: ["Control"] });
+  await expect(page.locator(".pick-bar")).toBeVisible();
+  const local = page.locator(".pick-bar .pane-chip").filter({ hasText: /Use local|采用本地/ });
+  const remote = page.locator(".pick-bar .pane-chip").filter({ hasText: /Use remote|采用线上/ });
+  await expect(local).toBeVisible();
+  await expect(remote).toBeVisible();
+  await local.click();
+  for (const path of paths) {
+    await expect(page.locator(`.unstaged-pane .file-list .file-select[title="${path}"]`)).toHaveCount(0);
+  }
+});
+
 test("unified diff keeps row nodes while scrolling", async ({ page }) => {
   await openLabScene(page, "prefs-git", '[data-dialog="prefs"]');
   const style = page.locator('[data-dialog="prefs"] label', { hasText: "Diff view" }).locator("select");

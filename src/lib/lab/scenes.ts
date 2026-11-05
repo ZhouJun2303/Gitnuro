@@ -120,6 +120,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "perf", group: "主界面", title: "性能", repo: "full", ready: "[data-layer=\"perf\"]" }),
   scene({ id: "clean", group: "仓库状态", title: "干净仓库", repo: "even", ready: ".file-list .empty" }),
   scene({ id: "conflict", group: "仓库状态", title: "文本冲突", repo: "conflict", ready: ".conflict-pane" }),
+  scene({ id: "conflict-batch", group: "仓库状态", title: "批量解决冲突", repo: "conflict", ready: ".file-list .file" }),
   scene({ id: "conflict-banner", group: "仓库状态", title: "冲突横幅", repo: "conflict", ready: ".identity-floor[data-layer=\"conflicts\"]" }),
   scene({ id: "merge-progress", group: "仓库状态", title: "合并进行中", repo: "merge", ready: ".identity-floor[data-layer=\"progress\"]" }),
   scene({ id: "rebase-progress", group: "仓库状态", title: "变基进行中", repo: "rebase", ready: ".identity-floor[data-layer=\"progress\"]" }),

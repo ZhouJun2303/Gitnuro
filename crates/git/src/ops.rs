@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cli::{check_name, check_path, check_rev, commit_config, has_local_author, run, run_env, run_paths, run_repo_author, run_stdin, with_operation_repo};
 use crate::model::in_progress;
-use crate::{commit, discard_hunk, discard_line, discard_lines, resolve_conflict, stage_hunk, stage_line, stage_lines, stage_paths, unstage_paths, CommitRequest, Error, InProgress, LineEdit};
+use crate::{commit, discard_hunk, discard_line, discard_lines, resolve_conflict, resolve_conflicts, stage_hunk, stage_line, stage_lines, stage_paths, unstage_paths, CommitRequest, Error, InProgress, LineEdit};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -251,6 +251,11 @@ pub enum Mutation {
         /// Used when `side` is `text`: the file contents to write before `git add`.
         #[serde(default)]
         text: String,
+    },
+    /// Resolve many unmerged paths to one side with one index write.
+    ResolvePaths {
+        files: Vec<String>,
+        side: String,
     },
     RenameBranch {
         name: String,
@@ -612,6 +617,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         } => discard_line(repo, &file, &text, addition, at),
         Mutation::DiscardLines { file, lines } => discard_lines(repo, &file, &lines),
         Mutation::Resolve { file, side, text } => resolve_conflict(repo, &file, &side, &text),
+        Mutation::ResolvePaths { files, side } => resolve_conflicts(repo, &files, &side),
         Mutation::RenameBranch { name, to } => {
             run(repo, &["branch", "-m", check_name(&name)?, check_name(&to)?]).map(|_| ())
         }

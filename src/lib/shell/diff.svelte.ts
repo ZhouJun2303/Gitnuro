@@ -587,6 +587,24 @@ export async function stagePicked(shell: ShellState, files = [...shell.picked]) 
     shell.picked = shell.picked.filter((path) => !files.includes(path));
   }
 
+/** Conflict files among the picked rows; other picked files are left alone. */
+export function pickedConflicts(shell: ShellState, files = [...shell.picked]) {
+    const names = new Set(files);
+    return shell.unstaged.filter((file) => file.letter === "C" && names.has(file.path)).map((file) => file.path);
+  }
+
+/**
+ * Keep the local or remote side of every picked conflict in one write.
+ * During a rebase the incoming commits are `theirs`, so local maps to that side.
+ */
+export async function resolvePicked(shell: ShellState, side: "local" | "remote", files = [...shell.picked]) {
+    const names = [...new Set(files.filter((path) => path.length > 0))];
+    if (names.length === 0 || shell.busy || shell.mode !== "live") return;
+    const ours = (side === "local") !== (shell.progress === "rebase");
+    await shell.mutate({ action: "resolvePaths", files: names, side: ours ? "ours" : "theirs" });
+    if (!shell.actionError) shell.picked = shell.picked.filter((path) => !names.includes(path));
+  }
+
 export function stageChosen(shell: ShellState, side: Side, files: string[]) {
     if (files.length > 1) {
       if (side === "staged") void shell.unstagePicked(files);
