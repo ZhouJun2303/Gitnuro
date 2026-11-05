@@ -44,6 +44,7 @@
               <p class="empty">{shell.tr("chrome.selectCommitFile")}</p>
             {:else if shell.historyTab === "commit"}
               {@const plate = shell.stashParts(shell.commitSubject(), shell.commitRefs())}
+              {@const route = shell.mergeRoute()}
               <div class="detail-scroll" use:commitScroll>
                 <div class="fork-card" class:select-all={shell.textWhere === "detail"}>
                   {@render personBlock(shell.tr("chrome.author"), shell.commitDetail?.author || shell.commitAuthorName(), shell.commitDetail?.authorEmail ?? "", shell.commitDetail?.authorAt ?? 0)}
@@ -56,6 +57,12 @@
                       {#each shell.commitDetail?.parents ?? [] as parent (parent)}
                         <button class="sha-link parent" type="button" onclick={() => { if (shell.mode === "live") void shell.selectCommit(parent); else shell.selectSample(parent); }}>{parent.slice(0, 7)}</button>
                       {/each}
+                    </div>
+                  {/if}
+                  {#if route}
+                    <div class="fork-row merge-route"><span class="k">{shell.tr("chrome.mergeRoute")}</span>
+                      <span class="ref" title={route.source}>{route.source}</span>
+                      {#if route.into}<span class="meta" aria-hidden="true">→</span><span class="ref" title={route.into}>{route.into}</span>{/if}
                     </div>
                   {/if}
                   {#if shell.commitRefs().length > 0}

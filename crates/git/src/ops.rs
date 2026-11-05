@@ -1085,6 +1085,59 @@ pub fn merge_preview(repo: &Path, name: &str) -> Result<MergePreview, Error> {
     })
 }
 
+/// Branch labels and files for a merge paused with conflicts.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeState {
+    pub source: String,
+    pub into: String,
+    pub files: Vec<MergeFile>,
+}
+
+pub fn merge_state(repo: &Path) -> Result<Option<MergeState>, Error> {
+    let head = match run(repo, &["rev-parse", "--verify", "--quiet", "MERGE_HEAD"]) {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        Err(_) => return Ok(None),
+    };
+    if head.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(MergeState {
+        source: merge_source(repo, &head),
+        into: current_branch_name(repo),
+        files: changed_names(repo, "MERGE_HEAD")?,
+    }))
+}
+
+/// The branch pointing at `MERGE_HEAD`, or a short id when no ref does.
+fn merge_source(repo: &Path, head: &str) -> String {
+    if let Ok(output) = run(
+        repo,
+        &["for-each-ref", "--points-at", head, "--format=%(refname)%09%(refname:short)", "refs/heads", "refs/remotes"],
+    ) {
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut remote = String::new();
+        for line in text.lines() {
+            let mut fields = line.split('\t');
+            let full = fields.next().unwrap_or("");
+            let short = fields.next().unwrap_or("").trim();
+            if short.is_empty() {
+                continue;
+            }
+            if full.starts_with("refs/heads/") {
+                return short.to_string();
+            }
+            if remote.is_empty() && full.starts_with("refs/remotes/") {
+                remote = short.to_string();
+            }
+        }
+        if !remote.is_empty() {
+            return remote;
+        }
+    }
+    head.chars().take(8).collect()
+}
+
 fn current_branch_name(repo: &Path) -> String {
     match run(repo, &["branch", "--show-current"]) {
         Ok(output) => {

@@ -190,10 +190,8 @@ export type Messages = {
     deleteSelected: string;
     unstageSelected: string;
     stageSelected: string;
-    takeLocal: string;
-    takeRemote: string;
-    takeLocalHint: string;
-    takeRemoteHint: string;
+    pickedCount: string;
+    mergeRoute: string;
     stageConflictBinary: string;
     bisect: string;
     ignored: string;
@@ -279,6 +277,8 @@ export type Messages = {
     copyPath: string;
     copyRelative: string;
     resolve: string;
+    keepOursCount: string;
+    keepTheirsCount: string;
     apply: string;
     pop: string;
     drop: string;
@@ -525,6 +525,7 @@ export type Messages = {
     mergeTime: string;
     mergeOverwriteEdits: string;
     mergeOverwriteEditsBody: string;
+    mergePopOut: string;
     result: string;
     verticalTabs: string;
     showSpace: string;

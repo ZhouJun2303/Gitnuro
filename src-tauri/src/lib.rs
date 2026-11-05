@@ -1592,6 +1592,12 @@ fn merge_preview(path: Option<String>, name: String) -> Result<awegit_git::Merge
 }
 
 #[tauri::command]
+fn merge_state(path: Option<String>) -> Result<Option<awegit_git::MergeState>, String> {
+    let repo = repo_from(path)?;
+    awegit_git::merge_state(&repo).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn merged_branches(path: Option<String>) -> Result<Vec<String>, String> {
     let repo = repo_from(path)?;
     awegit_git::merged_branches(&repo).map_err(|error| error.to_string())
@@ -1753,7 +1759,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 }
 
 #[tauri::command]
-fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>, file: Option<String>, rev: Option<String>) -> Result<(), String> {
+fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>, file: Option<String>, rev: Option<String>, width: Option<f64>, height: Option<f64>) -> Result<(), String> {
     let view_name = view.unwrap_or_default();
     let repo_name = repo.unwrap_or_default();
     let file_name = file.unwrap_or_default();
@@ -1762,11 +1768,12 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
         "blame" => "blame",
         "history" => "history",
         "blob" => "blob",
+        "merge" => "merge",
         _ => "desk",
     };
     if let Some(window) = app.get_webview_window(label) {
         let _ = window.set_focus();
-        if label == "history" || label == "blob" {
+        if label == "history" || label == "blob" || label == "merge" {
             let _ = app.emit(
                 "awegit-navigate",
                 WindowNav { view: view_name, repo: repo_name, file: file_name, rev: rev_name },
@@ -1789,9 +1796,15 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
     // Keep the root path: SvelteKit's dev server and client router both 404 on `/index.html`.
     // A query-only relative reference resolves against the dev server or the tauri protocol base.
     let url = if query.is_empty() { "index.html".to_string() } else { format!("?{query}") };
+    let (width, height) = if label == "merge" {
+        (width.unwrap_or(1280.0), height.unwrap_or(840.0))
+    } else {
+        (1100.0, 720.0)
+    };
     let window = tauri::webview::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
         .title("AweGit")
-        .inner_size(1100.0, 720.0)
+        .inner_size(width.clamp(480.0, 4000.0), height.clamp(360.0, 4000.0))
+        .resizable(true)
         .build()
         .map_err(|error| error.to_string())?;
     show_devtools(&window);
@@ -1941,6 +1954,7 @@ pub fn run() {
             search_log,
             cherry_preview,
             merge_preview,
+            merge_state,
             merged_branches,
             pick_history,
             activity_log,

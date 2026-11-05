@@ -598,7 +598,9 @@
 <PerfPanel />
 
 <div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.settings.diffFontSize || 13}px" style:--guide="{shell.settings.pageGuide || 72}" data-lab-scene={shell.labSceneId || undefined} data-lab-error={shell.labPage && !shell.labSceneId && shell.loadError ? shell.loadError : undefined}>
-  {#if shell.standalone === "history"}
+  {#if shell.standalone === "merge"}
+    <MergePanel />
+  {:else if shell.standalone === "history"}
     <FileHistoryPane />
   {:else if shell.standalone === "blob"}
     <BlobPane />
@@ -840,7 +842,7 @@
     </div>
   {/if}
   <DialogHost />
-  <MergePanel />
+  {#if shell.standalone !== "merge"}<MergePanel />{/if}
   {#if shell.launchOpen}
     <div class="palette-scrim" role="presentation" onclick={() => shell.closeLaunch()}>
       <div class="palette" data-layer="launch" role="dialog" aria-modal="true" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} use:overlayFocus={{ close: () => shell.closeLaunch() }} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>

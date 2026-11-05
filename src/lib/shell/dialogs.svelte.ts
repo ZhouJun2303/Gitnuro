@@ -214,7 +214,6 @@ export function joinedPieces(shell: ShellState, pieces: MergePiece[]) {
 
 export function pickHunk(shell: ShellState, index: number, pick: MergePick) {
     shell.mergePieces = shell.mergePieces.map((piece, at) => (piece.kind === "hunk" && at === index ? { ...piece, pick } : piece));
-    shell.mergeResult = shell.joinedPieces(shell.mergePieces);
   }
 
 /** Toggle one side of a conflict hunk (Fork Select / Remove). */
@@ -234,7 +233,6 @@ export function takeMergeSide(shell: ShellState, side: "ours" | "theirs", on: bo
       const ours = side === "ours" ? on : hunkIncludes(piece.pick, "ours");
       return { ...piece, pick: pickFromIncludes(theirs, ours) };
     });
-    shell.mergeResult = shell.joinedPieces(shell.mergePieces);
   }
 
 function piecesFromSides(shell: ShellState, sides: { ours: string; theirs: string; working: string }) {
@@ -316,7 +314,7 @@ export function buildRebaseSteps(steps: RebaseStep[], picked: string[]): RebaseS
       .map((step) => ({ ...step, message: step.verb === "reword" || step.verb === "squash" || step.verb === "exec" ? step.message : "" }));
   }
 
-export async function applyTextMerge(shell: ShellState) {
+export async function applyTextMerge(shell: ShellState, text?: string) {
     const file = shell.mergeFile;
     if (!file) return;
     if (shell.mode !== "live") {
@@ -325,7 +323,7 @@ export async function applyTextMerge(shell: ShellState) {
     }
     if (shell.busy) return;
     if (shell.mergePieces.some((piece) => piece.kind === "hunk" && piece.pick === "none")) return;
-    await shell.mutate({ action: "resolve", file, side: "text", text: shell.mergeResult });
+    await shell.mutate({ action: "resolve", file, side: "text", text: text ?? shell.mergeResult });
     shell.textMerge = false;
   }
 

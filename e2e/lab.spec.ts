@@ -62,7 +62,8 @@ test("pushbox commits and pushes", async () => {
 });
 
 async function openLabScene(page: Page, id: string, ready: string) {
-  await page.goto(`/?scene=${id}`, { waitUntil: "domcontentloaded" });
+  const href = scenes.find((scene) => scene.id === id)?.href ?? `/?scene=${id}`;
+  await page.goto(href, { waitUntil: "domcontentloaded" });
   await page.locator(`[data-lab-scene="${id}"]`).waitFor({ state: "visible", timeout: 90_000 });
   await page.locator(ready).first().waitFor({ state: "visible", timeout: 30_000 });
   await page.waitForTimeout(400);
@@ -465,6 +466,11 @@ test("merge stays available with local changes and stashes them", async ({ page 
 
 test("batch conflict actions keep one side for the selected files", async ({ page }) => {
   await openLabScene(page, "conflict-batch", ".file-list .file");
+  await expect(page.locator(".composer .summary-input")).toHaveValue(/topic/);
+  await expect(page.locator(".composer .summary-input")).toHaveValue(/main/);
+  await expect(page.locator(".composer textarea")).toHaveValue(/conflict\/file-/);
+  await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("topic");
+  await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("main");
   const rows = page.locator(".unstaged-pane .file-list .file");
   const paths = await rows.evaluateAll((nodes) =>
     nodes.slice(0, 2).map((node) => node.querySelector<HTMLElement>(".file-select")?.title ?? ""),
@@ -474,14 +480,29 @@ test("batch conflict actions keep one side for the selected files", async ({ pag
   await rows.nth(0).click();
   await rows.nth(1).click({ modifiers: ["Control"] });
   await expect(page.locator(".pick-bar")).toBeVisible();
-  const local = page.locator(".pick-bar .pane-chip").filter({ hasText: /Use local|采用本地/ });
-  const remote = page.locator(".pick-bar .pane-chip").filter({ hasText: /Use remote|采用线上/ });
-  await expect(local).toBeVisible();
-  await expect(remote).toBeVisible();
-  await local.click();
+  await expect(page.locator(".pick-count")).toHaveText(/2/);
+  await rows.nth(1).click({ button: "right" });
+  const menu = page.locator('[data-layer="menu"]');
+  await expect(menu).toBeVisible();
+  const ours = menu.locator("button").filter({ hasText: /Keep ours|保留 ours/ });
+  await expect(ours).toContainText("2");
+  await expect(menu.locator("button").filter({ hasText: /Keep theirs|保留 theirs/ })).toBeVisible();
+  await ours.click();
   for (const path of paths) {
     await expect(page.locator(`.unstaged-pane .file-list .file-select[title="${path}"]`)).toHaveCount(0);
   }
+});
+
+test("merge panel opens as a standalone page", async ({ page }) => {
+  await openLabScene(page, "text-merge-window", ".merge-panel.standalone");
+  const panel = page.locator(".merge-panel.standalone");
+  const box = await panel.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(Math.round(box!.width)).toBe(viewport!.width);
+  expect(Math.round(box!.height)).toBe(viewport!.height);
+  await expect(page.locator(".merge-scrim")).toHaveCount(0);
 });
 
 test("unified diff keeps row nodes while scrolling", async ({ page }) => {

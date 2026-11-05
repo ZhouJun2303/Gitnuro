@@ -24,6 +24,7 @@ import {
     type FileDiff,
     type FilePreview,
     type InProgress,
+    type MergeState,
     type RefSnapshot,
     type ForkImport,
     type Settings,
@@ -35,7 +36,7 @@ import {
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
-import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
+import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
@@ -45,10 +46,10 @@ const initialErrors = readErrorLog();
 /** Histories up to this length are drawn in one pass. Longer ones continue across frames. */
 const GRAPH_SYNC_LIMIT = 1500;
 
-function standaloneView(): "" | "history" | "blob" {
+function standaloneView(): "" | "history" | "blob" | "merge" {
   if (typeof window === "undefined") return "";
   const view = new URLSearchParams(window.location.search).get("view");
-  return view === "history" || view === "blob" ? view : "";
+  return view === "history" || view === "blob" || view === "merge" ? view : "";
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -545,6 +546,15 @@ export class ShellState {
   mergeFiles = $state<{ status: string; path: string }[]>([]);
 
 
+  mergeState = $state<MergeState | null>(null);
+
+
+  mergeProgressAutoSummary = $state("");
+
+
+  mergeProgressAutoBody = $state("");
+
+
   /** Fetch, pull, and push dialog options. */
   syncAll = $state(false);
 
@@ -609,7 +619,7 @@ export class ShellState {
   launchFiles = $state<string[]>([]);
 
 
-  standalone = $state<"" | "history" | "blob">(standaloneView());
+  standalone = $state<"" | "history" | "blob" | "merge">(standaloneView());
 
 
   blobFile = $state("");
@@ -1255,6 +1265,7 @@ export class ShellState {
   statusNotices = $derived.by((): StatusNotice[] => {
     const items: StatusNotice[] = [];
     const live = this.mode === "live";
+    const route = this.mergeRouteLabel();
     if (live && this.conflictCount > 0) {
       const actions: StatusNoticeAction[] = [];
       if (this.progress && this.progress !== "merge") {
@@ -1262,23 +1273,25 @@ export class ShellState {
         actions.push({ id: "skip", label: this.tr("chrome.skip"), disabled: this.busy });
       }
       actions.push({ id: "abort", label: this.tr("chrome.abort"), disabled: this.busy });
+      const unmerged = this.conflictCount === 1 ? this.tr("chrome.unmergedOne") : this.tr("chrome.unmergedMany", { count: String(this.conflictCount) });
       items.push({
         id: "conflicts",
         priority: 0,
         tone: "conflict",
-        title: this.conflictCount === 1 ? this.tr("chrome.unmergedOne") : this.tr("chrome.unmergedMany", { count: String(this.conflictCount) }),
-        detail: this.progress ? this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) }) : "",
+        title: route ? `${unmerged} · ${route}` : unmerged,
+        detail: route || (this.progress ? this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) }) : ""),
         dataLayer: "conflicts",
         floor: true,
         actions,
       });
     } else if (live && this.progress) {
+      const progress = this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) });
       items.push({
         id: "progress",
         priority: 1,
         tone: "progress",
-        title: this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) }),
-        detail: "",
+        title: route ? `${progress} · ${route}` : progress,
+        detail: route,
         dataLayer: "progress",
         floor: true,
         actions: [
@@ -2142,6 +2155,13 @@ export class ShellState {
       this.blobRev = nav.rev;
       if (nav.repo && nav.repo !== this.repoPath()) await this.openRepo(nav.repo);
       await this.loadBlobPane();
+      return;
+    }
+    if (nav.view === "merge") {
+      if (label && label !== "merge") return;
+      this.standalone = "merge";
+      if (nav.repo && nav.repo !== this.repoPath()) await this.openRepo(nav.repo);
+      if (nav.file) await this.openTextMerge(nav.file);
     }
   }
 
@@ -2684,9 +2704,8 @@ export class ShellState {
       case "resolvePaths": {
         const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
         const ours = text("side") === "ours";
-        const local = ours !== (this.progress === "rebase");
         return {
-          title: `${this.tr(local ? "chrome.takeLocal" : "chrome.takeRemote")} (${files.length})`,
+          title: `${this.tr(ours ? "dialog.useOurs" : "dialog.useTheirs")} (${files.length})`,
           command: this.gitLine(["checkout", ours ? "--ours" : "--theirs", "--", ...files.slice(0, 8)]),
         };
       }
@@ -4343,6 +4362,12 @@ export class ShellState {
 
 
 
+  mergeRoute() {
+    return mergeRoute(this);
+  }
+
+
+
   differentCommitter(detail: CommitDetail | null) {
     return differentCommitter(this, detail);
   }
@@ -4538,7 +4563,7 @@ export class ShellState {
 
 
 
-  async resolvePicked(side: "local" | "remote", files = [...this.picked]) {
+  async resolvePicked(side: "ours" | "theirs", files = [...this.picked]) {
     return resolvePicked(this, side, files);
   }
 
@@ -4758,8 +4783,8 @@ export class ShellState {
   }
 
 
-  async applyTextMerge() {
-    return applyTextMerge(this);
+  async applyTextMerge(text?: string) {
+    return applyTextMerge(this, text);
   }
 
   async applyFileMerge(side: "ours" | "theirs") {
@@ -5518,6 +5543,13 @@ export class ShellState {
     return "Merge";
   }
 
+
+
+  mergeRouteLabel() {
+    if (this.progress !== "merge" || !this.mergeState) return "";
+    return `${this.mergeState.source} → ${this.mergeState.into}`;
+  }
+
   constructor() {
     $effect(() => {
       if (!this.busy) this.releaseWriteWaiters();
@@ -5804,6 +5836,7 @@ export class ShellState {
       this.blobRev = params.get("rev") ?? "";
       await this.loadBlobPane();
     }
+    if (queryView === "merge" && queryFile) await this.openTextMerge(queryFile);
     return;
     }
     const workspace = this.settings.workspaces.find((item) => item.id === this.settings.currentWorkspace);

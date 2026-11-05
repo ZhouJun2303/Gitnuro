@@ -13,6 +13,7 @@ import {
     type FileDiff,
     type FilePreview,
     type InProgress,
+    type MergeState,
     type RefSnapshot,
     type Settings,
     type StatusFile,
@@ -85,14 +86,43 @@ export async function loadContext(shell: ShellState) {
     const nextRefs = await invoke<RefSnapshot>("repository_refs", { path });
     if (gen !== shell.contextGen) return;
     if (!shell.same(shell.refs, nextRefs)) shell.refs = nextRefs;
-    const [rows, state] = await Promise.all([
+    const [rows, state, merge] = await Promise.all([
       shell.loadCommits(path),
       invoke<InProgress | null>("in_progress", { path }),
+      invoke<MergeState | null>("merge_state", { path }).catch(() => null),
     ]);
     if (gen !== shell.contextGen) return;
     if (!shell.same(shell.commitsLive, rows)) shell.commitsLive = rows;
     shell.signOff = nextRefs.signOffSet ? !!nextRefs.signOff : shell.settings.signOff;
     shell.progress = state;
+    const nextMerge = state === "merge" ? merge : null;
+    if (!sameMergeState(shell.mergeState, nextMerge)) shell.mergeState = nextMerge;
+    if (nextMerge) fillMergeProgress(shell, nextMerge);
+    else clearMergeProgress(shell);
+  }
+
+function sameMergeState(left: MergeState | null, right: MergeState | null) {
+    if (left === right) return true;
+    if (!left || !right) return false;
+    if (left.source !== right.source || left.into !== right.into || left.files.length !== right.files.length) return false;
+    return left.files.every((file, index) => file.status === right.files[index]?.status && file.path === right.files[index]?.path);
+  }
+
+/** Fill the composer for a paused merge without replacing a draft the user wrote. */
+function fillMergeProgress(shell: ShellState, state: MergeState) {
+    const summary = shell.tr("dialog.mergeTitleLine", { source: state.source, into: state.into });
+    const body = state.files.map((file) => `${file.status}\t${file.path}`).join("\n");
+    if (!shell.summary.trim() || shell.summary === shell.mergeProgressAutoSummary) shell.summary = summary;
+    shell.mergeProgressAutoSummary = summary;
+    if (!shell.description.trim() || shell.description === shell.mergeProgressAutoBody) shell.description = body;
+    shell.mergeProgressAutoBody = body;
+  }
+
+function clearMergeProgress(shell: ShellState) {
+    if (shell.mergeProgressAutoSummary && shell.summary === shell.mergeProgressAutoSummary) shell.summary = "";
+    if (shell.mergeProgressAutoBody && shell.description === shell.mergeProgressAutoBody) shell.description = "";
+    shell.mergeProgressAutoSummary = "";
+    shell.mergeProgressAutoBody = "";
   }
 
 
@@ -532,6 +562,22 @@ export function commitWhenShort(shell: ShellState) {
 export function commitRefs(shell: ShellState) {
     if (shell.mode === "live") return shell.selectedCommitRow?.refs ?? [];
     return shell.sampleRows.find((row) => row.id === shell.selectedCommit)?.badges ?? [];
+  }
+
+/** Source and target branch names for a merge commit, when its message names them. */
+export function mergeRoute(shell: ShellState) {
+    const detail = shell.commitDetail;
+    if (!detail || detail.parents.length < 2) return null;
+    const summary = detail.summary.trim();
+    let match = /^Merge (?:remote-tracking )?branch '([^']+)'(?:\s+of\s+\S+)?(?:\s+into\s+(.+))?$/i.exec(summary);
+    if (!match) match = /^Merge pull request #\d+ from (.+?)(?:\s+into\s+(.+))?$/i.exec(summary);
+    if (!match) match = /^(?:合并|压缩合并)\s+(.+?)\s+到\s+(.+)$/.exec(summary);
+    if (!match) match = /^Merge\s+(.+?)\s+into\s+(.+)$/i.exec(summary);
+    if (!match) return null;
+    const source = (match[1] ?? "").trim();
+    if (!source) return null;
+    const into = (match[2] ?? "").trim() || shell.commitRefs()[0] || "";
+    return { source, into };
   }
 
 export function differentCommitter(shell: ShellState, detail: CommitDetail | null) {

@@ -245,7 +245,7 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.openTextMerge("src/many-hunks.ts");
     return;
   }
-  if (id === "text-merge") {
+  if (id === "text-merge" || id === "text-merge-window") {
     await showChange(shell, "src/both-sides.ts", "unstaged");
     await shell.openTextMerge("src/both-sides.ts");
     return;

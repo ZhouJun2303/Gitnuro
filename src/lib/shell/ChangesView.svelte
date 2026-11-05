@@ -370,13 +370,9 @@
     {/snippet}
 
 {#snippet pickedActions(unstagedFiles: string[], stagedFiles: string[])}
-      {@const conflicts = shell.pickedConflicts(unstagedFiles)}
       {#if unstagedFiles.length > 1 || stagedFiles.length > 1}
         <div class="pick-bar">
-          {#if conflicts.length > 0}
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} title={shell.tr("chrome.takeLocalHint", { count: String(conflicts.length) })} onclick={() => void shell.resolvePicked("local", conflicts)}>{shell.tr("chrome.takeLocal")}</button>
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} title={shell.tr("chrome.takeRemoteHint", { count: String(conflicts.length) })} onclick={() => void shell.resolvePicked("remote", conflicts)}>{shell.tr("chrome.takeRemote")}</button>
-          {/if}
+          <span class="pick-count">{shell.tr("chrome.pickedCount", { count: String(unstagedFiles.length + stagedFiles.length) })}</span>
           {#if unstagedFiles.length > 1}
             <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => void shell.stagePicked(unstagedFiles)}>{shell.tr("chrome.stageSelected")}</button>
             <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.discardChosen(unstagedFiles)}>{shell.tr("chrome.discardSelected")}</button>

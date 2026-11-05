@@ -116,6 +116,12 @@ export type RefSnapshot = {
 
 export type InProgress = "merge" | "rebase" | "cherryPick" | "revert";
 
+export type MergeState = {
+  source: string;
+  into: string;
+  files: { status: string; path: string }[];
+};
+
 export type BlameLine = {
   id: string;
   shortId: string;

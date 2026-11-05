@@ -583,6 +583,34 @@ fn resolve_paths_can_take_a_side_that_deleted_the_file() {
 }
 
 #[test]
+fn merge_state_names_the_branches_and_files() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "a.txt", "topic\n", "topic");
+    commit_file(&repo, "b.txt", "topic adds\n", "topic adds");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main");
+    let merge = perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "topic".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    );
+    assert!(merge.is_err(), "expected a conflict");
+    let state = awegit_git::merge_state(&repo.path).unwrap().expect("merge in progress");
+    assert_eq!(state.source, "topic");
+    assert_eq!(state.into, "main");
+    assert!(state.files.iter().any(|file| file.path == "a.txt"), "{:?}", state.files);
+    assert!(state.files.iter().any(|file| file.path == "b.txt"), "{:?}", state.files);
+}
+
+#[test]
 fn rename_and_reword_during_rebase() {
     let repo = repo();
     commit_file(&repo, "a.txt", "a\n", "base");

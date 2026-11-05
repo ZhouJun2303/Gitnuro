@@ -28,8 +28,8 @@ pub use cli::{
     stop_process_tree, use_bundled_git, with_operation_repo, Session, Trace,
 };
 pub use ops::{
-    approve_credential, cherry_preview, merge_preview, merged_branches, perform, pick_history, repo_facts, repo_facts_brief, scan_repositories,
-    search_commits, set_repo_author, HotPath, MergeFile, MergePreview, Mutation, RebaseStep, RepoFacts, ResetMode, SearchHit,
+    approve_credential, cherry_preview, merge_preview, merge_state, merged_branches, perform, pick_history, repo_facts, repo_facts_brief, scan_repositories,
+    search_commits, set_repo_author, HotPath, MergeFile, MergePreview, MergeState, Mutation, RebaseStep, RepoFacts, ResetMode, SearchHit,
 };
 
 use gix::bstr::BStr;

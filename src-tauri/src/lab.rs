@@ -375,6 +375,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         )),
         "cherry_preview" => done_result(super::cherry_preview(req(args, "path")?, req(args, "rev")?)),
         "merge_preview" => done_result(super::merge_preview(req(args, "path")?, req(args, "name")?)),
+        "merge_state" => done_result(super::merge_state(req(args, "path")?)),
         "merged_branches" => done_result(super::merged_branches(req(args, "path")?)),
         "pick_history" => done_result(super::pick_history(req(args, "path")?, req(args, "file")?, req(args, "text")?)),
         "activity_log" => done(crate::perf::activity()),

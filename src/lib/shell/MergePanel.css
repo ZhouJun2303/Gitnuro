@@ -15,6 +15,22 @@
   animation: dialog-in 160ms ease-out;
 }
 
+.merge-standalone {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  background: var(--canvas);
+}
+
+.merge-panel.standalone {
+  width: 100vw;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  animation: none;
+}
+
 .merge-panel-title {
   display: flex;
   align-items: center;
@@ -94,6 +110,23 @@
   color: var(--text-secondary);
   font-size: 18px;
   line-height: 1;
+}
+
+.merge-pop {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--elevated);
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.merge-pop:hover {
+  background: var(--hover);
+  color: var(--text);
 }
 
 .merge-close:hover {
@@ -252,6 +285,8 @@
   text-align: left;
   white-space: pre-wrap;
   word-break: break-word;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
 }
 
 .merge-cell.context {
@@ -397,6 +432,8 @@
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 24px;
 }
 
 .merge-result-text {
@@ -428,6 +465,8 @@
   font-size: 12px;
   font-weight: 650;
   text-align: center;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 32px;
 }
 
 .merge-result-edit {
