@@ -679,12 +679,12 @@
     <svg class="repo-chevron" class:open viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4.5 10 8l-4 3.5"/></svg>
   {/snippet}
 
-  {#snippet menuList(items: MenuItem[])}
+  {#snippet menuList(items: MenuItem[], nested = false)}
     {#each items as item, index (`${item.sep ? "sep" : item.label}-${index}`)}
       {#if item.sep}
         <hr />
       {:else}
-        <button type="button" role={item.checked !== undefined ? "menuitemradio" : "menuitem"} disabled={item.disabled} aria-checked={item.checked !== undefined ? item.checked : undefined} aria-haspopup={item.children ? "menu" : undefined} aria-expanded={item.children ? shell.submenu?.items === item.children : undefined} onmouseenter={(event) => { if (!item.children) { shell.submenu = null; return; } openSubmenu(item, event.currentTarget as HTMLElement); }} onclick={(event) => { if (item.disabled) return; if (item.children) { openSubmenu(item, event.currentTarget as HTMLElement, true); return; } if (!item.run) return; shell.dismissMenu(); void item.run(); }}>
+        <button type="button" role={item.checked !== undefined ? "menuitemradio" : "menuitem"} disabled={item.disabled} aria-checked={item.checked !== undefined ? item.checked : undefined} aria-haspopup={item.children ? "menu" : undefined} aria-expanded={item.children ? shell.submenu?.items === item.children : undefined} onmouseenter={(event) => { if (item.children) { openSubmenu(item, event.currentTarget as HTMLElement); return; } if (!nested) shell.submenu = null; }} onclick={(event) => { if (item.disabled) return; if (item.children) { openSubmenu(item, event.currentTarget as HTMLElement, true); return; } if (!item.run) return; shell.dismissMenu(); void item.run(); }}>
           <span class="menu-main">
             {#if item.checked !== undefined}<span class="menu-check" aria-hidden="true">{item.checked ? "✓" : ""}</span>{/if}
             <span>{item.label}</span>
@@ -799,7 +799,7 @@
     </div>
     {#if shell.submenu}
       <div class="menu" data-layer="submenu" use:fitMenu={shell.submenu} use:menuKeys={false} role="menu">
-        {@render menuList(shell.submenu.items)}
+        {@render menuList(shell.submenu.items, true)}
       </div>
     {/if}
     <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => shell.dismissMenu()}></button>

@@ -304,6 +304,20 @@ test("submenu opens and closes with the arrow keys", async ({ page }) => {
   await expect(page.locator('[data-layer="menu"] button[aria-haspopup="menu"]')).toBeFocused();
 });
 
+test("submenu stays open while the pointer moves through its items", async ({ page }) => {
+  await openLabScene(page, "menu", '[data-layer="menu"]');
+  await page.locator('[data-layer="menu"] button[aria-haspopup="menu"]').hover();
+  await expect(page.locator('[data-layer="submenu"]')).toBeVisible();
+  await page.locator('[data-layer="submenu"] button').nth(3).hover();
+  await expect(page.locator('[data-layer="submenu"]')).toBeVisible();
+  await expect(page.locator('[data-layer="submenu"] button')).toHaveCount(24);
+});
+
+test("a write blocked by local changes offers stash and retry", async ({ page }) => {
+  await openLabScene(page, "action-error-retry", '.identity-floor[data-layer="error"]');
+  await expect(page.locator('.identity-floor[data-layer="error"]')).toContainText("Stash and retry");
+});
+
 test("commit patch renders each hunk header once", async ({ page }) => {
   await openLabScene(page, "commit", ".detail");
   await page.locator(".patch-toggle").first().click();

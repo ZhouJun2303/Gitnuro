@@ -328,6 +328,10 @@ export class ShellState {
   }
 
 
+  /** The write a dirty work tree blocked, so the error banner can stash the changes and retry it. */
+  stashRetry = $state<{ request: Record<string, unknown>; source: "user" | "background" } | null>(null);
+
+
   jobs = $state<Record<string, RepoJob>>({});
 
 
@@ -1325,6 +1329,9 @@ export class ShellState {
       });
     }
     if (this.actionError) {
+      const actions: StatusNoticeAction[] = [];
+      if (this.stashRetry) actions.push({ id: "stash", label: this.tr("chrome.stashAndRetry"), disabled: this.busy });
+      actions.push({ id: "close", label: this.tr("chrome.close") });
       items.push({
         id: "error",
         priority: 3,
@@ -1333,7 +1340,7 @@ export class ShellState {
         detail: "",
         dataLayer: "error",
         floor: true,
-        actions: [{ id: "close", label: this.tr("chrome.close") }],
+        actions,
       });
     }
     if (this.cloneDone) {
@@ -1397,7 +1404,9 @@ export class ShellState {
         : notice.id === "progress"
           ? "continue"
           : notice.id === "error"
-            ? "close"
+            ? this.stashRetry
+              ? "stash"
+              : "close"
             : notice.actions[0]?.id;
     if (!prefer) return null;
     return notice.actions.find((item) => item.id === prefer) ?? notice.actions[0] ?? null;
@@ -2612,6 +2621,7 @@ export class ShellState {
       if (this.mode !== "live" || this.repoPath() !== path) return undefined;
     }
     this.actionError = null;
+    this.stashRetry = null;
     this.startWork(this.tr("chrome.working"), path);
     try {
       const value = await invoke<StatusSnapshot & { log?: string }>(command, { path, ...extra });
@@ -2882,8 +2892,9 @@ export class ShellState {
       }
       return;
     }
-    if (id === "error" && action === "close") {
-      this.closeError();
+    if (id === "error") {
+      if (action === "close") this.closeError();
+      else if (action === "stash") void this.stashAndRetry();
       return;
     }
     if (id === "clone-done" && action === "open") {
@@ -2966,6 +2977,7 @@ export class ShellState {
         if (this.repoPath() !== path) return;
       }
       if (!background) this.actionError = null;
+      if (!background) this.stashRetry = null;
       const described = this.describeRequest(request);
       const action = String(request.action ?? "");
       const dialogBefore = this.dialog;
@@ -3017,8 +3029,10 @@ export class ShellState {
             this.commandOutput = text.trim();
             this.dialog = "mergeConflict";
             this.actionError = null;
+            this.stashRetry = null;
           } else {
             this.actionError = text;
+            this.stashRetry = this.stashBlocked(action, text) ? { request, source } : null;
             if (action === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
           }
         }
@@ -3034,6 +3048,7 @@ export class ShellState {
 
   closeError() {
     this.actionError = null;
+    this.stashRetry = null;
     this.errorCopied = false;
   }
 
@@ -3044,6 +3059,33 @@ export class ShellState {
     this.copyText(this.actionError);
     this.errorCopied = true;
     window.setTimeout(() => (this.errorCopied = false), 1500);
+  }
+
+
+  /** True when git refused a write because the work tree has changes it would overwrite. */
+  stashBlocked(action: string, text: string) {
+    const retryable = ["checkout", "checkoutRemote", "merge", "pull", "pullRef", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashApply", "stashPop", "applyPatch", "continue", "gitFlowFinish"];
+    if (!retryable.includes(action)) return false;
+    const lower = text.toLowerCase();
+    return lower.includes("would be overwritten") || lower.includes("please commit your changes") || lower.includes("please move or remove");
+  }
+
+
+  /** Stash what blocked the last write, then run that write again. */
+  async stashAndRetry() {
+    const pending = this.stashRetry;
+    if (!pending) return;
+    this.stashRetry = null;
+    const request = { ...pending.request };
+    // A new stash renumbers stash@{n}, so pin the entry this write targeted by commit id.
+    const name = typeof request.name === "string" ? request.name : "";
+    if (name.startsWith("stash@{") && (request.action === "stashApply" || request.action === "stashPop")) {
+      const stash = (this.refs?.stashes ?? []).find((item) => item.name === name);
+      if (stash?.id) request.name = stash.id;
+    }
+    await this.mutate({ action: "stash", message: this.tr("chrome.stashBlockedMessage"), includeUntracked: true });
+    if (this.actionError) return;
+    await this.mutate(request, pending.source);
   }
 
 
@@ -3987,6 +4029,7 @@ export class ShellState {
     const running = (this.jobs[this.jobKey(path)]?.depth ?? 0) > 0;
     let stopAt = path;
     this.actionError = null;
+    this.stashRetry = null;
     if (!running) this.startWork(this.tr("chrome.open"), path);
     try {
       const value = await invoke<StatusSnapshot>("workspace_status", { path });

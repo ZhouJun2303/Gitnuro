@@ -260,6 +260,11 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.actionError = "实验室操作错误：推送被拒绝";
     return;
   }
+  if (id === "action-error-retry") {
+    shell.actionError = "error: Your local changes to the following files would be overwritten by merge:";
+    shell.stashRetry = { request: { action: "stashApply", name: "stash@{0}" }, source: "user" };
+    return;
+  }
   if (id === "text-merge-many") {
     await showChange(shell, "src/many-hunks.ts", "unstaged");
     await shell.openTextMerge("src/many-hunks.ts");

@@ -142,6 +142,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "clone-done", group: "仓库状态", title: "克隆完成", repo: "even", ready: ".command-log [data-layer=\"clone-done\"]" }),
   scene({ id: "update", group: "仓库状态", title: "更新提示", repo: "even", ready: ".command-log [data-layer=\"update\"]" }),
   scene({ id: "action-error", group: "仓库状态", title: "操作错误", repo: "even", ready: ".identity-floor[data-layer=\"error\"]" }),
+  scene({ id: "action-error-retry", group: "仓库状态", title: "操作错误：贮藏后重试", repo: "even", ready: ".identity-floor[data-layer=\"error\"]" }),
   scene({ id: "text-merge", group: "叠层", title: "文本合并", repo: "conflict", ready: "[data-layer=\"text-merge\"]" }),
   scene({ id: "text-merge-window", group: "叠层", title: "单独窗口合并", repo: "conflict", ready: ".merge-panel.standalone", href: "/?scene=text-merge-window&view=merge" }),
   scene({ id: "text-merge-many", group: "叠层", title: "多块冲突", repo: "conflict", ready: ".merge-count" }),

@@ -197,6 +197,8 @@ export const en: Messages = {
     pickedCount: "{count} selected",
     mergeRoute: "Merge",
     stageConflictBinary: "This binary conflict cannot be staged by double-click. Use a merge tool.",
+    stashAndRetry: "Stash and retry",
+    stashBlockedMessage: "Local changes before a blocked action",
     bisect: "Bisect",
     ignored: "Ignored",
     stats: "Statistics",

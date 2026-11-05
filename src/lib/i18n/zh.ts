@@ -197,6 +197,8 @@ export const zh: Messages = {
     pickedCount: "已选 {count} 个文件",
     mergeRoute: "合并",
     stageConflictBinary: "这是二进制冲突，双击不能暂存。请用合并工具处理。",
+    stashAndRetry: "贮藏后重试",
+    stashBlockedMessage: "挡住操作前的本地修改",
     bisect: "二分查找",
     ignored: "已忽略",
     stats: "统计",

@@ -197,6 +197,8 @@ export type Messages = {
     pickedCount: string;
     mergeRoute: string;
     stageConflictBinary: string;
+    stashAndRetry: string;
+    stashBlockedMessage: string;
     bisect: string;
     ignored: string;
     stats: string;
