@@ -1,12 +1,12 @@
 {
     "appVersion":  "2.0.3",
     "notes":  "优化性能",
-    "appCode":  29,
+    "appCode":  30,
     "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.3/AweGit_2.0.3_x64-setup.exe",
     "downloads":  {
                       "windows":  {
                                       "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.3/AweGit_2.0.3_x64-setup.exe",
-                                      "sha256":  "5aa8e5caf3692316864bc1d4c841efbe9354083fad59682d988b87a172350b7d"
+                                      "sha256":  "9b26a5b93b33efcb112cc0ab0ebfafe3df65244d658a96fd5216bde632646872"
                                   },
                       "macos":  ""
                   }
