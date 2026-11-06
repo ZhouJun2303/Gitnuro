@@ -638,3 +638,49 @@ test("unified diff keeps row nodes while scrolling", async ({ page }) => {
   expect(result).not.toBeNull();
   expect(result ?? 0).toBeLessThan(80);
 });
+
+test("a folder double-click stages it and the twist only folds", async ({ page }) => {
+  test.setTimeout(60_000);
+  await openLabScene(page, "changes", ".file-list");
+  await page.locator(".unstaged-pane .pane-more").click();
+  await page.locator('[data-layer="menu"] button', { hasText: /View as Tree|按树查看/ }).click();
+  await page.locator(".unstaged-pane .search-toggle").click();
+  await page.locator(".unstaged-pane .pane-filter").fill("pending");
+
+  const unstaged = page.locator(".unstaged-pane");
+  const staged = page.locator(".staged-pane");
+  const folder = unstaged.locator('button.file-select[title="pending"]');
+  const child = unstaged.locator('button.file-select[title="pending/file-01.txt"]');
+  const twist = unstaged.locator(".twist-btn");
+  await expect(child).toHaveCount(1);
+
+  await twist.click();
+  await expect(child).toHaveCount(0);
+  await expect(staged.locator('button.file-select[title="pending"]')).toHaveCount(0);
+
+  await twist.click();
+  await expect(child).toHaveCount(1);
+
+  await twist.dblclick();
+  await expect(child).toHaveCount(0);
+  await expect(staged.locator('button.file-select[title="pending"]')).toHaveCount(0);
+
+  await folder.click();
+  await expect(child).toHaveCount(1);
+
+  await folder.locator(".name").dblclick();
+  await expect(child).toHaveCount(0);
+  const stagedFile = staged.locator('button.file-select[title="pending/file-01.txt"]');
+  await expect(stagedFile).toHaveCount(1);
+
+  const stagedTwist = staged.locator(".twist-btn");
+  await stagedTwist.click();
+  await expect(stagedFile).toHaveCount(0);
+
+  await staged.locator('button.file-select[title="pending"] .name').dblclick();
+  await expect(staged.locator('button.file-select[title="pending"]')).toHaveCount(0);
+  await expect(unstaged.locator('button.file-select[title="pending"]')).toHaveCount(1);
+  await expect(child).toHaveCount(0);
+  await twist.click();
+  await expect(child).toHaveCount(1);
+});
