@@ -418,6 +418,11 @@ export type Messages = {
     cloneMissing: string;
     cloneBusy: string;
     about: string;
+    openGuide: string;
+    featuresTitle: string;
+    featuresBody: string;
+    featuresOpen: string;
+    featuresLater: string;
     copyDiagnostics: string;
     resetTo: string;
     imageSide: string;

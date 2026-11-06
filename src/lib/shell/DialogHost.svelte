@@ -26,7 +26,7 @@
   let primedDialog = "";
   let lastFocus: HTMLElement | null = null;
   const largeDialogs = new Set(["prefs", "resolve", "stats", "rebase", "accounts", "output", "mergeConflict"]);
-  const smallDialogs = new Set(["reset", "branch", "tag", "rename", "upstream", "reword", "remote", "submodule", "worktree", "continue", "about", "checkoutNotice", "stashRename", "stashBranch", "renameTab", "colorTab", "groupRename", "askInput", "workspace", "credential"]);
+  const smallDialogs = new Set(["reset", "branch", "tag", "rename", "upstream", "reword", "remote", "submodule", "worktree", "continue", "about", "features", "checkoutNotice", "stashRename", "stashBranch", "renameTab", "colorTab", "groupRename", "askInput", "workspace", "credential"]);
   function dialogSize(kind: string) {
     if (largeDialogs.has(kind)) return "lg";
     if (smallDialogs.has(kind)) return "sm";
@@ -621,10 +621,18 @@
           <p class="empty">{shell.tr("dialog.continueHint")}</p>
           <label>{shell.tr("dialog.continueMessage")}<input bind:value={shell.draft} /></label>
           <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.continueAction")}</button>
+        {:else if shell.dialog === "features"}
+          <h2>{shell.tr("dialog.featuresTitle")}</h2>
+          <p class="empty">{shell.tr("dialog.featuresBody")}</p>
+          <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("dialog.featuresLater")}</button>
+            <button class="commit" type="button" onclick={() => { shell.openFeaturesPage(); shell.dialog = null; }}>{shell.tr("dialog.featuresOpen")}</button>
+          </div>
         {:else if shell.dialog === "about"}
           <h2>{shell.tr("dialog.about")} {shell.appVersion}</h2>
           <p class="empty">{shell.tr("dialog.aboutBody")}</p>
           <div class="composer-row">
+            <button class="text-button" type="button" onclick={() => shell.openFeaturesPage()}>{shell.tr("dialog.openGuide")}</button>
             <button class="text-button" type="button" onclick={() => void copyDiagnostics()}>{diagnosticsCopied ? shell.tr("chrome.copied") : shell.tr("dialog.copyDiagnostics")}</button>
             <button class="commit" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
           </div>

@@ -49,6 +49,7 @@ export const dialogScenes = {
   rebase: dialog("rebase", "交互式变基"),
   patch: dialog("patch", "应用补丁", "full", "叠层"),
   about: dialog("about", "关于"),
+  features: dialog("features", "功能介绍"),
   submodule: dialog("submodule", "添加子模块"),
   worktree: dialog("worktree", "添加工作区"),
   output: dialog("output", "命令输出", "full", "叠层"),

@@ -26,6 +26,7 @@ export type Dialog =
     | "rebase"
     | "patch"
     | "about"
+    | "features"
     | "submodule"
     | "worktree"
     | "output"

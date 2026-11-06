@@ -257,6 +257,8 @@ export type Settings = {
   commitType: string;
   /** Update banner stays hidden for this version until a newer one is published. */
   dismissedUpdate: string;
+  /** `pending` on a brand-new install, otherwise `seen`. */
+  featuresIntro: string;
 };
 
 export type ForkImport = {

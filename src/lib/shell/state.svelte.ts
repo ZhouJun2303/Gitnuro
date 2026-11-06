@@ -8,6 +8,7 @@ import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { commits, diffs, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
+import { featuresPageUrl } from "../featuresPage";
 import { resolveLocale, translate } from "../i18n";
 import { isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
@@ -263,6 +264,7 @@ export class ShellState {
     scanDepth: 5,
     commitType: "feat",
     dismissedUpdate: "",
+    featuresIntro: "seen",
   };
 
 
@@ -3253,6 +3255,22 @@ export class ShellState {
     }
   }
 
+  /**
+   * A brand-new install asks once. Mark it seen before later saves, and show the
+   * prompt only from the main window after startup finishes.
+   */
+  takeFeaturesIntro() {
+    if (!this.inApp() || this.labPage || this.standalone) return false;
+    if (this.settings.featuresIntro !== "pending") return false;
+    this.settings = { ...this.settings, featuresIntro: "seen" };
+    return true;
+  }
+
+  openFeaturesPage() {
+    if (this.inApp()) void openUrl(featuresPageUrl);
+    else window.open(featuresPageUrl, "_blank", "noopener");
+  }
+
   dismissUpdate() {
     const version = this.updateNotice?.appVersion ?? "";
     this.updateNotice = null;
@@ -5867,11 +5885,15 @@ export class ShellState {
     this.showPendingUpdate(false);
     })
     .catch(() => {});
+    let targeted = false;
+    let introduce = false;
     void (async () => {
     try {
     const value = await invoke<Settings>("load_settings");
     if (stopped) return;
     this.adoptSettings(value);
+    introduce = this.takeFeaturesIntro();
+    if (introduce) void this.savePrefs(false);
     void invoke<string>("settings_path").then((path) => (this.settingsPath = path)).catch(() => {});
     await this.loadExternalTools();
     if (value.windowWidth > 200 && value.windowHeight > 200 && !this.standalone) {
@@ -5939,6 +5961,7 @@ export class ShellState {
     const queryFile = params.get("file");
     const queryView = params.get("view");
     if (queryRepo) {
+    targeted = true;
     if (queryView === "history" && queryFile) this.historyFilter = queryFile;
     await this.openRepo(queryRepo);
     if (queryView === "blame" && queryFile) await this.showBlame(queryFile);
@@ -5980,6 +6003,8 @@ export class ShellState {
     this.loadError = this.message(error);
     this.mode = "error";
     }
+    } finally {
+    if (!stopped && !targeted && introduce) this.dialog = "features";
     }
     })();
     return () => {

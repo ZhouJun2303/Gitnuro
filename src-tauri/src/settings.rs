@@ -276,6 +276,10 @@ pub struct Settings {
     /// Update banner stays hidden for this version until a newer one is published.
     #[serde(default)]
     pub dismissed_update: String,
+    /// `pending` asks a new install to open the feature guide once. Missing on an
+    /// existing file means the install predates the guide, so it stays `seen`.
+    #[serde(default = "features_intro_seen")]
+    pub features_intro: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -542,8 +546,13 @@ impl Default for Settings {
             scan_depth: scan_depth_default(),
             commit_type: commit_type_default(),
             dismissed_update: String::new(),
+            features_intro: features_intro_seen(),
         }
     }
+}
+
+fn features_intro_seen() -> String {
+    "seen".into()
 }
 
 pub fn path() -> Result<PathBuf, String> {
@@ -570,7 +579,9 @@ pub fn path() -> Result<PathBuf, String> {
 pub fn load() -> Result<Settings, String> {
     let path = path()?;
     if !path.exists() {
-        return Ok(Settings::default());
+        let mut fresh = Settings::default();
+        fresh.features_intro = "pending".into();
+        return Ok(fresh);
     }
     let text = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
     let mut settings: Settings = serde_json::from_str(&text).map_err(|error| error.to_string())?;
@@ -1235,6 +1246,12 @@ mod tests {
     fn missing_commit_type_stays_feat() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings.commit_type, "feat");
+    }
+
+    #[test]
+    fn missing_features_intro_counts_as_seen() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.features_intro, "seen");
     }
 
     #[test]
