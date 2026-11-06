@@ -50,7 +50,7 @@
   }
 
 .vertical-tabs .tab,
-  .vertical-tabs .tabs .tab:last-child { height: 28px; flex: none; width: 100%; min-width: 0; max-width: none; border-right: 0; border-radius: 6px; }
+  .vertical-tabs .tabs .tab:last-child { min-height: 28px; height: auto; flex: none; width: 100%; min-width: 0; max-width: none; padding: 4px 8px; border-right: 0; border-radius: 6px; }
 
 .text-button:hover:not(:disabled),
   .side:hover,
@@ -580,6 +580,12 @@ textarea {
     max-width: 100%;
     line-height: 1.5;
     overflow-wrap: anywhere;
+  }
+
+.dialog p {
+    white-space: pre-wrap;
+    max-height: 46vh;
+    overflow: auto;
   }
 
 .dialog pre.diff-body {

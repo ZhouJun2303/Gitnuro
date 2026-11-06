@@ -121,10 +121,15 @@ function clearMergeProgress(shell: ShellState) {
   }
 
 
-export async function previewCherry(shell: ShellState, rev: string, record: boolean) {
+export async function previewCherry(shell: ShellState, rev: string, record: boolean, summary = "") {
     const text = await invoke<string>("cherry_preview", { path: shell.repoPath(), rev }).catch(() => "");
-    if (text.trim()) shell.ask(shell.tr("menu.cherryPick"), text, () => void shell.mutate({ action: "cherryPick", rev, record }));
-    else void shell.mutate({ action: "cherryPick", rev, record });
+    const preview = text.trim().replace(/^[0-9a-f]{40,64}\s*/i, "").trim();
+    const target = summary ? `${rev.slice(0, 7)} "${summary}"` : rev.slice(0, 7);
+    const note = record ? ` ${shell.tr("dialog.cherryPickRecordNote")}` : "";
+    const intro = `${shell.tr("dialog.cherryPickBody", { target })}${note}`;
+    const body = preview ? `${intro}\n\n${preview}` : intro;
+    const title = shell.tr(record ? "menu.cherryPickRecord" : "menu.cherryPick");
+    shell.ask(title, body, () => void shell.mutate({ action: "cherryPick", rev, record }));
   }
 
 export function toggleFold(shell: ShellState, id: string) {

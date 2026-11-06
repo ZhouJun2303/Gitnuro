@@ -307,7 +307,7 @@
         {:else if row.kind === "stash"}
           <div class="side nested" class:selected={shell.sideSelected === `stash:${row.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.apply"), disabled: shell.mode !== "live", run: () => shell.confirmApplyStash(row.name, row.summary) },
-            { label: shell.tr("menu.pop"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "stashPop", name: row.name }) },
+            { label: shell.tr("menu.pop"), disabled: shell.mode !== "live", run: () => shell.confirmPopStash(row.name) },
             { label: shell.tr("menu.drop"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.drop"), row.summary, () => void shell.mutate({ action: "stashDrop", name: row.name })) },
             { label: shell.tr("menu.renameStash"), disabled: shell.mode !== "live", run: () => { shell.draft = row.summary; shell.draftExtra = row.name; shell.dialog = "stashRename"; } },
             { label: shell.tr("menu.stashPatch"), disabled: shell.mode !== "live", run: () => void shell.mutate({ action: "stashPatch", name: row.name }) },
@@ -443,7 +443,7 @@
           {#if shell.matchesQuery(stash.summary, shell.sideQuery) || shell.matchesQuery(stash.name, shell.sideQuery)}
           <div class="side nested" class:selected={shell.sideSelected === `stash:${stash.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.apply"), disabled: shell.mode !== "live", run: () => shell.confirmApplyStash(stash.name, stash.summary) },
-            { label: shell.tr("menu.pop"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "stashPop", name: stash.name }) },
+            { label: shell.tr("menu.pop"), disabled: shell.mode !== "live", run: () => shell.confirmPopStash(stash.name) },
             { label: shell.tr("menu.drop"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.drop"), stash.summary, () => void shell.mutate({ action: "stashDrop", name: stash.name })) },
             { label: shell.tr("menu.renameStash"), disabled: shell.mode !== "live", run: () => { shell.draft = stash.summary; shell.draftExtra = stash.name; shell.dialog = "stashRename"; } },
             { label: shell.tr("menu.stashPatch"), disabled: shell.mode !== "live", run: () => void shell.mutate({ action: "stashPatch", name: stash.name }) },

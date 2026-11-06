@@ -1423,16 +1423,21 @@ export class ShellState {
   );
 
 
-  rowCommit = $derived(this.settings.linesHeight === "spaced" ? 36 : 28);
+  rowCommit = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 36 : 28, 2.1));
 
 
-  rowFile = $derived(this.settings.linesHeight === "spaced" ? 32 : 28);
+  rowFile = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 32 : 28, 2));
 
 
-  rowTree = $derived(this.settings.linesHeight === "spaced" ? 28 : 24);
+  rowTree = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 28 : 24, 1.8));
 
 
-  rowSide = $derived(this.settings.linesHeight === "spaced" ? 32 : 28);
+  rowSide = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 32 : 28, 2));
+
+
+  rowHeight(base: number, factor: number) {
+    return Math.max(base, Math.ceil((this.settings.uiScale || 13) * factor));
+  }
 
 
   activeLocale = $derived(resolveLocale(this.settings.locale));
@@ -2007,7 +2012,7 @@ export class ShellState {
       { label: this.tr("menu.createTag"), group: action, run: () => { this.draft = ""; this.draftExtra = "HEAD"; this.draftUser = ""; this.dialog = "tag"; } },
       { label: this.tr("chrome.pushTags"), group: action, run: () => void this.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: this.settings.forceWithLease }) },
       { label: this.tr("chrome.stash"), group: action, run: () => this.openStash([]) },
-      { label: this.tr("chrome.pop"), group: action, run: () => void this.mutate({ action: "stashPop" }) },
+      { label: this.tr("chrome.pop"), group: action, run: () => this.confirmPopStash() },
       { label: this.tr("chrome.refresh"), group: action, run: () => void this.refresh() },
       { label: this.tr("chrome.stageAll"), group: action, run: () => void this.runChange("stage_all") },
       { label: this.tr("chrome.commit"), group: action, run: () => void this.submitCommit(false) },
@@ -2058,7 +2063,7 @@ export class ShellState {
         ...(this.refs?.stashes ?? []).map((stash) => ({
           label: stash.summary || stash.name,
           group: this.tr("chrome.groupStash"),
-          run: () => void this.mutate({ action: "stashPop", name: stash.name }),
+          run: () => this.confirmPopStash(stash.name),
         })),
       );
     }
@@ -3146,6 +3151,26 @@ export class ShellState {
   }
 
 
+  confirmPopStash(name?: string) {
+    const stash = name ? this.refs?.stashes.find((item) => item.name === name) : this.refs?.stashes[0];
+    if (!stash && !name) {
+      void this.mutate({ action: "stashPop" });
+      return;
+    }
+    const summary = stash?.summary || name || "";
+    this.ask(this.tr("dialog.popStash"), this.tr("dialog.popStashBody", { summary }), () => void this.mutate({ action: "stashPop", name: name ?? stash?.name }));
+  }
+
+
+  confirmReset(rev: string, mode: "soft" | "mixed", summary = "") {
+    const short = rev.slice(0, 7);
+    const target = summary ? `${short} "${summary}"` : short;
+    const title = this.tr(mode === "soft" ? "dialog.softReset" : "dialog.mixedReset");
+    const body = this.tr(mode === "soft" ? "dialog.softResetBody" : "dialog.mixedResetBody", { target });
+    this.ask(title, body, () => void this.mutate({ action: "reset", rev, mode }));
+  }
+
+
 
   confirmRevert(id: string, summary: string) {
     this.ask(this.tr("dialog.revert"), this.tr("dialog.revertBody", { short: id.slice(0, 7), summary }), () => void this.mutate({ action: "revert", rev: id }));
@@ -3423,8 +3448,8 @@ export class ShellState {
 
 
 
-  async previewCherry(rev: string, record: boolean) {
-    return previewCherry(this, rev, record);
+  async previewCherry(rev: string, record: boolean, summary = "") {
+    return previewCherry(this, rev, record, summary);
   }
 
 
@@ -5730,10 +5755,10 @@ export class ShellState {
     paint();
     media?.addEventListener("change", paint);
     root.style.setProperty("--ui-scale", `${this.settings.uiScale || 13}px`);
-    root.style.setProperty("--row-file", this.settings.linesHeight === "spaced" ? "32px" : "28px");
-    root.style.setProperty("--row-commit", this.settings.linesHeight === "spaced" ? "36px" : "28px");
+    root.style.setProperty("--row-file", `${this.rowFile}px`);
+    root.style.setProperty("--row-commit", `${this.rowCommit}px`);
     root.style.setProperty("--row-side", `${this.rowSide}px`);
-    root.style.setProperty("--row-tree", this.settings.linesHeight === "spaced" ? "28px" : "24px");
+    root.style.setProperty("--row-tree", `${this.rowTree}px`);
     root.style.setProperty("--diff-row", `${this.diffRowHeight}px`);
     return () => media?.removeEventListener("change", paint);
     });

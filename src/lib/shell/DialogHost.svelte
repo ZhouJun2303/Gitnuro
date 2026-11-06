@@ -265,8 +265,8 @@
           <h2>{shell.tr("dialog.resetTo", { name: shell.draft.slice(0, 7) })}</h2>
           <div class="composer-row">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "reset", rev: shell.draft, mode: "soft" })}>{shell.tr("menu.soft")}</button>
-            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "reset", rev: shell.draft, mode: "mixed" })}>{shell.tr("menu.mixed")}</button>
+            <button class="text-button" type="button" onclick={() => shell.confirmReset(shell.draft, "soft")}>{shell.tr("menu.soft")}</button>
+            <button class="text-button" type="button" onclick={() => shell.confirmReset(shell.draft, "mixed")}>{shell.tr("menu.mixed")}</button>
             <button class="text-button danger" type="button" onclick={shell.hardReset.bind(shell)}>{shell.tr("menu.hard")}</button>
           </div>
         {:else if shell.dialog === "flow"}

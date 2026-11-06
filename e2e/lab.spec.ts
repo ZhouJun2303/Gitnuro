@@ -333,6 +333,30 @@ test("reverting a commit asks before it runs", async ({ page }) => {
   await expect(confirm.locator(".commit")).toBeEnabled();
 });
 
+test("popping a stash asks before it runs", async ({ page }) => {
+  await openLabScene(page, "stash-pop-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("Pop stash");
+  await expect(confirm).toContainText("remove it from the stash list");
+  await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
+test("resetting a branch asks before it moves", async ({ page }) => {
+  await openLabScene(page, "reset-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("Mixed reset");
+  await expect(confirm).toContainText("unstaged");
+  await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
+test("cherry-picking asks before it runs", async ({ page }) => {
+  await openLabScene(page, "cherry-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("Cherry-pick (note source commit)");
+  await expect(confirm).toContainText("records the source commit");
+  await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
 test("commit patch renders each hunk header once", async ({ page }) => {
   await openLabScene(page, "commit", ".detail");
   await page.locator(".patch-toggle").first().click();

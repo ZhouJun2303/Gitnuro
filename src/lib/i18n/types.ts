@@ -363,8 +363,14 @@ export type Messages = {
     deleteBody: string;
     hardReset: string;
     hardResetBody: string;
+    softReset: string;
+    softResetBody: string;
+    mixedReset: string;
+    mixedResetBody: string;
     revert: string;
     revertBody: string;
+    cherryPickBody: string;
+    cherryPickRecordNote: string;
     deleteRemoteBody: string;
     newBranch: string;
     name: string;
@@ -543,6 +549,8 @@ export type Messages = {
     applyStashBody: string;
     applyStashKeepNote: string;
     applyStashDeleteNote: string;
+    popStash: string;
+    popStashBody: string;
     spaceHint: string;
     clientId: string;
     token: string;

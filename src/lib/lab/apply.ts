@@ -297,6 +297,20 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.confirmRevert(commit?.id ?? "f2c87af", commit?.summary ?? "feat: 英雄词条和技能翻译修复");
     return;
   }
+  if (id === "stash-pop-confirm") {
+    shell.confirmPopStash();
+    return;
+  }
+  if (id === "reset-confirm") {
+    const commit = shell.commitsLive[0];
+    shell.confirmReset(commit?.id ?? "HEAD", "mixed", commit?.summary ?? "");
+    return;
+  }
+  if (id === "cherry-confirm") {
+    const commit = shell.commitsLive[0];
+    if (commit) await shell.previewCherry(commit.id, true, commit.summary);
+    return;
+  }
   if (id === "menu") {
     shell.menu = {
       x: 72,

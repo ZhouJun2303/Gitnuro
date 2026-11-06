@@ -172,9 +172,9 @@
     justify-content: space-between;
     gap: 16px;
     width: 100%;
-    height: 28px;
+    min-height: 28px;
     flex: none;
-    padding: 0 8px;
+    padding: 4px 8px;
     border: 0;
     background: transparent;
     color: inherit;
@@ -246,7 +246,8 @@
     align-items: center;
     gap: 6px;
     width: 100%;
-    height: 28px;
+    min-height: 28px;
+    height: auto;
     border: 0;
     background: transparent;
     color: var(--text);
@@ -255,12 +256,12 @@
   }
 
 .repo-section {
-    padding: 0 6px;
+    padding: 4px 6px;
     font-weight: 600;
   }
 
 .repo-row {
-    padding: 0 8px 0 22px;
+    padding: 4px 8px 4px 22px;
     border-radius: 6px;
   }
 
@@ -359,7 +360,8 @@
 
 .command-filters {
     display: flex;
-    gap: 16px;
+    flex-wrap: wrap;
+    gap: 0 16px;
     padding: 4px 14px 0;
     border-bottom: 1px solid var(--line);
     flex: none;
@@ -372,6 +374,7 @@
     color: var(--text-secondary);
     font: inherit;
     padding: 8px 0;
+    white-space: nowrap;
   }
 
 .command-filters button.on {

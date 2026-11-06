@@ -100,14 +100,14 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
     const locked = shell.mode !== "live";
     return [
       { label: shell.tr("menu.checkout"), disabled: locked, run: () => shell.requestCheckout(commit.id) },
-      { label: shell.tr("menu.cherryPick"), disabled: locked, run: () => void shell.previewCherry(commit.id, false) },
-      { label: shell.tr("menu.cherryPickRecord"), disabled: locked, run: () => void shell.previewCherry(commit.id, true) },
+      { label: shell.tr("menu.cherryPick"), disabled: locked, run: () => void shell.previewCherry(commit.id, false, commit.summary) },
+      { label: shell.tr("menu.cherryPickRecord"), disabled: locked, run: () => void shell.previewCherry(commit.id, true, commit.summary) },
       { label: shell.tr("menu.revert"), disabled: locked, run: () => shell.confirmRevert(commit.id, commit.summary) },
       {
         label: shell.tr("menu.reset"),
         children: [
-          { label: shell.tr("menu.soft"), disabled: locked, run: () => shell.mutate({ action: "reset", rev: commit.id, mode: "soft" }) },
-          { label: shell.tr("menu.mixed"), disabled: locked, run: () => shell.mutate({ action: "reset", rev: commit.id, mode: "mixed" }) },
+          { label: shell.tr("menu.soft"), disabled: locked, run: () => shell.confirmReset(commit.id, "soft", commit.summary) },
+          { label: shell.tr("menu.mixed"), disabled: locked, run: () => shell.confirmReset(commit.id, "mixed", commit.summary) },
           { label: shell.tr("menu.hard"), disabled: locked, run: () => shell.ask(shell.tr("dialog.hardReset"), shell.tr("dialog.hardResetBody"), () => void shell.mutate({ action: "reset", rev: commit.id, mode: "hard" })) },
         ],
       },
@@ -150,11 +150,11 @@ export function stashItems(shell: ShellState) {
     const locked = shell.mode !== "live" || shell.busy;
     return [
       { label: shell.tr("chrome.stash"), disabled: locked, run: () => shell.openStash([]) },
-      { label: shell.tr("chrome.pop"), disabled: locked || (shell.refs?.stashes ?? []).length === 0, run: () => void shell.mutate({ action: "stashPop" }) },
+      { label: shell.tr("chrome.pop"), disabled: locked || (shell.refs?.stashes ?? []).length === 0, run: () => shell.confirmPopStash() },
       ...(shell.refs?.stashes ?? []).map((stash) => ({
         label: stash.summary || stash.name,
         disabled: locked,
-        run: () => void shell.mutate({ action: "stashPop", name: stash.name }),
+        run: () => shell.confirmPopStash(stash.name),
       })),
     ];
   }
