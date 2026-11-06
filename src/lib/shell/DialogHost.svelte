@@ -440,6 +440,7 @@
             <select bind:value={shell.pushTo}>
               <option value="">{shell.tr("dialog.pushDefault", { target: shell.pushTargetLabel(shell.pushBranch) })}</option>
               {#each shell.refs?.remotes ?? [] as remote (remote.name)}
+                <option value={`${remote.name}/`}>{remote.name}</option>
                 {#each remote.branches as branch (branch)}
                   <option value={`${remote.name}/${branch}`}>{remote.name}/{branch}</option>
                 {/each}

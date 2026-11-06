@@ -3651,7 +3651,9 @@ export class ShellState {
   pushTarget(local: string, to: string) {
     if (to) {
       const picked = this.splitRemoteRef(to);
-      return picked ? { ...picked, setUpstream: false } : null;
+      if (!picked) return null;
+      // A remote-only target means "the local branch with the same name".
+      return { ...picked, setUpstream: !picked.branch };
     }
     const upstream = this.refs?.branches.find((branch) => branch.name === local)?.upstream ?? "";
     const known = upstream ? this.splitRemoteRef(upstream) : null;
