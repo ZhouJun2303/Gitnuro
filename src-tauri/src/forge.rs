@@ -1,6 +1,6 @@
 //! GitHub notifications and GitHub or GitLab pull requests for the current remote.
 //!
-//! Tokens stay in the local settings file. They are sent as headers and are not written into logs.
+//! Tokens stay in the OS credential store. They are sent as headers and are not written into logs.
 
 use serde::Serialize;
 
@@ -342,19 +342,9 @@ fn http_get(url: &str, headers: &[(&str, &str)]) -> Result<String, String> {
 }
 
 fn http_send(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<String, String> {
-    let mut command = std::process::Command::new("curl");
-    awegit_git::hide_console(&mut command);
-    command.args(["--silent", "--show-error", "--fail", "--max-time", "20", "--request", method, "--header", "User-Agent: AweGit"]);
-    if let Some(body) = body {
-        command.arg("--data").arg(body);
+    let response = crate::http::send(method, url, headers, body)?;
+    if response.status >= 400 {
+        return Err(crate::http::coded("network", &format!("HTTP {}", response.status)));
     }
-    for (name, value) in headers {
-        command.arg("--header").arg(format!("{name}: {value}"));
-    }
-    command.arg(url);
-    let output = command.output().map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        return Err("could not reach the host".into());
-    }
-    String::from_utf8(output.stdout).map_err(|error| error.to_string())
+    Ok(response.body)
 }

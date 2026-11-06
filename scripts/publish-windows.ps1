@@ -107,13 +107,14 @@ if (Test-Path $latestPath) {
         $appCode = [Math]::Max(26, [int]$previous.appCode + 1)
     }
 }
+$sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nsis).Hash.ToLower()
 $latest = [ordered]@{
     appVersion = $version
     notes = $Notes
     appCode = $appCode
     downloadUrl = $download
     downloads = [ordered]@{
-        windows = $download
+        windows = [ordered]@{ url = $download; sha256 = $sha256 }
         macos = ""
     }
 }

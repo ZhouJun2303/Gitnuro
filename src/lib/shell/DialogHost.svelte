@@ -631,6 +631,12 @@
         {:else if shell.dialog === "about"}
           <h2>{shell.tr("dialog.about")} {shell.appVersion}</h2>
           <p class="empty">{shell.tr("dialog.aboutBody")}</p>
+          {#if shell.gitRuntime?.version}
+            <p class="empty">{shell.tr("chrome.gitSummary", { version: shell.gitRuntime.version, program: shell.gitRuntime.program })}</p>
+            {#if !shell.gitRuntime.lfs}<p class="empty">{shell.tr("chrome.gitNoLfs")}</p>{/if}
+          {:else if shell.gitRuntime}
+            <p class="empty">{shell.tr("chrome.gitMissing")}</p>
+          {/if}
           <div class="composer-row">
             <button class="text-button" type="button" onclick={() => shell.openFeaturesPage()}>{shell.tr("dialog.openGuide")}</button>
             <button class="text-button" type="button" onclick={() => void copyDiagnostics()}>{diagnosticsCopied ? shell.tr("chrome.copied") : shell.tr("dialog.copyDiagnostics")}</button>

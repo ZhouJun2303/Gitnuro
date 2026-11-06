@@ -67,12 +67,12 @@ macOS 使用系统 Git 和系统上的 `cargo`，不需要上面的 PATH。
 | --- | --- | --- |
 | 启动桌面程序 | `pnpm start` | 编译 Rust（仅第一次或改过后），并打开窗口 |
 | 类型检查 | `pnpm check` | Svelte 和 TypeScript，不跑 Git |
-| Rust 测试 | `pnpm test` | `awegit-git` 的全部测试，使用临时仓库 |
+| Rust 测试 | `pnpm test` | `awegit-git` 和 `awegit` 的单元测试，使用临时仓库 |
 | 打 Windows 安装包 | `pnpm package:windows` | `target\release\bundle` 下的 exe 和 msi |
 | 发布到 GitHub | `publish.bat` | 选择版本号，打包并上传到 Release |
 | 打 macOS 安装包 | `pnpm package:mac` | 只能在 Mac 上运行，产物在 `target/release/bundle` |
 
-`pnpm start` 就是 `pnpm tauri dev`。`pnpm test` 就是 `cargo test -p awegit-git -- --test-threads=1`。
+`pnpm start` 就是 `pnpm tauri dev`。`pnpm test` 跑 `scripts/test-all.mjs`，依次执行 `cargo test -p awegit-git` 和 `cargo test -p awegit --lib`，都加 `--test-threads=1`。
 
 ## 启动桌面程序
 
@@ -88,7 +88,7 @@ pnpm start
 
 1420 上已经有页面服务时，再执行 `pnpm start` 会沿用它并打开窗口。这个端口被占用后再另起一个开发服务会失败。
 
-设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令只留在当前进程里，HTTPS 密码交给 Git 的凭据存储。API key 和代理密码会写入这个文件。
+设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令只留在当前进程里，HTTPS 密码交给 Git 的凭据存储。API key、代理密码和各平台 token 放在系统凭据库（Windows 凭据管理器、macOS 钥匙串），配置文件里这些字段是空的。
 
 重新链接桌面程序前先关掉 `awegit.exe`。它占着 `WebView2Loader.dll` 时，`cargo build -p awegit` 会失败。Vite 可以留着。
 
@@ -99,7 +99,7 @@ pnpm check
 pnpm test
 ```
 
-`pnpm check` 查界面类型。`pnpm test` 跑状态、差异、提交、变基、贮藏这些 Git 行为，仓库都建在临时目录里。测试不打开窗口，也不要拿当前这个 AweGit 仓库去做暂存或提交实验。
+`pnpm check` 查界面类型。`pnpm test` 跑状态、差异、提交、变基、贮藏这些 Git 行为，以及设置、更新和凭据这些桌面单元测试。仓库都建在临时目录里。测试不打开窗口，也不要拿当前这个 AweGit 仓库去做暂存或提交实验。
 
 只跑一个测试：
 

@@ -1,7 +1,7 @@
 import { onMount, tick } from "svelte";
 import { invoke } from "../perf";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
-import { branchGroup, changedRanges, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, rowAtUnit, sameHistory, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type BlameLine,
@@ -92,7 +92,7 @@ export async function loadContext(shell: ShellState) {
       invoke<MergeState | null>("merge_state", { path }).catch(() => null),
     ]);
     if (gen !== shell.contextGen) return;
-    if (!shell.same(shell.commitsLive, rows)) shell.commitsLive = rows;
+    if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
     shell.signOff = nextRefs.signOffSet ? !!nextRefs.signOff : shell.settings.signOff;
     shell.progress = state;
     const nextMerge = state === "merge" ? merge : null;
@@ -186,7 +186,7 @@ async function refreshSearchedCommits(shell: ShellState, gen: number) {
     try {
       const rows = await loadCommits(shell, path);
       if (gen !== shell.commitSearchGen) return;
-      if (!shell.same(shell.commitsLive, rows)) shell.commitsLive = rows;
+      if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
     } catch (error) {
       if (gen !== shell.commitSearchGen) return;
       shell.actionError = shell.message(error);
@@ -739,7 +739,7 @@ export async function locateRef(shell: ShellState, name: string) {
             revs: shell.exactRefs(),
           });
           if (seq !== shell.locateSeq) return;
-          if (!shell.same(shell.commitsLive, rows)) shell.commitsLive = rows;
+          if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
           await tick();
           const tip = rows.find((commit) => commit.refs.includes(name)) ?? rows[0];
           if (!tip) return;
@@ -762,7 +762,7 @@ export async function locateRef(shell: ShellState, name: string) {
         });
         if (seq !== shell.locateSeq) return;
         shell.logLimit = Math.min(20_000, Math.max(shell.logLimit, found.commits.length));
-        if (!shell.same(shell.commitsLive, found.commits)) shell.commitsLive = found.commits;
+        if (!sameHistory(shell.commitsLive, found.commits)) shell.commitsLive = found.commits;
         await tick();
         await shell.selectCommit(found.id);
         await tick();
@@ -826,7 +826,7 @@ function patchScroller(node: HTMLElement) {
 }
 
 /** Keep only the rows of an open commit patch that sit in the detail viewport. */
-export function trackPatch(shell: ShellState, node: HTMLElement, spec: { file: string; count: number; rowHeight: number }) {
+export function trackPatch(shell: ShellState, node: HTMLElement, spec: { file: string; count: number; rowHeight: number; prefix?: Uint32Array | null }) {
   let current = spec;
   let scroller: HTMLElement | null = null;
   let frame = 0;
@@ -839,11 +839,21 @@ export function trackPatch(shell: ShellState, node: HTMLElement, spec: { file: s
     }
     const rowHeight = current.rowHeight || 18;
     const count = current.count;
+    const prefix = current.prefix;
     const top = node.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
     const viewTop = scroller.scrollTop;
     const viewBottom = viewTop + (scroller.clientHeight || 600);
-    let start = Math.max(0, Math.floor((viewTop - top) / rowHeight) - 30);
-    let end = Math.min(count, Math.ceil((viewBottom - top) / rowHeight) + 30);
+    let start: number;
+    let end: number;
+    if (prefix && prefix.length === count + 1) {
+      const unitTop = Math.floor((viewTop - top) / rowHeight);
+      const unitBottom = Math.ceil((viewBottom - top) / rowHeight);
+      start = Math.max(0, rowAtUnit(prefix, Math.max(0, unitTop)) - 30);
+      end = Math.min(count, rowAtUnit(prefix, Math.max(0, unitBottom)) + 31);
+    } else {
+      start = Math.max(0, Math.floor((viewTop - top) / rowHeight) - 30);
+      end = Math.min(count, Math.ceil((viewBottom - top) / rowHeight) + 30);
+    }
     if (end < 0) end = 0;
     if (start > count) start = count;
     if (end < start) end = start;
@@ -864,7 +874,7 @@ export function trackPatch(shell: ShellState, node: HTMLElement, spec: { file: s
   const host = node.closest(".detail-scroll") ?? node.parentElement;
   if (host instanceof HTMLElement && host !== node) resize.observe(host);
   return {
-    update(next: { file: string; count: number; rowHeight: number }) {
+    update(next: { file: string; count: number; rowHeight: number; prefix?: Uint32Array | null }) {
       current = next;
       measure();
     },

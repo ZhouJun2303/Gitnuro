@@ -28,7 +28,7 @@
 - 前端依赖写在 `package.json`，Rust 依赖写在对应的 `Cargo.toml`
 - 启动桌面：`pnpm start`（等同 `pnpm tauri dev`）
 - 界面调试用桌面窗口的检查器：调试版启动时自动打开。正式包没有检查器
-- 测试：`pnpm test`（`cargo test -p awegit-git -- --test-threads=1`）
+- 测试：`pnpm test`（`scripts/test-all.mjs`，依次跑 `awegit-git` 和 `awegit --lib`，都是 `--test-threads=1`）
 - 类型检查：`pnpm check`
 - Windows 打包：`pnpm package:windows`
 - Windows 发布：`publish.bat`（默认定修订号加一后打包并上传），在 `feat/dev` 上运行，脚本会合并进 `release`。`pnpm publish:windows` 只在 `release` 分支发布当前版本

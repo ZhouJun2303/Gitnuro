@@ -39,7 +39,33 @@ pub fn stage_all(repo: &Path) -> Result<(), Error> {
     }
     let blocked: std::collections::HashSet<String> = unmerged.into_iter().collect();
     let status = run(repo, &["status", "--porcelain", "-z"])?;
-    let parts: Vec<&[u8]> = status.stdout.split(|byte| *byte == 0).collect();
+    let paths = status_record_paths(&status.stdout)?
+        .into_iter()
+        .filter(|path| !blocked.contains(path))
+        .collect::<Vec<_>>();
+    stage_path_chunks(repo, &paths)
+}
+
+fn utf8_field(bytes: &[u8]) -> Result<String, Error> {
+    std::str::from_utf8(bytes).map(str::to_string).map_err(|_| Error::Git("path is not utf-8".into()))
+}
+
+/// NUL-separated paths. Space, tab, newline, and non-ASCII bytes stay in the path.
+/// A path that is not UTF-8 is an error, because the JSON API stores paths as strings.
+pub fn porcelain_z_paths(bytes: &[u8]) -> Result<Vec<String>, Error> {
+    let mut paths = Vec::new();
+    for part in bytes.split(|byte| *byte == 0) {
+        if part.is_empty() {
+            continue;
+        }
+        paths.push(utf8_field(part)?);
+    }
+    Ok(paths)
+}
+
+/// Paths from `git status --porcelain -z`. A rename or copy contributes both names.
+fn status_record_paths(bytes: &[u8]) -> Result<Vec<String>, Error> {
+    let parts: Vec<&[u8]> = bytes.split(|byte| *byte == 0).collect();
     let mut paths = Vec::new();
     let mut index = 0;
     while index < parts.len() {
@@ -49,21 +75,20 @@ pub fn stage_all(repo: &Path) -> Result<(), Error> {
             continue;
         }
         let code = &part[..2];
-        let path = String::from_utf8_lossy(&part[3..]).into_owned();
-        if !blocked.contains(&path) {
+        let path = utf8_field(&part[3..])?;
+        if !path.is_empty() {
             paths.push(path);
         }
-        if code.iter().any(|byte| *byte == b'R' || *byte == b'C') {
+        if code.contains(&b'R') || code.contains(&b'C') {
             if let Some(next) = parts.get(index) {
-                let other = String::from_utf8_lossy(next).into_owned();
-                if !other.is_empty() && !blocked.contains(&other) {
-                    paths.push(other);
+                if !next.is_empty() {
+                    paths.push(utf8_field(next)?);
                 }
                 index += 1;
             }
         }
     }
-    stage_path_chunks(repo, &paths)
+    Ok(paths)
 }
 
 fn stage_path_chunks(repo: &Path, paths: &[String]) -> Result<(), Error> {
@@ -73,9 +98,8 @@ fn stage_path_chunks(repo: &Path, paths: &[String]) -> Result<(), Error> {
 /// Paths that still have unmerged index entries.
 fn unmerged_paths(repo: &Path) -> Result<Vec<String>, Error> {
     let output = run(repo, &["ls-files", "-u", "-z"])?;
-    let text = String::from_utf8_lossy(&output.stdout);
     let mut paths = std::collections::BTreeSet::new();
-    for entry in text.split('\0') {
+    for entry in porcelain_z_paths(&output.stdout)? {
         if let Some((_, path)) = entry.split_once('\t') {
             if !path.is_empty() {
                 paths.insert(path.to_string());
@@ -1156,8 +1180,22 @@ fn zero_hunks(repo: &Path, path: &str, staged: bool, ignore_space: bool) -> Resu
     args.push("--");
     args.push(path);
     let (output, _) = run_capped(repo, &args, 1_000_000)?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    Ok(text.lines().filter(|line| line.starts_with("@@")).count() as u32)
+    Ok(count_hunk_markers(&output.stdout))
+}
+
+/// Count `@@` hunk headers without rewriting non-UTF-8 bytes in the diff.
+fn count_hunk_markers(bytes: &[u8]) -> u32 {
+    let mut count = 0u32;
+    let mut at_line = true;
+    let mut index = 0;
+    while index < bytes.len() {
+        if at_line && bytes[index..].starts_with(b"@@") {
+            count += 1;
+        }
+        at_line = bytes[index] == b'\n';
+        index += 1;
+    }
+    count
 }
 
 /// Diff from `base` to `HEAD` using the three-dot form.
@@ -1915,4 +1953,38 @@ fn base64_encode(bytes: &[u8]) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod porcelain_tests {
+    use super::{count_hunk_markers, porcelain_z_paths, status_record_paths};
+
+    #[test]
+    fn nul_paths_keep_space_tab_newline_and_unicode() {
+        let raw = b"a b.txt\0\xE4\xB8\xAD\xE6\x96\x87.txt\0a\tb\nc.txt\0";
+        let paths = porcelain_z_paths(raw).unwrap();
+        assert_eq!(paths, vec!["a b.txt".to_string(), "中文.txt".to_string(), "a\tb\nc.txt".to_string()]);
+    }
+
+    #[test]
+    fn a_non_utf8_path_is_an_error() {
+        let error = porcelain_z_paths(b"ok.txt\0\xFF\xFE\0").unwrap_err();
+        assert!(error.to_string().contains("utf-8"), "{error}");
+    }
+
+    #[test]
+    fn status_records_keep_both_rename_names() {
+        let raw = b" M a b.txt\0?? \xE4\xB8\xAD\xE6\x96\x87.txt\0R  old name\0new\nname.txt\0";
+        let paths = status_record_paths(raw).unwrap();
+        assert_eq!(
+            paths,
+            vec!["a b.txt".to_string(), "中文.txt".to_string(), "old name".to_string(), "new\nname.txt".to_string()]
+        );
+    }
+
+    #[test]
+    fn hunk_markers_count_without_lossy_text() {
+        let bytes = b"@@ -1 +1 @@\n binary \xFF\n@@ -2 +2 @@\n";
+        assert_eq!(count_hunk_markers(bytes), 2);
+    }
 }

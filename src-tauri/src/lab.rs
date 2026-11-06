@@ -32,6 +32,16 @@ fn enter() -> Guard {
     Guard
 }
 
+fn isolate_lab_secrets() {
+    if std::env::var_os("AWEGIT_SECRET_DIR").is_some() {
+        return;
+    }
+    let Ok(root) = lab_root() else { return };
+    let dir = root.join("secrets");
+    let _ = std::fs::create_dir_all(&dir);
+    unsafe { std::env::set_var("AWEGIT_SECRET_DIR", &dir) };
+}
+
 fn lab_root() -> Result<PathBuf, String> {
     if let Ok(root) = std::env::var("AWEGIT_LAB") {
         let root = root.trim();
@@ -400,6 +410,14 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "perf_snapshot" => done(crate::perf::snapshot()),
         "diagnostics" => done(crate::perf::diagnostics()),
         "open_log_folder" => Ok(Value::Null),
+        "reveal_path" => Ok(Value::Null),
+        "git_runtime" => done(serde_json::json!({
+            "program": "git",
+            "version": "2.56.0",
+            "mergeTree": true,
+            "lfs": true,
+            "minimum": true
+        })),
         other => Err(format!("unknown lab command {other}")),
     }
 }
@@ -411,6 +429,7 @@ pub fn lab_invoke(command: &str, args: Value) -> Result<Value, String> {
 }
 
 pub fn run_lab() {
+    isolate_lab_secrets();
     crate::perf::init();
     let listener = TcpListener::bind("127.0.0.1:1429").unwrap_or_else(|error| {
         eprintln!("awegit-lab could not listen on 127.0.0.1:1429: {error}");

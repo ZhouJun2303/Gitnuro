@@ -114,11 +114,11 @@
       {:else if shell.historyDiff.lines.length === 0}
         <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
       {:else}
-        <div class="diff-body">
-          <div class="commit-window" style:height="{shell.historyDiff.lines.length * diffRow}px">
+        <div class="diff-body" class:wrap-window={shell.settings.diffWordWrap}>
+          <div class="commit-window" class:wrap-window={shell.settings.diffWordWrap} style:height="{shell.historyDiffWindow.height}px">
             {#each shell.historyDiffWindow.rows as line, index (`h-${shell.historyDiffWindow.start + index}`)}
               {@const at = shell.historyDiffWindow.start + index}
-              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{at * diffRow}px" style:height="{diffRow}px" style:line-height="{diffRow}px">{line.text}</span>
+              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{shell.historyDiffWindow.tops[index] ?? 0}px" style:height={shell.settings.diffWordWrap ? "auto" : `${diffRow}px`} style:line-height={shell.settings.diffWordWrap ? "1.45" : `${diffRow}px`}>{line.text}</span>
             {/each}
           </div>
         </div>

@@ -5,13 +5,13 @@
   import SplitHandle from "../SplitHandle.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { diffs } from "../sample";
-  import { onVirtualScroll, type SplitRow } from "../view";
+  import { onVirtualScroll, wrapPrefix, type SplitRow } from "../view";
   import type { Row, Side, TreeEntry } from "./types";
 
   const shell = getShell();
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
   const onBlobScroll = onVirtualScroll((top) => (shell.blobTop = top));
-  const patchWindow = (node: HTMLElement, spec: { file: string; count: number; rowHeight: number }) => shell.trackPatch(node, spec);
+  const patchWindow = (node: HTMLElement, spec: { file: string; count: number; rowHeight: number; prefix?: Uint32Array | null }) => shell.trackPatch(node, spec);
   const commitScroll = (node: HTMLElement) => shell.trackCommitScroll(node);
   const commitList = (node: HTMLElement) => shell.trackCommitList(node);
   const measureCommitPatch = (node: HTMLElement, path: string) => shell.measureCommitPatch(node, path);
@@ -292,9 +292,12 @@
   {/snippet}
 
 {#snippet splitPatch(rows: SplitRow[], file: string, columns: { left: number; right: number })}
-    {@const view = shell.settings.diffWordWrap ? { start: 0, end: rows.length } : (shell.patchView[file] ?? { start: 0, end: 0 })}
-    <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textFile === file} data-file={file} data-select-side={shell.textFile === file ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" onmousedown={shell.pickSplitSide.bind(shell)} use:splitScroller={columns} use:patchWindow={{ file, count: rows.length, rowHeight: shell.splitRowHeight }}>
-      {#if view.start > 0}<div class="split-gap" style:height="{view.start * shell.splitRowHeight}px"></div>{/if}
+    {@const prefix = shell.settings.diffWordWrap ? wrapPrefix(rows) : null}
+    {@const view = shell.patchView[file] ?? { start: 0, end: 0 }}
+    {@const before = prefix ? (prefix[view.start] ?? 0) * shell.splitRowHeight : view.start * shell.splitRowHeight}
+    {@const after = prefix ? ((prefix[rows.length] ?? 0) - (prefix[view.end] ?? 0)) * shell.splitRowHeight : Math.max(0, rows.length - view.end) * shell.splitRowHeight}
+    <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textFile === file} data-file={file} data-select-side={shell.textFile === file ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" onmousedown={shell.pickSplitSide.bind(shell)} use:splitScroller={columns} use:patchWindow={{ file, count: rows.length, rowHeight: shell.splitRowHeight, prefix }}>
+      {#if before > 0}<div class="split-gap" style:height="{before}px"></div>{/if}
       {#each rows.slice(view.start, view.end) as row, offset (`${file}-s-${view.start + offset}`)}
         {#if row.meta}
           <div class="split-meta" data-line={row.lineIndex}>{row.left}</div>
@@ -305,7 +308,7 @@
           </div>
         {/if}
       {/each}
-      {#if rows.length > view.end}<div class="split-gap" style:height="{(rows.length - view.end) * shell.splitRowHeight}px"></div>{/if}
+      {#if after > 0}<div class="split-gap" style:height="{after}px"></div>{/if}
       {@render splitBar()}
     </div>
   {/snippet}
@@ -324,13 +327,14 @@
         {@render splitPatch(packed.rows, file, packed.columns)}
         {#if live.truncated}<p class="meta patch-note">{shell.tr("chrome.truncated")}</p>{/if}
       {:else}
-        {@const view = shell.settings.diffWordWrap ? { start: 0, end: live.lines.length } : (shell.patchView[`${file}:uni`] ?? { start: 0, end: 0 })}
+        {@const prefix = shell.settings.diffWordWrap ? wrapPrefix(live.lines) : null}
+        {@const view = shell.patchView[`${file}:uni`] ?? { start: 0, end: 0 }}
         {@const diffRow = shell.diffRowHeight}
-        <div class="diff-body" class:flow={embedded} class:select-all={shell.textFile === file} data-file={file} data-select-side={shell.textFile === file ? shell.textSide : undefined}>
-          <div class="commit-window" style:height={shell.settings.diffWordWrap ? "auto" : `${live.lines.length * diffRow}px`} use:patchWindow={{ file: `${file}:uni`, count: live.lines.length, rowHeight: diffRow }}>
+        <div class="diff-body" class:wrap-window={shell.settings.diffWordWrap} class:flow={embedded} class:select-all={shell.textFile === file} data-file={file} data-select-side={shell.textFile === file ? shell.textSide : undefined}>
+          <div class="commit-window" class:wrap-window={shell.settings.diffWordWrap} style:height={prefix ? `${(prefix[live.lines.length] ?? 0) * diffRow}px` : `${live.lines.length * diffRow}px`} use:patchWindow={{ file: `${file}:uni`, count: live.lines.length, rowHeight: diffRow, prefix }}>
             {#each live.lines.slice(view.start, view.end) as line, offset (`uni-${file}-${view.start + offset}`)}
               {@const index = view.start + offset}
-              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{index * diffRow}px">{#each shell.paint(line.text, file) as token, tokenIndex (`ut-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{(prefix ? (prefix[index] ?? 0) : index) * diffRow}px">{#each shell.paint(line.text, file) as token, tokenIndex (`ut-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
             {/each}
           </div>
         </div>

@@ -366,7 +366,7 @@
               <div class="diff-viewport">
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover} use:splitScroller={shell.splitColumns}>
-                {#if shell.splitWindow.start > 0}<div class="split-gap" style:height="{shell.splitWindow.start * shell.splitRowHeight}px"></div>{/if}
+                {#if shell.splitWindow.beforePx > 0}<div class="split-gap" style:height="{shell.splitWindow.beforePx}px"></div>{/if}
                 {#each shell.splitWindow.rows as row, offset (shell.splitWindow.start + offset)}
                   {@const index = shell.splitWindow.start + offset}
                   {@const leftAt = shell.splitLineAt(row, "left")}
@@ -381,7 +381,7 @@
                     </div>
                   {/if}
                 {/each}
-                {#if shell.splitWindow.after > 0}<div class="split-gap" style:height="{shell.splitWindow.after * shell.splitRowHeight}px"></div>{/if}
+                {#if shell.splitWindow.afterPx > 0}<div class="split-gap" style:height="{shell.splitWindow.afterPx}px"></div>{/if}
                 {@render splitBar()}
               </div>
               {@render hunkActions()}
@@ -390,13 +390,13 @@
             {:else}
               <div class="diff-viewport">
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
-                <div class="commit-window" style:height="{shell.diffLines.length * shell.diffRowHeight}px">
+              <div class="diff-body" class:wrap-window={shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
+                <div class="commit-window" class:wrap-window={shell.settings.diffWordWrap} style:height="{shell.diffWindow.height}px">
                   {#each shell.diffWindow.rows as line, index (`d${shell.diffWindow.start + index}`)}
                     {@const at = shell.diffWindow.start + index}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={litHunk != null && shell.hunkOf(at) === litHunk} data-line={at} style:top="{at * shell.diffRowHeight}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
+                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={litHunk != null && shell.hunkOf(at) === litHunk} data-line={at} style:top="{shell.diffWindow.tops[index] ?? 0}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
                       <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.oldNo ?? ""}</span>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->

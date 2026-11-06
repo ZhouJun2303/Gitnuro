@@ -15,6 +15,7 @@ export function labEnv(extra = {}) {
   const lab = join(root, ".lab");
   env.AWEGIT_LAB = lab;
   env.AWEGIT_SETTINGS = join(lab, "settings.json");
+  env.AWEGIT_SECRET_DIR = join(lab, "secrets");
   env.GIT_AUTHOR_NAME = "AweGit Lab";
   env.GIT_AUTHOR_EMAIL = "lab@example.com";
   env.GIT_COMMITTER_NAME = "AweGit Lab";

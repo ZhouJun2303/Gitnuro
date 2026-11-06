@@ -2,9 +2,9 @@
 // pnpm start / pnpm test call this so a fresh terminal does not need a manual PATH.
 
 import { spawn } from "node:child_process";
-import { statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -18,26 +18,26 @@ const env = { ...process.env };
 
 if (process.platform === "win32") {
   const extras = [];
-  if (process.env.LOCALAPPDATA) {
-    extras.push(
-      join(
-        process.env.LOCALAPPDATA,
-        "Microsoft",
-        "WinGet",
-        "Packages",
-        "BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe",
-        "mingw64",
-        "bin",
-      ),
-    );
-  }
-  const cargoBin = join(homedir(), ".cargo", "bin");
+  const gccBin = findGccBin();
+  if (gccBin) extras.push(gccBin);
+  if (process.env.AWE_RUSTUP) extras.push(process.env.AWE_RUSTUP);
+  const cargoHome = process.env.CARGO_HOME || join(homedir(), ".cargo");
+  const cargoBin = join(cargoHome, "bin");
   extras.push(cargoBin);
+  const cargoExe = join(cargoBin, "cargo.exe");
+  const rustcExe = join(cargoBin, "rustc.exe");
+  const gccExe = gccBin ? join(gccBin, "gcc.exe") : "";
 
-  if (!isFile(join(cargoBin, "cargo.exe"))) {
+  if (!isFile(cargoExe)) {
     console.error("未找到 cargo.exe。请先安装 rustup，并安装 nightly-x86_64-pc-windows-gnu。");
+    console.error(`已查找 ${cargoExe}`);
+    if (process.env.CARGO_HOME) console.error(`CARGO_HOME=${process.env.CARGO_HOME}`);
+    if (process.env.RUSTUP_HOME) console.error(`RUSTUP_HOME=${process.env.RUSTUP_HOME}`);
     process.exit(1);
   }
+  console.log(`cargo: ${cargoExe}`);
+  console.log(`rustc: ${isFile(rustcExe) ? rustcExe : "(cargo 代理会再查找 rustc)"}`);
+  console.log(`gcc: ${gccExe && isFile(gccExe) ? gccExe : "(未加入 PATH)"}`);
 
   const merged = [...extras, env.PATH ?? env.Path ?? ""].filter(Boolean).join(delimiter);
   let sawPath = false;
@@ -68,6 +68,33 @@ child.on("error", (error) => {
   console.error(error.message);
   process.exit(1);
 });
+
+function findGccBin() {
+  const given = process.env.AWE_GCC;
+  if (given) {
+    if (isFile(given)) return dirname(given);
+    if (isFile(join(given, "gcc.exe")) || isFile(join(given, "gcc"))) return given;
+  }
+  const found = [];
+  const local = process.env.LOCALAPPDATA;
+  if (local) {
+    const packages = join(local, "Microsoft", "WinGet", "Packages");
+    try {
+      for (const name of readdirSync(packages)) {
+        if (!name.startsWith("BrechtSanders.WinLibs")) continue;
+        const bin = join(packages, name, "mingw64", "bin");
+        if (isFile(join(bin, "gcc.exe"))) found.push(bin);
+      }
+    } catch {
+      /* WinGet is not installed */
+    }
+  }
+  for (const root of [process.env.ProgramFiles, process.env["ProgramFiles(x86)"]].filter(Boolean)) {
+    const bin = join(root, "WinLibs", "mingw64", "bin");
+    if (isFile(join(bin, "gcc.exe"))) found.push(bin);
+  }
+  return found[0] ?? null;
+}
 
 function isFile(path) {
   try {

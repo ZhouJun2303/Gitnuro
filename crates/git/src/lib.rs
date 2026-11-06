@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 pub use change::{
     blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line, discard_lines, file_diff, file_diff_with, file_preview,
-    launch_diff_pair, launch_diff_tool, launch_merge_tool, range_diff, resolve_conflict, resolve_conflicts, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths, staged_diff,
+    launch_diff_pair, launch_diff_tool, launch_merge_tool, porcelain_z_paths, range_diff, resolve_conflict, resolve_conflicts, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths, staged_diff,
     unstage_all, unstage_paths, workspace_diff, BlobView, CommitRequest, ConflictSides, ConflictView, DiffLine, DiffLineKind, FileDiff,
     FilePreview, LineEdit,
 };
@@ -25,12 +25,12 @@ pub use model::{
     RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow, write_expanded_groups, write_hidden_refs, write_sign_off,
 };
 pub use cli::{
-    cancel_reads, cancel_repo, cancel_running, capture_output, configure, hide_console, origin_url, repo_key, set_http_proxy, set_passphrase, set_progress, set_trace,
-    stop_process_tree, use_bundled_git, with_operation_repo, Session, Trace,
+    cancel_reads, cancel_repo, cancel_running, capture_output, configure, git_program, git_runtime, hide_console, origin_url, parse_git_version, repo_key, set_http_proxy, set_passphrase, set_progress, set_trace,
+    stop_process_tree, use_bundled_git, with_operation_repo, GitRuntime, Session, Trace,
 };
 pub use ops::{
     approve_credential, cherry_preview, merge_preview, merge_state, merged_branches, perform, pick_history, repo_facts, repo_facts_brief, scan_repositories,
-    search_commits, set_repo_author, HotPath, MergeFile, MergePreview, MergeState, Mutation, RebaseStep, RepoFacts, ResetMode, SearchHit,
+    search_commits, set_repo_author, tracked_directories, HotPath, MergeFile, MergePreview, MergeState, Mutation, RebaseStep, RepoFacts, ResetMode, ScanResult, SearchHit, TrackedDirs,
 };
 
 use gix::bstr::BStr;

@@ -1,4 +1,4 @@
-//! Commit-message suggestion. The key stays in the local settings file, `XAI_API_KEY`, or `OPENAI_API_KEY`.
+//! Commit-message suggestion. The key stays in the OS credential store, `XAI_API_KEY`, or `OPENAI_API_KEY`.
 
 use serde::Serialize;
 
@@ -289,87 +289,25 @@ fn split_status(text: String) -> (u16, String) {
 }
 
 fn http_get(url: &str, key: &str) -> Result<(u16, String), String> {
-    let mut command = std::process::Command::new("curl");
-    awegit_git::hide_console(&mut command);
-    command.args([
-        "-sS",
-        "--max-time",
-        "30",
-        "--proto",
-        "=http,https",
-        "--proto-redir",
-        "=http,https",
-        "--max-redirs",
-        "3",
-        "-L",
-        "-H",
-        "Accept: application/json",
-        "-w",
-        "\n%{http_code}",
-    ]);
+    let mut headers = vec![("Accept", "application/json")];
+    let auth;
     if !key.is_empty() {
-        command
-            .arg("-H")
-            .arg(format!("Authorization: Bearer {key}"));
+        auth = format!("Bearer {key}");
+        headers.push(("Authorization", &auth));
     }
-    let output = command
-        .arg(url)
-        .output()
-        .map_err(|error| format!("curl is not available: {error}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            "the endpoint request failed".into()
-        } else {
-            stderr
-        });
-    }
-    Ok(split_status(
-        String::from_utf8_lossy(&output.stdout).to_string(),
-    ))
+    let response = crate::http::send("GET", url, &headers, None)?;
+    Ok((response.status, response.body))
 }
 
 fn post_json(url: &str, key: &str, payload: &str) -> Result<String, String> {
-    let mut command = std::process::Command::new("curl");
-    awegit_git::hide_console(&mut command);
-    let mut child = command
-        .args([
-            "-sS",
-            "--max-time",
-            "60",
-            "-X",
-            "POST",
-            "-H",
-            "Content-Type: application/json",
-            "-H",
-            &format!("Authorization: Bearer {key}"),
-            "--data-binary",
-            "@-",
-            url,
-        ])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("curl is not available: {error}"))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        use std::io::Write;
-        stdin
-            .write_all(payload.as_bytes())
-            .map_err(|error| error.to_string())?;
-    }
-    let output = child
-        .wait_with_output()
-        .map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            "the model request failed".into()
-        } else {
-            stderr
-        });
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    let auth = format!("Bearer {key}");
+    let response = crate::http::send(
+        "POST",
+        url,
+        &[("Content-Type", "application/json"), ("Authorization", &auth)],
+        Some(payload),
+    )?;
+    Ok(response.body)
 }
 
 fn extract_text(value: &serde_json::Value) -> String {

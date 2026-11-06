@@ -6,7 +6,7 @@ use std::process::Command;
 
 use awegit_git::{
     blob_view, commit_log, conflict_view, discard_lines, file_diff, file_diff_with, file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs, search_commits,
-    search_log, stage_hunk, stage_line, stage_lines, stage_paths, status, stop_process_tree, ChangeKind, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
+    search_log, stage_all, stage_hunk, stage_line, stage_lines, stage_paths, status, stop_process_tree, ChangeKind, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
 };
 
 fn repo() -> common::TempRepo {
@@ -78,6 +78,30 @@ impl Drop for RemoveWorktree {
             .status();
         let _ = fs::remove_dir_all(&self.path);
     }
+}
+
+#[test]
+fn stage_all_keeps_space_and_unicode_names() {
+    let repo = repo();
+    fs::write(repo.path.join("a b.txt"), "space\n").unwrap();
+    fs::write(repo.path.join("中文.txt"), "zh\n").unwrap();
+    stage_all(&repo.path).unwrap();
+    awegit_git::commit(
+        &repo.path,
+        awegit_git::CommitRequest {
+            summary: "names".into(),
+            description: String::new(),
+            amend: false,
+            sign_off: false,
+            sign_off_format: String::new(),
+            skip_hooks: true,
+            convention: false,
+        },
+    )
+    .unwrap();
+    let listed = git_at(&repo.path, &["ls-files", "-z"]);
+    assert!(listed.contains("a b.txt"), "{listed}");
+    assert!(listed.contains("中文.txt"), "{listed}");
 }
 
 #[test]

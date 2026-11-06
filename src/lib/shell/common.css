@@ -906,13 +906,18 @@ input[type="checkbox"]:disabled,
     contain-intrinsic-size: auto 18px;
 }
 
-.shell.diff-wrap .diff-body .virtual-row {
+.shell.diff-wrap .diff-body:not(.wrap-window) .virtual-row {
     position: relative;
     top: auto !important;
 }
 
-.shell.diff-wrap .commit-window {
+.shell.diff-wrap .commit-window:not(.wrap-window) {
     height: auto !important;
+}
+
+.shell.diff-wrap .diff-body.wrap-window .virtual-row {
+    position: absolute;
+    overflow: hidden;
 }
 
 .diff-body.split.virtual .split-row > span {

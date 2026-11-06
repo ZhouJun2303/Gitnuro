@@ -1,0 +1,67 @@
+# GitHub no longer offers Intel macOS runners (macos-13 is retired).
+# The matrix is Windows x64 plus Apple Silicon on macOS 14 and macOS 15.
+# A full NSIS or signed package needs secrets and is not run on every pull request.
+# `cargo check -p awegit` is the packaging smoke test.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: node scripts/check-versions.mjs
+      - run: node scripts/test-all.mjs
+      - name: package smoke
+        run: cargo check -p awegit
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: logs-${{ matrix.os }}
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+
+  ui:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - name: install Playwright Chromium
+        run: pnpm exec playwright install chromium
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      - run: pnpm test:ui
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ui-logs
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore

@@ -12,6 +12,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use serde::Serialize;
+
 use crate::Error;
 
 static BUNDLED_GIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -227,6 +229,72 @@ fn resolve_launch() -> GitLaunch {
         program: OsString::from("git"),
         path_prefix: None,
     }
+}
+
+/// Path of the `git` binary the next command will start.
+pub fn git_program() -> String {
+    let launch = LAUNCH.get_or_init(resolve_launch);
+    launch.program.to_string_lossy().into_owned()
+}
+
+/// Git on this machine. `version` is empty when `git --version` cannot be read.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRuntime {
+    pub program: String,
+    pub version: String,
+    pub merge_tree: bool,
+    pub lfs: bool,
+    pub minimum: bool,
+}
+
+/// Major and minor from `git version 2.39.1` or `2.56.0.windows.1`. Empty text is `None`.
+pub fn parse_git_version(text: &str) -> Option<(u32, u32)> {
+    let rest = text.trim();
+    if rest.is_empty() {
+        return None;
+    }
+    let rest = rest.strip_prefix("git version ").unwrap_or(rest);
+    let mut numbers = rest.split(|c: char| !c.is_ascii_digit()).filter(|part| !part.is_empty());
+    let major = numbers.next()?.parse().ok()?;
+    let minor = numbers.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+fn version_at_least(parsed: Option<(u32, u32)>, major: u32, minor: u32) -> bool {
+    parsed.is_some_and(|(found_major, found_minor)| found_major > major || (found_major == major && found_minor >= minor))
+}
+
+/// Probe Git once for the about dialog. Startup still opens when Git is missing or old.
+pub fn git_runtime() -> GitRuntime {
+    let program = git_program();
+    let text = git_version_text();
+    let parsed = parse_git_version(&text);
+    let version = parsed
+        .map(|_| text.trim().strip_prefix("git version ").unwrap_or(text.trim()).split_whitespace().next().unwrap_or("").to_string())
+        .unwrap_or_default();
+    GitRuntime {
+        program,
+        version,
+        merge_tree: version_at_least(parsed, 2, 38),
+        lfs: lfs_runs(),
+        minimum: version_at_least(parsed, 2, 39),
+    }
+}
+
+fn git_version_text() -> String {
+    let mut command = git_command();
+    command.arg("--version");
+    match command.output() {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        _ => String::new(),
+    }
+}
+
+fn lfs_runs() -> bool {
+    let mut command = git_command();
+    command.args(["lfs", "version"]);
+    command.output().map(|output| output.status.success()).unwrap_or(false)
 }
 
 /// How to start the Git under `dir` (its `cmd` folder), when that copy can run.
@@ -1167,5 +1235,19 @@ mod cancel_tests {
         assert!(killed.elapsed() < Duration::from_secs(5), "cancel took {:?}", killed.elapsed());
         assert!(result.is_err(), "hanging git should fail once cancelled");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::parse_git_version;
+
+    #[test]
+    fn reads_supported_git_versions() {
+        assert_eq!(parse_git_version("git version 2.39.1"), Some((2, 39)));
+        assert_eq!(parse_git_version("git version 2.40.0"), Some((2, 40)));
+        assert_eq!(parse_git_version("git version 2.56.0.windows.1"), Some((2, 56)));
+        assert_eq!(parse_git_version(""), None);
+        assert_eq!(parse_git_version("git version"), None);
     }
 }

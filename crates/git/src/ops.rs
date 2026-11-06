@@ -2385,7 +2385,13 @@ pub fn repo_facts(repo: &Path) -> Result<RepoFacts, Error> {
     std::thread::scope(|scope| {
         let ignored = scope.spawn(|| lines_of(repo, &["ls-files", "-o", "-i", "--exclude-standard"], 500));
         let activity = scope.spawn(|| activity(repo));
-        let lfs = scope.spawn(|| text_of(repo, &["lfs", "ls-files"]));
+        let lfs = scope.spawn(|| {
+            if crate::lfs_available(repo) {
+                text_of(repo, &["lfs", "ls-files"])
+            } else {
+                String::new()
+            }
+        });
         let hot = scope.spawn(|| hot_paths(repo));
         let brief = repo_facts_brief(repo)?;
         let (weekday, hour) = activity.join().unwrap_or_default();
@@ -2564,26 +2570,75 @@ fn activity(repo: &Path) -> (Vec<u32>, Vec<u32>) {
     (weekday, hour)
 }
 
+/// Parent directories of tracked files, plus the work tree root. Stops at `limit`.
+#[derive(Debug, Clone)]
+pub struct TrackedDirs {
+    pub paths: Vec<PathBuf>,
+    pub capped: bool,
+}
+
+pub fn tracked_directories(repo: &Path, limit: usize) -> TrackedDirs {
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    let root = repo.to_path_buf();
+    seen.insert(root.clone());
+    paths.push(root);
+    let Ok(output) = crate::cli::run(repo, &["ls-files", "-z"]) else {
+        return TrackedDirs { paths, capped: false };
+    };
+    let mut capped = false;
+    for part in output.stdout.split(|byte| *byte == 0) {
+        if part.is_empty() {
+            continue;
+        }
+        let Ok(text) = std::str::from_utf8(part) else { continue };
+        let Some(parent) = repo.join(text).parent().map(Path::to_path_buf) else { continue };
+        if !seen.insert(parent.clone()) {
+            continue;
+        }
+        if paths.len() >= limit {
+            capped = true;
+            break;
+        }
+        paths.push(parent);
+    }
+    TrackedDirs { paths, capped }
+}
+
+/// Repositories found under `root`. `truncated` is set only when the 300 cap hid another repository.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScanResult {
+    pub paths: Vec<String>,
+    pub truncated: bool,
+}
+
+const SCAN_CAP: usize = 300;
+
 /// Find git work trees under `root`, without entering a repository or common build folders.
-pub fn scan_repositories(root: &Path, depth_limit: usize) -> Result<Vec<String>, Error> {
+pub fn scan_repositories(root: &Path, depth_limit: usize) -> Result<ScanResult, Error> {
     if !root.is_dir() {
         return Err(Error::Git(format!("{} is not a directory", root.display())));
     }
     let limit = if depth_limit == 0 { 5 } else { depth_limit };
     let mut found = Vec::new();
-    scan_dir(root, 0, limit, &mut found);
-    Ok(found)
+    let truncated = scan_dir(root, 0, limit, &mut found);
+    Ok(ScanResult { paths: found, truncated })
 }
 
-fn scan_dir(dir: &Path, depth: usize, limit: usize, found: &mut Vec<String>) {
-    if found.len() >= 300 || depth > limit {
-        return;
+fn scan_dir(dir: &Path, depth: usize, limit: usize, found: &mut Vec<String>) -> bool {
+    if depth > limit {
+        return false;
+    }
+    if found.len() >= SCAN_CAP {
+        return true;
     }
     if dir.join(".git").exists() {
         found.push(dir.display().to_string());
-        return;
+        return false;
     }
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else { return false };
+    let mut truncated = false;
     for entry in entries.flatten() {
         let Ok(kind) = entry.file_type() else { continue };
         if !kind.is_dir() {
@@ -2594,8 +2649,15 @@ fn scan_dir(dir: &Path, depth: usize, limit: usize, found: &mut Vec<String>) {
         if matches!(name.as_ref(), "node_modules" | "target" | "dist" | "vendor" | ".git" | ".next" | "out") {
             continue;
         }
-        scan_dir(&entry.path(), depth + 1, limit, found);
+        if found.len() >= SCAN_CAP {
+            truncated = true;
+            break;
+        }
+        if scan_dir(&entry.path(), depth + 1, limit, found) {
+            truncated = true;
+        }
     }
+    truncated
 }
 
 fn write_script(dir: &Path, name: &str, body: &str) -> Result<String, Error> {
@@ -2636,5 +2698,58 @@ mod clone_destination_tests {
         let err = resolve_clone_destination("https://github.com/org/Demo.git", &root.join("Demo").display().to_string()).unwrap_err();
         assert!(err.to_string().contains("already exists"));
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod scan_tests {
+    use super::{scan_repositories, tracked_directories};
+    use std::fs;
+    use std::process::Command;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("awegit-{name}-{nanos}"));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn scan_marks_truncation_only_when_more_remain() {
+        let root = scratch("scan");
+        for index in 0..301 {
+            fs::create_dir_all(root.join(format!("repo-{index:04}")).join(".git")).unwrap();
+        }
+        let full = scan_repositories(&root, 2).unwrap();
+        assert_eq!(full.paths.len(), 300);
+        assert!(full.truncated);
+        let exact = scratch("scan-exact");
+        fs::create_dir_all(exact.join("one").join(".git")).unwrap();
+        fs::create_dir_all(exact.join("two").join(".git")).unwrap();
+        let found = scan_repositories(&exact, 2).unwrap();
+        assert_eq!(found.paths.len(), 2);
+        assert!(!found.truncated);
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&exact);
+    }
+
+    #[test]
+    fn tracked_directories_follow_ls_files() {
+        let root = scratch("tracked");
+        let init = Command::new("git").args(["init", "-b", "main"]).current_dir(&root).output().unwrap();
+        assert!(init.status.success(), "{}", String::from_utf8_lossy(&init.stderr));
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src").join("main.txt"), "one\n").unwrap();
+        fs::write(root.join("top.txt"), "two\n").unwrap();
+        let add = Command::new("git").args(["add", "--", "src/main.txt", "top.txt"]).current_dir(&root).output().unwrap();
+        assert!(add.status.success(), "{}", String::from_utf8_lossy(&add.stderr));
+        let tracked = tracked_directories(&root, 10);
+        assert!(!tracked.capped);
+        assert!(tracked.paths.iter().any(|path| path == &root));
+        assert!(tracked.paths.iter().any(|path| path.ends_with("src")));
+        let capped = tracked_directories(&root, 1);
+        assert!(capped.capped);
+        assert_eq!(capped.paths.len(), 1);
+        let _ = fs::remove_dir_all(&root);
     }
 }

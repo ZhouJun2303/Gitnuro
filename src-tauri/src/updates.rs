@@ -1,6 +1,7 @@
 //! Looks at the same update document the current AweGit client uses.
 
 use serde::Serialize;
+use sha2::Digest;
 use std::cmp::Ordering;
 use std::io::{Read, Write};
 
@@ -15,8 +16,10 @@ pub struct UpdateNotice {
     pub app_code: i64,
     pub download_url: String,
     pub notes: String,
-    /// True when `download_url` is an installer this machine can open.
+    /// True when `download_url` is an installer this machine can open and `sha256` is present.
     pub installable: bool,
+    /// Lowercase SHA-256 of the installer. Empty when the manifest has no hash.
+    pub sha256: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -35,31 +38,41 @@ pub fn check() -> Result<Option<UpdateNotice>, String> {
     if !newer_than(&app_version, current_version()) {
         return Ok(None);
     }
-    let (download_url, installable) = platform_download(&value);
+    let (download_url, sha256, installable) = platform_download(&value);
     Ok(Some(UpdateNotice {
         app_version,
         app_code: value.get("appCode").and_then(|item| item.as_i64()).unwrap_or(0),
         download_url,
         notes: value.get("notes").and_then(|item| item.as_str()).unwrap_or("").trim().to_string(),
         installable,
+        sha256,
     }))
 }
 
-pub fn download_and_open(url: &str, mut progress: impl FnMut(Option<u8>)) -> Result<(), String> {
+pub fn download_and_open(url: &str, sha256: Option<&str>, mut progress: impl FnMut(Option<u8>)) -> Result<(), String> {
+    let expected = normalize_sha256(sha256).ok_or_else(|| crate::http::coded("update", "update hash is missing"))?;
     let name = installer_name(url)?;
+    if !installer_kind(&name) {
+        return Err(crate::http::coded("update", "update is not an installer for this system"));
+    }
     let dir = std::env::temp_dir().join("awegit-update");
-    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
-    let dest = dir.join(name);
-    let response = agent(600).get(url).call().map_err(|error| error.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|error| crate::http::coded("update", &error.to_string()))?;
+    let dest = dir.join(&name);
+    let partial = dir.join(format!("{name}.partial"));
+    let response = match crate::http::agent(600, true)?.get(url).call() {
+        Ok(response) => response,
+        Err(error) => return Err(crate::http::coded("update", &error.to_string())),
+    };
     let total = response.header("content-length").and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
     if total == 0 {
         progress(None);
     }
     let mut reader = response.into_reader();
-    let mut file = match std::fs::File::create(&dest) {
+    let mut file = match std::fs::File::create(&partial) {
         Ok(file) => file,
-        Err(error) => return Err(error.to_string()),
+        Err(error) => return Err(crate::http::coded("update", &error.to_string())),
     };
+    let mut hasher = sha2::Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     let mut got = 0u64;
     let mut reported: Option<u8> = None;
@@ -69,14 +82,15 @@ pub fn download_and_open(url: &str, mut progress: impl FnMut(Option<u8>)) -> Res
             Ok(count) => count,
             Err(error) => {
                 drop(file);
-                let _ = std::fs::remove_file(&dest);
-                return Err(error.to_string());
+                let _ = std::fs::remove_file(&partial);
+                return Err(crate::http::coded("update", &error.to_string()));
             }
         };
+        hasher.update(&buf[..read]);
         if let Err(error) = file.write_all(&buf[..read]) {
             drop(file);
-            let _ = std::fs::remove_file(&dest);
-            return Err(error.to_string());
+            let _ = std::fs::remove_file(&partial);
+            return Err(crate::http::coded("update", &error.to_string()));
         }
         got += read as u64;
         if let Some(percent) = percent_of(got, total) {
@@ -93,21 +107,58 @@ pub fn download_and_open(url: &str, mut progress: impl FnMut(Option<u8>)) -> Res
     }
     drop(file);
     if got == 0 {
-        let _ = std::fs::remove_file(&dest);
-        return Err("update download failed".into());
+        let _ = std::fs::remove_file(&partial);
+        return Err(crate::http::coded("update", "update download failed"));
     }
-    std::process::Command::new(&dest).spawn().map_err(|error| error.to_string())?;
-    Ok(())
+    let actual = format!("{:x}", hasher.finalize());
+    if actual != expected {
+        let _ = std::fs::remove_file(&partial);
+        return Err(crate::http::coded("update", "update hash does not match"));
+    }
+    replace_download(&partial, &dest)?;
+    open_installer(&dest)
 }
 
-fn agent(read_secs: u64) -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .https_only(true)
-        .redirects(10)
-        .timeout_connect(std::time::Duration::from_secs(20))
-        .timeout_read(std::time::Duration::from_secs(read_secs))
-        .timeout_write(std::time::Duration::from_secs(20))
-        .build()
+fn replace_download(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let from_wide: Vec<u16> = from.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let to_wide: Vec<u16> = to.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let ok = unsafe { MoveFileExW(from_wide.as_ptr(), to_wide.as_ptr(), 1 | 8) };
+        if ok == 0 {
+            let _ = std::fs::remove_file(from);
+            return Err(crate::http::coded("update", &std::io::Error::last_os_error().to_string()));
+        }
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::fs::remove_file(to);
+        std::fs::rename(from, to).map_err(|error| crate::http::coded("update", &error.to_string()))
+    }
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn MoveFileExW(from: *const u16, to: *const u16, flags: u32) -> i32;
+}
+
+fn open_installer(dest: &std::path::Path) -> Result<(), String> {
+    let name = dest.file_name().and_then(|name| name.to_str()).unwrap_or("");
+    let lower = name.to_ascii_lowercase();
+    #[cfg(windows)]
+    let result = if lower.ends_with(".msi") {
+        std::process::Command::new("msiexec").arg("/i").arg(dest).spawn()
+    } else {
+        std::process::Command::new(dest).spawn()
+    };
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(dest).spawn();
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let result = std::process::Command::new("xdg-open").arg(dest).spawn();
+    result.map(|_| ()).map_err(|error| crate::http::coded("update", &error.to_string()))
 }
 
 fn percent_of(got: u64, total: u64) -> Option<u8> {
@@ -117,30 +168,63 @@ fn percent_of(got: u64, total: u64) -> Option<u8> {
     Some(((got.saturating_mul(100)) / total).min(100) as u8)
 }
 
-fn platform_download(value: &serde_json::Value) -> (String, bool) {
-    let downloads = value.get("downloads");
-    let windows = text_at(downloads, "windows");
-    let macos = text_at(downloads, "macos");
+fn platform_download(value: &serde_json::Value) -> (String, String, bool) {
+    let (windows, windows_sha) = asset_at(value, "windows");
+    let (macos, macos_sha) = asset_at(value, "macos");
     let legacy = value.get("downloadUrl").and_then(|item| item.as_str()).unwrap_or("").trim().to_string();
     if cfg!(windows) {
-        let url = if windows.is_empty() { legacy } else { windows };
-        let installable = installer_name(&url).is_ok();
-        return (url, installable);
+        let (url, sha) = if windows.is_empty() { (legacy, String::new()) } else { (windows, windows_sha) };
+        return (url.clone(), sha.clone(), installable(&url, &sha));
     }
     if cfg!(target_os = "macos") && !macos.is_empty() {
-        let installable = installer_name(&macos).is_ok();
-        return (macos, installable);
+        return (macos.clone(), macos_sha.clone(), installable(&macos, &macos_sha));
     }
     let page = if legacy.starts_with("https://github.com/ZhouJun2303/Gitnuro/releases") && installer_name(&legacy).is_err() {
         legacy
     } else {
         RELEASES_PAGE.to_string()
     };
-    (page, false)
+    (page, String::new(), false)
 }
 
-fn text_at(value: Option<&serde_json::Value>, key: &str) -> String {
-    value.and_then(|item| item.get(key)).and_then(|item| item.as_str()).unwrap_or("").trim().to_string()
+fn asset_at(value: &serde_json::Value, key: &str) -> (String, String) {
+    let Some(item) = value.get("downloads").and_then(|item| item.get(key)) else {
+        return (String::new(), String::new());
+    };
+    match item {
+        serde_json::Value::String(text) => (text.trim().to_string(), String::new()),
+        serde_json::Value::Object(_) => {
+            let url = item.get("url").and_then(|entry| entry.as_str()).unwrap_or("").trim().to_string();
+            let sha = item.get("sha256").and_then(|entry| entry.as_str()).unwrap_or("").trim().to_string();
+            (url, sha)
+        }
+        _ => (String::new(), String::new()),
+    }
+}
+
+fn installable(url: &str, sha256: &str) -> bool {
+    let Ok(name) = installer_name(url) else { return false };
+    installer_kind(&name) && normalize_sha256(Some(sha256)).is_some()
+}
+
+fn installer_kind(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    if cfg!(windows) {
+        return lower.ends_with(".exe") || lower.ends_with(".msi");
+    }
+    if cfg!(target_os = "macos") {
+        return lower.ends_with(".dmg") || lower.ends_with(".pkg") || lower.ends_with(".zip");
+    }
+    false
+}
+
+pub(crate) fn normalize_sha256(text: Option<&str>) -> Option<String> {
+    let text = text.unwrap_or("").trim();
+    if text.len() == 64 && text.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        Some(text.to_ascii_lowercase())
+    } else {
+        None
+    }
 }
 
 fn installer_name(url: &str) -> Result<String, String> {
@@ -159,7 +243,12 @@ fn installer_name(url: &str) -> Result<String, String> {
 }
 
 fn http_get(url: &str) -> Result<String, String> {
-    agent(20).get(url).call().map_err(|error| error.to_string())?.into_string().map_err(|error| error.to_string())
+    crate::http::agent(20, true)?
+        .get(url)
+        .call()
+        .map_err(|error| crate::http::coded("network", &error.to_string()))?
+        .into_string()
+        .map_err(|error| crate::http::coded("network", &error.to_string()))
 }
 
 /// `remote` is newer than the version compiled into this build.
@@ -185,7 +274,7 @@ fn parse_version(text: &str) -> Option<[u64; 3]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{installer_name, newer_than, percent_of};
+    use super::{asset_at, installer_name, normalize_sha256, newer_than, percent_of, platform_download};
 
     #[test]
     fn three_part_versions_compare_by_number() {
@@ -205,6 +294,29 @@ mod tests {
         assert!(installer_name("https://github.com/ZhouJun2303/Gitnuro/releases/latest").is_err());
         assert!(installer_name("https://example.com/AweGit_2.0.1_x64-setup.exe").is_err());
         assert!(installer_name("https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.1/../secret.exe").is_err());
+    }
+
+    #[test]
+    fn a_release_asset_needs_a_sha256_before_it_can_install() {
+        let exe = "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.2/AweGit_2.0.2_x64-setup.exe";
+        let hash = "ab".repeat(32);
+        let plain = serde_json::json!({ "downloads": { "windows": exe, "macos": "" } });
+        let (url, sha) = asset_at(&plain, "windows");
+        assert_eq!(url, exe);
+        assert!(sha.is_empty());
+        let hashed = serde_json::json!({ "downloads": { "windows": { "url": exe, "sha256": hash }, "macos": "" } });
+        let (url, sha) = asset_at(&hashed, "windows");
+        assert_eq!(url, exe);
+        assert_eq!(sha, hash);
+        let (_, _, installable) = platform_download(&plain);
+        assert!(!installable);
+        if cfg!(windows) {
+            let (_, _, installable) = platform_download(&hashed);
+            assert!(installable);
+        }
+        assert!(normalize_sha256(Some(&hash.to_uppercase())).is_some());
+        assert!(normalize_sha256(Some("short")).is_none());
+        assert!(normalize_sha256(None).is_none());
     }
 
     #[test]

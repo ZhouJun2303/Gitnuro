@@ -29,8 +29,38 @@ if (-not (Test-Path (Join-Path $dest "cmd\git.exe"))) {
     throw "MinGit did not contain cmd\git.exe"
 }
 
-$mingw = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin"
-$env:PATH = "$mingw;$env:USERPROFILE\.cargo\bin;" + $env:PATH
+function Find-GccBin {
+    if ($env:AWE_GCC) {
+        if (Test-Path (Join-Path $env:AWE_GCC "gcc.exe")) { return $env:AWE_GCC }
+        if (Test-Path $env:AWE_GCC -PathType Leaf) { return (Split-Path -Parent $env:AWE_GCC) }
+    }
+    $packages = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages"
+    if (Test-Path $packages) {
+        $hits = Get-ChildItem -Path $packages -Directory -Filter "BrechtSanders.WinLibs*" -ErrorAction SilentlyContinue
+        foreach ($hit in $hits) {
+            $bin = Join-Path $hit.FullName "mingw64\bin"
+            if (Test-Path (Join-Path $bin "gcc.exe")) { return $bin }
+        }
+    }
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if (-not $root) { continue }
+        $bin = Join-Path $root "WinLibs\mingw64\bin"
+        if (Test-Path (Join-Path $bin "gcc.exe")) { return $bin }
+    }
+    return $null
+}
+
+$gccBin = Find-GccBin
+$cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+$cargoBin = Join-Path $cargoHome "bin"
+if (-not (Test-Path (Join-Path $cargoBin "cargo.exe"))) {
+    throw "未找到 cargo.exe。已查找 $(Join-Path $cargoBin 'cargo.exe')。可设置 CARGO_HOME 或 AWE_RUSTUP。"
+}
+if ($gccBin) { $env:PATH = "$gccBin;$cargoBin;" + $env:PATH } else { $env:PATH = "$cargoBin;" + $env:PATH }
+Write-Host "cargo: $(Join-Path $cargoBin 'cargo.exe')"
+$rustc = Join-Path $cargoBin "rustc.exe"
+if (Test-Path $rustc) { Write-Host "rustc: $rustc" }
+if ($gccBin) { Write-Host "gcc: $(Join-Path $gccBin 'gcc.exe')" } else { Write-Host "gcc: (未加入 PATH)" }
 Set-Location $root
 pnpm tauri build
 Write-Host "Installer output is under target\release\bundle"

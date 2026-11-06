@@ -644,12 +644,15 @@ fn load_at(path: &Path) -> Result<Settings, String> {
     if !path.exists() {
         let mut fresh = Settings::default();
         fresh.features_intro = "pending".into();
+        crate::secrets::fill(&mut fresh)?;
         return Ok(fresh);
     }
     match read_stored(path) {
         Ok(stored) => {
             let mut settings = stored.settings;
-            let mut changed = stored.migrated;
+            let imported = crate::secrets::import_plaintext(&settings)?;
+            crate::secrets::fill(&mut settings)?;
+            let mut changed = stored.migrated || imported;
             changed |= repair_imported_tabs(&mut settings);
             changed |= assign_tab_widths(&mut settings);
             if changed {
@@ -670,6 +673,8 @@ fn recover_at(path: &Path) -> Result<Settings, String> {
     };
     let mut settings = stored.settings;
     settings.schema = SETTINGS_SCHEMA;
+    let _imported = crate::secrets::import_plaintext(&settings)?;
+    crate::secrets::fill(&mut settings)?;
     save_at(path, &settings)?;
     settings.recovery_notice = "recovered-backup".into();
     Ok(settings)
@@ -690,6 +695,7 @@ fn save_at(path: &Path, settings: &Settings) -> Result<(), String> {
     let mut stored = settings.clone();
     stored.recovery_notice.clear();
     stored.schema = SETTINGS_SCHEMA;
+    crate::secrets::store_and_clear(&mut stored)?;
     let text = serde_json::to_string_pretty(&stored).map_err(|error| error.to_string())?;
     let tmp = sibling(path, ".tmp");
     {
@@ -1551,20 +1557,28 @@ mod tests {
     struct TempSettings {
         dir: std::path::PathBuf,
         path: std::path::PathBuf,
+        previous_secrets: Option<std::ffi::OsString>,
     }
 
     impl TempSettings {
         fn new() -> Self {
             let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
             let dir = std::env::temp_dir().join(format!("awegit-settings-{nanos}-{}", std::process::id()));
-            std::fs::create_dir_all(&dir).unwrap();
+            let secrets = dir.join("secrets");
+            std::fs::create_dir_all(&secrets).unwrap();
+            let previous_secrets = std::env::var_os("AWEGIT_SECRET_DIR");
+            unsafe { std::env::set_var("AWEGIT_SECRET_DIR", &secrets) };
             let path = dir.join("settings.json");
-            Self { dir, path }
+            Self { dir, path, previous_secrets }
         }
     }
 
     impl Drop for TempSettings {
         fn drop(&mut self) {
+            match self.previous_secrets.take() {
+                Some(value) => unsafe { std::env::set_var("AWEGIT_SECRET_DIR", value) },
+                None => unsafe { std::env::remove_var("AWEGIT_SECRET_DIR") },
+            }
             let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
@@ -1621,7 +1635,7 @@ mod tests {
         assert!(loaded.recovery_notice.is_empty());
         let disk = std::fs::read_to_string(&dir.path).unwrap();
         assert!(disk.contains("\"schema\": 1") || disk.contains("\"schema\":1"), "{disk}");
-        assert!(disk.contains("abc"));
+        assert!(!disk.contains("abc"), "{disk}");
         let again = load_at(&dir.path).unwrap();
         assert!(again.recovery_notice.is_empty());
         assert_eq!(again.github_token, "abc");
@@ -1659,6 +1673,40 @@ mod tests {
         save_at(&dir.path, &settings).unwrap();
         let text = std::fs::read_to_string(&dir.path).unwrap();
         assert!(!text.contains("recoveryNotice"), "{text}");
-        assert!(text.contains("secret"));
+        assert!(!text.contains("secret"), "{text}");
+        assert_eq!(load_at(&dir.path).unwrap().github_token, "secret");
+    }
+
+    #[test]
+    fn settings_account_tokens_leave_the_file_and_a_clear_removes_the_vault_entry() {
+        let dir = TempSettings::new();
+        let mut settings = sample_settings();
+        settings.proxy_password = "proxy-secret".into();
+        settings.ai_api_key = "ai-secret".into();
+        settings.accounts.push(Account {
+            id: "gh-1".into(),
+            forge: "github".into(),
+            label: "me".into(),
+            token: "acct-secret".into(),
+            host: String::new(),
+            client_id: String::new(),
+        });
+        save_at(&dir.path, &settings).unwrap();
+        let disk = std::fs::read_to_string(&dir.path).unwrap();
+        assert!(!disk.contains("secret"), "{disk}");
+        let loaded = load_at(&dir.path).unwrap();
+        assert_eq!(loaded.github_token, "secret");
+        assert_eq!(loaded.proxy_password, "proxy-secret");
+        assert_eq!(loaded.ai_api_key, "ai-secret");
+        assert_eq!(loaded.accounts[0].token, "acct-secret");
+        let mut cleared = loaded;
+        cleared.github_token.clear();
+        cleared.accounts[0].token.clear();
+        save_at(&dir.path, &cleared).unwrap();
+        let again = load_at(&dir.path).unwrap();
+        assert!(again.github_token.is_empty());
+        assert!(again.accounts[0].token.is_empty());
+        assert_eq!(again.proxy_password, "proxy-secret");
+        assert_eq!(again.ai_api_key, "ai-secret");
     }
 }

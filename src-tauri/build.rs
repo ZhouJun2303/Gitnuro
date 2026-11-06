@@ -80,6 +80,8 @@ fn main() {
             "open_window",
             "reveal_commit",
             "save_revision",
+            "reveal_path",
+            "git_runtime",
         ]),
     );
     tauri_build::try_build(attributes).expect("failed to run tauri-build");

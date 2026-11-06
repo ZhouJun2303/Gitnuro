@@ -4,7 +4,7 @@ import { invoke } from "../perf";
 import { listen } from "@tauri-apps/api/event";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { commits, diffs, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
@@ -12,7 +12,7 @@ import { featuresPageUrl } from "../featuresPage";
 import { resolveLocale, translate } from "../i18n";
 import { isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
-import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type BlameLine,
@@ -32,6 +32,8 @@ import {
     type StatusFile,
     type StatusSnapshot,
     type Suggestion,
+    type GitRuntime,
+    type RepoScan,
     type UpdateNotice,
     workspaceTabWidth,
   } from "../status";
@@ -488,7 +490,13 @@ export class ShellState {
   scannedRepos = $state<string[]>([]);
 
 
+  repoScanTruncated = $state(false);
+
+
   repoScanning = $state(false);
+
+
+  gitRuntime = $state<GitRuntime | null>(null);
 
 
   repoScanToken = 0;
@@ -1851,13 +1859,13 @@ export class ShellState {
   diffRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)));
 
 
-  diffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.diffLines } : windowSlice(this.diffLines, this.diffTop, this.diffRowHeight, 80, this.windowRows(this.diffHeight, this.diffRowHeight)));
+  diffWindow = $derived(virtualLines(this.diffLines, this.diffTop, this.diffRowHeight, this.windowRows(this.diffHeight, this.diffRowHeight), this.settings.diffWordWrap));
 
 
   blameWindow = $derived(windowSlice(this.blameLines ?? [], this.blameTop, this.diffRowHeight, 80, this.windowRows(this.diffHeight, this.diffRowHeight)));
 
 
-  historyDiffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.historyDiff?.lines ?? [] } : windowSlice(this.historyDiff?.lines ?? [], this.historyDiffTop, this.diffRowHeight, 80, this.windowRows(this.historyDetailHeight, this.diffRowHeight)));
+  historyDiffWindow = $derived(virtualLines(this.historyDiff?.lines ?? [], this.historyDiffTop, this.diffRowHeight, this.windowRows(this.historyDetailHeight, this.diffRowHeight), this.settings.diffWordWrap));
 
 
   splitRows = $derived(this.settings.diffStyle === "split" ? splitDiff(this.diffLines) : []);
@@ -1866,14 +1874,7 @@ export class ShellState {
   splitRowHeight = $derived(this.diffRowHeight);
 
 
-  splitWindow = $derived.by(() => {
-    if (this.settings.diffWordWrap) return { start: 0, rows: this.splitRows, after: 0 };
-    const count = Math.ceil(Math.max(this.diffHeight, 600) / this.splitRowHeight) + 36;
-    if (this.splitRows.length <= count + 40) return { start: 0, rows: this.splitRows, after: 0 };
-    const start = Math.min(Math.max(0, Math.floor(this.diffTop / this.splitRowHeight) - 16), Math.max(0, this.splitRows.length - count));
-    const rows = this.splitRows.slice(start, start + count);
-    return { start, rows, after: this.splitRows.length - start - rows.length };
-  });
+  splitWindow = $derived(virtualSplit(this.splitRows, this.diffTop, this.splitRowHeight, this.diffHeight, this.settings.diffWordWrap));
 
 
   splitColumns = $derived.by(() => {
@@ -2413,6 +2414,8 @@ export class ShellState {
         this.mode = "error";
         this.loadError = "";
       }
+      const runtime = await invoke<GitRuntime>("git_runtime").catch(() => null);
+      if (runtime) this.gitRuntime = runtime;
       await applyLabScene(this, item);
       this.labSceneId = item.id;
     } catch (error) {
@@ -2503,6 +2506,15 @@ export class ShellState {
 
   message(error: unknown) {
     const raw = (error instanceof Error ? error.message : String(error)).trim();
+    const coded = /^awegit:([a-z]+):(.*)$/i.exec(raw);
+    if (coded) {
+      const code = (coded[1] ?? "").toLowerCase();
+      const detail = (coded[2] ?? "").trim();
+      const known = code === "network" || code === "auth" || code === "update" || code === "git" || code === "cancelled" || code === "settings";
+      const sentence = known ? this.tr(`error.${code}`) : raw;
+      return detail && known ? `${sentence} ${detail}` : sentence;
+    }
+    if (/^could not start git/i.test(raw)) return this.tr("chrome.gitMissing");
     const open = /^could not open repository at (.+)$/i.exec(raw);
     if (open) return this.tr("dialog.errorOpenRepo", { path: open[1] ?? "" });
     if (/^not a git repository/i.test(raw)) return this.tr("dialog.errorNotRepo");
@@ -3298,7 +3310,7 @@ export class ShellState {
     this.updatePercent = null;
     this.updateMessage = this.tr("chrome.updateDownloading");
     try {
-      await invoke("download_update", { url: notice.downloadUrl });
+      await invoke("download_update", { url: notice.downloadUrl, sha256: notice.sha256 ?? "" });
       this.updatePhase = "ready";
       this.updatePercent = 100;
       this.updateMessage = this.tr("chrome.updateStarted");
@@ -5162,16 +5174,21 @@ export class ShellState {
     if (!this.backend()) return;
     const token = ++this.repoScanToken;
     this.repoScanning = true;
+    this.repoScanTruncated = false;
     const found: string[] = [];
+    let truncated = false;
     for (const root of this.sourceRootList()) {
       try {
-        found.push(...(await invoke<string[]>("scan_repositories", { root: root.path, depth: this.settings.scanDepth || 5 })));
+        const hit = await invoke<RepoScan>("scan_repositories", { root: root.path, depth: this.settings.scanDepth || 5 });
+        found.push(...(hit.paths ?? []));
+        if (hit.truncated) truncated = true;
       } catch {
         /* a missing source folder should not hide the ones that can be read */
       }
     }
     if (token !== this.repoScanToken) return;
     this.scannedRepos = this.dedupeRepos(found);
+    this.repoScanTruncated = truncated;
     this.repoScanning = false;
   }
 
@@ -5883,6 +5900,12 @@ export class ShellState {
     this.mode = "loading";
     this.selectedPath = null;
     void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
+    void invoke<GitRuntime>("git_runtime").then((value) => {
+      this.gitRuntime = value;
+      if (this.actionError) return;
+      if (!value.version) this.actionError = this.tr("chrome.gitMissing");
+      else if (!value.minimum) this.actionError = this.tr("chrome.gitOld", { version: value.version });
+    }).catch(() => {});
     invoke<UpdateNotice | null>("check_for_update")
     .then((value) => {
     this.pendingUpdate = value;

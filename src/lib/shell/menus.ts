@@ -1,5 +1,5 @@
 import { invoke } from "../perf";
-import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { shortcut, shortcutLabel, typing } from "../keys";
 import {
     badge,
@@ -83,7 +83,7 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { label: shell.tr("menu.lfsLock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsLock", path: file.path }) },
       { label: shell.tr("menu.lfsUnlock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsUnlock", path: file.path }) },
       { sep: true, label: "" },
-      { label: shell.tr("menu.reveal"), disabled: locked, run: () => revealItemInDir(shell.fullPath(file.path)) },
+      { label: shell.tr("menu.reveal"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file.path)) },
       { label: shell.tr("menu.openFile"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file.path)) },
       { label: shell.tr("menu.copyPath"), run: () => shell.copyText(shell.fullPath(file.path)) },
       { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(file.path) },
@@ -385,7 +385,7 @@ export function revisionFileMenu(shell: ShellState, file: string): MenuItem[] {
     return [
       { label: shell.tr("menu.open"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       external,
-      { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void revealItemInDir(shell.fullPath(file)) },
+      { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       {
         label: shell.tr("menu.resetFileTo"),
         disabled: locked,
@@ -411,7 +411,7 @@ export function historyFileMenu(shell: ShellState, commit: CommitRow): MenuItem[
       { label: shell.tr("menu.openSeparate"), disabled: locked, run: () => void invoke("open_window", { view: "blob", repo: shell.repoPath(), file, rev: commit.id }) },
       { label: shell.tr("menu.revealMain"), disabled: locked, run: () => void invoke("reveal_commit", { repo: shell.repoPath(), id: commit.id }).catch((error) => (shell.actionError = shell.message(error))) },
       { label: shell.tr("menu.open"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
-      { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void revealItemInDir(shell.fullPath(file)) },
+      { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       { label: shell.tr("menu.resetAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.resetAtCommit"), shell.tr("dialog.restoreFileBody", { name: file }), () => void shell.mutate({ action: "restoreFile", rev: commit.id, file })) },
       { label: shell.tr("menu.saveAs"), disabled: locked, run: () => void invoke("save_revision", { path: shell.repoPath(), rev: commit.id, file }).catch((error) => (shell.actionError = shell.message(error))) },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },

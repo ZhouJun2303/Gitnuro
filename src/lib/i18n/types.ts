@@ -117,6 +117,11 @@ export type Messages = {
     selectCommitFile: string;
     binary: string;
     truncated: string;
+    scanTruncated: string;
+    gitSummary: string;
+    gitMissing: string;
+    gitOld: string;
+    gitNoLfs: string;
     largeFileHint: string;
     loadDiff: string;
     openRepo: string;
@@ -683,5 +688,13 @@ export type Messages = {
     saveAuthorRepo: string;
     settingsSaveHint: string;
     done: string;
+  };
+  error: {
+    network: string;
+    auth: string;
+    update: string;
+    git: string;
+    cancelled: string;
+    settings: string;
   };
 };

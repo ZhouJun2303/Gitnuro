@@ -252,6 +252,7 @@ async function fillSurface(shell: ShellState, id: string) {
       downloadUrl: "https://example.com/awegit",
       notes: lines(FILL, "实验室更新说明"),
       installable: false,
+      sha256: "",
     };
     shell.openCommandLog("update");
     return;

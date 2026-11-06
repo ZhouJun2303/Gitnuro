@@ -370,6 +370,20 @@ export type UpdateNotice = {
   downloadUrl: string;
   notes: string;
   installable: boolean;
+  sha256?: string;
+};
+
+export type GitRuntime = {
+  program: string;
+  version: string;
+  mergeTree: boolean;
+  lfs: boolean;
+  minimum: boolean;
+};
+
+export type RepoScan = {
+  paths: string[];
+  truncated: boolean;
 };
 
 export type Suggestion = {

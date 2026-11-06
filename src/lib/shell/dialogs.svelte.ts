@@ -1,7 +1,7 @@
 import { onMount, tick } from "svelte";
 import { invoke } from "../perf";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { commits, diffs, sampleConflictText, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
 import {
@@ -924,8 +924,9 @@ export async function browseSourceRoot(shell: ShellState) {
   }
 
 export async function openLocal(shell: ShellState, path: string) {
+    if (!shell.backend()) return;
     try {
-      await openPath(path);
+      await invoke("reveal_path", { path });
     } catch (error) {
       shell.actionError = shell.message(error);
     }
