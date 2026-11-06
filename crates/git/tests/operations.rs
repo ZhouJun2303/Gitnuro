@@ -1108,7 +1108,9 @@ fn checkout_keeps_the_autostash_when_restoring_conflicts() {
     let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
     assert!(text.contains("<<<<<<<"), "{text}");
     let stashes = repository_refs(&repo.path).unwrap().stashes;
-    assert!(stashes.iter().any(|stash| stash.summary.contains("autostash")), "{stashes:?}");
+    let stash = stashes.iter().find(|stash| stash.summary.contains("autostash")).expect("autostash");
+    assert!(stash.summary.contains("checkout topic"), "{}", stash.summary);
+    assert!(stash.summary.contains("a.txt"), "{}", stash.summary);
 }
 
 #[test]
@@ -1134,10 +1136,41 @@ fn conflicting_merge_keeps_a_backup() {
     .is_err());
     let stashes = repository_refs(&repo.path).unwrap().stashes;
     let backup = stashes.iter().find(|stash| stash.summary.contains("conflict backup")).expect("conflict backup");
+    assert!(backup.summary.contains("merge topic"), "{}", backup.summary);
+    assert!(backup.summary.contains("a.txt"), "{}", backup.summary);
     assert_eq!(
         repo.output(&["show", &format!("{}:a.txt", backup.name)]).replace("\r\n", "\n"),
         "local\n"
     );
+}
+
+#[test]
+fn native_autostash_says_what_and_why() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    fs::write(repo.path.join("a.txt"), "local\n").unwrap();
+    perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: true,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .unwrap();
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    let stash = stashes
+        .iter()
+        .find(|stash| stash.summary.contains("AweGit autostash"))
+        .unwrap_or_else(|| panic!("no described autostash in {stashes:?}"));
+    assert!(stash.summary.contains("merge side"), "{}", stash.summary);
+    assert!(stash.summary.contains("a.txt"), "{}", stash.summary);
 }
 
 #[test]

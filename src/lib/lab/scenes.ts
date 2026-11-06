@@ -148,6 +148,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "text-merge-many", group: "叠层", title: "多块冲突", repo: "conflict", ready: ".merge-count" }),
   scene({ id: "file-merge", group: "叠层", title: "二进制合并", repo: "conflict", ready: "[data-layer=\"text-merge\"]" }),
   scene({ id: "confirm", group: "叠层", title: "确认框", repo: "full", ready: "[data-layer=\"confirm\"]" }),
+  scene({ id: "stash-apply-confirm", group: "叠层", title: "应用贮藏确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "menu", group: "叠层", title: "菜单", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "prefs-git", group: "弹窗", title: "偏好设置 · Git", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-commit", group: "弹窗", title: "偏好设置 · 提交", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),

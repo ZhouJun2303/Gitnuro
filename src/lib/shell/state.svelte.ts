@@ -3138,6 +3138,14 @@ export class ShellState {
   }
 
 
+  confirmApplyStash(name: string, summary: string) {
+    const note = this.settings.applyStashDelete
+      ? this.tr("dialog.applyStashDeleteNote")
+      : this.tr("dialog.applyStashKeepNote");
+    this.ask(this.tr("dialog.applyStash"), `${this.tr("dialog.applyStashBody", { summary })} ${note}`, () => void this.applyStash(name));
+  }
+
+
 
   adoptSettings(value: Settings, resetHistory = false) {
     this.settings = this.withSourceRoots({

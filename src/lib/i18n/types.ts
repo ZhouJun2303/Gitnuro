@@ -538,6 +538,9 @@ export type Messages = {
     checkoutStashMessage: string;
     checkoutStashed: string;
     applyStash: string;
+    applyStashBody: string;
+    applyStashKeepNote: string;
+    applyStashDeleteNote: string;
     spaceHint: string;
     clientId: string;
     token: string;

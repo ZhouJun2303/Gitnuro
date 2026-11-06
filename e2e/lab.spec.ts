@@ -318,6 +318,13 @@ test("a write blocked by local changes offers stash and retry", async ({ page })
   await expect(page.locator('.identity-floor[data-layer="error"]')).toContainText("Stash and retry");
 });
 
+test("applying a stash asks before it touches the work tree", async ({ page }) => {
+  await openLabScene(page, "stash-apply-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("working tree");
+  await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
 test("commit patch renders each hunk header once", async ({ page }) => {
   await openLabScene(page, "commit", ".detail");
   await page.locator(".patch-toggle").first().click();

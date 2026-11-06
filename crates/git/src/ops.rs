@@ -433,22 +433,53 @@ pub fn perform(repo: &Path, mutation: Mutation) -> Result<String, Error> {
     apply(repo, mutation).map(|_| String::new())
 }
 
+/// Full object ids make stash messages hard to scan; the UI already shows them.
+fn short_rev(rev: &str) -> String {
+    let rev = rev.trim();
+    if matches!(rev.len(), 40 | 64) && rev.chars().all(|c| c.is_ascii_hexdigit()) {
+        rev[..7].to_string()
+    } else {
+        rev.to_string()
+    }
+}
+
+fn stash_label(verb: &str, name: &str) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        verb.to_string()
+    } else {
+        format!("{verb} {name}")
+    }
+}
+
+/// `abort merge`, not a bare `abort`, for a stash restored by an in-progress operation.
+fn flow_label(repo: &Path, verb: &str) -> String {
+    let kind = match in_progress(repo) {
+        Ok(Some(InProgress::Merge)) => "merge",
+        Ok(Some(InProgress::Rebase)) => "rebase",
+        Ok(Some(InProgress::CherryPick)) => "cherry-pick",
+        Ok(Some(InProgress::Revert)) => "revert",
+        _ => return verb.to_string(),
+    };
+    format!("{verb} {kind}")
+}
+
 /// Operations that can leave unmerged paths behind. Each one gets a conflict backup.
-fn conflict_label(mutation: &Mutation) -> Option<&'static str> {
+fn conflict_label(repo: &Path, mutation: &Mutation) -> Option<String> {
     Some(match mutation {
-        Mutation::Pull { .. } => "pull",
-        Mutation::PullRef { .. } => "pull",
-        Mutation::Merge { .. } => "merge",
-        Mutation::Rebase { .. } => "rebase",
-        Mutation::RebaseInteractive { .. } => "rebase",
-        Mutation::Continue { .. } => "continue",
-        Mutation::CherryPick { .. } => "cherry-pick",
-        Mutation::Revert { .. } => "revert",
-        Mutation::StashPop { .. } => "stash pop",
-        Mutation::StashApply { .. } => "stash apply",
-        Mutation::StashBranch { .. } => "stash branch",
-        Mutation::Squash { .. } => "squash",
-        Mutation::GitFlowFinish { .. } => "git flow finish",
+        Mutation::Pull { rebase, .. } => if *rebase { "pull --rebase" } else { "pull" }.to_string(),
+        Mutation::PullRef { remote, branch, .. } => format!("pull {remote}/{branch}"),
+        Mutation::Merge { name, .. } => format!("merge {name}"),
+        Mutation::Rebase { onto, .. } => format!("rebase onto {}", short_rev(onto)),
+        Mutation::RebaseInteractive { onto, .. } => format!("rebase onto {}", short_rev(onto)),
+        Mutation::Continue { .. } => flow_label(repo, "continue"),
+        Mutation::CherryPick { rev, .. } => format!("cherry-pick {}", short_rev(rev)),
+        Mutation::Revert { rev } => format!("revert {}", short_rev(rev)),
+        Mutation::StashPop { name } => stash_label("stash pop", name),
+        Mutation::StashApply { name } => stash_label("stash apply", name),
+        Mutation::StashBranch { branch, .. } => format!("stash branch {branch}"),
+        Mutation::Squash { from, to, .. } => format!("squash {}..{}", short_rev(from), short_rev(to)),
+        Mutation::GitFlowFinish { name, kind } => format!("git flow {kind} finish {name}"),
         _ => return None,
     })
 }
@@ -461,7 +492,7 @@ fn with_conflict_backup(repo: &Path, label: &str, action: impl FnOnce() -> Resul
     let result = action();
     if let Some(hash) = snapshot {
         if has_unmerged(repo) {
-            let message = format!("AweGit conflict backup: {label}");
+            let message = stash_message("AweGit conflict backup", label, stash_files(repo, &hash));
             let _ = run(repo, &["stash", "store", "-m", &message, &hash]);
         }
     }
@@ -472,11 +503,11 @@ fn with_conflict_backup(repo: &Path, label: &str, action: impl FnOnce() -> Resul
 /// back. If the action fails the stash is still restored; if restoring it fails,
 /// the stash entry stays in the list and its error is returned.
 fn with_autostash(repo: &Path, label: &str, action: impl FnOnce() -> Result<(), Error>) -> Result<(), Error> {
-    let dirty = run(repo, &["status", "--porcelain"])?;
-    if String::from_utf8_lossy(&dirty.stdout).trim().is_empty() {
+    let paths = changed_paths(repo)?;
+    if paths.is_empty() {
         return action();
     }
-    let message = format!("AweGit autostash: {label}");
+    let message = stash_message("AweGit autostash", label, Some(describe_paths(&paths)));
     run(repo, &["stash", "push", "--include-untracked", "-m", &message])?;
     let result = action();
     let restored = run(repo, &["stash", "pop"]);
@@ -484,6 +515,109 @@ fn with_autostash(repo: &Path, label: &str, action: impl FnOnce() -> Result<(), 
         (Ok(()), Ok(_)) => Ok(()),
         (Ok(()), Err(error)) => Err(error),
         (Err(error), _) => Err(error),
+    }
+}
+
+/// Operations handed `--autostash` let Git make the stash, and Git names it just
+/// `autostash`. Any entry still in the list afterwards gets the same wording as ours.
+fn with_native_autostash(
+    repo: &Path,
+    enabled: bool,
+    label: &str,
+    action: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    if !enabled {
+        return action();
+    }
+    let before = stash_hashes(repo);
+    let result = action();
+    describe_native_autostashes(repo, &before, label);
+    result
+}
+
+fn describe_native_autostashes(repo: &Path, before: &HashSet<String>, label: &str) {
+    let Ok(output) = run(repo, &["stash", "list", "--format=%H%x09%gs"]) else { return };
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some((hash, summary)) = line.split_once('\t') else { continue };
+        if before.contains(hash) || summary != "autostash" {
+            continue;
+        }
+        let message = stash_message("AweGit autostash", label, stash_files(repo, hash));
+        rename_stash(repo, hash, &message);
+    }
+}
+
+fn rename_stash(repo: &Path, hash: &str, message: &str) {
+    let Ok(listed) = run(repo, &["stash", "list", "--format=%H"]) else { return };
+    let index = String::from_utf8_lossy(&listed.stdout)
+        .lines()
+        .position(|line| line.trim() == hash);
+    let Some(index) = index else { return };
+    if run(repo, &["stash", "store", "-m", message, hash]).is_err() {
+        return;
+    }
+    let _ = run(repo, &["stash", "drop", &format!("stash@{{{}}}", index + 1)]);
+}
+
+fn stash_hashes(repo: &Path) -> HashSet<String> {
+    run(repo, &["stash", "list", "--format=%H"])
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Files held by a stash commit, ready for a stash message.
+fn stash_files(repo: &Path, hash: &str) -> Option<String> {
+    let output = run(repo, &["stash", "show", "--name-only", "-z", hash]).ok()?;
+    let paths: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .split('\0')
+        .filter(|path| !path.is_empty())
+        .map(str::to_string)
+        .collect();
+    (!paths.is_empty()).then(|| describe_paths(&paths))
+}
+
+/// Work-tree paths from `status --porcelain -z`, in the order Git prints them.
+fn changed_paths(repo: &Path) -> Result<Vec<String>, Error> {
+    let output = run(repo, &["status", "--porcelain", "-z", "--untracked-files=normal"])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut entries = text.split('\0');
+    let mut paths = Vec::new();
+    while let Some(entry) = entries.next() {
+        if entry.len() < 4 {
+            continue;
+        }
+        let status = &entry[..2];
+        paths.push(entry[3..].to_string());
+        if status.contains(['R', 'C']) {
+            // A rename or copy prints its source path as the next entry.
+            entries.next();
+        }
+    }
+    Ok(paths)
+}
+
+fn describe_paths(paths: &[String]) -> String {
+    const SHOWN: usize = 3;
+    let shown = paths.iter().take(SHOWN).map(String::as_str).collect::<Vec<_>>().join(", ");
+    match paths.len() {
+        0 => String::new(),
+        1 => format!("1 file: {shown}"),
+        count if count > SHOWN => format!("{count} files: {shown}, +{}", count - SHOWN),
+        count => format!("{count} files: {shown}"),
+    }
+}
+
+fn stash_message(prefix: &str, label: &str, files: Option<String>) -> String {
+    match files {
+        Some(files) => format!("{prefix}: {label} ({files})"),
+        None => format!("{prefix}: {label}"),
     }
 }
 
@@ -506,8 +640,8 @@ fn has_unmerged(repo: &Path) -> bool {
 }
 
 fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
-    match conflict_label(&mutation) {
-        Some(label) => with_conflict_backup(repo, label, || apply_unguarded(repo, mutation)),
+    match conflict_label(repo, &mutation) {
+        Some(label) => with_conflict_backup(repo, &label, || apply_unguarded(repo, mutation)),
         None => apply_unguarded(repo, mutation),
     }
 }
@@ -515,7 +649,10 @@ fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
 fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
     match mutation {
         Mutation::Fetch { remote, prune, tags } => fetch(repo, remote, prune, tags),
-        Mutation::Pull { rebase, autostash } => pull(repo, rebase, autostash),
+        Mutation::Pull { rebase, autostash } => {
+            let label = if rebase { "pull --rebase" } else { "pull" };
+            with_native_autostash(repo, autostash, label, || pull(repo, rebase, autostash))
+        }
         Mutation::Push {
             remote,
             set_upstream,
@@ -533,7 +670,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         }
         Mutation::StashPatch { .. } => Ok(()),
         Mutation::StashPaths { files, message, include_untracked } => stash_paths(repo, &files, &message, include_untracked),
-        Mutation::Checkout { name } => with_autostash(repo, "checkout", || {
+        Mutation::Checkout { name } => with_autostash(repo, &format!("checkout {name}"), || {
             run(repo, &["checkout", check_rev(&name)?]).map(|_| ())
         }),
         Mutation::CreateBranch { name, start } => create_branch(repo, &name, start.as_deref()),
@@ -547,16 +684,25 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             autostash,
             summary,
             description,
-        } => merge(repo, &name, squash, no_ff, autostash, &summary, &description),
-        Mutation::Rebase { onto, autostash } => rebase_onto(repo, &onto, autostash),
-        Mutation::RebaseInteractive { onto, drop, steps, autostash, update_refs } => {
-            rebase_interactive(repo, &onto, &drop, &steps, autostash, update_refs)
+        } => {
+            let label = if squash { format!("squash-merge {name}") } else { format!("merge {name}") };
+            with_native_autostash(repo, autostash, &label, || merge(repo, &name, squash, no_ff, autostash, &summary, &description))
         }
-        Mutation::Abort => abort(repo),
-        Mutation::Continue { message } => continue_with(repo, &message),
-        Mutation::Skip => flow(repo, "skip"),
+        Mutation::Rebase { onto, autostash } => {
+            let label = format!("rebase onto {}", short_rev(&onto));
+            with_native_autostash(repo, autostash, &label, || rebase_onto(repo, &onto, autostash))
+        }
+        Mutation::RebaseInteractive { onto, drop, steps, autostash, update_refs } => {
+            let label = format!("rebase onto {}", short_rev(&onto));
+            with_native_autostash(repo, autostash, &label, || {
+                rebase_interactive(repo, &onto, &drop, &steps, autostash, update_refs)
+            })
+        }
+        Mutation::Abort => with_native_autostash(repo, true, &flow_label(repo, "abort"), || abort(repo)),
+        Mutation::Continue { message } => with_native_autostash(repo, true, &flow_label(repo, "continue"), || continue_with(repo, &message)),
+        Mutation::Skip => with_native_autostash(repo, true, &flow_label(repo, "skip"), || flow(repo, "skip")),
         Mutation::Reset { rev, mode } => reset(repo, &rev, mode),
-        Mutation::CherryPick { rev, record } => with_autostash(repo, "cherry-pick", || {
+        Mutation::CherryPick { rev, record } => with_autostash(repo, &format!("cherry-pick {}", short_rev(&rev)), || {
             let rev = check_rev(&rev)?;
             if record {
                 with_editor(repo, &["cherry-pick", "-x", "--no-edit", rev])
@@ -565,9 +711,9 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             }
         }),
         Mutation::Revert { rev } => {
-            with_autostash(repo, "revert", || with_editor(repo, &["revert", "--no-edit", check_rev(&rev)?]))
+            with_autostash(repo, &format!("revert {}", short_rev(&rev)), || with_editor(repo, &["revert", "--no-edit", check_rev(&rev)?]))
         }
-        Mutation::Reword { rev, summary } => with_autostash(repo, "reword", || reword(repo, &rev, &summary)),
+        Mutation::Reword { rev, summary } => with_autostash(repo, &format!("reword {}", short_rev(&rev)), || reword(repo, &rev, &summary)),
         Mutation::Tag { name, rev, message } => tag(repo, &name, &rev, &message),
         Mutation::DeleteTag { name } => run(repo, &["tag", "-d", check_name(&name)?]).map(|_| ()),
         Mutation::DeleteRemoteTag { remote, name } => {
@@ -625,7 +771,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::DeleteRemoteBranch { remote, branch } => {
             run(repo, &["push", check_name(&remote)?, "--delete", check_name(&branch)?]).map(|_| ())
         }
-        Mutation::CheckoutRemote { remote, branch } => with_autostash(repo, "checkout", || checkout_remote(repo, &remote, &branch)),
+        Mutation::CheckoutRemote { remote, branch } => with_autostash(repo, &format!("checkout {remote}/{branch}"), || checkout_remote(repo, &remote, &branch)),
         Mutation::PushRef {
             remote,
             branch,
@@ -651,7 +797,10 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             branch,
             rebase,
             autostash,
-        } => pull_ref(repo, &remote, &branch, rebase, autostash),
+        } => {
+            let label = format!("pull {remote}/{branch}");
+            with_native_autostash(repo, autostash, &label, || pull_ref(repo, &remote, &branch, rebase, autostash))
+        }
         Mutation::Discard { file } => discard(repo, &file),
         Mutation::DiscardPaths { files } => discard_paths(repo, &files),
         Mutation::Delete { file } => delete_path(repo, &file),
@@ -689,9 +838,9 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             hotfix,
             support,
         } => git_flow_init(repo, &master, &develop, &feature, &release, &hotfix, &support),
-        Mutation::GitFlowStart { name, kind } => with_autostash(repo, "git flow", || git_flow_start(repo, &name, &kind)),
-        Mutation::GitFlowFinish { name, kind } => with_autostash(repo, "git flow", || git_flow_finish(repo, &name, &kind)),
-        Mutation::Squash { from, to, summary } => with_autostash(repo, "squash", || squash(repo, &from, &to, &summary)),
+        Mutation::GitFlowStart { name, kind } => with_autostash(repo, &format!("git flow {kind} start {name}"), || git_flow_start(repo, &name, &kind)),
+        Mutation::GitFlowFinish { name, kind } => with_autostash(repo, &format!("git flow {kind} finish {name}"), || git_flow_finish(repo, &name, &kind)),
+        Mutation::Squash { from, to, summary } => with_autostash(repo, &format!("squash {}..{}", short_rev(&from), short_rev(&to)), || squash(repo, &from, &to, &summary)),
         Mutation::Clone { url, destination } => clone_repo(&url, &destination),
         Mutation::Init { destination } => init_repo(&destination),
         Mutation::LfsPull => lfs(repo, &["lfs", "pull"]),

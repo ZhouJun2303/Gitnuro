@@ -287,6 +287,11 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.confirmAsk = { title: "删除分支", body: "确认删除 topic？", run: () => {} };
     return;
   }
+  if (id === "stash-apply-confirm") {
+    const stash = shell.refs?.stashes[0];
+    shell.confirmApplyStash(stash?.name ?? "stash@{0}", stash?.summary ?? "WIP before the palette");
+    return;
+  }
   if (id === "menu") {
     shell.menu = {
       x: 72,
