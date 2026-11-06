@@ -98,6 +98,7 @@ export type CommitRow = {
   parents: string[];
   files: FileChange[];
   unpushed?: boolean;
+  remoteOnly?: boolean;
 };
 
 const kinds = ["M", "A", "D"] as const;

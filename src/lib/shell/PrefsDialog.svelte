@@ -58,10 +58,8 @@
             <label class="check"><input type="checkbox" bind:checked={shell.settings.compactBranchLabels} /> {shell.tr("dialog.compactLabels")}</label>
             <label class="pref-inline">{shell.tr("dialog.errorLogDays")} <input type="number" min="1" max="90" bind:value={shell.settings.errorLogDays} onchange={() => { shell.settings.errorLogDays = shell.errorDays(); shell.pruneErrorLog(); }} /></label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.fetchAllRemotes} /> {shell.tr("dialog.fetchAllRemotes")}</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.pullStash} /> {shell.tr("dialog.pullStash")}</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.pushAllTags} /> {shell.tr("dialog.pushAllTags")}</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.checkoutAfterCreate} /> {shell.tr("dialog.checkoutAfter")}</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.checkoutStash} /> {shell.tr("dialog.checkoutStash")}</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.stashIncludeUntracked} /> {shell.tr("dialog.includeUntracked")}</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.diffWordWrap} /> {shell.tr("dialog.wordWrap")}</label>
             <label class="pref-inline">{shell.tr("dialog.diffContext")} <input type="number" min="0" max="100" bind:value={shell.settings.diffContext} /></label>
@@ -70,7 +68,6 @@
             <label class="pref-inline">{shell.tr("dialog.maxCommits")} <input type="number" min="50" max="100000" bind:value={shell.settings.maxCommits} onchange={() => { shell.settings.maxCommits = Math.min(100000, Math.max(50, Math.round(shell.settings.maxCommits || 500))); shell.logLimit = shell.settings.maxCommits; if (shell.mode === "live") void shell.loadContext(); }} /></label>
             <label class="pref-inline">{shell.tr("dialog.scanDepth")} <input type="number" min="1" max="20" bind:value={shell.settings.scanDepth} /></label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.workspaceShowTitle} /> {shell.tr("dialog.workspaceTitle")}</label>
-            <label class="check"><input type="checkbox" bind:checked={shell.settings.rebaseAutostash} /> {shell.tr("dialog.rebaseAutostash")}</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.rebaseUpdateRefs} /> {shell.tr("dialog.rebaseUpdateRefs")}</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.applyStashDelete} /> {shell.tr("dialog.applyStashDelete")}</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.pushTagOnCreate} /> {shell.tr("dialog.pushTagOnCreate")}</label>
@@ -262,7 +259,6 @@
             <div class="pref-section">
               <div class="k">{shell.tr("dialog.merge")}</div>
               <label class="check"><input type="checkbox" bind:checked={shell.settings.mergeNoFf} /> {shell.tr("dialog.mergeNoFfPref")}</label>
-              <label class="check"><input type="checkbox" bind:checked={shell.settings.mergeAutostash} /> {shell.tr("dialog.mergeAutostashPref")}</label>
               <label class="check"><input type="checkbox" bind:checked={shell.settings.signCommits} /> {shell.tr("dialog.signCommits")}</label>
               <label class="check"><input type="checkbox" bind:checked={shell.settings.signOff} onchange={() => (shell.signOff = shell.settings.signOff)} /> {shell.tr("dialog.signOffDefault")}</label>
               <label>{shell.tr("dialog.signOffFormat")} <input bind:value={shell.settings.signOffFormat} /></label>

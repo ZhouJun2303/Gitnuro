@@ -1,7 +1,9 @@
 mod ai;
 mod forge;
+mod http;
 mod lab;
 mod perf;
+mod secrets;
 mod settings;
 mod tools;
 mod updates;
@@ -11,7 +13,7 @@ pub use lab::run_lab;
 use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -22,9 +24,35 @@ use tauri::{Emitter, Manager};
 static FAKE_IGNORE: AtomicBool = AtomicBool::new(true);
 static FAKE_IGNORE_KNOWN: AtomicBool = AtomicBool::new(false);
 static SETTINGS_LANE: OnceLock<Sender<Job>> = OnceLock::new();
-fn repo_gates() -> &'static Mutex<HashMap<String, Arc<RepoGate>>> {
-    static GATES: OnceLock<Mutex<HashMap<String, Arc<RepoGate>>>> = OnceLock::new();
+static WATCH_RECOVERIES: AtomicU64 = AtomicU64::new(0);
+
+const GATE_KEEP: usize = 24;
+const GATE_IDLE_SECS: u64 = 15 * 60;
+
+struct GateSlot {
+    gate: Arc<RepoGate>,
+    used: Instant,
+}
+
+fn repo_gates() -> &'static Mutex<HashMap<String, GateSlot>> {
+    static GATES: OnceLock<Mutex<HashMap<String, GateSlot>>> = OnceLock::new();
     GATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Drop an idle gate only when the map is over the cap and nothing else holds it.
+fn idle_for_reap(age_secs: u64, strong: usize, len: usize) -> bool {
+    len > GATE_KEEP && age_secs >= GATE_IDLE_SECS && strong == 1
+}
+
+struct CachedFacts {
+    stamp: String,
+    full: bool,
+    facts: awegit_git::RepoFacts,
+}
+
+fn facts_cache() -> &'static Mutex<HashMap<String, CachedFacts>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, CachedFacts>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 const WATCH_QUIET: Duration = Duration::from_millis(300);
@@ -79,14 +107,21 @@ fn repo_turn(repo: &Path) -> RepoTurn {
     let key = awegit_git::repo_key(repo);
     let gate = {
         let mut map = repo_gates().lock().unwrap_or_else(|err| err.into_inner());
-        map.entry(key)
-            .or_insert_with(|| {
-                Arc::new(RepoGate {
-                    inner: Mutex::new(RepoTicket { next: 0, serving: 0 }),
-                    cv: Condvar::new(),
-                })
-            })
-            .clone()
+        let now = Instant::now();
+        let slot = map.entry(key).or_insert_with(|| GateSlot {
+            gate: Arc::new(RepoGate {
+                inner: Mutex::new(RepoTicket { next: 0, serving: 0 }),
+                cv: Condvar::new(),
+            }),
+            used: now,
+        });
+        slot.used = now;
+        let gate = Arc::clone(&slot.gate);
+        let len = map.len();
+        if len > GATE_KEEP {
+            map.retain(|_, slot| !idle_for_reap(slot.used.elapsed().as_secs(), Arc::strong_count(&slot.gate), len));
+        }
+        gate
     };
     let ticket = {
         let mut guard = gate.inner.lock().unwrap_or_else(|err| err.into_inner());
@@ -189,61 +224,14 @@ fn remember_fakeignore(enabled: bool) {
     FAKE_IGNORE_KNOWN.store(true, Ordering::Release);
 }
 
-fn compose_proxy(settings: &settings::Settings) -> String {
-    let host = settings.proxy_host.trim();
-    if settings.proxy_enabled && !host.is_empty() {
-        let scheme = if settings.proxy_type.eq_ignore_ascii_case("socks") {
-            "socks5"
-        } else {
-            "http"
-        };
-        let port = if settings.proxy_port > 0 {
-            format!(":{}", settings.proxy_port)
-        } else {
-            String::new()
-        };
-        let auth = if settings.proxy_user.trim().is_empty() {
-            String::new()
-        } else {
-            format!(
-                "{}:{}@",
-                encode_userinfo(settings.proxy_user.trim()),
-                encode_userinfo(&settings.proxy_password)
-            )
-        };
-        return format!("{scheme}://{auth}{host}{port}");
-    }
-    let proxy = settings.proxy.trim();
-    if proxy.is_empty() {
-        return String::new();
-    }
-    if settings.proxy_user.trim().is_empty() {
-        return proxy.to_string();
-    }
-    let user = encode_userinfo(settings.proxy_user.trim());
-    let password = encode_userinfo(&settings.proxy_password);
-    if let Some((scheme, rest)) = proxy.split_once("://") {
-        format!("{scheme}://{user}:{password}@{rest}")
-    } else {
-        format!("http://{user}:{password}@{proxy}")
-    }
-}
-
-fn encode_userinfo(value: &str) -> String {
-    let mut out = String::new();
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+fn net_options() -> http::NetOptions {
+    settings::load().map(|values| http::NetOptions::from_settings(&values)).unwrap_or_else(|_| http::NetOptions::direct())
 }
 
 fn apply_session() {
     let values = settings::load().unwrap_or_default();
     awegit_git::configure(awegit_git::Session {
-        proxy: compose_proxy(&values),
+        proxy: http::compose_proxy(&values),
         author_name: values.author_name.trim().to_string(),
         author_email: values.author_email.trim().to_string(),
         ssl_verify: values.ssl_verify,
@@ -340,9 +328,10 @@ fn commit_changes(
 }
 
 #[tauri::command]
-fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u32>, ignore_space: Option<bool>) -> Result<awegit_git::FileDiff, String> {
+fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u32>, ignore_space: Option<bool>, load: Option<bool>) -> Result<awegit_git::FileDiff, String> {
     let repo = repo_from(path)?;
-    awegit_git::file_diff_with(&repo, &file, staged, unified.unwrap_or(3), ignore_space.unwrap_or(false)).map_err(|error| error.to_string())
+    awegit_git::file_diff_with(&repo, &file, staged, unified.unwrap_or(3), ignore_space.unwrap_or(false), load.unwrap_or(false))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -521,6 +510,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::DiscardLine { .. } => "discardLine",
         awegit_git::Mutation::DiscardLines { .. } => "discardLines",
         awegit_git::Mutation::Resolve { .. } => "resolve",
+        awegit_git::Mutation::ResolvePaths { .. } => "resolvePaths",
         awegit_git::Mutation::RenameBranch { .. } => "renameBranch",
         awegit_git::Mutation::SetUpstream { .. } => "setUpstream",
         awegit_git::Mutation::DeleteRemoteBranch { .. } => "deleteRemoteBranch",
@@ -613,6 +603,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::DiscardPaths { files } => format!("files={}", files.len()),
         Mutation::DeletePaths { files } => format!("files={}", files.len()),
         Mutation::Resolve { file, side, text } => join([scrub(file), scrub(side), format!("bytes={}", text.len())]),
+        Mutation::ResolvePaths { files, side } => join([format!("files={}", files.len()), scrub(side)]),
         Mutation::RenameBranch { name, to } => join([scrub(name), scrub(to)]),
         Mutation::SetUpstream { branch, upstream } => join([scrub(branch), scrub(upstream)]),
         Mutation::DeleteRemoteBranch { remote, branch }
@@ -678,7 +669,8 @@ fn load_settings() -> Result<settings::Settings, String> {
 }
 
 #[tauri::command]
-fn save_settings(values: settings::Settings) -> Result<settings::Settings, String> {
+fn save_settings(mut values: settings::Settings) -> Result<settings::Settings, String> {
+    values.recovery_notice.clear();
     settings::save(&values)?;
     remember_fakeignore(values.fake_ignore);
     Ok(values)
@@ -730,20 +722,34 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
     let started = Instant::now();
     let mut watched = WatchSet::default();
     let git_dir = git_metadata_dir(&repo);
-    watch_worktree(&mut watcher, &repo, &mut watched)?;
+    watch_one(&mut watcher, &repo, RecursiveMode::NonRecursive, &mut watched)?;
     if let Some(git) = &git_dir {
         watch_git_metadata(&mut watcher, git, &mut watched);
+    }
+    let tracked = awegit_git::tracked_directories(&repo, 4_000);
+    if tracked.capped {
+        perf::write("WARN", "watch", "tracked directories capped at 4000");
+    }
+    for dir in tracked.paths {
+        if skipped_path(&dir) {
+            continue;
+        }
+        if let Err(error) = watch_one(&mut watcher, &dir, RecursiveMode::NonRecursive, &mut watched) {
+            perf::write("WARN", "watch", &error);
+        }
     }
     perf::write(
         "INFO",
         "watch",
         &format!(
-            "armed watches={} recursive={} {}ms",
+            "armed watches={} recursive={} recoveries={} {}ms",
             watched.exact.len(),
             watched.recursive.len(),
+            WATCH_RECOVERIES.load(Ordering::Relaxed),
             started.elapsed().as_millis()
         ),
     );
+    let _ = app.emit("repo-changed", RepoChange { refs: true });
     let shared = Arc::new(WatchSlot {
         watcher: Mutex::new(Some(watcher)),
     });
@@ -910,6 +916,7 @@ fn watch_one(watcher: &mut RecommendedWatcher, path: &Path, mode: RecursiveMode,
     Ok(())
 }
 
+#[allow(dead_code)]
 fn place_watches(watcher: &mut RecommendedWatcher, nodes: &[WatchNode], index: usize, set: &mut WatchSet) -> Result<(), String> {
     let heavy = nodes[index].heavy;
     let path = nodes[index].path.clone();
@@ -926,6 +933,7 @@ fn place_watches(watcher: &mut RecommendedWatcher, nodes: &[WatchNode], index: u
     Ok(())
 }
 
+#[allow(dead_code)]
 fn watch_worktree(watcher: &mut RecommendedWatcher, root: &Path, set: &mut WatchSet) -> Result<(), String> {
     if !root.is_dir() {
         return Ok(());
@@ -984,7 +992,7 @@ fn attach_new_dirs(repo: &Path, git_dir: Option<&Path>, paths: &[PathBuf], set: 
         if !dir.starts_with(repo) || git_dir.is_some_and(|git| dir.starts_with(git)) || set.covers(&dir) || skipped_path(&dir) {
             continue;
         }
-        if let Err(error) = watch_worktree(watcher, &dir, set) {
+        if let Err(error) = watch_one(watcher, &dir, RecursiveMode::NonRecursive, set) {
             perf::write("WARN", "watch", &error);
         }
     }
@@ -1017,7 +1025,8 @@ fn settle_changes(
         attach_new_dirs(repo, git_dir.as_deref(), &paths, &mut watched, &slot);
         if overflow {
             // The dropped events may have included refs; a full refresh is the safe answer.
-            perf::write("INFO", "watch", "repo-changed refs=true paths=overflow");
+            let recoveries = WATCH_RECOVERIES.fetch_add(1, Ordering::Relaxed) + 1;
+            perf::write("INFO", "watch", &format!("repo-changed refs=true paths=overflow recoveries={recoveries}"));
             let _ = app.emit("repo-changed", RepoChange { refs: true });
             continue;
         }
@@ -1360,7 +1369,7 @@ fn approve_credential(path: Option<String>, protocol: String, host: String, user
 
 #[tauri::command]
 fn check_for_update() -> Result<Option<updates::UpdateNotice>, String> {
-    updates::check()
+    http::with_net(net_options(), updates::check)
 }
 
 #[tauri::command]
@@ -1369,9 +1378,11 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
-fn download_update(app: tauri::AppHandle, url: String) -> Result<(), String> {
-    updates::download_and_open(&url, |percent| {
-        let _ = app.emit("update-progress", updates::UpdateProgress { percent });
+fn download_update(app: tauri::AppHandle, url: String, sha256: Option<String>) -> Result<(), String> {
+    http::with_net(net_options(), || {
+        updates::download_and_open(&url, sha256.as_deref(), |percent| {
+            let _ = app.emit("update-progress", updates::UpdateProgress { percent });
+        })
     })
 }
 
@@ -1483,7 +1494,9 @@ fn account_token(values: &settings::Settings, forge_name: &str, fallback: &str) 
 #[tauri::command]
 fn forge_notifications() -> Result<Vec<forge::Notice>, String> {
     let values = settings::load()?;
-    forge::notifications(&account_token(&values, "github", &values.github_token))
+    http::with_net(http::NetOptions::from_settings(&values), || {
+        forge::notifications(&account_token(&values, "github", &values.github_token))
+    })
 }
 
 #[tauri::command]
@@ -1491,24 +1504,78 @@ fn forge_pulls(path: Option<String>) -> Result<Vec<forge::PullRequest>, String> 
     let repo = repo_from(path)?;
     let values = settings::load()?;
     let url = awegit_git::origin_url(&repo);
-    forge::pulls(
-        &url,
-        &account_token(&values, "github", &values.github_token),
-        &account_token(&values, "gitlab", &values.gitlab_token),
-        &values.gitlab_host,
-    )
+    http::with_net(http::NetOptions::from_settings(&values), || {
+        forge::pulls(
+            &url,
+            &account_token(&values, "github", &values.github_token),
+            &account_token(&values, "gitlab", &values.gitlab_token),
+            &values.gitlab_host,
+        )
+    })
+}
+
+/// A stored snapshot can answer this request when HEAD and the index still match.
+/// A full snapshot can serve a later brief request. A brief snapshot cannot serve a full one.
+fn facts_reusable(stored_stamp: &str, stored_full: bool, stamp: &str, full: bool) -> bool {
+    stored_stamp == stamp && (stored_full || !full)
 }
 
 /// `full: false` skips the ignored-file list, statistics, and LFS files.
+/// A full result can answer a later brief request when HEAD and the index are unchanged.
 #[tauri::command]
 fn repo_facts(path: Option<String>, full: Option<bool>) -> Result<awegit_git::RepoFacts, String> {
     let repo = repo_from(path)?;
-    let facts = if full.unwrap_or(true) { awegit_git::repo_facts(&repo) } else { awegit_git::repo_facts_brief(&repo) };
-    facts.map_err(|error| error.to_string())
+    let full = full.unwrap_or(true);
+    let key = awegit_git::repo_key(&repo);
+    let stamp = facts_stamp(&repo);
+    if let Ok(cache) = facts_cache().lock() {
+        if let Some(hit) = cache.get(&key) {
+            if facts_reusable(&hit.stamp, hit.full, &stamp, full) {
+                return Ok(hit.facts.clone());
+            }
+        }
+    }
+    let facts = if full { awegit_git::repo_facts(&repo) } else { awegit_git::repo_facts_brief(&repo) };
+    let facts = facts.map_err(|error| error.to_string())?;
+    if let Ok(mut cache) = facts_cache().lock() {
+        cache.insert(key, CachedFacts { stamp, full, facts: facts.clone() });
+    }
+    Ok(facts)
+}
+
+fn facts_stamp(repo: &Path) -> String {
+    let Some(git) = git_metadata_dir(repo) else {
+        return format!("missing:{}", repo.display());
+    };
+    let mut stamp = file_mark(&git.join("HEAD"));
+    if let Ok(text) = std::fs::read_to_string(git.join("HEAD")) {
+        if let Some(rest) = text.trim().strip_prefix("ref:") {
+            let rel = rest.trim();
+            if !rel.is_empty() {
+                stamp.push('|');
+                stamp.push_str(&file_mark(&git.join(rel)));
+            }
+        }
+    }
+    stamp.push('|');
+    stamp.push_str(&file_mark(&git.join("index")));
+    stamp.push('|');
+    stamp.push_str(repo.to_string_lossy().as_ref());
+    stamp
+}
+
+fn file_mark(path: &Path) -> String {
+    match std::fs::metadata(path) {
+        Ok(meta) => {
+            let modified = meta.modified().ok().and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map(|duration| duration.as_nanos()).unwrap_or(0);
+            format!("{}:{}:{modified}", path.display(), meta.len())
+        }
+        Err(_) => format!("{}:missing", path.display()),
+    }
 }
 
 #[tauri::command]
-fn scan_repositories(root: String, depth: Option<u32>) -> Result<Vec<String>, String> {
+fn scan_repositories(root: String, depth: Option<u32>) -> Result<awegit_git::ScanResult, String> {
     let limit = depth.unwrap_or(5) as usize;
     awegit_git::scan_repositories(std::path::Path::new(&root), limit).map_err(|error| error.to_string())
 }
@@ -1516,13 +1583,17 @@ fn scan_repositories(root: String, depth: Option<u32>) -> Result<Vec<String>, St
 #[tauri::command]
 fn mark_notification(id: String) -> Result<(), String> {
     let values = settings::load()?;
-    forge::mark_read(&account_token(&values, "github", &values.github_token), &id)
+    http::with_net(http::NetOptions::from_settings(&values), || {
+        forge::mark_read(&account_token(&values, "github", &values.github_token), &id)
+    })
 }
 
 #[tauri::command]
 fn create_github_repo(name: String, private_repo: bool) -> Result<String, String> {
     let values = settings::load()?;
-    forge::create_repo(&account_token(&values, "github", &values.github_token), &name, private_repo)
+    http::with_net(http::NetOptions::from_settings(&values), || {
+        forge::create_repo(&account_token(&values, "github", &values.github_token), &name, private_repo)
+    })
 }
 
 #[tauri::command]
@@ -1590,6 +1661,12 @@ fn merge_preview(path: Option<String>, name: String) -> Result<awegit_git::Merge
 }
 
 #[tauri::command]
+fn merge_state(path: Option<String>) -> Result<Option<awegit_git::MergeState>, String> {
+    let repo = repo_from(path)?;
+    awegit_git::merge_state(&repo).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn merged_branches(path: Option<String>) -> Result<Vec<String>, String> {
     let repo = repo_from(path)?;
     awegit_git::merged_branches(&repo).map_err(|error| error.to_string())
@@ -1616,24 +1693,26 @@ fn create_hosted_repo(forge_name: String, name: String, private_repo: bool, host
         _ => values.github_token.clone(),
     };
     let token = account_token(&values, &forge_name, &fallback);
-    forge::create_hosted(&forge_name, &token, &host, &name, private_repo, &org)
+    http::with_net(http::NetOptions::from_settings(&values), || {
+        forge::create_hosted(&forge_name, &token, &host, &name, private_repo, &org)
+    })
 }
 
 #[tauri::command]
 fn device_start(forge_name: String, client_id: String, host: String) -> Result<forge::DeviceStart, String> {
-    forge::device_start(&forge_name, &client_id, &host)
+    http::with_net(net_options(), || forge::device_start(&forge_name, &client_id, &host))
 }
 
 #[tauri::command]
 fn device_poll() -> Result<String, String> {
-    forge::device_poll()
+    http::with_net(net_options(), forge::device_poll)
 }
 
 #[tauri::command]
 fn review_branch(path: Option<String>, base: String) -> Result<String, String> {
     let repo = repo_from(path)?;
     let values = settings::load()?;
-    ai::review(&repo, &values, &base)
+    http::with_net(http::NetOptions::from_settings(&values), || ai::review(&repo, &values, &base))
 }
 
 #[tauri::command]
@@ -1751,7 +1830,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 }
 
 #[tauri::command]
-fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>, file: Option<String>, rev: Option<String>) -> Result<(), String> {
+fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>, file: Option<String>, rev: Option<String>, width: Option<f64>, height: Option<f64>) -> Result<(), String> {
     let view_name = view.unwrap_or_default();
     let repo_name = repo.unwrap_or_default();
     let file_name = file.unwrap_or_default();
@@ -1760,11 +1839,12 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
         "blame" => "blame",
         "history" => "history",
         "blob" => "blob",
+        "merge" => "merge",
         _ => "desk",
     };
     if let Some(window) = app.get_webview_window(label) {
         let _ = window.set_focus();
-        if label == "history" || label == "blob" {
+        if label == "history" || label == "blob" || label == "merge" {
             let _ = app.emit(
                 "awegit-navigate",
                 WindowNav { view: view_name, repo: repo_name, file: file_name, rev: rev_name },
@@ -1787,9 +1867,15 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
     // Keep the root path: SvelteKit's dev server and client router both 404 on `/index.html`.
     // A query-only relative reference resolves against the dev server or the tauri protocol base.
     let url = if query.is_empty() { "index.html".to_string() } else { format!("?{query}") };
+    let (width, height) = if label == "merge" {
+        (width.unwrap_or(1280.0), height.unwrap_or(840.0))
+    } else {
+        (1100.0, 720.0)
+    };
     let window = tauri::webview::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
         .title("AweGit")
-        .inner_size(1100.0, 720.0)
+        .inner_size(width.clamp(480.0, 4000.0), height.clamp(360.0, 4000.0))
+        .resizable(true)
         .build()
         .map_err(|error| error.to_string())?;
     show_devtools(&window);
@@ -1830,17 +1916,17 @@ fn suggest_commit_message(path: Option<String>, style: Option<String>, language:
     if let Some(language) = language.as_deref().map(str::trim).filter(|language| !language.is_empty()) {
         values.ai_language = language.to_string();
     }
-    ai::suggest(&repo, &values)
+    http::with_net(http::NetOptions::from_settings(&values), || ai::suggest(&repo, &values))
 }
 
 #[tauri::command]
 fn test_ai_endpoint(base_url: String, api_key: String) -> Result<u32, String> {
-    Ok(ai::list_models(&base_url, &api_key)?.len() as u32)
+    http::with_net(net_options(), || Ok(ai::list_models(&base_url, &api_key)?.len() as u32))
 }
 
 #[tauri::command]
 fn list_ai_models(base_url: String, api_key: String) -> Result<Vec<String>, String> {
-    ai::list_models(&base_url, &api_key)
+    http::with_net(net_options(), || ai::list_models(&base_url, &api_key))
 }
 
 #[tauri::command]
@@ -1855,7 +1941,102 @@ fn perf_snapshot() -> perf::Snapshot {
 
 #[tauri::command]
 fn diagnostics() -> String {
-    perf::diagnostics()
+    let runtime = awegit_git::git_runtime();
+    format!("{}\ngit {} {}", perf::diagnostics(), runtime.version, runtime.program)
+}
+
+#[tauri::command]
+fn git_runtime() -> awegit_git::GitRuntime {
+    awegit_git::git_runtime()
+}
+
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err("awegit:git:path cannot be revealed".into());
+    }
+    let target = PathBuf::from(path);
+    if !path_is_revealable(&target, &reveal_roots()) {
+        return Err("awegit:git:path cannot be revealed".into());
+    }
+    let full = std::fs::canonicalize(&target).unwrap_or(target);
+    reveal_in_file_manager(&full)
+}
+
+fn reveal_roots() -> Vec<PathBuf> {
+    let Ok(settings) = settings::load() else { return Vec::new() };
+    settings
+        .recent
+        .iter()
+        .chain(settings.source_directories.iter())
+        .filter(|path| !path.trim().is_empty())
+        .map(|path| PathBuf::from(path))
+        .collect()
+}
+
+fn system_dir(path: &Path) -> bool {
+    let text = path.to_string_lossy().replace('/', "\\").to_ascii_lowercase();
+    text.contains("\\windows\\system32") || text.contains("\\windows\\syswow64")
+}
+
+fn inside_git_worktree(path: &Path) -> bool {
+    let mut cursor = if path.is_dir() { Some(path) } else { path.parent() };
+    while let Some(dir) = cursor {
+        if dir.join(".git").exists() {
+            return true;
+        }
+        cursor = dir.parent();
+    }
+    false
+}
+
+fn root_allows(path: &Path, root: &Path) -> bool {
+    if system_dir(root) {
+        return false;
+    }
+    let full = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    if system_dir(&full) {
+        return false;
+    }
+    path.starts_with(&full)
+}
+
+/// A path can be shown in the file manager when it sits in a work tree or a known root.
+/// `Windows\System32` and `SysWOW64` are refused even when one of them is passed as a root.
+fn path_is_revealable(path: &Path, roots: &[PathBuf]) -> bool {
+    if path.as_os_str().is_empty() {
+        return false;
+    }
+    let full = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if system_dir(&full) || system_dir(path) {
+        return false;
+    }
+    if inside_git_worktree(&full) {
+        return true;
+    }
+    roots.iter().any(|root| root_allows(&full, root))
+}
+
+fn reveal_in_file_manager(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let text = path.display().to_string();
+        return std::process::Command::new("explorer")
+            .arg(format!("/select,{text}"))
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return std::process::Command::new("open").arg("-R").arg(path).spawn().map(|_| ()).map_err(|error| error.to_string());
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let parent = path.parent().unwrap_or(path);
+        std::process::Command::new("xdg-open").arg(parent).spawn().map(|_| ()).map_err(|error| error.to_string())
+    }
 }
 
 #[tauri::command]
@@ -1939,6 +2120,7 @@ pub fn run() {
             search_log,
             cherry_preview,
             merge_preview,
+            merge_state,
             merged_branches,
             pick_history,
             activity_log,
@@ -1955,7 +2137,9 @@ pub fn run() {
             log_client,
             perf_snapshot,
             diagnostics,
-            open_log_folder
+            open_log_folder,
+            reveal_path,
+            git_runtime
         ]);
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -2008,6 +2192,7 @@ pub fn run() {
 mod watch_plan_tests {
     use super::{heavy_dir, scan_worktree, watch_modes};
     use std::fs;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -2045,5 +2230,119 @@ mod watch_plan_tests {
         let apps = modes.iter().find(|(path, _)| path.ends_with("apps") && !path.ends_with("web"));
         assert!(apps.is_some_and(|(_, recursive)| !*recursive), "{joined}");
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn idle_gates_reap_only_when_the_map_is_large() {
+        assert!(!super::idle_for_reap(16 * 60, 1, 24));
+        assert!(super::idle_for_reap(15 * 60, 1, 25));
+        assert!(!super::idle_for_reap(15 * 60, 2, 25));
+        assert!(!super::idle_for_reap(14 * 60, 1, 25));
+    }
+
+    #[test]
+    fn facts_cache_reuses_a_full_snapshot_until_head_or_the_index_changes() {
+        assert!(super::facts_reusable("stamp", true, "stamp", false));
+        assert!(super::facts_reusable("stamp", true, "stamp", true));
+        assert!(super::facts_reusable("stamp", false, "stamp", false));
+        assert!(!super::facts_reusable("stamp", false, "stamp", true));
+        assert!(!super::facts_reusable("stamp", true, "moved", false));
+
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("awegit-facts-{nanos}"));
+        let git = root.join(".git");
+        fs::create_dir_all(git.join("refs").join("heads")).unwrap();
+        fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(git.join("refs").join("heads").join("main"), "abc\n").unwrap();
+        fs::write(git.join("index"), b"v1").unwrap();
+        let path = root.display().to_string();
+        let repo = PathBuf::from(&path);
+        let key = awegit_git::repo_key(&repo);
+        let stamp = super::facts_stamp(&repo);
+        fs::write(root.join("note.txt"), "worktree").unwrap();
+        assert_eq!(super::facts_stamp(&repo), stamp, "a worktree file does not invalidate facts");
+
+        let marker = "cached-full-marker";
+        let facts = awegit_git::RepoFacts {
+            ignored: Vec::new(),
+            bisect_active: true,
+            bisect_log: marker.into(),
+            template: String::new(),
+            head_message: String::new(),
+            weekday: Vec::new(),
+            hour: Vec::new(),
+            lfs: String::new(),
+            hot: Vec::new(),
+        };
+        super::facts_cache().lock().unwrap().insert(key.clone(), super::CachedFacts { stamp: stamp.clone(), full: true, facts: facts.clone() });
+        let brief = super::repo_facts(Some(path.clone()), Some(false)).unwrap();
+        assert_eq!(brief.bisect_log, marker);
+        assert!(brief.bisect_active);
+
+        super::facts_cache().lock().unwrap().insert(key.clone(), super::CachedFacts { stamp: stamp.clone(), full: false, facts });
+        let full = super::repo_facts(Some(path.clone()), Some(true)).unwrap();
+        assert_ne!(full.bisect_log, marker, "a brief snapshot must not answer a full request");
+
+        fs::write(git.join("index"), b"v1-changed").unwrap();
+        assert_ne!(super::facts_stamp(&repo), stamp);
+        let missed = super::repo_facts(Some(path), Some(false)).unwrap();
+        assert_ne!(missed.bisect_log, marker, "a new index must miss the cache");
+        super::facts_cache().lock().unwrap().remove(&key);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn system_directories_are_not_revealable() {
+        let path = Path::new(r"C:\Windows\System32\cmd.exe");
+        let roots = vec![PathBuf::from(r"C:\Windows\System32"), PathBuf::from(r"C:\Windows\SysWOW64")];
+        assert!(!super::path_is_revealable(path, &roots));
+    }
+
+    #[test]
+    fn a_work_tree_or_source_root_can_be_revealed() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("awegit-reveal-{nanos}"));
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src").join("note.txt"), "x").unwrap();
+        let note = root.join("src").join("note.txt");
+        assert!(!super::path_is_revealable(&note, &[]));
+        assert!(super::path_is_revealable(&note, &[root.clone()]));
+        fs::create_dir_all(root.join(".git")).unwrap();
+        assert!(super::path_is_revealable(&note, &[]));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn viewer_windows_cannot_run_writes() {
+        let viewers = include_str!("../capabilities/viewers.json");
+        let defaults = include_str!("../capabilities/default.json");
+        for name in [
+            "allow-mutate",
+            "allow-open-terminal",
+            "allow-write-ssh-config",
+            "allow-download-update",
+            "allow-generate-ssh-key",
+            "allow-set-passphrase",
+            "allow-approve-credential",
+            "allow-create-hosted-repo",
+            "allow-create-github-repo",
+            "allow-device-start",
+            "allow-device-poll",
+            "allow-import-fork-settings",
+            "allow-open-editor",
+            "allow-launch-tool",
+            "allow-save-revision",
+            "allow-open-path",
+            "opener:allow-reveal-item-in-dir",
+        ] {
+            assert!(!viewers.contains(name), "{name} is granted to a viewer window");
+        }
+        assert!(viewers.contains("allow-stage-all"));
+        assert!(viewers.contains("allow-reveal-path"));
+        assert!(viewers.contains("allow-git-runtime"));
+        assert!(!viewers.contains("**"));
+        assert!(!defaults.contains("**"));
+        assert!(!defaults.contains("allow-open-path"));
+        assert!(!defaults.contains("opener:allow-reveal-item-in-dir"));
     }
 }

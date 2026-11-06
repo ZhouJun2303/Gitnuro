@@ -172,9 +172,9 @@
     justify-content: space-between;
     gap: 16px;
     width: 100%;
-    height: 28px;
+    min-height: 28px;
     flex: none;
-    padding: 0 8px;
+    padding: 4px 8px;
     border: 0;
     background: transparent;
     color: inherit;
@@ -246,7 +246,8 @@
     align-items: center;
     gap: 6px;
     width: 100%;
-    height: 28px;
+    min-height: 28px;
+    height: auto;
     border: 0;
     background: transparent;
     color: var(--text);
@@ -255,12 +256,12 @@
   }
 
 .repo-section {
-    padding: 0 6px;
+    padding: 4px 6px;
     font-weight: 600;
   }
 
 .repo-row {
-    padding: 0 8px 0 22px;
+    padding: 4px 8px 4px 22px;
     border-radius: 6px;
   }
 
@@ -359,7 +360,8 @@
 
 .command-filters {
     display: flex;
-    gap: 16px;
+    flex-wrap: wrap;
+    gap: 0 16px;
     padding: 4px 14px 0;
     border-bottom: 1px solid var(--line);
     flex: none;
@@ -372,6 +374,7 @@
     color: var(--text-secondary);
     font: inherit;
     padding: 8px 0;
+    white-space: nowrap;
   }
 
 .command-filters button.on {
@@ -598,7 +601,9 @@
 <PerfPanel />
 
 <div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.settings.diffFontSize || 13}px" style:--guide="{shell.settings.pageGuide || 72}" data-lab-scene={shell.labSceneId || undefined} data-lab-error={shell.labPage && !shell.labSceneId && shell.loadError ? shell.loadError : undefined}>
-  {#if shell.standalone === "history"}
+  {#if shell.standalone === "merge"}
+    <MergePanel />
+  {:else if shell.standalone === "history"}
     <FileHistoryPane />
   {:else if shell.standalone === "blob"}
     <BlobPane />
@@ -677,12 +682,12 @@
     <svg class="repo-chevron" class:open viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4.5 10 8l-4 3.5"/></svg>
   {/snippet}
 
-  {#snippet menuList(items: MenuItem[])}
+  {#snippet menuList(items: MenuItem[], nested = false)}
     {#each items as item, index (`${item.sep ? "sep" : item.label}-${index}`)}
       {#if item.sep}
         <hr />
       {:else}
-        <button type="button" role={item.checked !== undefined ? "menuitemradio" : "menuitem"} disabled={item.disabled} aria-checked={item.checked !== undefined ? item.checked : undefined} aria-haspopup={item.children ? "menu" : undefined} aria-expanded={item.children ? shell.submenu?.items === item.children : undefined} onmouseenter={(event) => { if (!item.children) { shell.submenu = null; return; } openSubmenu(item, event.currentTarget as HTMLElement); }} onclick={(event) => { if (item.disabled) return; if (item.children) { openSubmenu(item, event.currentTarget as HTMLElement, true); return; } if (!item.run) return; shell.dismissMenu(); void item.run(); }}>
+        <button type="button" role={item.checked !== undefined ? "menuitemradio" : "menuitem"} disabled={item.disabled} aria-checked={item.checked !== undefined ? item.checked : undefined} aria-haspopup={item.children ? "menu" : undefined} aria-expanded={item.children ? shell.submenu?.items === item.children : undefined} onmouseenter={(event) => { if (item.children) { openSubmenu(item, event.currentTarget as HTMLElement); return; } if (!nested) shell.submenu = null; }} onclick={(event) => { if (item.disabled) return; if (item.children) { openSubmenu(item, event.currentTarget as HTMLElement, true); return; } if (!item.run) return; shell.dismissMenu(); void item.run(); }}>
           <span class="menu-main">
             {#if item.checked !== undefined}<span class="menu-check" aria-hidden="true">{item.checked ? "✓" : ""}</span>{/if}
             <span>{item.label}</span>
@@ -786,6 +791,7 @@
           {:else}
             <p class="repo-empty">{shell.repoScanning ? shell.tr("chrome.reading") : shell.tr("chrome.noRepositories")}</p>
           {/each}
+          {#if shell.repoScanTruncated}<p class="repo-empty" data-scan-truncated>{shell.tr("chrome.scanTruncated")}</p>{/if}
         {/if}
       </div>
     </div>
@@ -797,7 +803,7 @@
     </div>
     {#if shell.submenu}
       <div class="menu" data-layer="submenu" use:fitMenu={shell.submenu} use:menuKeys={false} role="menu">
-        {@render menuList(shell.submenu.items)}
+        {@render menuList(shell.submenu.items, true)}
       </div>
     {/if}
     <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => shell.dismissMenu()}></button>
@@ -840,7 +846,7 @@
     </div>
   {/if}
   <DialogHost />
-  <MergePanel />
+  {#if shell.standalone !== "merge"}<MergePanel />{/if}
   {#if shell.launchOpen}
     <div class="palette-scrim" role="presentation" onclick={() => shell.closeLaunch()}>
       <div class="palette" data-layer="launch" role="dialog" aria-modal="true" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} use:overlayFocus={{ close: () => shell.closeLaunch() }} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>

@@ -215,12 +215,11 @@
           </button>
         {:else if row.kind === "local"}
           {@const remoteState = shell.branchRemoteState(row.name)}
+          {@const syncTitle = [row.ahead > 0 ? shell.tr("chrome.syncAhead", { count: String(row.ahead) }) : "", row.behind > 0 ? shell.tr("chrome.syncBehind", { count: String(row.behind) }) : ""].filter(Boolean).join(" · ") + (row.upstream ? ` · ${row.upstream}` : "")}
           <div
             class="side nested"
             class:deep={row.deep}
             class:current={row.current}
-            class:local-only={remoteState === "missing"}
-            class:mirrored={remoteState === "mirrored"}
             class:selected={shell.sideSelected === `local:${row.name}`}
             role="group"
             oncontextmenu={(event) => shell.openMenu(event, [
@@ -229,7 +228,7 @@
                 { label: shell.tr("menu.compareBranches"), disabled: !shell.compareWith || shell.compareWith === row.name, run: () => { shell.drops = [shell.compareWith, row.name]; void shell.compareDrops(); } },
                 { label: shell.tr("menu.pushAs"), run: () => { shell.draft = row.name; shell.draftExtra = shell.refs?.remotes[0]?.name ?? "origin"; shell.draftUser = row.name; shell.dialog = "pushAs"; } },
                 { label: shell.tr("menu.merge"), run: () => { shell.draft = row.name; shell.draftExtra = shell.settings.mergeNoFf ? "no-ff" : "ff"; shell.dialog = "merge"; } },
-                { label: shell.tr("menu.rebaseOnto"), run: () => shell.mutate({ action: "rebase", onto: row.name, autostash: shell.settings.mergeAutostash }) },
+                { label: shell.tr("menu.rebaseOnto"), run: () => shell.mutate({ action: "rebase", onto: row.name, autostash: true }) },
                 { label: shell.tr("menu.delete"), run: () => shell.removeBranch(row.name) },
                 { label: shell.tr("menu.forceDelete"), run: () => shell.ask(shell.tr("menu.forceDelete"), row.name, () => void shell.mutate({ action: "deleteBranch", name: row.name, force: true })) },
               ] : []),
@@ -246,9 +245,18 @@
             <button class="file-select" type="button" title={remoteState === "missing" ? `${row.name} · ${shell.tr("chrome.localOnly")}` : row.name} onclick={(event) => { shell.sideSelected = `local:${row.name}`; if (event.ctrlKey || event.metaKey) shell.compareWith = row.name; else void shell.locateRef(row.name); }} ondblclick={() => !row.current && void shell.quickCheckout(row.name)}>
               <span class="twist"></span>
               {@render glyph(row.current ? "check" : "branch")}
+              {#if remoteState === "missing"}
+                <span class="track-dot missing" title={shell.tr("chrome.localOnly")}></span>
+              {:else if remoteState === "mirrored"}
+                <span class="track-dot mirrored" title={shell.tr("chrome.trackedRemote")}></span>
+              {/if}
               <span class="name">{shell.pinnedHere.has(row.name) ? "• " : ""}{row.group ? row.name.slice(row.group.length + 1) : row.name}</span>
-              {#if row.ahead > 0}<span class="ahead up">{row.ahead}</span>{/if}
-              {#if row.behind > 0}<span class="ahead down">{row.behind}</span>{/if}
+              {#if row.ahead > 0 || row.behind > 0}
+                <span class="sync" title={syncTitle}>
+                  {#if row.ahead > 0}<span class="ahead up">{row.ahead}</span>{/if}
+                  {#if row.behind > 0}<span class="ahead down">{row.behind}</span>{/if}
+                </span>
+              {/if}
             </button>
             {@render branchSwitches(row.name, !row.current && shell.mode === "live")}
           </div>
@@ -274,7 +282,7 @@
             role="group"
             oncontextmenu={(event) => shell.openMenu(event, [
               { label: shell.tr("menu.checkout"), run: () => shell.mutate({ action: "checkoutRemote", remote: row.remote, branch: row.name }) },
-              { label: shell.tr("menu.pullInto"), run: () => shell.mutate({ action: "pullRef", remote: row.remote, branch: row.name, rebase: shell.settings.pullRebase, autostash: shell.settings.mergeAutostash }) },
+              { label: shell.tr("menu.pullInto"), run: () => shell.mutate({ action: "pullRef", remote: row.remote, branch: row.name, rebase: shell.settings.pullRebase, autostash: true }) },
               { label: shell.tr("menu.pushHere"), run: () => shell.mutate({ action: "pushRef", remote: row.remote, branch: row.name, forceWithLease: shell.settings.forceWithLease }) },
               { label: shell.tr("menu.deleteRemote"), run: () => shell.ask(shell.tr("menu.deleteRemote"), shell.tr("dialog.deleteRemoteBody", { name: `${row.remote}/${row.name}` }), () => void shell.mutate({ action: "deleteRemoteBranch", remote: row.remote, branch: row.name })) },
               { label: shell.tr("menu.copyName"), run: () => shell.copyText(`${row.remote}/${row.name}`) },
@@ -298,8 +306,8 @@
           </div>
         {:else if row.kind === "stash"}
           <div class="side nested" class:selected={shell.sideSelected === `stash:${row.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
-            { label: shell.tr("menu.apply"), disabled: shell.mode !== "live", run: () => void shell.applyStash(row.name) },
-            { label: shell.tr("menu.pop"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "stashPop", name: row.name }) },
+            { label: shell.tr("menu.apply"), disabled: shell.mode !== "live", run: () => shell.confirmApplyStash(row.name, row.summary) },
+            { label: shell.tr("menu.pop"), disabled: shell.mode !== "live", run: () => shell.confirmPopStash(row.name) },
             { label: shell.tr("menu.drop"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.drop"), row.summary, () => void shell.mutate({ action: "stashDrop", name: row.name })) },
             { label: shell.tr("menu.renameStash"), disabled: shell.mode !== "live", run: () => { shell.draft = row.summary; shell.draftExtra = row.name; shell.dialog = "stashRename"; } },
             { label: shell.tr("menu.stashPatch"), disabled: shell.mode !== "live", run: () => void shell.mutate({ action: "stashPatch", name: row.name }) },
@@ -366,7 +374,7 @@
             <span class="twist"></span>
             {@render glyph("check")}
             <span class="name">{shell.branchLabel}</span>
-            {#if shell.mode === "sample"}<span class="ahead up">5</span>{/if}
+            {#if shell.mode === "sample"}<span class="sync"><span class="ahead up">5</span></span>{/if}
           </button>
           {@render branchSwitches(shell.branchLabel, false)}
         </div>
@@ -434,8 +442,8 @@
         {#each (shell.refs?.stashes ?? (shell.mode === "sample" ? [{ name: "stash@{0}", summary: "WIP before the palette" }] : [])) as stash (stash.name)}
           {#if shell.matchesQuery(stash.summary, shell.sideQuery) || shell.matchesQuery(stash.name, shell.sideQuery)}
           <div class="side nested" class:selected={shell.sideSelected === `stash:${stash.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
-            { label: shell.tr("menu.apply"), disabled: shell.mode !== "live", run: () => void shell.applyStash(stash.name) },
-            { label: shell.tr("menu.pop"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "stashPop", name: stash.name }) },
+            { label: shell.tr("menu.apply"), disabled: shell.mode !== "live", run: () => shell.confirmApplyStash(stash.name, stash.summary) },
+            { label: shell.tr("menu.pop"), disabled: shell.mode !== "live", run: () => shell.confirmPopStash(stash.name) },
             { label: shell.tr("menu.drop"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.drop"), stash.summary, () => void shell.mutate({ action: "stashDrop", name: stash.name })) },
             { label: shell.tr("menu.renameStash"), disabled: shell.mode !== "live", run: () => { shell.draft = stash.summary; shell.draftExtra = stash.name; shell.dialog = "stashRename"; } },
             { label: shell.tr("menu.stashPatch"), disabled: shell.mode !== "live", run: () => void shell.mutate({ action: "stashPatch", name: stash.name }) },

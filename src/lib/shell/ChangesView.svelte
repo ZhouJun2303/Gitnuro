@@ -30,6 +30,38 @@
     void shell.flipStage(path, side);
   }
 
+  // A click on the folder name waits so a double-click can stage it without
+  // also folding. The twist folds immediately and never stages.
+  let dirClickTimer = 0;
+
+  function clearDirClick() {
+    window.clearTimeout(dirClickTimer);
+    dirClickTimer = 0;
+  }
+
+  function onTwistClick(event: MouseEvent, path: string) {
+    clearDirClick();
+    if (event.button !== 0 || event.detail > 1) return;
+    shell.toggleDir(path);
+  }
+
+  function onDirClick(event: MouseEvent, path: string) {
+    if (event.button !== 0 || event.detail > 1) return;
+    clearDirClick();
+    dirClickTimer = window.setTimeout(() => {
+      dirClickTimer = 0;
+      shell.toggleDir(path);
+    }, 280);
+  }
+
+  function flipDir(event: MouseEvent, path: string, side: Side) {
+    if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.button !== 0) return;
+    clearDirClick();
+    event.preventDefault();
+    if (shell.mode !== "live" || shell.dialog || shell.menu || shell.launchOpen) return;
+    shell.stageFolder(path, side === "staged");
+  }
+
   function pickType(type: CommitType) {
     shell.rememberCommitType(type);
     shell.fitSummary();
@@ -243,9 +275,16 @@
       </div>
 
 {#snippet dirRow(path: string, side: Side, depth: number)}
-      <button class="tree-row" type="button" style:padding-left="{8 + depth * 16}px" onclick={() => shell.toggleDir(path)} oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
-        {@render treeLine(true, !shell.collapsedDirs.includes(path), path, "")}
-      </button>
+      {@const open = !shell.collapsedDirs.includes(path)}
+      <div class="tree-row" style:padding-left="{8 + depth * 16}px" role="group" oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
+        <button class="twist-btn" type="button" aria-expanded={open} aria-label={shell.fileName(path)} onclick={(event) => onTwistClick(event, path)}>
+          {@render disclosure(open)}
+        </button>
+        <button class="file-select" type="button" title={path} onclick={(event) => onDirClick(event, path)} ondblclick={(event) => flipDir(event, path, side)}>
+          {@render folderIcon()}
+          <span class="name">{shell.fileName(path)}</span>
+        </button>
+      </div>
     {/snippet}
 
 {#snippet combinedPane()}
@@ -272,7 +311,7 @@
                 type="button"
                 class:selected={shell.selectedPath === entry.file.path && shell.selectedSide === entry.side}
                 class:picked={shell.picked.includes(entry.file.path) && !(shell.selectedPath === entry.file.path && shell.selectedSide === entry.side)}
-                onclick={() => shell.selectFile(entry.file.path, entry.side)}
+                onclick={(event) => shell.selectFile(entry.file.path, entry.side, event)}
                 ondblclick={(event) => flipFile(event, entry.file.path, entry.side)}
               >
                 {#if entry.file.letter === "C"}{@render conflictMark()}{/if}
@@ -372,6 +411,7 @@
 {#snippet pickedActions(unstagedFiles: string[], stagedFiles: string[])}
       {#if unstagedFiles.length > 1 || stagedFiles.length > 1}
         <div class="pick-bar">
+          <span class="pick-count">{shell.tr("chrome.pickedCount", { count: String(unstagedFiles.length + stagedFiles.length) })}</span>
           {#if unstagedFiles.length > 1}
             <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => void shell.stagePicked(unstagedFiles)}>{shell.tr("chrome.stageSelected")}</button>
             <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.discardChosen(unstagedFiles)}>{shell.tr("chrome.discardSelected")}</button>
@@ -400,7 +440,7 @@
       >
         <button class="file-select" type="button" title={file.path} onclick={(event) => shell.selectFile(file.path, side, event)}>
           {#if shell.fileLayout === "tree"}
-            {@render treeLine(false, false, file.path, file.letter)}
+            {@render treeLine(file.path, file.letter)}
           {:else}
             {#if file.letter === "C"}
               {@render conflictMark()}
@@ -414,19 +454,14 @@
       </div>
     {/snippet}
 
-{#snippet treeLine(dir: boolean, open: boolean, path: string, letter: string)}
-    {#if dir}
-      {@render disclosure(open)}
-      {@render folderIcon()}
-    {:else}
-      <span class="twist"></span>
-      {#if letter === "C"}
-        {@render conflictMark()}
-      {:else if letter}
-        {@render statusBadge(letter)}
-      {/if}
-      {@render typeIcon(path)}
+{#snippet treeLine(path: string, letter: string)}
+    <span class="twist"></span>
+    {#if letter === "C"}
+      {@render conflictMark()}
+    {:else if letter}
+      {@render statusBadge(letter)}
     {/if}
+    {@render typeIcon(path)}
     <span class="name">{shell.fileName(path)}</span>
   {/snippet}
 

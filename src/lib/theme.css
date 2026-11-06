@@ -156,13 +156,11 @@ body {
 *::before,
 *::after {
   box-sizing: border-box;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -173,6 +171,15 @@ body {
   background: var(--scrollbar-thumb);
   border-radius: var(--radius-pill);
   transition: background 120ms ease;
+}
+
+/* Keep the thumb long enough to grab when the list is very long. */
+::-webkit-scrollbar-thumb:vertical {
+  min-height: 32px;
+}
+
+::-webkit-scrollbar-thumb:horizontal {
+  min-width: 32px;
 }
 
 ::-webkit-scrollbar-thumb:hover {

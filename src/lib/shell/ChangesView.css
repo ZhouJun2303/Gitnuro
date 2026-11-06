@@ -79,6 +79,13 @@
     background: var(--canvas);
   }
 
+.pick-count {
+    margin-right: 4px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
 .search.pane-filter {
     min-width: 60px;
     height: 24px;
@@ -176,6 +183,32 @@ textarea:focus,
   }
 
 .file.tree-row { gap: 0; }
+
+.twist-btn {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  line-height: 0;
+}
+
+.twist-btn::before {
+  content: "";
+  position: absolute;
+  inset: -5px -4px;
+}
+
+.twist-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 
 .summary-input,
   .composer textarea {

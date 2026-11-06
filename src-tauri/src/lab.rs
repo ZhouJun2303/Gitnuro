@@ -32,6 +32,16 @@ fn enter() -> Guard {
     Guard
 }
 
+fn isolate_lab_secrets() {
+    if std::env::var_os("AWEGIT_SECRET_DIR").is_some() {
+        return;
+    }
+    let Ok(root) = lab_root() else { return };
+    let dir = root.join("secrets");
+    let _ = std::fs::create_dir_all(&dir);
+    unsafe { std::env::set_var("AWEGIT_SECRET_DIR", &dir) };
+}
+
 fn lab_root() -> Result<PathBuf, String> {
     if let Ok(root) = std::env::var("AWEGIT_LAB") {
         let root = root.trim();
@@ -261,6 +271,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             req(args, "staged")?,
             req(args, "unified")?,
             req(args, "ignore_space")?,
+            req(args, "load")?,
         )),
         "commit_log" => done_result(super::commit_log(
             req(args, "path")?,
@@ -375,6 +386,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         )),
         "cherry_preview" => done_result(super::cherry_preview(req(args, "path")?, req(args, "rev")?)),
         "merge_preview" => done_result(super::merge_preview(req(args, "path")?, req(args, "name")?)),
+        "merge_state" => done_result(super::merge_state(req(args, "path")?)),
         "merged_branches" => done_result(super::merged_branches(req(args, "path")?)),
         "pick_history" => done_result(super::pick_history(req(args, "path")?, req(args, "file")?, req(args, "text")?)),
         "activity_log" => done(crate::perf::activity()),
@@ -398,6 +410,14 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "perf_snapshot" => done(crate::perf::snapshot()),
         "diagnostics" => done(crate::perf::diagnostics()),
         "open_log_folder" => Ok(Value::Null),
+        "reveal_path" => Ok(Value::Null),
+        "git_runtime" => done(serde_json::json!({
+            "program": "git",
+            "version": "2.56.0",
+            "mergeTree": true,
+            "lfs": true,
+            "minimum": true
+        })),
         other => Err(format!("unknown lab command {other}")),
     }
 }
@@ -409,6 +429,7 @@ pub fn lab_invoke(command: &str, args: Value) -> Result<Value, String> {
 }
 
 pub fn run_lab() {
+    isolate_lab_secrets();
     crate::perf::init();
     let listener = TcpListener::bind("127.0.0.1:1429").unwrap_or_else(|error| {
         eprintln!("awegit-lab could not listen on 127.0.0.1:1429: {error}");

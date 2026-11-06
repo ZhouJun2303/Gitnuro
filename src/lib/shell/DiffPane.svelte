@@ -41,6 +41,7 @@
   });
 
   const hunkList = $derived(shell.mode === "live" && shell.section === "changes" ? shell.hunkRanges() : []);
+  const conflictSelection = $derived(shell.section === "changes" ? shell.pickedConflicts() : []);
   const activeAt = $derived(hunkList.findIndex((range) => range.index === activeHunk));
 
   $effect(() => {
@@ -274,16 +275,20 @@
               {@const view = shell.activeConflict}
               {@const tool = shell.mode === "sample" ? (view.binary ? "ExcelMergeFork" : "") : mergeToolLabel(shell)}
               {@const only = pickTheirs !== pickOurs ? (pickTheirs ? view.theirs.label : view.ours.label) : ""}
+              {@const batch = conflictSelection.length > 1}
               <div class="conflict-pane">
                 <div class="conflict-title">
                   <svg class="conflict-warn" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.4 14.8 13.4H1.2L8 1.4z"/><path d="M8 6.1v3.3" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r=".75" fill="#fff"/></svg>
                   <strong>{shell.tr("chrome.mergeConflict")}</strong>
                 </div>
-                <p class="conflict-hint">{shell.tr("chrome.mergeConflictHint")}</p>
+                <p class="conflict-hint">{shell.tr("chrome.mergeConflictHint", { theirs: view.theirs.label, ours: view.ours.label })}</p>
                 <div class="conflict-file">
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.2" d="M3.2 1.5h6L12.8 5v9.5H3.2z"/><path fill="none" stroke="currentColor" stroke-width="1.2" d="M9.1 1.6V5.1h3.6"/></svg>
                   <span>{shell.fileName(shell.selectedPath)}</span>
                 </div>
+                {#if batch}
+                  <p class="conflict-selection" role="status">{shell.tr("chrome.conflictSelected", { count: String(conflictSelection.length) })}</p>
+                {/if}
                 <div class="conflict-cluster">
                 <div class="conflict-row" class:pick-one={pickTheirs !== pickOurs}>
                   <div class="conflict-end left">{@render conflictCard(view.theirs, "theirs")}</div>
@@ -295,7 +300,7 @@
                   <div class="conflict-end right">{@render conflictCard(view.ours, "ours")}</div>
                 </div>
                 <div class="conflict-actions">
-                  <button class="conflict-merge" type="button" disabled={(!pickOurs && !pickTheirs) || (shell.mode === "live" && shell.busy)} onclick={() => void applyConflictChoice(shell, pickOurs, pickTheirs)}>{only ? shell.tr("chrome.chooseSide", { name: only }) : pickOurs && pickTheirs ? shell.tr("chrome.mergeBoth") : shell.tr("chrome.mergeAction")}</button>
+                  <button class="conflict-merge" type="button" disabled={(!pickOurs && !pickTheirs) || (shell.mode === "live" && shell.busy)} onclick={() => { if (batch && only && shell.mode === "live") void shell.resolvePicked(pickOurs ? "ours" : "theirs", conflictSelection); else void applyConflictChoice(shell, pickOurs, pickTheirs); }}>{only ? (batch ? shell.tr("menu.keepSideCount", { name: only, count: String(conflictSelection.length) }) : shell.tr("chrome.chooseSide", { name: only })) : pickOurs && pickTheirs ? shell.tr("chrome.mergeBoth") : shell.tr("chrome.mergeAction")}</button>
                   {#if tool && pickOurs && pickTheirs}
                     <button class="conflict-tool" type="button" disabled={shell.mode === "live" && shell.busy} onclick={() => { if (shell.mode === "live") void openConflictTool(shell); }}>
                       {shell.tr("chrome.mergeInTool", { name: tool })}
@@ -350,13 +355,18 @@
               {:else}
                 <p class="diff-empty">{shell.tr("chrome.binary")}</p>
               {/if}
+            {:else if shell.diff.loadable && shell.diff.lines.length === 0}
+              <div class="diff-empty diff-load">
+                <p>{shell.tr("chrome.largeFileHint")}</p>
+                <button class="pane-chip" type="button" disabled={shell.busy} onclick={() => void shell.loadDiff(true)}>{shell.tr("chrome.loadDiff")}</button>
+              </div>
             {:else if shell.diff.lines.length === 0}
               <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
             {:else if shell.settings.diffStyle === "split"}
               <div class="diff-viewport">
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover} use:splitScroller={shell.splitColumns}>
-                {#if shell.splitWindow.start > 0}<div class="split-gap" style:height="{shell.splitWindow.start * shell.splitRowHeight}px"></div>{/if}
+                {#if shell.splitWindow.beforePx > 0}<div class="split-gap" style:height="{shell.splitWindow.beforePx}px"></div>{/if}
                 {#each shell.splitWindow.rows as row, offset (shell.splitWindow.start + offset)}
                   {@const index = shell.splitWindow.start + offset}
                   {@const leftAt = shell.splitLineAt(row, "left")}
@@ -371,7 +381,7 @@
                     </div>
                   {/if}
                 {/each}
-                {#if shell.splitWindow.after > 0}<div class="split-gap" style:height="{shell.splitWindow.after * shell.splitRowHeight}px"></div>{/if}
+                {#if shell.splitWindow.afterPx > 0}<div class="split-gap" style:height="{shell.splitWindow.afterPx}px"></div>{/if}
                 {@render splitBar()}
               </div>
               {@render hunkActions()}
@@ -380,13 +390,13 @@
             {:else}
               <div class="diff-viewport">
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
-                <div class="commit-window" style:height="{shell.diffLines.length * shell.diffRowHeight}px">
+              <div class="diff-body" class:wrap-window={shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
+                <div class="commit-window" class:wrap-window={shell.settings.diffWordWrap} style:height="{shell.diffWindow.height}px">
                   {#each shell.diffWindow.rows as line, index (`d${shell.diffWindow.start + index}`)}
                     {@const at = shell.diffWindow.start + index}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={litHunk != null && shell.hunkOf(at) === litHunk} data-line={at} style:top="{at * shell.diffRowHeight}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
+                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={litHunk != null && shell.hunkOf(at) === litHunk} data-line={at} style:top="{shell.diffWindow.tops[index] ?? 0}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
                       <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.oldNo ?? ""}</span>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -468,6 +478,7 @@
   <label class="conflict-card" class:on for="conflict-{side}">
     <svg class="branch" viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M4 2.2v7.2a2.2 2.2 0 1 0 2.2 2.2"/><circle cx="4" cy="12.2" r="1.35"/><circle cx="12" cy="3.6" r="1.35"/><path fill="none" stroke="currentColor" stroke-width="1.3" d="M12 5a4.2 4.2 0 0 1-6 2.6"/></svg>
     <span class="name" title={party.label}>{party.label}</span>
+    {#if party.commit?.short}<code class="conflict-commit" title={party.commit.subject}>{party.commit.short}</code>{/if}
     {#if sideText(party)}<span class="conflict-pill {party.state}">{sideText(party)}</span>{/if}
   </label>
 {/snippet}

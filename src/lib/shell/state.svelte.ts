@@ -4,14 +4,15 @@ import { invoke } from "../perf";
 import { listen } from "@tauri-apps/api/event";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { commits, diffs, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
+import { featuresPageUrl } from "../featuresPage";
 import { resolveLocale, translate } from "../i18n";
 import { isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
-import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type BlameLine,
@@ -24,31 +25,37 @@ import {
     type FileDiff,
     type FilePreview,
     type InProgress,
+    type MergeState,
     type RefSnapshot,
     type ForkImport,
     type Settings,
     type StatusFile,
     type StatusSnapshot,
     type Suggestion,
+    type GitRuntime,
+    type RepoScan,
     type UpdateNotice,
     workspaceTabWidth,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
-import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
-import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
-import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
+import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
+import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
+import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 
 const initialErrors = readErrorLog();
 
+/** Ids below this belong only to error rows. Notices use small negatives (-101…-106). */
+const ERROR_ENTRY_ID = -1_000_000;
+
 /** Histories up to this length are drawn in one pass. Longer ones continue across frames. */
 const GRAPH_SYNC_LIMIT = 1500;
 
-function standaloneView(): "" | "history" | "blob" {
+function standaloneView(): "" | "history" | "blob" | "merge" {
   if (typeof window === "undefined") return "";
   const view = new URLSearchParams(window.location.search).get("view");
-  return view === "history" || view === "blob" ? view : "";
+  return view === "history" || view === "blob" || view === "merge" ? view : "";
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -71,6 +78,7 @@ function sameCommitRow(left: CommitRow, right: CommitRow): boolean {
     left.at === right.at &&
     left.email === right.email &&
     left.unpushed === right.unpushed &&
+    left.remoteOnly === right.remoteOnly &&
     sameStrings(left.parents, right.parents) &&
     sameStrings(left.refs, right.refs)
   );
@@ -167,7 +175,6 @@ export class ShellState {
     proxyPort: 0,
     signCommits: false,
     mergeNoFf: false,
-    mergeAutostash: false,
     cloneDirectory: "",
     windowX: 0,
     windowY: 0,
@@ -244,7 +251,6 @@ export class ShellState {
     azureOrg: "",
     oauthClientId: "",
     fetchAllRemotes: false,
-    pullStash: false,
     pushAllTags: false,
     checkoutAfterCreate: true,
     stashIncludeUntracked: false,
@@ -253,15 +259,15 @@ export class ShellState {
     statusInterval: 0,
     showWorktrees: true,
     maxCommits: 500,
-    rebaseAutostash: false,
     rebaseUpdateRefs: false,
     applyStashDelete: false,
     pushTagOnCreate: false,
-    checkoutStash: false,
     workspaceShowTitle: false,
     scanDepth: 5,
     commitType: "feat",
     dismissedUpdate: "",
+    featuresIntro: "seen",
+    recoveryNotice: "",
   };
 
 
@@ -327,6 +333,10 @@ export class ShellState {
   }
 
 
+  /** The write a dirty work tree blocked, so the error banner can stash the changes and retry it. */
+  stashRetry = $state<{ request: Record<string, unknown>; source: "user" | "background" } | null>(null);
+
+
   jobs = $state<Record<string, RepoJob>>({});
 
 
@@ -351,6 +361,9 @@ export class ShellState {
 
 
   diffToken = 0;
+
+  /** Diffs the user agreed to load past the large-file cutoff, keyed by repo and side. */
+  largeLoaded = new Set<string>();
 
 
   statusGen = 0;
@@ -477,7 +490,13 @@ export class ShellState {
   scannedRepos = $state<string[]>([]);
 
 
+  repoScanTruncated = $state(false);
+
+
   repoScanning = $state(false);
+
+
+  gitRuntime = $state<GitRuntime | null>(null);
 
 
   repoScanToken = 0;
@@ -543,10 +562,13 @@ export class ShellState {
   mergeAutoSummary = $state("");
 
 
-  mergeAutoBody = $state("");
-
-
   mergeFiles = $state<{ status: string; path: string }[]>([]);
+
+
+  mergeState = $state<MergeState | null>(null);
+
+
+  mergeProgressAutoSummary = $state("");
 
 
   /** Fetch, pull, and push dialog options. */
@@ -557,9 +579,6 @@ export class ShellState {
 
 
   syncRebase = $state(false);
-
-
-  syncStash = $state(false);
 
 
   syncForce = $state(false);
@@ -616,7 +635,7 @@ export class ShellState {
   launchFiles = $state<string[]>([]);
 
 
-  standalone = $state<"" | "history" | "blob">(standaloneView());
+  standalone = $state<"" | "history" | "blob" | "merge">(standaloneView());
 
 
   blobFile = $state("");
@@ -742,7 +761,7 @@ export class ShellState {
 
   updatePercent = $state<number | null>(null);
 
-  appVersion = $state("2.0.0");
+  appVersion = $state("2.0.3");
 
 
   passphrase = $state("");
@@ -886,6 +905,9 @@ export class ShellState {
   textMerge = $state(false);
 
   mergeKind = $state<"text" | "file">("text");
+
+  /** Text merge above the auto-load limit waits for the user to ask for it. */
+  mergeLarge = $state(false);
 
 
   mergeFile = $state("");
@@ -1221,6 +1243,10 @@ export class ShellState {
   }
 
 
+  /** Counts user writes in flight; repeated clicks while one runs are ignored. */
+  userWrites = $state(0);
+
+
   switching = $derived(!!this.focusPath && this.jobKey(this.focusPath) !== this.jobKey(this.snapshot?.path));
 
 
@@ -1231,6 +1257,10 @@ export class ShellState {
 
 
   busy = $derived(this.switching || (this.jobs[this.jobKey(this.snapshot?.path)]?.depth ?? 0) > 0);
+
+
+  /** A user write is running; further clicks must not queue another one. */
+  writing = $derived(this.userWrites > 0);
 
 
   busyLabel = $derived(this.currentJob?.label ?? "");
@@ -1262,6 +1292,7 @@ export class ShellState {
   statusNotices = $derived.by((): StatusNotice[] => {
     const items: StatusNotice[] = [];
     const live = this.mode === "live";
+    const route = this.mergeRouteLabel();
     if (live && this.conflictCount > 0) {
       const actions: StatusNoticeAction[] = [];
       if (this.progress && this.progress !== "merge") {
@@ -1269,23 +1300,25 @@ export class ShellState {
         actions.push({ id: "skip", label: this.tr("chrome.skip"), disabled: this.busy });
       }
       actions.push({ id: "abort", label: this.tr("chrome.abort"), disabled: this.busy });
+      const unmerged = this.conflictCount === 1 ? this.tr("chrome.unmergedOne") : this.tr("chrome.unmergedMany", { count: String(this.conflictCount) });
       items.push({
         id: "conflicts",
         priority: 0,
         tone: "conflict",
-        title: this.conflictCount === 1 ? this.tr("chrome.unmergedOne") : this.tr("chrome.unmergedMany", { count: String(this.conflictCount) }),
-        detail: this.progress ? this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) }) : "",
+        title: route ? `${unmerged} · ${route}` : unmerged,
+        detail: route || (this.progress ? this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) }) : ""),
         dataLayer: "conflicts",
         floor: true,
         actions,
       });
     } else if (live && this.progress) {
+      const progress = this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) });
       items.push({
         id: "progress",
         priority: 1,
         tone: "progress",
-        title: this.tr("chrome.inProgress", { name: this.progressLabel(this.progress) }),
-        detail: "",
+        title: route ? `${progress} · ${route}` : progress,
+        detail: route,
         dataLayer: "progress",
         floor: true,
         actions: [
@@ -1313,6 +1346,9 @@ export class ShellState {
       });
     }
     if (this.actionError) {
+      const actions: StatusNoticeAction[] = [];
+      if (this.stashRetry) actions.push({ id: "stash", label: this.tr("chrome.stashAndRetry"), disabled: this.busy });
+      actions.push({ id: "close", label: this.tr("chrome.close") });
       items.push({
         id: "error",
         priority: 3,
@@ -1321,7 +1357,7 @@ export class ShellState {
         detail: "",
         dataLayer: "error",
         floor: true,
-        actions: [{ id: "close", label: this.tr("chrome.close") }],
+        actions,
       });
     }
     if (this.cloneDone) {
@@ -1385,7 +1421,9 @@ export class ShellState {
         : notice.id === "progress"
           ? "continue"
           : notice.id === "error"
-            ? "close"
+            ? this.stashRetry
+              ? "stash"
+              : "close"
             : notice.actions[0]?.id;
     if (!prefer) return null;
     return notice.actions.find((item) => item.id === prefer) ?? notice.actions[0] ?? null;
@@ -1402,16 +1440,21 @@ export class ShellState {
   );
 
 
-  rowCommit = $derived(this.settings.linesHeight === "spaced" ? 36 : 28);
+  rowCommit = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 36 : 28, 2.1));
 
 
-  rowFile = $derived(this.settings.linesHeight === "spaced" ? 32 : 28);
+  rowFile = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 32 : 28, 2));
 
 
-  rowTree = $derived(this.settings.linesHeight === "spaced" ? 28 : 24);
+  rowTree = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 28 : 24, 1.8));
 
 
-  rowSide = $derived(this.settings.linesHeight === "spaced" ? 32 : 28);
+  rowSide = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 32 : 28, 2));
+
+
+  rowHeight(base: number, factor: number) {
+    return Math.max(base, Math.ceil((this.settings.uiScale || 13) * factor));
+  }
 
 
   activeLocale = $derived(resolveLocale(this.settings.locale));
@@ -1816,13 +1859,13 @@ export class ShellState {
   diffRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)));
 
 
-  diffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.diffLines } : windowSlice(this.diffLines, this.diffTop, this.diffRowHeight, 80, this.windowRows(this.diffHeight, this.diffRowHeight)));
+  diffWindow = $derived(virtualLines(this.diffLines, this.diffTop, this.diffRowHeight, this.windowRows(this.diffHeight, this.diffRowHeight), this.settings.diffWordWrap));
 
 
   blameWindow = $derived(windowSlice(this.blameLines ?? [], this.blameTop, this.diffRowHeight, 80, this.windowRows(this.diffHeight, this.diffRowHeight)));
 
 
-  historyDiffWindow = $derived(this.settings.diffWordWrap ? { start: 0, rows: this.historyDiff?.lines ?? [] } : windowSlice(this.historyDiff?.lines ?? [], this.historyDiffTop, this.diffRowHeight, 80, this.windowRows(this.historyDetailHeight, this.diffRowHeight)));
+  historyDiffWindow = $derived(virtualLines(this.historyDiff?.lines ?? [], this.historyDiffTop, this.diffRowHeight, this.windowRows(this.historyDetailHeight, this.diffRowHeight), this.settings.diffWordWrap));
 
 
   splitRows = $derived(this.settings.diffStyle === "split" ? splitDiff(this.diffLines) : []);
@@ -1831,14 +1874,7 @@ export class ShellState {
   splitRowHeight = $derived(this.diffRowHeight);
 
 
-  splitWindow = $derived.by(() => {
-    if (this.settings.diffWordWrap) return { start: 0, rows: this.splitRows, after: 0 };
-    const count = Math.ceil(Math.max(this.diffHeight, 600) / this.splitRowHeight) + 36;
-    if (this.splitRows.length <= count + 40) return { start: 0, rows: this.splitRows, after: 0 };
-    const start = Math.min(Math.max(0, Math.floor(this.diffTop / this.splitRowHeight) - 16), Math.max(0, this.splitRows.length - count));
-    const rows = this.splitRows.slice(start, start + count);
-    return { start, rows, after: this.splitRows.length - start - rows.length };
-  });
+  splitWindow = $derived(virtualSplit(this.splitRows, this.diffTop, this.splitRowHeight, this.diffHeight, this.settings.diffWordWrap));
 
 
   splitColumns = $derived.by(() => {
@@ -1986,7 +2022,7 @@ export class ShellState {
       { label: this.tr("menu.createTag"), group: action, run: () => { this.draft = ""; this.draftExtra = "HEAD"; this.draftUser = ""; this.dialog = "tag"; } },
       { label: this.tr("chrome.pushTags"), group: action, run: () => void this.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: this.settings.forceWithLease }) },
       { label: this.tr("chrome.stash"), group: action, run: () => this.openStash([]) },
-      { label: this.tr("chrome.pop"), group: action, run: () => void this.mutate({ action: "stashPop" }) },
+      { label: this.tr("chrome.pop"), group: action, run: () => this.confirmPopStash() },
       { label: this.tr("chrome.refresh"), group: action, run: () => void this.refresh() },
       { label: this.tr("chrome.stageAll"), group: action, run: () => void this.runChange("stage_all") },
       { label: this.tr("chrome.commit"), group: action, run: () => void this.submitCommit(false) },
@@ -2037,7 +2073,7 @@ export class ShellState {
         ...(this.refs?.stashes ?? []).map((stash) => ({
           label: stash.summary || stash.name,
           group: this.tr("chrome.groupStash"),
-          run: () => void this.mutate({ action: "stashPop", name: stash.name }),
+          run: () => this.confirmPopStash(stash.name),
         })),
       );
     }
@@ -2149,6 +2185,13 @@ export class ShellState {
       this.blobRev = nav.rev;
       if (nav.repo && nav.repo !== this.repoPath()) await this.openRepo(nav.repo);
       await this.loadBlobPane();
+      return;
+    }
+    if (nav.view === "merge") {
+      if (label && label !== "merge") return;
+      this.standalone = "merge";
+      if (nav.repo && nav.repo !== this.repoPath()) await this.openRepo(nav.repo);
+      if (nav.file) await this.openTextMerge(nav.file);
     }
   }
 
@@ -2371,6 +2414,8 @@ export class ShellState {
         this.mode = "error";
         this.loadError = "";
       }
+      const runtime = await invoke<GitRuntime>("git_runtime").catch(() => null);
+      if (runtime) this.gitRuntime = runtime;
       await applyLabScene(this, item);
       this.labSceneId = item.id;
     } catch (error) {
@@ -2461,6 +2506,15 @@ export class ShellState {
 
   message(error: unknown) {
     const raw = (error instanceof Error ? error.message : String(error)).trim();
+    const coded = /^awegit:([a-z]+):(.*)$/i.exec(raw);
+    if (coded) {
+      const code = (coded[1] ?? "").toLowerCase();
+      const detail = (coded[2] ?? "").trim();
+      const known = code === "network" || code === "auth" || code === "update" || code === "git" || code === "cancelled" || code === "settings";
+      const sentence = known ? this.tr(`error.${code}`) : raw;
+      return detail && known ? `${sentence} ${detail}` : sentence;
+    }
+    if (/^could not start git/i.test(raw)) return this.tr("chrome.gitMissing");
     const open = /^could not open repository at (.+)$/i.exec(raw);
     if (open) return this.tr("dialog.errorOpenRepo", { path: open[1] ?? "" });
     if (/^not a git repository/i.test(raw)) return this.tr("dialog.errorNotRepo");
@@ -2514,8 +2568,8 @@ export class ShellState {
 
 
 
-  async loadDiff() {
-    return loadDiff(this);
+  async loadDiff(loadLarge = false) {
+    return loadDiff(this, loadLarge);
   }
 
 
@@ -2593,6 +2647,7 @@ export class ShellState {
       if (this.mode !== "live" || this.repoPath() !== path) return undefined;
     }
     this.actionError = null;
+    this.stashRetry = null;
     this.startWork(this.tr("chrome.working"), path);
     try {
       const value = await invoke<StatusSnapshot & { log?: string }>(command, { path, ...extra });
@@ -2687,6 +2742,14 @@ export class ShellState {
       case "discardPaths": {
         const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
         return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--", ...files.slice(0, 8)]) };
+      }
+      case "resolvePaths": {
+        const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
+        const ours = text("side") === "ours";
+        return {
+          title: `${this.tr(ours ? "dialog.useOurs" : "dialog.useTheirs")} (${files.length})`,
+          command: this.gitLine(["checkout", ours ? "--ours" : "--theirs", "--", ...files.slice(0, 8)]),
+        };
       }
       case "stash":
         return { title: this.tr("chrome.stash"), command: this.gitLine(["stash", "push", text("message") ? "-m" : "", text("message")]) };
@@ -2788,7 +2851,9 @@ export class ShellState {
     }
     if (this.commandFilter === "errors") {
       return this.recentErrors.map((item): CommandEntry => ({
-        id: item.id,
+        // Saved errors count from 1 on their own, so they take a separate id band.
+        // Otherwise a stale command id could select an old error and open scrolled down.
+        id: ERROR_ENTRY_ID - item.id,
         title: item.title || this.tr("chrome.errorTitle"),
         command: item.command,
         output: item.text,
@@ -2853,8 +2918,9 @@ export class ShellState {
       }
       return;
     }
-    if (id === "error" && action === "close") {
-      this.closeError();
+    if (id === "error") {
+      if (action === "close") this.closeError();
+      else if (action === "stash") void this.stashAndRetry();
       return;
     }
     if (id === "clone-done" && action === "open") {
@@ -2925,67 +2991,82 @@ export class ShellState {
     const path = this.repoPath();
     if (!this.backend() || !path) return;
     const background = source === "background";
-    if (this.busy) {
-      if (background) return;
-      await this.waitForWriteSlot();
-      if (this.repoPath() !== path) return;
+    if (!background) {
+      if (this.userWrites > 0) return;
+      this.userWrites += 1;
     }
-    if (!background) this.actionError = null;
-    const described = this.describeRequest(request);
-    const action = String(request.action ?? "");
-    const dialogBefore = this.dialog;
-    const refreshContext = this.needsContext(action);
-    const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
-    if (!background) this.startWork(described.title, path);
+    let started = false;
     try {
-      const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request });
-      const output = value.output ?? "";
-      // A foreground write started while this was running will paint the later status itself.
-      const superseded = background && this.busy;
-      if (this.viewing(path) && !superseded) {
-        this.applySnapshot(value);
-        if (refreshContext) await this.loadContext();
-        if (!background && this.viewing(path)) await this.loadDiff();
+      if (this.busy) {
+        if (background) return;
+        await this.waitForWriteSlot();
+        if (this.repoPath() !== path) return;
       }
-      if (followSubmodules) {
-        const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request: { action: "submoduleUpdate" } });
-        if (this.viewing(path)) this.applySnapshot(follow);
-        this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
+      if (!background) this.actionError = null;
+      if (!background) this.stashRetry = null;
+      const described = this.describeRequest(request);
+      const action = String(request.action ?? "");
+      const dialogBefore = this.dialog;
+      const refreshContext = this.needsContext(action);
+      const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
+      if (!background) {
+        this.startWork(described.title, path);
+        started = true;
       }
-      this.noteActivity(`${action}${output ? " output" : " ok"}`);
-      this.recordCommand(action, described, value.log || output, true, source);
-      if (!background && this.viewing(path) && this.dialog === dialogBefore) {
-        if (dialogBefore === "prefs") {
-          // Preferences stay open for LFS/author actions; the operation is recorded below.
-        } else if (output) {
-          this.commandOutput = output;
-          this.dialog = "output";
-        } else {
-          this.dialog = null;
-        }
-      }
-    } catch (error) {
-      const text = this.message(error);
-      this.noteActivity(`${String(request.action ?? "")} failed`);
-      this.recordCommand(String(request.action ?? ""), described, text, false, source);
-      if (this.viewing(path) && !(background && this.busy)) {
-        try {
-          this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
+      try {
+        const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request });
+        const output = value.output ?? "";
+        // A foreground write started while this was running will paint the later status itself.
+        const superseded = background && this.busy;
+        if (this.viewing(path) && !superseded) {
+          this.applySnapshot(value);
           if (refreshContext) await this.loadContext();
-        } catch {
-          /* keep the action error */
+          if (!background && this.viewing(path)) await this.loadDiff();
         }
-        if (this.shouldShowMergeConflict(action, text)) {
-          this.commandOutput = text.trim();
-          this.dialog = "mergeConflict";
-          this.actionError = null;
-        } else {
-          this.actionError = text;
-          if (action === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
+        if (followSubmodules) {
+          const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request: { action: "submoduleUpdate" } });
+          if (this.viewing(path)) this.applySnapshot(follow);
+          this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
         }
+        this.noteActivity(`${action}${output ? " output" : " ok"}`);
+        this.recordCommand(action, described, value.log || output, true, source);
+        if (!background && this.viewing(path) && this.dialog === dialogBefore) {
+          if (dialogBefore === "prefs") {
+            // Preferences stay open for LFS/author actions; the operation is recorded below.
+          } else if (output) {
+            this.commandOutput = output;
+            this.dialog = "output";
+          } else {
+            this.dialog = null;
+          }
+        }
+      } catch (error) {
+        const text = this.message(error);
+        this.noteActivity(`${String(request.action ?? "")} failed`);
+        this.recordCommand(String(request.action ?? ""), described, text, false, source);
+        if (this.viewing(path) && !(background && this.busy)) {
+          try {
+            this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
+            if (refreshContext) await this.loadContext();
+          } catch {
+            /* keep the action error */
+          }
+          if (this.shouldShowMergeConflict(action, text)) {
+            this.commandOutput = text.trim();
+            this.dialog = "mergeConflict";
+            this.actionError = null;
+            this.stashRetry = null;
+          } else {
+            this.actionError = text;
+            this.stashRetry = this.stashBlocked(action, text) ? { request, source } : null;
+            if (action === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
+          }
+        }
+      } finally {
+        if (started) this.stopWork(path);
       }
     } finally {
-      if (!background) this.stopWork(path);
+      if (!background) this.userWrites -= 1;
     }
   }
 
@@ -2993,6 +3074,7 @@ export class ShellState {
 
   closeError() {
     this.actionError = null;
+    this.stashRetry = null;
     this.errorCopied = false;
   }
 
@@ -3003,6 +3085,33 @@ export class ShellState {
     this.copyText(this.actionError);
     this.errorCopied = true;
     window.setTimeout(() => (this.errorCopied = false), 1500);
+  }
+
+
+  /** True when git refused a write because the work tree has changes it would overwrite. */
+  stashBlocked(action: string, text: string) {
+    const retryable = ["checkout", "checkoutRemote", "merge", "pull", "pullRef", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashApply", "stashPop", "applyPatch", "continue", "gitFlowFinish"];
+    if (!retryable.includes(action)) return false;
+    const lower = text.toLowerCase();
+    return lower.includes("would be overwritten") || lower.includes("please commit your changes") || lower.includes("please move or remove");
+  }
+
+
+  /** Stash what blocked the last write, then run that write again. */
+  async stashAndRetry() {
+    const pending = this.stashRetry;
+    if (!pending) return;
+    this.stashRetry = null;
+    const request = { ...pending.request };
+    // A new stash renumbers stash@{n}, so pin the entry this write targeted by commit id.
+    const name = typeof request.name === "string" ? request.name : "";
+    if (name.startsWith("stash@{") && (request.action === "stashApply" || request.action === "stashPop")) {
+      const stash = (this.refs?.stashes ?? []).find((item) => item.name === name);
+      if (stash?.id) request.name = stash.id;
+    }
+    await this.mutate({ action: "stash", message: this.tr("chrome.stashBlockedMessage"), includeUntracked: true });
+    if (this.actionError) return;
+    await this.mutate(request, pending.source);
   }
 
 
@@ -3020,7 +3129,7 @@ export class ShellState {
 
 
   doPull() {
-    return this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: this.settings.pullStash });
+    return this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: true });
   }
 
 
@@ -3030,7 +3139,7 @@ export class ShellState {
     if (!ops.has(action)) return false;
     if (this.conflictCount > 0) return true;
     const lower = text.toLowerCase();
-    return /conflict|fix conflicts|merge failed|could not apply|needs merge|unmerged paths|自动合并失败/.test(lower);
+    return /conflict|fix conflicts|merge failed|could not apply|needs merge|unmerged (paths|files)|merging is not possible|自动合并失败/.test(lower);
   }
 
 
@@ -3055,8 +3164,43 @@ export class ShellState {
   }
 
 
+  confirmApplyStash(name: string, summary: string) {
+    const note = this.settings.applyStashDelete
+      ? this.tr("dialog.applyStashDeleteNote")
+      : this.tr("dialog.applyStashKeepNote");
+    this.ask(this.tr("dialog.applyStash"), `${this.tr("dialog.applyStashBody", { summary })} ${note}`, () => void this.applyStash(name));
+  }
+
+
+  confirmPopStash(name?: string) {
+    const stash = name ? this.refs?.stashes.find((item) => item.name === name) : this.refs?.stashes[0];
+    if (!stash && !name) {
+      void this.mutate({ action: "stashPop" });
+      return;
+    }
+    const summary = stash?.summary || name || "";
+    this.ask(this.tr("dialog.popStash"), this.tr("dialog.popStashBody", { summary }), () => void this.mutate({ action: "stashPop", name: name ?? stash?.name }));
+  }
+
+
+  confirmReset(rev: string, mode: "soft" | "mixed", summary = "") {
+    const short = rev.slice(0, 7);
+    const target = summary ? `${short} "${summary}"` : short;
+    const title = this.tr(mode === "soft" ? "dialog.softReset" : "dialog.mixedReset");
+    const body = this.tr(mode === "soft" ? "dialog.softResetBody" : "dialog.mixedResetBody", { target });
+    this.ask(title, body, () => void this.mutate({ action: "reset", rev, mode }));
+  }
+
+
+
+  confirmRevert(id: string, summary: string) {
+    this.ask(this.tr("dialog.revert"), this.tr("dialog.revertBody", { short: id.slice(0, 7), summary }), () => void this.mutate({ action: "revert", rev: id }));
+  }
+
+
 
   adoptSettings(value: Settings, resetHistory = false) {
+    const recovered = value.recoveryNotice === "recovered-backup";
     this.settings = this.withSourceRoots({
       ...this.defaultSettings,
       ...value,
@@ -3074,6 +3218,7 @@ export class ShellState {
       sourceDirectories: value.sourceDirectories ?? [],
       groupNames: value.groupNames ?? [],
     });
+    if (recovered) this.settings = { ...this.settings, recoveryNotice: "" };
     if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
     if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
     if (this.settings.aiPromptStyle !== "long") this.settings = { ...this.settings, aiPromptStyle: "short" };
@@ -3085,6 +3230,7 @@ export class ShellState {
     if (resetHistory || this.logLimit === 500) this.logLimit = limit;
     this.signOff = this.settings.signOff;
     this.showPendingUpdate(false);
+    if (recovered && !this.actionError) this.actionError = this.tr("chrome.settingsRecovered");
   }
 
   showPendingUpdate(force: boolean) {
@@ -3125,6 +3271,22 @@ export class ShellState {
     }
   }
 
+  /**
+   * A brand-new install asks once. Mark it seen before later saves, and show the
+   * prompt only from the main window after startup finishes.
+   */
+  takeFeaturesIntro() {
+    if (!this.inApp() || this.labPage || this.standalone) return false;
+    if (this.settings.featuresIntro !== "pending") return false;
+    this.settings = { ...this.settings, featuresIntro: "seen" };
+    return true;
+  }
+
+  openFeaturesPage() {
+    if (this.inApp()) void openUrl(featuresPageUrl);
+    else window.open(featuresPageUrl, "_blank", "noopener");
+  }
+
   dismissUpdate() {
     const version = this.updateNotice?.appVersion ?? "";
     this.updateNotice = null;
@@ -3148,7 +3310,7 @@ export class ShellState {
     this.updatePercent = null;
     this.updateMessage = this.tr("chrome.updateDownloading");
     try {
-      await invoke("download_update", { url: notice.downloadUrl });
+      await invoke("download_update", { url: notice.downloadUrl, sha256: notice.sha256 ?? "" });
       this.updatePhase = "ready";
       this.updatePercent = 100;
       this.updateMessage = this.tr("chrome.updateStarted");
@@ -3326,8 +3488,8 @@ export class ShellState {
 
 
 
-  async previewCherry(rev: string, record: boolean) {
-    return previewCherry(this, rev, record);
+  async previewCherry(rev: string, record: boolean, summary = "") {
+    return previewCherry(this, rev, record, summary);
   }
 
 
@@ -3946,6 +4108,7 @@ export class ShellState {
     const running = (this.jobs[this.jobKey(path)]?.depth ?? 0) > 0;
     let stopAt = path;
     this.actionError = null;
+    this.stashRetry = null;
     if (!running) this.startWork(this.tr("chrome.open"), path);
     try {
       const value = await invoke<StatusSnapshot>("workspace_status", { path });
@@ -4341,6 +4504,12 @@ export class ShellState {
 
 
 
+  mergeRoute() {
+    return mergeRoute(this);
+  }
+
+
+
   differentCommitter(detail: CommitDetail | null) {
     return differentCommitter(this, detail);
   }
@@ -4526,6 +4695,18 @@ export class ShellState {
 
   async stagePicked(files = [...this.picked]) {
     return stagePicked(this, files);
+  }
+
+
+
+  pickedConflicts(files = [...this.picked]) {
+    return pickedConflicts(this, files);
+  }
+
+
+
+  async resolvePicked(side: "ours" | "theirs", files = [...this.picked]) {
+    return resolvePicked(this, side, files);
   }
 
 
@@ -4738,14 +4919,18 @@ export class ShellState {
     return openTextMerge(this, file);
   }
 
+  async loadTextMerge() {
+    return loadTextMerge(this);
+  }
+
 
   closeTextMerge() {
     return closeTextMerge(this);
   }
 
 
-  async applyTextMerge() {
-    return applyTextMerge(this);
+  async applyTextMerge(text?: string) {
+    return applyTextMerge(this, text);
   }
 
   async applyFileMerge(side: "ours" | "theirs") {
@@ -4989,16 +5174,21 @@ export class ShellState {
     if (!this.backend()) return;
     const token = ++this.repoScanToken;
     this.repoScanning = true;
+    this.repoScanTruncated = false;
     const found: string[] = [];
+    let truncated = false;
     for (const root of this.sourceRootList()) {
       try {
-        found.push(...(await invoke<string[]>("scan_repositories", { root: root.path, depth: this.settings.scanDepth || 5 })));
+        const hit = await invoke<RepoScan>("scan_repositories", { root: root.path, depth: this.settings.scanDepth || 5 });
+        found.push(...(hit.paths ?? []));
+        if (hit.truncated) truncated = true;
       } catch {
         /* a missing source folder should not hide the ones that can be read */
       }
     }
     if (token !== this.repoScanToken) return;
     this.scannedRepos = this.dedupeRepos(found);
+    this.repoScanTruncated = truncated;
     this.repoScanning = false;
   }
 
@@ -5504,6 +5694,13 @@ export class ShellState {
     return "Merge";
   }
 
+
+
+  mergeRouteLabel() {
+    if (this.progress !== "merge" || !this.mergeState) return "";
+    return `${this.mergeState.source} → ${this.mergeState.into}`;
+  }
+
   constructor() {
     $effect(() => {
       if (!this.busy) this.releaseWriteWaiters();
@@ -5607,10 +5804,10 @@ export class ShellState {
     paint();
     media?.addEventListener("change", paint);
     root.style.setProperty("--ui-scale", `${this.settings.uiScale || 13}px`);
-    root.style.setProperty("--row-file", this.settings.linesHeight === "spaced" ? "32px" : "28px");
-    root.style.setProperty("--row-commit", this.settings.linesHeight === "spaced" ? "36px" : "28px");
+    root.style.setProperty("--row-file", `${this.rowFile}px`);
+    root.style.setProperty("--row-commit", `${this.rowCommit}px`);
     root.style.setProperty("--row-side", `${this.rowSide}px`);
-    root.style.setProperty("--row-tree", this.settings.linesHeight === "spaced" ? "28px" : "24px");
+    root.style.setProperty("--row-tree", `${this.rowTree}px`);
     root.style.setProperty("--diff-row", `${this.diffRowHeight}px`);
     return () => media?.removeEventListener("change", paint);
     });
@@ -5703,17 +5900,27 @@ export class ShellState {
     this.mode = "loading";
     this.selectedPath = null;
     void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
+    void invoke<GitRuntime>("git_runtime").then((value) => {
+      this.gitRuntime = value;
+      if (this.actionError) return;
+      if (!value.version) this.actionError = this.tr("chrome.gitMissing");
+      else if (!value.minimum) this.actionError = this.tr("chrome.gitOld", { version: value.version });
+    }).catch(() => {});
     invoke<UpdateNotice | null>("check_for_update")
     .then((value) => {
     this.pendingUpdate = value;
     this.showPendingUpdate(false);
     })
     .catch(() => {});
+    let targeted = false;
+    let introduce = false;
     void (async () => {
     try {
     const value = await invoke<Settings>("load_settings");
     if (stopped) return;
     this.adoptSettings(value);
+    introduce = this.takeFeaturesIntro();
+    if (introduce) void this.savePrefs(false);
     void invoke<string>("settings_path").then((path) => (this.settingsPath = path)).catch(() => {});
     await this.loadExternalTools();
     if (value.windowWidth > 200 && value.windowHeight > 200 && !this.standalone) {
@@ -5781,6 +5988,7 @@ export class ShellState {
     const queryFile = params.get("file");
     const queryView = params.get("view");
     if (queryRepo) {
+    targeted = true;
     if (queryView === "history" && queryFile) this.historyFilter = queryFile;
     await this.openRepo(queryRepo);
     if (queryView === "blame" && queryFile) await this.showBlame(queryFile);
@@ -5790,6 +5998,7 @@ export class ShellState {
       this.blobRev = params.get("rev") ?? "";
       await this.loadBlobPane();
     }
+    if (queryView === "merge" && queryFile) await this.openTextMerge(queryFile);
     return;
     }
     const workspace = this.settings.workspaces.find((item) => item.id === this.settings.currentWorkspace);
@@ -5821,6 +6030,8 @@ export class ShellState {
     this.loadError = this.message(error);
     this.mode = "error";
     }
+    } finally {
+    if (!stopped && !targeted && introduce) this.dialog = "features";
     }
     })();
     return () => {

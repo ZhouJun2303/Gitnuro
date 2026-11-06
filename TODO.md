@@ -1,13 +1,73 @@
-# 待办
+# TODO：项目问题与优化清单
 
-暂无。
+> 最近一次审计：2026-11-05。条目来自源码、构建配置、现有测试和实验台脚本；先处理 P0，再按 P1/P2 排期。
+>
+> 优先级：P0 = 阻塞核心操作或有数据风险；P1 = 发布前应处理；P2 = 可安排的质量、性能和体验改进。
 
-## 未处理
+## 当前验证基线
 
-暂无。
+- pnpm check：通过，0 errors、0 warnings。
+- pnpm test：通过。awegit-git 106 个测试通过，awegit 库 51 个测试通过。统一入口是 `node scripts/test-all.mjs`。
+- pnpm test:ui：通过，58 个测试。脚本只在本机没有 Chromium 时才安装。本轮打开了实验台，关于页、换行差异、截断扫描、错误码和设置恢复横幅都过了。
+
+## P1：先修复的 bug 与可靠性问题
+
+- [x] BUG-01 P1 取消操作不能稳定终止 Windows 子进程树（crates/git/src/cli.rs:368、crates/git/tests/operations.rs:358）。用 Windows Job Object 或可验证的 taskkill 重试/等待实现进程组取消；Unix 使用独立进程组。取消后等待句柄退出、清理 PID，并增加不会误杀后续同仓库操作的测试。验收：取消 fetch、clone、历史读取和大 diff 都能在限定时间内结束，测试在 Windows/macOS 均稳定通过。
+- [x] BUG-02 P1 发布版本元数据不一致。package.json、src-tauri/Cargo.toml 和 src-tauri/tauri.conf.json 是 2.0.2，latest.json 与 README 仍写 2.0.0；updates::check 因此不会给 2.0.2 显示更新。集中版本来源，发布脚本同步 latest.json、README 和安装包，并在 CI 中检查所有版本字段一致。
+- [x] BUG-03 P1 设置文件写入需要崩溃安全和损坏恢复（src-tauri/src/settings.rs:570-590）。当前直接 fs::write，进程中断可能留下半个 JSON；解析失败也会使设置加载整体失败。改为临时文件写入、刷盘、原子替换并保留上一份备份；加入 schema 版本、迁移和损坏文件恢复提示。验收：写入中断、旧版本字段、空文件和非法 JSON 都不会丢失最近一次有效设置。
+- [x] BUG-04 P1 凭据不应长期明文保存在 settings.json（src-tauri/src/settings.rs:25-55,135-230、README）。API key、代理密码和各平台 token 当前写入用户配置目录。迁移到 Windows Credential Manager/macOS Keychain，配置文件只保留引用；导入、诊断、日志和错误信息继续脱敏，并补升级迁移测试。
+- [x] BUG-05 P1 更新包缺少完整性验证和平台启动分支（src-tauri/src/updates.rs:48-99）。当前只校验 GitHub URL，下载后直接启动文件，没有签名或 SHA-256 校验；macOS 的 DMG 也不能按 Windows 的方式直接启动。为每个平台发布签名/哈希，下载到临时文件后校验并原子替换；Windows 使用安装程序，macOS 使用 open，失败时清理临时文件并保留可重试状态。
+- [x] BUG-06 P1 Tauri 安全边界过宽（src-tauri/tauri.conf.json:23、src-tauri/capabilities/default.json:10-91）。CSP 为 null，opener 允许打开任意路径，多个高权限命令对所有窗口开放。配置最小 CSP，按主窗口/独立窗口拆分 capability，限制外部 URL 和可打开路径；为命令增加参数边界测试，并验证错误页面或远程内容不能调用本地命令。
+- [x] BUG-07 P1 AI 和 Forge 功能依赖外部 curl（src-tauri/src/ai.rs:292-372、src-tauri/src/forge.rs:330-370）。系统没有 curl 时功能直接失败，代理、CA 文件、SSL 开关和更新模块的 HTTP 行为也不一致。复用已存在的 ureq 客户端或可靠定位应用自带 curl，统一超时、代理、CA 和错误码；用本地测试服务器覆盖 HTTP、HTTPS、代理、重定向和无 curl 环境。
+
+## P1：测试、构建和发布流程
+
+- [x] TEST-01 P1 建立跨平台 CI 门槛。github 目前只有 issue 模板，没有 Windows/macOS 构建和测试工作流。加入 pnpm check、cargo test -p awegit-git、cargo test -p awegit --lib、打包 smoke test 和实验台测试；矩阵至少覆盖 Windows x64、macOS Intel、macOS Apple Silicon，并上传失败日志和诊断信息。
+- [x] TEST-02 P1 修复实验台浏览器安装流程（scripts/lab-test.mjs:13）。测试脚本不应每次运行都修改用户级 Playwright 缓存；检测浏览器是否已安装，允许通过环境变量指定缓存目录，CI 中单独执行安装并缓存。EPERM、残留锁和缺少浏览器时输出明确修复命令。
+- [x] TEST-03 P1 扩大自动化覆盖范围。pnpm test 只运行 awegit-git，不会运行 30 个 Tauri 单元测试；补一个统一测试入口，并为设置原子写入、更新校验、取消操作、watcher 丢事件、特殊路径和 Git 版本差异补回归测试。
+- [x] REL-01 P1 固定唯一版本来源并验证发布产物。发布前自动检查 Cargo、npm、Tauri 配置、latest.json、安装包文件名和关于页版本；发布脚本失败时不应留下部分合并或错误的 latest.json。
+
+## P1/P2：性能和资源使用
+
+- [x] PERF-01 P1 降低仓库监视器启动和丢事件风险（src-tauri/src/lib.rs:718-990）。打开仓库会递归扫描工作树并建立大量 watch；代码注释已指出大型仓库在 Windows 上会卡顿，而且状态读取和 watcher 建立之间存在窗口。改用 Git 感知的目录集合或分层惰性 watch，建立后立即做一次增量校验；明确只监视当前仓库还是维护每个打开 tab 的 watcher。记录建立耗时、watch 数和丢事件后的恢复次数。
+- [x] PERF-02 P1 长历史图计算移出渲染路径（src/lib/view.ts:62-270、src/lib/shell/state.svelte.ts:50,1714-1853,5655-5690）。合并折叠在 25,000 条提交以内使用位图，内存和计算量仍可能达到 O(n²/32)；sameValue 在刷新时还会逐项比较整份历史。使用提交 tip/refs generation 做增量失效，把图布局和折叠放进 worker 或后端分页计算；保留按帧分批，避免任何一次重绘超过一帧预算。
+- [x] PERF-03 P1 换行差异失去虚拟化（src/lib/shell/state.svelte.ts:1846-1852）。diffWordWrap 开启时 diffWindow 和历史差异窗口直接返回全部行，长文本会一次创建大量 DOM。实现按可见区域的换行高度估算和虚拟列表，或在超过阈值时提示切换不换行模式；验收 50,000 行文本滚动、选择和复制仍可操作。
+- [x] PERF-04 P2 让状态、统计和 LFS 信息按字段缓存（crates/git/src/ops.rs:2224-2238）。repo_facts 会并行启动 ignored、activity、LFS 和 hot-path 查询，完整统计在大仓库可能耗时数秒；前端缓存只按仓库路径区分，缺少基于 HEAD、index 和工作树变化的失效条件。拆分 brief/full 结果，按实际变更字段刷新，并在确认没有 Git LFS 时跳过 LFS 查询。
+- [x] PERF-05 P2 清理仓库队列对象（src-tauri/src/lib.rs:25-90）。repo_gates 是永不删除的全局 HashMap，长时间打开大量仓库会持续保留 gate。改用引用计数、空闲回收或有上限的缓存，并补多仓库长时间运行的内存测试。
+- [x] PERF-06 P2 仓库扫描不要静默丢失结果（crates/git/src/ops.rs:2408-2437）。扫描最多返回 300 个仓库，达到上限后没有截断标记，用户会误以为目录中只有这些仓库。返回 truncated 和继续扫描入口，或让用户设置上限并在界面明确提示。
+
+## P1/P2：兼容性和数据完整性
+
+- [x] COMP-01 P1 明确并检查 Git 版本能力。Windows 打包固定 MinGit 2.56，macOS 使用系统 Git，但启动时没有最低版本/能力探测；merge-tree --write-tree、LFS、worktree 等功能在旧版 Git 上可能失败。启动时显示 Git 路径、版本和缺失能力，提供降级路径；测试系统 Git 2.39、2.40、2.56 以及没有 Git/LFS 的环境。
+- [x] COMP-02 P1 移除对固定开发机路径的依赖（scripts/with-rust-path.mjs:20-39、scripts/package-windows.ps1:32）。WinLibs 路径写死为一个 WinGet 包目录，换版本、离线环境或 ARM64 机器都会找不到工具链。支持环境变量和常见安装位置探测，输出实际使用的 cargo/rustc/gcc，并在 CI 验证干净机器构建。
+- [x] COMP-03 P1 完善 macOS/Windows 发布兼容性。macOS 打包脚本没有签名、公证、最低系统版本和 Intel/Apple Silicon 产物说明；Windows 也没有验证 WebView2 已安装或离线安装行为。定义支持的系统版本和架构，产出签名/公证包，增加干净系统安装、升级、卸载和无网络启动 smoke test。
+- [x] COMP-04 P2 支持特殊和非 UTF-8 路径（crates/git/src/change.rs:1160-1175、crates/git/src/ops.rs:1160-1180 等）。多个 name-status 和路径解析使用非 -z 输出与 String::from_utf8_lossy，包含制表符、换行或非 UTF-8 字节的文件名可能被改写、截断或无法再次操作。统一使用 NUL 分隔和字节安全的内部路径表示，界面层再做可逆显示；补 Unicode、空格、tab、换行、大小写敏感文件系统测试。
+- [x] COMP-05 P2 统一网络代理和 TLS 行为。Git 命令读取代理/CA/SSL 设置，AI 和 Forge 的 curl 路径没有完整复用这些设置。抽出共享网络配置和错误模型，验证 HTTP 代理、SOCKS、企业 CA、关闭 SSL 校验和超时行为在三类请求中一致。
+- [x] COMP-06 P2 错误信息改用稳定错误码并补齐本地化。前端目前只翻译少数固定字符串，Git、curl、系统工具的大量错误直接显示英文原文。后端返回分类错误码和安全参数，前端按语言渲染可操作提示，同时保留原始诊断信息供复制。
+
+## 交付顺序建议
+
+1. 先修 BUG-01、BUG-02、BUG-03，并让 pnpm test 全绿。
+2. 同一迭代完成 BUG-05、BUG-06、BUG-07 和 TEST-01/02，建立可重复发布和安全边界。
+3. 然后处理 PERF-01/02/03，使用大仓库基准记录首屏、刷新、滚动、内存和取消延迟。
+4. 最后按 COMP-01 至 COMP-06 扩展平台矩阵、路径覆盖和本地化。
 
 ## 已处理
 
+- 凭据写入系统凭据库。Windows 用 Credential Manager，macOS 代码走 Keychain，测试和实验台用 `AWEGIT_SECRET_DIR` 文件库。设置文件里的密钥字段保持空字符串。本机没有调用真实 CredWrite，也没有编译 macOS Keychain。
+- 更新安装包要有 64 位 SHA-256 才允许安装。下载先写入 `.partial`，哈希一致后原子替换。Windows 启动 exe 或 msiexec，macOS 用 `open`。当前 `latest.json` 仍是空下载地址，要等真正发布才写入哈希。版本保持 2.0.2，appCode 保持 25。
+- CSP 不再是 null。主窗口和查看窗口分开授权。打开本地路径改走 `reveal_path`，拒绝 System32 和 SysWOW64。外部 URL 只允许 https、mailto 和本机 http。回环以外的自建 GitLab 页面打不开。
+- AI、Forge 和更新检查共用 ureq。代理、CA、关闭校验和超时走同一套网络选项。本地测试覆盖了 HTTP、重定向、401、代理、SOCKS 和坏的 CA 文件。
+- CI 矩阵是 windows-latest、macos-14、macos-15。实验台只在缺少 Chromium 时安装浏览器。`pnpm test` 同时跑 git 和 Tauri 库测试。
+- 仓库监视按已跟踪文件的父目录建立，上限 4000，建好后发一次刷新。丢事件会记恢复次数。历史列表用摘要戳比较，不再逐字段比较整份提交数组。换行差异按约 96 列估算高度，只渲染可见行。
+- 仓库事实按 HEAD 和 index 缓存。完整结果可以回答随后的简要请求，简要结果不能回答完整请求；工作区里的普通文件不使缓存失效。没有 Git LFS 时跳过 `lfs ls-files`。仓库队列超过 24 个后回收空闲 15 分钟且没有人占用的项。扫描超过 300 个仓库时界面说明后面还有。试验台场景 `picker-truncated` 会显示这句说明。
+- 错误码 `awegit:update:sha256 mismatch` 在错误条里显示翻译后的句子，并保留 `sha256 mismatch`。设置从备份恢复时，现有错误条显示恢复说明。这两条都有试验台场景。
+- 启动时读取 Git 路径和版本。低于 2.39 或找不到 Git 时在错误条说明，关于页显示版本。解析测试覆盖 2.39、2.40、2.56 和空字符串。本机没有做签名或公证，macOS 最低系统版本写的是 12.0。
+- 开发机工具链通过环境变量和常见安装位置查找。NUL 分隔的路径保留空格、制表符、换行和 Unicode。不是 UTF-8 的路径返回错误，界面仍用字符串，不能可逆显示原始字节。`a b.txt` 和 `中文.txt` 可以暂存并提交。
+- 网络和 Git 错误用 `awegit:代码:详情`。界面显示翻译后的句子，并保留原始详情。
+- 取消会停掉 Windows 作业对象里的进程树，并等到进程退出。同一次仓库操作用代际号分开，后启动的命令不会被上一次取消杀掉。读取取消不会停写操作。
+- 版本以 `src-tauri/Cargo.toml` 为准，当前 2.0.2。latest.json、README、关于页回退和安装包名与它对齐；`node scripts/check-versions.mjs` 和 CI 检查这些字段。发布时安装包已上传但清单未推送，则不再回退 release 合并。
+- 设置先写入临时文件并刷盘，再原子替换。能解析的当前文件会留下 `.bak`；空文件和非法 JSON 恢复这份备份，并在现有错误条说明。恢复提示不写回文件。更新的 schema 不覆盖，旧文件补上 schema 1。
 - 一次丢弃多个文件，不再逐个调用。
 - 克隆、更新、冲突、进行中和操作错误都放到顶部中间。
 - 二级弹窗固定大、中、小三种宽度，去掉撑高的最小高度。回车确认最上层弹窗，Esc 只关最上层。

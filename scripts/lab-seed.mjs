@@ -231,6 +231,21 @@ function manyHunkText(side) {
   return manyHunkSpec.flatMap((part) => [...(part.stable ?? []), ...(part[side] ?? [])]).join("\n") + "\n";
 }
 
+// A Unity-style YAML asset past the old 2 MB diff cutoff, with one changed header line.
+function bigAsset(name) {
+  const head = [
+    "%YAML 1.1",
+    "%TAG !u! tag:unity3d.com,2011:",
+    "--- !u!114 &11400000",
+    "MonoBehaviour:",
+    `  m_Name: ${name}`,
+    "  m_Entries:",
+  ];
+  const row = "0123456789abcdef".repeat(58);
+  const rows = Array.from({ length: 2400 }, (_, index) => `  m_Entry_${index}: ${row}`);
+  return `${[...head, ...rows].join("\n")}\n`;
+}
+
 function conflictRepo(path, pause) {
   initWork(path);
   const longBase = lines(40, "both base");
@@ -243,6 +258,7 @@ function conflictRepo(path, pause) {
   commit(path, "art/removed-here.png", pngA, "base image");
   commit(path, "data/sheet.xlsx", xlsx("base"), "base sheet");
   commit(path, "src/shared.txt", "shared base\n", "shared name");
+  commit(path, "assets/Config/Generated.asset", bigAsset("base"), "base large asset");
   for (let i = 0; i < FILL; i++) {
     const ext = textExts[i % textExts.length];
     commit(path, `conflict/file-${pad(i + 1)}.${ext}`, `base ${ext} ${i + 1}\n`, `base conflict ${i + 1}`);
@@ -252,6 +268,7 @@ function conflictRepo(path, pause) {
   git(path, ["add", "--", "src/both-sides.ts"]);
   git(path, ["commit", "-m", "topic text", "--", "src/both-sides.ts"]);
   commit(path, "src/many-hunks.ts", manyHunkText("topic"), "topic many hunks");
+  commit(path, "assets/Config/Generated.asset", bigAsset("topic"), "topic large asset");
   git(path, ["rm", "docs/removed-there.md"]);
   git(path, ["commit", "-m", "topic removes the doc"]);
   commit(path, "docs/removed-here.md", "keep here\ntopic edit\n", "topic edits kept here");
@@ -275,6 +292,7 @@ function conflictRepo(path, pause) {
   git(path, ["add", "--", "src/both-sides.ts"]);
   git(path, ["commit", "-m", "main text", "--", "src/both-sides.ts"]);
   commit(path, "src/many-hunks.ts", manyHunkText("main"), "main many hunks");
+  commit(path, "assets/Config/Generated.asset", bigAsset("main"), "main large asset");
   commit(path, "docs/removed-there.md", "keep\nmain edit\n", "main edits the doc");
   git(path, ["rm", "docs/removed-here.md"]);
   git(path, ["commit", "-m", "main removes kept here"]);
@@ -522,6 +540,8 @@ for (let i = 1; i <= FILL; i++) {
 git(full, ["add", "--", "catalog"]);
 git(full, ["commit", "-m", "catalog pack"]);
 write(full, "README.md", lines(80, "working readme"));
+commit(full, "assets/Config/Generated.asset", bigAsset("base"), "large asset");
+write(full, "assets/Config/Generated.asset", bigAsset("working"));
 commit(full, "art/mark.png", pngA, "add the mark");
 write(full, "art/mark.png", pngB);
 commit(full, "data/sheet.xlsx", xlsx("sheet-a"), "add the sheet");

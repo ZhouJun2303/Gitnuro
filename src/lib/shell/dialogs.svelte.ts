@@ -1,7 +1,7 @@
 import { onMount, tick } from "svelte";
 import { invoke } from "../perf";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { commits, diffs, sampleConflictText, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
 import {
@@ -214,7 +214,6 @@ export function joinedPieces(shell: ShellState, pieces: MergePiece[]) {
 
 export function pickHunk(shell: ShellState, index: number, pick: MergePick) {
     shell.mergePieces = shell.mergePieces.map((piece, at) => (piece.kind === "hunk" && at === index ? { ...piece, pick } : piece));
-    shell.mergeResult = shell.joinedPieces(shell.mergePieces);
   }
 
 /** Toggle one side of a conflict hunk (Fork Select / Remove). */
@@ -234,7 +233,6 @@ export function takeMergeSide(shell: ShellState, side: "ours" | "theirs", on: bo
       const ours = side === "ours" ? on : hunkIncludes(piece.pick, "ours");
       return { ...piece, pick: pickFromIncludes(theirs, ours) };
     });
-    shell.mergeResult = shell.joinedPieces(shell.mergePieces);
   }
 
 function piecesFromSides(shell: ShellState, sides: { ours: string; theirs: string; working: string }) {
@@ -243,25 +241,66 @@ function piecesFromSides(shell: ShellState, sides: { ours: string; theirs: strin
     return [{ kind: "hunk" as const, ours: sides.ours, theirs: sides.theirs, pick: "none" as const }];
   }
 
-/** Past this, drawing every line would stall the window. Show the file card instead. */
-const MERGE_TEXT_LIMIT = 200_000;
+/** Past this, moving the whole text through the window costs more than a merge view is worth. */
+const MERGE_TEXT_LIMIT = 8_000_000;
+const MERGE_LINE_LIMIT = 200_000;
+/** Above this, opening the merge panel offers a load button instead of building the view. */
+const MERGE_AUTO_LIMIT = 200_000;
+const MERGE_AUTO_LINES = 8_000;
 
 function textTooBig(text: string) {
     if (text.length > MERGE_TEXT_LIMIT) return true;
     let lines = 1;
     for (let index = 0; index < text.length; index += 1) {
-      if (text.charCodeAt(index) === 10 && ++lines > 8000) return true;
+      if (text.charCodeAt(index) === 10 && ++lines > MERGE_LINE_LIMIT) return true;
     }
     return false;
+  }
+
+function textNeedsLoad(text: string) {
+    if (text.length > MERGE_AUTO_LIMIT) return true;
+    let lines = 1;
+    for (let index = 0; index < text.length; index += 1) {
+      if (text.charCodeAt(index) === 10 && ++lines > MERGE_AUTO_LINES) return true;
+    }
+    return false;
+  }
+
+function sidesTooBig(sides: { ours: string; theirs: string; working: string }) {
+    return textTooBig(sides.working) || textTooBig(sides.ours) || textTooBig(sides.theirs);
+  }
+
+function sidesNeedLoad(sides: { ours: string; theirs: string; working: string }) {
+    return textNeedsLoad(sides.working) || textNeedsLoad(sides.ours) || textNeedsLoad(sides.theirs);
   }
 
 function showFileMerge(shell: ShellState, file: string) {
     shell.mergeFile = file;
     shell.mergeKind = "file";
+    shell.mergeLarge = false;
     shell.mergePieces = [];
     shell.mergeResult = "";
     shell.conflict = null;
     shell.textMerge = true;
+  }
+
+/** Build the merge view once the user asks for a file too large to draw on open. */
+export async function loadTextMerge(shell: ShellState) {
+    const file = shell.mergeFile;
+    if (!file || shell.busy) return;
+    try {
+      const sides = shell.mode === "sample" ? sampleConflictText[file] : await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
+      if (!sides || sidesTooBig(sides)) {
+        showFileMerge(shell, file);
+        return;
+      }
+      shell.conflict = sides;
+      shell.mergePieces = piecesFromSides(shell, sides);
+      shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+      shell.mergeLarge = false;
+    } catch (error) {
+      shell.actionError = shell.message(error);
+    }
   }
 
 export async function openTextMerge(shell: ShellState, file: string) {
@@ -287,15 +326,16 @@ export async function openTextMerge(shell: ShellState, file: string) {
     }
     try {
       const sides = shell.mode === "sample" ? sampleConflictText[file] : await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
-      if (!sides || textTooBig(sides.working) || textTooBig(sides.ours) || textTooBig(sides.theirs)) {
+      if (!sides || sidesTooBig(sides)) {
         showFileMerge(shell, file);
         return;
       }
       shell.conflict = sides;
       shell.mergeFile = file;
       shell.mergeKind = "text";
-      shell.mergePieces = piecesFromSides(shell, sides);
-      shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+      shell.mergeLarge = sidesNeedLoad(sides);
+      shell.mergePieces = shell.mergeLarge ? [] : piecesFromSides(shell, sides);
+      shell.mergeResult = shell.mergeLarge ? "" : shell.joinedPieces(shell.mergePieces);
       shell.textMerge = true;
     } catch (error) {
       shell.actionError = shell.message(error);
@@ -304,6 +344,7 @@ export async function openTextMerge(shell: ShellState, file: string) {
 
 export function closeTextMerge(shell: ShellState) {
     shell.textMerge = false;
+    shell.mergeLarge = false;
   }
 
 export type RebaseStep = { verb: string; rev: string; summary: string; message: string };
@@ -316,7 +357,7 @@ export function buildRebaseSteps(steps: RebaseStep[], picked: string[]): RebaseS
       .map((step) => ({ ...step, message: step.verb === "reword" || step.verb === "squash" || step.verb === "exec" ? step.message : "" }));
   }
 
-export async function applyTextMerge(shell: ShellState) {
+export async function applyTextMerge(shell: ShellState, text?: string) {
     const file = shell.mergeFile;
     if (!file) return;
     if (shell.mode !== "live") {
@@ -324,8 +365,9 @@ export async function applyTextMerge(shell: ShellState) {
       return;
     }
     if (shell.busy) return;
+    if (shell.mergeLarge || shell.mergePieces.length === 0) return;
     if (shell.mergePieces.some((piece) => piece.kind === "hunk" && piece.pick === "none")) return;
-    await shell.mutate({ action: "resolve", file, side: "text", text: shell.mergeResult });
+    await shell.mutate({ action: "resolve", file, side: "text", text: text ?? shell.mergeResult });
     shell.textMerge = false;
   }
 
@@ -413,21 +455,20 @@ export function requestCheckout(shell: ShellState, name: string) {
       void shell.mutate({ action: "checkout", name });
       return;
     }
-    if (shell.settings.checkoutStash) {
-      void checkoutWithStash(shell, name);
-      return;
-    }
-    shell.pendingCheckout = name;
-    shell.draftExtra = "bring";
-    shell.dialog = "checkoutDirty";
+    void checkoutWithStash(shell, name);
   }
 
 async function checkoutWithStash(shell: ShellState, name: string, remote?: { remote: string; branch: string }) {
-    await shell.mutate({ action: "stash", message: shell.tr("dialog.checkoutStashMessage", { name }), includeUntracked: shell.settings.stashIncludeUntracked });
+    await shell.mutate({ action: "stash", message: shell.tr("dialog.checkoutStashMessage", { name }), includeUntracked: true });
     if (shell.actionError) return;
     if (remote) await shell.mutate({ action: "checkoutRemote", remote: remote.remote, branch: remote.branch });
     else await shell.mutate({ action: "checkout", name });
-    if (shell.actionError) return;
+    if (shell.actionError) {
+      const failure = shell.actionError;
+      await shell.mutate({ action: "stashPop", name: "stash@{0}" });
+      shell.actionError = shell.actionError ? `${failure}\n${shell.actionError}` : failure;
+      return;
+    }
     await shell.mutate({ action: "stashPop", name: "stash@{0}" });
     if (shell.actionError) {
       shell.pendingCheckout = name;
@@ -438,21 +479,12 @@ async function checkoutWithStash(shell: ShellState, name: string, remote?: { rem
 export async function quickCheckout(shell: ShellState, name: string, remote?: { remote: string; branch: string }) {
     if (shell.mode !== "live") return;
     const dirty = (shell.snapshot?.staged.length ?? 0) + (shell.snapshot?.unstaged.length ?? 0) > 0;
-    if (dirty && shell.settings.checkoutStash) {
+    if (dirty) {
       await checkoutWithStash(shell, name, remote);
       return;
     }
-    if (dirty) {
-      await shell.mutate({ action: "stash", message: shell.tr("dialog.checkoutStashMessage", { name }), includeUntracked: true });
-      if (shell.actionError) return;
-    }
     if (remote) await shell.mutate({ action: "checkoutRemote", remote: remote.remote, branch: remote.branch });
     else await shell.mutate({ action: "checkout", name });
-    if (shell.actionError) return;
-    if (dirty) {
-      shell.pendingCheckout = name;
-      shell.dialog = "checkoutNotice";
-    }
   }
 
 export function reopenClosed(shell: ShellState) {
@@ -476,7 +508,6 @@ export function confirmSync(shell: ShellState, kind: "fetch" | "pull" | "push") 
     shell.syncAll = shell.settings.fetchAllRemotes;
     shell.syncTags = kind === "fetch" ? shell.settings.fetchTags : shell.settings.pushAllTags;
     shell.syncRebase = shell.settings.pullRebase;
-    shell.syncStash = shell.settings.pullStash;
     shell.syncForce = false;
     shell.pushBranch = current?.name ?? shell.snapshot?.branch ?? "";
     shell.pushTo = "";
@@ -893,8 +924,9 @@ export async function browseSourceRoot(shell: ShellState) {
   }
 
 export async function openLocal(shell: ShellState, path: string) {
+    if (!shell.backend()) return;
     try {
-      await openPath(path);
+      await invoke("reveal_path", { path });
     } catch (error) {
       shell.actionError = shell.message(error);
     }
@@ -1165,11 +1197,8 @@ export function refreshMergeSummary(shell: ShellState) {
 
 function fillMergeText(shell: ShellState, into: string, source: string) {
     const summary = shell.tr(shell.draftExtra === "squash" ? "dialog.mergeSquashTitle" : "dialog.mergeTitleLine", { source, into });
-    const body = shell.mergeFiles.map((file) => `${file.status}\t${file.path}`).join("\n");
     if (shell.mergeSummary === shell.mergeAutoSummary) shell.mergeSummary = summary;
     shell.mergeAutoSummary = summary;
-    if (shell.mergeBody === shell.mergeAutoBody) shell.mergeBody = body;
-    shell.mergeAutoBody = body;
   }
 
 export async function saveWindow(shell: ShellState) {

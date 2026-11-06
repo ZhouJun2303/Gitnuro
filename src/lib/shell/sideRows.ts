@@ -6,7 +6,7 @@ export type SideAdd = "branch" | "remote" | "submodule" | "worktree";
 export type SideRow =
   | { key: string; kind: "section"; id: string; label: string; count: number | null; filter: boolean; add: SideAdd | null; showAll: boolean; empty: boolean }
   | { key: string; kind: "folder"; folderKey: string; label: string; deep: boolean }
-  | { key: string; kind: "local"; name: string; current: boolean; ahead: number; behind: number; group: string; deep: boolean }
+  | { key: string; kind: "local"; name: string; current: boolean; ahead: number; behind: number; upstream: string; group: string; deep: boolean }
   | { key: string; kind: "remote"; name: string; url: string; empty: boolean }
   | { key: string; kind: "remoteHead"; remote: string; head: string }
   | { key: string; kind: "remoteBranch"; remote: string; name: string; label: string; deeper: boolean }
@@ -49,6 +49,7 @@ export function liveSideRows(shell: ShellState): SideRow[] {
           current: branch.current,
           ahead: branch.ahead,
           behind: branch.behind,
+          upstream: branch.upstream ?? "",
           group,
           deep: group.length > 0,
         });

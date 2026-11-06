@@ -1,14 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main", "desk", "blame", "history", "blob"],
+  "description": "Capability for the main window, a second workspace, and the merge window",
+  "windows": ["main", "desk", "merge"],
   "permissions": [
     "core:default",
-    "opener:default",
     {
-      "identifier": "opener:allow-open-path",
-      "allow": [{ "path": "**" }]
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://*" },
+        { "url": "mailto:*" },
+        { "url": "http://127.0.0.1*" },
+        { "url": "http://localhost*" }
+      ]
     },
     "allow-workspace-status",
     "allow-stage-all",
@@ -77,6 +81,7 @@
     "allow-search-log",
     "allow-cherry-preview",
     "allow-merge-preview",
+    "allow-merge-state",
     "allow-merged-branches",
     "allow-pick-history",
     "allow-activity-log",
@@ -90,6 +95,8 @@
     "allow-open-window",
     "allow-reveal-commit",
     "allow-save-revision",
+    "allow-reveal-path",
+    "allow-git-runtime",
     "core:window:allow-inner-size",
     "core:window:allow-outer-position",
     "core:window:allow-scale-factor",

@@ -21,12 +21,14 @@
 
 - 标识 `com.zhoujun.awegit`，产品名 AweGit
 - `feat/dev` 是日常开发分支，功能和修复提交到这里；`release` 只放发布提交和 `latest.json`
+- `release` 受 GitHub 规则集保护，只有仓库所有者能直接推送。协作者从 `feat/dev` 开分支，向 `feat/dev` 提 PR
+- 协作者开 PR 时 base 选 `feat/dev`。仓库默认分支是 `release`，不选会指错
 - 不改全局 gitconfig。仓库本地配置和 `.git/awegit` 可以写
 - 写操作按仓库排队
 - 前端依赖写在 `package.json`，Rust 依赖写在对应的 `Cargo.toml`
 - 启动桌面：`pnpm start`（等同 `pnpm tauri dev`）
 - 界面调试用桌面窗口的检查器：调试版启动时自动打开。正式包没有检查器
-- 测试：`pnpm test`（`cargo test -p awegit-git -- --test-threads=1`）
+- 测试：`pnpm test`（`scripts/test-all.mjs`，依次跑 `awegit-git` 和 `awegit --lib`，都是 `--test-threads=1`）
 - 类型检查：`pnpm check`
 - Windows 打包：`pnpm package:windows`
 - Windows 发布：`publish.bat`（默认定修订号加一后打包并上传），在 `feat/dev` 上运行，脚本会合并进 `release`。`pnpm publish:windows` 只在 `release` 分支发布当前版本

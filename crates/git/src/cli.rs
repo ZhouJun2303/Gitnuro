@@ -9,13 +9,25 @@ use std::io::Read;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
+use serde::Serialize;
 
 use crate::Error;
 
 static BUNDLED_GIT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-static CHILDREN: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
-static READS: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
+
+struct Tracked {
+    key: String,
+    pid: u32,
+    generation: u64,
+    read: bool,
+    group: crate::proc::Group,
+}
+
+static TRACKED: Mutex<Vec<Tracked>> = Mutex::new(Vec::new());
+static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 static TRACE: std::sync::OnceLock<Trace> = std::sync::OnceLock::new();
 static PROGRESS: Mutex<Option<ProgressHook>> = Mutex::new(None);
 
@@ -205,14 +217,9 @@ fn git_command() -> Command {
 
 fn resolve_launch() -> GitLaunch {
     if let Some(bundled) = BUNDLED_GIT.get() {
-        let dir = PathBuf::from(bundled);
-        if let Some(found) = launch_beside(&dir) {
+        if let Some(found) = bundled_launch(Path::new(bundled)) {
             return found;
         }
-        return GitLaunch {
-            program: OsString::from("git"),
-            path_prefix: Some(dir.into_os_string()),
-        };
     }
     #[cfg(windows)]
     if let Some(found) = launch_from_system_path() {
@@ -224,28 +231,112 @@ fn resolve_launch() -> GitLaunch {
     }
 }
 
-/// `dir` is Git's `cmd` folder. The real binary is `../mingw64/bin/git.exe`.
-fn launch_beside(dir: &Path) -> Option<GitLaunch> {
-    let mingw = dir.join("..").join("mingw64").join("bin");
-    let real = mingw.join("git.exe");
-    if !real.is_file() {
+/// Path of the `git` binary the next command will start.
+pub fn git_program() -> String {
+    let launch = LAUNCH.get_or_init(resolve_launch);
+    launch.program.to_string_lossy().into_owned()
+}
+
+/// Git on this machine. `version` is empty when `git --version` cannot be read.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRuntime {
+    pub program: String,
+    pub version: String,
+    pub merge_tree: bool,
+    pub lfs: bool,
+    pub minimum: bool,
+}
+
+/// Major and minor from `git version 2.39.1` or `2.56.0.windows.1`. Empty text is `None`.
+pub fn parse_git_version(text: &str) -> Option<(u32, u32)> {
+    let rest = text.trim();
+    if rest.is_empty() {
         return None;
     }
-    Some(GitLaunch {
-        program: real.into_os_string(),
-        path_prefix: Some(helper_path(&mingw)),
+    let rest = rest.strip_prefix("git version ").unwrap_or(rest);
+    let mut numbers = rest.split(|c: char| !c.is_ascii_digit()).filter(|part| !part.is_empty());
+    let major = numbers.next()?.parse().ok()?;
+    let minor = numbers.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+fn version_at_least(parsed: Option<(u32, u32)>, major: u32, minor: u32) -> bool {
+    parsed.is_some_and(|(found_major, found_minor)| found_major > major || (found_major == major && found_minor >= minor))
+}
+
+/// Probe Git once for the about dialog. Startup still opens when Git is missing or old.
+pub fn git_runtime() -> GitRuntime {
+    let program = git_program();
+    let text = git_version_text();
+    let parsed = parse_git_version(&text);
+    let version = parsed
+        .map(|_| text.trim().strip_prefix("git version ").unwrap_or(text.trim()).split_whitespace().next().unwrap_or("").to_string())
+        .unwrap_or_default();
+    GitRuntime {
+        program,
+        version,
+        merge_tree: version_at_least(parsed, 2, 38),
+        lfs: lfs_runs(),
+        minimum: version_at_least(parsed, 2, 39),
+    }
+}
+
+fn git_version_text() -> String {
+    let mut command = git_command();
+    command.arg("--version");
+    match command.output() {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        _ => String::new(),
+    }
+}
+
+fn lfs_runs() -> bool {
+    let mut command = git_command();
+    command.args(["lfs", "version"]);
+    command.output().map(|output| output.status.success()).unwrap_or(false)
+}
+
+/// How to start the Git under `dir` (its `cmd` folder), when that copy can run.
+fn bundled_launch(dir: &Path) -> Option<GitLaunch> {
+    if let Some(found) = launch_beside(dir) {
+        return Some(found);
+    }
+    // Only the shim is left. Start it by absolute path: a bare `git` would be
+    // looked up in the parent's PATH, which often has no Git at all.
+    let shim = dir.join(if cfg!(windows) { "git.exe" } else { "git" });
+    shim.is_file().then(|| GitLaunch {
+        program: shim.into_os_string(),
+        path_prefix: Some(dir.as_os_str().to_os_string()),
     })
 }
 
-fn helper_path(mingw_bin: &Path) -> OsString {
-    let mut dirs = vec![mingw_bin.to_path_buf()];
-    if let Some(root) = mingw_bin.parent().and_then(|parent| parent.parent()) {
+/// `dir` is Git's `cmd` folder. The real binary sits in `<arch>/bin/git.exe`;
+/// recent MinGit uses `ucrt64`, older installs use `mingw64`.
+fn launch_beside(dir: &Path) -> Option<GitLaunch> {
+    let root = dir.parent()?;
+    for arch in ["ucrt64", "mingw64", "clang64", "clangarm64", "mingw32"] {
+        let bin = root.join(arch).join("bin");
+        let real = bin.join("git.exe");
+        if real.is_file() {
+            return Some(GitLaunch {
+                program: real.into_os_string(),
+                path_prefix: Some(helper_path(&bin)),
+            });
+        }
+    }
+    None
+}
+
+fn helper_path(bin: &Path) -> OsString {
+    let mut dirs = vec![bin.to_path_buf()];
+    if let Some(root) = bin.parent().and_then(|parent| parent.parent()) {
         let usr = root.join("usr").join("bin");
         if usr.is_dir() {
             dirs.push(usr);
         }
     }
-    std::env::join_paths(&dirs).unwrap_or_else(|_| mingw_bin.as_os_str().to_os_string())
+    std::env::join_paths(&dirs).unwrap_or_else(|_| bin.as_os_str().to_os_string())
 }
 
 #[cfg(windows)]
@@ -319,48 +410,76 @@ pub(crate) fn session_snapshot() -> (Session, String) {
         .unwrap_or_else(|_| (Session::default(), String::new()))
 }
 
+fn lock_tracked() -> std::sync::MutexGuard<'static, Vec<Tracked>> {
+    TRACKED.lock().unwrap_or_else(|poison| poison.into_inner())
+}
+
+fn track(key: String, pid: u32, read: bool, group: crate::proc::Group) -> u64 {
+    let generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
+    lock_tracked().push(Tracked { key, pid, generation, read, group });
+    generation
+}
+
+fn stop_generation(generation: u64) {
+    let entry = {
+        let mut guard = lock_tracked();
+        let index = guard.iter().position(|item| item.generation == generation);
+        index.map(|index| guard.remove(index))
+    };
+    if let Some(entry) = entry {
+        entry.group.kill_and_wait(entry.pid);
+    }
+}
+
 /// Stop every `git` process this library started, including grandchildren.
 pub fn cancel_running() {
-    let pids = CHILDREN.lock().map(|guard| guard.clone()).unwrap_or_default();
-    for (_, pid) in pids {
-        stop_process_tree(pid);
+    let generations: Vec<u64> = lock_tracked().iter().map(|item| item.generation).collect();
+    for generation in generations {
+        stop_generation(generation);
     }
 }
 
 /// Stop `git` processes started for this repository. Other repositories keep running.
+///
+/// Only the generations recorded at this moment are stopped. A command that starts
+/// afterwards has a new generation and is left running.
 pub fn cancel_repo(repo: &Path) {
     let key = repo_key(repo);
-    let pids = CHILDREN
-        .lock()
-        .map(|guard| guard.iter().filter(|(item, _)| item == &key).map(|(_, pid)| *pid).collect::<Vec<_>>())
-        .unwrap_or_default();
-    for pid in pids {
-        stop_process_tree(pid);
+    let generations: Vec<u64> = lock_tracked().iter().filter(|item| item.key == key).map(|item| item.generation).collect();
+    for generation in generations {
+        stop_generation(generation);
     }
-    cancel_reads(repo);
 }
 
 /// Stop reads (history, diff, blame, search) for this repository. Writes keep running.
 pub fn cancel_reads(repo: &Path) {
     let key = repo_key(repo);
-    let pids = READS
-        .lock()
-        .map(|guard| guard.iter().filter(|(item, _)| item == &key).map(|(_, pid)| *pid).collect::<Vec<_>>())
-        .unwrap_or_default();
-    for pid in pids {
-        stop_process_tree(pid);
+    let generations: Vec<u64> = lock_tracked()
+        .iter()
+        .filter(|item| item.read && item.key == key)
+        .map(|item| item.generation)
+        .collect();
+    for generation in generations {
+        stop_generation(generation);
     }
 }
 
+/// Stop one process and the children it has started, then wait until it has exited.
+///
+/// When the process was started here, its job or process group is signaled and the
+/// tracking entry is removed first. A later command that reused the same process id
+/// has a different entry and is not signaled.
 pub fn stop_process_tree(pid: u32) {
-    if cfg!(windows) {
-        let mut command = Command::new("taskkill");
-        hide_console(&mut command);
-        let _ = command.args(["/F", "/T", "/PID", &pid.to_string()]).output();
-    } else {
-        let _ = Command::new("kill").args(["-TERM", &format!("-{pid}")]).output();
-        let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).output();
+    let entry = {
+        let mut guard = lock_tracked();
+        let index = guard.iter().position(|item| item.pid == pid);
+        index.map(|index| guard.remove(index))
+    };
+    if let Some(entry) = entry {
+        entry.group.kill_and_wait(entry.pid);
+        return;
     }
+    crate::proc::kill_pid(pid);
 }
 
 pub fn run(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
@@ -383,6 +502,11 @@ pub fn run_stdin(repo: &Path, args: &[&str], stdin: &[u8]) -> Result<std::proces
 /// Like `run_stdin`, but a non-zero exit still returns the output.
 pub(crate) fn run_stdin_output(repo: &Path, args: &[&str], stdin: &[u8]) -> Result<std::process::Output, Error> {
     run_prepared(repo, args, &[], Some(stdin), true, true)
+}
+
+/// Like `run_stdin`, but keeps a repository-local `user.name`.
+pub(crate) fn run_stdin_repo_author(repo: &Path, args: &[&str], stdin: &[u8]) -> Result<std::process::Output, Error> {
+    run_prepared(repo, args, &[], Some(stdin), false, false)
 }
 
 /// Run git without replacing a repository-local `user.name`.
@@ -516,18 +640,11 @@ fn run_prepared_capped(
     }
     let started = std::time::Instant::now();
     let owned = operation_path(repo);
-    let mut child = command.spawn().map_err(Error::GitMissing)?;
+    let (mut child, group) = crate::proc::spawn_prepared(&mut command).map_err(Error::GitMissing)?;
     let pid = child.id();
     let key = repo_key(&owned);
-    if let Ok(mut guard) = CHILDREN.lock() {
-        guard.push((key.clone(), pid));
-    }
     let is_read = READ_SCOPE.with(|slot| slot.get());
-    if is_read {
-        if let Ok(mut guard) = READS.lock() {
-            guard.push((key, pid));
-        }
-    }
+    track(key, pid, is_read, group);
     let (output, write_result, truncated) = std::thread::scope(|scope| {
         // Feed stdin while stdout is drained. Writing the whole input first deadlocks
         // as soon as the child fills its stdout pipe and stops reading.
@@ -797,12 +914,7 @@ fn progress_args(args: &[&str]) -> Vec<String> {
 }
 
 fn untrack(pid: u32) {
-    if let Ok(mut guard) = CHILDREN.lock() {
-        guard.retain(|(_, item)| *item != pid);
-    }
-    if let Ok(mut guard) = READS.lock() {
-        guard.retain(|(_, item)| *item != pid);
-    }
+    lock_tracked().retain(|item| item.pid != pid);
 }
 
 /// `-c` arguments that keep commit signing on only when the session asked for it.
@@ -955,30 +1067,187 @@ mod progress_tests {
 
 #[cfg(test)]
 mod launch_tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
-    use super::launch_beside;
+    use super::{bundled_launch, launch_beside};
+
+    fn bundle(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("awegit-git-launch-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("cmd")).unwrap();
+        std::fs::create_dir_all(root.join("usr").join("bin")).unwrap();
+        std::fs::write(root.join("cmd").join("git.exe"), b"shim").unwrap();
+        root
+    }
+
+    fn real_git(root: &Path, arch: &str) -> PathBuf {
+        let bin = root.join(arch).join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let real = bin.join("git.exe");
+        std::fs::write(&real, b"real").unwrap();
+        real
+    }
 
     #[test]
-    fn prefers_the_real_git_beside_the_cmd_wrapper() {
-        let root = std::env::temp_dir().join(format!("awegit-git-launch-{}", std::process::id()));
-        let cmd = root.join("cmd");
-        let mingw = root.join("mingw64").join("bin");
-        let usr = root.join("usr").join("bin");
-        std::fs::create_dir_all(&cmd).unwrap();
-        std::fs::create_dir_all(&mingw).unwrap();
-        std::fs::create_dir_all(&usr).unwrap();
-        std::fs::write(cmd.join("git.exe"), b"wrapper").unwrap();
-        std::fs::write(mingw.join("git.exe"), b"real").unwrap();
-        let launch = launch_beside(&cmd).expect("mingw git");
-        let program = Path::new(&launch.program);
-        assert!(program.is_file());
-        assert!(program.components().any(|part| part.as_os_str() == "mingw64"));
-        let prefix = launch.path_prefix.expect("helper path");
-        let text = prefix.to_string_lossy();
-        assert!(text.contains("mingw64"));
-        assert!(text.contains("usr"));
+    fn finds_the_real_git_in_every_layout() {
+        for arch in ["ucrt64", "mingw64", "clang64"] {
+            let root = bundle(arch);
+            let real = real_git(&root, arch);
+            let launch = launch_beside(&root.join("cmd")).expect("real git");
+            assert_eq!(Path::new(&launch.program), real);
+            let prefix = launch.path_prefix.expect("helper path").to_string_lossy().to_string();
+            assert!(prefix.contains(arch));
+            assert!(prefix.contains("usr"));
+            let _ = std::fs::remove_dir_all(&root);
+        }
+    }
+
+    #[test]
+    fn ucrt64_wins_when_several_layouts_exist() {
+        let root = bundle("both");
+        real_git(&root, "mingw64");
+        let real = real_git(&root, "ucrt64");
+        let launch = launch_beside(&root.join("cmd")).expect("real git");
+        assert_eq!(Path::new(&launch.program), real);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn falls_back_to_the_shim_by_absolute_path() {
+        let root = bundle("shim");
+        let launch = bundled_launch(&root.join("cmd")).expect("shim");
+        assert_eq!(Path::new(&launch.program), root.join("cmd").join("git.exe"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn gives_up_when_the_bundle_has_no_git() {
+        let root = std::env::temp_dir().join(format!("awegit-git-empty-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("cmd")).unwrap();
+        assert!(bundled_launch(&root.join("cmd")).is_none());
         assert!(launch_beside(&root).is_none());
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod cancel_tests {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    use super::{cancel_reads, cancel_repo, lock_tracked, repo_key, run, stop_generation, track};
+
+    fn sleeper() -> Command {
+        let mut command = if cfg!(windows) {
+            let mut command = Command::new("ping");
+            command.args(["-n", "30", "127.0.0.1"]);
+            command
+        } else {
+            let mut command = Command::new("sleep");
+            command.arg("30");
+            command
+        };
+        command.stdout(Stdio::null()).stderr(Stdio::null());
+        command
+    }
+
+    /// Kills the generation when the test unwinds, so a failed assertion does not leave a sleeper.
+    struct StopLater(u64);
+
+    impl Drop for StopLater {
+        fn drop(&mut self) {
+            if self.0 != 0 {
+                stop_generation(self.0);
+            }
+        }
+    }
+
+    #[test]
+    fn cancel_repo_does_not_kill_a_later_command() {
+        let repo = std::path::Path::new("repo-cancel-later");
+        let (mut older, older_group) = crate::proc::spawn_prepared(&mut sleeper()).unwrap();
+        let older_gen = track(repo_key(repo), older.id(), false, older_group);
+        let _stop_older = StopLater(older_gen);
+        let (mut newer, newer_group) = crate::proc::spawn_prepared(&mut sleeper()).unwrap();
+        let newer_gen = track(repo_key(repo), newer.id(), false, newer_group);
+        let _stop_newer = StopLater(newer_gen);
+        let started = Instant::now();
+        stop_generation(older_gen);
+        let status = older.wait().unwrap();
+        assert!(!status.success(), "{status}");
+        assert!(started.elapsed() < Duration::from_secs(5), "cancel took {:?}", started.elapsed());
+        assert!(newer.try_wait().unwrap().is_none(), "later command was killed");
+        stop_generation(newer_gen);
+        let status = newer.wait().unwrap();
+        assert!(!status.success(), "{status}");
+    }
+
+    #[test]
+    fn cancel_reads_leaves_a_write_running() {
+        let repo = std::path::Path::new("repo-cancel-reads");
+        let (mut write, write_group) = crate::proc::spawn_prepared(&mut sleeper()).unwrap();
+        let write_gen = track(repo_key(repo), write.id(), false, write_group);
+        let _stop_write = StopLater(write_gen);
+        let (mut read, read_group) = crate::proc::spawn_prepared(&mut sleeper()).unwrap();
+        let read_gen = track(repo_key(repo), read.id(), true, read_group);
+        let _stop_read = StopLater(read_gen);
+        cancel_reads(repo);
+        assert!(write.try_wait().unwrap().is_none(), "write was killed");
+        let status = read.wait().unwrap();
+        assert!(!status.success(), "{status}");
+        cancel_repo(repo);
+        let status = write.wait().unwrap();
+        assert!(!status.success(), "{status}");
+    }
+
+    #[test]
+    fn cancel_repo_stops_a_git_child_quickly() {
+        let dir = std::env::temp_dir().join(format!("awegit-cancel-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let init = Command::new("git").args(["init", "-b", "main"]).current_dir(&dir).output().unwrap();
+        assert!(init.status.success(), "{}", String::from_utf8_lossy(&init.stderr));
+        let repo = dir.clone();
+        let handle = std::thread::spawn(move || {
+            let hang = if cfg!(windows) { "!ping -n 30 127.0.0.1" } else { "!sleep 30" };
+            let alias = format!("alias.hang={hang}");
+            run(&repo, &["-c", &alias, "hang"])
+        });
+        let started = Instant::now();
+        let mut saw = false;
+        while started.elapsed() < Duration::from_secs(5) {
+            let key = repo_key(&dir);
+            let running = lock_tracked().iter().any(|item| item.key == key);
+            if running {
+                saw = true;
+                break;
+            }
+            if handle.is_finished() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(saw, "git hang did not stay running");
+        let killed = Instant::now();
+        cancel_repo(&dir);
+        let result = handle.join().expect("hang thread");
+        assert!(killed.elapsed() < Duration::from_secs(5), "cancel took {:?}", killed.elapsed());
+        assert!(result.is_err(), "hanging git should fail once cancelled");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::parse_git_version;
+
+    #[test]
+    fn reads_supported_git_versions() {
+        assert_eq!(parse_git_version("git version 2.39.1"), Some((2, 39)));
+        assert_eq!(parse_git_version("git version 2.40.0"), Some((2, 40)));
+        assert_eq!(parse_git_version("git version 2.56.0.windows.1"), Some((2, 56)));
+        assert_eq!(parse_git_version(""), None);
+        assert_eq!(parse_git_version("git version"), None);
     }
 }

@@ -1,7 +1,7 @@
 import { onMount, tick } from "svelte";
 import { invoke } from "../perf";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
-import { branchGroup, changedRanges, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, rowAtUnit, sameHistory, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type BlameLine,
@@ -13,6 +13,7 @@ import {
     type FileDiff,
     type FilePreview,
     type InProgress,
+    type MergeState,
     type RefSnapshot,
     type Settings,
     type StatusFile,
@@ -85,21 +86,50 @@ export async function loadContext(shell: ShellState) {
     const nextRefs = await invoke<RefSnapshot>("repository_refs", { path });
     if (gen !== shell.contextGen) return;
     if (!shell.same(shell.refs, nextRefs)) shell.refs = nextRefs;
-    const [rows, state] = await Promise.all([
+    const [rows, state, merge] = await Promise.all([
       shell.loadCommits(path),
       invoke<InProgress | null>("in_progress", { path }),
+      invoke<MergeState | null>("merge_state", { path }).catch(() => null),
     ]);
     if (gen !== shell.contextGen) return;
-    if (!shell.same(shell.commitsLive, rows)) shell.commitsLive = rows;
+    if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
     shell.signOff = nextRefs.signOffSet ? !!nextRefs.signOff : shell.settings.signOff;
     shell.progress = state;
+    const nextMerge = state === "merge" ? merge : null;
+    if (!sameMergeState(shell.mergeState, nextMerge)) shell.mergeState = nextMerge;
+    if (nextMerge) fillMergeProgress(shell, nextMerge);
+    else clearMergeProgress(shell);
+  }
+
+function sameMergeState(left: MergeState | null, right: MergeState | null) {
+    if (left === right) return true;
+    if (!left || !right) return false;
+    if (left.source !== right.source || left.into !== right.into || left.files.length !== right.files.length) return false;
+    return left.files.every((file, index) => file.status === right.files[index]?.status && file.path === right.files[index]?.path);
+  }
+
+/** Fill the composer for a paused merge without replacing a draft the user wrote. */
+function fillMergeProgress(shell: ShellState, state: MergeState) {
+    const summary = shell.tr("dialog.mergeTitleLine", { source: state.source, into: state.into });
+    if (!shell.summary.trim() || shell.summary === shell.mergeProgressAutoSummary) shell.summary = summary;
+    shell.mergeProgressAutoSummary = summary;
+  }
+
+function clearMergeProgress(shell: ShellState) {
+    if (shell.mergeProgressAutoSummary && shell.summary === shell.mergeProgressAutoSummary) shell.summary = "";
+    shell.mergeProgressAutoSummary = "";
   }
 
 
-export async function previewCherry(shell: ShellState, rev: string, record: boolean) {
+export async function previewCherry(shell: ShellState, rev: string, record: boolean, summary = "") {
     const text = await invoke<string>("cherry_preview", { path: shell.repoPath(), rev }).catch(() => "");
-    if (text.trim()) shell.ask(shell.tr("menu.cherryPick"), text, () => void shell.mutate({ action: "cherryPick", rev, record }));
-    else void shell.mutate({ action: "cherryPick", rev, record });
+    const preview = text.trim().replace(/^[0-9a-f]{40,64}\s*/i, "").trim();
+    const target = summary ? `${rev.slice(0, 7)} "${summary}"` : rev.slice(0, 7);
+    const note = record ? ` ${shell.tr("dialog.cherryPickRecordNote")}` : "";
+    const intro = `${shell.tr("dialog.cherryPickBody", { target })}${note}`;
+    const body = preview ? `${intro}\n\n${preview}` : intro;
+    const title = shell.tr(record ? "menu.cherryPickRecord" : "menu.cherryPick");
+    shell.ask(title, body, () => void shell.mutate({ action: "cherryPick", rev, record }));
   }
 
 export function toggleFold(shell: ShellState, id: string) {
@@ -156,7 +186,7 @@ async function refreshSearchedCommits(shell: ShellState, gen: number) {
     try {
       const rows = await loadCommits(shell, path);
       if (gen !== shell.commitSearchGen) return;
-      if (!shell.same(shell.commitsLive, rows)) shell.commitsLive = rows;
+      if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
     } catch (error) {
       if (gen !== shell.commitSearchGen) return;
       shell.actionError = shell.message(error);
@@ -534,6 +564,22 @@ export function commitRefs(shell: ShellState) {
     return shell.sampleRows.find((row) => row.id === shell.selectedCommit)?.badges ?? [];
   }
 
+/** Source and target branch names for a merge commit, when its message names them. */
+export function mergeRoute(shell: ShellState) {
+    const detail = shell.commitDetail;
+    if (!detail || detail.parents.length < 2) return null;
+    const summary = detail.summary.trim();
+    let match = /^Merge (?:remote-tracking )?branch '([^']+)'(?:\s+of\s+\S+)?(?:\s+into\s+(.+))?$/i.exec(summary);
+    if (!match) match = /^Merge pull request #\d+ from (.+?)(?:\s+into\s+(.+))?$/i.exec(summary);
+    if (!match) match = /^(?:合并|压缩合并)\s+(.+?)\s+到\s+(.+)$/.exec(summary);
+    if (!match) match = /^Merge\s+(.+?)\s+into\s+(.+)$/i.exec(summary);
+    if (!match) return null;
+    const source = (match[1] ?? "").trim();
+    if (!source) return null;
+    const into = (match[2] ?? "").trim() || shell.commitRefs()[0] || "";
+    return { source, into };
+  }
+
 export function differentCommitter(shell: ShellState, detail: CommitDetail | null) {
     if (!detail?.committer && !detail?.committerEmail) return false;
     return detail.author.trim().toLowerCase() !== detail.committer.trim().toLowerCase() || detail.authorEmail.trim().toLowerCase() !== detail.committerEmail.trim().toLowerCase();
@@ -693,7 +739,7 @@ export async function locateRef(shell: ShellState, name: string) {
             revs: shell.exactRefs(),
           });
           if (seq !== shell.locateSeq) return;
-          if (!shell.same(shell.commitsLive, rows)) shell.commitsLive = rows;
+          if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
           await tick();
           const tip = rows.find((commit) => commit.refs.includes(name)) ?? rows[0];
           if (!tip) return;
@@ -716,7 +762,7 @@ export async function locateRef(shell: ShellState, name: string) {
         });
         if (seq !== shell.locateSeq) return;
         shell.logLimit = Math.min(20_000, Math.max(shell.logLimit, found.commits.length));
-        if (!shell.same(shell.commitsLive, found.commits)) shell.commitsLive = found.commits;
+        if (!sameHistory(shell.commitsLive, found.commits)) shell.commitsLive = found.commits;
         await tick();
         await shell.selectCommit(found.id);
         await tick();
@@ -759,7 +805,7 @@ export function dropCommits(shell: ShellState) {
       return;
     }
     shell.drops = [];
-    void shell.mutate({ action: "rebaseInteractive", onto: parent, drop: chosen.map((commit) => commit.id), autostash: shell.settings.mergeAutostash });
+    void shell.mutate({ action: "rebaseInteractive", onto: parent, drop: chosen.map((commit) => commit.id), autostash: true });
   }
 
 export function toggleDrop(shell: ShellState, id: string) {
@@ -780,7 +826,7 @@ function patchScroller(node: HTMLElement) {
 }
 
 /** Keep only the rows of an open commit patch that sit in the detail viewport. */
-export function trackPatch(shell: ShellState, node: HTMLElement, spec: { file: string; count: number; rowHeight: number }) {
+export function trackPatch(shell: ShellState, node: HTMLElement, spec: { file: string; count: number; rowHeight: number; prefix?: Uint32Array | null }) {
   let current = spec;
   let scroller: HTMLElement | null = null;
   let frame = 0;
@@ -793,11 +839,21 @@ export function trackPatch(shell: ShellState, node: HTMLElement, spec: { file: s
     }
     const rowHeight = current.rowHeight || 18;
     const count = current.count;
+    const prefix = current.prefix;
     const top = node.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
     const viewTop = scroller.scrollTop;
     const viewBottom = viewTop + (scroller.clientHeight || 600);
-    let start = Math.max(0, Math.floor((viewTop - top) / rowHeight) - 30);
-    let end = Math.min(count, Math.ceil((viewBottom - top) / rowHeight) + 30);
+    let start: number;
+    let end: number;
+    if (prefix && prefix.length === count + 1) {
+      const unitTop = Math.floor((viewTop - top) / rowHeight);
+      const unitBottom = Math.ceil((viewBottom - top) / rowHeight);
+      start = Math.max(0, rowAtUnit(prefix, Math.max(0, unitTop)) - 30);
+      end = Math.min(count, rowAtUnit(prefix, Math.max(0, unitBottom)) + 31);
+    } else {
+      start = Math.max(0, Math.floor((viewTop - top) / rowHeight) - 30);
+      end = Math.min(count, Math.ceil((viewBottom - top) / rowHeight) + 30);
+    }
     if (end < 0) end = 0;
     if (start > count) start = count;
     if (end < start) end = start;
@@ -818,7 +874,7 @@ export function trackPatch(shell: ShellState, node: HTMLElement, spec: { file: s
   const host = node.closest(".detail-scroll") ?? node.parentElement;
   if (host instanceof HTMLElement && host !== node) resize.observe(host);
   return {
-    update(next: { file: string; count: number; rowHeight: number }) {
+    update(next: { file: string; count: number; rowHeight: number; prefix?: Uint32Array | null }) {
       current = next;
       measure();
     },

@@ -3,9 +3,13 @@
   import "./MergePanel.css";
   import type { ConflictParty } from "../status";
   import type { MergePiece } from "./types";
-  import { hunkIncludes } from "./dialogs.svelte";
+  import { hunkIncludes, loadTextMerge } from "./dialogs.svelte";
+  import { invoke } from "../perf";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
 
   const shell = getShell();
+  const standalone = $derived(shell.standalone === "merge");
+  const MERGE_WINDOW_KEY = "awegit.mergeWindowSize";
   let fileLeft = $state(false);
   let fileRight = $state(false);
   let openFor = "";
@@ -19,6 +23,55 @@
   let syncing = false;
   let editingResult = $state(false);
   let resultDirty = $state(false);
+
+  function mergeWindowSize() {
+    try {
+      const value = JSON.parse(localStorage.getItem(MERGE_WINDOW_KEY) ?? "null") as { width?: unknown; height?: unknown } | null;
+      if (typeof value?.width === "number" && typeof value.height === "number") return { width: value.width, height: value.height };
+    } catch {
+      /* a broken entry just falls back to the default size */
+    }
+    return null;
+  }
+
+  $effect(() => {
+    if (!standalone || !shell.inApp()) return;
+    const win = getCurrentWindow();
+    let stop: (() => void) | undefined;
+    void win.onResized(async () => {
+      const factor = await win.scaleFactor();
+      const size = await win.innerSize();
+      try {
+        localStorage.setItem(MERGE_WINDOW_KEY, JSON.stringify({ width: Math.round(size.width / factor), height: Math.round(size.height / factor) }));
+      } catch {
+        /* size persistence is optional */
+      }
+    }).then((value) => {
+      stop = value;
+    });
+    return () => stop?.();
+  });
+
+  function closePanel() {
+    if (standalone && shell.inApp()) {
+      void getCurrentWindow().close();
+      return;
+    }
+    shell.closeTextMerge();
+  }
+
+  async function popOut() {
+    if (!shell.inApp() || !shell.mergeFile) return;
+    const size = mergeWindowSize();
+    await invoke("open_window", {
+      view: "merge",
+      repo: shell.repoPath(),
+      file: shell.mergeFile,
+      width: size?.width ?? null,
+      height: size?.height ?? null,
+    });
+    shell.closeTextMerge();
+  }
 
   $effect(() => {
     if (!shell.textMerge) {
@@ -65,7 +118,7 @@
   const leftParty = $derived(view?.theirs ?? null);
   const rightParty = $derived(view?.ours ?? null);
   const unresolved = $derived(Math.max(0, conflictTotal - conflictResolved));
-  const canResolve = $derived(shell.mergeKind === "file" ? fileSide !== "" : unresolved === 0);
+  const canResolve = $derived(shell.mergeKind === "file" ? fileSide !== "" : !shell.mergeLarge && unresolved === 0);
 
   function trapTab(event: KeyboardEvent) {
     if (event.key !== "Tab" || !panel) return;
@@ -193,15 +246,29 @@
     if (shell.mergeKind === "file") {
       if (fileSide !== "ours" && fileSide !== "theirs") return;
       await shell.applyFileMerge(fileSide);
+      if (standalone && !shell.textMerge) void getCurrentWindow().close();
       return;
     }
-    await shell.applyTextMerge();
+    const text = editingResult || resultDirty ? shell.mergeResult : shell.joinedPieces(shell.mergePieces);
+    await shell.applyTextMerge(text);
+    if (standalone && !shell.textMerge) void getCurrentWindow().close();
   }
 </script>
 
 {#if shell.textMerge}
-  <div class="scrim merge-scrim" role="presentation">
-    <div class="merge-panel" data-layer="text-merge" bind:this={panel} role="dialog" aria-modal="true" aria-label={shell.tr("dialog.mergeTitle")} tabindex="-1" onkeydown={(event) => { if (event.key === "Escape") { event.preventDefault(); shell.closeTextMerge(); return; } trapTab(event); }}>
+  {#if standalone}
+    <div class="merge-standalone" role="presentation">
+      {@render mergeSurface()}
+    </div>
+  {:else}
+    <div class="scrim merge-scrim" role="presentation">
+      {@render mergeSurface()}
+    </div>
+  {/if}
+{/if}
+
+{#snippet mergeSurface()}
+    <div class="merge-panel" class:standalone data-layer="text-merge" bind:this={panel} role="dialog" aria-modal="true" aria-label={shell.tr("dialog.mergeTitle")} tabindex="-1" onkeydown={(event) => { if (event.key === "Escape") { event.preventDefault(); closePanel(); return; } trapTab(event); }}>
       <header class="merge-panel-title">
         <strong>{shell.tr("dialog.mergeTitle")}</strong>
         <span class="merge-title-file">
@@ -215,13 +282,16 @@
             <button class="merge-nav-btn" type="button" aria-label={shell.tr("menu.nextHunk")} onclick={() => jumpConflict(1)}>›</button>
           </div>
         {/if}
-        <button class="merge-close" type="button" aria-label={shell.tr("chrome.close")} onclick={() => shell.closeTextMerge()}>×</button>
+        {#if !standalone && shell.inApp()}
+          <button class="merge-pop" type="button" aria-label={shell.tr("dialog.mergePopOut")} title={shell.tr("dialog.mergePopOut")} onclick={() => void popOut()}>⧉</button>
+        {/if}
+        <button class="merge-close" type="button" aria-label={shell.tr("chrome.close")} onclick={() => closePanel()}>×</button>
       </header>
       <div class="merge-head">
         <div class="merge-parties">
           <div class="merge-party">
             <label class="merge-party-pick">
-              <input type="checkbox" checked={leftOn} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })} onclick={onLeft} />
+              <input type="checkbox" checked={leftOn} disabled={shell.mergeLarge} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })} onclick={onLeft} />
               <span>{shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })}</span>
               {#if leftParty && leftParty.state !== "unchanged"}<span class="merge-party-state">{stateText(leftParty.state)}</span>{/if}
             </label>
@@ -242,7 +312,7 @@
           </div>
           <div class="merge-party right">
             <label class="merge-party-pick">
-              <input type="checkbox" checked={rightOn} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })} onclick={onRight} />
+              <input type="checkbox" checked={rightOn} disabled={shell.mergeLarge} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })} onclick={onRight} />
               <span>{shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })}</span>
               {#if rightParty && rightParty.state !== "unchanged"}<span class="merge-party-state">{stateText(rightParty.state)}</span>{/if}
             </label>
@@ -270,6 +340,11 @@
         <div class="merge-stage files">
           {@render fileCard(view?.theirs)}
           {@render fileCard(view?.ours)}
+        </div>
+      {:else if shell.mergeLarge}
+        <div class="merge-stage merge-large">
+          <p>{shell.tr("dialog.mergeLargeHint")}</p>
+          <button class="pane-chip" type="button" disabled={shell.busy} onclick={() => void loadTextMerge(shell)}>{shell.tr("dialog.loadMerge")}</button>
         </div>
       {:else}
         <div class="merge-top">
@@ -357,30 +432,30 @@
         </div>
       {/if}
       <footer class="merge-panel-foot">
-        {#if shell.mergeKind === "text"}
+        {#if shell.mergeKind === "text" && !shell.mergeLarge}
           {#if unresolved > 0}
             <span class="merge-edit-hint merge-unresolved" role="status">{shell.tr("dialog.mergeUnresolved", { count: String(unresolved) })}</span>
           {:else}
             <span class="merge-edit-hint">{shell.tr("dialog.editingAllowed")}</span>
           {/if}
         {/if}
-        {#if shell.mergeKind === "text"}
+        {#if shell.mergeKind === "text" && !shell.mergeLarge}
           <button
             class="text-button merge-edit-entry"
             type="button"
             aria-pressed={editingResult}
             onclick={() => {
+              if (!editingResult && !resultDirty) shell.mergeResult = shell.joinedPieces(shell.mergePieces);
               editingResult = !editingResult;
               if (editingResult) queueMicrotask(() => panel?.querySelector<HTMLTextAreaElement>(".merge-result-edit")?.focus());
             }}
           >{editingResult ? shell.tr("dialog.previewResult") : shell.tr("dialog.editResult")}</button>
         {/if}
         <button class="commit" type="button" disabled={shell.busy || !canResolve} title={!canResolve ? shell.tr(shell.mergeKind === "file" ? "dialog.mergePickFile" : "dialog.mergeUnresolved", shell.mergeKind === "file" ? {} : { count: String(unresolved) }) : undefined} onclick={() => void resolve()}>{shell.tr("dialog.mergeResolve")}</button>
-        <button class="text-button" type="button" onclick={() => shell.closeTextMerge()}>{shell.tr("chrome.cancel")}</button>
+        <button class="text-button" type="button" onclick={() => closePanel()}>{shell.tr("chrome.cancel")}</button>
       </footer>
     </div>
-  </div>
-{/if}
+{/snippet}
 
 {#snippet fileCard(party: ConflictParty | undefined)}
   <div class="merge-file-slot">

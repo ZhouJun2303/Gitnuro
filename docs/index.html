@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AweGit 功能介绍</title>
+  <meta name="description" content="AweGit 的功能介绍。fakeignore、多工作区、冲突合并、提交说明，以及历史、差异、远程和窗口里的其余能力。" />
+  <style>
+    :root {
+      --canvas: #f4f4f5;
+      --elevated: #ffffff;
+      --text: #18181b;
+      --muted: #5c5c66;
+      --line: rgba(24, 24, 27, 0.1);
+      --accent: #5b5bd6;
+      --accent-soft: rgba(91, 91, 214, 0.12);
+      --added: #1a7f37;
+      --add-bg: #e6ffec;
+      --deleted: #cf222e;
+      --del-bg: #ffebe9;
+      --modified: #9a6700;
+      --mod-bg: #fff8c5;
+      --shadow: 0 18px 50px rgba(24, 24, 27, 0.08);
+      --mono: "Cascadia Code", "Segoe UI Mono", ui-monospace, monospace;
+      --sans: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(900px 420px at 90% -10%, rgba(91, 91, 214, 0.16), transparent 60%),
+        var(--canvas);
+      color: var(--text);
+      font: 16px/1.55 var(--sans);
+    }
+    a { color: var(--accent); }
+    html:not([lang="en"]) [data-en] { display: none !important; }
+    html[lang="en"] [data-zh] { display: none !important; }
+    .wrap { width: min(1120px, calc(100% - 32px)); margin: 0 auto; }
+    header {
+      position: sticky; top: 0; z-index: 5;
+      backdrop-filter: blur(16px);
+      background: rgba(244, 244, 245, 0.86);
+      border-bottom: 1px solid var(--line);
+    }
+    .bar { display: flex; align-items: center; gap: 18px; min-height: 64px; }
+    .brand { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; font-weight: 650; }
+    .brand svg { width: 28px; height: 28px; }
+    nav { display: flex; gap: 14px; flex: 1; flex-wrap: wrap; font-size: 13px; }
+    nav a { color: var(--muted); text-decoration: none; }
+    nav a:hover { color: var(--text); }
+    .lang { border: 1px solid var(--line); background: var(--elevated); border-radius: 999px; padding: 2px; display: flex; }
+    .lang button { border: 0; background: transparent; border-radius: 999px; padding: 4px 10px; font: inherit; cursor: pointer; color: var(--muted); }
+    .lang button.on { background: var(--accent); color: white; }
+    .hero { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 36px; align-items: center; padding: 56px 0 28px; }
+    h1 { font-size: clamp(40px, 6vw, 64px); line-height: 1.02; margin: 0 0 12px; letter-spacing: -0.04em; }
+    .lede { font-size: 18px; color: var(--muted); margin: 0 0 18px; }
+    .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pill { background: var(--elevated); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font-size: 13px; }
+    .stage { background: var(--elevated); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
+    .chrome { display: flex; gap: 6px; align-items: center; padding: 10px 12px; background: #f7f7f8; border-bottom: 1px solid var(--line); }
+    .dot { width: 10px; height: 10px; border-radius: 50%; background: #d4d4d8; }
+    .chrome b { margin-left: 8px; font-size: 13px; }
+    .tabs { display: flex; gap: 6px; padding: 10px; }
+    .tab { border: 1px solid var(--line); background: #fafafa; border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+    .tab.on { background: var(--accent-soft); border-color: transparent; color: #3c3ca8; }
+    .graph { height: 150px; }
+    section { padding: 28px 0; }
+    h2 { font-size: 32px; letter-spacing: -0.03em; margin: 0 0 8px; }
+    .sub { color: var(--muted); margin: 0 0 18px; max-width: 68ch; }
+    .feature { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: center; }
+    .feature.reverse { direction: rtl; }
+    .feature.reverse > * { direction: ltr; }
+    .file { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; align-items: center; padding: 8px 12px; font-family: var(--mono); font-size: 13px; }
+    .file + .file { border-top: 1px solid var(--line); }
+    .mark { font-weight: 700; }
+    .mark.m { color: var(--modified); }
+    .mark.a { color: var(--added); }
+    .gone { opacity: 0.35; text-decoration: line-through; }
+    .switch { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+    .switch button, .demo button, .roots button { font: inherit; cursor: pointer; }
+    .toggle { width: 36px; height: 22px; border-radius: 999px; border: 0; background: #d4d4d8; position: relative; }
+    .toggle.on { background: var(--accent); }
+    .toggle i { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: white; transition: left 0.15s; }
+    .toggle.on i { left: 17px; }
+    .note { font-size: 13px; color: var(--muted); margin-top: 10px; }
+    .roots { display: flex; gap: 8px; margin-bottom: 12px; }
+    .roots button { flex: 1; text-align: left; border: 1px solid var(--line); background: var(--elevated); border-radius: 12px; padding: 12px; }
+    .roots button.on { border-color: var(--accent); background: var(--accent-soft); }
+    .roots small, .path { display: block; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; }
+    .side { padding: 12px; min-height: 180px; }
+    .side + .side { border-left: 1px solid var(--line); }
+    .side h3 { margin: 0 0 8px; font-size: 13px; }
+    .side.ours { background: #f4fff7; }
+    .side.theirs { background: #fff8f7; }
+    pre { margin: 0; font: 13px/1.45 var(--mono); white-space: pre-wrap; }
+    .checks { display: flex; gap: 12px; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 13px; }
+    .result { margin: 0; padding: 10px 12px; background: #fafafa; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 13px; }
+    .composer { padding: 12px; display: grid; gap: 8px; }
+    .types { display: flex; gap: 6px; flex-wrap: wrap; }
+    .types button, .gen { border: 1px solid var(--line); background: #fafafa; border-radius: 999px; padding: 4px 10px; }
+    .types button.on { background: var(--text); color: white; border-color: var(--text); }
+    .subject { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 14px var(--mono); min-height: 38px; }
+    .gen { background: var(--accent); color: white; border: 0; justify-self: start; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    article { background: var(--elevated); border: 1px solid var(--line); border-radius: 14px; padding: 14px 14px 12px; }
+    article h3 { margin: 0 0 6px; font-size: 16px; }
+    article p { margin: 0; color: var(--muted); font-size: 14px; }
+    .kicker { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin: 0 0 6px; }
+    footer { padding: 28px 0 48px; color: var(--muted); font-size: 14px; }
+    @media (max-width: 860px) {
+      .hero, .feature, .feature.reverse, .grid, .split { grid-template-columns: 1fr; direction: ltr; }
+      nav { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap bar">
+      <a class="brand" href="#top">
+        <svg viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="14" fill="none" stroke="#5b5bd6" stroke-width="2.5" />
+          <circle cx="11" cy="11" r="3" fill="#5b5bd6" />
+          <circle cx="21" cy="14" r="3" fill="#5b5bd6" />
+          <circle cx="11" cy="21" r="3" fill="#5b5bd6" />
+          <path d="M11 11v10M11 16c4 0 10-2 10-2" fill="none" stroke="#5b5bd6" stroke-width="2" stroke-linecap="round" />
+        </svg>
+        AweGit
+      </a>
+      <nav>
+        <a href="#fakeignore">fakeignore</a>
+        <a href="#workspaces" data-zh>工作区</a><a href="#workspaces" data-en>Workspaces</a>
+        <a href="#conflicts" data-zh>冲突</a><a href="#conflicts" data-en>Conflicts</a>
+        <a href="#commit" data-zh>提交说明</a><a href="#commit" data-en>Messages</a>
+        <a href="#history" data-zh>历史与差异</a><a href="#history" data-en>History</a>
+        <a href="#repos" data-zh>仓库与远程</a><a href="#repos" data-en>Remotes</a>
+      </nav>
+      <div class="lang" role="group" aria-label="Language">
+        <button type="button" id="lang-zh" class="on">中文</button>
+        <button type="button" id="lang-en">EN</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="top" class="wrap">
+    <div class="hero">
+      <div>
+        <p class="kicker">Windows · macOS</p>
+        <h1>AweGit</h1>
+        <p class="lede" data-zh>本地 Git 客户端。状态用 gitoxide 读，差异、历史和写操作走本机 git。这一页跟着功能更新，在浏览器里打开，不进日常窗口。</p>
+        <p class="lede" data-en>A local Git client. Status is read with gitoxide. Diffs, history, and writes go through the git on this machine. This page stays in the browser and is updated with the product.</p>
+        <div class="pills">
+          <span class="pill">.fakeignore</span>
+          <span class="pill" data-zh>工作 / 个人</span><span class="pill" data-en>Work / personal</span>
+          <span class="pill" data-zh>冲突合并</span><span class="pill" data-en>Conflict merge</span>
+          <span class="pill" data-zh>提交说明</span><span class="pill" data-en>Commit messages</span>
+        </div>
+      </div>
+      <div class="stage" aria-hidden="true">
+        <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><b>AweGit</b></div>
+        <div class="tabs"><span class="tab on">reward</span><span class="tab">notes</span><span class="tab">site</span></div>
+        <svg class="graph" viewBox="0 0 420 150">
+          <path d="M30 40 H390" stroke="#e4e4e7" />
+          <path d="M30 78 H210 C240 78 240 40 270 40 H390" fill="none" stroke="#5b5bd6" stroke-width="2" />
+          <path d="M30 110 H150 C180 110 180 78 210 78" fill="none" stroke="#1a7f37" stroke-width="2" />
+          <circle cx="70" cy="78" r="6" fill="#5b5bd6" />
+          <circle cx="150" cy="78" r="6" fill="#5b5bd6" />
+          <circle cx="150" cy="110" r="6" fill="#1a7f37" />
+          <circle cx="270" cy="40" r="6" fill="#5b5bd6" />
+          <circle cx="340" cy="40" r="6" fill="#18181b" />
+        </svg>
+      </div>
+    </div>
+
+    <section id="fakeignore">
+      <div class="feature">
+        <div>
+          <p class="kicker">.fakeignore</p>
+          <h2 data-zh>本地试验不进变更列表</h2>
+          <h2 data-en>Local experiments leave the change list</h2>
+          <p class="sub" data-zh>仓库根目录放一个 .fakeignore，语法和 .gitignore 一样。匹配的文件从已暂存和未暂存列表里消失，Git 自己的忽略规则不动。默认开着，视图菜单可以关掉。右键文件可以写进这个文件。全部暂存和提交前，已经进暂存区的匹配文件会被移出去。冲突文件始终留在列表里。Codex 的 .tmp_artifact 目录也不会被当成仓库改动。</p>
+          <p class="sub" data-en>A .fakeignore at the work-tree root uses .gitignore syntax. Matching files drop out of both change lists, and Git's own ignore rules stay as they are. It is on by default and can be turned off from the view menu. Right-click a file to add it. Stage-all and commit move matching staged files back out. Conflicts stay visible. Codex .tmp_artifact directories are also left out of the change list.</p>
+        </div>
+        <div class="stage" id="fake-demo">
+          <div class="chrome"><b data-zh>变更</b><b data-en>Changes</b></div>
+          <div class="file"><span class="mark m">M</span><span>src/reward.ts</span><span data-zh>未暂存</span><span data-en>unstaged</span></div>
+          <div class="file" data-fake><span class="mark a">?</span><span>notes/local.json</span><span data-zh>本地</span><span data-en>local</span></div>
+          <div class="file" data-fake><span class="mark m">M</span><span>config.local.json</span><span data-zh>本地</span><span data-en>local</span></div>
+          <div class="file"><span class="mark m">M</span><span>README.md</span><span data-zh>已暂存</span><span data-en>staged</span></div>
+          <div class="switch">
+            <span data-zh>启用 .fakeignore</span><span data-en>Use .fakeignore</span>
+            <button class="toggle on" id="fake-toggle" type="button" aria-pressed="true"><i></i></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="workspaces">
+      <div class="feature reverse">
+        <div>
+          <p class="kicker" data-zh>工作区</p><p class="kicker" data-en>Workspaces</p>
+          <h2 data-zh>工作和个，各有自己的根目录</h2>
+          <h2 data-en>Work and personal, each with its own root</h2>
+          <p class="sub" data-zh>源代码文件夹可以各写一个别名，比如工作、个人，克隆和打开都从那一层开始。每个工作区再记住自己的仓库、打开的标签和当前标签。标签可以改名、上色，也能竖着排，关掉的还能重新打开。标题栏可以带上工作区的名字。</p>
+          <p class="sub" data-en>Each source folder can have an alias, such as Work or Personal. Clone and open start from that root. A workspace then keeps its own repositories, open tabs, and selected tab. Tabs can be renamed, colored, turned vertical, and reopened after close. The title bar can show the workspace name.</p>
+        </div>
+        <div>
+          <div class="roots">
+            <button type="button" class="on" data-root="work"><b data-zh>工作</b><b data-en>Work</b><small>D:\Work</small></button>
+            <button type="button" data-root="home"><b data-zh>个人</b><b data-en>Personal</b><small>D:\Personal</small></button>
+          </div>
+          <div class="stage">
+            <div class="chrome"><b id="root-label">reward · notes · site</b></div>
+            <div class="tabs" id="root-tabs"></div>
+            <p class="path" id="root-path" style="padding: 0 12px 12px;">D:\Work\reward</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="conflicts">
+      <div class="feature">
+        <div>
+          <p class="kicker" data-zh>冲突</p><p class="kicker" data-en>Conflicts</p>
+          <h2 data-zh>勾一侧，或两侧拼在一起</h2>
+          <h2 data-en>Keep one side, or both</h2>
+          <p class="sub" data-zh>左侧是对方的版本，右侧是自己的版本。只勾一侧就留下那一侧；两侧都勾，按顺序拼起来。选中多个冲突文件时，一次可以给它们保留同一侧。也可以交给外部合并工具，或在单独窗口里改。合并对话框会写上来源分支和当前分支，并填上说明和变更文件。工作区不干净时会先自动贮藏。还有未选择的冲突时，不能完成解决。</p>
+          <p class="sub" data-en>The left side is theirs and the right side is ours. One check keeps that side. Both checks concatenate them in order. A selection of conflict files can take the same side together. An external merge tool and a separate window are there too. The merge dialog names both branches and fills the message and the file list. A dirty work tree is stashed first. Resolve stays unavailable while a conflict is still unpicked.</p>
+        </div>
+        <div class="stage">
+          <div class="split">
+            <div class="side theirs">
+              <h3 data-zh>对方 · topic</h3><h3 data-en>Theirs · topic</h3>
+              <pre>reward += daily
+bonus = 0</pre>
+            </div>
+            <div class="side ours">
+              <h3 data-zh>自己 · main</h3><h3 data-en>Ours · main</h3>
+              <pre>reward += daily * streak
+bonus = 1</pre>
+            </div>
+          </div>
+          <div class="checks">
+            <label><input id="pick-theirs" type="checkbox" /> <span data-zh>保留 topic</span><span data-en>Keep topic</span></label>
+            <label><input id="pick-ours" type="checkbox" checked /> <span data-zh>保留 main</span><span data-en>Keep main</span></label>
+          </div>
+          <p class="result" id="merge-result"></p>
+        </div>
+      </div>
+    </section>
+
+    <section id="commit">
+      <div class="feature reverse">
+        <div>
+          <p class="kicker" data-zh>提交说明</p><p class="kicker" data-en>Commit message</p>
+          <h2 data-zh>类型在左边，一键写成 type: 描述</h2>
+          <h2 data-en>The type sits on the left</h2>
+          <p class="sub" data-zh>主题必须是 type: 描述。类型有 feat、fix、docs、art、style、refactor、test、chore、perf、revert。在输入框里写 fix: 修复登录，fix 会自己跳到左边，框里只留描述。中文冒号也认，重复的类型只留一个。已暂存文件之后，可以按简单或详细生成说明，右键切换。也可以提交并推送、修订、署名、签名或跳过钩子。作者和署名可以只写在当前仓库。</p>
+          <p class="sub" data-en>The subject has to read type: description. The types are feat, fix, docs, art, style, refactor, test, chore, perf, and revert. Typing fix: repair login moves fix into the selector and leaves the description. A full-width colon counts, and a repeated type is kept once. After something is staged, a short or long message can be generated. Right-click switches the length. Commit-and-push, amend, sign-off, signing, and skip-hooks are on the same box. Author and sign-off can belong to this repository only.</p>
+        </div>
+        <div class="stage">
+          <div class="composer">
+            <div class="types" id="types"></div>
+            <div class="subject" id="subject" data-zh>写一句描述</div>
+            <div class="subject" id="subject-en" data-en>Describe the change</div>
+            <button class="gen" id="generate" type="button" data-zh>生成 · 简单</button>
+            <button class="gen" id="generate-en" type="button" data-en>Generate · short</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="history">
+      <p class="kicker" data-zh>历史与差异</p><p class="kicker" data-en>History and diffs</p>
+      <h2 data-zh>图、文件和每一行从哪来</h2>
+      <h2 data-en>The graph, the file, and the line</h2>
+      <p class="sub" data-zh>提交图可以只看当前分支，也可以看所有分支。领先和落后记在分支上。远程还没有的本地分支会在历史和侧栏标出来。文件历史、追溯、某一次的文件内容、引用日志都能打开。提交可以按说明或内容搜索。图片差异有并排、滑动、洋葱皮和像素差分。</p>
+      <p class="sub" data-en>The graph can follow the current branch or every branch. Ahead and behind sit on the branch. A local branch the remote does not have is marked in history and in the sidebar. File history, blame, a file at one revision, and the reflog each open. Commits can be searched by message or by content. Image diffs include side by side, swipe, onion skin, and pixel difference.</p>
+      <div class="grid">
+        <article>
+          <h3 data-zh>文本差异</h3><h3 data-en>Text diff</h3>
+          <p data-zh>分栏查看，语法高亮，行内标出改动的词。可以显示空白、忽略空白、调节上下文行数，也可以自动换行。按块暂存、丢弃或复制。很大的文本先不加载，点了再读。</p>
+          <p data-en>Split view, syntax color, and the changed words marked inside the line. Whitespace can be shown or ignored, context can be shortened, and lines can wrap. Stage, discard, or copy a hunk. A large text file waits until you ask for the diff.</p>
+        </article>
+        <article>
+          <h3 data-zh>提交详情</h3><h3 data-en>Commit detail</h3>
+          <p data-zh>一次提交里看说明、变更和文件树。说明里的议题编号可以打开网页。未推送的提交有标记。侧栏可以固定常用分支。</p>
+          <p data-en>One commit shows its message, its changes, and its tree. Issue numbers in the message open on the web. Unpushed commits are marked. Branches you use often can be pinned in the sidebar.</p>
+        </article>
+        <article>
+          <h3 data-zh>统计</h3><h3 data-en>Stats</h3>
+          <p data-zh>按星期和小时看提交分布，也列出改得最勤的文件。mailmap 可以把同一位作者的不同邮箱并到一个名字上。</p>
+          <p data-en>Commits are counted by weekday and hour, and the busiest files are listed. A mailmap folds one author's addresses into a single name.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="repos">
+      <p class="kicker" data-zh>仓库、远程、窗口</p><p class="kicker" data-en>Repositories, remotes, window</p>
+      <h2 data-zh>从克隆到推送，中间那些事</h2>
+      <h2 data-en>From clone to push</h2>
+      <div class="grid">
+        <article>
+          <h3 data-zh>合并和改写</h3><h3 data-en>Merge and rewrite</h3>
+          <p data-zh>交互变基、拣选、还原、压缩。压缩时选中范围之后的提交会重放，范围里不能有合并提交。重置有软、混合、硬。二分查找可以标好和坏。贮藏可以只收选中的文件，也可以从贮藏拉出分支。操作被本地修改挡住时，可以先贮藏再重试。</p>
+          <p data-en>Interactive rebase, cherry-pick, revert, and squash. Squash replays the commits after the range, and the range cannot contain a merge. Reset is soft, mixed, or hard. Bisect marks good and bad. A stash can take only the selected files, or grow a branch. When local edits block an action, stash them and retry.</p>
+        </article>
+        <article>
+          <h3 data-zh>仓库本身</h3><h3 data-en>The repository</h3>
+          <p data-zh>后台克隆，新建仓库，Git Flow。子模块和工作树列在侧栏。LFS 文件可以查看，也可以锁定和解锁。已合并的分支可以一批删掉。自定义命令可以给所有仓库，也可以只给当前仓库，需要时再提问。SSH 配置可以在这里改。终端和资源管理器从仓库菜单打开。</p>
+          <p data-en>Clone in the background, create a repository, or use Git Flow. Submodules and worktrees sit in the sidebar. LFS files can be listed, locked, and unlocked. Merged branches can be deleted together. A custom command can be shared or limited to one repository, and it can ask for a value. The SSH config can be edited here. Terminal and the file manager open from the repository menu.</p>
+        </article>
+        <article>
+          <h3 data-zh>获取、拉取、推送</h3><h3 data-en>Fetch, pull, push</h3>
+          <p data-zh>这三个对话框会记住修剪、标签、变基这些选项。推送默认带 --force-with-lease。不带保护的强制推送要再确认一次。可以提交后立刻推送，建标签时也可以一起推。拉取可以变基。来源文件夹的扫描深度可以调。</p>
+          <p data-en>Those dialogs remember prune, tags, and rebase. Push uses --force-with-lease unless you confirm a bare force push. A commit can push immediately, and a new tag can go with it. Pull can rebase. The depth used to scan a source folder is adjustable.</p>
+        </article>
+        <article>
+          <h3 data-zh>GitHub 和其他托管</h3><h3 data-en>GitHub and the other forges</h3>
+          <p data-zh>账号可以是 GitHub、GitLab、Bitbucket 或 Azure。通知和拉取请求在窗口里看。可以新建托管仓库。登录可以用粘贴的令牌，也可以走设备码。HTTP 和 SOCKS 代理、证书和 SSL 校验都在偏好里。</p>
+          <p data-en>Accounts cover GitHub, GitLab, Bitbucket, and Azure. Notifications and pull requests open in the window. A hosted repository can be created from here. Sign in with a pasted token or a device code. HTTP and SOCKS proxies, certificates, and SSL verification live in preferences.</p>
+        </article>
+        <article>
+          <h3 data-zh>多窗口和命令记录</h3><h3 data-en>Windows and the command log</h3>
+          <p data-zh>历史、文件内容和合并可以单独开窗口。快速启动搜命令和文件。命令记录分开用户操作、后台、错误和通知。关于里可以复制诊断信息。有新版本时可以下载安装包并启动。Fork 的设置可以导入过来。</p>
+          <p data-en>History, file contents, and merge can each have their own window. Quick launch searches commands and files. The command log separates your actions, background work, errors, and notices. About can copy diagnostics. A newer build can be downloaded and started. Fork settings can be imported.</p>
+        </article>
+        <article>
+          <h3 data-zh>界面一直能点</h3><h3 data-en>The window stays usable</h3>
+          <p data-zh>长列表只画窗口里的行。写操作按仓库排队，后台慢的时候界面先保持可操作。语言可以中文、英文或跟随系统。主题可以浅色、深色或跟随系统。Windows 安装包自带 MinGit，macOS 使用系统 Git。</p>
+          <p data-en>A long list draws the rows in the window. Writes queue per repository, so a slow git leaves the window usable. Language is Chinese, English, or the system. Theme is light, dark, or the system. Windows builds include MinGit. macOS uses the system Git.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p data-zh>改 <code>docs/index.html</code> 并推到 <code>feat/dev</code>，这一页就会更新。程序只记住地址，不把页面放进窗口。</p>
+      <p data-en>Edit <code>docs/index.html</code> and push <code>feat/dev</code> to update this page. The app stores the address and does not keep the page in its window.</p>
+      <p>
+        <a href="https://github.com/ZhouJun2303/Gitnuro">GitHub</a>
+        · <a href="https://github.com/ZhouJun2303/Gitnuro/releases">Releases</a>
+        · GPL v3 · Gitnuro
+      </p>
+    </div>
+  </footer>
+
+  <script>
+    const roots = {
+      work: { tabs: ["reward", "notes", "site"], path: "D:\\Work\\reward" },
+      home: { tabs: ["diary", "photos"], path: "D:\\Personal\\diary" },
+    };
+    const types = ["feat", "fix", "docs", "art", "style", "refactor", "test", "chore", "perf", "revert"];
+    const samples = {
+      zh: {
+        feat: "feat: 新增挂机奖励结算",
+        fix: "fix: 修复登录后的空提交",
+        docs: "docs: 补上奖励规则说明",
+        art: "art: 替换结算界面图标",
+        style: "style: 整理奖励函数的空行",
+        refactor: "refactor: 拆开每日结算",
+        test: "test: 补上连胜奖励用例",
+        chore: "chore: 更新构建脚本",
+        perf: "perf: 少读一次奖励表",
+        revert: "revert: 撤回上一笔结算改动",
+      },
+      en: {
+        feat: "feat: add idle reward settlement",
+        fix: "fix: repair the empty commit after login",
+        docs: "docs: describe the reward rules",
+        art: "art: replace the reward icon",
+        style: "style: tidy blank lines in the reward function",
+        refactor: "refactor: split daily settlement",
+        test: "test: cover the streak bonus",
+        chore: "chore: update the build script",
+        perf: "perf: read the reward table once",
+        revert: "revert: undo the last settlement change",
+      },
+    };
+    let currentType = "feat";
+    let currentRoot = "work";
+
+    function lang() { return document.documentElement.lang === "en" ? "en" : "zh"; }
+
+    let generated = false;
+
+    function setLang(next) {
+      document.documentElement.lang = next;
+      document.getElementById("lang-zh").classList.toggle("on", next !== "en");
+      document.getElementById("lang-en").classList.toggle("on", next === "en");
+      try { localStorage.setItem("awegit.guide.lang", next); } catch { /* private mode */ }
+      if (generated) generate();
+      paintMerge();
+    }
+
+    function paintRoot() {
+      const item = roots[currentRoot];
+      document.getElementById("root-label").textContent = item.tabs.join(" · ");
+      document.getElementById("root-path").textContent = item.path;
+      document.getElementById("root-tabs").innerHTML = item.tabs.map((name, index) => `<span class="tab${index === 0 ? " on" : ""}">${name}</span>`).join("");
+      document.querySelectorAll("[data-root]").forEach((button) => button.classList.toggle("on", button.getAttribute("data-root") === currentRoot));
+    }
+
+    function paintTypes() {
+      document.getElementById("types").innerHTML = types.map((name) => `<button type="button" data-type="${name}" class="${name === currentType ? "on" : ""}">${name}</button>`).join("");
+    }
+
+    function paintMerge() {
+      const ours = document.getElementById("pick-ours").checked;
+      const theirs = document.getElementById("pick-theirs").checked;
+      const both = "reward += daily\nbonus = 0\nreward += daily * streak\nbonus = 1";
+      const oursText = "reward += daily * streak\nbonus = 1";
+      const theirsText = "reward += daily\nbonus = 0";
+      const body = !ours && !theirs ? "" : ours && theirs ? both : ours ? oursText : theirsText;
+      const empty = lang() === "en" ? "Nothing picked yet" : "还没有选择";
+      document.getElementById("merge-result").textContent = body || empty;
+    }
+
+    document.getElementById("lang-zh").onclick = () => setLang("zh");
+    document.getElementById("lang-en").onclick = () => setLang("en");
+    document.getElementById("fake-toggle").onclick = (event) => {
+      const on = event.currentTarget.getAttribute("aria-pressed") !== "true";
+      event.currentTarget.setAttribute("aria-pressed", String(on));
+      event.currentTarget.classList.toggle("on", on);
+      document.querySelectorAll("[data-fake]").forEach((row) => row.classList.toggle("gone", on));
+    };
+    document.querySelectorAll("[data-root]").forEach((button) => {
+      button.onclick = () => { currentRoot = button.getAttribute("data-root"); paintRoot(); };
+    });
+    document.getElementById("types").onclick = (event) => {
+      const button = event.target.closest("[data-type]");
+      if (!button) return;
+      currentType = button.getAttribute("data-type");
+      paintTypes();
+    };
+    function generate() {
+      generated = true;
+      const text = samples[lang()][currentType];
+      document.getElementById("subject").textContent = text;
+      document.getElementById("subject-en").textContent = text;
+    }
+    document.getElementById("generate").onclick = generate;
+    document.getElementById("generate-en").onclick = generate;
+    document.getElementById("pick-ours").onchange = paintMerge;
+    document.getElementById("pick-theirs").onchange = paintMerge;
+
+    try {
+      const saved = localStorage.getItem("awegit.guide.lang");
+      if (saved === "en" || saved === "zh") setLang(saved);
+    } catch { /* keep Chinese */ }
+    paintRoot();
+    paintTypes();
+    paintMerge();
+    document.querySelectorAll("[data-fake]").forEach((row) => row.classList.add("gone"));
+  </script>
+</body>
+</html>

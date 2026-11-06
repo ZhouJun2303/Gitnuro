@@ -14,6 +14,23 @@ function lines(count: number, prefix: string) {
   return Array.from({ length: count }, (_, index) => `${prefix} ${index + 1}`).join("\n");
 }
 
+function fillCommandLog(shell: ShellState) {
+  const now = Date.now();
+  shell.commandLog = Array.from({ length: FILL }, (_, index) => {
+    const n = pad(index + 1);
+    return {
+      id: index + 1,
+      title: `git status #${n}`,
+      summary: index % 5 === 0 ? "failed in lab" : "ok in lab",
+      command: `git status --short # ${n}`,
+      output: lines(FILL, `output ${n}`),
+      ok: index % 5 !== 0,
+      at: now - index * 60_000,
+      source: index % 3 === 0 ? "background" as const : "user" as const,
+    };
+  });
+}
+
 function manyCommands(): CommandRecord[] {
   return Array.from({ length: FILL }, (_, index) => {
     const n = pad(index + 1);
@@ -80,7 +97,7 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.settings = { ...shell.settings, diffWordWrap: true, diffStyle: "unified" };
     return showChange(shell, "notes/wrap.txt", "unstaged");
   }
-  if (id === "history" || id === "commit") return showHistory(shell);
+  if (id === "history" || id === "commit" || id === "history-remote") return showHistory(shell);
   if (id === "tree") {
     await showHistory(shell);
     await shell.openHistoryTab("tree");
@@ -115,21 +132,29 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.toggleRepoPicker();
     return;
   }
+  if (id === "picker-truncated") {
+    await shell.toggleRepoPicker();
+    shell.repoScanTruncated = true;
+    return;
+  }
   if (id === "commands") {
-    const now = Date.now();
-    shell.commandLog = Array.from({ length: FILL }, (_, index) => {
-      const n = pad(index + 1);
-      return {
-        id: index + 1,
-        title: `git status #${n}`,
-        summary: index % 5 === 0 ? "failed in lab" : "ok in lab",
-        command: `git status --short # ${n}`,
-        output: lines(FILL, `output ${n}`),
-        ok: index % 5 !== 0,
-        at: now - index * 60_000,
-        source: index % 3 === 0 ? "background" as const : "user" as const,
-      };
-    });
+    fillCommandLog(shell);
+    shell.commandPick = 1;
+    shell.openCommandLog();
+    return;
+  }
+  if (id === "commands-errors") {
+    fillCommandLog(shell);
+    // Saved errors keep their own id counter, so a stale command id can happen to match one.
+    shell.errorLog = Array.from({ length: 80 }, (_, index) => ({
+      id: 80 - index,
+      at: Date.now() - index * 60_000,
+      title: `lab error ${index + 1}`,
+      text: `lab error text ${index + 1}`,
+      command: "",
+    }));
+    shell.errorSeq = 80;
+    shell.unseenErrors = 1;
     shell.commandPick = 1;
     shell.openCommandLog();
     return;
@@ -178,6 +203,11 @@ async function fillSurface(shell: ShellState, id: string) {
     return;
   }
   if (id === "conflict") return showChange(shell, "src/both-sides.ts", "unstaged");
+  if (id === "conflict-batch") {
+    shell.section = "changes";
+    shell.picked = [];
+    return;
+  }
   if (id === "bisect") {
     await shell.loadFacts(true, false);
     return;
@@ -227,6 +257,7 @@ async function fillSurface(shell: ShellState, id: string) {
       downloadUrl: "https://example.com/awegit",
       notes: lines(FILL, "实验室更新说明"),
       installable: false,
+      sha256: "",
     };
     shell.openCommandLog("update");
     return;
@@ -235,14 +266,36 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.actionError = "实验室操作错误：推送被拒绝";
     return;
   }
+  if (id === "action-error-coded") {
+    shell.actionError = shell.message("awegit:update:sha256 mismatch");
+    return;
+  }
+  if (id === "action-error-retry") {
+    shell.actionError = "error: Your local changes to the following files would be overwritten by merge:";
+    shell.stashRetry = { request: { action: "stashApply", name: "stash@{0}" }, source: "user" };
+    return;
+  }
+  if (id === "settings-recovered") {
+    shell.adoptSettings({ ...shell.settings, recoveryNotice: "recovered-backup" });
+    return;
+  }
   if (id === "text-merge-many") {
     await showChange(shell, "src/many-hunks.ts", "unstaged");
     await shell.openTextMerge("src/many-hunks.ts");
     return;
   }
-  if (id === "text-merge") {
+  if (id === "text-merge" || id === "text-merge-window") {
     await showChange(shell, "src/both-sides.ts", "unstaged");
     await shell.openTextMerge("src/both-sides.ts");
+    return;
+  }
+  if (id === "diff-large-asset") {
+    await showChange(shell, "assets/Config/Generated.asset", "unstaged");
+    return;
+  }
+  if (id === "conflict-large-asset") {
+    await showChange(shell, "assets/Config/Generated.asset", "unstaged");
+    await shell.openTextMerge("assets/Config/Generated.asset");
     return;
   }
   if (id === "file-merge") {
@@ -255,6 +308,30 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.draftExtra = "main";
     shell.dialog = "branch";
     shell.confirmAsk = { title: "删除分支", body: "确认删除 topic？", run: () => {} };
+    return;
+  }
+  if (id === "stash-apply-confirm") {
+    const stash = shell.refs?.stashes[0];
+    shell.confirmApplyStash(stash?.name ?? "stash@{0}", stash?.summary ?? "WIP before the palette");
+    return;
+  }
+  if (id === "revert-confirm") {
+    const commit = shell.commitsLive[0];
+    shell.confirmRevert(commit?.id ?? "f2c87af", commit?.summary ?? "feat: 英雄词条和技能翻译修复");
+    return;
+  }
+  if (id === "stash-pop-confirm") {
+    shell.confirmPopStash();
+    return;
+  }
+  if (id === "reset-confirm") {
+    const commit = shell.commitsLive[0];
+    shell.confirmReset(commit?.id ?? "HEAD", "mixed", commit?.summary ?? "");
+    return;
+  }
+  if (id === "cherry-confirm") {
+    const commit = shell.commitsLive[0];
+    if (commit) await shell.previewCherry(commit.id, true, commit.summary);
     return;
   }
   if (id === "menu") {
@@ -451,10 +528,6 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
     case "stashBranch":
       shell.draft = "from-stash";
       shell.draftExtra = "stash@{0}";
-      break;
-    case "checkoutDirty":
-      shell.pendingCheckout = "topic";
-      shell.draftExtra = "stash";
       break;
     case "checkoutNotice":
       shell.pendingCheckout = "topic";

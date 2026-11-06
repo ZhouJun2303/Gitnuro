@@ -1,6 +1,6 @@
 [package]
 name = "awegit"
-version = "2.0.2"
+version = "2.0.3"
 description = "AweGit desktop shell"
 edition = "2021"
 # Two bins exist (`awegit` shell, `awegit-lab` harness). `tauri dev` runs a
@@ -39,5 +39,6 @@ notify = "6"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # `native-tls` alone does not install a default connector; `tls` + `native-certs`
 # uses rustls with the OS trust store so HTTPS update checks work on Windows.
-ureq = { version = "2.12", default-features = false, features = ["tls", "native-certs", "gzip"] }
+ureq = { version = "2.12", default-features = false, features = ["tls", "native-certs", "gzip", "socks-proxy"] }
+sha2 = "0.10"
 awegit-git = { path = "../crates/git" }

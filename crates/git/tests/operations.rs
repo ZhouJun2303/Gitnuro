@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    blob_view, conflict_view, discard_lines, file_diff, file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs, search_commits,
-    search_log, stage_hunk, stage_line, stage_lines, stage_paths, status, stop_process_tree, ChangeKind, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
+    blob_view, commit_log, conflict_view, discard_lines, file_diff, file_diff_with, file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs, search_commits,
+    search_log, stage_all, stage_hunk, stage_line, stage_lines, stage_paths, status, stop_process_tree, ChangeKind, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
 };
 
 fn repo() -> common::TempRepo {
@@ -81,6 +81,30 @@ impl Drop for RemoveWorktree {
 }
 
 #[test]
+fn stage_all_keeps_space_and_unicode_names() {
+    let repo = repo();
+    fs::write(repo.path.join("a b.txt"), "space\n").unwrap();
+    fs::write(repo.path.join("中文.txt"), "zh\n").unwrap();
+    stage_all(&repo.path).unwrap();
+    awegit_git::commit(
+        &repo.path,
+        awegit_git::CommitRequest {
+            summary: "names".into(),
+            description: String::new(),
+            amend: false,
+            sign_off: false,
+            sign_off_format: String::new(),
+            skip_hooks: true,
+            convention: false,
+        },
+    )
+    .unwrap();
+    let listed = git_at(&repo.path, &["ls-files", "-z"]);
+    assert!(listed.contains("a b.txt"), "{listed}");
+    assert!(listed.contains("中文.txt"), "{listed}");
+}
+
+#[test]
 fn fetch_push_and_fast_forward() {
     let origin = bare();
     let local = repo();
@@ -113,6 +137,7 @@ fn fetch_push_and_fast_forward() {
     git_at(&std::env::temp_dir(), &["clone", &url, other.to_str().unwrap()]);
     let _cleanup = RemoveDir(other.clone());
     git_at(&other, &["config", "commit.gpgsign", "false"]);
+    git_at(&other, &["config", "core.hooksPath", ".git/no-hooks"]);
     git_at(&other, &["config", "user.name", "Test"]);
     git_at(&other, &["config", "user.email", "test@example.com"]);
 
@@ -138,6 +163,55 @@ fn fetch_push_and_fast_forward() {
     let log = git_at(&other, &["log", "--format=%s"]);
     assert!(log.contains("second"), "{log}");
     assert!(log.contains("first"), "{log}");
+}
+
+#[test]
+fn marks_commits_that_exist_only_on_a_remote() {
+    let origin = bare();
+    let local = repo();
+    commit_file(&local, "a.txt", "one\n", "first");
+    let url = file_url(&origin.path);
+    perform(&local.path, Mutation::AddRemote { name: "origin".into(), url: url.clone() }).unwrap();
+    perform(
+        &local.path,
+        Mutation::Push {
+            remote: Some("origin".into()),
+            set_upstream: true,
+            tags: false,
+            force_with_lease: false,
+            force: false,
+        },
+    )
+    .unwrap();
+
+    let other = std::env::temp_dir().join(format!(
+        "awegit-remote-only-{}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    git_at(&std::env::temp_dir(), &["clone", &url, other.to_str().unwrap()]);
+    let _cleanup = RemoveDir(other.clone());
+    git_at(&other, &["config", "commit.gpgsign", "false"]);
+    git_at(&other, &["config", "core.hooksPath", ".git/no-hooks"]);
+    git_at(&other, &["config", "user.name", "Test"]);
+    git_at(&other, &["config", "user.email", "test@example.com"]);
+    fs::write(other.join("a.txt"), "two\n").unwrap();
+    git_at(&other, &["add", "--", "a.txt"]);
+    git_at(&other, &["commit", "-m", "second"]);
+    git_at(&other, &["push", "origin", "HEAD:main"]);
+    perform(&local.path, Mutation::Fetch { remote: Some("origin".into()), prune: false, tags: false }).unwrap();
+
+    let rows = commit_log(&local.path, 50).unwrap();
+    let second = rows.iter().find(|row| row.summary == "second").expect("remote tip missing");
+    assert!(second.remote_only, "remote tip should be remote-only: {second:?}");
+    assert!(!second.unpushed, "remote tip should not be unpushed: {second:?}");
+    let first = rows.iter().find(|row| row.summary == "first").expect("local tip missing");
+    assert!(!first.remote_only && !first.unpushed, "shared base should be plain: {first:?}");
+
+    commit_file(&local, "b.txt", "local\n", "local work");
+    let rows = commit_log(&local.path, 50).unwrap();
+    let work = rows.iter().find(|row| row.summary == "local work").expect("local commit missing");
+    assert!(work.unpushed, "local commit should be unpushed: {work:?}");
+    assert!(!work.remote_only, "local commit should not be remote-only: {work:?}");
 }
 
 #[test]
@@ -306,15 +380,19 @@ fn preview_reads_a_png() {
 
 #[test]
 fn cancel_stops_a_child_process() {
-    let mut child = Command::new("ping")
-        .args(["-n", "30", "127.0.0.1"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut command = Command::new(if cfg!(windows) { "ping" } else { "sleep" });
+    if cfg!(windows) {
+        command.args(["-n", "30", "127.0.0.1"]);
+    } else {
+        command.arg("30");
+    }
+    command.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let mut child = command.spawn().unwrap();
+    let started = std::time::Instant::now();
     stop_process_tree(child.id());
     let status = child.wait().unwrap();
     assert!(!status.success(), "{status}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "cancel took {:?}", started.elapsed());
 }
 
 #[test]
@@ -371,7 +449,7 @@ fn squash_replays_commits_after_the_range() {
     let third = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
     commit_file(&repo, "d.txt", "d\n", "fourth");
     fs::write(repo.path.join("dirty.txt"), "nope\n").unwrap();
-    let dirty = perform(
+    perform(
         &repo.path,
         Mutation::Squash {
             from: second.clone(),
@@ -379,18 +457,9 @@ fn squash_replays_commits_after_the_range() {
             summary: "squashed".into(),
         },
     )
-    .unwrap_err();
-    assert!(dirty.to_string().contains("clean"), "{dirty}");
-    fs::remove_file(repo.path.join("dirty.txt")).unwrap();
-    perform(
-        &repo.path,
-        Mutation::Squash {
-            from: second,
-            to: third,
-            summary: "squashed".into(),
-        },
-    )
     .unwrap();
+    assert_eq!(fs::read_to_string(repo.path.join("dirty.txt")).unwrap(), "nope\n");
+    assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
     let log = repo.output(&["log", "--format=%s"]);
     assert!(log.contains("base"), "{log}");
     assert!(log.contains("squashed"), "{log}");
@@ -520,6 +589,103 @@ fn resolve_conflict_keeps_ours() {
     let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
     assert!(text.contains("main"), "{text}");
     assert!(!text.contains("<<<<<<<"), "{text}");
+}
+
+#[test]
+fn resolve_paths_keeps_the_chosen_side_for_every_file() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base a\n", "base a");
+    commit_file(&repo, "b.txt", "base b\n", "base b");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side a\n", "side a");
+    commit_file(&repo, "b.txt", "side b\n", "side b");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main a\n", "main a");
+    commit_file(&repo, "b.txt", "main b\n", "main b");
+    let merge = perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    );
+    assert!(merge.is_err(), "expected a conflict");
+    perform(
+        &repo.path,
+        Mutation::ResolvePaths {
+            files: vec!["a.txt".into(), "b.txt".into()],
+            side: "theirs".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "side a\n");
+    assert_eq!(fs::read_to_string(repo.path.join("b.txt")).unwrap(), "side b\n");
+    assert!(repo.output(&["ls-files", "-u"]).trim().is_empty());
+}
+
+#[test]
+fn resolve_paths_can_take_a_side_that_deleted_the_file() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    repo.git(&["rm", "a.txt"]);
+    repo.git(&["commit", "-m", "side removes"]);
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main edits");
+    let merge = perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    );
+    assert!(merge.is_err(), "expected a modify/delete conflict");
+    perform(
+        &repo.path,
+        Mutation::ResolvePaths {
+            files: vec!["a.txt".into()],
+            side: "theirs".into(),
+        },
+    )
+    .unwrap();
+    assert!(!repo.path.join("a.txt").exists());
+    assert!(repo.output(&["ls-files", "-u"]).trim().is_empty());
+}
+
+#[test]
+fn merge_state_names_the_branches_and_files() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "a.txt", "topic\n", "topic");
+    commit_file(&repo, "b.txt", "topic adds\n", "topic adds");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main");
+    let merge = perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "topic".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    );
+    assert!(merge.is_err(), "expected a conflict");
+    let state = awegit_git::merge_state(&repo.path).unwrap().expect("merge in progress");
+    assert_eq!(state.source, "topic");
+    assert_eq!(state.into, "main");
+    assert!(state.files.iter().any(|file| file.path == "a.txt"), "{:?}", state.files);
+    assert!(state.files.iter().any(|file| file.path == "b.txt"), "{:?}", state.files);
 }
 
 #[test]
@@ -836,6 +1002,32 @@ fn skip_hooks_commits_past_a_failing_hook() {
 }
 
 #[test]
+fn commits_a_description_longer_than_the_windows_command_line() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    fs::write(repo.path.join("a.txt"), "two\n").unwrap();
+    repo.git(&["add", "--", "a.txt"]);
+    let description: String = (0..2000).map(|index| format!("M\tAssets/Editor/File{index}.asset\n")).collect();
+    assert!(description.len() > 32_767, "the test needs a body Windows cannot pass as one argument");
+    awegit_git::commit(
+        &repo.path,
+        awegit_git::CommitRequest {
+            summary: "Merge develop into main".into(),
+            description: description.clone(),
+            amend: false,
+            sign_off: false,
+            sign_off_format: String::new(),
+            skip_hooks: false,
+            convention: false,
+        },
+    )
+    .unwrap();
+    let message = repo.output(&["log", "-1", "--format=%B"]);
+    assert!(message.contains("Merge develop into main"));
+    assert!(message.contains("Assets/Editor/File1999.asset"));
+}
+
+#[test]
 fn stash_records_its_parent() {
     let repo = repo();
     commit_file(&repo, "a.txt", "one\n", "base");
@@ -917,6 +1109,96 @@ fn stash_paths_takes_untracked_files_without_the_flag() {
     assert!(!repo.path.join("new.txt").exists());
     assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "a\n");
     assert_eq!(repository_refs(&repo.path).unwrap().stashes.len(), 1);
+}
+
+#[test]
+fn checkout_stashes_local_changes_and_puts_them_back() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "b.txt", "b\n", "topic");
+    repo.git(&["checkout", "main"]);
+    fs::write(repo.path.join("a.txt"), "dirty\n").unwrap();
+    perform(&repo.path, Mutation::Checkout { name: "topic".into() }).unwrap();
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "dirty\n");
+    assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
+}
+
+#[test]
+fn checkout_keeps_the_autostash_when_restoring_conflicts() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "a.txt", "topic\n", "topic");
+    repo.git(&["checkout", "main"]);
+    fs::write(repo.path.join("a.txt"), "local\n").unwrap();
+    assert!(perform(&repo.path, Mutation::Checkout { name: "topic".into() }).is_err());
+    let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
+    assert!(text.contains("<<<<<<<"), "{text}");
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    let stash = stashes.iter().find(|stash| stash.summary.contains("autostash")).expect("autostash");
+    assert!(stash.summary.contains("checkout topic"), "{}", stash.summary);
+    assert!(stash.summary.contains("a.txt"), "{}", stash.summary);
+}
+
+#[test]
+fn conflicting_merge_keeps_a_backup() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "a.txt", "topic\n", "topic");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main");
+    fs::write(repo.path.join("a.txt"), "local\n").unwrap();
+    assert!(perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "topic".into(),
+            squash: false,
+            no_ff: false,
+            autostash: true,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .is_err());
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    let backup = stashes.iter().find(|stash| stash.summary.contains("conflict backup")).expect("conflict backup");
+    assert!(backup.summary.contains("merge topic"), "{}", backup.summary);
+    assert!(backup.summary.contains("a.txt"), "{}", backup.summary);
+    assert_eq!(
+        repo.output(&["show", &format!("{}:a.txt", backup.name)]).replace("\r\n", "\n"),
+        "local\n"
+    );
+}
+
+#[test]
+fn native_autostash_says_what_and_why() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    fs::write(repo.path.join("a.txt"), "local\n").unwrap();
+    perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: true,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .unwrap();
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    let stash = stashes
+        .iter()
+        .find(|stash| stash.summary.contains("AweGit autostash"))
+        .unwrap_or_else(|| panic!("no described autostash in {stashes:?}"));
+    assert!(stash.summary.contains("merge side"), "{}", stash.summary);
+    assert!(stash.summary.contains("a.txt"), "{}", stash.summary);
 }
 
 #[test]
@@ -1313,6 +1595,61 @@ fn merge_preview_fills_message() {
     let log = repo.output(&["log", "-1", "--format=%B"]);
     assert!(log.contains("Merge topic into main"), "{log}");
     assert!(log.contains("b.txt"), "{log}");
+}
+
+fn large_asset(name: &str) -> String {
+    let mut text = format!("%YAML 1.1\n--- !u!114 &11400000\nMonoBehaviour:\n  m_Name: {name}\n");
+    let row = "0123456789abcdef".repeat(58);
+    for index in 0..2_400 {
+        text.push_str(&format!("  m_Entry_{index}: {row}\n"));
+    }
+    text
+}
+
+#[test]
+fn large_text_asset_loads_its_diff_on_demand() {
+    let repo = repo();
+    let path = "big.asset";
+    commit_file(&repo, path, &large_asset("base"), "base asset");
+    fs::write(repo.path.join(path), large_asset("working")).unwrap();
+
+    let pending = file_diff(&repo.path, path, false).unwrap();
+    assert!(pending.loadable, "{pending:?}");
+    assert!(!pending.binary && pending.lines.is_empty(), "{pending:?}");
+
+    let diff = file_diff_with(&repo.path, path, false, 3, false, true).unwrap();
+    assert!(!diff.binary, "{diff:?}");
+    assert!(diff.lines.iter().any(|line| line.text == "+  m_Name: working"), "{diff:?}");
+    assert!(diff.lines.iter().all(|line| line.text != "large file skipped"), "{diff:?}");
+}
+
+#[test]
+fn large_binary_file_is_still_skipped() {
+    let repo = repo();
+    let mut bytes = vec![b'x'; 2_200_000];
+    bytes[1024] = 0;
+    fs::write(repo.path.join("big.bin"), &bytes).unwrap();
+    repo.git(&["add", "big.bin"]);
+    repo.git(&["commit", "-m", "base"]);
+    bytes[2048] = b'y';
+    fs::write(repo.path.join("big.bin"), &bytes).unwrap();
+
+    let diff = file_diff(&repo.path, "big.bin", false).unwrap();
+    assert!(diff.truncated && !diff.loadable, "{diff:?}");
+    assert!(diff.lines.iter().any(|line| line.text == "large file skipped"), "{diff:?}");
+}
+
+#[test]
+fn large_untracked_text_loads_on_demand() {
+    let repo = repo();
+    fs::write(repo.path.join("big.asset"), large_asset("untracked")).unwrap();
+
+    let pending = file_diff(&repo.path, "big.asset", false).unwrap();
+    assert!(pending.loadable && !pending.binary, "{pending:?}");
+
+    let diff = file_diff_with(&repo.path, "big.asset", false, 3, false, true).unwrap();
+    assert!(!diff.binary, "{diff:?}");
+    assert!(diff.lines.iter().any(|line| line.text == "+  m_Name: untracked"), "{diff:?}");
 }
 
 struct RemoveDir(PathBuf);

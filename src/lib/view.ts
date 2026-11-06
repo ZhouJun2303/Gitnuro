@@ -355,6 +355,127 @@ export function windowSlice<T>(items: T[], scrollTop: number, rowHeight: number,
   return { start, rows: items.slice(start, Math.min(items.length, start + size)) };
 }
 
+const WRAP_COLUMNS = 96;
+const wrapPrefixes = new WeakMap<object, Uint32Array>();
+
+/** Visual rows a wrapped line occupies. One unit is about 96 columns. */
+export function visualUnits(text: string, columns = WRAP_COLUMNS) {
+  return Math.max(1, Math.ceil(text.length / columns));
+}
+
+/** Exclusive prefix of visual units. Cached on the row array. */
+export function wrapPrefix(rows: ReadonlyArray<{ text?: string; left?: string; right?: string }>): Uint32Array {
+  const key = rows as object;
+  const cached = wrapPrefixes.get(key);
+  if (cached && cached.length === rows.length + 1) return cached;
+  const prefix = new Uint32Array(rows.length + 1);
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const units = row.left !== undefined || row.right !== undefined
+      ? visualUnits(row.left ?? "") + visualUnits(row.right ?? "")
+      : visualUnits(row.text ?? "");
+    prefix[index + 1] = prefix[index] + units;
+  }
+  wrapPrefixes.set(key, prefix);
+  return prefix;
+}
+
+/** First row whose prefix end is past `unit`. */
+export function rowAtUnit(prefix: Uint32Array, unit: number) {
+  const last = prefix.length - 2;
+  if (last < 0) return 0;
+  let lo = 0;
+  let hi = last;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (prefix[mid + 1] > unit) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
+export function virtualLines<T extends { text: string }>(items: T[], scrollTop: number, rowHeight: number, viewRows: number, wrap: boolean) {
+  if (!wrap) {
+    const slice = windowSlice(items, scrollTop, rowHeight, 80, viewRows);
+    return {
+      start: slice.start,
+      rows: slice.rows,
+      height: items.length * rowHeight,
+      tops: slice.rows.map((_, index) => (slice.start + index) * rowHeight),
+    };
+  }
+  const prefix = wrapPrefix(items);
+  const total = prefix.length > 0 ? prefix[prefix.length - 1] : 0;
+  if (items.length <= 80) {
+    return {
+      start: 0,
+      rows: items,
+      height: total * rowHeight,
+      tops: items.map((_, index) => prefix[index] * rowHeight),
+    };
+  }
+  const unit = Math.max(0, Math.floor(scrollTop / Math.max(rowHeight, 1)));
+  const span = Math.max(viewRows, 1);
+  let start = Math.max(0, rowAtUnit(prefix, unit) - 16);
+  let end = Math.min(items.length, rowAtUnit(prefix, unit + span) + 16);
+  if (end < start) end = start;
+  const rows = items.slice(start, end);
+  return {
+    start,
+    rows,
+    height: total * rowHeight,
+    tops: rows.map((_, index) => prefix[start + index] * rowHeight),
+  };
+}
+
+export function virtualSplit(rows: SplitRow[], scrollTop: number, rowHeight: number, viewPx: number, wrap: boolean) {
+  if (!wrap) {
+    const count = Math.ceil(Math.max(viewPx, 600) / rowHeight) + 36;
+    if (rows.length <= count + 40) return { start: 0, rows, beforePx: 0, afterPx: 0 };
+    const start = Math.min(Math.max(0, Math.floor(scrollTop / rowHeight) - 16), Math.max(0, rows.length - count));
+    const slice = rows.slice(start, start + count);
+    return { start, rows: slice, beforePx: start * rowHeight, afterPx: (rows.length - start - slice.length) * rowHeight };
+  }
+  const prefix = wrapPrefix(rows);
+  const total = prefix[prefix.length - 1] ?? 0;
+  if (rows.length <= 80) return { start: 0, rows, beforePx: 0, afterPx: 0 };
+  const unit = Math.max(0, Math.floor(scrollTop / Math.max(rowHeight, 1)));
+  const span = Math.max(1, Math.ceil(Math.max(viewPx, 1) / rowHeight));
+  let start = Math.max(0, rowAtUnit(prefix, unit) - 8);
+  let end = Math.min(rows.length, rowAtUnit(prefix, unit + span) + 8);
+  if (end < start) end = start;
+  return {
+    start,
+    rows: rows.slice(start, end),
+    beforePx: prefix[start] * rowHeight,
+    afterPx: (total - prefix[end]) * rowHeight,
+  };
+}
+
+function mixStamp(hash: number, text: string) {
+  let value = hash >>> 0;
+  for (let index = 0; index < text.length; index += 1) value = Math.imul(value ^ text.charCodeAt(index), 16777619) >>> 0;
+  return value;
+}
+
+/** Length, id, summary, ref badges, and push flags. A matching stamp keeps the previous array. */
+export function historyStamp(rows: { id: string; summary: string; refs: string[]; unpushed?: boolean; remoteOnly?: boolean }[]) {
+  let hash = rows.length >>> 0;
+  for (const row of rows) {
+    hash = mixStamp(hash, row.id);
+    hash = mixStamp(hash, row.summary);
+    for (const ref of row.refs) hash = mixStamp(hash, ref);
+    hash = Math.imul(hash ^ (row.unpushed ? 1 : 0) ^ ((row.remoteOnly ? 1 : 0) << 1), 16777619) >>> 0;
+  }
+  return hash >>> 0;
+}
+
+export function sameHistory(left: { id: string; summary: string; refs: string[]; unpushed?: boolean; remoteOnly?: boolean }[], right: { id: string; summary: string; refs: string[]; unpushed?: boolean; remoteOnly?: boolean }[]) {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  return historyStamp(left) === historyStamp(right);
+}
+
 /** Coalesce scroll events so a virtual list writes state at most once per frame. */
 export function onVirtualScroll(apply: (top: number) => void) {
   let frame = 0;

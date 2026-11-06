@@ -202,7 +202,7 @@ export async function applyConflictChoice(shell: ShellState, ours: boolean, thei
     await shell.mutate({ action: "resolve", file, side: ours ? "ours" : "theirs", text: "" });
   }
 
-export async function loadDiff(shell: ShellState) {
+export async function loadDiff(shell: ShellState, loadLarge = false) {
     if (shell.mode !== "live" || !shell.selectedPath || shell.section !== "changes") {
       shell.diff = null;
       shell.diffError = null;
@@ -213,6 +213,9 @@ export async function loadDiff(shell: ShellState) {
     const file = shell.selectedPath;
     const stagedSide = shell.selectedSide === "staged";
     const path = shell.repoPath();
+    const loadKey = `${path}\0${stagedSide ? "staged" : "unstaged"}\0${file}`;
+    const load = loadLarge || shell.largeLoaded.has(loadKey);
+    if (loadLarge) shell.largeLoaded.add(loadKey);
     const rows = stagedSide ? shell.snapshot?.staged : shell.snapshot?.unstaged;
     const conflicted = rows?.some((item) => item.path === file && item.kind === "conflict") ?? false;
     await shell.withWork(shell.tr("chrome.readingFile"), async () => {
@@ -236,6 +239,7 @@ export async function loadDiff(shell: ShellState) {
         staged: stagedSide,
         unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
         ignoreSpace: shell.settings.ignoreSpace,
+        load,
       });
       if (token === shell.diffToken && shell.viewing(path)) {
         if (!shell.same(shell.diff, value)) shell.diff = value;
@@ -569,22 +573,36 @@ export function pickedIn(shell: ShellState, rows: Row[]) {
 
 export async function discardPicked(shell: ShellState, files = [...shell.picked]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
-    if (names.length === 0 || shell.busy) return;
+    if (names.length === 0 || shell.busy || shell.writing) return;
     if (names.length === 1) await shell.mutate({ action: "discard", file: names[0] });
     else await shell.mutate({ action: "discardPaths", files: names });
     if (!shell.actionError) shell.picked = shell.picked.filter((path) => !names.includes(path));
   }
 
 export async function unstagePicked(shell: ShellState, files = [...shell.picked]) {
-    if (files.length === 0) return;
+    if (files.length === 0 || shell.writing) return;
     await shell.mutate({ action: "stagePaths", files, unstage: true });
     shell.picked = shell.picked.filter((path) => !files.includes(path));
   }
 
 export async function stagePicked(shell: ShellState, files = [...shell.picked]) {
-    if (files.length === 0) return;
+    if (files.length === 0 || shell.writing) return;
     await shell.mutate({ action: "stagePaths", files, unstage: false });
     shell.picked = shell.picked.filter((path) => !files.includes(path));
+  }
+
+/** Conflict files among the picked rows; other picked files are left alone. */
+export function pickedConflicts(shell: ShellState, files = [...shell.picked]) {
+    const names = new Set(files);
+    return shell.unstaged.filter((file) => file.letter === "C" && names.has(file.path)).map((file) => file.path);
+  }
+
+/** Keep `ours` or `theirs` for every picked conflict in one write. */
+export async function resolvePicked(shell: ShellState, side: "ours" | "theirs", files = [...shell.picked]) {
+    const names = [...new Set(files.filter((path) => path.length > 0))];
+    if (names.length === 0 || shell.mode !== "live" || shell.writing) return;
+    await shell.mutate({ action: "resolvePaths", files: names, side });
+    if (!shell.actionError) shell.picked = shell.picked.filter((path) => !names.includes(path));
   }
 
 export function stageChosen(shell: ShellState, side: Side, files: string[]) {
@@ -676,7 +694,7 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
 
 export async function deletePicked(shell: ShellState, files = [...shell.picked]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
-    if (names.length === 0) return;
+    if (names.length === 0 || shell.writing) return;
     if (names.length === 1) await shell.mutate({ action: "delete", file: names[0] });
     else await shell.mutate({ action: "deletePaths", files: names });
     shell.picked = shell.picked.filter((path) => !names.includes(path));

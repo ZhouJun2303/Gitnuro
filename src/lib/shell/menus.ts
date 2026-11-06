@@ -1,5 +1,5 @@
 import { invoke } from "../perf";
-import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { shortcut, shortcutLabel, typing } from "../keys";
 import {
     badge,
@@ -62,8 +62,13 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
     const targets = shell.ignoreTargets(file.path, side);
     const many = targets.length > 1;
     const count = String(targets.length);
+    const conflicts = shell.pickedConflicts(targets);
+    const sideName = (party: { label: string; commit?: { short: string } | null } | undefined | null, fallback: string) =>
+      party ? (party.commit?.short ? `${party.label} · ${party.commit.short}` : party.label) : fallback;
+    const oursName = sideName(shell.activeConflict?.ours, shell.mergeState?.into || shell.tr("dialog.useOurs"));
+    const theirsName = sideName(shell.activeConflict?.theirs, shell.mergeState?.source || shell.tr("dialog.useTheirs"));
     return [
-      { label: many ? shell.tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected") : shell.tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked, shortcut: shortcutLabel("stageToggle"), run: () => shell.stageChosen(side, targets) },
+      { label: many ? `${shell.tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected")} (${count})` : shell.tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked, shortcut: shortcutLabel("stageToggle"), run: () => shell.stageChosen(side, targets) },
       { label: many ? shell.tr("menu.discardSelected", { count }) : shell.tr("menu.discard"), disabled: locked || (side === "staged" && many), shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(targets) },
       { label: many ? shell.tr("menu.deleteSelected", { count }) : shell.tr("menu.deleteFile"), disabled: locked, run: () => shell.deleteChosen(targets) },
       { sep: true, label: "" },
@@ -78,11 +83,15 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { label: shell.tr("menu.lfsLock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsLock", path: file.path }) },
       { label: shell.tr("menu.lfsUnlock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsUnlock", path: file.path }) },
       { sep: true, label: "" },
-      { label: shell.tr("menu.reveal"), disabled: locked, run: () => revealItemInDir(shell.fullPath(file.path)) },
+      { label: shell.tr("menu.reveal"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file.path)) },
       { label: shell.tr("menu.openFile"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file.path)) },
       { label: shell.tr("menu.copyPath"), run: () => shell.copyText(shell.fullPath(file.path)) },
       { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(file.path) },
-      ...(file.letter === "C" ? [{ label: shell.tr("menu.resolve"), disabled: locked, run: () => shell.openResolve(file.path) }] : []),
+      ...(file.letter === "C" ? [
+        { label: shell.tr("menu.keepSideCount", { name: oursName, count: String(conflicts.length) }), disabled: locked, run: () => void shell.resolvePicked("ours", conflicts) },
+        { label: shell.tr("menu.keepSideCount", { name: theirsName, count: String(conflicts.length) }), disabled: locked, run: () => void shell.resolvePicked("theirs", conflicts) },
+        { label: shell.tr("menu.resolve"), disabled: locked, run: () => shell.openResolve(file.path) },
+      ] : []),
       ...shell.commandItems("file"),
     ];
   }
@@ -91,14 +100,14 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
     const locked = shell.mode !== "live";
     return [
       { label: shell.tr("menu.checkout"), disabled: locked, run: () => shell.requestCheckout(commit.id) },
-      { label: shell.tr("menu.cherryPick"), disabled: locked, run: () => void shell.previewCherry(commit.id, false) },
-      { label: shell.tr("menu.cherryPickRecord"), disabled: locked, run: () => void shell.previewCherry(commit.id, true) },
-      { label: shell.tr("menu.revert"), disabled: locked, run: () => shell.mutate({ action: "revert", rev: commit.id }) },
+      { label: shell.tr("menu.cherryPick"), disabled: locked, run: () => void shell.previewCherry(commit.id, false, commit.summary) },
+      { label: shell.tr("menu.cherryPickRecord"), disabled: locked, run: () => void shell.previewCherry(commit.id, true, commit.summary) },
+      { label: shell.tr("menu.revert"), disabled: locked, run: () => shell.confirmRevert(commit.id, commit.summary) },
       {
         label: shell.tr("menu.reset"),
         children: [
-          { label: shell.tr("menu.soft"), disabled: locked, run: () => shell.mutate({ action: "reset", rev: commit.id, mode: "soft" }) },
-          { label: shell.tr("menu.mixed"), disabled: locked, run: () => shell.mutate({ action: "reset", rev: commit.id, mode: "mixed" }) },
+          { label: shell.tr("menu.soft"), disabled: locked, run: () => shell.confirmReset(commit.id, "soft", commit.summary) },
+          { label: shell.tr("menu.mixed"), disabled: locked, run: () => shell.confirmReset(commit.id, "mixed", commit.summary) },
           { label: shell.tr("menu.hard"), disabled: locked, run: () => shell.ask(shell.tr("dialog.hardReset"), shell.tr("dialog.hardResetBody"), () => void shell.mutate({ action: "reset", rev: commit.id, mode: "hard" })) },
         ],
       },
@@ -141,11 +150,11 @@ export function stashItems(shell: ShellState) {
     const locked = shell.mode !== "live" || shell.busy;
     return [
       { label: shell.tr("chrome.stash"), disabled: locked, run: () => shell.openStash([]) },
-      { label: shell.tr("chrome.pop"), disabled: locked || (shell.refs?.stashes ?? []).length === 0, run: () => void shell.mutate({ action: "stashPop" }) },
+      { label: shell.tr("chrome.pop"), disabled: locked || (shell.refs?.stashes ?? []).length === 0, run: () => shell.confirmPopStash() },
       ...(shell.refs?.stashes ?? []).map((stash) => ({
         label: stash.summary || stash.name,
         disabled: locked,
-        run: () => void shell.mutate({ action: "stashPop", name: stash.name }),
+        run: () => shell.confirmPopStash(stash.name),
       })),
     ];
   }
@@ -376,7 +385,7 @@ export function revisionFileMenu(shell: ShellState, file: string): MenuItem[] {
     return [
       { label: shell.tr("menu.open"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       external,
-      { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void revealItemInDir(shell.fullPath(file)) },
+      { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       {
         label: shell.tr("menu.resetFileTo"),
         disabled: locked,
@@ -402,7 +411,7 @@ export function historyFileMenu(shell: ShellState, commit: CommitRow): MenuItem[
       { label: shell.tr("menu.openSeparate"), disabled: locked, run: () => void invoke("open_window", { view: "blob", repo: shell.repoPath(), file, rev: commit.id }) },
       { label: shell.tr("menu.revealMain"), disabled: locked, run: () => void invoke("reveal_commit", { repo: shell.repoPath(), id: commit.id }).catch((error) => (shell.actionError = shell.message(error))) },
       { label: shell.tr("menu.open"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
-      { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void revealItemInDir(shell.fullPath(file)) },
+      { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       { label: shell.tr("menu.resetAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.resetAtCommit"), shell.tr("dialog.restoreFileBody", { name: file }), () => void shell.mutate({ action: "restoreFile", rev: commit.id, file })) },
       { label: shell.tr("menu.saveAs"), disabled: locked, run: () => void invoke("save_revision", { path: shell.repoPath(), rev: commit.id, file }).catch((error) => (shell.actionError = shell.message(error))) },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },

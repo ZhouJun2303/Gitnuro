@@ -39,7 +39,33 @@ pub fn stage_all(repo: &Path) -> Result<(), Error> {
     }
     let blocked: std::collections::HashSet<String> = unmerged.into_iter().collect();
     let status = run(repo, &["status", "--porcelain", "-z"])?;
-    let parts: Vec<&[u8]> = status.stdout.split(|byte| *byte == 0).collect();
+    let paths = status_record_paths(&status.stdout)?
+        .into_iter()
+        .filter(|path| !blocked.contains(path))
+        .collect::<Vec<_>>();
+    stage_path_chunks(repo, &paths)
+}
+
+fn utf8_field(bytes: &[u8]) -> Result<String, Error> {
+    std::str::from_utf8(bytes).map(str::to_string).map_err(|_| Error::Git("path is not utf-8".into()))
+}
+
+/// NUL-separated paths. Space, tab, newline, and non-ASCII bytes stay in the path.
+/// A path that is not UTF-8 is an error, because the JSON API stores paths as strings.
+pub fn porcelain_z_paths(bytes: &[u8]) -> Result<Vec<String>, Error> {
+    let mut paths = Vec::new();
+    for part in bytes.split(|byte| *byte == 0) {
+        if part.is_empty() {
+            continue;
+        }
+        paths.push(utf8_field(part)?);
+    }
+    Ok(paths)
+}
+
+/// Paths from `git status --porcelain -z`. A rename or copy contributes both names.
+fn status_record_paths(bytes: &[u8]) -> Result<Vec<String>, Error> {
+    let parts: Vec<&[u8]> = bytes.split(|byte| *byte == 0).collect();
     let mut paths = Vec::new();
     let mut index = 0;
     while index < parts.len() {
@@ -49,21 +75,20 @@ pub fn stage_all(repo: &Path) -> Result<(), Error> {
             continue;
         }
         let code = &part[..2];
-        let path = String::from_utf8_lossy(&part[3..]).into_owned();
-        if !blocked.contains(&path) {
+        let path = utf8_field(&part[3..])?;
+        if !path.is_empty() {
             paths.push(path);
         }
-        if code.iter().any(|byte| *byte == b'R' || *byte == b'C') {
+        if code.contains(&b'R') || code.contains(&b'C') {
             if let Some(next) = parts.get(index) {
-                let other = String::from_utf8_lossy(next).into_owned();
-                if !other.is_empty() && !blocked.contains(&other) {
-                    paths.push(other);
+                if !next.is_empty() {
+                    paths.push(utf8_field(next)?);
                 }
                 index += 1;
             }
         }
     }
-    stage_path_chunks(repo, &paths)
+    Ok(paths)
 }
 
 fn stage_path_chunks(repo: &Path, paths: &[String]) -> Result<(), Error> {
@@ -73,9 +98,8 @@ fn stage_path_chunks(repo: &Path, paths: &[String]) -> Result<(), Error> {
 /// Paths that still have unmerged index entries.
 fn unmerged_paths(repo: &Path) -> Result<Vec<String>, Error> {
     let output = run(repo, &["ls-files", "-u", "-z"])?;
-    let text = String::from_utf8_lossy(&output.stdout);
     let mut paths = std::collections::BTreeSet::new();
-    for entry in text.split('\0') {
+    for entry in porcelain_z_paths(&output.stdout)? {
         if let Some((_, path)) = entry.split_once('\t') {
             if !path.is_empty() {
                 paths.insert(path.to_string());
@@ -145,12 +169,10 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
     }
     let mut args = commit_config(repo);
     args.push("commit".to_string());
-    args.push("-m".to_string());
-    args.push(summary.to_string());
-    if !description.is_empty() {
-        args.push("-m".to_string());
-        args.push(description);
-    }
+    // The message goes through stdin: a merge body can list hundreds of files and
+    // Windows rejects a command line longer than 32K characters.
+    args.push("-F".to_string());
+    args.push("-".to_string());
     if request.amend {
         args.push("--amend".to_string());
     }
@@ -160,11 +182,16 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
     if request.skip_hooks {
         args.push("--no-verify".to_string());
     }
+    let mut message = summary.to_string();
+    if !description.is_empty() {
+        message.push_str("\n\n");
+        message.push_str(&description);
+    }
     let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
     if crate::cli::has_local_author(repo) {
-        crate::cli::run_repo_author(repo, &borrowed).map(|_| ())
+        crate::cli::run_stdin_repo_author(repo, &borrowed, message.as_bytes()).map(|_| ())
     } else {
-        run(repo, &borrowed).map(|_| ())
+        run_stdin(repo, &borrowed, message.as_bytes()).map(|_| ())
     }
 }
 
@@ -286,13 +313,15 @@ pub struct FileDiff {
     pub staged: bool,
     pub binary: bool,
     pub truncated: bool,
+    /// Large text that the window should read only after the user asks for it.
+    pub loadable: bool,
     pub lines: Vec<DiffLine>,
     /// How many zero-context hunks can be staged one at a time.
     pub hunks: u32,
 }
 
 const MAX_DIFF_LINES: usize = 4_000;
-const MAX_UNTRACKED_BYTES: u64 = 1_048_576;
+const MAX_UNTRACKED_BYTES: u64 = 8_000_000;
 const MAX_DIFF_BYTES: usize = 8_000_000;
 const MAX_LARGE_FILE: u64 = 2_000_000;
 const MAX_PREVIEW_BYTES: u64 = 8_000_000;
@@ -864,15 +893,10 @@ pub fn resolve_conflict(repo: &Path, path: &str, side: &str, text: &str) -> Resu
         })?;
         return run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ());
     }
+    if side == "ours" || side == "theirs" {
+        return resolve_conflicts(repo, &[path.to_string()], side);
+    }
     match side {
-        "ours" => {
-            run(repo, &["--literal-pathspecs", "checkout", "--ours", "--", path])?;
-            run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ())
-        }
-        "theirs" => {
-            run(repo, &["--literal-pathspecs", "checkout", "--theirs", "--", path])?;
-            run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ())
-        }
         "both" => {
             let ours = show_stage(repo, path, 2);
             let theirs = show_stage(repo, path, 3);
@@ -894,6 +918,60 @@ pub fn resolve_conflict(repo: &Path, path: &str, side: &str, text: &str) -> Resu
         "mark" => run(repo, &["--literal-pathspecs", "add", "--", path]).map(|_| ()),
         other => Err(Error::Git(format!("unknown conflict side {other}"))),
     }
+}
+
+/// Keep `ours` or `theirs` for many unmerged paths with one index write.
+///
+/// A side that deleted the file has no stage entry, so those paths are removed
+/// instead of checked out. Taking that side through `checkout` would fail.
+pub fn resolve_conflicts(repo: &Path, paths: &[String], side: &str) -> Result<(), Error> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let (flag, stage) = match side {
+        "ours" => ("--ours", 2),
+        "theirs" => ("--theirs", 3),
+        other => return Err(Error::Git(format!("unknown conflict side {other}"))),
+    };
+    let stages = unmerged_stages(repo)?;
+    let mut kept = Vec::new();
+    let mut removed = Vec::new();
+    for path in paths {
+        check_path(path)?;
+        if stages.get(path).map_or(true, |entry| entry[stage]) {
+            kept.push(path.clone());
+        } else {
+            removed.push(path.clone());
+        }
+    }
+    if !kept.is_empty() {
+        run_paths(repo, &["checkout", flag], &kept)?;
+        run_paths(repo, &["add"], &kept)?;
+    }
+    if !removed.is_empty() {
+        run_paths(repo, &["rm", "-q", "-f"], &removed)?;
+    }
+    Ok(())
+}
+
+/// Index stages present for each unmerged path, indexed by stage number.
+fn unmerged_stages(repo: &Path) -> Result<std::collections::BTreeMap<String, [bool; 4]>, Error> {
+    let output = run(repo, &["ls-files", "-u", "-z"])?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut stages: std::collections::BTreeMap<String, [bool; 4]> = std::collections::BTreeMap::new();
+    for entry in text.split('\0') {
+        let Some((meta, path)) = entry.split_once('\t') else { continue };
+        if path.is_empty() {
+            continue;
+        }
+        let Some(stage) = meta.split_whitespace().nth(2).and_then(|value| value.parse::<usize>().ok()) else {
+            continue;
+        };
+        if stage < 4 {
+            stages.entry(path.to_string()).or_insert([false; 4])[stage] = true;
+        }
+    }
+    Ok(stages)
 }
 
 fn index_blob(repo: &Path, path: &str) -> Result<Vec<u8>, Error> {
@@ -953,11 +1031,12 @@ fn split_hunks(text: &str) -> (String, Vec<String>) {
 
 /// Unified diff for one path. `staged` selects the index rather than the work tree.
 pub fn file_diff(repo: &Path, path: &str, staged: bool) -> Result<FileDiff, Error> {
-    file_diff_with(repo, path, staged, 3, false)
+    file_diff_with(repo, path, staged, 3, false, false)
 }
 
 /// `context` is the number of unchanged lines around each hunk. A large value shows the whole file.
-pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignore_space: bool) -> Result<FileDiff, Error> {
+/// `load_large` reads past [`MAX_LARGE_FILE`]; callers set it only after the user asks.
+pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignore_space: bool, load_large: bool) -> Result<FileDiff, Error> {
     let path = check_path(path)?;
     if let Ok(meta) = std::fs::metadata(repo.join(path)) {
         if meta.is_file() && meta.len() > MAX_LARGE_FILE {
@@ -965,23 +1044,40 @@ pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignor
                 image_kind(&bytes).is_some()
                     || (bytes.len() >= 18 && bytes[2] == 2 && matches!(bytes[16], 24 | 32))
             });
-            return Ok(FileDiff {
-                path: path.to_string(),
-                staged,
-                binary: previewable,
-                truncated: true,
-                lines: if previewable {
-                    Vec::new()
-                } else {
-                    vec![DiffLine {
-                        kind: DiffLineKind::Meta,
-                        text: "large file skipped".into(),
-                        stage_at: None,
-                        work_at: None,
-                    }]
-                },
-                hunks: 0,
-            });
+            if previewable {
+                return Ok(FileDiff {
+                    path: path.to_string(),
+                    staged,
+                    binary: true,
+                    truncated: true,
+                    loadable: false,
+                    lines: Vec::new(),
+                    hunks: 0,
+                });
+            }
+            // Big text — Unity YAML assets and the like — usually carries a small
+            // diff. Offer it on demand instead of reading the file with every select.
+            let text = !file_has_nul(repo, path);
+            if !text || !load_large {
+                return Ok(FileDiff {
+                    path: path.to_string(),
+                    staged,
+                    binary: false,
+                    truncated: !text,
+                    loadable: text,
+                    lines: if text {
+                        Vec::new()
+                    } else {
+                        vec![DiffLine {
+                            kind: DiffLineKind::Meta,
+                            text: "large file skipped".into(),
+                            stage_at: None,
+                            work_at: None,
+                        }]
+                    },
+                    hunks: 0,
+                });
+            }
         }
     }
     let unified = format!("--unified={}", context.min(1_000_000));
@@ -1004,7 +1100,7 @@ pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignor
     })?;
     let text = String::from_utf8_lossy(&output.stdout);
     if !staged && text.trim().is_empty() && !in_index(repo, path)? {
-        return diff_untracked(repo, path);
+        return diff_untracked(repo, path, load_large);
     }
     let mut parsed = parse_diff(path, staged, &text);
     parsed.truncated |= capped;
@@ -1084,8 +1180,22 @@ fn zero_hunks(repo: &Path, path: &str, staged: bool, ignore_space: bool) -> Resu
     args.push("--");
     args.push(path);
     let (output, _) = run_capped(repo, &args, 1_000_000)?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    Ok(text.lines().filter(|line| line.starts_with("@@")).count() as u32)
+    Ok(count_hunk_markers(&output.stdout))
+}
+
+/// Count `@@` hunk headers without rewriting non-UTF-8 bytes in the diff.
+fn count_hunk_markers(bytes: &[u8]) -> u32 {
+    let mut count = 0u32;
+    let mut at_line = true;
+    let mut index = 0;
+    while index < bytes.len() {
+        if at_line && bytes[index..].starts_with(b"@@") {
+            count += 1;
+        }
+        at_line = bytes[index] == b'\n';
+        index += 1;
+    }
+    count
 }
 
 /// Diff from `base` to `HEAD` using the three-dot form.
@@ -1134,7 +1244,7 @@ fn in_index(repo: &Path, path: &str) -> Result<bool, Error> {
     Ok(!output.stdout.is_empty())
 }
 
-fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
+fn diff_untracked(repo: &Path, path: &str, load_large: bool) -> Result<FileDiff, Error> {
     let full = repo.join(path);
     let metadata = match std::fs::metadata(&full) {
         Ok(metadata) => metadata,
@@ -1144,6 +1254,7 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
                 staged: false,
                 binary: false,
                 truncated: false,
+                loadable: false,
                 lines: Vec::new(),
                 hunks: 0,
             });
@@ -1155,12 +1266,49 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
             });
         }
     };
-    if metadata.len() > MAX_UNTRACKED_BYTES || !metadata.is_file() {
+    if !metadata.is_file() {
         return Ok(FileDiff {
             path: path.to_string(),
             staged: false,
             binary: true,
-            truncated: metadata.len() > MAX_UNTRACKED_BYTES,
+            truncated: false,
+            loadable: false,
+            lines: Vec::new(),
+            hunks: 0,
+        });
+    }
+    if metadata.len() > MAX_UNTRACKED_BYTES {
+        let previewable = file_prefix(full.clone(), 32).is_some_and(|bytes| {
+            image_kind(&bytes).is_some()
+                || (bytes.len() >= 18 && bytes[2] == 2 && matches!(bytes[16], 24 | 32))
+        });
+        return Ok(FileDiff {
+            path: path.to_string(),
+            staged: false,
+            binary: previewable,
+            truncated: true,
+            loadable: false,
+            lines: if previewable {
+                Vec::new()
+            } else {
+                vec![DiffLine {
+                    kind: DiffLineKind::Meta,
+                    text: "large file skipped".into(),
+                    stage_at: None,
+                    work_at: None,
+                }]
+            },
+            hunks: 0,
+        });
+    }
+    if metadata.len() > MAX_LARGE_FILE && !load_large {
+        let text = !file_has_nul(repo, path);
+        return Ok(FileDiff {
+            path: path.to_string(),
+            staged: false,
+            binary: !text,
+            truncated: false,
+            loadable: text,
             lines: Vec::new(),
             hunks: 0,
         });
@@ -1175,27 +1323,27 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
             staged: false,
             binary: true,
             truncated: false,
+            loadable: false,
             lines: Vec::new(),
             hunks: 0,
         });
     }
     let text = String::from_utf8_lossy(&bytes);
-    let mut parts: Vec<&str> = text.split('\n').map(|line| line.trim_end_matches('\r')).collect();
-    if text.ends_with('\n') {
-        parts.pop();
-    }
-    let mut body: Vec<DiffLine> = parts
-        .into_iter()
-        .enumerate()
-        .map(|(index, line)| DiffLine {
+    let trimmed = text.strip_suffix('\n').unwrap_or(&text);
+    let mut body: Vec<DiffLine> = Vec::new();
+    let mut truncated = false;
+    for (index, line) in trimmed.split('\n').enumerate() {
+        if index == MAX_DIFF_LINES {
+            truncated = true;
+            break;
+        }
+        body.push(DiffLine {
             kind: DiffLineKind::Add,
-            text: format!("+{line}"),
+            text: format!("+{}", line.trim_end_matches('\r')),
             stage_at: Some(index as u32),
             work_at: Some(index as u32),
-        })
-        .collect();
-    let truncated = body.len() > MAX_DIFF_LINES;
-    body.truncate(MAX_DIFF_LINES);
+        });
+    }
     let mut lines = vec![DiffLine {
         kind: DiffLineKind::Hunk,
         text: format!("@@ -0,0 +1,{} @@", body.len()),
@@ -1208,6 +1356,7 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
         staged: false,
         binary: false,
         truncated,
+        loadable: false,
         lines,
         hunks: 1,
     })
@@ -1296,6 +1445,7 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
         staged,
         binary,
         truncated,
+        loadable: false,
         lines,
         hunks: 0,
     }
@@ -1803,4 +1953,38 @@ fn base64_encode(bytes: &[u8]) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod porcelain_tests {
+    use super::{count_hunk_markers, porcelain_z_paths, status_record_paths};
+
+    #[test]
+    fn nul_paths_keep_space_tab_newline_and_unicode() {
+        let raw = b"a b.txt\0\xE4\xB8\xAD\xE6\x96\x87.txt\0a\tb\nc.txt\0";
+        let paths = porcelain_z_paths(raw).unwrap();
+        assert_eq!(paths, vec!["a b.txt".to_string(), "中文.txt".to_string(), "a\tb\nc.txt".to_string()]);
+    }
+
+    #[test]
+    fn a_non_utf8_path_is_an_error() {
+        let error = porcelain_z_paths(b"ok.txt\0\xFF\xFE\0").unwrap_err();
+        assert!(error.to_string().contains("utf-8"), "{error}");
+    }
+
+    #[test]
+    fn status_records_keep_both_rename_names() {
+        let raw = b" M a b.txt\0?? \xE4\xB8\xAD\xE6\x96\x87.txt\0R  old name\0new\nname.txt\0";
+        let paths = status_record_paths(raw).unwrap();
+        assert_eq!(
+            paths,
+            vec!["a b.txt".to_string(), "中文.txt".to_string(), "old name".to_string(), "new\nname.txt".to_string()]
+        );
+    }
+
+    #[test]
+    fn hunk_markers_count_without_lossy_text() {
+        let bytes = b"@@ -1 +1 @@\n binary \xFF\n@@ -2 +2 @@\n";
+        assert_eq!(count_hunk_markers(bytes), 2);
+    }
 }

@@ -42,6 +42,21 @@ test("every scene opens", async ({ page }) => {
   for (const scene of scenes) await openScene(page, scene);
 });
 
+test("large text assets load their diff on demand", async ({ page }) => {
+  await openLabScene(page, "diff-large-asset", ".diff-load");
+  await expect(page.locator(".diff-load .pane-chip")).toBeVisible();
+  await expect(page.locator("section.diff .diff-body")).toHaveCount(0);
+  await page.locator(".diff-load .pane-chip").click();
+  const diff = page.locator("section.diff .diff-body");
+  await expect(diff).toContainText("m_Name: working", { timeout: 30_000 });
+  await expect(diff).not.toContainText("large file skipped");
+
+  await openLabScene(page, "conflict-large-asset", ".merge-large");
+  await expect(page.locator(".merge-side")).toHaveCount(0);
+  await page.locator(".merge-large .pane-chip").click();
+  await expect(page.locator(".merge-side").first()).toContainText("m_Entry_1:", { timeout: 30_000 });
+});
+
 test("pushbox commits and pushes", async () => {
   const layout = (await lab("lab_layout")) as { pushbox: string; remotePush: string };
   await lab("stage_path", { path: layout.pushbox, file: "note.txt" });
@@ -62,7 +77,8 @@ test("pushbox commits and pushes", async () => {
 });
 
 async function openLabScene(page: Page, id: string, ready: string) {
-  await page.goto(`/?scene=${id}`, { waitUntil: "domcontentloaded" });
+  const href = scenes.find((scene) => scene.id === id)?.href ?? `/?scene=${id}`;
+  await page.goto(href, { waitUntil: "domcontentloaded" });
   await page.locator(`[data-lab-scene="${id}"]`).waitFor({ state: "visible", timeout: 90_000 });
   await page.locator(ready).first().waitFor({ state: "visible", timeout: 30_000 });
   await page.waitForTimeout(400);
@@ -82,12 +98,12 @@ test("command palette is blocked while a dialog is open", async ({ page }) => {
 });
 
 test("branch rows mark local-only and mirrored branches", async ({ page }) => {
-  await openLabScene(page, "branch-badges", ".sidebar .side.nested.local-only");
-  const missing = page.locator(".sidebar .side.nested.local-only").first();
-  const mirrored = page.locator(".sidebar .side.nested.mirrored").first();
+  await openLabScene(page, "branch-badges", ".sidebar .track-dot.missing");
+  const missing = page.locator(".sidebar .track-dot.missing").first();
+  const mirrored = page.locator(".sidebar .track-dot.mirrored").first();
   await expect(mirrored).toBeVisible();
-  expect(await missing.evaluate((node) => getComputedStyle(node, "::after").content)).toBe('"!"');
-  expect(await mirrored.evaluate((node) => getComputedStyle(node, "::after").borderRadius)).toBe("50%");
+  expect(await missing.evaluate((node) => getComputedStyle(node).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  expect(await mirrored.evaluate((node) => getComputedStyle(node).borderTopWidth)).toBe("0px");
 });
 
 test("merge resolve is disabled until every conflict is picked", async ({ page }) => {
@@ -277,6 +293,18 @@ test("command log keeps focus inside and closes with Escape", async ({ page }) =
   await expect(page.locator('[data-layer="commands"]')).toHaveCount(0);
 });
 
+test("command log opens on the newest row even when a stale id matches an old error", async ({ page }) => {
+  await openLabScene(page, "commands-errors", '[data-layer="commands"]');
+  const state = await page.evaluate(() => {
+    const box = document.querySelector(".command-items");
+    const items = [...document.querySelectorAll(".command-item")];
+    const current = document.querySelector(".command-item.current");
+    return { scrollTop: box?.scrollTop ?? -1, index: current ? items.indexOf(current) : -1 };
+  });
+  expect(state.scrollTop).toBe(0);
+  expect(state.index).toBe(0);
+});
+
 test("submenu opens and closes with the arrow keys", async ({ page }) => {
   await openLabScene(page, "menu", '[data-layer="menu"]');
   await page.keyboard.press("ArrowDown");
@@ -289,6 +317,59 @@ test("submenu opens and closes with the arrow keys", async ({ page }) => {
   await page.keyboard.press("ArrowLeft");
   await expect(page.locator('[data-layer="submenu"]')).toHaveCount(0);
   await expect(page.locator('[data-layer="menu"] button[aria-haspopup="menu"]')).toBeFocused();
+});
+
+test("submenu stays open while the pointer moves through its items", async ({ page }) => {
+  await openLabScene(page, "menu", '[data-layer="menu"]');
+  await page.locator('[data-layer="menu"] button[aria-haspopup="menu"]').hover();
+  await expect(page.locator('[data-layer="submenu"]')).toBeVisible();
+  await page.locator('[data-layer="submenu"] button').nth(3).hover();
+  await expect(page.locator('[data-layer="submenu"]')).toBeVisible();
+  await expect(page.locator('[data-layer="submenu"] button')).toHaveCount(24);
+});
+
+test("a write blocked by local changes offers stash and retry", async ({ page }) => {
+  await openLabScene(page, "action-error-retry", '.identity-floor[data-layer="error"]');
+  await expect(page.locator('.identity-floor[data-layer="error"]')).toContainText("Stash and retry");
+});
+
+test("applying a stash asks before it touches the work tree", async ({ page }) => {
+  await openLabScene(page, "stash-apply-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("working tree");
+  await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
+test("reverting a commit asks before it runs", async ({ page }) => {
+  await openLabScene(page, "revert-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("Revert commit");
+  await expect(confirm).toContainText("new revert commit");
+  await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
+test("popping a stash asks before it runs", async ({ page }) => {
+  await openLabScene(page, "stash-pop-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("Pop stash");
+  await expect(confirm).toContainText("remove it from the stash list");
+  await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
+test("resetting a branch asks before it moves", async ({ page }) => {
+  await openLabScene(page, "reset-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("Mixed reset");
+  await expect(confirm).toContainText("unstaged");
+  await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
+test("cherry-picking asks before it runs", async ({ page }) => {
+  await openLabScene(page, "cherry-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("Cherry-pick (note source commit)");
+  await expect(confirm).toContainText("records the source commit");
+  await expect(confirm.locator(".commit")).toBeEnabled();
 });
 
 test("commit patch renders each hunk header once", async ({ page }) => {
@@ -395,7 +476,25 @@ test("dialogs focus the first field and fall back to close", async ({ page }) =>
   await openLabScene(page, "dialog-branch", '[data-dialog="branch"]');
   await expect(page.locator('[data-dialog="branch"] input').first()).toBeFocused();
   await openLabScene(page, "dialog-about", '[data-dialog="about"]');
+  await expect(page.locator('[data-dialog="about"]')).toContainText("2.56.0");
   await expect(page.locator('[data-dialog="about"] .dialog-close')).toBeFocused();
+});
+
+test("a coded error keeps the translated sentence and the detail", async ({ page }) => {
+  await openLabScene(page, "action-error-coded", "text=sha256 mismatch");
+  const floor = page.locator('.identity-floor[data-layer="error"]');
+  await expect(floor).toContainText(/could not be verified|没有通过校验/);
+  await expect(floor).toContainText("sha256 mismatch");
+});
+
+test("a truncated repository scan says more remain", async ({ page }) => {
+  await openLabScene(page, "picker-truncated", "[data-scan-truncated]");
+  await expect(page.locator("[data-scan-truncated]")).toContainText("300");
+});
+
+test("damaged settings use the recovery banner", async ({ page }) => {
+  await openLabScene(page, "settings-recovered", '.identity-floor[data-layer="error"]');
+  await expect(page.locator('.identity-floor[data-layer="error"]')).toContainText(/restored|已恢复/);
 });
 
 test("returning to changes reloads a diff cleared by a history refresh", async ({ page }) => {
@@ -455,15 +554,58 @@ test("shortcuts do not open layers behind a menu or the forge dialog", async ({ 
   await expect(page.locator('[data-layer="forge"]')).toHaveCount(0);
 });
 
-test("checkout discard confirmation names the current and target branch", async ({ page }) => {
-  await openLabScene(page, "dialog-checkoutDirty", '[data-dialog="checkoutDirty"]');
-  await page.locator('[data-dialog="checkoutDirty"] .text-button.danger').click();
-  await page.locator('[data-dialog="checkoutDirty"] .commit').click();
-  const confirm = page.locator("[data-confirm]");
-  await expect(confirm).toBeVisible();
-  await expect(confirm).toContainText(/current branch/i);
-  await expect(confirm).toContainText("topic");
-  await page.keyboard.press("Escape");
+test("merge stays available with local changes and stashes them", async ({ page }) => {
+  await openLabScene(page, "dialog-merge", '[data-dialog="merge"]');
+  const dialog = page.locator('[data-dialog="merge"]');
+  await expect(dialog.locator(".commit")).toBeEnabled();
+  await expect(dialog.locator(".dialog-error")).toHaveCount(0);
+  await expect(dialog).toContainText("Local changes are stashed first.");
+});
+
+test("batch conflict actions keep one side for the selected files", async ({ page }) => {
+  await openLabScene(page, "conflict-batch", ".file-list .file");
+  await expect(page.locator(".composer .summary-input")).toHaveValue(/topic/);
+  await expect(page.locator(".composer .summary-input")).toHaveValue(/main/);
+  await expect(page.locator(".composer textarea")).not.toHaveValue(/conflict\/file-/);
+  await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("topic");
+  await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("main");
+  const rows = page.locator(".unstaged-pane .file-list .file");
+  const paths = await rows.evaluateAll((nodes) =>
+    nodes.slice(0, 2).map((node) => node.querySelector<HTMLElement>(".file-select")?.title ?? ""),
+  );
+  expect(paths).toHaveLength(2);
+  expect(paths.every((path) => path !== "")).toBe(true);
+  await rows.nth(0).click();
+  await rows.nth(1).click({ modifiers: ["Control"] });
+  await expect(page.locator(".pick-bar")).toBeVisible();
+  await expect(page.locator(".pick-count")).toHaveText(/2/);
+  const pane = page.locator(".conflict-pane");
+  await expect(pane.locator(".conflict-selection")).toContainText("2");
+  await pane.locator("#conflict-theirs").click();
+  await expect(pane.locator(".conflict-merge")).toContainText(/Keep main|保留 main/);
+  await pane.locator("#conflict-theirs").click();
+  await rows.nth(1).click({ button: "right" });
+  const menu = page.locator('[data-layer="menu"]');
+  await expect(menu).toBeVisible();
+  const ours = menu.locator("button").filter({ hasText: /Keep main|保留 main/ });
+  await expect(ours).toContainText("2");
+  await expect(menu.locator("button").filter({ hasText: /Keep topic|保留 topic/ })).toBeVisible();
+  await ours.click();
+  for (const path of paths) {
+    await expect(page.locator(`.unstaged-pane .file-list .file-select[title="${path}"]`)).toHaveCount(0);
+  }
+});
+
+test("merge panel opens as a standalone page", async ({ page }) => {
+  await openLabScene(page, "text-merge-window", ".merge-panel.standalone");
+  const panel = page.locator(".merge-panel.standalone");
+  const box = await panel.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(Math.round(box!.width)).toBe(viewport!.width);
+  expect(Math.round(box!.height)).toBe(viewport!.height);
+  await expect(page.locator(".merge-scrim")).toHaveCount(0);
 });
 
 test("unified diff keeps row nodes while scrolling", async ({ page }) => {
@@ -495,4 +637,50 @@ test("unified diff keeps row nodes while scrolling", async ({ page }) => {
   });
   expect(result).not.toBeNull();
   expect(result ?? 0).toBeLessThan(80);
+});
+
+test("a folder double-click stages it and the twist only folds", async ({ page }) => {
+  test.setTimeout(60_000);
+  await openLabScene(page, "changes", ".file-list");
+  await page.locator(".unstaged-pane .pane-more").click();
+  await page.locator('[data-layer="menu"] button', { hasText: /View as Tree|按树查看/ }).click();
+  await page.locator(".unstaged-pane .search-toggle").click();
+  await page.locator(".unstaged-pane .pane-filter").fill("pending");
+
+  const unstaged = page.locator(".unstaged-pane");
+  const staged = page.locator(".staged-pane");
+  const folder = unstaged.locator('button.file-select[title="pending"]');
+  const child = unstaged.locator('button.file-select[title="pending/file-01.txt"]');
+  const twist = unstaged.locator(".twist-btn");
+  await expect(child).toHaveCount(1);
+
+  await twist.click();
+  await expect(child).toHaveCount(0);
+  await expect(staged.locator('button.file-select[title="pending"]')).toHaveCount(0);
+
+  await twist.click();
+  await expect(child).toHaveCount(1);
+
+  await twist.dblclick();
+  await expect(child).toHaveCount(0);
+  await expect(staged.locator('button.file-select[title="pending"]')).toHaveCount(0);
+
+  await folder.click();
+  await expect(child).toHaveCount(1);
+
+  await folder.locator(".name").dblclick();
+  await expect(child).toHaveCount(0);
+  const stagedFile = staged.locator('button.file-select[title="pending/file-01.txt"]');
+  await expect(stagedFile).toHaveCount(1);
+
+  const stagedTwist = staged.locator(".twist-btn");
+  await stagedTwist.click();
+  await expect(stagedFile).toHaveCount(0);
+
+  await staged.locator('button.file-select[title="pending"] .name').dblclick();
+  await expect(staged.locator('button.file-select[title="pending"]')).toHaveCount(0);
+  await expect(unstaged.locator('button.file-select[title="pending"]')).toHaveCount(1);
+  await expect(child).toHaveCount(0);
+  await twist.click();
+  await expect(child).toHaveCount(1);
 });

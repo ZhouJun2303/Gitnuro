@@ -28,6 +28,7 @@ export type FileDiff = {
   staged: boolean;
   binary: boolean;
   truncated: boolean;
+  loadable: boolean;
   lines: DiffLine[];
   hunks: number;
 };
@@ -77,6 +78,7 @@ export type CommitRow = {
   at: number;
   email?: string;
   unpushed?: boolean;
+  remoteOnly?: boolean;
 };
 
 export type BranchRow = {
@@ -115,6 +117,12 @@ export type RefSnapshot = {
 };
 
 export type InProgress = "merge" | "rebase" | "cherryPick" | "revert";
+
+export type MergeState = {
+  source: string;
+  into: string;
+  files: { status: string; path: string }[];
+};
 
 export type BlameLine = {
   id: string;
@@ -156,7 +164,6 @@ export type Settings = {
   proxyPort: number;
   signCommits: boolean;
   mergeNoFf: boolean;
-  mergeAutostash: boolean;
   cloneDirectory: string;
   windowX: number;
   windowY: number;
@@ -233,7 +240,6 @@ export type Settings = {
   azureOrg: string;
   oauthClientId: string;
   fetchAllRemotes: boolean;
-  pullStash: boolean;
   pushAllTags: boolean;
   checkoutAfterCreate: boolean;
   stashIncludeUntracked: boolean;
@@ -242,17 +248,19 @@ export type Settings = {
   statusInterval: number;
   showWorktrees: boolean;
   maxCommits: number;
-  rebaseAutostash: boolean;
   rebaseUpdateRefs: boolean;
   applyStashDelete: boolean;
   pushTagOnCreate: boolean;
-  checkoutStash: boolean;
   workspaceShowTitle: boolean;
   scanDepth: number;
   /** Last commit-message type chosen in the composer. */
   commitType: string;
   /** Update banner stays hidden for this version until a newer one is published. */
   dismissedUpdate: string;
+  /** `pending` on a brand-new install, otherwise `seen`. */
+  featuresIntro: string;
+  /** `recovered-backup` when the last load restored a damaged settings file. */
+  recoveryNotice?: string;
 };
 
 export type ForkImport = {
@@ -362,6 +370,20 @@ export type UpdateNotice = {
   downloadUrl: string;
   notes: string;
   installable: boolean;
+  sha256?: string;
+};
+
+export type GitRuntime = {
+  program: string;
+  version: string;
+  mergeTree: boolean;
+  lfs: boolean;
+  minimum: boolean;
+};
+
+export type RepoScan = {
+  paths: string[];
+  truncated: boolean;
 };
 
 export type Suggestion = {
