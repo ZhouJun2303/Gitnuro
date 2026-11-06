@@ -133,10 +133,30 @@ function Set-ProjectVersion([string]$version) {
 function Assert-Clean {
     $merge = & git -C $root rev-parse -q --verify MERGE_HEAD 2>$null
     if ($LASTEXITCODE -eq 0 -and $merge) { throw "有一次合并还没完成" }
-    $status = & git -C $root status --porcelain
-    if ($status) {
-        throw "工作区还有未提交的改动，先提交或暂存。`n$status"
+    $status = @(& git -C $root status --porcelain | Where-Object { $_ })
+    if (-not $status) { return }
+    foreach ($line in $status) {
+        if ($line -match '^\?\?') {
+            throw "工作区还有未提交的改动，先提交或暂存。`n$($status -join "`n")"
+        }
     }
+    # A build can touch generated files without changing their bytes.
+    # status still lists them; diff does not. Those are not unpublished work.
+    $work = & git -C $root diff --raw
+    $index = & git -C $root diff --cached --raw
+    if ($work -or $index) {
+        throw "工作区还有未提交的改动，先提交或暂存。`n$($status -join "`n")"
+    }
+}
+
+function Test-ManifestPublished([string]$version) {
+    & git -C $root fetch origin release
+    if ($LASTEXITCODE -ne 0) { throw "没能读取 origin/release" }
+    $json = & git -C $root show "origin/release:latest.json" 2>$null
+    if ($LASTEXITCODE -ne 0) { return $false }
+    $text = ($json | Out-String)
+    $ver = [regex]::Escape($version)
+    return ($text -match ('"appVersion"\s*:\s*"' + $ver + '"') -and $text -match ('releases/download/v' + $ver + '/'))
 }
 
 function Get-UnmergedPaths {
@@ -177,7 +197,9 @@ function Assert-ReleaseAvailable([string]$version) {
     cmd /c "gh auth status >nul 2>nul"
     if ($LASTEXITCODE -ne 0) { throw "gh 还没登录。先运行 gh auth login" }
     cmd /c "gh release view v$version --repo $repo >nul 2>nul"
-    if ($LASTEXITCODE -eq 0) { throw "GitHub 上已经有 v$version，请把版本号加高" }
+    if ($LASTEXITCODE -eq 0 -and (Test-ManifestPublished $version)) {
+        throw "GitHub 上已经有 v$version，请把版本号加高"
+    }
 }
 
 function Invoke-ReleaseFlow {
@@ -285,7 +307,7 @@ function Invoke-ReleaseFlow {
                         Write-Host "发布没有完成，已撤回 release 上这次合并。"
                     }
                 } elseif ($stage -eq "released") {
-                    Write-Host "安装包已经上传，版本清单还没有推到 release。请检查网络后再发布，不要改版本号。"
+                    Write-Host "安装包已经上传，版本清单还没有推到 release。再发布一次当前版本即可，不要改版本号。"
                 }
                 throw
             } finally {
