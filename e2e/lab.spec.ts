@@ -42,6 +42,21 @@ test("every scene opens", async ({ page }) => {
   for (const scene of scenes) await openScene(page, scene);
 });
 
+test("large text assets load their diff on demand", async ({ page }) => {
+  await openLabScene(page, "diff-large-asset", ".diff-load");
+  await expect(page.locator(".diff-load .pane-chip")).toBeVisible();
+  await expect(page.locator("section.diff .diff-body")).toHaveCount(0);
+  await page.locator(".diff-load .pane-chip").click();
+  const diff = page.locator("section.diff .diff-body");
+  await expect(diff).toContainText("m_Name: working", { timeout: 30_000 });
+  await expect(diff).not.toContainText("large file skipped");
+
+  await openLabScene(page, "conflict-large-asset", ".merge-large");
+  await expect(page.locator(".merge-side")).toHaveCount(0);
+  await page.locator(".merge-large .pane-chip").click();
+  await expect(page.locator(".merge-side").first()).toContainText("m_Entry_1:", { timeout: 30_000 });
+});
+
 test("pushbox commits and pushes", async () => {
   const layout = (await lab("lab_layout")) as { pushbox: string; remotePush: string };
   await lab("stage_path", { path: layout.pushbox, file: "note.txt" });

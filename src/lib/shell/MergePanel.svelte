@@ -3,7 +3,7 @@
   import "./MergePanel.css";
   import type { ConflictParty } from "../status";
   import type { MergePiece } from "./types";
-  import { hunkIncludes } from "./dialogs.svelte";
+  import { hunkIncludes, loadTextMerge } from "./dialogs.svelte";
   import { invoke } from "../perf";
   import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -118,7 +118,7 @@
   const leftParty = $derived(view?.theirs ?? null);
   const rightParty = $derived(view?.ours ?? null);
   const unresolved = $derived(Math.max(0, conflictTotal - conflictResolved));
-  const canResolve = $derived(shell.mergeKind === "file" ? fileSide !== "" : unresolved === 0);
+  const canResolve = $derived(shell.mergeKind === "file" ? fileSide !== "" : !shell.mergeLarge && unresolved === 0);
 
   function trapTab(event: KeyboardEvent) {
     if (event.key !== "Tab" || !panel) return;
@@ -291,7 +291,7 @@
         <div class="merge-parties">
           <div class="merge-party">
             <label class="merge-party-pick">
-              <input type="checkbox" checked={leftOn} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })} onclick={onLeft} />
+              <input type="checkbox" checked={leftOn} disabled={shell.mergeLarge} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })} onclick={onLeft} />
               <span>{shell.tr("dialog.mergeKeepSide", { name: shell.mergeLeft })}</span>
               {#if leftParty && leftParty.state !== "unchanged"}<span class="merge-party-state">{stateText(leftParty.state)}</span>{/if}
             </label>
@@ -312,7 +312,7 @@
           </div>
           <div class="merge-party right">
             <label class="merge-party-pick">
-              <input type="checkbox" checked={rightOn} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })} onclick={onRight} />
+              <input type="checkbox" checked={rightOn} disabled={shell.mergeLarge} aria-label={shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })} onclick={onRight} />
               <span>{shell.tr("dialog.mergeKeepSide", { name: shell.mergeRight })}</span>
               {#if rightParty && rightParty.state !== "unchanged"}<span class="merge-party-state">{stateText(rightParty.state)}</span>{/if}
             </label>
@@ -340,6 +340,11 @@
         <div class="merge-stage files">
           {@render fileCard(view?.theirs)}
           {@render fileCard(view?.ours)}
+        </div>
+      {:else if shell.mergeLarge}
+        <div class="merge-stage merge-large">
+          <p>{shell.tr("dialog.mergeLargeHint")}</p>
+          <button class="pane-chip" type="button" disabled={shell.busy} onclick={() => void loadTextMerge(shell)}>{shell.tr("dialog.loadMerge")}</button>
         </div>
       {:else}
         <div class="merge-top">
@@ -427,14 +432,14 @@
         </div>
       {/if}
       <footer class="merge-panel-foot">
-        {#if shell.mergeKind === "text"}
+        {#if shell.mergeKind === "text" && !shell.mergeLarge}
           {#if unresolved > 0}
             <span class="merge-edit-hint merge-unresolved" role="status">{shell.tr("dialog.mergeUnresolved", { count: String(unresolved) })}</span>
           {:else}
             <span class="merge-edit-hint">{shell.tr("dialog.editingAllowed")}</span>
           {/if}
         {/if}
-        {#if shell.mergeKind === "text"}
+        {#if shell.mergeKind === "text" && !shell.mergeLarge}
           <button
             class="text-button merge-edit-entry"
             type="button"

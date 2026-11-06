@@ -275,6 +275,15 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.openTextMerge("src/both-sides.ts");
     return;
   }
+  if (id === "diff-large-asset") {
+    await showChange(shell, "assets/Config/Generated.asset", "unstaged");
+    return;
+  }
+  if (id === "conflict-large-asset") {
+    await showChange(shell, "assets/Config/Generated.asset", "unstaged");
+    await shell.openTextMerge("assets/Config/Generated.asset");
+    return;
+  }
   if (id === "file-merge") {
     await showChange(shell, "art/removed-here.png", "unstaged");
     await shell.openTextMerge("art/removed-here.png");

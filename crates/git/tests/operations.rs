@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    blob_view, commit_log, conflict_view, discard_lines, file_diff, file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs, search_commits,
+    blob_view, commit_log, conflict_view, discard_lines, file_diff, file_diff_with, file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs, search_commits,
     search_log, stage_hunk, stage_line, stage_lines, stage_paths, status, stop_process_tree, ChangeKind, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
 };
 
@@ -1567,6 +1567,61 @@ fn merge_preview_fills_message() {
     let log = repo.output(&["log", "-1", "--format=%B"]);
     assert!(log.contains("Merge topic into main"), "{log}");
     assert!(log.contains("b.txt"), "{log}");
+}
+
+fn large_asset(name: &str) -> String {
+    let mut text = format!("%YAML 1.1\n--- !u!114 &11400000\nMonoBehaviour:\n  m_Name: {name}\n");
+    let row = "0123456789abcdef".repeat(58);
+    for index in 0..2_400 {
+        text.push_str(&format!("  m_Entry_{index}: {row}\n"));
+    }
+    text
+}
+
+#[test]
+fn large_text_asset_loads_its_diff_on_demand() {
+    let repo = repo();
+    let path = "big.asset";
+    commit_file(&repo, path, &large_asset("base"), "base asset");
+    fs::write(repo.path.join(path), large_asset("working")).unwrap();
+
+    let pending = file_diff(&repo.path, path, false).unwrap();
+    assert!(pending.loadable, "{pending:?}");
+    assert!(!pending.binary && pending.lines.is_empty(), "{pending:?}");
+
+    let diff = file_diff_with(&repo.path, path, false, 3, false, true).unwrap();
+    assert!(!diff.binary, "{diff:?}");
+    assert!(diff.lines.iter().any(|line| line.text == "+  m_Name: working"), "{diff:?}");
+    assert!(diff.lines.iter().all(|line| line.text != "large file skipped"), "{diff:?}");
+}
+
+#[test]
+fn large_binary_file_is_still_skipped() {
+    let repo = repo();
+    let mut bytes = vec![b'x'; 2_200_000];
+    bytes[1024] = 0;
+    fs::write(repo.path.join("big.bin"), &bytes).unwrap();
+    repo.git(&["add", "big.bin"]);
+    repo.git(&["commit", "-m", "base"]);
+    bytes[2048] = b'y';
+    fs::write(repo.path.join("big.bin"), &bytes).unwrap();
+
+    let diff = file_diff(&repo.path, "big.bin", false).unwrap();
+    assert!(diff.truncated && !diff.loadable, "{diff:?}");
+    assert!(diff.lines.iter().any(|line| line.text == "large file skipped"), "{diff:?}");
+}
+
+#[test]
+fn large_untracked_text_loads_on_demand() {
+    let repo = repo();
+    fs::write(repo.path.join("big.asset"), large_asset("untracked")).unwrap();
+
+    let pending = file_diff(&repo.path, "big.asset", false).unwrap();
+    assert!(pending.loadable && !pending.binary, "{pending:?}");
+
+    let diff = file_diff_with(&repo.path, "big.asset", false, 3, false, true).unwrap();
+    assert!(!diff.binary, "{diff:?}");
+    assert!(diff.lines.iter().any(|line| line.text == "+  m_Name: untracked"), "{diff:?}");
 }
 
 struct RemoveDir(PathBuf);

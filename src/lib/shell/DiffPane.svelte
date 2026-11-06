@@ -355,6 +355,11 @@
               {:else}
                 <p class="diff-empty">{shell.tr("chrome.binary")}</p>
               {/if}
+            {:else if shell.diff.loadable && shell.diff.lines.length === 0}
+              <div class="diff-empty diff-load">
+                <p>{shell.tr("chrome.largeFileHint")}</p>
+                <button class="pane-chip" type="button" disabled={shell.busy} onclick={() => void shell.loadDiff(true)}>{shell.tr("chrome.loadDiff")}</button>
+              </div>
             {:else if shell.diff.lines.length === 0}
               <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
             {:else if shell.settings.diffStyle === "split"}

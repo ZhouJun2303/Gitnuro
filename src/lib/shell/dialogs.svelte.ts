@@ -241,25 +241,66 @@ function piecesFromSides(shell: ShellState, sides: { ours: string; theirs: strin
     return [{ kind: "hunk" as const, ours: sides.ours, theirs: sides.theirs, pick: "none" as const }];
   }
 
-/** Past this, drawing every line would stall the window. Show the file card instead. */
-const MERGE_TEXT_LIMIT = 200_000;
+/** Past this, moving the whole text through the window costs more than a merge view is worth. */
+const MERGE_TEXT_LIMIT = 8_000_000;
+const MERGE_LINE_LIMIT = 200_000;
+/** Above this, opening the merge panel offers a load button instead of building the view. */
+const MERGE_AUTO_LIMIT = 200_000;
+const MERGE_AUTO_LINES = 8_000;
 
 function textTooBig(text: string) {
     if (text.length > MERGE_TEXT_LIMIT) return true;
     let lines = 1;
     for (let index = 0; index < text.length; index += 1) {
-      if (text.charCodeAt(index) === 10 && ++lines > 8000) return true;
+      if (text.charCodeAt(index) === 10 && ++lines > MERGE_LINE_LIMIT) return true;
     }
     return false;
+  }
+
+function textNeedsLoad(text: string) {
+    if (text.length > MERGE_AUTO_LIMIT) return true;
+    let lines = 1;
+    for (let index = 0; index < text.length; index += 1) {
+      if (text.charCodeAt(index) === 10 && ++lines > MERGE_AUTO_LINES) return true;
+    }
+    return false;
+  }
+
+function sidesTooBig(sides: { ours: string; theirs: string; working: string }) {
+    return textTooBig(sides.working) || textTooBig(sides.ours) || textTooBig(sides.theirs);
+  }
+
+function sidesNeedLoad(sides: { ours: string; theirs: string; working: string }) {
+    return textNeedsLoad(sides.working) || textNeedsLoad(sides.ours) || textNeedsLoad(sides.theirs);
   }
 
 function showFileMerge(shell: ShellState, file: string) {
     shell.mergeFile = file;
     shell.mergeKind = "file";
+    shell.mergeLarge = false;
     shell.mergePieces = [];
     shell.mergeResult = "";
     shell.conflict = null;
     shell.textMerge = true;
+  }
+
+/** Build the merge view once the user asks for a file too large to draw on open. */
+export async function loadTextMerge(shell: ShellState) {
+    const file = shell.mergeFile;
+    if (!file || shell.busy) return;
+    try {
+      const sides = shell.mode === "sample" ? sampleConflictText[file] : await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
+      if (!sides || sidesTooBig(sides)) {
+        showFileMerge(shell, file);
+        return;
+      }
+      shell.conflict = sides;
+      shell.mergePieces = piecesFromSides(shell, sides);
+      shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+      shell.mergeLarge = false;
+    } catch (error) {
+      shell.actionError = shell.message(error);
+    }
   }
 
 export async function openTextMerge(shell: ShellState, file: string) {
@@ -285,15 +326,16 @@ export async function openTextMerge(shell: ShellState, file: string) {
     }
     try {
       const sides = shell.mode === "sample" ? sampleConflictText[file] : await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
-      if (!sides || textTooBig(sides.working) || textTooBig(sides.ours) || textTooBig(sides.theirs)) {
+      if (!sides || sidesTooBig(sides)) {
         showFileMerge(shell, file);
         return;
       }
       shell.conflict = sides;
       shell.mergeFile = file;
       shell.mergeKind = "text";
-      shell.mergePieces = piecesFromSides(shell, sides);
-      shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+      shell.mergeLarge = sidesNeedLoad(sides);
+      shell.mergePieces = shell.mergeLarge ? [] : piecesFromSides(shell, sides);
+      shell.mergeResult = shell.mergeLarge ? "" : shell.joinedPieces(shell.mergePieces);
       shell.textMerge = true;
     } catch (error) {
       shell.actionError = shell.message(error);
@@ -302,6 +344,7 @@ export async function openTextMerge(shell: ShellState, file: string) {
 
 export function closeTextMerge(shell: ShellState) {
     shell.textMerge = false;
+    shell.mergeLarge = false;
   }
 
 export type RebaseStep = { verb: string; rev: string; summary: string; message: string };
@@ -322,6 +365,7 @@ export async function applyTextMerge(shell: ShellState, text?: string) {
       return;
     }
     if (shell.busy) return;
+    if (shell.mergeLarge || shell.mergePieces.length === 0) return;
     if (shell.mergePieces.some((piece) => piece.kind === "hunk" && piece.pick === "none")) return;
     await shell.mutate({ action: "resolve", file, side: "text", text: text ?? shell.mergeResult });
     shell.textMerge = false;

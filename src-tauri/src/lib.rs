@@ -340,9 +340,10 @@ fn commit_changes(
 }
 
 #[tauri::command]
-fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u32>, ignore_space: Option<bool>) -> Result<awegit_git::FileDiff, String> {
+fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u32>, ignore_space: Option<bool>, load: Option<bool>) -> Result<awegit_git::FileDiff, String> {
     let repo = repo_from(path)?;
-    awegit_git::file_diff_with(&repo, &file, staged, unified.unwrap_or(3), ignore_space.unwrap_or(false)).map_err(|error| error.to_string())
+    awegit_git::file_diff_with(&repo, &file, staged, unified.unwrap_or(3), ignore_space.unwrap_or(false), load.unwrap_or(false))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

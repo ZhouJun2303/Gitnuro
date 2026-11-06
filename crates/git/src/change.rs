@@ -289,13 +289,15 @@ pub struct FileDiff {
     pub staged: bool,
     pub binary: bool,
     pub truncated: bool,
+    /// Large text that the window should read only after the user asks for it.
+    pub loadable: bool,
     pub lines: Vec<DiffLine>,
     /// How many zero-context hunks can be staged one at a time.
     pub hunks: u32,
 }
 
 const MAX_DIFF_LINES: usize = 4_000;
-const MAX_UNTRACKED_BYTES: u64 = 1_048_576;
+const MAX_UNTRACKED_BYTES: u64 = 8_000_000;
 const MAX_DIFF_BYTES: usize = 8_000_000;
 const MAX_LARGE_FILE: u64 = 2_000_000;
 const MAX_PREVIEW_BYTES: u64 = 8_000_000;
@@ -1005,11 +1007,12 @@ fn split_hunks(text: &str) -> (String, Vec<String>) {
 
 /// Unified diff for one path. `staged` selects the index rather than the work tree.
 pub fn file_diff(repo: &Path, path: &str, staged: bool) -> Result<FileDiff, Error> {
-    file_diff_with(repo, path, staged, 3, false)
+    file_diff_with(repo, path, staged, 3, false, false)
 }
 
 /// `context` is the number of unchanged lines around each hunk. A large value shows the whole file.
-pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignore_space: bool) -> Result<FileDiff, Error> {
+/// `load_large` reads past [`MAX_LARGE_FILE`]; callers set it only after the user asks.
+pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignore_space: bool, load_large: bool) -> Result<FileDiff, Error> {
     let path = check_path(path)?;
     if let Ok(meta) = std::fs::metadata(repo.join(path)) {
         if meta.is_file() && meta.len() > MAX_LARGE_FILE {
@@ -1017,23 +1020,40 @@ pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignor
                 image_kind(&bytes).is_some()
                     || (bytes.len() >= 18 && bytes[2] == 2 && matches!(bytes[16], 24 | 32))
             });
-            return Ok(FileDiff {
-                path: path.to_string(),
-                staged,
-                binary: previewable,
-                truncated: true,
-                lines: if previewable {
-                    Vec::new()
-                } else {
-                    vec![DiffLine {
-                        kind: DiffLineKind::Meta,
-                        text: "large file skipped".into(),
-                        stage_at: None,
-                        work_at: None,
-                    }]
-                },
-                hunks: 0,
-            });
+            if previewable {
+                return Ok(FileDiff {
+                    path: path.to_string(),
+                    staged,
+                    binary: true,
+                    truncated: true,
+                    loadable: false,
+                    lines: Vec::new(),
+                    hunks: 0,
+                });
+            }
+            // Big text — Unity YAML assets and the like — usually carries a small
+            // diff. Offer it on demand instead of reading the file with every select.
+            let text = !file_has_nul(repo, path);
+            if !text || !load_large {
+                return Ok(FileDiff {
+                    path: path.to_string(),
+                    staged,
+                    binary: false,
+                    truncated: !text,
+                    loadable: text,
+                    lines: if text {
+                        Vec::new()
+                    } else {
+                        vec![DiffLine {
+                            kind: DiffLineKind::Meta,
+                            text: "large file skipped".into(),
+                            stage_at: None,
+                            work_at: None,
+                        }]
+                    },
+                    hunks: 0,
+                });
+            }
         }
     }
     let unified = format!("--unified={}", context.min(1_000_000));
@@ -1056,7 +1076,7 @@ pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignor
     })?;
     let text = String::from_utf8_lossy(&output.stdout);
     if !staged && text.trim().is_empty() && !in_index(repo, path)? {
-        return diff_untracked(repo, path);
+        return diff_untracked(repo, path, load_large);
     }
     let mut parsed = parse_diff(path, staged, &text);
     parsed.truncated |= capped;
@@ -1186,7 +1206,7 @@ fn in_index(repo: &Path, path: &str) -> Result<bool, Error> {
     Ok(!output.stdout.is_empty())
 }
 
-fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
+fn diff_untracked(repo: &Path, path: &str, load_large: bool) -> Result<FileDiff, Error> {
     let full = repo.join(path);
     let metadata = match std::fs::metadata(&full) {
         Ok(metadata) => metadata,
@@ -1196,6 +1216,7 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
                 staged: false,
                 binary: false,
                 truncated: false,
+                loadable: false,
                 lines: Vec::new(),
                 hunks: 0,
             });
@@ -1207,12 +1228,49 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
             });
         }
     };
-    if metadata.len() > MAX_UNTRACKED_BYTES || !metadata.is_file() {
+    if !metadata.is_file() {
         return Ok(FileDiff {
             path: path.to_string(),
             staged: false,
             binary: true,
-            truncated: metadata.len() > MAX_UNTRACKED_BYTES,
+            truncated: false,
+            loadable: false,
+            lines: Vec::new(),
+            hunks: 0,
+        });
+    }
+    if metadata.len() > MAX_UNTRACKED_BYTES {
+        let previewable = file_prefix(full.clone(), 32).is_some_and(|bytes| {
+            image_kind(&bytes).is_some()
+                || (bytes.len() >= 18 && bytes[2] == 2 && matches!(bytes[16], 24 | 32))
+        });
+        return Ok(FileDiff {
+            path: path.to_string(),
+            staged: false,
+            binary: previewable,
+            truncated: true,
+            loadable: false,
+            lines: if previewable {
+                Vec::new()
+            } else {
+                vec![DiffLine {
+                    kind: DiffLineKind::Meta,
+                    text: "large file skipped".into(),
+                    stage_at: None,
+                    work_at: None,
+                }]
+            },
+            hunks: 0,
+        });
+    }
+    if metadata.len() > MAX_LARGE_FILE && !load_large {
+        let text = !file_has_nul(repo, path);
+        return Ok(FileDiff {
+            path: path.to_string(),
+            staged: false,
+            binary: !text,
+            truncated: false,
+            loadable: text,
             lines: Vec::new(),
             hunks: 0,
         });
@@ -1227,27 +1285,27 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
             staged: false,
             binary: true,
             truncated: false,
+            loadable: false,
             lines: Vec::new(),
             hunks: 0,
         });
     }
     let text = String::from_utf8_lossy(&bytes);
-    let mut parts: Vec<&str> = text.split('\n').map(|line| line.trim_end_matches('\r')).collect();
-    if text.ends_with('\n') {
-        parts.pop();
-    }
-    let mut body: Vec<DiffLine> = parts
-        .into_iter()
-        .enumerate()
-        .map(|(index, line)| DiffLine {
+    let trimmed = text.strip_suffix('\n').unwrap_or(&text);
+    let mut body: Vec<DiffLine> = Vec::new();
+    let mut truncated = false;
+    for (index, line) in trimmed.split('\n').enumerate() {
+        if index == MAX_DIFF_LINES {
+            truncated = true;
+            break;
+        }
+        body.push(DiffLine {
             kind: DiffLineKind::Add,
-            text: format!("+{line}"),
+            text: format!("+{}", line.trim_end_matches('\r')),
             stage_at: Some(index as u32),
             work_at: Some(index as u32),
-        })
-        .collect();
-    let truncated = body.len() > MAX_DIFF_LINES;
-    body.truncate(MAX_DIFF_LINES);
+        });
+    }
     let mut lines = vec![DiffLine {
         kind: DiffLineKind::Hunk,
         text: format!("@@ -0,0 +1,{} @@", body.len()),
@@ -1260,6 +1318,7 @@ fn diff_untracked(repo: &Path, path: &str) -> Result<FileDiff, Error> {
         staged: false,
         binary: false,
         truncated,
+        loadable: false,
         lines,
         hunks: 1,
     })
@@ -1348,6 +1407,7 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
         staged,
         binary,
         truncated,
+        loadable: false,
         lines,
         hunks: 0,
     }

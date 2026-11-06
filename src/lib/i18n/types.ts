@@ -117,6 +117,8 @@ export type Messages = {
     selectCommitFile: string;
     binary: string;
     truncated: string;
+    largeFileHint: string;
+    loadDiff: string;
     openRepo: string;
     clone: string;
     cloning: string;
@@ -532,6 +534,8 @@ export type Messages = {
     editResult: string;
     previewResult: string;
     mergeUnresolved: string;
+    mergeLargeHint: string;
+    loadMerge: string;
     mergeKeepSide: string;
     mergePickFile: string;
     mergeOverviewHint: string;

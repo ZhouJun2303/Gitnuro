@@ -261,6 +261,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             req(args, "staged")?,
             req(args, "unified")?,
             req(args, "ignore_space")?,
+            req(args, "load")?,
         )),
         "commit_log" => done_result(super::commit_log(
             req(args, "path")?,

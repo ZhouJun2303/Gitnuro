@@ -202,7 +202,7 @@ export async function applyConflictChoice(shell: ShellState, ours: boolean, thei
     await shell.mutate({ action: "resolve", file, side: ours ? "ours" : "theirs", text: "" });
   }
 
-export async function loadDiff(shell: ShellState) {
+export async function loadDiff(shell: ShellState, loadLarge = false) {
     if (shell.mode !== "live" || !shell.selectedPath || shell.section !== "changes") {
       shell.diff = null;
       shell.diffError = null;
@@ -213,6 +213,9 @@ export async function loadDiff(shell: ShellState) {
     const file = shell.selectedPath;
     const stagedSide = shell.selectedSide === "staged";
     const path = shell.repoPath();
+    const loadKey = `${path}\0${stagedSide ? "staged" : "unstaged"}\0${file}`;
+    const load = loadLarge || shell.largeLoaded.has(loadKey);
+    if (loadLarge) shell.largeLoaded.add(loadKey);
     const rows = stagedSide ? shell.snapshot?.staged : shell.snapshot?.unstaged;
     const conflicted = rows?.some((item) => item.path === file && item.kind === "conflict") ?? false;
     await shell.withWork(shell.tr("chrome.readingFile"), async () => {
@@ -236,6 +239,7 @@ export async function loadDiff(shell: ShellState) {
         staged: stagedSide,
         unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
         ignoreSpace: shell.settings.ignoreSpace,
+        load,
       });
       if (token === shell.diffToken && shell.viewing(path)) {
         if (!shell.same(shell.diff, value)) shell.diff = value;

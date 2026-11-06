@@ -28,6 +28,7 @@ export type FileDiff = {
   staged: boolean;
   binary: boolean;
   truncated: boolean;
+  loadable: boolean;
   lines: DiffLine[];
   hunks: number;
 };
