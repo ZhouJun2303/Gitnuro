@@ -761,7 +761,7 @@ export class ShellState {
 
   updatePercent = $state<number | null>(null);
 
-  appVersion = $state("2.0.2");
+  appVersion = $state("2.0.3");
 
 
   passphrase = $state("");
