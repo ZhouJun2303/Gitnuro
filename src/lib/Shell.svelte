@@ -791,7 +791,7 @@
           {:else}
             <p class="repo-empty">{shell.repoScanning ? shell.tr("chrome.reading") : shell.tr("chrome.noRepositories")}</p>
           {/each}
-          {#if shell.repoScanTruncated}<p class="repo-empty">{shell.tr("chrome.scanTruncated")}</p>{/if}
+          {#if shell.repoScanTruncated}<p class="repo-empty" data-scan-truncated>{shell.tr("chrome.scanTruncated")}</p>{/if}
         {/if}
       </div>
     </div>

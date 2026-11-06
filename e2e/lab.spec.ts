@@ -476,7 +476,25 @@ test("dialogs focus the first field and fall back to close", async ({ page }) =>
   await openLabScene(page, "dialog-branch", '[data-dialog="branch"]');
   await expect(page.locator('[data-dialog="branch"] input').first()).toBeFocused();
   await openLabScene(page, "dialog-about", '[data-dialog="about"]');
+  await expect(page.locator('[data-dialog="about"]')).toContainText("2.56.0");
   await expect(page.locator('[data-dialog="about"] .dialog-close')).toBeFocused();
+});
+
+test("a coded error keeps the translated sentence and the detail", async ({ page }) => {
+  await openLabScene(page, "action-error-coded", "text=sha256 mismatch");
+  const floor = page.locator('.identity-floor[data-layer="error"]');
+  await expect(floor).toContainText(/could not be verified|没有通过校验/);
+  await expect(floor).toContainText("sha256 mismatch");
+});
+
+test("a truncated repository scan says more remain", async ({ page }) => {
+  await openLabScene(page, "picker-truncated", "[data-scan-truncated]");
+  await expect(page.locator("[data-scan-truncated]")).toContainText("300");
+});
+
+test("damaged settings use the recovery banner", async ({ page }) => {
+  await openLabScene(page, "settings-recovered", '.identity-floor[data-layer="error"]');
+  await expect(page.locator('.identity-floor[data-layer="error"]')).toContainText(/restored|已恢复/);
 });
 
 test("returning to changes reloads a diff cleared by a history refresh", async ({ page }) => {

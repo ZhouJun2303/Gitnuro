@@ -132,6 +132,11 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.toggleRepoPicker();
     return;
   }
+  if (id === "picker-truncated") {
+    await shell.toggleRepoPicker();
+    shell.repoScanTruncated = true;
+    return;
+  }
   if (id === "commands") {
     fillCommandLog(shell);
     shell.commandPick = 1;
@@ -261,9 +266,17 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.actionError = "实验室操作错误：推送被拒绝";
     return;
   }
+  if (id === "action-error-coded") {
+    shell.actionError = shell.message("awegit:update:sha256 mismatch");
+    return;
+  }
   if (id === "action-error-retry") {
     shell.actionError = "error: Your local changes to the following files would be overwritten by merge:";
     shell.stashRetry = { request: { action: "stashApply", name: "stash@{0}" }, source: "user" };
+    return;
+  }
+  if (id === "settings-recovered") {
+    shell.adoptSettings({ ...shell.settings, recoveryNotice: "recovered-backup" });
     return;
   }
   if (id === "text-merge-many") {

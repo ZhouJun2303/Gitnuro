@@ -1514,6 +1514,12 @@ fn forge_pulls(path: Option<String>) -> Result<Vec<forge::PullRequest>, String> 
     })
 }
 
+/// A stored snapshot can answer this request when HEAD and the index still match.
+/// A full snapshot can serve a later brief request. A brief snapshot cannot serve a full one.
+fn facts_reusable(stored_stamp: &str, stored_full: bool, stamp: &str, full: bool) -> bool {
+    stored_stamp == stamp && (stored_full || !full)
+}
+
 /// `full: false` skips the ignored-file list, statistics, and LFS files.
 /// A full result can answer a later brief request when HEAD and the index are unchanged.
 #[tauri::command]
@@ -1524,7 +1530,7 @@ fn repo_facts(path: Option<String>, full: Option<bool>) -> Result<awegit_git::Re
     let stamp = facts_stamp(&repo);
     if let Ok(cache) = facts_cache().lock() {
         if let Some(hit) = cache.get(&key) {
-            if hit.stamp == stamp && (hit.full || !full) {
+            if facts_reusable(&hit.stamp, hit.full, &stamp, full) {
                 return Ok(hit.facts.clone());
             }
         }
@@ -2232,6 +2238,57 @@ mod watch_plan_tests {
         assert!(super::idle_for_reap(15 * 60, 1, 25));
         assert!(!super::idle_for_reap(15 * 60, 2, 25));
         assert!(!super::idle_for_reap(14 * 60, 1, 25));
+    }
+
+    #[test]
+    fn facts_cache_reuses_a_full_snapshot_until_head_or_the_index_changes() {
+        assert!(super::facts_reusable("stamp", true, "stamp", false));
+        assert!(super::facts_reusable("stamp", true, "stamp", true));
+        assert!(super::facts_reusable("stamp", false, "stamp", false));
+        assert!(!super::facts_reusable("stamp", false, "stamp", true));
+        assert!(!super::facts_reusable("stamp", true, "moved", false));
+
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("awegit-facts-{nanos}"));
+        let git = root.join(".git");
+        fs::create_dir_all(git.join("refs").join("heads")).unwrap();
+        fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(git.join("refs").join("heads").join("main"), "abc\n").unwrap();
+        fs::write(git.join("index"), b"v1").unwrap();
+        let path = root.display().to_string();
+        let repo = PathBuf::from(&path);
+        let key = awegit_git::repo_key(&repo);
+        let stamp = super::facts_stamp(&repo);
+        fs::write(root.join("note.txt"), "worktree").unwrap();
+        assert_eq!(super::facts_stamp(&repo), stamp, "a worktree file does not invalidate facts");
+
+        let marker = "cached-full-marker";
+        let facts = awegit_git::RepoFacts {
+            ignored: Vec::new(),
+            bisect_active: true,
+            bisect_log: marker.into(),
+            template: String::new(),
+            head_message: String::new(),
+            weekday: Vec::new(),
+            hour: Vec::new(),
+            lfs: String::new(),
+            hot: Vec::new(),
+        };
+        super::facts_cache().lock().unwrap().insert(key.clone(), super::CachedFacts { stamp: stamp.clone(), full: true, facts: facts.clone() });
+        let brief = super::repo_facts(Some(path.clone()), Some(false)).unwrap();
+        assert_eq!(brief.bisect_log, marker);
+        assert!(brief.bisect_active);
+
+        super::facts_cache().lock().unwrap().insert(key.clone(), super::CachedFacts { stamp: stamp.clone(), full: false, facts });
+        let full = super::repo_facts(Some(path.clone()), Some(true)).unwrap();
+        assert_ne!(full.bisect_log, marker, "a brief snapshot must not answer a full request");
+
+        fs::write(git.join("index"), b"v1-changed").unwrap();
+        assert_ne!(super::facts_stamp(&repo), stamp);
+        let missed = super::repo_facts(Some(path), Some(false)).unwrap();
+        assert_ne!(missed.bisect_log, marker, "a new index must miss the cache");
+        super::facts_cache().lock().unwrap().remove(&key);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
