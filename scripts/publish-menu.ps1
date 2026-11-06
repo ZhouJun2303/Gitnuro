@@ -139,6 +139,34 @@ function Assert-Clean {
     }
 }
 
+function Get-UnmergedPaths {
+    @(& git -C $root diff --name-only --diff-filter=U | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+}
+
+function Stop-OpenMerge {
+    $merging = & git -C $root rev-parse -q --verify MERGE_HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $merging) {
+        & git -C $root merge --abort 2>$null
+    }
+}
+
+# release keeps the published manifest (download URL, notes, appCode).
+# The branch being merged only has a version stub, so latest.json conflicts on every publish.
+# Keep release's file and move appVersion to the version about to ship.
+# publish-windows.ps1 rewrites the download fields after the installer is uploaded.
+function Restore-PublishedManifest([string]$version) {
+    & git -C $root checkout --ours -- latest.json
+    if ($LASTEXITCODE -ne 0) { throw "git checkout --ours -- latest.json failed" }
+    $path = Join-Path $root "latest.json"
+    $text = [IO.File]::ReadAllText($path)
+    $pattern = [regex]'"appVersion"\s*:\s*"\d+\.\d+\.\d+"'
+    if (-not $pattern.IsMatch($text)) { throw "Could not update latest.json after merge" }
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [IO.File]::WriteAllText($path, $pattern.Replace($text, ('"appVersion": "' + $version + '"'), 1), $utf8)
+    & git -C $root add -- latest.json
+    if ($LASTEXITCODE -ne 0) { throw "git add -- latest.json failed" }
+}
+
 function Get-CurrentBranch {
     $branch = (& git -C $root branch --show-current).Trim()
     if (-not $branch) { throw "当前不在任何分支上" }
@@ -221,8 +249,23 @@ function Invoke-ReleaseFlow {
             $releaseBefore = (& git -C $root rev-parse HEAD).Trim()
             & git -C $root merge -m "chore: 合并 $branch" $branch
             if ($LASTEXITCODE -ne 0) {
-                & git -C $root merge --abort 2>$null
-                throw "没能把 $branch 合并进 release。版本号提交还留在 $branch 上。"
+                $names = @(Get-UnmergedPaths)
+                $onlyLatest = $names.Count -eq 1 -and $names[0] -eq "latest.json"
+                if ($onlyLatest) {
+                    try {
+                        Restore-PublishedManifest $target
+                        & git -C $root commit -m "chore: 合并 $branch"
+                        if ($LASTEXITCODE -ne 0) { throw "git commit failed" }
+                    } catch {
+                        Stop-OpenMerge
+                        throw "没能把 $branch 合并进 release。版本号提交还留在 $branch 上。$($_.Exception.Message)"
+                    }
+                    Write-Host "latest.json 保留 release 上已发布的下载地址和 appCode，版本号改为 $target"
+                } else {
+                    Stop-OpenMerge
+                    $list = if ($names.Count) { $names -join "、" } else { "没有列出冲突文件" }
+                    throw "没能把 $branch 合并进 release。版本号提交还留在 $branch 上。`n$list"
+                }
             }
         }
         if ($Publish) {
