@@ -325,6 +325,14 @@ test("applying a stash asks before it touches the work tree", async ({ page }) =
   await expect(confirm.locator(".commit")).toBeEnabled();
 });
 
+test("reverting a commit asks before it runs", async ({ page }) => {
+  await openLabScene(page, "revert-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("Revert commit");
+  await expect(confirm).toContainText("new revert commit");
+  await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
 test("commit patch renders each hunk header once", async ({ page }) => {
   await openLabScene(page, "commit", ".detail");
   await page.locator(".patch-toggle").first().click();

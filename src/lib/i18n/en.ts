@@ -363,6 +363,8 @@ export const en: Messages = {
     deleteBody: "Delete {name}?",
     hardReset: "Hard reset",
     hardResetBody: "Hard reset discards uncommitted work. Continue?",
+    revert: "Revert commit",
+    revertBody: "Revert the changes in {short} \"{summary}\"? This creates a new revert commit.",
     deleteRemoteBody: "Delete {name} on the remote?",
     newBranch: "New branch",
     name: "Name",

@@ -102,7 +102,7 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
       { label: shell.tr("menu.checkout"), disabled: locked, run: () => shell.requestCheckout(commit.id) },
       { label: shell.tr("menu.cherryPick"), disabled: locked, run: () => void shell.previewCherry(commit.id, false) },
       { label: shell.tr("menu.cherryPickRecord"), disabled: locked, run: () => void shell.previewCherry(commit.id, true) },
-      { label: shell.tr("menu.revert"), disabled: locked, run: () => shell.mutate({ action: "revert", rev: commit.id }) },
+      { label: shell.tr("menu.revert"), disabled: locked, run: () => shell.confirmRevert(commit.id, commit.summary) },
       {
         label: shell.tr("menu.reset"),
         children: [

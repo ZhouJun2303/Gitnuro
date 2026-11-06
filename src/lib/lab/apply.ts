@@ -292,6 +292,11 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.confirmApplyStash(stash?.name ?? "stash@{0}", stash?.summary ?? "WIP before the palette");
     return;
   }
+  if (id === "revert-confirm") {
+    const commit = shell.commitsLive[0];
+    shell.confirmRevert(commit?.id ?? "f2c87af", commit?.summary ?? "feat: 英雄词条和技能翻译修复");
+    return;
+  }
   if (id === "menu") {
     shell.menu = {
       x: 72,

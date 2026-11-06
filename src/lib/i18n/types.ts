@@ -363,6 +363,8 @@ export type Messages = {
     deleteBody: string;
     hardReset: string;
     hardResetBody: string;
+    revert: string;
+    revertBody: string;
     deleteRemoteBody: string;
     newBranch: string;
     name: string;

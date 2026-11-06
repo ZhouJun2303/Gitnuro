@@ -3147,6 +3147,12 @@ export class ShellState {
 
 
 
+  confirmRevert(id: string, summary: string) {
+    this.ask(this.tr("dialog.revert"), this.tr("dialog.revertBody", { short: id.slice(0, 7), summary }), () => void this.mutate({ action: "revert", rev: id }));
+  }
+
+
+
   adoptSettings(value: Settings, resetHistory = false) {
     this.settings = this.withSourceRoots({
       ...this.defaultSettings,

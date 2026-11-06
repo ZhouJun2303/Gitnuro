@@ -363,6 +363,8 @@ export const zh: Messages = {
     deleteBody: "删除 {name}？",
     hardReset: "硬重置",
     hardResetBody: "硬重置会丢掉未提交的工作。继续？",
+    revert: "还原提交",
+    revertBody: "还原 {short}「{summary}」的改动？这会生成一个新的还原提交。",
     deleteRemoteBody: "在远程删除 {name}？",
     newBranch: "新建分支",
     name: "名称",
