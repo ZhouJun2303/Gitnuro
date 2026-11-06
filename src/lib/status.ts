@@ -259,6 +259,8 @@ export type Settings = {
   dismissedUpdate: string;
   /** `pending` on a brand-new install, otherwise `seen`. */
   featuresIntro: string;
+  /** `recovered-backup` when the last load restored a damaged settings file. */
+  recoveryNotice?: string;
 };
 
 export type ForkImport = {

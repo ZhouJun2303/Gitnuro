@@ -248,6 +248,7 @@ name = "awegit-git"
 version = "2.0.2"
 dependencies = [
  "gix",
+ "libc",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

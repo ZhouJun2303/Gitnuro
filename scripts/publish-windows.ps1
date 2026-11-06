@@ -9,6 +9,12 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $repo = "ZhouJun2303/Gitnuro"
+$stagePath = Join-Path $root ".git\awegit-publish-stage"
+
+function Set-PublishStage([string]$name) {
+    if (-not (Test-Path (Split-Path $stagePath))) { return }
+    [System.IO.File]::WriteAllText($stagePath, $name)
+}
 
 Push-Location $root
 try {
@@ -45,9 +51,15 @@ $version = [string]$tauri.version
 if ($version -notmatch '^\d+\.\d+\.\d+$') {
     throw "Version must be three numbers, like 1.0.0. Got $version"
 }
+$versionCheck = & node (Join-Path $root "scripts\check-versions.mjs") 2>&1
+if ($LASTEXITCODE -ne 0) {
+    throw ($versionCheck | Out-String)
+}
 if ($version -ne [string]$package.version -or $version -ne $cargoVersion -or $version -ne $gitVersion) {
     throw "Version mismatch: tauri.conf.json=$version package.json=$($package.version) Cargo.toml=$cargoVersion crates/git=$gitVersion"
 }
+
+Set-PublishStage "packaging"
 
 cmd /c "gh auth status >nul 2>nul"
 if ($LASTEXITCODE -ne 0) {
@@ -85,6 +97,7 @@ gh release create $tag @assets --repo $repo --title "AweGit $version" --notes $r
 if ($LASTEXITCODE -ne 0) {
     throw "Could not create GitHub release $tag"
 }
+Set-PublishStage "released"
 
 $latestPath = Join-Path $root "latest.json"
 $appCode = 26
@@ -106,7 +119,13 @@ $latest = [ordered]@{
 }
 $json = ($latest | ConvertTo-Json -Depth 4) + "`n"
 $utf8 = New-Object System.Text.UTF8Encoding $false
-[System.IO.File]::WriteAllText($latestPath, $json, $utf8)
+$latestTemp = "$latestPath.tmp"
+[System.IO.File]::WriteAllText($latestTemp, $json, $utf8)
+Move-Item -LiteralPath $latestTemp -Destination $latestPath -Force
+$written = Get-Content -Raw -Encoding UTF8 -Path $latestPath | ConvertFrom-Json
+if ([string]$written.appVersion -ne $version) {
+    throw "latest.json version is $($written.appVersion), expected $version"
+}
 
 Push-Location $root
 try {
@@ -119,6 +138,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Could not push latest.json"
     }
+    Set-PublishStage "pushed"
 }
 finally {
     Pop-Location

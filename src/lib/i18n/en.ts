@@ -145,6 +145,7 @@ export const en: Messages = {
     updateProgress: "Downloading {percent}%",
     updateStarted: "The installer has started.",
     updateVersion: "Current version {version}",
+    settingsRecovered: "Settings were damaged. The last saved copy was restored.",
     localOnly: "This branch is not on any remote",
     trackedRemote: "A remote branch with this name exists",
     syncAhead: "{count} ahead",

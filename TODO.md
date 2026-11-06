@@ -13,9 +13,9 @@
 
 ## P1：先修复的 bug 与可靠性问题
 
-- [ ] BUG-01 P1 取消操作不能稳定终止 Windows 子进程树（crates/git/src/cli.rs:368、crates/git/tests/operations.rs:358）。用 Windows Job Object 或可验证的 taskkill 重试/等待实现进程组取消；Unix 使用独立进程组。取消后等待句柄退出、清理 PID，并增加不会误杀后续同仓库操作的测试。验收：取消 fetch、clone、历史读取和大 diff 都能在限定时间内结束，测试在 Windows/macOS 均稳定通过。
-- [ ] BUG-02 P1 发布版本元数据不一致。package.json、src-tauri/Cargo.toml 和 src-tauri/tauri.conf.json 是 2.0.2，latest.json 与 README 仍写 2.0.0；updates::check 因此不会给 2.0.2 显示更新。集中版本来源，发布脚本同步 latest.json、README 和安装包，并在 CI 中检查所有版本字段一致。
-- [ ] BUG-03 P1 设置文件写入需要崩溃安全和损坏恢复（src-tauri/src/settings.rs:570-590）。当前直接 fs::write，进程中断可能留下半个 JSON；解析失败也会使设置加载整体失败。改为临时文件写入、刷盘、原子替换并保留上一份备份；加入 schema 版本、迁移和损坏文件恢复提示。验收：写入中断、旧版本字段、空文件和非法 JSON 都不会丢失最近一次有效设置。
+- [x] BUG-01 P1 取消操作不能稳定终止 Windows 子进程树（crates/git/src/cli.rs:368、crates/git/tests/operations.rs:358）。用 Windows Job Object 或可验证的 taskkill 重试/等待实现进程组取消；Unix 使用独立进程组。取消后等待句柄退出、清理 PID，并增加不会误杀后续同仓库操作的测试。验收：取消 fetch、clone、历史读取和大 diff 都能在限定时间内结束，测试在 Windows/macOS 均稳定通过。
+- [x] BUG-02 P1 发布版本元数据不一致。package.json、src-tauri/Cargo.toml 和 src-tauri/tauri.conf.json 是 2.0.2，latest.json 与 README 仍写 2.0.0；updates::check 因此不会给 2.0.2 显示更新。集中版本来源，发布脚本同步 latest.json、README 和安装包，并在 CI 中检查所有版本字段一致。
+- [x] BUG-03 P1 设置文件写入需要崩溃安全和损坏恢复（src-tauri/src/settings.rs:570-590）。当前直接 fs::write，进程中断可能留下半个 JSON；解析失败也会使设置加载整体失败。改为临时文件写入、刷盘、原子替换并保留上一份备份；加入 schema 版本、迁移和损坏文件恢复提示。验收：写入中断、旧版本字段、空文件和非法 JSON 都不会丢失最近一次有效设置。
 - [ ] BUG-04 P1 凭据不应长期明文保存在 settings.json（src-tauri/src/settings.rs:25-55,135-230、README）。API key、代理密码和各平台 token 当前写入用户配置目录。迁移到 Windows Credential Manager/macOS Keychain，配置文件只保留引用；导入、诊断、日志和错误信息继续脱敏，并补升级迁移测试。
 - [ ] BUG-05 P1 更新包缺少完整性验证和平台启动分支（src-tauri/src/updates.rs:48-99）。当前只校验 GitHub URL，下载后直接启动文件，没有签名或 SHA-256 校验；macOS 的 DMG 也不能按 Windows 的方式直接启动。为每个平台发布签名/哈希，下载到临时文件后校验并原子替换；Windows 使用安装程序，macOS 使用 open，失败时清理临时文件并保留可重试状态。
 - [ ] BUG-06 P1 Tauri 安全边界过宽（src-tauri/tauri.conf.json:23、src-tauri/capabilities/default.json:10-91）。CSP 为 null，opener 允许打开任意路径，多个高权限命令对所有窗口开放。配置最小 CSP，按主窗口/独立窗口拆分 capability，限制外部 URL 和可打开路径；为命令增加参数边界测试，并验证错误页面或远程内容不能调用本地命令。
@@ -55,6 +55,9 @@
 
 ## 已处理
 
+- 取消会停掉 Windows 作业对象里的进程树，并等到进程退出。同一次仓库操作用代际号分开，后启动的命令不会被上一次取消杀掉。读取取消不会停写操作。
+- 版本以 `src-tauri/Cargo.toml` 为准，当前 2.0.2。latest.json、README、关于页回退和安装包名与它对齐；`node scripts/check-versions.mjs` 和 CI 检查这些字段。发布时安装包已上传但清单未推送，则不再回退 release 合并。
+- 设置先写入临时文件并刷盘，再原子替换。能解析的当前文件会留下 `.bak`；空文件和非法 JSON 恢复这份备份，并在现有错误条说明。恢复提示不写回文件。更新的 schema 不覆盖，旧文件补上 schema 1。
 - 一次丢弃多个文件，不再逐个调用。
 - 克隆、更新、冲突、进行中和操作错误都放到顶部中间。
 - 二级弹窗固定大、中、小三种宽度，去掉撑高的最小高度。回车确认最上层弹窗，Esc 只关最上层。

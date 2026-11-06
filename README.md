@@ -115,10 +115,10 @@ Windows：
 pnpm package:windows
 ```
 
-脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build`。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。当前版本是 2.0.0：
+脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build`。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。版本号以 `src-tauri/Cargo.toml` 为准，`node scripts/check-versions.mjs` 会核对安装包、清单和关于页。当前版本是 2.0.2：
 
-- `target\release\bundle\nsis\AweGit_2.0.0_x64-setup.exe`
-- `target\release\bundle\msi\AweGit_2.0.0_x64_en-US.msi`
+- `target\release\bundle\nsis\AweGit_2.0.2_x64-setup.exe`
+- `target\release\bundle\msi\AweGit_2.0.2_x64_en-US.msi`
 
 发布到 GitHub 时，在仓库根目录双击或运行 `publish.bat`。第 1 项会把修订号加一（2.0.0 变成 2.0.1），然后打包并上传。也可以选次版本、主版本、指定版本、不改版本，或只打包不上传。
 

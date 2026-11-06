@@ -145,6 +145,7 @@ export const zh: Messages = {
     updateProgress: "正在下载 {percent}%",
     updateStarted: "安装程序已启动。",
     updateVersion: "当前版本 {version}",
+    settingsRecovered: "设置文件已损坏，已恢复上一份备份。",
     localOnly: "远程没有这个分支",
     trackedRemote: "远程有同名分支",
     syncAhead: "领先 {count} 个提交",

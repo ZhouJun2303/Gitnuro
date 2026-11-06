@@ -265,6 +265,7 @@ export class ShellState {
     commitType: "feat",
     dismissedUpdate: "",
     featuresIntro: "seen",
+    recoveryNotice: "",
   };
 
 
@@ -752,7 +753,7 @@ export class ShellState {
 
   updatePercent = $state<number | null>(null);
 
-  appVersion = $state("2.0.0");
+  appVersion = $state("2.0.2");
 
 
   passphrase = $state("");
@@ -3187,6 +3188,7 @@ export class ShellState {
 
 
   adoptSettings(value: Settings, resetHistory = false) {
+    const recovered = value.recoveryNotice === "recovered-backup";
     this.settings = this.withSourceRoots({
       ...this.defaultSettings,
       ...value,
@@ -3204,6 +3206,7 @@ export class ShellState {
       sourceDirectories: value.sourceDirectories ?? [],
       groupNames: value.groupNames ?? [],
     });
+    if (recovered) this.settings = { ...this.settings, recoveryNotice: "" };
     if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
     if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
     if (this.settings.aiPromptStyle !== "long") this.settings = { ...this.settings, aiPromptStyle: "short" };
@@ -3215,6 +3218,7 @@ export class ShellState {
     if (resetHistory || this.logLimit === 500) this.logLimit = limit;
     this.signOff = this.settings.signOff;
     this.showPendingUpdate(false);
+    if (recovered && !this.actionError) this.actionError = this.tr("chrome.settingsRecovered");
   }
 
   showPendingUpdate(force: boolean) {

@@ -553,10 +553,28 @@ fn rename_stash(repo: &Path, hash: &str, message: &str) {
         .lines()
         .position(|line| line.trim() == hash);
     let Some(index) = index else { return };
-    if run(repo, &["stash", "store", "-m", message, hash]).is_err() {
-        return;
+    let _ = replace_stash_entry(repo, hash, index, message);
+}
+
+/// Give one stash commit a new reflog message.
+///
+/// `git stash store` of the commit that is already `refs/stash` writes nothing:
+/// Git skips the reflog entry when the tip does not change, so an `autostash`
+/// subject stays in place. Drop that entry, then store the same commit. The hold
+/// ref keeps it reachable if the process stops between those two commands.
+fn replace_stash_entry(repo: &Path, hash: &str, index: usize, message: &str) -> Result<(), Error> {
+    const HOLD: &str = "refs/awegit/stash-rename";
+    run(repo, &["update-ref", HOLD, hash])?;
+    if let Err(error) = run(repo, &["stash", "drop", &format!("stash@{{{index}}}")]) {
+        let _ = run(repo, &["update-ref", "-d", HOLD]);
+        return Err(error);
     }
-    let _ = run(repo, &["stash", "drop", &format!("stash@{{{}}}", index + 1)]);
+    let stored = run(repo, &["stash", "store", "-m", message, hash]);
+    if stored.is_err() {
+        let _ = run(repo, &["update-ref", "-m", message, "--create-reflog", "refs/stash", hash]);
+    }
+    let _ = run(repo, &["update-ref", "-d", HOLD]);
+    stored.map(|_| ())
 }
 
 fn stash_hashes(repo: &Path) -> HashSet<String> {
@@ -961,19 +979,12 @@ fn stash_rename(repo: &Path, name: &str, message: &str) -> Result<(), Error> {
     if hash.len() < 7 {
         return Err(Error::Git("stash has no commit".into()));
     }
-    run(repo, &["stash", "store", "-m", message, &hash])?;
-    let index = stash_index(selector).unwrap_or(0);
-    let shifted = format!("stash@{{{}}}", index + 1);
-    run(repo, &["stash", "drop", &shifted]).map(|_| ())
-}
-
-fn stash_index(selector: &str) -> Option<usize> {
-    let start = selector.find("{")?;
-    let end = selector.find('}')?;
-    if end <= start + 1 {
-        return None;
-    }
-    selector[start + 1..end].parse().ok()
+    let list = run(repo, &["stash", "list", "--format=%H"])?;
+    let index = String::from_utf8_lossy(&list.stdout)
+        .lines()
+        .position(|line| line.trim() == hash)
+        .ok_or_else(|| Error::Git("stash has no commit".into()))?;
+    replace_stash_entry(repo, &hash, index, message)
 }
 
 fn bisect(repo: &Path, verb: &str, rev: &str) -> Result<(), Error> {

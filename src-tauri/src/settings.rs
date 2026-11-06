@@ -1,12 +1,24 @@
 //! Local settings. This file is created on save and is not the old DataStore.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+/// On-disk shape of `settings.json`. Bump this when a migration has to rewrite fields.
+pub const SETTINGS_SCHEMA: u32 = 1;
+
+fn schema_current() -> u32 {
+    SETTINGS_SCHEMA
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
+    #[serde(default = "schema_current")]
+    pub schema: u32,
+    /// `recovered-backup` when this load restored `settings.json.bak`. Not written to disk.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub recovery_notice: String,
     #[serde(default = "theme_default")]
     pub theme: String,
     #[serde(default)]
@@ -426,6 +438,8 @@ fn commit_type_default() -> String {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            schema: schema_current(),
+            recovery_notice: String::new(),
             theme: theme_default(),
             pull_rebase: false,
             fetch_prune: true,
@@ -577,29 +591,176 @@ pub fn path() -> Result<PathBuf, String> {
 }
 
 pub fn load() -> Result<Settings, String> {
-    let path = path()?;
+    load_at(&path()?)
+}
+
+pub fn save(settings: &Settings) -> Result<(), String> {
+    save_at(&path()?, settings)
+}
+
+enum ReadIssue {
+    Corrupt,
+    Newer(u64),
+    Io(String),
+}
+
+struct StoredFile {
+    settings: Settings,
+    migrated: bool,
+}
+
+fn sibling(path: &Path, suffix: &str) -> PathBuf {
+    let name = path.file_name().map(|name| {
+        let mut owned = name.to_os_string();
+        owned.push(suffix);
+        owned
+    });
+    match name {
+        Some(name) => path.with_file_name(name),
+        None => path.to_path_buf(),
+    }
+}
+
+fn read_stored(path: &Path) -> Result<StoredFile, ReadIssue> {
+    let text = std::fs::read_to_string(path).map_err(|error| ReadIssue::Io(error.to_string()))?;
+    if text.trim().is_empty() {
+        return Err(ReadIssue::Corrupt);
+    }
+    let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| ReadIssue::Corrupt)?;
+    if !value.is_object() {
+        return Err(ReadIssue::Corrupt);
+    }
+    let schema = value.get("schema").and_then(|item| item.as_u64()).unwrap_or(0);
+    if schema > SETTINGS_SCHEMA as u64 {
+        return Err(ReadIssue::Newer(schema));
+    }
+    let mut settings: Settings = serde_json::from_value(value).map_err(|_| ReadIssue::Corrupt)?;
+    let migrated = (schema as u32) < SETTINGS_SCHEMA;
+    settings.schema = SETTINGS_SCHEMA;
+    Ok(StoredFile { settings, migrated })
+}
+
+fn load_at(path: &Path) -> Result<Settings, String> {
     if !path.exists() {
         let mut fresh = Settings::default();
         fresh.features_intro = "pending".into();
         return Ok(fresh);
     }
-    let text = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    let mut settings: Settings = serde_json::from_str(&text).map_err(|error| error.to_string())?;
-    let mut changed = repair_imported_tabs(&mut settings);
-    changed |= assign_tab_widths(&mut settings);
-    if changed {
-        save(&settings)?;
+    match read_stored(path) {
+        Ok(stored) => {
+            let mut settings = stored.settings;
+            let mut changed = stored.migrated;
+            changed |= repair_imported_tabs(&mut settings);
+            changed |= assign_tab_widths(&mut settings);
+            if changed {
+                save_at(path, &settings)?;
+            }
+            Ok(settings)
+        }
+        Err(ReadIssue::Corrupt) => recover_at(path),
+        Err(ReadIssue::Newer(schema)) => Err(format!("设置文件由更新的版本写入（schema {schema}），这次没有覆盖。")),
+        Err(ReadIssue::Io(message)) => Err(message),
     }
+}
+
+fn recover_at(path: &Path) -> Result<Settings, String> {
+    let bak = sibling(path, ".bak");
+    let Ok(stored) = read_stored(&bak) else {
+        return Err("设置文件已损坏，没有可恢复的备份。".into());
+    };
+    let mut settings = stored.settings;
+    settings.schema = SETTINGS_SCHEMA;
+    save_at(path, &settings)?;
+    settings.recovery_notice = "recovered-backup".into();
     Ok(settings)
 }
 
-pub fn save(settings: &Settings) -> Result<(), String> {
-    let path = path()?;
+fn save_at(path: &Path, settings: &Settings) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    let text = serde_json::to_string_pretty(settings).map_err(|error| error.to_string())?;
-    std::fs::write(path, text).map_err(|error| error.to_string())
+    if let Ok(text) = std::fs::read_to_string(path) {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) {
+            let existing = value.get("schema").and_then(|item| item.as_u64()).unwrap_or(0);
+            if existing > SETTINGS_SCHEMA as u64 {
+                return Err(format!("设置文件由更新的版本写入（schema {existing}），这次没有覆盖。"));
+            }
+        }
+    }
+    let mut stored = settings.clone();
+    stored.recovery_notice.clear();
+    stored.schema = SETTINGS_SCHEMA;
+    let text = serde_json::to_string_pretty(&stored).map_err(|error| error.to_string())?;
+    let tmp = sibling(path, ".tmp");
+    {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp)
+            .map_err(|error| error.to_string())?;
+        file.write_all(text.as_bytes()).map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())?;
+    }
+    if read_stored(path).is_ok() {
+        copy_durable(path, &sibling(path, ".bak"))?;
+    }
+    replace_file(&tmp, path)?;
+    sync_parent(path);
+    let _ = copy_durable(path, &sibling(path, ".bak"));
+    Ok(())
+}
+
+fn copy_durable(from: &Path, to: &Path) -> Result<(), String> {
+    let tmp = sibling(to, ".tmp");
+    std::fs::copy(from, &tmp).map_err(|error| error.to_string())?;
+    if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&tmp) {
+        let _ = file.sync_all();
+    }
+    replace_file(&tmp, to)
+}
+
+fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let from_wide: Vec<u16> = from.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let to_wide: Vec<u16> = to.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let ok = unsafe { MoveFileExW(from_wide.as_ptr(), to_wide.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::rename(from, to).map_err(|error| error.to_string())
+    }
+}
+
+fn sync_parent(path: &Path) {
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        if let Ok(dir) = std::fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
+#[cfg(windows)]
+const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+#[cfg(windows)]
+const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn MoveFileExW(from: *const u16, to: *const u16, flags: u32) -> i32;
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1385,5 +1546,119 @@ mod tests {
             "{}",
         );
         assert_eq!(settings.theme, "system");
+    }
+
+    struct TempSettings {
+        dir: std::path::PathBuf,
+        path: std::path::PathBuf,
+    }
+
+    impl TempSettings {
+        fn new() -> Self {
+            let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let dir = std::env::temp_dir().join(format!("awegit-settings-{nanos}-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("settings.json");
+            Self { dir, path }
+        }
+    }
+
+    impl Drop for TempSettings {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn sample_settings() -> Settings {
+        let mut settings = Settings::default();
+        settings.theme = "dark".into();
+        settings.github_token = "secret".into();
+        settings.commit_type = "fix".into();
+        settings
+    }
+
+    #[test]
+    fn settings_interrupted_temp_write_keeps_the_last_good_file() {
+        let dir = TempSettings::new();
+        let settings = sample_settings();
+        save_at(&dir.path, &settings).unwrap();
+        std::fs::write(sibling(&dir.path, ".tmp"), b"{").unwrap();
+        let loaded = load_at(&dir.path).unwrap();
+        assert_eq!(loaded.theme, "dark");
+        assert_eq!(loaded.github_token, "secret");
+        assert!(loaded.recovery_notice.is_empty());
+    }
+
+    #[test]
+    fn settings_empty_and_invalid_files_restore_the_backup() {
+        let dir = TempSettings::new();
+        save_at(&dir.path, &sample_settings()).unwrap();
+        assert!(sibling(&dir.path, ".bak").is_file());
+
+        std::fs::write(&dir.path, b"").unwrap();
+        let loaded = load_at(&dir.path).unwrap();
+        assert_eq!(loaded.theme, "dark");
+        assert_eq!(loaded.github_token, "secret");
+        assert_eq!(loaded.recovery_notice, "recovered-backup");
+        assert!(std::fs::read_to_string(&dir.path).unwrap().contains("dark"));
+        assert!(!std::fs::read_to_string(&dir.path).unwrap().contains("recoveryNotice"));
+
+        std::fs::write(&dir.path, b"{nope").unwrap();
+        let loaded = load_at(&dir.path).unwrap();
+        assert_eq!(loaded.commit_type, "fix");
+        assert_eq!(loaded.recovery_notice, "recovered-backup");
+    }
+
+    #[test]
+    fn settings_old_fields_survive_and_gain_a_schema() {
+        let dir = TempSettings::new();
+        std::fs::write(&dir.path, r#"{"theme":"dark","githubToken":"abc","commitType":"fix"}"#).unwrap();
+        let loaded = load_at(&dir.path).unwrap();
+        assert_eq!(loaded.theme, "dark");
+        assert_eq!(loaded.github_token, "abc");
+        assert_eq!(loaded.commit_type, "fix");
+        assert_eq!(loaded.schema, SETTINGS_SCHEMA);
+        assert!(loaded.recovery_notice.is_empty());
+        let disk = std::fs::read_to_string(&dir.path).unwrap();
+        assert!(disk.contains("\"schema\": 1") || disk.contains("\"schema\":1"), "{disk}");
+        assert!(disk.contains("abc"));
+        let again = load_at(&dir.path).unwrap();
+        assert!(again.recovery_notice.is_empty());
+        assert_eq!(again.github_token, "abc");
+    }
+
+    #[test]
+    fn settings_corrupt_file_without_a_backup_is_left_in_place() {
+        let dir = TempSettings::new();
+        std::fs::write(&dir.path, b"[]").unwrap();
+        let error = load_at(&dir.path).unwrap_err();
+        assert!(error.contains("备份"), "{error}");
+        assert_eq!(std::fs::read(&dir.path).unwrap(), b"[]");
+    }
+
+    #[test]
+    fn settings_newer_schema_is_not_overwritten() {
+        let dir = TempSettings::new();
+        let original = r#"{"schema":99,"theme":"dark","githubToken":"keep"}"#;
+        std::fs::write(&dir.path, original).unwrap();
+        let error = load_at(&dir.path).unwrap_err();
+        assert!(error.contains("99"), "{error}");
+        assert_eq!(std::fs::read_to_string(&dir.path).unwrap(), original);
+        let mut settings = sample_settings();
+        settings.schema = 1;
+        let error = save_at(&dir.path, &settings).unwrap_err();
+        assert!(error.contains("99"), "{error}");
+        assert_eq!(std::fs::read_to_string(&dir.path).unwrap(), original);
+    }
+
+    #[test]
+    fn settings_save_does_not_persist_the_recovery_notice() {
+        let dir = TempSettings::new();
+        let mut settings = sample_settings();
+        settings.recovery_notice = "recovered-backup".into();
+        save_at(&dir.path, &settings).unwrap();
+        let text = std::fs::read_to_string(&dir.path).unwrap();
+        assert!(!text.contains("recoveryNotice"), "{text}");
+        assert!(text.contains("secret"));
     }
 }

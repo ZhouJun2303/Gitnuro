@@ -31,18 +31,6 @@ function Get-JsonVersion([string]$text) {
     return $match.Groups[1].Value
 }
 
-function Get-TomlVersion([string]$text) {
-    $match = [regex]::Match($text, '(?m)^version = "(\d+\.\d+\.\d+)"')
-    if (-not $match.Success) { throw "Could not find a Cargo version" }
-    return $match.Groups[1].Value
-}
-
-function Get-LockVersion([string]$text, [string]$name) {
-    $match = [regex]::Match($text, "(?s)\[\[package\]\]\r?\nname = `"$name`"\r?\nversion = `"(\d+\.\d+\.\d+)`"")
-    if (-not $match.Success) { throw "Cargo.lock has no package $name" }
-    return $match.Groups[1].Value
-}
-
 function Update-FirstMatch([string]$text, [regex]$pattern, [string]$replacement) {
     $match = $pattern.Match($text)
     if (-not $match.Success) { throw "Version pattern was not found" }
@@ -50,18 +38,11 @@ function Update-FirstMatch([string]$text, [regex]$pattern, [string]$replacement)
 }
 
 function Get-ProjectVersion {
-    $package = Get-JsonVersion ([IO.File]::ReadAllText((Join-Path $root "package.json")))
-    $tauri = Get-JsonVersion ([IO.File]::ReadAllText((Join-Path $root "src-tauri\tauri.conf.json")))
-    $shell = Get-TomlVersion ([IO.File]::ReadAllText((Join-Path $root "src-tauri\Cargo.toml")))
-    $git = Get-TomlVersion ([IO.File]::ReadAllText((Join-Path $root "crates\git\Cargo.toml")))
-    $lockText = [IO.File]::ReadAllText((Join-Path $root "Cargo.lock"))
-    $lockApp = Get-LockVersion $lockText "awegit"
-    $lockGit = Get-LockVersion $lockText "awegit-git"
-    $versions = @($package, $tauri, $shell, $git, $lockApp, $lockGit)
-    if (@($versions | Select-Object -Unique).Count -ne 1) {
-        throw "版本号不一致：package.json=$package tauri.conf.json=$tauri src-tauri/Cargo.toml=$shell crates/git=$git Cargo.lock awegit=$lockApp awegit-git=$lockGit"
+    $output = & node (Join-Path $root "scripts\check-versions.mjs") 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw ($output | Out-String)
     }
-    return $package
+    return Get-JsonVersion ([IO.File]::ReadAllText((Join-Path $root "package.json")))
 }
 
 function ConvertTo-Parts([string]$text) {
@@ -94,6 +75,7 @@ function Test-VersionGreater([string]$left, [string]$right) {
 
 function Set-ProjectVersion([string]$version) {
     $utf8 = New-Object System.Text.UTF8Encoding $false
+    $previous = Get-JsonVersion ([IO.File]::ReadAllText((Join-Path $root "package.json")))
     $jsonPattern = [regex]'(?m)^(\s*"version"\s*:\s*")\d+\.\d+\.\d+(")'
     $tomlPattern = [regex]'(?m)^version = "\d+\.\d+\.\d+"'
     $files = @(
@@ -123,6 +105,26 @@ function Set-ProjectVersion([string]$version) {
         $lock = $lock.Remove($match.Index, $match.Length).Insert($match.Index, $match.Groups[1].Value + $version)
     }
     $pending += @{ Path = $lockPath; Text = $lock }
+
+    $readmePath = Join-Path $root "README.md"
+    $readme = [IO.File]::ReadAllText($readmePath)
+    $readmeUpdated = $readme.Replace("当前版本是 $previous", "当前版本是 $version").Replace("AweGit_${previous}_", "AweGit_${version}_")
+    if ($previous -ne $version -and $readmeUpdated -eq $readme) { throw "Could not update the version in README.md" }
+    $pending += @{ Path = $readmePath; Text = $readmeUpdated }
+
+    $statePath = Join-Path $root "src\lib\shell\state.svelte.ts"
+    $state = [IO.File]::ReadAllText($statePath)
+    $stateOld = 'appVersion = $state("' + $previous + '")'
+    $stateNew = 'appVersion = $state("' + $version + '")'
+    if (-not $state.Contains($stateOld)) { throw "Could not update the about-page version" }
+    $pending += @{ Path = $statePath; Text = $state.Replace($stateOld, $stateNew) }
+
+    $latestPath = Join-Path $root "latest.json"
+    $latest = [IO.File]::ReadAllText($latestPath)
+    $latestPattern = [regex]'"appVersion"\s*:\s*"\d+\.\d+\.\d+"'
+    if (-not $latestPattern.IsMatch($latest)) { throw "Could not update latest.json" }
+    $pending += @{ Path = $latestPath; Text = $latestPattern.Replace($latest, ('"appVersion": "' + $version + '"'), 1) }
+
     foreach ($item in $pending) {
         [IO.File]::WriteAllText($item.Path, $item.Text, $utf8)
     }
@@ -204,17 +206,19 @@ function Invoke-ReleaseFlow {
 
     if ($target -ne $current) {
         Set-ProjectVersion $target
-        Invoke-Git add -- package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml crates/git/Cargo.toml Cargo.lock
+        Invoke-Git add -- package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml crates/git/Cargo.toml Cargo.lock README.md latest.json src/lib/shell/state.svelte.ts
         Invoke-Git commit -m "chore: 版本 $target"
         Write-Host "已提交版本 $target"
     }
 
     $switched = $false
+    $releaseBefore = $null
     try {
         if ($Publish -and $branch -ne "release") {
             Write-Host "切换到 release，并合并 $branch"
             Invoke-Git checkout release
             $switched = $true
+            $releaseBefore = (& git -C $root rev-parse HEAD).Trim()
             & git -C $root merge -m "chore: 合并 $branch" $branch
             if ($LASTEXITCODE -ne 0) {
                 & git -C $root merge --abort 2>$null
@@ -222,8 +226,28 @@ function Invoke-ReleaseFlow {
             }
         }
         if ($Publish) {
-            & (Join-Path $root "scripts\publish-windows.ps1") -Notes $ReleaseNotes
-            if ($LASTEXITCODE -ne 0) { throw "发布失败" }
+            $stagePath = Join-Path $root ".git\awegit-publish-stage"
+            if (Test-Path $stagePath) { Remove-Item $stagePath -Force }
+            try {
+                & (Join-Path $root "scripts\publish-windows.ps1") -Notes $ReleaseNotes
+                if ($LASTEXITCODE -ne 0) { throw "发布失败" }
+            } catch {
+                $stage = ""
+                if (Test-Path $stagePath) { $stage = (Get-Content -Raw $stagePath).Trim() }
+                if ($switched -and $releaseBefore -and $stage -ne "released" -and $stage -ne "pushed") {
+                    & git -C $root reset --hard $releaseBefore
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Host "没能撤回 release 上的合并。"
+                    } else {
+                        Write-Host "发布没有完成，已撤回 release 上这次合并。"
+                    }
+                } elseif ($stage -eq "released") {
+                    Write-Host "安装包已经上传，版本清单还没有推到 release。请检查网络后再发布，不要改版本号。"
+                }
+                throw
+            } finally {
+                if (Test-Path $stagePath) { Remove-Item $stagePath -Force }
+            }
         } else {
             & (Join-Path $root "scripts\package-windows.ps1")
             if ($LASTEXITCODE -ne 0) { throw "打包失败" }

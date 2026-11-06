@@ -681,7 +681,8 @@ fn load_settings() -> Result<settings::Settings, String> {
 }
 
 #[tauri::command]
-fn save_settings(values: settings::Settings) -> Result<settings::Settings, String> {
+fn save_settings(mut values: settings::Settings) -> Result<settings::Settings, String> {
+    values.recovery_notice.clear();
     settings::save(&values)?;
     remember_fakeignore(values.fake_ignore);
     Ok(values)

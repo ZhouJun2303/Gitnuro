@@ -356,15 +356,19 @@ fn preview_reads_a_png() {
 
 #[test]
 fn cancel_stops_a_child_process() {
-    let mut child = Command::new("ping")
-        .args(["-n", "30", "127.0.0.1"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut command = Command::new(if cfg!(windows) { "ping" } else { "sleep" });
+    if cfg!(windows) {
+        command.args(["-n", "30", "127.0.0.1"]);
+    } else {
+        command.arg("30");
+    }
+    command.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let mut child = command.spawn().unwrap();
+    let started = std::time::Instant::now();
     stop_process_tree(child.id());
     let status = child.wait().unwrap();
     assert!(!status.success(), "{status}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(5), "cancel took {:?}", started.elapsed());
 }
 
 #[test]

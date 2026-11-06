@@ -7,6 +7,7 @@ mod cli;
 mod fakeignore;
 mod model;
 mod ops;
+mod proc;
 
 use std::path::{Path, PathBuf};
 
