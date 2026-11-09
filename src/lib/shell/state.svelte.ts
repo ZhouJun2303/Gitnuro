@@ -35,6 +35,7 @@ import {
     type GitRuntime,
     type RepoScan,
     type UpdateNotice,
+    type UpdateProgress,
     workspaceTabWidth,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
@@ -755,11 +756,27 @@ export class ShellState {
 
   updateBusy = $state(false);
 
-  updatePhase = $state<"idle" | "checking" | "current" | "available" | "downloading" | "ready" | "error">("idle");
+  updatePhase = $state<"idle" | "checking" | "current" | "available" | "downloading" | "verifying" | "ready" | "cancelled" | "error">("idle");
 
   updateMessage = $state("");
 
   updatePercent = $state<number | null>(null);
+
+  updateReceived = $state(0);
+
+  updateTotal = $state(0);
+
+  updateSpeed = $state<number | null>(null);
+
+  updateCancelling = $state(false);
+
+  updateCheckedAt = $state(0);
+
+  updateSpeedAt = 0;
+
+  updateSpeedBytes = 0;
+
+  updateCancelRequested = false;
 
   appVersion = $state("2.0.3");
 
@@ -1373,30 +1390,15 @@ export class ShellState {
       });
     }
     if (this.updateNotice) {
-      const notes = [this.updateNotice.notes, this.updateMessage].filter(Boolean).join("\n").trim();
       items.push({
         id: "update",
         priority: 4,
         tone: "info",
         title: this.tr("chrome.updateAvailable", { name: `AweGit ${this.updateNotice.appVersion}` }),
-        detail: notes,
+        detail: this.updateNotice.notes,
         dataLayer: "update",
         floor: false,
-        actions: [
-          { id: "install", label: this.updateBusy ? this.tr("chrome.updateDownloading") : this.tr("chrome.updateInstall"), disabled: this.updateBusy },
-          { id: "later", label: this.tr("chrome.updateLater"), disabled: this.updateBusy },
-        ],
-      });
-    } else if ((this.updatePhase === "checking" || this.updatePhase === "current" || this.updatePhase === "error") && this.updateMessage) {
-      items.push({
-        id: "update",
-        priority: 4,
-        tone: "info",
-        title: this.updateMessage,
-        detail: "",
-        dataLayer: "update",
-        floor: false,
-        actions: [],
+        actions: [{ id: "open", label: this.tr("chrome.updateOpenPanel") }],
       });
     }
     return items.sort((left, right) => left.priority - right.priority || left.id.localeCompare(right.id));
@@ -2929,9 +2931,8 @@ export class ShellState {
       if (path) void this.openRepo(path);
       return;
     }
-    if (id === "update") {
-      if (action === "install") void this.installUpdate();
-      else if (action === "later") this.dismissUpdate();
+    if (id === "update" && action === "open") {
+      this.openUpdatePanel(false);
     }
   }
 
@@ -3248,13 +3249,36 @@ export class ShellState {
     if (this.updatePhase === "idle") this.updatePhase = "available";
   }
 
+  updateStatusLine = $derived.by(() => {
+    if (this.updatePhase === "checking") return this.tr("chrome.updateChecking");
+    if (this.updatePhase === "current") return this.tr("chrome.updateCurrent", { version: this.appVersion });
+    if (this.updatePhase === "available" && this.updateNotice) return this.tr("chrome.updateAvailable", { name: `AweGit ${this.updateNotice.appVersion}` });
+    if (this.updatePhase === "downloading") return this.updatePercent == null ? this.tr("chrome.updateDownloading") : this.tr("chrome.updateProgress", { percent: String(this.updatePercent) });
+    if (this.updatePhase === "verifying") return this.tr("chrome.updateVerifying");
+    if (this.updatePhase === "ready") return this.tr("chrome.updateStarted");
+    if (this.updatePhase === "cancelled") return this.tr("chrome.updateCancelled");
+    if (this.updatePhase === "error") return this.updateMessage;
+    return "";
+  });
+
+  openUpdatePanel(check = true) {
+    this.dialog = "update";
+    if (!check || this.updateBusy || this.updatePhase === "checking") return;
+    if (this.updateNotice) return;
+    void this.checkForUpdate();
+  }
+
   async checkForUpdate() {
     if (this.updatePhase === "checking" || this.updateBusy) return;
     this.updatePhase = "checking";
     this.updateMessage = this.tr("chrome.updateChecking");
     this.updatePercent = null;
+    this.updateReceived = 0;
+    this.updateTotal = 0;
+    this.updateSpeed = null;
     try {
       const value = await invoke<UpdateNotice | null>("check_for_update");
+      this.updateCheckedAt = Date.now();
       this.pendingUpdate = value;
       if (!value) {
         this.updateNotice = null;
@@ -3293,6 +3317,10 @@ export class ShellState {
     this.updatePhase = "idle";
     this.updateMessage = "";
     this.updatePercent = null;
+    this.updateReceived = 0;
+    this.updateTotal = 0;
+    this.updateSpeed = null;
+    if (this.dialog === "update") this.dialog = null;
     if (!version) return;
     this.settings = { ...this.settings, dismissedUpdate: version };
     void this.savePrefs(false);
@@ -3302,12 +3330,20 @@ export class ShellState {
     const notice = this.updateNotice;
     if (!notice || this.updateBusy) return;
     if (!notice.installable || !notice.downloadUrl) {
-      if (notice.downloadUrl) void openUrl(notice.downloadUrl);
+      const url = notice.downloadUrl || notice.releaseUrl;
+      if (url) void openUrl(url);
       return;
     }
     this.updateBusy = true;
     this.updatePhase = "downloading";
     this.updatePercent = null;
+    this.updateReceived = 0;
+    this.updateTotal = 0;
+    this.updateSpeed = null;
+    this.updateSpeedAt = 0;
+    this.updateSpeedBytes = 0;
+    this.updateCancelling = false;
+    this.updateCancelRequested = false;
     this.updateMessage = this.tr("chrome.updateDownloading");
     try {
       await invoke("download_update", { url: notice.downloadUrl, sha256: notice.sha256 ?? "" });
@@ -3315,10 +3351,46 @@ export class ShellState {
       this.updatePercent = 100;
       this.updateMessage = this.tr("chrome.updateStarted");
     } catch (error) {
-      this.updatePhase = "error";
-      this.updateMessage = this.message(error);
+      if (this.updateCancelRequested) {
+        this.updatePhase = "cancelled";
+        this.updatePercent = null;
+        this.updateMessage = this.tr("chrome.updateCancelled");
+      } else {
+        this.updatePhase = "error";
+        this.updateMessage = this.message(error);
+      }
     } finally {
       this.updateBusy = false;
+      this.updateCancelling = false;
+      this.updateCancelRequested = false;
+    }
+  }
+
+  cancelUpdate() {
+    if (this.updatePhase !== "downloading" || this.updateCancelling) return;
+    this.updateCancelling = true;
+    invoke("cancel_update").catch(() => {});
+  }
+
+  noteUpdateProgress(progress: UpdateProgress) {
+    if (progress.phase === "verifying" && this.updatePhase === "downloading") {
+      this.updatePhase = "verifying";
+      this.updatePercent = 100;
+    }
+    if (progress.phase === "downloading") this.updatePercent = progress.percent;
+    if (progress.total > 0) this.updateTotal = progress.total;
+    this.updateReceived = progress.received;
+    const now = performance.now();
+    if (!this.updateSpeedAt) {
+      this.updateSpeedAt = now;
+      this.updateSpeedBytes = progress.received;
+      return;
+    }
+    const elapsed = now - this.updateSpeedAt;
+    if (elapsed >= 500) {
+      this.updateSpeed = Math.max(0, ((progress.received - this.updateSpeedBytes) * 1000) / elapsed);
+      this.updateSpeedAt = now;
+      this.updateSpeedBytes = progress.received;
     }
   }
 
@@ -5949,11 +6021,8 @@ export class ShellState {
     const path = event.payload?.path;
     if (typeof percent === "number" && percent >= 0 && percent <= 100 && path) this.noteProgress(path, percent);
     });
-    unupdate = await listen<{ percent: number | null }>("update-progress", (event) => {
-    if (this.updatePhase !== "downloading") return;
-    const percent = event.payload?.percent;
-    this.updatePercent = typeof percent === "number" ? percent : null;
-    this.updateMessage = this.updatePercent == null ? this.tr("chrome.updateDownloading") : this.tr("chrome.updateProgress", { percent: String(this.updatePercent) });
+    unupdate = await listen<UpdateProgress>("update-progress", (event) => {
+    if (event.payload) this.noteUpdateProgress(event.payload);
     });
     } catch {
     /* the watcher is optional until a repository is open */

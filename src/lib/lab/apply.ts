@@ -263,13 +263,15 @@ async function fillSurface(shell: ShellState, id: string) {
     return;
   }
   if (id === "update") {
+    shell.updatePhase = "available";
     shell.updateNotice = {
       appVersion: "9.9.9",
       appCode: 999,
-      downloadUrl: "https://example.com/awegit",
+      downloadUrl: "https://github.com/ZhouJun2303/Gitnuro/releases/latest",
       notes: lines(FILL, "实验室更新说明"),
       installable: false,
       sha256: "",
+      releaseUrl: "https://github.com/ZhouJun2303/Gitnuro/releases/latest",
     };
     shell.openCommandLog("update");
     return;
@@ -420,6 +422,23 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.prefTab = sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : sceneId === "prefs-integration" ? "integration" : sceneId === "prefs-updates" ? "updates" : "general";
       fillSourceRoots(shell);
       fillLabTools(shell);
+      break;
+    case "update":
+      shell.updateNotice = {
+        appVersion: "2.1.0",
+        appCode: 29,
+        downloadUrl: "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.1.0/AweGit_2.1.0_x64-setup.exe",
+        notes: "修复大型差异滚动卡顿。\n提交图在浅色主题下更清楚。\n更新面板显示下载进度、速度和校验状态。",
+        installable: true,
+        sha256: "ab".repeat(32),
+        releaseUrl: "https://github.com/ZhouJun2303/Gitnuro/releases/latest",
+        fileName: "AweGit_2.1.0_x64-setup.exe",
+      };
+      shell.updatePhase = sceneId === "update-downloading" ? "downloading" : sceneId === "update-ready" ? "ready" : "available";
+      shell.updatePercent = sceneId === "update-downloading" ? 42 : sceneId === "update-ready" ? 100 : null;
+      shell.updateReceived = sceneId === "update-downloading" ? 18_450_432 : 0;
+      shell.updateTotal = sceneId === "update-downloading" ? 43_000_000 : 0;
+      shell.updateSpeed = sceneId === "update-downloading" ? 2_400_000 : null;
       break;
     case "reset":
       shell.draft = head.slice(0, 7) || "HEAD";

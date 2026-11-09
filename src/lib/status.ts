@@ -375,6 +375,15 @@ export type UpdateNotice = {
   notes: string;
   installable: boolean;
   sha256?: string;
+  releaseUrl?: string;
+  fileName?: string;
+};
+
+export type UpdateProgress = {
+  phase: "connecting" | "downloading" | "verifying" | "done";
+  percent: number | null;
+  received: number;
+  total: number;
 };
 
 export type GitRuntime = {

@@ -53,6 +53,7 @@ export type Dialog =
     | "renameTab"
     | "colorTab"
     | "groupRename"
+    | "update"
     | null;
 
 export type MergePick = "ours" | "theirs" | "both" | "none";

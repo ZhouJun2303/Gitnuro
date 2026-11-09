@@ -2,6 +2,7 @@
   import { getShell } from "./context";
   import "./DialogHost.css";
   import PrefsDialog from "./PrefsDialog.svelte";
+  import UpdatePanel from "./UpdatePanel.svelte";
   import { flushClientLog, invoke } from "../perf";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { cloneTarget, cloneUrl } from "../clonePath";
@@ -261,6 +262,8 @@
       >
         {#if shell.dialog === "prefs"}
           <PrefsDialog />
+        {:else if shell.dialog === "update"}
+          <UpdatePanel />
         {:else if shell.dialog === "reset"}
           <h2>{shell.tr("dialog.resetTo", { name: shell.draft.slice(0, 7) })}</h2>
           <div class="composer-row">

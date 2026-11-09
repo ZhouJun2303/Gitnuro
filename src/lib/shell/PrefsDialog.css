@@ -65,6 +65,14 @@
 
 .prefs-foot .meta { margin-right: auto; }
 
+.update-summary {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
 .pref-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .pref-inline input[type="number"] { width: 72px; }
