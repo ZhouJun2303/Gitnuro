@@ -2188,11 +2188,8 @@ fn push_ref(repo: &Path, options: PushRefOptions<'_>) -> Result<(), Error> {
     let remote = check_name(options.remote)?;
     let branch = check_name(options.branch)?;
     let remote_branch = options.remote_branch.trim();
-    let spec = if remote_branch.is_empty() {
-        format!("HEAD:{branch}")
-    } else {
-        format!("{branch}:{}", check_name(remote_branch)?)
-    };
+    let target = if remote_branch.is_empty() { branch } else { check_name(remote_branch)? };
+    let spec = format!("{branch}:{target}");
     let mut args = vec!["push"];
     if options.set_upstream {
         args.push("--set-upstream");

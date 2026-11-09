@@ -295,6 +295,12 @@ test("push and pull dialogs start with a branch", async ({ page }) => {
   await openLabScene(page, "dialog-push", '[data-dialog="push"]');
   const push = await page.locator('[data-dialog="push"] select').first().inputValue();
   expect(push).not.toBe("");
+  const tabs = page.locator('[data-dialog="push"] .push-tabs [role="tab"]');
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.filter({ hasText: "origin" })).toHaveAttribute("aria-selected", "true");
+  await tabs.filter({ hasText: "mirror" }).click();
+  await expect(tabs.filter({ hasText: "mirror" })).toHaveAttribute("aria-selected", "true");
+  expect(await page.locator('[data-dialog="push"] select').nth(1).inputValue()).toMatch(/^mirror\//);
   await openLabScene(page, "dialog-pull", '[data-dialog="pull"]');
   const pull = await page.locator('[data-dialog="pull"] select').nth(1).inputValue();
   expect(pull).not.toBe("");

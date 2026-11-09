@@ -215,6 +215,59 @@
     font-weight: 500;
   }
 
+.dialog .push-target {
+    align-items: flex-start;
+  }
+
+.dialog .push-target > span {
+    padding-top: 6px;
+  }
+
+.dialog .push-target-body {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+.dialog .push-target-empty {
+    padding: 6px 0;
+    color: var(--text-secondary);
+  }
+
+.dialog .push-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 8px;
+    background: var(--field);
+  }
+
+.dialog .push-tabs button {
+    min-height: 26px;
+    height: auto;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    padding: 3px 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+
+.dialog .push-tabs button:hover {
+    color: var(--text);
+  }
+
+.dialog .push-tabs button.on {
+    color: var(--text);
+    background: var(--elevated);
+    font-weight: 500;
+    box-shadow: 0 1px 2px var(--line), 0 0 0 1px var(--line);
+  }
+
 .dialog label.check.sync-indent {
     margin-left: 76px;
   }

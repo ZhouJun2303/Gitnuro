@@ -462,6 +462,8 @@ const ahead = join(repos, "ahead");
 cloneFrom(origin, full);
 cloneFrom(origin, even);
 cloneFrom(origin, ahead);
+git(ahead, ["remote", "add", "mirror", origin]);
+git(ahead, ["fetch", "mirror"]);
 seedBisectRepo();
 
 for (let i = 1; i <= FILL; i++) {

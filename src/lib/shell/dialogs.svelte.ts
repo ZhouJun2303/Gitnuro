@@ -510,7 +510,7 @@ export function confirmSync(shell: ShellState, kind: "fetch" | "pull" | "push") 
     shell.syncRebase = shell.settings.pullRebase;
     shell.syncForce = false;
     shell.pushBranch = current?.name ?? shell.snapshot?.branch ?? "";
-    shell.pushTo = "";
+    shell.resetPushTarget();
     shell.draft = upstreamRemote || firstRemote;
     shell.draftExtra = kind === "pull" ? (upstreamRemote ? upstream.slice(upstreamRemote.length + 1) : shell.snapshot?.branch ?? "") : "";
     shell.dialog = kind;

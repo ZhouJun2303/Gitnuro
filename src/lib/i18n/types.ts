@@ -535,7 +535,8 @@ export type Messages = {
     fetchAllRemotes: string;
     pullInto: string;
     pushTo: string;
-    pushDefault: string;
+    pushNewBranch: string;
+    noRemotes: string;
     pushAllTags: string;
     forcePush: string;
     allRemotes: string;

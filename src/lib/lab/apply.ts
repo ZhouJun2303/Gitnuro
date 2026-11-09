@@ -486,7 +486,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       break;
     case "push":
       shell.pushBranch = shell.refs?.branches.find((branch) => branch.current)?.name ?? shell.snapshot?.branch ?? "main";
-      shell.pushTo = "";
+      shell.resetPushTarget();
       shell.draft = "origin";
       break;
     case "stash":

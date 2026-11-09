@@ -166,6 +166,35 @@ fn fetch_push_and_fast_forward() {
 }
 
 #[test]
+fn push_ref_same_name_pushes_the_chosen_branch() {
+    let origin = bare();
+    let local = repo();
+    commit_file(&local, "a.txt", "main\n", "main commit");
+    let url = file_url(&origin.path);
+    perform(&local.path, Mutation::AddRemote { name: "origin".into(), url }).unwrap();
+    local.git(&["checkout", "-b", "work"]);
+    commit_file(&local, "a.txt", "work\n", "work commit");
+    local.git(&["checkout", "main"]);
+
+    perform(
+        &local.path,
+        Mutation::PushRef {
+            remote: "origin".into(),
+            branch: "work".into(),
+            force_with_lease: false,
+            force: false,
+            remote_branch: String::new(),
+            set_upstream: true,
+            tags: false,
+        },
+    )
+    .unwrap();
+
+    let log = git_at(&origin.path, &["log", "--format=%s", "work"]);
+    assert!(log.contains("work commit"), "pushed HEAD instead of the branch tip: {log}");
+}
+
+#[test]
 fn marks_commits_that_exist_only_on_a_remote() {
     let origin = bare();
     let local = repo();

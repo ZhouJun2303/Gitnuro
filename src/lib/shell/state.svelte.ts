@@ -3739,9 +3739,46 @@ export class ShellState {
 
 
 
-  pushTargetLabel(local: string) {
-    const target = this.pushTarget(local, "");
-    return target ? `${target.remote}/${target.branch}` : "—";
+  /** The remote tab the target belongs to. */
+  pushRemoteName() {
+    return this.splitRemoteRef(this.pushTo)?.remote ?? this.refs?.remotes[0]?.name ?? "";
+  }
+
+
+
+  /** Target on one remote: its upstream branch, else the same local name, else a new branch. */
+  pushTargetOn(remote: string) {
+    const known = this.splitRemoteRef(this.refs?.branches.find((branch) => branch.name === this.pushBranch)?.upstream ?? "");
+    if (known?.remote === remote) return `${remote}/${known.branch}`;
+    const branches = this.refs?.remotes.find((item) => item.name === remote)?.branches ?? [];
+    return branches.includes(this.pushBranch) ? `${remote}/${this.pushBranch}` : `${remote}/`;
+  }
+
+
+
+  /** Branches offered under the selected remote tab; a same-name new branch when the remote has none. */
+  pushBranchOptions() {
+    const remotes = this.refs?.remotes ?? [];
+    const remote = remotes.find((item) => item.name === this.pushRemoteName());
+    if (!remote) return [];
+    const options = remote.branches.map((branch) => ({ value: `${remote.name}/${branch}`, label: branch }));
+    if (!remote.branches.includes(this.pushBranch)) options.unshift({ value: `${remote.name}/`, label: this.tr("dialog.pushNewBranch", { name: this.pushBranch }) });
+    return options;
+  }
+
+
+
+  selectPushRemote(remote: string) {
+    this.pushTo = this.pushTargetOn(remote);
+  }
+
+
+
+  /** Reset the target to the upstream branch, or the same name on the first remote. */
+  resetPushTarget() {
+    const known = this.splitRemoteRef(this.refs?.branches.find((branch) => branch.name === this.pushBranch)?.upstream ?? "");
+    const remote = known?.remote ?? this.refs?.remotes[0]?.name ?? "";
+    this.pushTo = remote ? this.pushTargetOn(remote) : "";
   }
 
 

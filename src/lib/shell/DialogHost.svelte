@@ -429,7 +429,7 @@
           <p>{shell.tr("dialog.pushBody")}</p>
           <label class="sync-row">
             <span>{shell.tr("dialog.branch")}</span>
-            <select value={shell.pushBranch} onchange={(event) => { shell.pushBranch = event.currentTarget.value; shell.pushTo = ""; }}>
+            <select value={shell.pushBranch} onchange={(event) => { shell.pushBranch = event.currentTarget.value; shell.resetPushTarget(); }}>
               {#if shell.pushBranch && !(shell.refs?.branches.some((branch) => branch.name === shell.pushBranch))}
                 <option value={shell.pushBranch}>{shell.pushBranch}</option>
               {/if}
@@ -438,18 +438,25 @@
               {/each}
             </select>
           </label>
-          <label class="sync-row">
+          <div class="sync-row push-target">
             <span>{shell.tr("dialog.pushTo")}</span>
-            <select bind:value={shell.pushTo}>
-              <option value="">{shell.tr("dialog.pushDefault", { target: shell.pushTargetLabel(shell.pushBranch) })}</option>
-              {#each shell.refs?.remotes ?? [] as remote (remote.name)}
-                <option value={`${remote.name}/`}>{remote.name}</option>
-                {#each remote.branches as branch (branch)}
-                  <option value={`${remote.name}/${branch}`}>{remote.name}/{branch}</option>
-                {/each}
-              {/each}
-            </select>
-          </label>
+            <div class="push-target-body">
+              {#if (shell.refs?.remotes ?? []).length > 0}
+                <div class="push-tabs" role="tablist" aria-label={shell.tr("dialog.pushTo")}>
+                  {#each shell.refs?.remotes ?? [] as remote (remote.name)}
+                    <button type="button" role="tab" title={remote.url ?? remote.name} class:on={shell.pushRemoteName() === remote.name} aria-selected={shell.pushRemoteName() === remote.name} onclick={() => shell.selectPushRemote(remote.name)}>{remote.name}</button>
+                  {/each}
+                </div>
+                <select bind:value={shell.pushTo} aria-label={shell.tr("dialog.remoteBranch")}>
+                  {#each shell.pushBranchOptions() as option (option.value)}
+                    <option value={option.value}>{option.label}</option>
+                  {/each}
+                </select>
+              {:else}
+                <span class="push-target-empty">{shell.tr("dialog.noRemotes")}</span>
+              {/if}
+            </div>
+          </div>
           <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncTags} onchange={(event) => { shell.settings = { ...shell.settings, pushAllTags: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.pushAllTags")}</label>
           <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncForce} /> {shell.tr("dialog.forcePush")}</label>
           <div class="composer-row">
