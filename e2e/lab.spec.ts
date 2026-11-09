@@ -438,6 +438,13 @@ test("history restores its scroll position after switching sections", async ({ p
   expect(visible).toBeGreaterThan(0);
 });
 
+test("local commits keep full contrast and use bold", async ({ page }) => {
+  await openLabScene(page, "history", ".history .commit-row.unpushed");
+  const subject = page.locator(".history .commit-row.unpushed .subject").first();
+  expect(await subject.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("600");
+  expect(await subject.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+});
+
 test("context menu arrows stay in the menu and restore focus", async ({ page }) => {
   await openLabScene(page, "history", ".history .commit-row");
   const row = page.locator(".history .commit-row").nth(2);
