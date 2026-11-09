@@ -46,6 +46,11 @@ pub fn current_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// The GitHub releases page the update document points people at.
+pub fn release_page() -> &'static str {
+    RELEASES_PAGE
+}
+
 pub fn check() -> Result<Option<UpdateNotice>, String> {
     let text = http_get(VERSION_CHECK_URL)?;
     let value: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;

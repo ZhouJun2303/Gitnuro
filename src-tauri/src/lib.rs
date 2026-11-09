@@ -1378,6 +1378,11 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
+fn update_release_page() -> String {
+    updates::release_page().to_string()
+}
+
+#[tauri::command]
 fn download_update(app: tauri::AppHandle, url: String, sha256: Option<String>) -> Result<(), String> {
     http::with_net(net_options(), || {
         updates::download_and_open(&url, sha256.as_deref(), |progress| {
@@ -2100,6 +2105,7 @@ pub fn run() {
             approve_credential,
             check_for_update,
             app_version,
+            update_release_page,
             download_update,
             cancel_update,
             conflict_sides,

@@ -772,6 +772,8 @@ export class ShellState {
 
   updateCheckedAt = $state(0);
 
+  updateReleaseUrl = $state("");
+
   updateSpeedAt = 0;
 
   updateSpeedBytes = 0;
@@ -2392,6 +2394,7 @@ export class ShellState {
       });
       this.aiModels = Array.from({ length: 24 }, (_, index) => `lab-model-${String(index + 1).padStart(2, "0")}`);
       void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
+      void invoke<string>("update_release_page").then((value) => { if (value) this.updateReleaseUrl = value; }).catch(() => {});
       if (item.repo) {
         const path = layout[item.repo];
         if (!path) throw new Error(`场景 ${item.id} 没有仓库 ${item.repo}`);
@@ -5974,6 +5977,7 @@ export class ShellState {
     this.mode = "loading";
     this.selectedPath = null;
     void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
+    void invoke<string>("update_release_page").then((value) => { if (value) this.updateReleaseUrl = value; }).catch(() => {});
     void invoke<GitRuntime>("git_runtime").then((value) => {
       this.gitRuntime = value;
       if (this.actionError) return;

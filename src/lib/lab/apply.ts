@@ -424,6 +424,12 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       fillLabTools(shell);
       break;
     case "update":
+      if (sceneId === "update-current") {
+        shell.updateNotice = null;
+        shell.updatePhase = "current";
+        shell.updateCheckedAt = Date.now();
+        break;
+      }
       shell.updateNotice = {
         appVersion: "2.1.0",
         appCode: 29,

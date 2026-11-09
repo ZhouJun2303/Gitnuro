@@ -9,6 +9,10 @@
   const notice = $derived(shell.updateNotice);
   const phase = $derived(shell.updatePhase);
   const busy = $derived(shell.updateBusy);
+  const releaseUrl = $derived(notice?.releaseUrl || shell.updateReleaseUrl);
+  const working = $derived(phase === "downloading" || phase === "verifying");
+  const ringLength = 2 * Math.PI * 16;
+  const ringOffset = $derived(ringLength * (1 - Math.min(100, Math.max(0, shell.updatePercent ?? 0)) / 100));
   const checked = $derived(
     shell.updateCheckedAt
       ? new Date(shell.updateCheckedAt).toLocaleTimeString(shell.activeLocale === "zh" ? "zh-CN" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })
@@ -44,7 +48,13 @@
 <h2>{shell.tr("chrome.updateTitle")}</h2>
 <div class="update-panel">
   <div class="update-identity">
-    <span class="update-icon" aria-hidden="true">
+    <span class="update-icon" class:working={working} aria-hidden="true">
+      {#if working}
+        <svg class="update-ring" viewBox="0 0 36 36">
+          <circle class="update-ring-track" cx="18" cy="18" r="16"></circle>
+          <circle class="update-ring-value" cx="18" cy="18" r="16" style:stroke-dasharray={ringLength} style:stroke-dashoffset={ringOffset}></circle>
+        </svg>
+      {/if}
       <svg viewBox="0 0 24 24" class="line-icon"><path d="M12 3v11M8 10l4 4 4-4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
     </span>
     <div class="update-identity-copy">
@@ -86,6 +96,10 @@
 
     {#if phase === "downloading"}
       <div class="update-progress">
+        <div class="update-progress-head">
+          <span>{shell.tr("chrome.updateDownloading")}</span>
+          {#if shell.updatePercent != null}<span class="update-percent">{shell.updatePercent}<small>%</small></span>{/if}
+        </div>
         <div
           class="update-track"
           class:indeterminate={shell.updatePercent == null}
@@ -98,7 +112,6 @@
           <span style:width={shell.updatePercent == null ? "36%" : `${shell.updatePercent}%`}></span>
         </div>
         <div class="update-progress-meta">
-          <span>{shell.updatePercent == null ? shell.tr("chrome.updateDownloading") : shell.tr("chrome.updateProgress", { percent: String(shell.updatePercent) })}</span>
           {#if shell.updateTotal > 0}
             <span>{formatBytes(shell.updateReceived)} / {formatBytes(shell.updateTotal)}</span>
           {:else if shell.updateReceived > 0}
@@ -137,10 +150,10 @@
           {phase === "available" ? shell.tr("chrome.updateInstall") : shell.tr("chrome.updateRetry")}
         </button>
       {:else if !notice.installable}
-        <button class="commit" type="button" onclick={() => openRelease(notice.downloadUrl || notice.releaseUrl)}>{shell.tr("chrome.updateOpenRelease")}</button>
+        <button class="commit" type="button" onclick={() => openRelease(notice.downloadUrl || releaseUrl)}>{shell.tr("chrome.updateOpenRelease")}</button>
       {/if}
-      {#if notice.installable && notice.releaseUrl}
-        <button class="text-button" type="button" onclick={() => openRelease(notice.releaseUrl)}>{shell.tr("chrome.updateOpenRelease")}</button>
+      {#if notice.installable && releaseUrl}
+        <button class="text-button" type="button" onclick={() => openRelease(releaseUrl)}>{shell.tr("chrome.updateOpenRelease")}</button>
       {/if}
       {#if notice.downloadUrl}
         <button class="text-button" type="button" onclick={() => copyDownload(notice.downloadUrl)}>{copied ? shell.tr("chrome.copied") : shell.tr("chrome.updateCopyDownload")}</button>
@@ -157,6 +170,13 @@
     <p class="empty update-note">{shell.tr("chrome.updatePanelIdle")}</p>
     <div class="composer-row">
       <button class="commit" type="button" onclick={() => void shell.checkForUpdate()}>{shell.tr("chrome.checkUpdate")}</button>
+    </div>
+  {/if}
+
+  {#if !notice && releaseUrl}
+    <div class="update-reference">
+      <button class="text-button" type="button" onclick={() => openRelease(releaseUrl)}>{shell.tr("chrome.updateOpenRelease")}</button>
+      <span class="meta update-url" title={releaseUrl}>{releaseUrl}</span>
     </div>
   {/if}
 </div>
