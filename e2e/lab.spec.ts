@@ -42,6 +42,17 @@ test("every scene opens", async ({ page }) => {
   for (const scene of scenes) await openScene(page, scene);
 });
 
+test("binary diffs show both sides by size", async ({ page }) => {
+  await openLabScene(page, "diff-binary", ".binary-diff");
+  await expect(page.locator(".binary-card")).toHaveCount(2);
+  await expect(page.locator(".binary-card").first()).toContainText("939,456 B");
+  await expect(page.locator(".binary-card").last()).toContainText("1,087,487 B");
+
+  await openLabScene(page, "diff-binary-large", ".binary-diff");
+  await expect(page.locator(".binary-card").first()).toContainText("3,145,740 B");
+  await expect(page.locator(".binary-card").last()).toContainText("3,265,740 B");
+});
+
 test("large text assets load their diff on demand", async ({ page }) => {
   await openLabScene(page, "diff-large-asset", ".diff-load");
   await expect(page.locator(".diff-load .pane-chip")).toBeVisible();

@@ -116,6 +116,11 @@ export type Messages = {
     selectFile: string;
     selectCommitFile: string;
     binary: string;
+    binaryOld: string;
+    binaryNew: string;
+    binaryAdded: string;
+    binaryDeleted: string;
+    binaryHint: string;
     truncated: string;
     scanTruncated: string;
     gitSummary: string;

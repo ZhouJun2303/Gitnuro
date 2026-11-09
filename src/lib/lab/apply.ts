@@ -74,6 +74,12 @@ async function showHistory(shell: ShellState) {
   if (first) await shell.selectCommit(first.id);
 }
 
+async function showCommitBySummary(shell: ShellState, summary: string) {
+  shell.section = "history";
+  const target = shell.commitsLive.find((row) => row.summary === summary);
+  if (target) await shell.selectCommit(target.id);
+}
+
 async function fillSurface(shell: ShellState, id: string) {
   if (id === "changes") {
     shell.section = "changes";
@@ -87,6 +93,7 @@ async function fillSurface(shell: ShellState, id: string) {
   if (id === "diff-text") return showChange(shell, "README.md", "unstaged");
   if (id === "diff-image") return showChange(shell, "art/mark.png", "unstaged");
   if (id === "diff-binary") return showChange(shell, "data/sheet.xlsx", "unstaged");
+  if (id === "diff-binary-large") return showChange(shell, "data/large.pak", "unstaged");
   if (id === "diff-rename") return showChange(shell, "src/renamed.txt", "staged");
   if (id === "diff-long") return showChange(shell, "notes/long.txt", "unstaged");
   if (id === "diff-wrap") {
@@ -98,6 +105,11 @@ async function fillSurface(shell: ShellState, id: string) {
     return showChange(shell, "notes/wrap.txt", "unstaged");
   }
   if (id === "history" || id === "commit" || id === "history-remote") return showHistory(shell);
+  if (id === "commit-binary") {
+    await showCommitBySummary(shell, "add the large pak");
+    await shell.openHistoryTab("changes");
+    return;
+  }
   if (id === "tree") {
     await showHistory(shell);
     await shell.openHistoryTab("tree");

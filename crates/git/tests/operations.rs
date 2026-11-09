@@ -1616,6 +1616,8 @@ fn large_text_asset_loads_its_diff_on_demand() {
     let pending = file_diff(&repo.path, path, false).unwrap();
     assert!(pending.loadable, "{pending:?}");
     assert!(!pending.binary && pending.lines.is_empty(), "{pending:?}");
+    assert_eq!(pending.old_bytes, Some(large_asset("base").len() as u64), "{pending:?}");
+    assert_eq!(pending.new_bytes, Some(large_asset("working").len() as u64), "{pending:?}");
 
     let diff = file_diff_with(&repo.path, path, false, 3, false, true).unwrap();
     assert!(!diff.binary, "{diff:?}");
@@ -1624,7 +1626,7 @@ fn large_text_asset_loads_its_diff_on_demand() {
 }
 
 #[test]
-fn large_binary_file_is_still_skipped() {
+fn large_binary_file_reports_both_sizes() {
     let repo = repo();
     let mut bytes = vec![b'x'; 2_200_000];
     bytes[1024] = 0;
@@ -1635,8 +1637,32 @@ fn large_binary_file_is_still_skipped() {
     fs::write(repo.path.join("big.bin"), &bytes).unwrap();
 
     let diff = file_diff(&repo.path, "big.bin", false).unwrap();
-    assert!(diff.truncated && !diff.loadable, "{diff:?}");
-    assert!(diff.lines.iter().any(|line| line.text == "large file skipped"), "{diff:?}");
+    assert!(diff.binary && diff.truncated && !diff.loadable, "{diff:?}");
+    assert!(diff.lines.is_empty(), "{diff:?}");
+    assert_eq!(diff.old_bytes, Some(2_200_000), "{diff:?}");
+    assert_eq!(diff.new_bytes, Some(2_200_000), "{diff:?}");
+}
+
+#[test]
+fn binary_change_reports_each_side_size() {
+    let repo = repo();
+    let base = [0u8, 1, 2, 3, 4];
+    fs::write(repo.path.join("data.pak"), base).unwrap();
+    repo.git(&["add", "data.pak"]);
+    repo.git(&["commit", "-m", "base"]);
+    let next = [0u8, 1, 2, 3, 4, 5, 6, 7, 8];
+    fs::write(repo.path.join("data.pak"), next).unwrap();
+
+    let diff = file_diff(&repo.path, "data.pak", false).unwrap();
+    assert!(diff.binary, "{diff:?}");
+    assert_eq!(diff.old_bytes, Some(base.len() as u64), "{diff:?}");
+    assert_eq!(diff.new_bytes, Some(next.len() as u64), "{diff:?}");
+
+    fs::remove_file(repo.path.join("data.pak")).unwrap();
+    let deleted = file_diff(&repo.path, "data.pak", false).unwrap();
+    assert!(deleted.binary, "{deleted:?}");
+    assert_eq!(deleted.old_bytes, Some(base.len() as u64), "{deleted:?}");
+    assert_eq!(deleted.new_bytes, None, "{deleted:?}");
 }
 
 #[test]
