@@ -482,7 +482,6 @@ export const zh: Messages = {
     commitPage: "提交",
     integration: "集成",
     customCommands: "自定义命令",
-    updates: "更新",
     sourceFolder: "源代码文件夹",
     browse: "浏览",
     showMarks: "显示 + - 标记",

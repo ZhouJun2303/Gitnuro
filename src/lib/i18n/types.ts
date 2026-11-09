@@ -482,7 +482,6 @@ export type Messages = {
     commitPage: string;
     integration: string;
     customCommands: string;
-    updates: string;
     sourceFolder: string;
     browse: string;
     showMarks: string;

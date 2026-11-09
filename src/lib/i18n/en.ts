@@ -482,7 +482,6 @@ export const en: Messages = {
     commitPage: "Commit",
     integration: "Integration",
     customCommands: "Custom Commands",
-    updates: "Updates",
     sourceFolder: "Source Code Folder",
     browse: "Browse",
     showMarks: "Show + - marks",

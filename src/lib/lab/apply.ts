@@ -419,7 +419,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       fillSourceRoots(shell);
       break;
     case "prefs":
-      shell.prefTab = sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : sceneId === "prefs-integration" ? "integration" : sceneId === "prefs-updates" ? "updates" : "general";
+      shell.prefTab = sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : sceneId === "prefs-integration" ? "integration" : "general";
       fillSourceRoots(shell);
       fillLabTools(shell);
       break;
