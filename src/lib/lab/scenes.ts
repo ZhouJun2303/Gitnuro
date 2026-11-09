@@ -163,6 +163,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "reset-confirm", group: "叠层", title: "重置确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "cherry-confirm", group: "叠层", title: "拣选确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "menu", group: "叠层", title: "菜单", repo: "full", ready: "[data-layer=\"menu\"]" }),
+  scene({ id: "workspace-menu-busy", group: "叠层", title: "工作区菜单：刷新中", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "prefs-git", group: "弹窗", title: "偏好设置 · Git", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-commit", group: "弹窗", title: "偏好设置 · 提交", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-integration", group: "弹窗", title: "偏好设置 · 集成", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),

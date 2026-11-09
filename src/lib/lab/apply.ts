@@ -359,6 +359,13 @@ async function fillSurface(shell: ShellState, id: string) {
     if (commit) await shell.previewCherry(commit.id, true, commit.summary);
     return;
   }
+  if (id === "workspace-menu-busy") {
+    const key = shell.jobKey(shell.snapshot?.path);
+    shell.jobs[key] = { label: "刷新中", percent: null, depth: 1 };
+    shell.menu = { x: 72, y: 96, items: () => shell.workspaceItems() };
+    window.setTimeout(() => { delete shell.jobs[key]; }, 2000);
+    return;
+  }
   if (id === "menu") {
     shell.menu = {
       x: 72,

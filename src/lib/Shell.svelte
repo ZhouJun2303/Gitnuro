@@ -20,7 +20,7 @@
   import { shortcutLabel } from "./keys";
   import { branchGroup, gravatarUrl, laneColors, splitDiff, type SplitRow } from "./view";
   import { type UpdateNotice } from "./status";
-  import type { MenuItem, Row, SearchKey, Side, TreeEntry } from "./shell/types";
+  import type { MenuItem, MenuItems, Row, SearchKey, Side, TreeEntry } from "./shell/types";
 
   const shell = new ShellState();
   setShell(shell);
@@ -734,8 +734,9 @@
     <svg class="repo-chevron" class:open viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4.5 10 8l-4 3.5"/></svg>
   {/snippet}
 
-  {#snippet menuList(items: MenuItem[], nested = false)}
-    {#each items as item, index (`${item.sep ? "sep" : item.label}-${index}`)}
+  {#snippet menuList(items: MenuItems, nested = false)}
+    {@const list = typeof items === "function" ? items() : items}
+    {#each list as item, index (`${item.sep ? "sep" : item.label}-${index}`)}
       {#if item.sep}
         <hr />
       {:else}

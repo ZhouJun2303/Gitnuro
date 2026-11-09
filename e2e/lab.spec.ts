@@ -159,6 +159,12 @@ test("menu rows keep their full height", async ({ page }) => {
   expect(height).toBeGreaterThanOrEqual(27);
 });
 
+test("workspace menu enables its rows when the refresh ends", async ({ page }) => {
+  await openLabScene(page, "workspace-menu-busy", '[data-layer="menu"]');
+  const first = page.locator('[data-layer="menu"] button[role="menuitemradio"]').first();
+  await expect(first).toBeEnabled({ timeout: 15_000 });
+});
+
 test("confirmation is above a dialog that opened it", async ({ page }) => {
   await openLabScene(page, "dialog-workspace", '[data-dialog="workspace"]');
   await page.locator(".workspace-delete").first().click();

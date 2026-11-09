@@ -188,7 +188,7 @@
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg>
           <span>{shell.tr("dialog.appearance")}</span>
         </button>
-        <button class="tool-btn stack workspace-chip" type="button" title={shell.currentWorkspace?.name ?? shell.tr("chrome.workspace")} aria-label={shell.tr("chrome.workspace")} aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.workspaceItems())}>
+        <button class="tool-btn stack workspace-chip" type="button" title={shell.currentWorkspace?.name ?? shell.tr("chrome.workspace")} aria-label={shell.tr("chrome.workspace")} aria-haspopup="menu" onclick={(event) => shell.openBar(event, () => shell.workspaceItems())}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="13" height="13" rx="2"/><path d="M8 20h11a2 2 0 0 0 2-2V8"/></svg>
           <span><span class="workspace-name">{shell.currentWorkspace?.name ?? shell.tr("chrome.workspace")}</span><svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
         </button>
