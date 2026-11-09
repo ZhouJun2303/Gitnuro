@@ -12,11 +12,18 @@
     color: var(--text-secondary);
     font-size: 18px;
     line-height: 1;
+    display: inline-grid;
+    place-items: center;
+    transition: background 120ms ease, color 120ms ease;
   }
 
 .dialog-close:hover {
     background: var(--hover);
     color: var(--text);
+  }
+
+.dialog-close:active {
+    background: var(--pressed);
   }
 
 .dialog h2 {
@@ -35,11 +42,49 @@
   }
 
 .swatch {
-    width: 18px;
-    height: 18px;
-    border: 0;
-    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
     padding: 0;
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+
+.swatch:hover {
+    transform: translateY(-1px);
+  }
+
+.swatch.on {
+    box-shadow: 0 0 0 2px var(--elevated), 0 0 0 4px var(--accent);
+  }
+
+.dialog .swatch-row {
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+.dialog .composer-row.swatch-row input[type="color"][type="color"] {
+    width: 26px;
+    height: 26px;
+    padding: 2px;
+    flex: none;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--elevated);
+    cursor: pointer;
+  }
+
+.dialog .composer-row.swatch-row input[type="color"][type="color"]:hover {
+    border-color: color-mix(in srgb, var(--text-secondary) 40%, transparent);
+  }
+
+.dialog .composer-row.swatch-row input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+
+.dialog .composer-row.swatch-row input[type="color"]::-webkit-color-swatch {
+    border: 0;
+    border-radius: 50%;
   }
 
 .merge-grid {
@@ -359,7 +404,7 @@
   }
 
 .workspace-delete {
-    height: 26px;
+    height: 28px;
     padding: 0 8px;
     font-size: 12px;
   }

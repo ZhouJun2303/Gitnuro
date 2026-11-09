@@ -190,6 +190,7 @@
               <div class="composer-row">
                 <span>{command.name}</span>
                 <span class="meta">{command.target}</span>
+                <span class="grow"></span>
                 <button class="text-button" type="button" onclick={() => shell.runCommand(command)}>{shell.tr("dialog.run")}</button>
                 <button class="text-button" type="button" onclick={() => shell.removeCommand(command.id)}>{shell.tr("menu.delete")}</button>
               </div>
@@ -300,7 +301,7 @@
             <p class="empty">{shell.tr("dialog.settingsSaveHint")}</p>
           {/if}
           </div>
-          <div class="composer-row prefs-foot">
+          <div class="composer-row actions prefs-foot">
             <span class="meta">{shell.tr("dialog.settingsSaveHint")}</span>
             <button class="commit" type="button" onclick={() => shell.savePrefs(true)}>{shell.tr("dialog.done")}</button>
           </div>

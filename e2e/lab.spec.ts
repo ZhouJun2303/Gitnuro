@@ -514,12 +514,12 @@ test("search options fit inside a narrow sidebar", async ({ page }) => {
   expect((menu?.x ?? 0) + (menu?.width ?? 0)).toBeLessThanOrEqual((sidebar?.x ?? 0) + (sidebar?.width ?? 0) + 0.5);
 });
 
-test("dialogs focus the first field and fall back to close", async ({ page }) => {
+test("dialogs focus the first field and fall back to the dialog", async ({ page }) => {
   await openLabScene(page, "dialog-branch", '[data-dialog="branch"]');
   await expect(page.locator('[data-dialog="branch"] input').first()).toBeFocused();
   await openLabScene(page, "dialog-about", '[data-dialog="about"]');
   await expect(page.locator('[data-dialog="about"]')).toContainText("2.56.0");
-  await expect(page.locator('[data-dialog="about"] .dialog-close')).toBeFocused();
+  await expect(page.locator('[data-dialog="about"]')).toBeFocused();
 });
 
 test("a coded error keeps the translated sentence and the detail", async ({ page }) => {

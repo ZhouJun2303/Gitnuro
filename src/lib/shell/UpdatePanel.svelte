@@ -84,7 +84,7 @@
     </div>
   {:else if phase === "error" && !notice}
     <p class="dialog-error" role="alert">{shell.updateMessage}</p>
-    <div class="composer-row">
+    <div class="composer-row actions">
       <button class="commit" type="button" onclick={() => void shell.checkForUpdate()}>{shell.tr("chrome.updateRetry")}</button>
     </div>
   {:else if notice}
@@ -146,18 +146,7 @@
       <p class="empty update-note">{shell.tr("chrome.updateNoInstaller")}</p>
     {/if}
 
-    <div class="composer-row update-actions">
-      {#if phase === "downloading"}
-        <button class="text-button" type="button" disabled={shell.updateCancelling} onclick={() => shell.cancelUpdate()}>
-          {shell.updateCancelling ? shell.tr("chrome.updateCancelling") : shell.tr("chrome.updateCancel")}
-        </button>
-      {:else if notice.installable && (phase === "available" || phase === "cancelled" || phase === "error")}
-        <button class="commit" type="button" disabled={busy} onclick={() => void shell.installUpdate()}>
-          {phase === "available" ? shell.tr("chrome.updateInstall") : shell.tr("chrome.updateRetry")}
-        </button>
-      {:else if !notice.installable}
-        <button class="commit" type="button" onclick={() => openRelease(notice.downloadUrl || releaseUrl)}>{shell.tr("chrome.updateOpenRelease")}</button>
-      {/if}
+    <div class="composer-row actions update-actions">
       {#if notice.installable && releaseUrl}
         <button class="text-button" type="button" onclick={() => openRelease(releaseUrl)}>{shell.tr("chrome.updateOpenRelease")}</button>
       {/if}
@@ -165,16 +154,27 @@
         <button class="text-button" type="button" onclick={() => copyDownload(notice.downloadUrl)}>{copied ? shell.tr("chrome.copied") : shell.tr("chrome.updateCopyDownload")}</button>
       {/if}
       <span class="grow"></span>
-      {#if phase === "ready"}
+      {#if phase === "downloading"}
+        <button class="text-button" type="button" disabled={shell.updateCancelling} onclick={() => shell.cancelUpdate()}>
+          {shell.updateCancelling ? shell.tr("chrome.updateCancelling") : shell.tr("chrome.updateCancel")}
+        </button>
+      {:else if phase === "ready"}
         <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
-      {:else if phase !== "downloading" && phase !== "verifying"}
-        <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.updateLater")}</button>
+      {:else if phase !== "verifying"}
         <button class="text-button" type="button" disabled={busy} onclick={() => shell.dismissUpdate()}>{shell.tr("chrome.updateSkip")}</button>
+        <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.updateLater")}</button>
+        {#if notice.installable && (phase === "available" || phase === "cancelled" || phase === "error")}
+          <button class="commit" type="button" disabled={busy} onclick={() => void shell.installUpdate()}>
+            {phase === "available" ? shell.tr("chrome.updateInstall") : shell.tr("chrome.updateRetry")}
+          </button>
+        {:else if !notice.installable}
+          <button class="commit" type="button" onclick={() => openRelease(notice.downloadUrl || releaseUrl)}>{shell.tr("chrome.updateOpenRelease")}</button>
+        {/if}
       {/if}
     </div>
   {:else}
     <p class="empty update-note">{shell.tr("chrome.updatePanelIdle")}</p>
-    <div class="composer-row">
+    <div class="composer-row actions">
       <button class="commit" type="button" onclick={() => void shell.checkForUpdate()}>{shell.tr("chrome.checkUpdate")}</button>
     </div>
   {/if}

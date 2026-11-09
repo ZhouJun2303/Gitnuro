@@ -59,7 +59,7 @@
       <span class:bad={tasks.longTasks > 0}>long tasks {tasks.longTasks} · max {ms(tasks.longTaskMax)}</span>
       <span class="grow"></span>
       <button type="button" onclick={() => void invoke("open_log_folder")}>Open logs</button>
-      <button type="button" aria-label="Close" onclick={() => (open = false)}>×</button>
+      <button class="perf-close" type="button" aria-label="Close" title="Close" onclick={() => (open = false)}>×</button>
     </header>
     {#if snap}
       <p class="path">{snap.logFile}</p>
@@ -128,6 +128,26 @@
   }
   button:hover {
     background: var(--hover);
+  }
+  .perf-close {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 18px;
+    line-height: 1;
+    display: inline-grid;
+    place-items: center;
+  }
+  .perf-close:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+  .perf-close:active {
+    background: var(--pressed);
   }
   .path {
     margin: 4px 0 8px;

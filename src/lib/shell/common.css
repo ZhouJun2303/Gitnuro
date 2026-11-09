@@ -545,6 +545,11 @@ textarea {
     animation: dialog-in 160ms ease-out;
   }
 
+.dialog:focus,
+.dialog:focus-visible {
+    outline: none;
+  }
+
 .dialog.sm { width: min(420px, calc(100vw - 32px)); }
 
 .dialog.md { width: min(560px, calc(100vw - 32px)); }
@@ -703,16 +708,45 @@ textarea {
     min-width: 0;
   }
 
+.dialog .composer-row.actions {
+    justify-content: flex-end;
+    align-items: center;
+    row-gap: 8px;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin-top: -6px;
+    padding: 6px 0 2px;
+    background: var(--elevated);
+  }
+
+.dialog .composer-row.actions > .grow,
+.dialog .composer-row.actions > label.grow,
+.dialog .composer-row > .grow {
+    flex: 1;
+    min-width: 0;
+}
+
 .dialog .composer-row > :is(button, select, input, span) {
     min-width: 0;
     max-width: 100%;
+  }
+
+.dialog .composer-row > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+.dialog form > .commit {
+    flex: 0 0 auto;
+    align-self: flex-end;
   }
 
 .dialog .composer-row > :is(.text-button, .commit) {
     margin-left: 0;
   }
 
-.dialog .composer-row:has(> .commit) > button:is(.text-button, .commit):first-of-type {
+.dialog .composer-row:not(.actions):has(> .commit) > button:is(.text-button, .commit):first-of-type {
     margin-left: auto;
   }
 

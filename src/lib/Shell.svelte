@@ -96,12 +96,7 @@
     const focusables = () => [...node.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')].filter((item) => item.offsetParent !== null);
     const focusFirst = () => {
       const preferred = options.focus ? node.querySelector<HTMLElement>(options.focus) : null;
-      if (preferred) {
-        preferred.focus();
-        return;
-      }
-      const list = focusables();
-      (list[0] ?? node).focus();
+      (preferred ?? node).focus();
     };
     node.setAttribute("tabindex", node.getAttribute("tabindex") ?? "-1");
     queueMicrotask(focusFirst);
@@ -274,6 +269,15 @@
     border-radius: 10px;
     box-shadow: var(--shadow);
     overflow: hidden;
+  }
+
+.repo-picker:focus,
+.repo-picker:focus-visible,
+.command-log:focus,
+.command-log:focus-visible,
+.palette:focus,
+.palette:focus-visible {
+    outline: none;
   }
 
 .repo-picker h2 {
@@ -877,7 +881,7 @@
             </ol>
           </div>
         {/if}
-        <div class="composer-row">
+        <div class="composer-row actions">
           <button class="text-button" type="button" onclick={() => (shell.confirmAsk = null)}>{shell.tr("dialog.cancel")}</button>
           <button class="commit" type="button" onclick={() => { const run = shell.confirmAsk?.run; shell.confirmAsk = null; run?.(); }}>{shell.tr("dialog.confirm")}</button>
         </div>
@@ -893,7 +897,7 @@
         {#if shell.forgeOpen === "notes"}
           {#if shell.notices.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noNotifications") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.notices as notice (notice.id)}
-            <div class="composer-row"><span>{notice.title}</span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => { if (shell.mode === "live") void invoke("mark_notification", { id: notice.id }).then(() => (shell.notices = shell.notices.filter((item) => item.id !== notice.id))); else shell.notices = shell.notices.filter((item) => item.id !== notice.id); }}>{shell.tr("dialog.markRead")}</button></div>
+            <div class="composer-row"><span>{notice.title}</span><span class="grow"></span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => { if (shell.mode === "live") void invoke("mark_notification", { id: notice.id }).then(() => (shell.notices = shell.notices.filter((item) => item.id !== notice.id))); else shell.notices = shell.notices.filter((item) => item.id !== notice.id); }}>{shell.tr("dialog.markRead")}</button></div>
           {/each}
           {#if shell.notices.length > 0}
             <div class="composer-row">
@@ -903,7 +907,7 @@
         {:else}
           {#if shell.pulls.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noPulls") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.pulls as pull (pull.url)}
-            <div class="composer-row"><span>{pull.title}</span><span class="meta">{pull.author}</span><button class="text-button" type="button" disabled={shell.mode !== "live"} onclick={() => shell.mutate({ action: "checkout", name: pull.branch })}>{shell.tr("dialog.checkoutBranch")}</button></div>
+            <div class="composer-row"><span>{pull.title}</span><span class="meta">{pull.author}</span><span class="grow"></span><button class="text-button" type="button" disabled={shell.mode !== "live"} onclick={() => shell.mutate({ action: "checkout", name: pull.branch })}>{shell.tr("dialog.checkoutBranch")}</button></div>
           {/each}
         {/if}
       </div>
@@ -913,7 +917,7 @@
   {#if shell.standalone !== "merge"}<MergePanel />{/if}
   {#if shell.launchOpen}
     <div class="palette-scrim" role="presentation" onclick={() => shell.closeLaunch()}>
-      <div class="palette" data-layer="launch" role="dialog" aria-modal="true" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} use:overlayFocus={{ close: () => shell.closeLaunch() }} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+      <div class="palette" data-layer="launch" role="dialog" aria-modal="true" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} use:overlayFocus={{ close: () => shell.closeLaunch(), focus: ".palette-input" }} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
         <div class="palette-query">
           {#if shell.launchMode === "files"}
             <span class="palette-chip">{shell.tr("chrome.fileHistory")}</span>
