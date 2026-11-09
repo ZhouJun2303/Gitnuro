@@ -383,6 +383,18 @@ test("cherry-picking asks before it runs", async ({ page }) => {
   await expect(confirm.locator(".commit")).toBeEnabled();
 });
 
+test("multi-file confirmation lists one file per line with a total", async ({ page }) => {
+  await openLabScene(page, "discard-many-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  const rows = confirm.locator(".confirm-files li");
+  await expect(rows).toHaveCount(6);
+  await expect(confirm.locator(".confirm-count")).toHaveText("6 files");
+  await expect(rows.first()).toContainText("Y语言表_Data_Language.xlsx");
+  await expect(confirm.locator(".commit")).toBeFocused();
+  const heights = await rows.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
+  expect(Math.max(...heights)).toBeLessThan(26);
+});
+
 test("commit patch renders each hunk header once", async ({ page }) => {
   await openLabScene(page, "commit", ".detail");
   await page.locator(".patch-toggle").first().click();

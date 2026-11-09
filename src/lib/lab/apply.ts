@@ -322,6 +322,19 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.confirmAsk = { title: "删除分支", body: "确认删除 topic？", run: () => {} };
     return;
   }
+  if (id === "discard-many-confirm") {
+    const names = [
+      "src/Excel/Y语言表_Data_Language.xlsx",
+      "src/features/settlement/rates.ts",
+      "src/features/skills/hero-skills.ts",
+      "src/i18n/zh-CN.json",
+      "README.md",
+      "docs/release-notes.md",
+    ];
+    shell.discardChosen(names);
+    if (!shell.confirmAsk) shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => {}, names);
+    return;
+  }
   if (id === "stash-apply-confirm") {
     const stash = shell.refs?.stashes[0];
     shell.confirmApplyStash(stash?.name ?? "stash@{0}", stash?.summary ?? "WIP before the palette");

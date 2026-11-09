@@ -516,8 +516,8 @@ export function confirmSync(shell: ShellState, kind: "fetch" | "pull" | "push") 
     shell.dialog = kind;
   }
 
-export function ask(shell: ShellState, title: string, body: string, run: () => void) {
-    shell.confirmAsk = { title, body, run };
+export function ask(shell: ShellState, title: string, body: string, run: () => void, files: string[] = []) {
+    shell.confirmAsk = { title, body, run, files };
   }
 
 export function liveOnly(shell: ShellState, run: () => void) {

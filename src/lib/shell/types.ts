@@ -75,7 +75,7 @@ export type RepoFacts = {
 
 export type MenuItem = { label: string; run?: () => void; disabled?: boolean; shortcut?: string; children?: MenuItem[]; sep?: boolean; checked?: boolean };
 
-export type ConfirmAsk = { title: string; body: string; run: () => void };
+export type ConfirmAsk = { title: string; body: string; files?: string[]; run: () => void };
 
 export type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row; depth: number };
 

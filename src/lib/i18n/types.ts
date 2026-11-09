@@ -370,6 +370,7 @@ export type Messages = {
     restoreFileBody: string;
     discardBody: string;
     discardFilesBody: string;
+    fileCount: string;
     stashFiles: string;
     stashFile: string;
     discardLinesBody: string;

@@ -3771,8 +3771,8 @@ export class ShellState {
 
 
 
-  ask(title: string, body: string, run: () => void) {
-    return ask(this, title, body, run);
+  ask(title: string, body: string, run: () => void, files: string[] = []) {
+    return ask(this, title, body, run, files);
   }
 
 

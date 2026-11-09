@@ -200,6 +200,58 @@
 
 .scrim.confirm-scrim { z-index: var(--z-confirm, 60); }
 
+.confirm-files {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--canvas);
+  }
+
+.confirm-files ol {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-height: 0;
+    max-height: 40vh;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow: auto;
+  }
+
+.confirm-files li {
+    display: flex;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+
+.confirm-file-dir {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-secondary);
+  }
+
+.confirm-file-name {
+    flex: 0 0 auto;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+.confirm-count {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
 .shell {
     height: 100vh;
     display: flex;
@@ -810,9 +862,20 @@
   {/if}
   {#if shell.confirmAsk}
     <div class="scrim confirm-scrim" role="presentation">
-      <div class="dialog sm" data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null) }}>
+      <div class="dialog sm" data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ".commit" }}>
         <h2 id="confirm-title">{shell.confirmAsk.title}</h2>
-        <p>{shell.confirmAsk.body}</p>
+        {#if shell.confirmAsk.body}<p>{shell.confirmAsk.body}</p>{/if}
+        {#if shell.confirmAsk.files?.length}
+          <div class="confirm-files" data-confirm-files>
+            <div class="confirm-count">{shell.tr("dialog.fileCount", { count: String(shell.confirmAsk.files.length) })}</div>
+            <ol>
+              {#each shell.confirmAsk.files as file (file)}
+                {@const cut = file.lastIndexOf("/")}
+                <li title={file}><span class="confirm-file-dir">{cut > 0 ? file.slice(0, cut + 1) : ""}</span><span class="confirm-file-name">{cut > 0 ? file.slice(cut + 1) : file}</span></li>
+              {/each}
+            </ol>
+          </div>
+        {/if}
         <div class="composer-row">
           <button class="text-button" type="button" onclick={() => (shell.confirmAsk = null)}>{shell.tr("dialog.cancel")}</button>
           <button class="commit" type="button" onclick={() => { const run = shell.confirmAsk?.run; shell.confirmAsk = null; run?.(); }}>{shell.tr("dialog.confirm")}</button>
