@@ -255,6 +255,64 @@
   color: var(--added);
 }
 
+.update-current {
+  gap: 10px;
+  padding-right: 8px;
+}
+
+.update-current-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.45;
+}
+
+.update-release-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  height: 27px;
+  padding: 0 9px 0 11px;
+  border: 1px solid color-mix(in srgb, var(--added) 30%, transparent);
+  border-radius: var(--radius-pill);
+  background: var(--elevated);
+  color: var(--added);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 130ms ease, border-color 130ms ease, box-shadow 130ms ease;
+}
+
+.update-release-link:hover {
+  border-color: color-mix(in srgb, var(--added) 52%, transparent);
+  background: color-mix(in srgb, var(--added) 8%, var(--elevated));
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--added) 24%, transparent);
+}
+
+.update-release-link:active {
+  background: color-mix(in srgb, var(--added) 14%, var(--elevated));
+}
+
+.update-release-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.update-release-arrow {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 130ms ease;
+}
+
+.update-release-link:hover .update-release-arrow {
+  transform: translate(1px, -1px);
+}
+
 .update-dot {
   width: 8px;
   height: 8px;

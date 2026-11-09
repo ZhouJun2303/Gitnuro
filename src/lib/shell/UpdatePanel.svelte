@@ -72,9 +72,15 @@
       <span>{shell.tr("chrome.updateChecking")}</span>
     </div>
   {:else if phase === "current" && !notice}
-    <div class="update-result ok" role="status">
+    <div class="update-result ok update-current">
       <span class="update-dot" aria-hidden="true"></span>
-      <span>{shell.tr("chrome.updateCurrent", { version: shell.appVersion })}</span>
+      <span class="update-current-text" role="status">{shell.tr("chrome.updateCurrent", { version: shell.appVersion })}</span>
+      {#if releaseUrl}
+        <button class="update-release-link" type="button" onclick={() => openRelease(releaseUrl)}>
+          <span>{shell.tr("chrome.updateOpenRelease")}</span>
+          <svg viewBox="0 0 16 16" class="update-release-arrow" aria-hidden="true"><path d="M5 11 11 5"></path><path d="M6.5 5H11v4.5"></path></svg>
+        </button>
+      {/if}
     </div>
   {:else if phase === "error" && !notice}
     <p class="dialog-error" role="alert">{shell.updateMessage}</p>
@@ -173,7 +179,7 @@
     </div>
   {/if}
 
-  {#if !notice && releaseUrl}
+  {#if !notice && releaseUrl && phase !== "current"}
     <div class="update-reference">
       <button class="text-button" type="button" onclick={() => openRelease(releaseUrl)}>{shell.tr("chrome.updateOpenRelease")}</button>
       <span class="meta update-url" title={releaseUrl}>{releaseUrl}</span>

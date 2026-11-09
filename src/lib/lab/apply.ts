@@ -424,6 +424,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       fillLabTools(shell);
       break;
     case "update":
+      shell.updateReleaseUrl = "https://github.com/ZhouJun2303/Gitnuro/releases/latest";
       if (sceneId === "update-current") {
         shell.updateNotice = null;
         shell.updatePhase = "current";
