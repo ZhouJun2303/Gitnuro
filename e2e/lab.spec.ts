@@ -101,6 +101,21 @@ test("dialog close button dismisses the dialog", async ({ page }) => {
   await expect(page.locator('[data-dialog="prefs"]')).toHaveCount(0);
 });
 
+test("tab color can be set and cleared", async ({ page }) => {
+  await openLabScene(page, "dialog-colorTab", '[data-dialog="colorTab"]');
+  const dialog = page.locator('[data-dialog="colorTab"]');
+  const none = dialog.locator(".swatch.none");
+  await expect(none).toHaveClass("swatch none");
+  await dialog.locator(".swatch:not(.none)").nth(1).click();
+  await expect(dialog.locator(".swatch:not(.none).on")).toHaveCount(1);
+  await none.click();
+  await expect(none).toHaveClass("swatch none on");
+  await expect(dialog.locator(".swatch:not(.none).on")).toHaveCount(0);
+
+  await openLabScene(page, "dialog-colorTab-none", '[data-dialog="colorTab"]');
+  await expect(page.locator('[data-dialog="colorTab"] .swatch.none')).toHaveClass("swatch none on");
+});
+
 test("file type rows assign custom suffixes to different tools", async ({ page }) => {
   await openLabScene(page, "prefs-integration", '[data-dialog="prefs"]');
   const jsonRow = page.locator('.tool-type-row[data-suffix="json"]');

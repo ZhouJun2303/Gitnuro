@@ -371,6 +371,7 @@ export const en: Messages = {
     lineHistory: "History for this line",
     renameTab: "Rename tab",
     tabColor: "Tab color",
+    noColor: "No color",
     bareForce: "Force push",
     popBlame: "Blame in a window",
     open: "Open",

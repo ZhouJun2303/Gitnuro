@@ -177,7 +177,11 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "update-ready", group: "弹窗", title: "更新 · 安装程序已启动", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
 ];
 
-export const scenes: LabScene[] = [...surfaceScenes, ...Object.values(dialogScenes)];
+export const scenes: LabScene[] = [
+  ...surfaceScenes,
+  ...Object.values(dialogScenes),
+  scene({ id: "dialog-colorTab-none", group: "弹窗", title: "标签页颜色 · 无颜色", repo: "full", ready: '[data-dialog="colorTab"]', dialog: "colorTab" }),
+];
 
 export function sceneById(id: string) {
   return scenes.find((item) => item.id === id);

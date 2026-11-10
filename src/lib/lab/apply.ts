@@ -693,7 +693,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draft = "实验室";
       break;
     case "colorTab":
-      shell.draft = "#5b8def";
+      shell.draft = sceneId === "dialog-colorTab-none" ? "" : "#5b8def";
       break;
     case "groupRename":
       shell.draft = "工作";

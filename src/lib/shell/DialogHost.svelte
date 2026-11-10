@@ -811,10 +811,11 @@
         {:else if shell.dialog === "colorTab"}
           <h2>{shell.tr("menu.tabColor")}</h2>
           <div class="composer-row swatch-row">
+            <button class="swatch none" type="button" class:on={!shell.draft} aria-pressed={!shell.draft} title={shell.tr("menu.noColor")} aria-label={shell.tr("menu.noColor")} onclick={() => (shell.draft = "")}></button>
             {#each ["#5b8def", "#e07a3d", "#3aa76d", "#c45b8a", "#7a6ad8", "#c9a227", "#d16464"] as color (color)}
               <button class="swatch" type="button" class:on={shell.draft === color} aria-pressed={shell.draft === color} style:background={color} aria-label={color} onclick={() => (shell.draft = color)}></button>
             {/each}
-            <input type="color" bind:value={shell.draft} aria-label={shell.tr("menu.tabColor")} />
+            <input type="color" value={shell.draft || "#5b8def"} aria-label={shell.tr("menu.tabColor")} oninput={(event) => (shell.draft = (event.currentTarget as HTMLInputElement).value)} />
           </div>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>

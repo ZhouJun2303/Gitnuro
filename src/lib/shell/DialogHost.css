@@ -58,6 +58,12 @@
     box-shadow: 0 0 0 2px var(--elevated), 0 0 0 4px var(--accent);
   }
 
+.swatch.none {
+    background:
+      linear-gradient(135deg, transparent 43%, var(--text-secondary) 43%, var(--text-secondary) 57%, transparent 57%),
+      var(--elevated);
+  }
+
 .dialog .swatch-row {
     align-items: center;
     flex-wrap: wrap;

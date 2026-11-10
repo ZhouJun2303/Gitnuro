@@ -202,7 +202,7 @@
           { label: shell.tr("chrome.terminal"), disabled: shell.mode !== "live", run: () => void invoke("open_terminal", { path: repo }) },
           { label: shell.tr("chrome.explorer"), run: () => void shell.openLocal(repo) },
           { label: shell.tr("menu.renameTab"), run: () => { shell.draft = shell.tabText(repo); shell.draftExtra = repo; shell.dialog = "renameTab"; } },
-          { label: shell.tr("menu.tabColor"), run: () => { shell.draft = shell.tabColor(repo) || "#5b5bd6"; shell.draftExtra = repo; shell.dialog = "colorTab"; } },
+          { label: shell.tr("menu.tabColor"), run: () => { shell.draft = shell.tabColor(repo); shell.draftExtra = repo; shell.dialog = "colorTab"; } },
           { label: shell.tr("chrome.close"), run: () => shell.closeTab(repo) },
         ])}>
           <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabText(repo)} onclick={() => shell.openRepo(repo)}>{#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}{shell.tabText(repo)}</button>

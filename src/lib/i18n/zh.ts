@@ -371,6 +371,7 @@ export const zh: Messages = {
     lineHistory: "这行的历史",
     renameTab: "重命名标签",
     tabColor: "标签颜色",
+    noColor: "无颜色",
     bareForce: "强制推送",
     popBlame: "独立窗口打开追溯",
     open: "打开",

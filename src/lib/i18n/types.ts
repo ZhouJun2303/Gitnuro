@@ -371,6 +371,7 @@ export type Messages = {
     lineHistory: string;
     renameTab: string;
     tabColor: string;
+    noColor: string;
     bareForce: string;
     popBlame: string;
     open: string;
