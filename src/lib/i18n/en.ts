@@ -406,6 +406,8 @@ export const en: Messages = {
     deleteBody: "Delete {name}?",
     hardReset: "Hard reset",
     hardResetBody: "Hard reset discards uncommitted work. Continue?",
+    staleIndexLock: "Remove the leftover index.lock?",
+    staleIndexLockBody: "Cancelling the operation left {path}. Another Git process may still be using it, so remove it only when no Git command is running.",
     softReset: "Soft reset",
     softResetBody: "Move the current branch to {target}? The changes stay staged.",
     mixedReset: "Mixed reset",

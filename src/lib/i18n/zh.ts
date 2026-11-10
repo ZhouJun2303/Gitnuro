@@ -406,6 +406,8 @@ export const zh: Messages = {
     deleteBody: "删除 {name}？",
     hardReset: "硬重置",
     hardResetBody: "硬重置会丢掉未提交的工作。继续？",
+    staleIndexLock: "删除残留的 index.lock？",
+    staleIndexLockBody: "取消操作后留下了 {path}。可能还有其他 Git 进程在使用它，确认没有 Git 操作运行后再删除。",
     softReset: "软重置",
     softResetBody: "把当前分支重置到 {target}？改动会保留在暂存区。",
     mixedReset: "混合重置",

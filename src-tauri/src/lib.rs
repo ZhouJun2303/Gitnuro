@@ -1374,12 +1374,44 @@ fn file_preview(path: Option<String>, file: String) -> Result<Option<awegit_git:
 }
 
 #[tauri::command]
-fn cancel_operation(path: Option<String>) -> Result<(), String> {
-    match path {
-        Some(path) if !path.trim().is_empty() => awegit_git::cancel_repo(Path::new(&path)),
-        _ => awegit_git::cancel_running(),
+fn cancel_operation(path: Option<String>) -> Result<Option<String>, String> {
+    let requested = path.filter(|path| !path.trim().is_empty());
+    let stopped_write = match &requested {
+        Some(path) => awegit_git::cancel_repo(Path::new(path)),
+        None => awegit_git::cancel_running(),
+    };
+    let Some(path) = requested else {
+        return Ok(None);
+    };
+    if !stopped_write {
+        return Ok(None);
     }
-    Ok(())
+    // A killed write may leave `.git/index.lock`. Ask before deleting it: an
+    // external Git process can own that file too.
+    let Ok(repo) = repo_from(Some(path)) else {
+        return Ok(None);
+    };
+    let Some(lock) = awegit_git::index_lock_path(&repo) else {
+        return Ok(None);
+    };
+    if lock.is_file() {
+        Ok(Some(lock.display().to_string()))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn remove_index_lock(path: Option<String>) -> Result<bool, String> {
+    let repo = repo_from(path)?;
+    let Some(lock) = awegit_git::index_lock_path(&repo) else {
+        return Ok(false);
+    };
+    match std::fs::remove_file(&lock) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 /// Stop history/diff/blame reads without touching a queued write.
@@ -2182,6 +2214,7 @@ pub fn run() {
             file_preview,
             cancel_operation,
             cancel_reads,
+            remove_index_lock,
             save_hidden_refs,
             save_expanded_groups,
             save_sign_off,

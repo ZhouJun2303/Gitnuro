@@ -406,6 +406,8 @@ export type Messages = {
     deleteBody: string;
     hardReset: string;
     hardResetBody: string;
+    staleIndexLock: string;
+    staleIndexLockBody: string;
     softReset: string;
     softResetBody: string;
     mixedReset: string;

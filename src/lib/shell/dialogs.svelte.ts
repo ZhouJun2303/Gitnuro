@@ -917,7 +917,7 @@ export async function finishCloneOpen(shell: ShellState, destination: string) {
 
 export function cancelClone(shell: ShellState) {
     shell.cloneCancel = true;
-    void invoke("cancel_operation", { path: shell.cloneJob?.destination ?? "" });
+    void cancelOperation(shell, shell.cloneJob?.destination ?? "");
   }
 
 export async function browseCloneRoot(shell: ShellState) {
@@ -1561,6 +1561,21 @@ export function moveStep(shell: ShellState, index: number, delta: number) {
 
 export function removeBranch(shell: ShellState, name: string) {
     shell.ask(shell.tr("dialog.deleteBranch"), shell.tr("dialog.deleteBranchBody", { name }), () => void shell.mutate({ action: "deleteBranch", name }));
+  }
+
+/** Cancel a running command and offer to clear an index.lock the kill left behind. */
+export async function cancelOperation(shell: ShellState, path: string) {
+    try {
+      const lock = await invoke<string | null>("cancel_operation", { path });
+      if (!lock) return;
+      shell.ask(
+        shell.tr("dialog.staleIndexLock"),
+        shell.tr("dialog.staleIndexLockBody", { path: lock }),
+        () => void invoke<boolean>("remove_index_lock", { path }).catch((error) => (shell.actionError = shell.message(error))),
+      );
+    } catch (error) {
+      shell.actionError = shell.message(error);
+    }
   }
 
 export function hardReset(shell: ShellState) {

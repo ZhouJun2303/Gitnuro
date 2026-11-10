@@ -324,6 +324,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "file_preview" => done_result(super::file_preview(req(args, "path")?, req(args, "file")?)),
         "cancel_operation" => done_result(super::cancel_operation(req(args, "path")?)),
         "cancel_reads" => Ok(Value::Null),
+        "remove_index_lock" => done(false),
         "save_hidden_refs" => done_result(super::save_hidden_refs(req(args, "path")?, req(args, "names")?)),
         "save_expanded_groups" => done_result(super::save_expanded_groups(req(args, "path")?, req(args, "names")?)),
         "save_sign_off" => done_result(super::save_sign_off(req(args, "path")?, req(args, "enabled")?, req(args, "format")?)),

@@ -513,6 +513,11 @@ pub fn write_hidden_refs(repo: &Path, names: &[String]) -> Result<(), Error> {
     write_local(&path, &next)
 }
 
+/// The `index.lock` a killed write can leave behind, or `None` outside a repository.
+pub fn index_lock_path(repo: &Path) -> Option<PathBuf> {
+    absolute_git_dir(repo).ok().map(|dir| dir.join("index.lock"))
+}
+
 fn read_local(path: &Path) -> Result<String, Error> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(text),

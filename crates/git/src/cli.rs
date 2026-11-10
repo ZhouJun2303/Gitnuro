@@ -390,9 +390,15 @@ pub fn set_passphrase(user: String, secret: String) {
     if secret.contains(['\n', '\r', '\0']) || user.contains(['\n', '\r', '\0']) {
         return;
     }
+    let clear = secret.is_empty();
     if let Ok(mut guard) = PROCESS.lock() {
         guard.session.ask_user = user;
         guard.passphrase = secret;
+    }
+    if clear {
+        if let Some(dir) = askpass_dir() {
+            let _ = std::fs::remove_file(dir.join("secret"));
+        }
     }
 }
 
@@ -432,23 +438,32 @@ fn stop_generation(generation: u64) {
 }
 
 /// Stop every `git` process this library started, including grandchildren.
-pub fn cancel_running() {
-    let generations: Vec<u64> = lock_tracked().iter().map(|item| item.generation).collect();
-    for generation in generations {
+/// Returns true when a write (not just a read) was among them.
+pub fn cancel_running() -> bool {
+    let entries: Vec<(u64, bool)> = lock_tracked().iter().map(|item| (item.generation, item.read)).collect();
+    let stopped_write = entries.iter().any(|(_, read)| !read);
+    for (generation, _) in entries {
         stop_generation(generation);
     }
+    stopped_write
 }
 
 /// Stop `git` processes started for this repository. Other repositories keep running.
 ///
 /// Only the generations recorded at this moment are stopped. A command that starts
 /// afterwards has a new generation and is left running.
-pub fn cancel_repo(repo: &Path) {
+pub fn cancel_repo(repo: &Path) -> bool {
     let key = repo_key(repo);
-    let generations: Vec<u64> = lock_tracked().iter().filter(|item| item.key == key).map(|item| item.generation).collect();
-    for generation in generations {
+    let entries: Vec<(u64, bool)> = lock_tracked()
+        .iter()
+        .filter(|item| item.key == key)
+        .map(|item| (item.generation, item.read))
+        .collect();
+    let stopped_write = entries.iter().any(|(_, read)| !read);
+    for (generation, _) in entries {
         stop_generation(generation);
     }
+    stopped_write
 }
 
 /// Stop reads (history, diff, blame, search) for this repository. Writes keep running.
@@ -626,12 +641,11 @@ fn run_prepared_capped(
     if !session.ssl_ca.is_empty() {
         command.env("GIT_SSL_CAINFO", &session.ssl_ca);
     }
-    if !passphrase.is_empty() {
-        if let Some(script) = askpass_script() {
+    if !passphrase.is_empty() && needs_passphrase(args) {
+        if let Some(script) = askpass_script(&passphrase) {
             command.env("GIT_ASKPASS", &script);
             command.env("SSH_ASKPASS", &script);
             command.env("SSH_ASKPASS_REQUIRE", "force");
-            command.env("AWE_ASKPASS", &passphrase);
             command.env("AWE_ASK_USER", &session.ask_user);
         }
     }
@@ -932,7 +946,7 @@ pub(crate) fn commit_config(repo: &Path) -> Vec<String> {
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .unwrap_or_default();
     if format != "ssh" {
-        if let Some(program) = gpg_wrapper() {
+        if let Some(program) = gpg_wrapper(&passphrase) {
             prefix.push("-c".into());
             prefix.push(format!("gpg.program={program}"));
         }
@@ -943,12 +957,14 @@ pub(crate) fn commit_config(repo: &Path) -> Vec<String> {
 fn askpass_dir() -> Option<&'static std::path::Path> {
     static DIR: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
+        let root = std::env::temp_dir();
+        prune_askpass_dirs(&root);
         for attempt in 0..4 {
             let stamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|elapsed| elapsed.as_nanos())
                 .unwrap_or(0);
-            let dir = std::env::temp_dir().join(format!("awegit-askpass-{}-{stamp}-{attempt}", std::process::id()));
+            let dir = root.join(format!("awegit-askpass-{}-{stamp}-{attempt}", std::process::id()));
             match std::fs::create_dir(&dir) {
                 Ok(()) => {
                     #[cfg(unix)]
@@ -967,6 +983,26 @@ fn askpass_dir() -> Option<&'static std::path::Path> {
     .as_deref()
 }
 
+fn prune_askpass_dirs(root: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let Some(cutoff) = std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(24 * 60 * 60)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if !entry.file_name().to_string_lossy().starts_with("awegit-askpass-") {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if meta.is_dir() && meta.modified().map(|at| at < cutoff).unwrap_or(false) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 fn write_private(path: &std::path::Path, body: &str) -> Option<()> {
     std::fs::write(path, body).ok()?;
     #[cfg(unix)]
@@ -977,19 +1013,79 @@ fn write_private(path: &std::path::Path, body: &str) -> Option<()> {
     Some(())
 }
 
-fn askpass_script() -> Option<String> {
+/// Write the passphrase where the helper scripts can read it. Keeping it out of the
+/// child environment stops it from appearing in process listings and crash dumps.
+fn write_secret(path: &std::path::Path, value: &str) -> Option<()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let _guard = LOCK.lock().ok()?;
+    let tmp = path.with_file_name(format!(".secret-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+    std::fs::write(&tmp, value).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    if std::fs::rename(&tmp, path).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return None;
+    }
+    Some(())
+}
+
+fn shell_quote(value: &str) -> String {
+    let escaped = value.replace('\\', "/").replace('$', "\\$").replace('`', "\\`").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
+/// Reads never need the signing passphrase, and leaving it out of their environment
+/// also keeps it away from external drivers a read can start.
+fn needs_passphrase(args: &[&str]) -> bool {
+    let mut index = 0;
+    while index < args.len() {
+        let arg = args[index];
+        if matches!(arg, "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env" | "--exec-path") {
+            index += 2;
+            continue;
+        }
+        if arg.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        return !matches!(
+            arg,
+            "status" | "diff" | "log" | "show" | "blame" | "rev-parse" | "rev-list" | "cat-file"
+                | "ls-files" | "ls-tree" | "for-each-ref" | "merge-base" | "shortlog" | "describe"
+                | "grep" | "check-ignore" | "hash-object" | "symbolic-ref" | "count-objects" | "var"
+                | "version" | "help" | "show-ref" | "name-rev" | "config"
+        );
+    }
+    true
+}
+
+fn askpass_script(passphrase: &str) -> Option<String> {
     let dir = askpass_dir()?;
+    let secret = dir.join("secret");
+    write_secret(&secret, &format!("{passphrase}\n"))?;
     let path = dir.join("ask.sh");
-    let body = "#!/bin/sh\ncase \"$1\" in\n*[Uu]sername*)\n  printf '%s\\n' \"$AWE_ASK_USER\"\n  ;;\n*)\n  printf '%s\\n' \"$AWE_ASKPASS\"\n  ;;\nesac\n";
-    write_private(&path, body)?;
+    let body = format!(
+        "#!/bin/sh\ncase \"$1\" in\n*[Uu]sername*)\n  printf '%s\\n' \"$AWE_ASK_USER\"\n  ;;\n*)\n  cat {}\n  ;;\nesac\n",
+        shell_quote(&secret.display().to_string())
+    );
+    write_private(&path, &body)?;
     Some(path.display().to_string().replace('\\', "/"))
 }
 
-fn gpg_wrapper() -> Option<String> {
+fn gpg_wrapper(passphrase: &str) -> Option<String> {
     let dir = askpass_dir()?;
+    let secret = dir.join("secret");
+    write_secret(&secret, &format!("{passphrase}\n"))?;
     let path = dir.join("gpgwrap.sh");
-    let body = "#!/bin/sh\numask 077\ntmp=\"${TMP:-/tmp}/awegit-pass-$$\"\ntrap 'rm -f \"$tmp\"' EXIT INT TERM HUP\nprintf '%s\\n' \"$AWE_ASKPASS\" > \"$tmp\"\ngpg --batch --yes --pinentry-mode loopback --passphrase-file \"$tmp\" \"$@\"\n";
-    write_private(&path, body)?;
+    let body = format!(
+        "#!/bin/sh\ngpg --batch --yes --pinentry-mode loopback --passphrase-file {} \"$@\"\n",
+        shell_quote(&secret.display().to_string())
+    );
+    write_private(&path, &body)?;
     Some(path.display().to_string().replace('\\', "/"))
 }
 
@@ -1163,6 +1259,37 @@ mod launch_tests {
         assert!(bundled_launch(&root.join("cmd")).is_none());
         assert!(launch_beside(&root).is_none());
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod secret_tests {
+    use super::{askpass_dir, askpass_script, needs_passphrase};
+
+    #[test]
+    fn read_commands_do_not_get_the_signing_passphrase() {
+        assert!(!needs_passphrase(&["status", "--porcelain"]));
+        assert!(!needs_passphrase(&["-c", "core.quotepath=false", "diff", "--cached"]));
+        assert!(!needs_passphrase(&["--no-pager", "log", "-5"]));
+        assert!(needs_passphrase(&["commit", "-m", "message"]));
+        assert!(needs_passphrase(&["push", "origin", "main"]));
+        assert!(needs_passphrase(&["-c", "commit.gpgsign=true", "tag", "-s", "v1"]));
+    }
+
+    #[test]
+    fn askpass_script_reads_the_passphrase_from_a_private_file() {
+        let script = askpass_script("s3cret").expect("askpass script");
+        let secret = askpass_dir().expect("askpass dir").join("secret");
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "s3cret\n");
+        let body = std::fs::read_to_string(script).unwrap();
+        assert!(!body.contains("AWE_ASKPASS"), "{body}");
+        assert!(body.contains("cat "), "{body}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&secret).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        let _ = std::fs::remove_file(secret);
     }
 }
 

@@ -158,7 +158,7 @@
             {#if notice && primary}
               <button class="text-button identity-cancel" type="button" disabled={primary.disabled} onclick={() => shell.runStatusNoticeAction(notice.id, primary.id)}>{primary.label}</button>
             {:else if shell.workDepth > 0}
-              <button class="text-button identity-cancel" type="button" onclick={() => (shell.showingClone ? shell.cancelClone() : invoke("cancel_operation", { path: shell.meterPath || shell.repoPath() }))}>{shell.tr("chrome.cancel")}</button>
+              <button class="text-button identity-cancel" type="button" onclick={() => (shell.showingClone ? shell.cancelClone() : void shell.cancelOperation(shell.meterPath || shell.repoPath() || ""))}>{shell.tr("chrome.cancel")}</button>
             {/if}
             <button class="tool-btn stack branch-chip" type="button" aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.branchItems())}>
               <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
