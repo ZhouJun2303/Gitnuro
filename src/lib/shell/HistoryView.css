@@ -46,6 +46,14 @@
     left: 0;
   }
 
+.commit-row.head {
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+.history .commit-row.head:not(:hover):not(.selected) {
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+
 .subject {
     flex: 1;
     overflow: hidden;
@@ -81,6 +89,8 @@
     font-size: 12px;
     line-height: 16px;
   }
+
+.lane-name.local { font-weight: 600; }
 
 .lane-name.compact { gap: 2px; padding: 0 4px; }
 
@@ -164,16 +174,8 @@
     background: transparent;
   }
 
-.commit-row.unpushed .subject,
-  .commit-row.unpushed .badges,
-  .commit-row.unpushed .lane-names,
-  .commit-row.unpushed .commit-side {
-    opacity: 0.65;
-    transition: opacity 120ms ease;
-  }
-
-.commit-row.unpushed .graph-node:not(.dim) {
-    opacity: 0.65;
+.commit-row.pushed .subject {
+    font-weight: 600;
   }
 
 .commit-row.remote-only .subject,
@@ -198,19 +200,6 @@
   .commit-row.remote-only.selected .lane-names,
   .commit-row.remote-only.selected .commit-side,
   .commit-row.remote-only.selected .graph-node:not(.dim) {
-    opacity: 1;
-  }
-
-.commit-row.unpushed:hover .subject,
-  .commit-row.unpushed:hover .badges,
-  .commit-row.unpushed:hover .lane-names,
-  .commit-row.unpushed:hover .commit-side,
-  .commit-row.unpushed:hover .graph-node:not(.dim),
-  .commit-row.unpushed.selected .subject,
-  .commit-row.unpushed.selected .badges,
-  .commit-row.unpushed.selected .lane-names,
-  .commit-row.unpushed.selected .commit-side,
-  .commit-row.unpushed.selected .graph-node:not(.dim) {
     opacity: 1;
   }
 

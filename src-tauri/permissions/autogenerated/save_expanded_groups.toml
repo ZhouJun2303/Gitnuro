@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-expanded-groups"
+description = "Enables the save_expanded_groups command without any pre-configured scope."
+commands.allow = ["save_expanded_groups"]
+
+[[permission]]
+identifier = "deny-save-expanded-groups"
+description = "Denies the save_expanded_groups command without any pre-configured scope."
+commands.deny = ["save_expanded_groups"]

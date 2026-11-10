@@ -13,10 +13,25 @@
             <button type="button" class:on={shell.prefTab === "git"} onclick={() => shell.selectPrefTab("git")}>{shell.tr("dialog.git")}</button>
             <button type="button" class:on={shell.prefTab === "integration"} onclick={() => shell.selectPrefTab("integration")}>{shell.tr("dialog.integration")}</button>
             <button type="button" class:on={shell.prefTab === "commands"} onclick={() => shell.selectPrefTab("commands")}>{shell.tr("dialog.customCommands")}</button>
-            <button type="button" class:on={shell.prefTab === "updates"} onclick={() => shell.selectPrefTab("updates")}>{shell.tr("dialog.updates")}</button>
           </div>
           <div class="pref-page" bind:this={shell.prefPage}>
           {#if shell.prefTab === "general"}
+            <div class="pref-section">
+              <label>{shell.tr("dialog.language")}
+                <select bind:value={shell.settings.locale}>
+                  <option value="system">{shell.tr("dialog.followSystem")}</option>
+                  <option value="zh">{shell.tr("dialog.chinese")}</option>
+                  <option value="en">{shell.tr("dialog.english")}</option>
+                </select>
+              </label>
+              <label>{shell.tr("dialog.theme")}
+                <select bind:value={shell.settings.theme}>
+                  <option value="system">{shell.tr("dialog.system")}</option>
+                  <option value="light">{shell.tr("dialog.light")}</option>
+                  <option value="dark">{shell.tr("dialog.dark")}</option>
+                </select>
+              </label>
+            </div>
             <div class="source-folders">
               <div class="k">{shell.tr("dialog.sourceFolder")}</div>
               {#each shell.sourceRootList() as root (root.path)}
@@ -175,6 +190,7 @@
               <div class="composer-row">
                 <span>{command.name}</span>
                 <span class="meta">{command.target}</span>
+                <span class="grow"></span>
                 <button class="text-button" type="button" onclick={() => shell.runCommand(command)}>{shell.tr("dialog.run")}</button>
                 <button class="text-button" type="button" onclick={() => shell.removeCommand(command.id)}>{shell.tr("menu.delete")}</button>
               </div>
@@ -190,35 +206,6 @@
             <textarea rows="3" placeholder={shell.tr("dialog.commandPrompt")} bind:value={shell.commandPrompt}></textarea>
             <label class="check"><input type="checkbox" bind:checked={shell.commandShared} /> {shell.tr("chrome.shared")}</label>
             <button class="text-button" type="button" onclick={shell.saveCommand.bind(shell)}>{shell.tr("dialog.save")}</button>
-          {:else if shell.prefTab === "updates"}
-            <label>{shell.tr("dialog.language")}
-              <select bind:value={shell.settings.locale}>
-                <option value="system">{shell.tr("dialog.followSystem")}</option>
-                <option value="zh">{shell.tr("dialog.chinese")}</option>
-                <option value="en">{shell.tr("dialog.english")}</option>
-              </select>
-            </label>
-            <label>{shell.tr("dialog.theme")}
-              <select bind:value={shell.settings.theme}>
-                <option value="system">{shell.tr("dialog.system")}</option>
-                <option value="light">{shell.tr("dialog.light")}</option>
-                <option value="dark">{shell.tr("dialog.dark")}</option>
-              </select>
-            </label>
-            <p class="empty">{shell.tr("chrome.updateVersion", { version: shell.appVersion })}</p>
-            <button class="text-button" type="button" disabled={shell.updatePhase === "checking" || shell.updateBusy} onclick={() => void shell.checkForUpdate()}>{shell.updatePhase === "checking" ? shell.tr("chrome.updateChecking") : shell.tr("chrome.checkUpdate")}</button>
-            {#if shell.updateMessage}<p class="empty">{shell.updateMessage}</p>{/if}
-            {#if shell.updatePhase === "downloading" && shell.updatePercent != null}
-              <div class="update-track" aria-hidden="true"><span style:width={`${shell.updatePercent}%`}></span></div>
-            {/if}
-            {#if shell.updateNotice}
-              <p>{shell.tr("chrome.updateAvailable", { name: `AweGit ${shell.updateNotice.appVersion}` })}</p>
-              {#if shell.updateNotice.notes}<p class="meta">{shell.updateNotice.notes}</p>{/if}
-              <div class="composer-row">
-                <button class="text-button" type="button" disabled={shell.updateBusy} onclick={() => void shell.installUpdate()}>{shell.updateBusy ? shell.tr("chrome.updateDownloading") : shell.tr("chrome.updateInstall")}</button>
-                <button class="text-button" type="button" disabled={shell.updateBusy} onclick={() => shell.dismissUpdate()}>{shell.tr("chrome.updateLater")}</button>
-              </div>
-            {/if}
           {:else if shell.prefTab === "git"}
             <div class="pref-section">
               <div class="k">{shell.tr("dialog.gitBehavior")}</div>
@@ -314,7 +301,7 @@
             <p class="empty">{shell.tr("dialog.settingsSaveHint")}</p>
           {/if}
           </div>
-          <div class="composer-row prefs-foot">
+          <div class="composer-row actions prefs-foot">
             <span class="meta">{shell.tr("dialog.settingsSaveHint")}</span>
             <button class="commit" type="button" onclick={() => shell.savePrefs(true)}>{shell.tr("dialog.done")}</button>
           </div>

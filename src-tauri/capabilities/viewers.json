@@ -45,6 +45,7 @@
     "allow-list-ai-models",
     "allow-file-preview",
     "allow-cancel-operation",
+    "allow-cancel-reads",
     "allow-check-for-update",
     "allow-app-version",
     "allow-conflict-sides",

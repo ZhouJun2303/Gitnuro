@@ -12,11 +12,18 @@
     color: var(--text-secondary);
     font-size: 18px;
     line-height: 1;
+    display: inline-grid;
+    place-items: center;
+    transition: background 120ms ease, color 120ms ease;
   }
 
 .dialog-close:hover {
     background: var(--hover);
     color: var(--text);
+  }
+
+.dialog-close:active {
+    background: var(--pressed);
   }
 
 .dialog h2 {
@@ -35,11 +42,49 @@
   }
 
 .swatch {
-    width: 18px;
-    height: 18px;
-    border: 0;
-    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
     padding: 0;
+    transition: transform 120ms ease, box-shadow 120ms ease;
+  }
+
+.swatch:hover {
+    transform: translateY(-1px);
+  }
+
+.swatch.on {
+    box-shadow: 0 0 0 2px var(--elevated), 0 0 0 4px var(--accent);
+  }
+
+.dialog .swatch-row {
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+.dialog .composer-row.swatch-row input[type="color"][type="color"] {
+    width: 26px;
+    height: 26px;
+    padding: 2px;
+    flex: none;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    background: var(--elevated);
+    cursor: pointer;
+  }
+
+.dialog .composer-row.swatch-row input[type="color"][type="color"]:hover {
+    border-color: color-mix(in srgb, var(--text-secondary) 40%, transparent);
+  }
+
+.dialog .composer-row.swatch-row input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+  }
+
+.dialog .composer-row.swatch-row input[type="color"]::-webkit-color-swatch {
+    border: 0;
+    border-radius: 50%;
   }
 
 .merge-grid {
@@ -215,6 +260,59 @@
     font-weight: 500;
   }
 
+.dialog .push-target {
+    align-items: flex-start;
+  }
+
+.dialog .push-target > span {
+    padding-top: 6px;
+  }
+
+.dialog .push-target-body {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+.dialog .push-target-empty {
+    padding: 6px 0;
+    color: var(--text-secondary);
+  }
+
+.dialog .push-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 8px;
+    background: var(--field);
+  }
+
+.dialog .push-tabs button {
+    min-height: 26px;
+    height: auto;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    padding: 3px 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+  }
+
+.dialog .push-tabs button:hover {
+    color: var(--text);
+  }
+
+.dialog .push-tabs button.on {
+    color: var(--text);
+    background: var(--elevated);
+    font-weight: 500;
+    box-shadow: 0 1px 2px var(--line), 0 0 0 1px var(--line);
+  }
+
 .dialog label.check.sync-indent {
     margin-left: 76px;
   }
@@ -277,6 +375,17 @@
 
 .workspace-row.current .workspace-mark { background: var(--accent); }
 
+.workspace-name-fixed {
+    min-width: 0;
+    height: 28px;
+    padding: 0 6px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
 .dialog.workspace .workspace-row input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
     height: 28px;
     border-color: transparent;
@@ -306,7 +415,7 @@
   }
 
 .workspace-delete {
-    height: 26px;
+    height: 28px;
     padding: 0 8px;
     font-size: 12px;
   }

@@ -53,6 +53,7 @@ export type Dialog =
     | "renameTab"
     | "colorTab"
     | "groupRename"
+    | "update"
     | null;
 
 export type MergePick = "ours" | "theirs" | "both" | "none";
@@ -75,7 +76,9 @@ export type RepoFacts = {
 
 export type MenuItem = { label: string; run?: () => void; disabled?: boolean; shortcut?: string; children?: MenuItem[]; sep?: boolean; checked?: boolean };
 
-export type ConfirmAsk = { title: string; body: string; run: () => void };
+export type MenuItems = MenuItem[] | (() => MenuItem[]);
+
+export type ConfirmAsk = { title: string; body: string; files?: string[]; run: () => void };
 
 export type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row; depth: number };
 
@@ -141,7 +144,7 @@ export const STATUS_NOTICE_ENTRY: Record<StatusNoticeId, number> = {
 
 export type RepoJob = { label: string; percent: number | null; depth: number };
 
-export type PrefTab = "general" | "commit" | "git" | "integration" | "commands" | "updates";
+export type PrefTab = "general" | "commit" | "git" | "integration" | "commands";
 
 export type LaunchItem = { label: string; group: string; run: () => void; stay?: boolean };
 

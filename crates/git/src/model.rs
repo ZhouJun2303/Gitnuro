@@ -10,7 +10,7 @@ use std::thread::ScopedJoinHandle;
 
 use serde::Serialize;
 
-use crate::change::{parse_diff, FileDiff};
+use crate::change::{parse_diff, spec_size, FileDiff};
 use crate::cli::{check_path, check_rev, run, run_capped, run_output, run_stdin_output, with_read};
 use crate::{ChangeKind, Error, FileChange};
 
@@ -987,6 +987,11 @@ pub fn show_commit_file_with(repo: &Path, id: &str, path: &str, context: u32) ->
     })?;
     let mut parsed = parse_diff(path, false, &String::from_utf8_lossy(&output.stdout));
     parsed.truncated |= capped;
+    if parsed.binary {
+        let old_rev = base.unwrap_or_else(|| format!("{id}^"));
+        parsed.old_bytes = spec_size(repo, &format!("{old_rev}:{path}"));
+        parsed.new_bytes = spec_size(repo, &format!("{id}:{path}"));
+    }
     Ok(parsed)
 }
 
@@ -1053,6 +1058,10 @@ pub fn compare_file(repo: &Path, from: &str, to: &str, path: &str, context: u32)
     })?;
     let mut parsed = parse_diff(path, false, &String::from_utf8_lossy(&output.stdout));
     parsed.truncated |= capped;
+    if parsed.binary {
+        parsed.old_bytes = spec_size(repo, &format!("{from}:{path}"));
+        parsed.new_bytes = spec_size(repo, &format!("{to}:{path}"));
+    }
     Ok(parsed)
 }
 

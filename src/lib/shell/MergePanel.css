@@ -110,6 +110,9 @@
   color: var(--text-secondary);
   font-size: 18px;
   line-height: 1;
+  display: inline-grid;
+  place-items: center;
+  transition: background 120ms ease, color 120ms ease;
 }
 
 .merge-pop {
@@ -132,6 +135,10 @@
 .merge-close:hover {
   background: var(--hover);
   color: var(--text);
+}
+
+.merge-close:active {
+  background: var(--pressed);
 }
 
 .merge-head {
@@ -642,6 +649,12 @@
 .merge-panel-foot .text-button,
 .merge-panel-foot .commit {
   margin-left: 0;
+  flex: none;
+  white-space: nowrap;
+}
+
+.merge-panel-foot .commit {
+  height: 30px;
 }
 
 .merge-panel-foot .text-button {

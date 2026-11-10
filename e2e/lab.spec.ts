@@ -42,6 +42,17 @@ test("every scene opens", async ({ page }) => {
   for (const scene of scenes) await openScene(page, scene);
 });
 
+test("binary diffs show both sides by size", async ({ page }) => {
+  await openLabScene(page, "diff-binary", ".binary-diff");
+  await expect(page.locator(".binary-card")).toHaveCount(2);
+  await expect(page.locator(".binary-card").first()).toContainText("939,456 B");
+  await expect(page.locator(".binary-card").last()).toContainText("1,087,487 B");
+
+  await openLabScene(page, "diff-binary-large", ".binary-diff");
+  await expect(page.locator(".binary-card").first()).toContainText("3,145,740 B");
+  await expect(page.locator(".binary-card").last()).toContainText("3,265,740 B");
+});
+
 test("large text assets load their diff on demand", async ({ page }) => {
   await openLabScene(page, "diff-large-asset", ".diff-load");
   await expect(page.locator(".diff-load .pane-chip")).toBeVisible();
@@ -148,6 +159,12 @@ test("menu rows keep their full height", async ({ page }) => {
   expect(height).toBeGreaterThanOrEqual(27);
 });
 
+test("workspace menu enables its rows when the refresh ends", async ({ page }) => {
+  await openLabScene(page, "workspace-menu-busy", '[data-layer="menu"]');
+  const first = page.locator('[data-layer="menu"] button[role="menuitemradio"]').first();
+  await expect(first).toBeEnabled({ timeout: 15_000 });
+});
+
 test("confirmation is above a dialog that opened it", async ({ page }) => {
   await openLabScene(page, "dialog-workspace", '[data-dialog="workspace"]');
   await page.locator(".workspace-delete").first().click();
@@ -159,6 +176,14 @@ test("confirmation is above a dialog that opened it", async ({ page }) => {
     return scrim ? Number(getComputedStyle(scrim).zIndex) : 0;
   });
   expect(layers).toBeGreaterThan(50);
+});
+
+test("recent workspace stays first and cannot be deleted", async ({ page }) => {
+  await openLabScene(page, "dialog-workspace", '[data-dialog="workspace"]');
+  const first = page.locator(".workspace-row").first();
+  await expect(first.locator(".workspace-name-fixed")).toHaveText(/最近工作区|Recent workspace/);
+  await expect(first.locator(".workspace-count")).toHaveText("5");
+  await expect(first.locator(".workspace-delete")).toHaveCount(0);
 });
 
 test("hunk toolbar selects a hunk without hovering", async ({ page }) => {
@@ -278,6 +303,12 @@ test("push and pull dialogs start with a branch", async ({ page }) => {
   await openLabScene(page, "dialog-push", '[data-dialog="push"]');
   const push = await page.locator('[data-dialog="push"] select').first().inputValue();
   expect(push).not.toBe("");
+  const tabs = page.locator('[data-dialog="push"] .push-tabs [role="tab"]');
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.filter({ hasText: "origin" })).toHaveAttribute("aria-selected", "true");
+  await tabs.filter({ hasText: "mirror" }).click();
+  await expect(tabs.filter({ hasText: "mirror" })).toHaveAttribute("aria-selected", "true");
+  expect(await page.locator('[data-dialog="push"] select').nth(1).inputValue()).toMatch(/^mirror\//);
   await openLabScene(page, "dialog-pull", '[data-dialog="pull"]');
   const pull = await page.locator('[data-dialog="pull"] select').nth(1).inputValue();
   expect(pull).not.toBe("");
@@ -372,6 +403,18 @@ test("cherry-picking asks before it runs", async ({ page }) => {
   await expect(confirm.locator(".commit")).toBeEnabled();
 });
 
+test("multi-file confirmation lists one file per line with a total", async ({ page }) => {
+  await openLabScene(page, "discard-many-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  const rows = confirm.locator(".confirm-files li");
+  await expect(rows).toHaveCount(6);
+  await expect(confirm.locator(".confirm-count")).toHaveText("6 files");
+  await expect(rows.first()).toContainText("Y语言表_Data_Language.xlsx");
+  await expect(confirm.locator(".commit")).toBeFocused();
+  const heights = await rows.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
+  expect(Math.max(...heights)).toBeLessThan(26);
+});
+
 test("commit patch renders each hunk header once", async ({ page }) => {
   await openLabScene(page, "commit", ".detail");
   await page.locator(".patch-toggle").first().click();
@@ -401,6 +444,28 @@ test("history restores its scroll position after switching sections", async ({ p
     }).length;
   });
   expect(visible).toBeGreaterThan(0);
+});
+
+test("pushed commits are bold, local ones stay regular and readable", async ({ page }) => {
+  await openLabScene(page, "history", ".history .commit-row.unpushed");
+  const local = page.locator(".history .commit-row.unpushed .subject").first();
+  expect(await local.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("400");
+  expect(await local.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+  await page.locator(".history").evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+    node.dispatchEvent(new Event("scroll"));
+  });
+  await page.waitForTimeout(400);
+  const pushed = page.locator(".history .commit-row.pushed .subject").first();
+  await expect(pushed).toBeVisible();
+  expect(await pushed.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("600");
+});
+
+test("remote-only commits stay dimmed and regular", async ({ page }) => {
+  await openLabScene(page, "history-remote", ".history .commit-row.remote-only");
+  const subject = page.locator(".history .commit-row.remote-only .subject").nth(1);
+  expect(await subject.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("400");
+  expect(await subject.evaluate((node) => getComputedStyle(node).opacity)).toBe("0.55");
 });
 
 test("context menu arrows stay in the menu and restore focus", async ({ page }) => {
@@ -472,12 +537,12 @@ test("search options fit inside a narrow sidebar", async ({ page }) => {
   expect((menu?.x ?? 0) + (menu?.width ?? 0)).toBeLessThanOrEqual((sidebar?.x ?? 0) + (sidebar?.width ?? 0) + 0.5);
 });
 
-test("dialogs focus the first field and fall back to close", async ({ page }) => {
+test("dialogs focus the first field and fall back to the dialog", async ({ page }) => {
   await openLabScene(page, "dialog-branch", '[data-dialog="branch"]');
   await expect(page.locator('[data-dialog="branch"] input').first()).toBeFocused();
   await openLabScene(page, "dialog-about", '[data-dialog="about"]');
   await expect(page.locator('[data-dialog="about"]')).toContainText("2.56.0");
-  await expect(page.locator('[data-dialog="about"] .dialog-close')).toBeFocused();
+  await expect(page.locator('[data-dialog="about"]')).toBeFocused();
 });
 
 test("a coded error keeps the translated sentence and the detail", async ({ page }) => {

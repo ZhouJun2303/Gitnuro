@@ -285,7 +285,7 @@
         {#if !standalone && shell.inApp()}
           <button class="merge-pop" type="button" aria-label={shell.tr("dialog.mergePopOut")} title={shell.tr("dialog.mergePopOut")} onclick={() => void popOut()}>⧉</button>
         {/if}
-        <button class="merge-close" type="button" aria-label={shell.tr("chrome.close")} onclick={() => closePanel()}>×</button>
+        <button class="merge-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={() => closePanel()}>×</button>
       </header>
       <div class="merge-head">
         <div class="merge-parties">
@@ -451,8 +451,8 @@
             }}
           >{editingResult ? shell.tr("dialog.previewResult") : shell.tr("dialog.editResult")}</button>
         {/if}
-        <button class="commit" type="button" disabled={shell.busy || !canResolve} title={!canResolve ? shell.tr(shell.mergeKind === "file" ? "dialog.mergePickFile" : "dialog.mergeUnresolved", shell.mergeKind === "file" ? {} : { count: String(unresolved) }) : undefined} onclick={() => void resolve()}>{shell.tr("dialog.mergeResolve")}</button>
         <button class="text-button" type="button" onclick={() => closePanel()}>{shell.tr("chrome.cancel")}</button>
+        <button class="commit" type="button" disabled={shell.busy || !canResolve} title={!canResolve ? shell.tr(shell.mergeKind === "file" ? "dialog.mergePickFile" : "dialog.mergeUnresolved", shell.mergeKind === "file" ? {} : { count: String(unresolved) }) : undefined} onclick={() => void resolve()}>{shell.tr("dialog.mergeResolve")}</button>
       </footer>
     </div>
 {/snippet}

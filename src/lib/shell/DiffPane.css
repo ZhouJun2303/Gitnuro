@@ -18,6 +18,15 @@
   margin: 0;
 }
 
+.diff-load .diff-sizes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .diff-body .virtual-row.hunk-hover,
 .diff-body .split-row.hunk-hover > span {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);

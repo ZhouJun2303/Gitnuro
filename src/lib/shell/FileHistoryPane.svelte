@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getShell } from "./context";
+  import BinaryDiff from "./BinaryDiff.svelte";
   import { onVirtualScroll, windowSlice } from "../view";
 
   const shell = getShell();
@@ -110,7 +111,7 @@
       {#if !shell.historyDiff}
         <p class="diff-empty">{shell.selectedCommit ? shell.tr("chrome.reading") : shell.tr("chrome.noCommits")}</p>
       {:else if shell.historyDiff.binary}
-        <p class="diff-empty">{shell.tr("chrome.binary")}</p>
+        <BinaryDiff path={shell.historyFile ?? ""} oldBytes={shell.historyDiff.oldBytes} newBytes={shell.historyDiff.newBytes} compact />
       {:else if shell.historyDiff.lines.length === 0}
         <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
       {:else}

@@ -76,6 +76,7 @@ export const dialogScenes = {
   renameTab: dialog("renameTab", "重命名标签页"),
   colorTab: dialog("colorTab", "标签页颜色"),
   groupRename: dialog("groupRename", "重命名分组"),
+  update: dialog("update", "更新"),
 } satisfies Record<LabDialog, LabScene>;
 
 export const surfaceScenes: LabScene[] = [
@@ -84,7 +85,8 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "changes-combined", group: "主界面", title: "合并列表", repo: "full", ready: ".status-pane .virtual-row" }),
   scene({ id: "diff-text", group: "主界面", title: "文本差异", repo: "full", ready: ".diff-body" }),
   scene({ id: "diff-image", group: "主界面", title: "图片差异", repo: "full", ready: ".image-stage" }),
-  scene({ id: "diff-binary", group: "主界面", title: "二进制差异", repo: "full", ready: ".diff-empty" }),
+  scene({ id: "diff-binary", group: "主界面", title: "二进制差异", repo: "full", ready: ".binary-diff" }),
+  scene({ id: "diff-binary-large", group: "主界面", title: "超大二进制差异", repo: "full", ready: ".binary-diff" }),
   scene({ id: "diff-rename", group: "主界面", title: "重命名", repo: "full", ready: "text=renamed.txt" }),
   scene({ id: "diff-long", group: "主界面", title: "长差异", repo: "full", ready: ".diff-body" }),
   scene({ id: "diff-large-asset", group: "主界面", title: "大文本资产差异", repo: "full", ready: ".diff-load" }),
@@ -93,6 +95,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "history", group: "主界面", title: "历史", repo: "full", ready: ".commit-row" }),
   scene({ id: "history-remote", group: "主界面", title: "远程未拉取历史", repo: "behind", ready: ".commit-row.remote-only" }),
   scene({ id: "commit", group: "主界面", title: "提交详情", repo: "full", ready: ".detail" }),
+  scene({ id: "commit-binary", group: "主界面", title: "提交中的二进制差异", repo: "full", ready: ".binary-summary" }),
   scene({ id: "tree", group: "主界面", title: "文件树", repo: "full", ready: ".tree-row" }),
   scene({ id: "sidebar", group: "主界面", title: "侧栏", repo: "full", ready: ".sidebar" }),
   scene({ id: "branch-badges", group: "主界面", title: "分支角标", repo: "full", ready: ".sidebar .track-dot.missing" }),
@@ -154,16 +157,20 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "conflict-large-asset", group: "叠层", title: "大文本冲突", repo: "conflict", ready: ".merge-large" }),
   scene({ id: "file-merge", group: "叠层", title: "二进制合并", repo: "conflict", ready: "[data-layer=\"text-merge\"]" }),
   scene({ id: "confirm", group: "叠层", title: "确认框", repo: "full", ready: "[data-layer=\"confirm\"]" }),
+  scene({ id: "discard-many-confirm", group: "叠层", title: "多文件丢弃确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "stash-apply-confirm", group: "叠层", title: "应用贮藏确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "revert-confirm", group: "叠层", title: "还原确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "stash-pop-confirm", group: "叠层", title: "弹出贮藏确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "reset-confirm", group: "叠层", title: "重置确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "cherry-confirm", group: "叠层", title: "拣选确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "menu", group: "叠层", title: "菜单", repo: "full", ready: "[data-layer=\"menu\"]" }),
+  scene({ id: "workspace-menu-busy", group: "叠层", title: "工作区菜单：刷新中", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "prefs-git", group: "弹窗", title: "偏好设置 · Git", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-commit", group: "弹窗", title: "偏好设置 · 提交", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-integration", group: "弹窗", title: "偏好设置 · 集成", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
-  scene({ id: "prefs-updates", group: "弹窗", title: "偏好设置 · 更新", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "update-downloading", group: "弹窗", title: "更新 · 下载中", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
+  scene({ id: "update-current", group: "弹窗", title: "更新 · 已是最新", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
+  scene({ id: "update-ready", group: "弹窗", title: "更新 · 安装程序已启动", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
 ];
 
 export const scenes: LabScene[] = [...surfaceScenes, ...Object.values(dialogScenes)];

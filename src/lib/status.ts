@@ -31,6 +31,10 @@ export type FileDiff = {
   loadable: boolean;
   lines: DiffLine[];
   hunks: number;
+  /** Bytes on the old side; null when the file is new. */
+  oldBytes: number | null;
+  /** Bytes on the new side; null when the file was deleted. */
+  newBytes: number | null;
 };
 
 export type BadgeTone = "added" | "modified" | "deleted";
@@ -290,6 +294,10 @@ export type WorkspaceRecord = {
   tabWidth?: number;
 };
 
+/** Built-in workspace that always holds the most recently opened repositories. */
+export const recentWorkspaceId = "awegit-recent";
+export const recentWorkspaceLimit = 5;
+
 /** Narrowest project tab. Past this, the strip scrolls instead of shrinking further. */
 export const workspaceTabFloor = 96;
 
@@ -371,6 +379,15 @@ export type UpdateNotice = {
   notes: string;
   installable: boolean;
   sha256?: string;
+  releaseUrl?: string;
+  fileName?: string;
+};
+
+export type UpdateProgress = {
+  phase: "connecting" | "downloading" | "verifying" | "done";
+  percent: number | null;
+  received: number;
+  total: number;
 };
 
 export type GitRuntime = {

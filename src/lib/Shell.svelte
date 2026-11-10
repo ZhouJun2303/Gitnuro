@@ -20,7 +20,7 @@
   import { shortcutLabel } from "./keys";
   import { branchGroup, gravatarUrl, laneColors, splitDiff, type SplitRow } from "./view";
   import { type UpdateNotice } from "./status";
-  import type { MenuItem, Row, SearchKey, Side, TreeEntry } from "./shell/types";
+  import type { MenuItem, MenuItems, Row, SearchKey, Side, TreeEntry } from "./shell/types";
 
   const shell = new ShellState();
   setShell(shell);
@@ -96,12 +96,7 @@
     const focusables = () => [...node.querySelectorAll<HTMLElement>('a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')].filter((item) => item.offsetParent !== null);
     const focusFirst = () => {
       const preferred = options.focus ? node.querySelector<HTMLElement>(options.focus) : null;
-      if (preferred) {
-        preferred.focus();
-        return;
-      }
-      const list = focusables();
-      (list[0] ?? node).focus();
+      (preferred ?? node).focus();
     };
     node.setAttribute("tabindex", node.getAttribute("tabindex") ?? "-1");
     queueMicrotask(focusFirst);
@@ -200,6 +195,58 @@
 
 .scrim.confirm-scrim { z-index: var(--z-confirm, 60); }
 
+.confirm-files {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--canvas);
+  }
+
+.confirm-files ol {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-height: 0;
+    max-height: 40vh;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow: auto;
+  }
+
+.confirm-files li {
+    display: flex;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+
+.confirm-file-dir {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-secondary);
+  }
+
+.confirm-file-name {
+    flex: 0 0 auto;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+.confirm-count {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
 .shell {
     height: 100vh;
     display: flex;
@@ -222,6 +269,15 @@
     border-radius: 10px;
     box-shadow: var(--shadow);
     overflow: hidden;
+  }
+
+.repo-picker:focus,
+.repo-picker:focus-visible,
+.command-log:focus,
+.command-log:focus-visible,
+.palette:focus,
+.palette:focus-visible {
+    outline: none;
   }
 
 .repo-picker h2 {
@@ -682,8 +738,9 @@
     <svg class="repo-chevron" class:open viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4.5 10 8l-4 3.5"/></svg>
   {/snippet}
 
-  {#snippet menuList(items: MenuItem[], nested = false)}
-    {#each items as item, index (`${item.sep ? "sep" : item.label}-${index}`)}
+  {#snippet menuList(items: MenuItems, nested = false)}
+    {@const list = typeof items === "function" ? items() : items}
+    {#each list as item, index (`${item.sep ? "sep" : item.label}-${index}`)}
       {#if item.sep}
         <hr />
       {:else}
@@ -810,10 +867,21 @@
   {/if}
   {#if shell.confirmAsk}
     <div class="scrim confirm-scrim" role="presentation">
-      <div class="dialog sm" data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null) }}>
+      <div class="dialog sm" data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ".commit" }}>
         <h2 id="confirm-title">{shell.confirmAsk.title}</h2>
-        <p>{shell.confirmAsk.body}</p>
-        <div class="composer-row">
+        {#if shell.confirmAsk.body}<p>{shell.confirmAsk.body}</p>{/if}
+        {#if shell.confirmAsk.files?.length}
+          <div class="confirm-files" data-confirm-files>
+            <div class="confirm-count">{shell.tr("dialog.fileCount", { count: String(shell.confirmAsk.files.length) })}</div>
+            <ol>
+              {#each shell.confirmAsk.files as file (file)}
+                {@const cut = file.lastIndexOf("/")}
+                <li title={file}><span class="confirm-file-dir">{cut > 0 ? file.slice(0, cut + 1) : ""}</span><span class="confirm-file-name">{cut > 0 ? file.slice(cut + 1) : file}</span></li>
+              {/each}
+            </ol>
+          </div>
+        {/if}
+        <div class="composer-row actions">
           <button class="text-button" type="button" onclick={() => (shell.confirmAsk = null)}>{shell.tr("dialog.cancel")}</button>
           <button class="commit" type="button" onclick={() => { const run = shell.confirmAsk?.run; shell.confirmAsk = null; run?.(); }}>{shell.tr("dialog.confirm")}</button>
         </div>
@@ -829,7 +897,7 @@
         {#if shell.forgeOpen === "notes"}
           {#if shell.notices.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noNotifications") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.notices as notice (notice.id)}
-            <div class="composer-row"><span>{notice.title}</span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => { if (shell.mode === "live") void invoke("mark_notification", { id: notice.id }).then(() => (shell.notices = shell.notices.filter((item) => item.id !== notice.id))); else shell.notices = shell.notices.filter((item) => item.id !== notice.id); }}>{shell.tr("dialog.markRead")}</button></div>
+            <div class="composer-row"><span>{notice.title}</span><span class="grow"></span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => { if (shell.mode === "live") void invoke("mark_notification", { id: notice.id }).then(() => (shell.notices = shell.notices.filter((item) => item.id !== notice.id))); else shell.notices = shell.notices.filter((item) => item.id !== notice.id); }}>{shell.tr("dialog.markRead")}</button></div>
           {/each}
           {#if shell.notices.length > 0}
             <div class="composer-row">
@@ -839,7 +907,7 @@
         {:else}
           {#if shell.pulls.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noPulls") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.pulls as pull (pull.url)}
-            <div class="composer-row"><span>{pull.title}</span><span class="meta">{pull.author}</span><button class="text-button" type="button" disabled={shell.mode !== "live"} onclick={() => shell.mutate({ action: "checkout", name: pull.branch })}>{shell.tr("dialog.checkoutBranch")}</button></div>
+            <div class="composer-row"><span>{pull.title}</span><span class="meta">{pull.author}</span><span class="grow"></span><button class="text-button" type="button" disabled={shell.mode !== "live"} onclick={() => shell.mutate({ action: "checkout", name: pull.branch })}>{shell.tr("dialog.checkoutBranch")}</button></div>
           {/each}
         {/if}
       </div>
@@ -849,7 +917,7 @@
   {#if shell.standalone !== "merge"}<MergePanel />{/if}
   {#if shell.launchOpen}
     <div class="palette-scrim" role="presentation" onclick={() => shell.closeLaunch()}>
-      <div class="palette" data-layer="launch" role="dialog" aria-modal="true" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} use:overlayFocus={{ close: () => shell.closeLaunch() }} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
+      <div class="palette" data-layer="launch" role="dialog" aria-modal="true" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} use:overlayFocus={{ close: () => shell.closeLaunch(), focus: ".palette-input" }} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>
         <div class="palette-query">
           {#if shell.launchMode === "files"}
             <span class="palette-chip">{shell.tr("chrome.fileHistory")}</span>

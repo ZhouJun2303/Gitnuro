@@ -219,7 +219,7 @@ export function windowItems(shell: ShellState) {
 export function helpItems(shell: ShellState) {
     return [
       { label: shell.tr("chrome.about"), run: () => (shell.dialog = "about") },
-      { label: shell.tr("chrome.checkUpdate"), run: () => void shell.checkForUpdate() },
+      { label: shell.tr("chrome.checkUpdate"), run: () => shell.openUpdatePanel(true) },
       { label: shell.tr("chrome.performance"), shortcut: "Ctrl+Alt+P", run: () => window.dispatchEvent(new CustomEvent("awegit-perf")) },
     ];
   }
@@ -422,7 +422,7 @@ export function historyFileMenu(shell: ShellState, commit: CommitRow): MenuItem[
 export function workspaceItems(shell: ShellState) {
     return [
       ...shell.settings.workspaces.map((item) => ({
-        label: item.name,
+        label: shell.workspaceName(item),
         checked: item.id === shell.settings.currentWorkspace,
         disabled: shell.busy,
         run: () => void shell.switchWorkspace(item.id),

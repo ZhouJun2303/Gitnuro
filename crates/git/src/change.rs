@@ -318,6 +318,10 @@ pub struct FileDiff {
     pub lines: Vec<DiffLine>,
     /// How many zero-context hunks can be staged one at a time.
     pub hunks: u32,
+    /// Bytes on the old side. `None` when that side has no file, as in a new file.
+    pub old_bytes: Option<u64>,
+    /// Bytes on the new side. `None` when the file was deleted.
+    pub new_bytes: Option<u64>,
 }
 
 const MAX_DIFF_LINES: usize = 4_000;
@@ -1045,6 +1049,7 @@ pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignor
                     || (bytes.len() >= 18 && bytes[2] == 2 && matches!(bytes[16], 24 | 32))
             });
             if previewable {
+                let (old_bytes, new_bytes) = side_sizes(repo, path, staged);
                 return Ok(FileDiff {
                     path: path.to_string(),
                     staged,
@@ -1053,29 +1058,25 @@ pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignor
                     loadable: false,
                     lines: Vec::new(),
                     hunks: 0,
+                    old_bytes,
+                    new_bytes,
                 });
             }
             // Big text — Unity YAML assets and the like — usually carries a small
             // diff. Offer it on demand instead of reading the file with every select.
             let text = !file_has_nul(repo, path);
             if !text || !load_large {
+                let (old_bytes, new_bytes) = side_sizes(repo, path, staged);
                 return Ok(FileDiff {
                     path: path.to_string(),
                     staged,
-                    binary: false,
+                    binary: !text,
                     truncated: !text,
                     loadable: text,
-                    lines: if text {
-                        Vec::new()
-                    } else {
-                        vec![DiffLine {
-                            kind: DiffLineKind::Meta,
-                            text: "large file skipped".into(),
-                            stage_at: None,
-                            work_at: None,
-                        }]
-                    },
+                    lines: Vec::new(),
                     hunks: 0,
+                    old_bytes,
+                    new_bytes,
                 });
             }
         }
@@ -1122,7 +1123,34 @@ pub fn file_diff_with(repo: &Path, path: &str, staged: bool, context: u32, ignor
             parsed.lines = lines;
         }
     }
+    if parsed.binary || parsed.loadable {
+        let (old_bytes, new_bytes) = side_sizes(repo, path, staged);
+        parsed.old_bytes = old_bytes;
+        parsed.new_bytes = new_bytes;
+    }
     Ok(parsed)
+}
+
+/// Byte sizes of the two sides of a change. A side without a file is `None`.
+fn side_sizes(repo: &Path, path: &str, staged: bool) -> (Option<u64>, Option<u64>) {
+    let old_spec = if staged { format!("HEAD:{path}") } else { format!(":{path}") };
+    let new_spec = format!(":{path}");
+    let old = spec_size(repo, &old_spec);
+    let new = if staged {
+        spec_size(repo, &new_spec)
+    } else {
+        std::fs::metadata(repo.join(path))
+            .ok()
+            .filter(|meta| meta.is_file())
+            .map(|meta| meta.len())
+    };
+    (old, new)
+}
+
+pub(crate) fn spec_size(repo: &Path, spec: &str) -> Option<u64> {
+    run(repo, &["cat-file", "-s", spec])
+        .ok()
+        .and_then(|output| String::from_utf8_lossy(&output.stdout).trim().parse().ok())
 }
 
 fn lfs_pointer_diff(repo: &Path, path: &str, staged: bool) -> Option<Vec<DiffLine>> {
@@ -1257,6 +1285,8 @@ fn diff_untracked(repo: &Path, path: &str, load_large: bool) -> Result<FileDiff,
                 loadable: false,
                 lines: Vec::new(),
                 hunks: 0,
+                old_bytes: None,
+                new_bytes: None,
             });
         }
         Err(source) => {
@@ -1275,6 +1305,8 @@ fn diff_untracked(repo: &Path, path: &str, load_large: bool) -> Result<FileDiff,
             loadable: false,
             lines: Vec::new(),
             hunks: 0,
+            old_bytes: None,
+            new_bytes: None,
         });
     }
     if metadata.len() > MAX_UNTRACKED_BYTES {
@@ -1282,23 +1314,26 @@ fn diff_untracked(repo: &Path, path: &str, load_large: bool) -> Result<FileDiff,
             image_kind(&bytes).is_some()
                 || (bytes.len() >= 18 && bytes[2] == 2 && matches!(bytes[16], 24 | 32))
         });
+        let text = !previewable && !file_has_nul(repo, path);
         return Ok(FileDiff {
             path: path.to_string(),
             staged: false,
-            binary: previewable,
+            binary: !text,
             truncated: true,
             loadable: false,
-            lines: if previewable {
-                Vec::new()
-            } else {
+            lines: if text {
                 vec![DiffLine {
                     kind: DiffLineKind::Meta,
                     text: "large file skipped".into(),
                     stage_at: None,
                     work_at: None,
                 }]
+            } else {
+                Vec::new()
             },
             hunks: 0,
+            old_bytes: None,
+            new_bytes: Some(metadata.len()),
         });
     }
     if metadata.len() > MAX_LARGE_FILE && !load_large {
@@ -1311,6 +1346,8 @@ fn diff_untracked(repo: &Path, path: &str, load_large: bool) -> Result<FileDiff,
             loadable: text,
             lines: Vec::new(),
             hunks: 0,
+            old_bytes: None,
+            new_bytes: Some(metadata.len()),
         });
     }
     let bytes = std::fs::read(&full).map_err(|source| Error::Read {
@@ -1326,6 +1363,8 @@ fn diff_untracked(repo: &Path, path: &str, load_large: bool) -> Result<FileDiff,
             loadable: false,
             lines: Vec::new(),
             hunks: 0,
+            old_bytes: None,
+            new_bytes: Some(bytes.len() as u64),
         });
     }
     let text = String::from_utf8_lossy(&bytes);
@@ -1359,6 +1398,8 @@ fn diff_untracked(repo: &Path, path: &str, load_large: bool) -> Result<FileDiff,
         loadable: false,
         lines,
         hunks: 1,
+        old_bytes: None,
+        new_bytes: Some(bytes.len() as u64),
     })
 }
 
@@ -1448,6 +1489,8 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
         loadable: false,
         lines,
         hunks: 0,
+        old_bytes: None,
+        new_bytes: None,
     }
 }
 

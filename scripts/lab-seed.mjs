@@ -29,7 +29,12 @@ const pngC = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
   "base64",
 );
-const xlsx = (mark) => Buffer.concat([Buffer.from("PK\u0003\u0004"), Buffer.from(mark), Buffer.from([0])]);
+const xlsx = (mark) => {
+  const body = Buffer.concat([Buffer.from("PK\u0003\u0004"), Buffer.from(mark), Buffer.from([0])]);
+  const size = mark.endsWith("b") ? 1_087_487 : 939_456;
+  return Buffer.concat([body, Buffer.alloc(size - body.length)]);
+};
+const largePak = (mark) => Buffer.concat([Buffer.from(`lab-large-${mark}\n`), Buffer.alloc(3 * 1024 * 1024 + (mark === "b" ? 120_000 : 0))]);
 
 const textExts = [
   "js", "py", "rs", "json", "css", "html", "md", "sql", "yml", "toml", "csv", "go", "java", "xml", "sh",
@@ -457,6 +462,8 @@ const ahead = join(repos, "ahead");
 cloneFrom(origin, full);
 cloneFrom(origin, even);
 cloneFrom(origin, ahead);
+git(ahead, ["remote", "add", "mirror", origin]);
+git(ahead, ["fetch", "mirror"]);
 seedBisectRepo();
 
 for (let i = 1; i <= FILL; i++) {
@@ -546,6 +553,8 @@ commit(full, "art/mark.png", pngA, "add the mark");
 write(full, "art/mark.png", pngB);
 commit(full, "data/sheet.xlsx", xlsx("sheet-a"), "add the sheet");
 write(full, "data/sheet.xlsx", xlsx("sheet-b"));
+commit(full, "data/large.pak", largePak("a"), "add the large pak");
+write(full, "data/large.pak", largePak("b"));
 commit(full, "src/old-name.txt", "name me\n", "name a file");
 git(full, ["mv", "src/old-name.txt", "src/renamed.txt"]);
 const longBase = lines(40, "line");

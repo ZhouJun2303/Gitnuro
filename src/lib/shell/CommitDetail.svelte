@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getShell } from "./context";
   import StashPlates from "./StashPlates.svelte";
+  import BinaryDiff from "./BinaryDiff.svelte";
   import "./CommitDetail.css";
   import SplitHandle from "../SplitHandle.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -319,7 +320,7 @@
       {#if !live}
         <p class="diff-empty slim">{shell.tr("chrome.reading")}</p>
       {:else if live.binary}
-        <p class="diff-empty slim">{shell.tr("chrome.binary")}</p>
+        <BinaryDiff path={file} oldBytes={live.oldBytes} newBytes={live.newBytes} compact />
       {:else if live.lines.length === 0}
         <p class="diff-empty slim">{shell.tr("chrome.noChanges")}</p>
       {:else if shell.settings.diffStyle === "split"}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-hidden-refs"
+description = "Enables the save_hidden_refs command without any pre-configured scope."
+commands.allow = ["save_hidden_refs"]
+
+[[permission]]
+identifier = "deny-save-hidden-refs"
+description = "Denies the save_hidden_refs command without any pre-configured scope."
+commands.deny = ["save_hidden_refs"]

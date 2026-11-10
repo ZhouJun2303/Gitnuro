@@ -22,6 +22,7 @@ import {
     type StatusSnapshot,
     type Suggestion,
     type UpdateNotice,
+    recentWorkspaceId,
     workspaceTabWidth,
   } from "../status";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StatusNoticeId } from "./types";
@@ -510,14 +511,14 @@ export function confirmSync(shell: ShellState, kind: "fetch" | "pull" | "push") 
     shell.syncRebase = shell.settings.pullRebase;
     shell.syncForce = false;
     shell.pushBranch = current?.name ?? shell.snapshot?.branch ?? "";
-    shell.pushTo = "";
+    shell.resetPushTarget();
     shell.draft = upstreamRemote || firstRemote;
     shell.draftExtra = kind === "pull" ? (upstreamRemote ? upstream.slice(upstreamRemote.length + 1) : shell.snapshot?.branch ?? "") : "";
     shell.dialog = kind;
   }
 
-export function ask(shell: ShellState, title: string, body: string, run: () => void) {
-    shell.confirmAsk = { title, body, run };
+export function ask(shell: ShellState, title: string, body: string, run: () => void, files: string[] = []) {
+    shell.confirmAsk = { title, body, run, files };
   }
 
 export function liveOnly(shell: ShellState, run: () => void) {
@@ -1121,6 +1122,7 @@ export async function selectWorkspace(shell: ShellState) {
 
 export async function switchWorkspace(shell: ShellState, id: string) {
     if (id === shell.settings.currentWorkspace || shell.busy) return;
+    if (id === recentWorkspaceId) shell.syncRecentWorkspace();
     shell.settings = { ...shell.settings, currentWorkspace: id };
     await shell.selectWorkspace();
   }
@@ -1129,15 +1131,19 @@ export async function createWorkspace(shell: ShellState, name: string) {
     const label = name.trim();
     if (!label) return;
     let list = shell.settings.workspaces;
-    if (list.length === 0 && shell.repos.length > 0) {
-      list = [{
-        id: `ws-default-${Date.now()}`,
-        name: shell.tr("chrome.workspaceDefault"),
-        repositories: [...shell.repos],
-        openTabs: [...shell.repos],
-        selectedTab: Math.max(0, shell.repos.indexOf(shell.snapshot?.path ?? "")),
-        tabWidth: workspaceTabWidth(shell.repos.length),
-      }];
+    const userWorkspaces = list.filter((item) => item.id !== recentWorkspaceId);
+    if (userWorkspaces.length === 0 && shell.repos.length > 0) {
+      list = [
+        ...list.filter((item) => item.id === recentWorkspaceId),
+        {
+          id: `ws-default-${Date.now()}`,
+          name: shell.tr("chrome.workspaceDefault"),
+          repositories: [...shell.repos],
+          openTabs: [...shell.repos],
+          selectedTab: Math.max(0, shell.repos.indexOf(shell.snapshot?.path ?? "")),
+          tabWidth: workspaceTabWidth(shell.repos.length),
+        },
+      ];
     }
     const id = `ws-${Date.now()}`;
     shell.settings = { ...shell.settings, workspaces: [...list, { id, name: label, repositories: [], openTabs: [], selectedTab: 0, tabWidth: workspaceTabWidth(0) }], currentWorkspace: id };
@@ -1145,6 +1151,7 @@ export async function createWorkspace(shell: ShellState, name: string) {
   }
 
 export function renameWorkspace(shell: ShellState, id: string, name: string) {
+    if (id === recentWorkspaceId) return;
     const label = name.trim();
     if (!label) return;
     shell.settings = { ...shell.settings, workspaces: shell.settings.workspaces.map((item) => (item.id === id ? { ...item, name: label } : item)) };
@@ -1152,6 +1159,7 @@ export function renameWorkspace(shell: ShellState, id: string, name: string) {
   }
 
 export async function deleteWorkspace(shell: ShellState, id: string) {
+    if (id === recentWorkspaceId) return;
     const rest = shell.settings.workspaces.filter((item) => item.id !== id);
     const wasCurrent = shell.settings.currentWorkspace === id;
     shell.settings = { ...shell.settings, workspaces: rest, currentWorkspace: wasCurrent ? (rest[0]?.id ?? "") : shell.settings.currentWorkspace };

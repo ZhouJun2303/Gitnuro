@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $repo = "ZhouJun2303/Gitnuro"
 $stagePath = Join-Path $root ".git\awegit-publish-stage"
+. (Join-Path $PSScriptRoot "gh-retry.ps1")
 
 function Set-PublishStage([string]$name) {
     if (-not (Test-Path (Split-Path $stagePath))) { return }
@@ -134,15 +135,11 @@ if ($version -ne [string]$package.version -or $version -ne $cargoVersion -or $ve
     throw "Version mismatch: tauri.conf.json=$version package.json=$($package.version) Cargo.toml=$cargoVersion crates/git=$gitVersion"
 }
 
-cmd /c "gh auth status >nul 2>nul"
-if ($LASTEXITCODE -ne 0) {
-    throw "gh is not logged in. Run gh auth login"
-}
+Assert-GhAuthenticated
 
 $bundle = Join-Path $root "target\release\bundle"
 $nsis = Join-Path $bundle "nsis\AweGit_${version}_x64-setup.exe"
-cmd /c "gh release view v$version --repo $repo >nul 2>nul"
-$releaseExists = ($LASTEXITCODE -eq 0)
+$releaseExists = Test-GitHubRelease -Tag "v$version" -Repo $repo
 
 if ($releaseExists) {
     Write-Host "GitHub 上已经有 v$version，改为推送版本清单"
@@ -169,11 +166,40 @@ if ($releaseExists) {
     }
     $tag = "v$version"
     $releaseNotes = if ($Notes) { $Notes } else { "AweGit $version" }
+    # Multi-line notes cannot survive the Windows command line; gh reads them from a file.
+    $notesFile = Join-Path $env:TEMP ("awegit-notes-" + [guid]::NewGuid().ToString("N") + ".txt")
+    [IO.File]::WriteAllText($notesFile, $releaseNotes, (New-Object System.Text.UTF8Encoding $false))
     $assets = @($nsis)
     if ($msi) { $assets += $msi.FullName }
-    gh release create $tag @assets --repo $repo --title "AweGit $version" --notes $releaseNotes
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not create GitHub release $tag"
+    try {
+        $createArgs = @("release", "create", $tag) + $assets + @("--repo", $repo, "--title", "AweGit $version", "--notes-file", $notesFile)
+        $created = $false
+        $lastText = ""
+        for ($attempt = 1; $attempt -le 6 -and -not $created; $attempt++) {
+            $result = Invoke-GhOnce $createArgs
+            if ($result.Code -eq 0) { $created = $true; break }
+            $lastText = $result.Text
+            # The request can time out after GitHub created the release.
+            if (Test-GitHubRelease -Tag $tag -Repo $repo) { $created = $true; break }
+            if ($attempt -lt 6) {
+                Write-Host "创建 GitHub release $tag 没有成功，正在重试 ($attempt)"
+                Start-Sleep -Seconds ([Math]::Min(3 * $attempt, 15))
+            }
+        }
+        if (-not $created) {
+            throw "Could not create GitHub release $tag：$lastText"
+        }
+        # A create that timed out midway can leave the release without its
+        # installers; upload whatever is still missing.
+        $listed = Invoke-GhRetry @("release", "view", $tag, "--repo", $repo, "--json", "assets", "--jq", ".assets[].name") "读取 release $tag 的附件"
+        $have = @($listed -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        $missing = @($assets | Where-Object { $have -notcontains [IO.Path]::GetFileName($_) })
+        if ($missing.Count -gt 0) {
+            Invoke-GhRetry (@("release", "upload", $tag) + $missing + @("--repo", $repo, "--clobber")) "上传 release 附件" | Out-Null
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $notesFile -Force -ErrorAction SilentlyContinue
     }
     Set-PublishStage "released"
     Write-LatestManifest $version $Notes $nsis

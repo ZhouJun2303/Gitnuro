@@ -76,7 +76,9 @@
                   <div
                     class="commit-row virtual"
                     class:selected={shell.selectedCommit === commit.id}
+                    class:head={shell.refs?.head === commit.id}
                     class:unpushed={shell.isCommitUnpushed(commit)}
+                    class:pushed={(shell.refs?.remotes.length ?? 0) > 0 && !shell.isCommitUnpushed(commit) && commit.remoteOnly !== true}
                     class:remote-only={commit.remoteOnly === true}
                     class:good={shell.bisectMark(commit.id) === "good"}
                     class:bad={shell.bisectMark(commit.id) === "bad"}
@@ -148,7 +150,7 @@
                 {@const graphRow = shell.sampleShownGraph.rows[index] ?? []}
                 {@const tone = shell.laneTone(graphRow)}
                 {@const plate = shell.stashParts(commit.summary, commit.badges)}
-                <button class="commit-row" class:selected={shell.selectedCommit === commit.id || shell.selectedPath === commit.id} class:unpushed={shell.isCommitUnpushed(commit)} class:remote-only={commit.remoteOnly === true} type="button" onclick={() => shell.selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
+                <button class="commit-row" class:selected={shell.selectedCommit === commit.id || shell.selectedPath === commit.id} class:unpushed={shell.isCommitUnpushed(commit)} class:pushed={(shell.refs?.remotes.length ?? 0) > 0 && !shell.isCommitUnpushed(commit) && commit.remoteOnly !== true} class:remote-only={commit.remoteOnly === true} type="button" onclick={() => shell.selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
                   {@render laneGraph(graphRow, commit.id)}
                   <span class="commit-copy">
                     {@render branchChips(shell.branchRefLabels(commit.badges), tone, activeColor)}
@@ -216,7 +218,7 @@
         <span class="lane-names">
           {#each labels as label (label)}
             {@const remoteState = shell.branchRemoteState(label)}
-            <span class="lane-name" class:compact={shell.settings.compactBranchLabels} class:quiet={active !== null && tone !== laneColors[active]} style:--lane={tone ?? "var(--text-secondary)"} title={remoteState === "missing" ? `${label} · ${shell.tr("chrome.localOnly")}` : label}>
+            <span class="lane-name" class:compact={shell.settings.compactBranchLabels} class:quiet={active !== null && tone !== laneColors[active]} class:local={shell.refKind(label) === "local"} style:--lane={tone ?? "var(--text-secondary)"} title={remoteState === "missing" ? `${label} · ${shell.tr("chrome.localOnly")}` : label}>
               {#if shell.refKind(label) === "remote" && !shell.refs?.branches.some((branch) => branch.name === label)}
                 <svg class="lane-remote" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="3.2" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="6" cy="6" r="1.15" fill="currentColor"/></svg>
               {/if}

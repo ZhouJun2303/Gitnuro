@@ -4,6 +4,12 @@ use serde::Serialize;
 use sha2::Digest;
 use std::cmp::Ordering;
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+
+/// Set by `cancel_update`; the download loop checks it between chunks.
+static CANCEL: AtomicBool = AtomicBool::new(false);
+
+const PROGRESS_BYTES_STEP: u64 = 1_048_576;
 
 const VERSION_CHECK_URL: &str = "https://raw.githubusercontent.com/ZhouJun2303/Gitnuro/release/latest.json";
 const RELEASE_PREFIX: &str = "https://github.com/ZhouJun2303/Gitnuro/releases/download/";
@@ -20,15 +26,29 @@ pub struct UpdateNotice {
     pub installable: bool,
     /// Lowercase SHA-256 of the installer. Empty when the manifest has no hash.
     pub sha256: String,
+    /// The release page a person can open in a browser.
+    pub release_url: String,
+    /// Installer file name for the current system. Empty when the release has no installer.
+    pub file_name: String,
 }
 
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateProgress {
+    /// `connecting`, `downloading`, `verifying`, or `done`.
+    pub phase: &'static str,
     pub percent: Option<u8>,
+    pub received: u64,
+    pub total: u64,
 }
 
 pub fn current_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
+}
+
+/// The GitHub releases page the update document points people at.
+pub fn release_page() -> &'static str {
+    RELEASES_PAGE
 }
 
 pub fn check() -> Result<Option<UpdateNotice>, String> {
@@ -39,6 +59,11 @@ pub fn check() -> Result<Option<UpdateNotice>, String> {
         return Ok(None);
     }
     let (download_url, sha256, installable) = platform_download(&value);
+    let file_name = if installable {
+        installer_name(&download_url).unwrap_or_default()
+    } else {
+        String::new()
+    };
     Ok(Some(UpdateNotice {
         app_version,
         app_code: value.get("appCode").and_then(|item| item.as_i64()).unwrap_or(0),
@@ -46,27 +71,33 @@ pub fn check() -> Result<Option<UpdateNotice>, String> {
         notes: value.get("notes").and_then(|item| item.as_str()).unwrap_or("").trim().to_string(),
         installable,
         sha256,
+        release_url: RELEASES_PAGE.to_string(),
+        file_name,
     }))
 }
 
-pub fn download_and_open(url: &str, sha256: Option<&str>, mut progress: impl FnMut(Option<u8>)) -> Result<(), String> {
+pub fn cancel() {
+    CANCEL.store(true, AtomicOrdering::SeqCst);
+}
+
+pub fn download_and_open(url: &str, sha256: Option<&str>, mut progress: impl FnMut(UpdateProgress)) -> Result<(), String> {
     let expected = normalize_sha256(sha256).ok_or_else(|| crate::http::coded("update", "update hash is missing"))?;
     let name = installer_name(url)?;
     if !installer_kind(&name) {
         return Err(crate::http::coded("update", "update is not an installer for this system"));
     }
+    CANCEL.store(false, AtomicOrdering::SeqCst);
     let dir = std::env::temp_dir().join("awegit-update");
     std::fs::create_dir_all(&dir).map_err(|error| crate::http::coded("update", &error.to_string()))?;
     let dest = dir.join(&name);
     let partial = dir.join(format!("{name}.partial"));
+    progress(UpdateProgress { phase: "connecting", percent: None, received: 0, total: 0 });
     let response = match crate::http::agent(600, true)?.get(url).call() {
         Ok(response) => response,
-        Err(error) => return Err(crate::http::coded("update", &error.to_string())),
+        Err(error) => return Err(crate::http::coded("network", &error.to_string())),
     };
     let total = response.header("content-length").and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
-    if total == 0 {
-        progress(None);
-    }
+    progress(UpdateProgress { phase: "downloading", percent: percent_of(0, total), received: 0, total });
     let mut reader = response.into_reader();
     let mut file = match std::fs::File::create(&partial) {
         Ok(file) => file,
@@ -76,14 +107,20 @@ pub fn download_and_open(url: &str, sha256: Option<&str>, mut progress: impl FnM
     let mut buf = [0u8; 64 * 1024];
     let mut got = 0u64;
     let mut reported: Option<u8> = None;
+    let mut emitted = 0u64;
     loop {
+        if CANCEL.load(AtomicOrdering::Relaxed) {
+            drop(file);
+            let _ = std::fs::remove_file(&partial);
+            return Err(crate::http::coded("cancelled", "update download cancelled"));
+        }
         let read = match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(count) => count,
             Err(error) => {
                 drop(file);
                 let _ = std::fs::remove_file(&partial);
-                return Err(crate::http::coded("update", &error.to_string()));
+                return Err(crate::http::coded("network", &error.to_string()));
             }
         };
         hasher.update(&buf[..read]);
@@ -93,22 +130,22 @@ pub fn download_and_open(url: &str, sha256: Option<&str>, mut progress: impl FnM
             return Err(crate::http::coded("update", &error.to_string()));
         }
         got += read as u64;
-        if let Some(percent) = percent_of(got, total) {
-            if reported != Some(percent) {
-                reported = Some(percent);
-                progress(Some(percent));
-            }
-        }
-    }
-    if let Some(percent) = percent_of(got, total) {
-        if reported != Some(percent) {
-            progress(Some(percent));
+        let percent = percent_of(got, total);
+        if percent != reported || got - emitted >= PROGRESS_BYTES_STEP {
+            reported = percent;
+            emitted = got;
+            progress(UpdateProgress { phase: "downloading", percent, received: got, total });
         }
     }
     drop(file);
     if got == 0 {
         let _ = std::fs::remove_file(&partial);
-        return Err(crate::http::coded("update", "update download failed"));
+        return Err(crate::http::coded("network", "update download failed"));
+    }
+    progress(UpdateProgress { phase: "verifying", percent: Some(100), received: got, total: total.max(got) });
+    if CANCEL.load(AtomicOrdering::Relaxed) {
+        let _ = std::fs::remove_file(&partial);
+        return Err(crate::http::coded("cancelled", "update download cancelled"));
     }
     let actual = format!("{:x}", hasher.finalize());
     if actual != expected {
@@ -116,6 +153,7 @@ pub fn download_and_open(url: &str, sha256: Option<&str>, mut progress: impl FnM
         return Err(crate::http::coded("update", "update hash does not match"));
     }
     replace_download(&partial, &dest)?;
+    progress(UpdateProgress { phase: "done", percent: Some(100), received: got, total: total.max(got) });
     open_installer(&dest)
 }
 

@@ -702,17 +702,13 @@ export async function deletePicked(shell: ShellState, files = [...shell.picked])
 
 export function confirmPicked(shell: ShellState, files: string[], title: string, run: (files: string[]) => Promise<void>) {
     if (files.length === 0 || shell.mode !== "live") return;
-    shell.ask(title, files.join("\n"), () => void run(files));
+    shell.ask(title, "", () => void run(files), files);
   }
 
 export function discardChosen(shell: ShellState, files: string[]) {
     const names = files.filter((path) => path.length > 0);
     if (names.length === 0 || shell.mode !== "live") return;
-    if (names.length === 1) {
-      shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardBody", { name: names[0] ?? "" }), () => void shell.mutate({ action: "discard", file: names[0] }));
-      return;
-    }
-    shell.ask(shell.tr("chrome.discardSelected"), `${shell.tr("dialog.discardFilesBody", { count: String(names.length) })}\n${names.join("\n")}`, () => void shell.discardPicked(names));
+    shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => void shell.discardPicked(names), names);
   }
 
 export function deleteChosen(shell: ShellState, files: string[]) {

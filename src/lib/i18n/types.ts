@@ -4,6 +4,7 @@ export type Messages = {
   chrome: {
     open: string;
     workspace: string;
+    recentWorkspace: string;
     workspaceConfigure: string;
     workspaceName: string;
     workspaceCreate: string;
@@ -116,6 +117,11 @@ export type Messages = {
     selectFile: string;
     selectCommitFile: string;
     binary: string;
+    binaryOld: string;
+    binaryNew: string;
+    binaryAdded: string;
+    binaryDeleted: string;
+    binaryHint: string;
     truncated: string;
     scanTruncated: string;
     gitSummary: string;
@@ -144,12 +150,29 @@ export type Messages = {
     checkUpdate: string;
     updateInstall: string;
     updateLater: string;
+    updateSkip: string;
     updateDownloading: string;
     updateCurrent: string;
     updateChecking: string;
     updateProgress: string;
     updateStarted: string;
     updateVersion: string;
+    updateTitle: string;
+    updateHint: string;
+    updateOpenPanel: string;
+    updateOpenRelease: string;
+    updateCopyDownload: string;
+    updateNoInstaller: string;
+    updateVerifying: string;
+    updateCancel: string;
+    updateCancelling: string;
+    updateCancelled: string;
+    updateRetry: string;
+    updateCheckAgain: string;
+    updatePanelIdle: string;
+    updateReleaseNotes: string;
+    updateFileName: string;
+    updateCheckedAt: string;
     settingsRecovered: string;
     localOnly: string;
     trackedRemote: string;
@@ -365,6 +388,7 @@ export type Messages = {
     restoreFileBody: string;
     discardBody: string;
     discardFilesBody: string;
+    fileCount: string;
     stashFiles: string;
     stashFile: string;
     discardLinesBody: string;
@@ -459,7 +483,6 @@ export type Messages = {
     commitPage: string;
     integration: string;
     customCommands: string;
-    updates: string;
     sourceFolder: string;
     browse: string;
     showMarks: string;
@@ -513,7 +536,8 @@ export type Messages = {
     fetchAllRemotes: string;
     pullInto: string;
     pushTo: string;
-    pushDefault: string;
+    pushNewBranch: string;
+    noRemotes: string;
     pushAllTags: string;
     forcePush: string;
     allRemotes: string;

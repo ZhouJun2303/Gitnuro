@@ -6,6 +6,8 @@
   import { onVirtualScroll, type SplitRow } from "../view";
   import type { Row, Side } from "./types";
   import { applyConflictChoice, mergeToolLabel, openConflictTool } from "./diff.svelte";
+  import BinaryDiff from "./BinaryDiff.svelte";
+  import { formatBytes } from "../format";
   import type { ConflictParty } from "../status";
   import type { DiffLine } from "../status";
 
@@ -353,11 +355,18 @@
               {#if shell.imageOld || shell.imageNew}
                 {@render imageCompare(shell.imageOld, shell.imageNew)}
               {:else}
-                <p class="diff-empty">{shell.tr("chrome.binary")}</p>
+                <BinaryDiff path={shell.selectedPath ?? ""} oldBytes={shell.diff.oldBytes} newBytes={shell.diff.newBytes} />
               {/if}
             {:else if shell.diff.loadable && shell.diff.lines.length === 0}
               <div class="diff-empty diff-load">
                 <p>{shell.tr("chrome.largeFileHint")}</p>
+                {#if shell.diff.oldBytes != null || shell.diff.newBytes != null}
+                  <p class="diff-sizes">
+                    {#if shell.diff.oldBytes != null}<span>{shell.tr("chrome.binaryOld")} {formatBytes(shell.diff.oldBytes, shell.activeLocale)}</span>{/if}
+                    {#if shell.diff.oldBytes != null && shell.diff.newBytes != null}<span aria-hidden="true">→</span>{/if}
+                    {#if shell.diff.newBytes != null}<span>{shell.tr("chrome.binaryNew")} {formatBytes(shell.diff.newBytes, shell.activeLocale)}</span>{/if}
+                  </p>
+                {/if}
                 <button class="pane-chip" type="button" disabled={shell.busy} onclick={() => void shell.loadDiff(true)}>{shell.tr("chrome.loadDiff")}</button>
               </div>
             {:else if shell.diff.lines.length === 0}

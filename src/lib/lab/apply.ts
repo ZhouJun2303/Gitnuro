@@ -74,6 +74,12 @@ async function showHistory(shell: ShellState) {
   if (first) await shell.selectCommit(first.id);
 }
 
+async function showCommitBySummary(shell: ShellState, summary: string) {
+  shell.section = "history";
+  const target = shell.commitsLive.find((row) => row.summary === summary);
+  if (target) await shell.selectCommit(target.id);
+}
+
 async function fillSurface(shell: ShellState, id: string) {
   if (id === "changes") {
     shell.section = "changes";
@@ -87,6 +93,7 @@ async function fillSurface(shell: ShellState, id: string) {
   if (id === "diff-text") return showChange(shell, "README.md", "unstaged");
   if (id === "diff-image") return showChange(shell, "art/mark.png", "unstaged");
   if (id === "diff-binary") return showChange(shell, "data/sheet.xlsx", "unstaged");
+  if (id === "diff-binary-large") return showChange(shell, "data/large.pak", "unstaged");
   if (id === "diff-rename") return showChange(shell, "src/renamed.txt", "staged");
   if (id === "diff-long") return showChange(shell, "notes/long.txt", "unstaged");
   if (id === "diff-wrap") {
@@ -98,6 +105,11 @@ async function fillSurface(shell: ShellState, id: string) {
     return showChange(shell, "notes/wrap.txt", "unstaged");
   }
   if (id === "history" || id === "commit" || id === "history-remote") return showHistory(shell);
+  if (id === "commit-binary") {
+    await showCommitBySummary(shell, "add the large pak");
+    await shell.openHistoryTab("changes");
+    return;
+  }
   if (id === "tree") {
     await showHistory(shell);
     await shell.openHistoryTab("tree");
@@ -251,13 +263,15 @@ async function fillSurface(shell: ShellState, id: string) {
     return;
   }
   if (id === "update") {
+    shell.updatePhase = "available";
     shell.updateNotice = {
       appVersion: "9.9.9",
       appCode: 999,
-      downloadUrl: "https://example.com/awegit",
+      downloadUrl: "https://github.com/ZhouJun2303/Gitnuro/releases/latest",
       notes: lines(FILL, "实验室更新说明"),
       installable: false,
       sha256: "",
+      releaseUrl: "https://github.com/ZhouJun2303/Gitnuro/releases/latest",
     };
     shell.openCommandLog("update");
     return;
@@ -310,6 +324,19 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.confirmAsk = { title: "删除分支", body: "确认删除 topic？", run: () => {} };
     return;
   }
+  if (id === "discard-many-confirm") {
+    const names = [
+      "src/Excel/Y语言表_Data_Language.xlsx",
+      "src/features/settlement/rates.ts",
+      "src/features/skills/hero-skills.ts",
+      "src/i18n/zh-CN.json",
+      "README.md",
+      "docs/release-notes.md",
+    ];
+    shell.discardChosen(names);
+    if (!shell.confirmAsk) shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => {}, names);
+    return;
+  }
   if (id === "stash-apply-confirm") {
     const stash = shell.refs?.stashes[0];
     shell.confirmApplyStash(stash?.name ?? "stash@{0}", stash?.summary ?? "WIP before the palette");
@@ -332,6 +359,13 @@ async function fillSurface(shell: ShellState, id: string) {
   if (id === "cherry-confirm") {
     const commit = shell.commitsLive[0];
     if (commit) await shell.previewCherry(commit.id, true, commit.summary);
+    return;
+  }
+  if (id === "workspace-menu-busy") {
+    const key = shell.jobKey(shell.snapshot?.path);
+    shell.jobs[key] = { label: "刷新中", percent: null, depth: 1 };
+    shell.menu = { x: 72, y: 96, items: () => shell.workspaceItems() };
+    window.setTimeout(() => { delete shell.jobs[key]; }, 2000);
     return;
   }
   if (id === "menu") {
@@ -385,9 +419,33 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       fillSourceRoots(shell);
       break;
     case "prefs":
-      shell.prefTab = sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : sceneId === "prefs-integration" ? "integration" : sceneId === "prefs-updates" ? "updates" : "general";
+      shell.prefTab = sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : sceneId === "prefs-integration" ? "integration" : "general";
       fillSourceRoots(shell);
       fillLabTools(shell);
+      break;
+    case "update":
+      shell.updateReleaseUrl = "https://github.com/ZhouJun2303/Gitnuro/releases/latest";
+      if (sceneId === "update-current") {
+        shell.updateNotice = null;
+        shell.updatePhase = "current";
+        shell.updateCheckedAt = Date.now();
+        break;
+      }
+      shell.updateNotice = {
+        appVersion: "2.1.0",
+        appCode: 29,
+        downloadUrl: "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.1.0/AweGit_2.1.0_x64-setup.exe",
+        notes: "修复大型差异滚动卡顿。\n提交图在浅色主题下更清楚。\n更新面板显示下载进度、速度和校验状态。",
+        installable: true,
+        sha256: "ab".repeat(32),
+        releaseUrl: "https://github.com/ZhouJun2303/Gitnuro/releases/latest",
+        fileName: "AweGit_2.1.0_x64-setup.exe",
+      };
+      shell.updatePhase = sceneId === "update-downloading" ? "downloading" : sceneId === "update-ready" ? "ready" : "available";
+      shell.updatePercent = sceneId === "update-downloading" ? 42 : sceneId === "update-ready" ? 100 : null;
+      shell.updateReceived = sceneId === "update-downloading" ? 18_450_432 : 0;
+      shell.updateTotal = sceneId === "update-downloading" ? 43_000_000 : 0;
+      shell.updateSpeed = sceneId === "update-downloading" ? 2_400_000 : null;
       break;
     case "reset":
       shell.draft = head.slice(0, 7) || "HEAD";
@@ -429,7 +487,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       break;
     case "push":
       shell.pushBranch = shell.refs?.branches.find((branch) => branch.current)?.name ?? shell.snapshot?.branch ?? "main";
-      shell.pushTo = "";
+      shell.resetPushTarget();
       shell.draft = "origin";
       break;
     case "stash":
