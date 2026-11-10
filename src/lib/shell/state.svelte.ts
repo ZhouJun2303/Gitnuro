@@ -6066,8 +6066,10 @@ export class ShellState {
     const media = typeof window === "undefined" ? null : window.matchMedia("(prefers-color-scheme: dark)");
     const resolved = () => (this.settings.theme === "dark" || (this.settings.theme !== "light" && (media?.matches ?? false)) ? "dark" : "light");
     const paint = () => {
-    root.setAttribute("data-theme", resolved());
+    const theme = resolved();
+    root.setAttribute("data-theme", theme);
     root.lang = this.activeLocale === "zh" ? "zh-CN" : "en";
+    if (this.inApp()) void getCurrentWindow().setTheme(theme).catch(() => {});
     };
     paint();
     media?.addEventListener("change", paint);

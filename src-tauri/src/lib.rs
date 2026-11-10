@@ -1859,6 +1859,15 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
     }
 }
 
+/// Saved app theme as a window theme, so the native title bar matches the webview from the first frame.
+fn saved_window_theme() -> Option<tauri::Theme> {
+    match settings::load().ok()?.theme.as_str() {
+        "dark" => Some(tauri::Theme::Dark),
+        "light" => Some(tauri::Theme::Light),
+        _ => None,
+    }
+}
+
 #[tauri::command]
 fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>, file: Option<String>, rev: Option<String>, width: Option<f64>, height: Option<f64>) -> Result<(), String> {
     let view_name = view.unwrap_or_default();
@@ -1905,6 +1914,7 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
     let window = tauri::webview::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
         .title("AweGit")
         .inner_size(width.clamp(480.0, 4000.0), height.clamp(360.0, 4000.0))
+        .theme(saved_window_theme())
         .resizable(true)
         .build()
         .map_err(|error| error.to_string())?;
@@ -2179,6 +2189,11 @@ pub fn run() {
         .manage(RepoWatch(Mutex::new(None)))
         .setup(|app| {
             perf::mark("setup");
+            if let Some(theme) = saved_window_theme() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_theme(Some(theme));
+                }
+            }
             if let Ok(dir) = app.path().resource_dir() {
                 if let Some(cmd) = git_cmd(&dir) {
                     awegit_git::use_bundled_git(&cmd);

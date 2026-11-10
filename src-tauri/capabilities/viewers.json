@@ -40,6 +40,7 @@
     "allow-pick-directory",
     "allow-pick-file",
     "core:window:allow-set-title",
+    "core:window:allow-set-theme",
     "allow-suggest-commit-message",
     "allow-test-ai-endpoint",
     "allow-list-ai-models",
