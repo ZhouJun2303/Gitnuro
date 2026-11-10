@@ -1137,25 +1137,43 @@ export function dragDiffLine(shell: ShellState, index: number, event: MouseEvent
     const anchor = event.shiftKey ? shell.diffAnchor : index;
     if (!event.shiftKey) shell.diffAnchor = index;
     shell.selectDiffRange(anchor, index);
-    const move = (ev: MouseEvent) => {
+    let frame = 0;
+    let pendingX = event.clientX;
+    let pendingY = event.clientY;
+    let lastLine = index;
+    const apply = () => {
       const body = shell.diffEl;
-      if (body) {
-        const rect = body.getBoundingClientRect();
-        if (ev.clientY < rect.top + 28) body.scrollTop -= shell.diffRowHeight;
-        else if (ev.clientY > rect.bottom - 28) body.scrollTop += shell.diffRowHeight;
-      }
-      const hit = body
-        ? document.elementsFromPoint(ev.clientX, ev.clientY).find(
-            (node): node is HTMLElement =>
-              node instanceof HTMLElement && body.contains(node) && Number.isInteger(Number(node.dataset.line)),
-          )
-        : undefined;
+      if (!body) return;
+      const rect = body.getBoundingClientRect();
+      if (pendingY < rect.top + 28) body.scrollTop -= shell.diffRowHeight;
+      else if (pendingY > rect.bottom - 28) body.scrollTop += shell.diffRowHeight;
+      const hit = document.elementsFromPoint(pendingX, pendingY).find(
+        (node): node is HTMLElement =>
+          node instanceof HTMLElement && body.contains(node) && Number.isInteger(Number(node.dataset.line)),
+      );
       const next = Number(hit?.dataset.line);
-      if (Number.isInteger(next)) shell.selectDiffRange(anchor, next);
+      if (Number.isInteger(next) && next !== lastLine) {
+        lastLine = next;
+        shell.selectDiffRange(anchor, next);
+      }
+    };
+    const move = (ev: MouseEvent) => {
+      pendingX = ev.clientX;
+      pendingY = ev.clientY;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        apply();
+      });
     };
     const up = () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+        apply();
+      }
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);

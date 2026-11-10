@@ -345,6 +345,8 @@ pub struct FileDiff {
 
 const MAX_DIFF_LINES: usize = 4_000;
 const MAX_UNTRACKED_BYTES: u64 = 8_000_000;
+const MAX_LINE_EDIT_BYTES: usize = 16_000_000;
+const MAX_LFS_POINTER_BYTES: u64 = 4096;
 const MAX_DIFF_BYTES: usize = 8_000_000;
 const MAX_LARGE_FILE: u64 = 2_000_000;
 const MAX_PREVIEW_BYTES: u64 = 8_000_000;
@@ -433,6 +435,9 @@ pub fn discard_line(repo: &Path, path: &str, text: &str, addition: bool, at: u32
     let full = repo.join(path);
     if !full.starts_with(repo) {
         return Err(Error::Path(path.to_string()));
+    }
+    if std::fs::metadata(&full).map(|meta| meta.len() > MAX_LINE_EDIT_BYTES as u64).unwrap_or(false) {
+        return Err(too_large_for_lines(path));
     }
     let current = match std::fs::read(&full) {
         Ok(bytes) => decode_text(&bytes, path, "discard the whole file instead")?,
@@ -532,8 +537,8 @@ pub fn stage_lines(repo: &Path, path: &str, lines: &[LineEdit], unstage: bool) -
         check_line_text(line, "staged")?;
     }
     let current = index_blob(repo, path)?;
-    if current.len() > 16_000_000 {
-        return Err(Error::Git(format!("{path} is too large for line staging; stage the whole file instead")));
+    if current.len() > MAX_LINE_EDIT_BYTES {
+        return Err(too_large_for_lines(path));
     }
     let current = decode_text(&current, path, "stage the whole file instead")?;
     let (mut body, eol) = split_keep_eol(&current);
@@ -550,6 +555,9 @@ pub fn discard_lines(repo: &Path, path: &str, lines: &[LineEdit]) -> Result<(), 
     let full = repo.join(path);
     if !full.starts_with(repo) {
         return Err(Error::Path(path.to_string()));
+    }
+    if std::fs::metadata(&full).map(|meta| meta.len() > MAX_LINE_EDIT_BYTES as u64).unwrap_or(false) {
+        return Err(too_large_for_lines(path));
     }
     let current = match std::fs::read(&full) {
         Ok(bytes) => decode_text(&bytes, path, "discard the whole file instead")?,
@@ -896,6 +904,9 @@ fn file_has_nul(repo: &Path, path: &str) -> bool {
 }
 
 fn blob_has_nul(repo: &Path, oid: &str) -> bool {
+    if matches!(spec_size(repo, oid), Some(size) if size > MAX_BLOB_READ_BYTES) {
+        return true;
+    }
     run(repo, &["cat-file", "blob", oid])
         .map(|output| output.stdout.iter().take(8192).any(|byte| *byte == 0))
         .unwrap_or(false)
@@ -995,8 +1006,16 @@ fn unmerged_stages(repo: &Path) -> Result<std::collections::BTreeMap<String, [bo
     Ok(stages)
 }
 
+fn too_large_for_lines(path: &str) -> Error {
+    Error::Git(format!("{path} is too large for line editing; edit the whole file instead"))
+}
+
 fn index_blob(repo: &Path, path: &str) -> Result<Vec<u8>, Error> {
-    match run(repo, &["show", &format!(":{path}")]) {
+    let spec = format!(":{path}");
+    if matches!(spec_size(repo, &spec), Some(size) if size > MAX_LINE_EDIT_BYTES as u64) {
+        return Err(too_large_for_lines(path));
+    }
+    match run(repo, &["show", &spec]) {
         Ok(output) => Ok(output.stdout),
         Err(Error::Git(_)) if !in_index(repo, path)? => Ok(Vec::new()),
         Err(error) => Err(error),
@@ -1169,12 +1188,20 @@ pub(crate) fn spec_size(repo: &Path, spec: &str) -> Option<u64> {
 
 fn lfs_pointer_diff(repo: &Path, path: &str, staged: bool) -> Option<Vec<DiffLine>> {
     let left_spec = if staged { format!("HEAD:{path}") } else { format!(":{path}") };
-    let right_bytes = if staged {
-        run(repo, &["show", &format!(":{path}")]).ok().map(|output| output.stdout)
-    } else {
-        std::fs::read(repo.join(path)).ok()
+    let read_spec = |spec: &str| match spec_size(repo, spec) {
+        Some(size) if size <= MAX_LFS_POINTER_BYTES => run(repo, &["show", spec]).ok().map(|output| output.stdout),
+        _ => None,
     };
-    let left_bytes = run(repo, &["show", &left_spec]).ok().map(|output| output.stdout).unwrap_or_default();
+    let right_bytes = if staged {
+        read_spec(&format!(":{path}"))
+    } else {
+        let full = repo.join(path);
+        match std::fs::metadata(&full) {
+            Ok(meta) if meta.len() <= MAX_LFS_POINTER_BYTES => std::fs::read(&full).ok(),
+            _ => None,
+        }
+    };
+    let left_bytes = read_spec(&left_spec).unwrap_or_default();
     let right_bytes = right_bytes.unwrap_or_default();
     let left = lfs_pointer(&left_bytes);
     let right = lfs_pointer(&right_bytes);
@@ -1732,7 +1759,27 @@ fn tool_scratch() -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_nanos())
         .unwrap_or(0);
-    std::env::temp_dir().join("awegit-tool").join(format!("{tick}-{}", std::process::id()))
+    let root = std::env::temp_dir().join("awegit-tool");
+    prune_tool_scratch(&root);
+    root.join(format!("{tick}-{}", std::process::id()))
+}
+
+/// External diff/merge tools keep their copies until the app exits; drop day-old ones.
+fn prune_tool_scratch(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let Some(cutoff) = std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(24 * 60 * 60)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if meta.is_dir() && meta.modified().map(|at| at < cutoff).unwrap_or(false) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 fn write_copy(dir: &Path, role: &str, rel: &str, bytes: &[u8]) -> Result<String, Error> {

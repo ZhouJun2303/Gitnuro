@@ -451,6 +451,9 @@ export class ShellState {
   historyTop = $state(0);
 
 
+  commitNavTimer = 0;
+
+
   historyHeight = $state(0);
 
 
@@ -661,6 +664,9 @@ export class ShellState {
 
 
   blobLoaded = $state(false);
+
+
+  blobGen = 0;
   blobTruncated = $state(false);
 
 
@@ -1267,7 +1273,7 @@ export class ShellState {
 
 
   jobKey(path: string | null | undefined) {
-    return (path ?? "").replace(/[\\/]+$/, "").replaceAll("\\", "/").toLowerCase();
+    return (path ?? "").replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "").replaceAll("\\", "/").toLowerCase();
   }
 
 
@@ -2171,16 +2177,23 @@ export class ShellState {
 
   async loadBlobPane() {
     if (!this.blobFile) return;
+    const file = this.blobFile;
+    const rev = this.blobRev || "HEAD";
+    const path = this.repoPath();
+    const gen = ++this.blobGen;
+    const current = () => gen === this.blobGen && this.blobFile === file && (!path || this.viewing(path));
     this.blobLoaded = false;
     this.blobError = "";
     try {
-      const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null; truncated?: boolean }>("blob_view", { path: this.repoPath(), rev: this.blobRev || "HEAD", file: this.blobFile });
+      const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null; truncated?: boolean }>("blob_view", { path, rev, file });
+      if (!current()) return;
       this.blobBinary = view.binary && !view.preview && !view.text;
       this.blobPreview = view.preview;
       this.blobText = view.text;
       this.blobTruncated = view.truncated === true;
-      if (this.inApp()) await getCurrentWindow().setTitle(this.fileName(this.blobFile)).catch(() => {});
+      if (this.inApp()) await getCurrentWindow().setTitle(this.fileName(file)).catch(() => {});
     } catch (error) {
+      if (!current()) return;
       this.actionError = this.message(error);
       this.blobError = this.message(error);
       this.blobText = "";
@@ -2188,7 +2201,7 @@ export class ShellState {
       this.blobBinary = false;
       this.blobTruncated = false;
     } finally {
-      this.blobLoaded = true;
+      if (current()) this.blobLoaded = true;
     }
   }
 
@@ -4224,7 +4237,25 @@ export class ShellState {
 
 
   async selectCommit(id: string, event?: MouseEvent) {
+    window.clearTimeout(this.commitNavTimer);
+    this.commitNavTimer = 0;
     return selectCommit(this, id, event);
+  }
+
+  /** Move the highlight now, load the expensive detail once the key repeat settles. */
+  selectCommitSoon(id: string) {
+    const path = this.repoPath();
+    this.comparePair = null;
+    this.selectedCommit = id;
+    const rowAt = this.historyItems.findIndex((row) => row.id === id);
+    if (rowAt >= 0) this.selectedIndex = rowAt;
+    this.blameLines = null;
+    this.historyTab = "commit";
+    window.clearTimeout(this.commitNavTimer);
+    this.commitNavTimer = window.setTimeout(() => {
+      this.commitNavTimer = 0;
+      if (this.viewing(path)) void this.selectCommit(id);
+    }, 90);
   }
 
 
@@ -5625,7 +5656,7 @@ export class ShellState {
       if (rows.length === 0) return;
       this.selectedIndex = Math.min(rows.length - 1, Math.max(0, this.selectedIndex + delta));
       const row = rows[this.selectedIndex];
-      if (row) void this.selectCommit(row.id);
+      if (row) this.selectCommitSoon(row.id);
       return;
     }
     const { target, rows } = this.fileTargetRows();
@@ -6292,7 +6323,9 @@ export class ShellState {
     }
     }
     try {
-    unlisten = await listen<{ refs?: boolean } | null>("repo-changed", (event) => {
+    unlisten = await listen<{ refs?: boolean; path?: string } | null>("repo-changed", (event) => {
+      const path = event.payload?.path;
+      if (path && !this.viewing(path)) return;
       const scope = event.payload?.refs === false ? "status" : "full";
       if (this.busy) {
         // A write ignores refreshes for its whole duration; replay the newest event when it ends.

@@ -63,14 +63,16 @@ type Job = Box<dyn FnOnce() + Send>;
 
 struct WatchSlot {
     watcher: Mutex<Option<RecommendedWatcher>>,
+    alive: Arc<AtomicBool>,
 }
 
-struct RepoWatch(Mutex<Option<Arc<WatchSlot>>>);
+struct RepoWatch(Mutex<HashMap<PathBuf, Arc<WatchSlot>>>);
 
 /// What a batch of file events changed. `refs` means branches, `HEAD`, or an operation in progress.
 #[derive(Clone, serde::Serialize)]
 struct RepoChange {
     refs: bool,
+    path: String,
 }
 
 /// Transfer percent for one repository. The shell shows it only while that repository is open.
@@ -727,10 +729,27 @@ fn program_exists(path: String) -> bool {
 #[tauri::command]
 fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, path: Option<String>) -> Result<(), String> {
     let repo = repo_from(path)?;
-    let mut slot = state.0.lock().map_err(|_| "watcher lock".to_string())?;
-    if let Some(previous) = slot.take() {
-        if let Ok(mut watcher) = previous.watcher.lock() {
-            watcher.take();
+    let key = watch_key(&repo);
+    let mut slots = state.0.lock().map_err(|_| "watcher lock".to_string())?;
+    // Opening another tab of the same repository must not rebuild the recursive watch.
+    if let Some(existing) = slots.get(&key) {
+        if existing.alive.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if let Some(stale) = slots.remove(&key) {
+            if let Ok(mut watcher) = stale.watcher.lock() {
+                watcher.take();
+            }
+        }
+    }
+    if slots.len() >= 8 {
+        let stale = slots.keys().find(|item| item.as_path() != key.as_path()).cloned();
+        if let Some(stale) = stale {
+            if let Some(previous) = slots.remove(&stale) {
+                if let Ok(mut watcher) = previous.watcher.lock() {
+                    watcher.take();
+                }
+            }
         }
     }
     let (sender, receiver) = mpsc::channel::<Vec<PathBuf>>();
@@ -770,9 +789,16 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
             started.elapsed().as_millis()
         ),
     );
-    let _ = app.emit("repo-changed", RepoChange { refs: true });
+    let _ = app.emit(
+        "repo-changed",
+        RepoChange {
+            refs: true,
+            path: repo.display().to_string(),
+        },
+    );
     let shared = Arc::new(WatchSlot {
         watcher: Mutex::new(Some(watcher)),
+        alive: Arc::new(AtomicBool::new(true)),
     });
     let thread_slot = Arc::clone(&shared);
     let root = repo.clone();
@@ -780,7 +806,7 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
         .name("awegit-watch".into())
         .spawn(move || settle_changes(&app, &root, git_dir, receiver, watched, thread_slot))
         .map_err(|error| error.to_string())?;
-    *slot = Some(shared);
+    slots.insert(key, shared);
     Ok(())
 }
 
@@ -1028,7 +1054,7 @@ fn settle_changes(
     mut watched: WatchSet,
     slot: Arc<WatchSlot>,
 ) {
-    while let Ok(mut paths) = receiver.recv() {
+    'watch: while let Ok(mut paths) = receiver.recv() {
         let started = Instant::now();
         let mut overflow = false;
         while started.elapsed() < WATCH_MAX_WAIT {
@@ -1040,7 +1066,7 @@ fn settle_changes(
             match receiver.recv_timeout(WATCH_QUIET) {
                 Ok(more) => paths.extend(more),
                 Err(RecvTimeoutError::Timeout) => break,
-                Err(RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Disconnected) => break 'watch,
             }
         }
         attach_new_dirs(repo, git_dir.as_deref(), &paths, &mut watched, &slot);
@@ -1048,13 +1074,20 @@ fn settle_changes(
             // The dropped events may have included refs; a full refresh is the safe answer.
             let recoveries = WATCH_RECOVERIES.fetch_add(1, Ordering::Relaxed) + 1;
             perf::write("INFO", "watch", &format!("repo-changed refs=true paths=overflow recoveries={recoveries}"));
-            let _ = app.emit("repo-changed", RepoChange { refs: true });
+            let _ = app.emit(
+                "repo-changed",
+                RepoChange {
+                    refs: true,
+                    path: repo.display().to_string(),
+                },
+            );
             continue;
         }
         let Some(change) = classify_changes(repo, &paths) else { continue };
         perf::write("INFO", "watch", &format!("repo-changed refs={} paths={}", change.refs, paths.len()));
         let _ = app.emit("repo-changed", change);
     }
+    slot.alive.store(false, Ordering::Release);
 }
 
 /// `None` when every path is Git bookkeeping the UI does not show, or matched by ignore rules.
@@ -1072,7 +1105,7 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
                 "index" => status = true,
                 "objects" | "modules" | "lfs" | "logs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit" | "gitnuro" | "fsmonitor--daemon"
                     if inner != "logs/refs/stash" => {}
-                _ => return Some(RepoChange { refs: true }),
+                _ => return Some(RepoChange { refs: true, path: repo.display().to_string() }),
             }
             continue;
         }
@@ -1087,7 +1120,7 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
         let ignored: HashSet<String> = awegit_git::ignored_paths(repo, &files).into_iter().collect();
         status = files.iter().any(|file| !ignored.contains(file));
     }
-    status.then_some(RepoChange { refs: false })
+    status.then_some(RepoChange { refs: false, path: repo.display().to_string() })
 }
 
 #[tauri::command]
@@ -2206,7 +2239,7 @@ pub fn run() {
         ]);
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(RepoWatch(Mutex::new(None)))
+        .manage(RepoWatch(Mutex::new(HashMap::new())))
         .setup(|app| {
             perf::mark("setup");
             if let Some(theme) = saved_window_theme() {

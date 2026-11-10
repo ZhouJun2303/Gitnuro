@@ -30,6 +30,16 @@
     for (let year = start; year <= end; year += 1) list.push(year);
     return list;
   });
+  const timelineCommits = $derived.by(() => {
+    const commits = shell.commitsLive.filter((commit) => commit.at);
+    const limit = 600;
+    if (commits.length <= limit) return commits;
+    const step = Math.ceil(commits.length / limit);
+    const sampled = commits.filter((_, index) => index % step === 0);
+    const selected = commits.find((commit) => commit.id === shell.selectedCommit);
+    if (selected && !sampled.includes(selected)) sampled.push(selected);
+    return sampled;
+  });
 
   const place = (at: number) => (span ? ((at - span.min) / (span.max - span.min)) * 100 : 0);
 
@@ -65,7 +75,7 @@
         {@const pos = place(at)}
         <span style:left="{pos}%" style:transform={pos < 4 ? "none" : pos > 96 ? "translateX(-100%)" : undefined}>{year}</span>
       {/each}
-      {#each shell.commitsLive as commit (commit.id)}
+      {#each timelineCommits as commit (commit.id)}
         {#if commit.at}
           {@const pos = Math.max(1, Math.min(99, place(commit.at)))}
           <button type="button" class:on={shell.selectedCommit === commit.id} style:left="{pos}%" aria-label={`${commit.summary} · ${shell.whenLabel(commit)}`} title={commit.summary} onclick={() => void choose(commit.id)}></button>
