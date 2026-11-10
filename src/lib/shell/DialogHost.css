@@ -260,15 +260,15 @@
     font-weight: 500;
   }
 
-.dialog .push-target {
+.dialog .remote-target {
     align-items: flex-start;
   }
 
-.dialog .push-target > span {
+.dialog .remote-target > span {
     padding-top: 6px;
   }
 
-.dialog .push-target-body {
+.dialog .remote-target-body {
     display: flex;
     flex: 1;
     min-width: 0;
@@ -276,12 +276,12 @@
     gap: 8px;
   }
 
-.dialog .push-target-empty {
+.dialog .remote-target-empty {
     padding: 6px 0;
     color: var(--text-secondary);
   }
 
-.dialog .push-tabs {
+.dialog .remote-tabs {
     display: flex;
     flex-wrap: wrap;
     gap: 2px;
@@ -290,7 +290,7 @@
     background: var(--field);
   }
 
-.dialog .push-tabs button {
+.dialog .remote-tabs button {
     min-height: 26px;
     height: auto;
     border: 0;
@@ -302,11 +302,11 @@
     white-space: nowrap;
   }
 
-.dialog .push-tabs button:hover {
+.dialog .remote-tabs button:hover {
     color: var(--text);
   }
 
-.dialog .push-tabs button.on {
+.dialog .remote-tabs button.on {
     color: var(--text);
     background: var(--elevated);
     font-weight: 500;

@@ -395,33 +395,39 @@
         {:else if shell.dialog === "pull"}
           <h2>{shell.tr("chrome.pull")}</h2>
           <p>{shell.tr("dialog.pullBody")}</p>
-          <label class="sync-row">
-            <span>{shell.tr("dialog.remoteName")}</span>
-            {#if (shell.refs?.remotes.length ?? 0) > 0}
-              <select value={shell.draft} onchange={(event) => { shell.draft = event.currentTarget.value; shell.draftExtra = shell.pullBranchFor(shell.draft); }}>
-                {#each shell.refs?.remotes ?? [] as remote (remote.name)}
-                  <option value={remote.name}>{remote.name}</option>
-                {/each}
-              </select>
-            {:else}
-              <input placeholder={shell.tr("dialog.remoteName")} bind:value={shell.draft} />
-            {/if}
-          </label>
-          <label class="sync-row">
-            <span>{shell.tr("dialog.branch")}</span>
-            {#if (shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches.length ?? 0) > 0}
-              <select bind:value={shell.draftExtra}>
-                {#if shell.draftExtra && !(shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches.includes(shell.draftExtra))}
-                  <option value={shell.draftExtra}>{shell.draft}/{shell.draftExtra}</option>
+          {#if (shell.refs?.remotes.length ?? 0) > 0}
+            <div class="sync-row remote-target">
+              <span>{shell.tr("dialog.remoteName")}</span>
+              <div class="remote-target-body">
+                <div class="remote-tabs" role="tablist" aria-label={shell.tr("dialog.remoteName")}>
+                  {#each shell.refs?.remotes ?? [] as remote (remote.name)}
+                    <button type="button" role="tab" title={remote.url ?? remote.name} class:on={shell.draft === remote.name} aria-selected={shell.draft === remote.name} onclick={() => { shell.draft = remote.name; shell.draftExtra = shell.pullBranchFor(remote.name); }}>{remote.name}</button>
+                  {/each}
+                </div>
+                {#if (shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches.length ?? 0) > 0}
+                  <select bind:value={shell.draftExtra} aria-label={shell.tr("dialog.branch")}>
+                    {#if shell.draftExtra && !(shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches.includes(shell.draftExtra))}
+                      <option value={shell.draftExtra}>{shell.draft}/{shell.draftExtra}</option>
+                    {/if}
+                    {#each shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches ?? [] as branch (branch)}
+                      <option value={branch}>{shell.draft}/{branch}</option>
+                    {/each}
+                  </select>
+                {:else}
+                  <input placeholder={shell.tr("dialog.branch")} aria-label={shell.tr("dialog.branch")} bind:value={shell.draftExtra} />
                 {/if}
-                {#each shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches ?? [] as branch (branch)}
-                  <option value={branch}>{shell.draft}/{branch}</option>
-                {/each}
-              </select>
-            {:else}
+              </div>
+            </div>
+          {:else}
+            <label class="sync-row">
+              <span>{shell.tr("dialog.remoteName")}</span>
+              <input placeholder={shell.tr("dialog.remoteName")} bind:value={shell.draft} />
+            </label>
+            <label class="sync-row">
+              <span>{shell.tr("dialog.branch")}</span>
               <input placeholder={shell.tr("dialog.branch")} bind:value={shell.draftExtra} />
-            {/if}
-          </label>
+            </label>
+          {/if}
           <div class="sync-row">
             <span>{shell.tr("dialog.pullInto")}</span>
             <strong class="sync-value">{shell.snapshot?.branch ?? ""}</strong>
@@ -445,11 +451,11 @@
               {/each}
             </select>
           </label>
-          <div class="sync-row push-target">
+          <div class="sync-row remote-target">
             <span>{shell.tr("dialog.pushTo")}</span>
-            <div class="push-target-body">
+            <div class="remote-target-body">
               {#if (shell.refs?.remotes ?? []).length > 0}
-                <div class="push-tabs" role="tablist" aria-label={shell.tr("dialog.pushTo")}>
+                <div class="remote-tabs" role="tablist" aria-label={shell.tr("dialog.pushTo")}>
                   {#each shell.refs?.remotes ?? [] as remote (remote.name)}
                     <button type="button" role="tab" title={remote.url ?? remote.name} class:on={shell.pushRemoteName() === remote.name} aria-selected={shell.pushRemoteName() === remote.name} onclick={() => shell.selectPushRemote(remote.name)}>{remote.name}</button>
                   {/each}
@@ -460,7 +466,7 @@
                   {/each}
                 </select>
               {:else}
-                <span class="push-target-empty">{shell.tr("dialog.noRemotes")}</span>
+                <span class="remote-target-empty">{shell.tr("dialog.noRemotes")}</span>
               {/if}
             </div>
           </div>
