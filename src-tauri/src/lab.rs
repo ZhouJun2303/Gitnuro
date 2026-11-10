@@ -305,6 +305,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             done_result(super::import_fork_settings(path))
         }
         "external_tools" => done(super::external_tools()),
+        "editor_tools" => done(super::editor_tools()),
         "program_exists" => done(super::program_exists(req(args, "path")?)),
         "watch_repository" => Ok(Value::Null),
         "open_terminal" => Ok(Value::Null),

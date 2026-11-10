@@ -1697,6 +1697,15 @@ pub fn launch_merge_tool(repo: &Path, template: &str, file: &str) -> Result<(), 
     ])
 }
 
+/// Open a work-tree file in an editor, expanding `{file}` to the full path
+/// and `{line}` to the line to reveal. Line 0 means the top of the file.
+pub fn launch_editor(repo: &Path, template: &str, file: &str, line: u32) -> Result<(), Error> {
+    let path = check_path(file)?;
+    let absolute = repo.join(path).display().to_string();
+    let line = line.max(1).to_string();
+    launch_template(repo, template, path, &[("{file}", &absolute), ("{line}", &line)])
+}
+
 fn stage_bytes(repo: &Path, path: &str, stage: u8) -> Vec<u8> {
     match run(repo, &["show", &format!(":{stage}:{path}")]) {
         Ok(output) => output.stdout,

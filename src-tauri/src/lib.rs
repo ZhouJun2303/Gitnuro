@@ -704,6 +704,11 @@ fn common_tools() -> Vec<tools::CommonTool> {
 }
 
 #[tauri::command]
+fn editor_tools() -> Vec<tools::EditorTool> {
+    tools::editor_tools()
+}
+
+#[tauri::command]
 fn program_exists(path: String) -> bool {
     tools::program_exists(&path)
 }
@@ -1772,8 +1777,11 @@ fn ssh_config_path() -> Result<std::path::PathBuf, String> {
 }
 
 #[tauri::command]
-fn open_editor(path: Option<String>, file: String, line: u32) -> Result<(), String> {
+fn open_editor(path: Option<String>, file: String, line: u32, tool: Option<String>) -> Result<(), String> {
     let repo = repo_from(path)?;
+    if let Some(tool) = tool.filter(|item| !item.trim().is_empty()) {
+        return awegit_git::launch_editor(&repo, &tool, &file, line).map_err(|error| error.to_string());
+    }
     let full = repo.join(&file);
     let spec = format!("{}:{line}", full.display());
     for bin in ["cursor", "code"] {
@@ -2117,6 +2125,7 @@ pub fn run() {
             import_fork_settings,
             external_tools,
             common_tools,
+            editor_tools,
             program_exists,
             watch_repository,
             open_terminal,

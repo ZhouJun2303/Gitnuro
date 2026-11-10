@@ -690,6 +690,7 @@ export function composeTool(shell: ShellState, path: string, args: string) {
 
 export function applyToolSettings(shell: ShellState) {
     for (const kind of toolKinds) {
+      if (kind === "editor") continue;
       const tool = defaultTool(shell, kind);
       const name = tool?.name ?? "";
       const path = tool?.path ?? "";
@@ -950,6 +951,16 @@ export async function openLocal(shell: ShellState, path: string) {
     }
   }
 
+/** Open a work-tree file in a configured editor; without a template the backend picks one. */
+export async function openInEditor(shell: ShellState, file: string, line = 0, template?: string) {
+    if (!file) return;
+    try {
+      await invoke("open_editor", { path: shell.repoPath(), file, line, tool: template ?? null });
+    } catch (error) {
+      shell.actionError = shell.message(error);
+    }
+  }
+
 export type ExternalTool = {
     name: string;
     path: string;
@@ -964,11 +975,17 @@ export type CommonTool = {
     mergeArgs: string;
   };
 
-export type ToolKind = "diff" | "merge";
+export type EditorTool = {
+    name: string;
+    path: string;
+    args: string;
+  };
+
+export type ToolKind = "diff" | "merge" | "editor";
 
 export type ToolSource = "detected" | "common";
 
-const toolKinds: ToolKind[] = ["diff", "merge"];
+const toolKinds: ToolKind[] = ["diff", "merge", "editor"];
 
 function legacyToolName(shell: ShellState, kind: ToolKind) {
     return kind === "merge" ? shell.settings.mergeToolName : shell.settings.diffToolName;
@@ -983,12 +1000,15 @@ function legacyToolArgs(shell: ShellState, kind: ToolKind) {
   }
 
 export function toolsOf(shell: ShellState, kind: ToolKind): ToolRecord[] {
+    if (kind === "editor") return shell.settings.editorTools;
     return kind === "merge" ? shell.settings.mergeTools : shell.settings.diffTools;
   }
 
 function setTools(shell: ShellState, kind: ToolKind, tools: ToolRecord[]) {
     const next = ensureFallback(tools);
-    shell.settings = kind === "merge" ? { ...shell.settings, mergeTools: next } : { ...shell.settings, diffTools: next };
+    if (kind === "editor") shell.settings = { ...shell.settings, editorTools: next };
+    else if (kind === "merge") shell.settings = { ...shell.settings, mergeTools: next };
+    else shell.settings = { ...shell.settings, diffTools: next };
   }
 
 /** One tool owns the fallback for files that match no extension rule. */
@@ -1232,7 +1252,10 @@ export async function browseToolPath(shell: ShellState, kind: ToolKind, toolId: 
 export async function importTools(shell: ShellState, kind: ToolKind, source: ToolSource) {
     let incoming: { name: string; path: string; args: string }[] = [];
     try {
-      if (source === "common") {
+      if (kind === "editor") {
+        const rows = await invoke<EditorTool[]>("editor_tools");
+        incoming = rows.map((row) => ({ name: row.name, path: row.path, args: row.args }));
+      } else if (source === "common") {
         const rows = await invoke<CommonTool[]>("common_tools");
         incoming = rows
           .map((row) => ({ name: row.name, path: row.path, args: kind === "merge" ? row.mergeArgs : row.diffArgs }))
@@ -1268,8 +1291,10 @@ export async function loadExternalTools(shell: ShellState) {
       return;
     }
     let catalog: { merge: ExternalTool[]; diff: ExternalTool[] };
+    let editors: EditorTool[] = [];
     try {
       catalog = await invoke("external_tools");
+      editors = await invoke<EditorTool[]>("editor_tools").catch(() => []);
     } catch {
       return;
     }
@@ -1277,7 +1302,8 @@ export async function loadExternalTools(shell: ShellState) {
     shell.diffTools = catalog.diff ?? [];
     let changed = false;
     for (const kind of toolKinds) {
-      changed = ensureToolList(shell, kind, kind === "merge" ? shell.mergeTools : shell.diffTools) || changed;
+      const source = kind === "editor" ? editors : kind === "merge" ? shell.mergeTools : shell.diffTools;
+      changed = ensureToolList(shell, kind, source) || changed;
     }
     if (changed) {
       applyToolSettings(shell);
@@ -1295,7 +1321,7 @@ function ensureToolList(shell: ShellState, kind: ToolKind, catalog: ExternalTool
     });
     if (changed) setTools(shell, kind, repaired);
     if (repaired.length > 0) return changed;
-    const path = legacyToolPath(shell, kind).trim();
+    const path = kind === "editor" ? "" : legacyToolPath(shell, kind).trim();
     if (path) {
       const record: ToolRecord = {
         id: newToolId(),

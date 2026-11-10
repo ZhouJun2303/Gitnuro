@@ -142,7 +142,7 @@ export type ToolRecord = {
   id: string;
   name: string;
   path: string;
-  /** Diff: `{left}` `{right}` `{file}`. Merge: `{ours}` `{theirs}` `{base}` `{working}` `{file}`. */
+  /** Diff: `{left}` `{right}` `{file}`. Merge: `{ours}` `{theirs}` `{base}` `{working}` `{file}`. Editor: `{file}` `{line}`. */
   args: string;
   /** Lowercase suffixes without the dot. Empty means every file. */
   extensions: string[];
@@ -242,6 +242,7 @@ export type Settings = {
   mergeToolArgs: string;
   diffTools: ToolRecord[];
   mergeTools: ToolRecord[];
+  editorTools: ToolRecord[];
   ignoreSpace: boolean;
   verticalTabs: boolean;
   pinnedRefs: string[];

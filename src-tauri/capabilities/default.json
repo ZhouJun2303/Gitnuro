@@ -36,6 +36,8 @@
     "allow-settings-path",
     "allow-import-fork-settings",
     "allow-external-tools",
+    "allow-common-tools",
+    "allow-editor-tools",
     "allow-program-exists",
     "allow-watch-repository",
     "allow-open-terminal",

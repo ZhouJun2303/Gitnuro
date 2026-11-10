@@ -34,6 +34,15 @@ pub struct CommonTool {
     pub merge_args: String,
 }
 
+/// A text editor present on this machine, used to seed the editor list.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorTool {
+    pub name: String,
+    pub path: String,
+    pub args: String,
+}
+
 #[derive(Clone, Copy)]
 enum Kind {
     Merge,
@@ -175,6 +184,110 @@ fn common_presets() -> Vec<CommonTool> {
         });
     }
     rows
+}
+
+/// Editors installed on this machine, newest names first. Only programs present on disk are returned.
+pub fn editor_tools() -> Vec<EditorTool> {
+    let mut tools: Vec<EditorTool> = Vec::new();
+    for preset in editor_presets() {
+        if preset.path.trim().is_empty() || !program_exists(&preset.path) {
+            continue;
+        }
+        if tools.iter().any(|item| item.name.eq_ignore_ascii_case(&preset.name)) {
+            continue;
+        }
+        tools.push(preset);
+    }
+    tools
+}
+
+fn editor_presets() -> Vec<EditorTool> {
+    let local = |folder: &str, file: &str| {
+        std::env::var("LOCALAPPDATA")
+            .ok()
+            .map(|base| Path::new(&base).join(folder).join(file).display().to_string())
+            .unwrap_or_default()
+    };
+    let program = |folder: &str, file: &str| {
+        std::env::var("ProgramFiles")
+            .ok()
+            .map(|base| Path::new(&base).join(folder).join(file).display().to_string())
+            .unwrap_or_default()
+    };
+    let goto = "-g \"{file}:{line}\"";
+    vec![
+        EditorTool {
+            name: "Visual Studio Code".into(),
+            path: local("Programs\\Microsoft VS Code", "Code.exe"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Visual Studio Code".into(),
+            path: program("Microsoft VS Code", "Code.exe"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Visual Studio Code".into(),
+            path: on_path("code.cmd"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Visual Studio Code".into(),
+            path: on_path("code.exe"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "VS Code Insiders".into(),
+            path: local("Programs\\Microsoft VS Code Insiders", "Code - Insiders.exe"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Cursor".into(),
+            path: local("Programs\\cursor", "Cursor.exe"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Cursor".into(),
+            path: local("Programs\\Cursor", "Cursor.exe"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Cursor".into(),
+            path: on_path("cursor.cmd"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Windsurf".into(),
+            path: local("Programs\\Windsurf", "Windsurf.exe"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Sublime Text".into(),
+            path: program("Sublime Text", "sublime_text.exe"),
+            args: "\"{file}:{line}\"".into(),
+        },
+        EditorTool {
+            name: "Notepad++".into(),
+            path: program("Notepad++", "notepad++.exe"),
+            args: "-n{line} \"{file}\"".into(),
+        },
+        EditorTool {
+            name: "Zed".into(),
+            path: local("Programs\\Zed", "Zed.exe"),
+            args: "\"{file}:{line}\"".into(),
+        },
+    ]
+}
+
+fn on_path(file: &str) -> String {
+    let Some(paths) = std::env::var_os("PATH") else {
+        return String::new();
+    };
+    std::env::split_paths(&paths)
+        .map(|folder| folder.join(file))
+        .find(|candidate| candidate.is_file())
+        .map(|candidate| candidate.display().to_string())
+        .unwrap_or_default()
 }
 
 pub fn normalize_extension(value: &str) -> String {

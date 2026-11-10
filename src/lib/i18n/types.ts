@@ -329,6 +329,11 @@ export type Messages = {
     externalMerge: string;
     noExternalTools: string;
     configureTools: string;
+    openInEditor: string;
+    openInEditorAtLine: string;
+    noEditorTools: string;
+    autoEditor: string;
+    configureEditors: string;
     lfsLock: string;
     lfsUnlock: string;
     stageHunk: string;
@@ -528,6 +533,8 @@ export type Messages = {
     issueLinks: string;
     externalMerge: string;
     externalDiff: string;
+    textEditor: string;
+    toolEditorHint: string;
     shell: string;
     shellDefault: string;
     shellPath: string;

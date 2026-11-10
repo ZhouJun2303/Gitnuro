@@ -242,6 +242,7 @@ export class ShellState {
     mergeToolArgs: "",
     diffTools: [],
     mergeTools: [],
+    editorTools: [],
     ignoreSpace: false,
     verticalTabs: false,
     pinnedRefs: [],
@@ -4881,7 +4882,7 @@ export class ShellState {
     openToolSettings(this, kind, toolId);
   }
 
-  openExternalToolMenu(event: MouseEvent, kind: ToolKind, file: string) {
+  openExternalToolMenu(event: MouseEvent, kind: "diff" | "merge", file: string) {
     this.openMenu(event, externalItems(this, kind, file));
   }
 

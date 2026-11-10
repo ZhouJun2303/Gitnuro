@@ -212,6 +212,9 @@ pub struct Settings {
     pub diff_tools: Vec<ToolRecord>,
     #[serde(default)]
     pub merge_tools: Vec<ToolRecord>,
+    /// Editors that open a file, optionally at a line.
+    #[serde(default)]
+    pub editor_tools: Vec<ToolRecord>,
     #[serde(default)]
     pub ignore_space: bool,
     #[serde(default)]
@@ -329,7 +332,8 @@ pub struct ToolRecord {
     #[serde(default)]
     pub path: String,
     /// Arguments after the path. Diff tools use `{left}` `{right}` `{file}`;
-    /// merge tools use `{ours}` `{theirs}` `{base}` `{working}` `{file}`.
+    /// merge tools use `{ours}` `{theirs}` `{base}` `{working}` `{file}`;
+    /// editors use `{file}` and `{line}`.
     #[serde(default)]
     pub args: String,
     /// Lowercase suffixes without the dot. Empty, or `*`, matches every file.
@@ -558,6 +562,7 @@ impl Default for Settings {
             merge_tool_args: String::new(),
             diff_tools: Vec::new(),
             merge_tools: Vec::new(),
+            editor_tools: Vec::new(),
             ignore_space: false,
             vertical_tabs: false,
             pinned_refs: Vec::new(),

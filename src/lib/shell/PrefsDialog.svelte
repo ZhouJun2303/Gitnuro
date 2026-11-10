@@ -6,7 +6,7 @@
 
   const shell = getShell();
 
-  type ToolKind = "diff" | "merge";
+  type ToolKind = "diff" | "merge" | "editor";
 
   let typeSuffix = $state("");
   let typeToolId = $state("");
@@ -21,6 +21,11 @@
   }
 
   function toolImportItems(kind: ToolKind): MenuItem[] {
+    if (kind === "editor") {
+      return [
+        { label: shell.tr("dialog.toolImportDetected"), run: () => void importSource(kind, "detected") },
+      ];
+    }
     return [
       { label: shell.tr("dialog.toolImportDetected"), run: () => void importSource(kind, "detected") },
       { label: shell.tr("dialog.toolImportCommon"), run: () => void importSource(kind, "common") },
@@ -165,6 +170,7 @@
             <div class="pref-tabs tool-tabs">
               <button type="button" class:on={kind === "diff"} onclick={() => (shell.toolKind = "diff")}>{shell.tr("dialog.externalDiff")}</button>
               <button type="button" class:on={kind === "merge"} onclick={() => (shell.toolKind = "merge")}>{shell.tr("dialog.externalMerge")}</button>
+              <button type="button" class:on={kind === "editor"} onclick={() => (shell.toolKind = "editor")}>{shell.tr("dialog.textEditor")}</button>
             </div>
             <div class="tool-grid">
               <div class="tool-list">
@@ -198,8 +204,9 @@
                     </span>
                   </label>
                   <label>{shell.tr("dialog.toolArguments")}
-                    <input value={picked.args} placeholder={kind === "merge" ? "{ours} {base} {theirs} {working}" : "{left} {right}"} onchange={(event) => shell.setToolField(kind, picked.id, "args", event.currentTarget.value)} />
+                    <input value={picked.args} placeholder={kind === "merge" ? "{ours} {base} {theirs} {working}" : kind === "editor" ? "-g \"{file}:{line}\"" : "{left} {right}"} onchange={(event) => shell.setToolField(kind, picked.id, "args", event.currentTarget.value)} />
                   </label>
+                  {#if kind === "editor"}<p class="empty">{shell.tr("dialog.toolEditorHint")}</p>{/if}
                   <label>{shell.tr("dialog.toolExtensions")}
                     <input value={picked.extensions.join(", ")} placeholder={shell.tr("dialog.toolAllFiles")} onchange={(event) => shell.setToolExtensions(kind, picked.id, event.currentTarget.value)} />
                   </label>

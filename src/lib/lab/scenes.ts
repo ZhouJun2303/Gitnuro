@@ -171,6 +171,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "prefs-commit", group: "弹窗", title: "偏好设置 · 提交", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-integration", group: "弹窗", title: "偏好设置 · 集成", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-integration-merge", group: "弹窗", title: "偏好设置 · 集成 · 合并", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-integration-editor", group: "弹窗", title: "偏好设置 · 集成 · 文本编辑", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "update-downloading", group: "弹窗", title: "更新 · 下载中", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
   scene({ id: "update-current", group: "弹窗", title: "更新 · 已是最新", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
   scene({ id: "update-ready", group: "弹窗", title: "更新 · 安装程序已启动", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
