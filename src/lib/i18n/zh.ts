@@ -4,6 +4,7 @@ export const zh: Messages = {
   chrome: {
     open: "打开",
     workspace: "工作区",
+    recentWorkspace: "最近工作区",
     workspaceConfigure: "配置…",
     workspaceName: "工作区名称",
     workspaceCreate: "新建工作区",

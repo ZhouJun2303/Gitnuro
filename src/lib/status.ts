@@ -294,6 +294,10 @@ export type WorkspaceRecord = {
   tabWidth?: number;
 };
 
+/** Built-in workspace that always holds the most recently opened repositories. */
+export const recentWorkspaceId = "awegit-recent";
+export const recentWorkspaceLimit = 5;
+
 /** Narrowest project tab. Past this, the strip scrolls instead of shrinking further. */
 export const workspaceTabFloor = 96;
 

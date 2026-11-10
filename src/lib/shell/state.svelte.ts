@@ -36,6 +36,9 @@ import {
     type RepoScan,
     type UpdateNotice,
     type UpdateProgress,
+    type WorkspaceRecord,
+    recentWorkspaceId,
+    recentWorkspaceLimit,
     workspaceTabWidth,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
@@ -2045,7 +2048,7 @@ export class ShellState {
       { label: this.tr("chrome.changes"), group: action, run: () => { this.section = "changes"; } },
       { label: this.tr("chrome.commits"), group: action, run: () => { this.section = "history"; } },
       ...this.settings.workspaces.map((workspace) => ({
-        label: workspace.name,
+        label: this.workspaceName(workspace),
         group: this.tr("chrome.workspace"),
         run: () => void this.switchWorkspace(workspace.id),
       })),
@@ -3222,6 +3225,7 @@ export class ShellState {
       sourceDirectories: value.sourceDirectories ?? [],
       groupNames: value.groupNames ?? [],
     });
+    this.syncRecentWorkspace();
     if (recovered) this.settings = { ...this.settings, recoveryNotice: "" };
     if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
     if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
@@ -4027,6 +4031,7 @@ export class ShellState {
       };
     });
     this.settings = { ...this.settings, recent, workspaces };
+    this.syncRecentWorkspace();
     await invoke("save_settings", { values: this.settings }).catch(() => {});
   }
 
@@ -4083,6 +4088,7 @@ export class ShellState {
       }
       this.recentStats = stats;
     }
+    this.syncRecentWorkspace();
     void this.savePrefs(false);
   }
 
@@ -5489,6 +5495,46 @@ export class ShellState {
 
 
 
+  workspaceName(workspace: Pick<WorkspaceRecord, "id" | "name">) {
+    return workspace.id === recentWorkspaceId ? this.tr("chrome.recentWorkspace") : workspace.name;
+  }
+
+
+
+  /** Keep the built-in recent workspace on the newest five repositories, without reshuffling an unchanged set. */
+  syncRecentWorkspace() {
+    const recent = this.dedupeRepos(this.settings.recent).slice(0, recentWorkspaceLimit);
+    const workspaces = this.settings.workspaces;
+    const fixed = workspaces.find((item) => item.id === recentWorkspaceId);
+    const same = !!fixed
+      && fixed.repositories.length === recent.length
+      && recent.every((path) => fixed.repositories.some((item) => this.pathsMatch(item, path)));
+    if (same) {
+      if (workspaces[0]?.id !== recentWorkspaceId) {
+        this.settings = { ...this.settings, workspaces: [fixed, ...workspaces.filter((item) => item.id !== recentWorkspaceId)] };
+      }
+      return;
+    }
+    const selected = fixed?.openTabs[fixed.selectedTab] ?? "";
+    const selectedIndex = selected ? recent.findIndex((path) => this.pathsMatch(path, selected)) : -1;
+    const next: WorkspaceRecord = {
+      id: recentWorkspaceId,
+      name: fixed?.name || this.tr("chrome.recentWorkspace"),
+      repositories: recent,
+      openTabs: recent,
+      selectedTab: selectedIndex >= 0 ? selectedIndex : 0,
+      tabsSeeded: true,
+      tabWidth: workspaceTabWidth(recent.length),
+    };
+    this.settings = {
+      ...this.settings,
+      workspaces: [next, ...workspaces.filter((item) => item.id !== recentWorkspaceId)],
+    };
+    if (this.settings.currentWorkspace === recentWorkspaceId) this.repos = [...recent];
+  }
+
+
+
   async switchWorkspace(id: string) {
     return switchWorkspace(this, id);
   }
@@ -5899,7 +5945,7 @@ export class ShellState {
     });
     $effect(() => {
     const parts: string[] = [];
-    if (this.settings.workspaceShowTitle && this.currentWorkspace?.name) parts.push(this.currentWorkspace.name);
+    if (this.settings.workspaceShowTitle && this.currentWorkspace) parts.push(this.workspaceName(this.currentWorkspace));
     if (this.snapshot?.path) parts.push(this.folderName(this.snapshot.path));
     parts.push("AweGit");
     const title = parts.join(" — ");

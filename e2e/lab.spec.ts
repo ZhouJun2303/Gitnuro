@@ -178,6 +178,14 @@ test("confirmation is above a dialog that opened it", async ({ page }) => {
   expect(layers).toBeGreaterThan(50);
 });
 
+test("recent workspace stays first and cannot be deleted", async ({ page }) => {
+  await openLabScene(page, "dialog-workspace", '[data-dialog="workspace"]');
+  const first = page.locator(".workspace-row").first();
+  await expect(first.locator(".workspace-name-fixed")).toHaveText(/最近工作区|Recent workspace/);
+  await expect(first.locator(".workspace-count")).toHaveText("5");
+  await expect(first.locator(".workspace-delete")).toHaveCount(0);
+});
+
 test("hunk toolbar selects a hunk without hovering", async ({ page }) => {
   await openLabScene(page, "diff-text", ".hunk-tools");
   const stage = page.locator(".hunk-tools .pane-chip").first();

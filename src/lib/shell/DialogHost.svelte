@@ -7,6 +7,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { cloneTarget, cloneUrl } from "../clonePath";
   import { buildRebaseSteps } from "./dialogs.svelte";
+  import { recentWorkspaceId } from "../status";
 
   const shell = getShell();
   let diagnosticsCopied = $state(false);
@@ -557,9 +558,15 @@
             {#each shell.settings.workspaces as item (item.id)}
               <div class="workspace-row" class:current={item.id === shell.settings.currentWorkspace}>
                 <span class="workspace-mark" aria-hidden="true"></span>
-                <input value={item.name} aria-label={shell.tr("chrome.workspaceName")} onchange={(event) => shell.renameWorkspace(item.id, event.currentTarget.value)} />
+                {#if item.id === recentWorkspaceId}
+                  <span class="workspace-name-fixed" title={shell.workspaceName(item)}>{shell.workspaceName(item)}</span>
+                {:else}
+                  <input value={item.name} aria-label={shell.tr("chrome.workspaceName")} onchange={(event) => shell.renameWorkspace(item.id, event.currentTarget.value)} />
+                {/if}
                 <span class="workspace-count" title={shell.tr("chrome.manager")}>{item.repositories.length}</span>
-                <button class="text-button workspace-delete" type="button" onclick={() => shell.ask(shell.tr("dialog.deleteWorkspace"), shell.tr("dialog.deleteWorkspaceBody", { name: item.name }), () => void shell.deleteWorkspace(item.id))}>{shell.tr("menu.delete")}</button>
+                {#if item.id !== recentWorkspaceId}
+                  <button class="text-button workspace-delete" type="button" onclick={() => shell.ask(shell.tr("dialog.deleteWorkspace"), shell.tr("dialog.deleteWorkspaceBody", { name: item.name }), () => void shell.deleteWorkspace(item.id))}>{shell.tr("menu.delete")}</button>
+                {/if}
               </div>
             {/each}
           </div>

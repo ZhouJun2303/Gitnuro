@@ -4,6 +4,7 @@ export const en: Messages = {
   chrome: {
     open: "Open",
     workspace: "Workspace",
+    recentWorkspace: "Recent workspace",
     workspaceConfigure: "Configure…",
     workspaceName: "Workspace name",
     workspaceCreate: "New workspace",

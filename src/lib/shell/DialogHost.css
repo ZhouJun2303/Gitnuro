@@ -375,6 +375,17 @@
 
 .workspace-row.current .workspace-mark { background: var(--accent); }
 
+.workspace-name-fixed {
+    min-width: 0;
+    height: 28px;
+    padding: 0 6px;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
 .dialog.workspace .workspace-row input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
     height: 28px;
     border-color: transparent;

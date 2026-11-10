@@ -422,7 +422,7 @@ export function historyFileMenu(shell: ShellState, commit: CommitRow): MenuItem[
 export function workspaceItems(shell: ShellState) {
     return [
       ...shell.settings.workspaces.map((item) => ({
-        label: item.name,
+        label: shell.workspaceName(item),
         checked: item.id === shell.settings.currentWorkspace,
         disabled: shell.busy,
         run: () => void shell.switchWorkspace(item.id),
