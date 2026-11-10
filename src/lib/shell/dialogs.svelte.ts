@@ -1366,7 +1366,7 @@ export async function loadExternalTools(shell: ShellState) {
     }
   }
 
-function ensureToolList(shell: ShellState, kind: ToolKind, catalog: ExternalTool[]) {
+function ensureToolList(shell: ShellState, kind: ToolKind, catalog: { name: string; path: string; args: string; primary?: boolean }[]) {
     const list = toolsOf(shell, kind);
     let changed = false;
     const repaired = list.map((tool) => {
