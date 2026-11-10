@@ -62,7 +62,6 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
     } else {
         "short"
     };
-    let types = configured_types(settings);
     let prompt = compose_prompt(
         style,
         settings.ai_prompt.trim(),
@@ -71,7 +70,6 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
         &branch,
         &recent,
         &diff,
-        &types,
     );
     let xai = base.contains("api.x.ai");
     let (url, mut body) = if xai {
@@ -81,7 +79,7 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
         let body = serde_json::json!({
             "model": model,
             "messages": [
-                { "role": "system", "content": format!("You write git commit messages. The first line must match type: description. type is {}. No scope. Reply with the message only.", types.join(", ")) },
+                { "role": "system", "content": "You write git commit messages. The first line must match type: description. type is feat, fix, docs, art, style, refactor, test, chore, perf, or revert. No scope. Reply with the message only." },
                 { "role": "user", "content": prompt }
             ]
         });
@@ -103,7 +101,7 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
     if answer.trim().is_empty() {
         return Err("The model returned an empty message.".into());
     }
-    parse_suggestion(&answer, &types)
+    parse_suggestion(&answer)
 }
 
 /// Review the diff of `HEAD` against `base` with the same model as commit messages.
@@ -341,48 +339,6 @@ const COMMIT_TYPES: [&str; 10] = [
     "feat", "fix", "docs", "art", "style", "refactor", "test", "chore", "perf", "revert",
 ];
 
-/// Lowercase type names from settings. Empty settings keep the built-in list.
-fn configured_types(settings: &Settings) -> Vec<String> {
-    let names: Vec<String> = settings
-        .commit_types
-        .iter()
-        .map(|item| item.name.trim().to_ascii_lowercase())
-        .filter(|item| !item.is_empty())
-        .collect();
-    if names.is_empty() {
-        COMMIT_TYPES.iter().map(|item| item.to_string()).collect()
-    } else {
-        names
-    }
-}
-
-fn type_note(name: &str) -> Option<&'static str> {
-    match name {
-        "feat" => Some("新增功能"),
-        "fix" => Some("修复 bug"),
-        "docs" => Some("仅文档、注释或说明"),
-        "art" => Some("美术资源"),
-        "style" => Some("只改格式、不改逻辑"),
-        "refactor" => Some("重构，不是新功能也不是修 bug"),
-        "test" => Some("测试"),
-        "chore" => Some("构建、工具、配置或流程"),
-        "perf" => Some("性能"),
-        "revert" => Some("回滚之前的提交"),
-        _ => None,
-    }
-}
-
-fn regex_escape(text: &str) -> String {
-    let mut out = String::new();
-    for ch in text.chars() {
-        if "\\^$.*+?()[]{}|".contains(ch) {
-            out.push('\\');
-        }
-        out.push(ch);
-    }
-    out
-}
-
 fn compose_prompt(
     style: &str,
     custom: &str,
@@ -391,28 +347,14 @@ fn compose_prompt(
     branch: &str,
     recent: &str,
     diff: &str,
-    types: &[String],
 ) -> String {
-    let pattern = types
-        .iter()
-        .map(|item| regex_escape(item))
-        .collect::<Vec<_>>()
-        .join("|");
-    let notes = types
-        .iter()
-        .map(|name| match type_note(name) {
-            Some(note) => format!("{name} {note}"),
-            None => name.clone(),
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    let example = types.first().map(String::as_str).unwrap_or("feat");
     let convention = format!(
         "Write in {language}. A commit-msg hook rejects any other first line. \
-It must match ^({pattern}):[[:space:]]*[^[:space:]].* \
-Types: {notes}. \
+It must match ^(feat|fix|docs|art|style|refactor|test|chore|perf|revert):[[:space:]]*[^[:space:]].* \
+Types: feat 新增功能; fix 修复 bug; docs 仅文档、注释或说明; art 美术资源; style 只改格式、不改逻辑; \
+refactor 重构，不是新功能也不是修 bug; test 测试; chore 构建、工具、配置或流程; perf 性能; revert 回滚之前的提交. \
 The type is lowercase and is followed immediately by a colon. A space after the colon is optional. \
-Do not add a scope, issue id, quotes, or markdown. Example: {example}: 新增挂机奖励结算逻辑"
+Do not add a scope, issue id, quotes, or markdown. Example: feat: 新增挂机奖励结算逻辑"
     );
     let custom = custom.trim();
     if custom.contains("{diff}") || custom.contains("${diff}") {
@@ -481,11 +423,11 @@ fn skip_space(text: &str) -> &str {
     text.trim_start_matches([' ', '\t', '\u{000B}', '\u{000C}'])
 }
 
-fn valid_subject(line: &str, types: &[String]) -> bool {
+fn valid_subject(line: &str) -> bool {
     let Some((kind, rest)) = line.split_once(':') else {
         return false;
     };
-    types.iter().any(|item| item == kind) && !skip_space(rest).is_empty()
+    COMMIT_TYPES.contains(&kind) && !skip_space(rest).is_empty()
 }
 
 fn clean_line(line: &str) -> String {
@@ -500,7 +442,7 @@ fn cap_chars(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
 }
 
-fn parse_suggestion(text: &str, types: &[String]) -> Result<Suggestion, String> {
+fn parse_suggestion(text: &str) -> Result<Suggestion, String> {
     let mut lines: Vec<&str> = text.trim().lines().collect();
     if lines
         .first()
@@ -516,7 +458,7 @@ fn parse_suggestion(text: &str, types: &[String]) -> Result<Suggestion, String> 
     }
     let mut subject_at = None;
     for (index, line) in lines.iter().enumerate() {
-        if valid_subject(&clean_line(line), types) {
+        if valid_subject(&clean_line(line)) {
             subject_at = Some(index);
             break;
         }
@@ -533,7 +475,7 @@ fn parse_suggestion(text: &str, types: &[String]) -> Result<Suggestion, String> 
         ));
     };
     let summary = cap_chars(&clean_line(lines[index]), 200);
-    if !valid_subject(&summary, types) {
+    if !valid_subject(&summary) {
         return Err(format!(
             "The model reply does not match the commit format: {}",
             cap_chars(&summary, 80)
@@ -569,10 +511,6 @@ fn limit_diff(diff: &mut String, limit: usize) {
 mod tests {
     use super::*;
 
-    fn builtin_types() -> Vec<String> {
-        COMMIT_TYPES.iter().map(|item| item.to_string()).collect()
-    }
-
     #[test]
     fn short_prompt_keeps_the_hook_rule_and_staged_diff() {
         let prompt = compose_prompt(
@@ -583,7 +521,6 @@ mod tests {
             "main",
             "chore: old",
             "diff-body",
-            &builtin_types(),
         );
         assert!(prompt.contains("feat|fix|docs|art|style|refactor|test|chore|perf|revert"));
         assert!(prompt.contains("feat: 新增挂机奖励结算逻辑"));
@@ -605,7 +542,6 @@ mod tests {
             "main",
             "chore: old",
             "diff-body",
-            &builtin_types(),
         );
         assert!(prompt.contains("blank line"));
         assert!(prompt.contains("chore: old"));
@@ -623,7 +559,6 @@ mod tests {
             "dev",
             "old",
             "DIFF",
-            &builtin_types(),
         );
         assert!(prompt.contains("commit-msg hook"));
         assert!(prompt.contains("Only this."));
@@ -632,23 +567,13 @@ mod tests {
 
     #[test]
     fn accepts_the_hook_examples() {
-        let value = parse_suggestion("feat: 新增挂机奖励结算逻辑", &builtin_types()).unwrap();
+        let value = parse_suggestion("feat: 新增挂机奖励结算逻辑").unwrap();
         assert_eq!(value.summary, "feat: 新增挂机奖励结算逻辑");
         assert!(value.description.is_empty());
         let tight =
-            parse_suggestion("fix:keep the composer visible\n\nThe pane collapsed.", &builtin_types()).unwrap();
+            parse_suggestion("fix:keep the composer visible\n\nThe pane collapsed.").unwrap();
         assert_eq!(tight.summary, "fix:keep the composer visible");
         assert_eq!(tight.description, "The pane collapsed.");
-    }
-
-    #[test]
-    fn custom_types_reach_the_prompt_and_the_parser() {
-        let types = vec!["ui".to_string(), "feat".to_string()];
-        let prompt = compose_prompt("short", "", "中文", "a.ts", "main", "", "DIFF", &types);
-        assert!(prompt.contains("^(ui|feat):"));
-        assert!(prompt.contains("Example: ui:"));
-        assert!(parse_suggestion("ui: 调整按钮", &types).is_ok());
-        assert!(parse_suggestion("fix: 调整按钮", &types).is_err());
     }
 
     #[test]
@@ -741,11 +666,11 @@ mod tests {
     #[test]
     fn strips_fences_and_rejects_a_freeform_subject() {
         let value =
-            parse_suggestion("```\n**refactor: 抽出提交提示词**\n\n避免漏掉钩子规则。\n```", &builtin_types())
+            parse_suggestion("```\n**refactor: 抽出提交提示词**\n\n避免漏掉钩子规则。\n```")
                 .unwrap();
         assert_eq!(value.summary, "refactor: 抽出提交提示词");
         assert!(value.description.contains("钩子"));
-        let error = parse_suggestion("updated the button", &builtin_types()).unwrap_err();
+        let error = parse_suggestion("updated the button").unwrap_err();
         assert!(error.contains("does not match"));
         assert!(error.contains("updated the button"));
     }

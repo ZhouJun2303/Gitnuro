@@ -10,9 +10,6 @@
 
   let typeSuffix = $state("");
   let typeToolId = $state("");
-  let commitTypeName = $state("");
-  let commitTypeColor = $state("#1a7f37");
-  let commitTypeLabel = $state("");
   const kindTools = $derived(shell.toolsOf(shell.toolKind));
   const addToolPick = $derived(kindTools.find((tool) => tool.id === typeToolId) ?? kindTools[0] ?? null);
 
@@ -121,27 +118,6 @@
             </div>
             {#if shell.forkImportNote}<p class="empty">{shell.forkImportNote}</p>{/if}
           {:else if shell.prefTab === "commit"}
-            <div class="pref-section">
-              <div class="k">{shell.tr("dialog.commitTypes")}</div>
-              <div class="commit-type-list">
-                {#each shell.commitTypeList() as type (type.name)}
-                  <div class="commit-type-row">
-                    <input class="commit-type-color" type="color" value={type.color} aria-label={shell.tr("dialog.commitTypeColor")} onchange={(event) => shell.setCommitTypeField(type.name, "color", event.currentTarget.value)} />
-                    <input class="commit-type-name" value={type.name} aria-label={shell.tr("dialog.commitTypeName")} onchange={(event) => { if (!shell.renameCommitType(type.name, event.currentTarget.value)) event.currentTarget.value = type.name; }} />
-                    <input class="commit-type-label" value={type.label} placeholder={shell.commitTypeLabel(type.name)} aria-label={shell.tr("dialog.commitTypeLabel")} onchange={(event) => shell.setCommitTypeField(type.name, "label", event.currentTarget.value)} />
-                    <button class="text-button" type="button" title={shell.tr("dialog.toolRemove")} aria-label={shell.tr("dialog.toolRemove")} disabled={shell.commitTypeList().length <= 1} onclick={() => shell.removeCommitType(type.name)}>×</button>
-                  </div>
-                {/each}
-                <div class="commit-type-row commit-type-new">
-                  <input class="commit-type-color" type="color" bind:value={commitTypeColor} aria-label={shell.tr("dialog.commitTypeColor")} />
-                  <input class="commit-type-name" placeholder="ui" aria-label={shell.tr("dialog.commitTypeName")} bind:value={commitTypeName} />
-                  <input class="commit-type-label" placeholder={shell.tr("dialog.commitTypeLabel")} aria-label={shell.tr("dialog.commitTypeLabel")} bind:value={commitTypeLabel} />
-                  <button class="text-button" type="button" disabled={!commitTypeName.trim()} onclick={() => { if (shell.addCommitType(commitTypeName, commitTypeColor, commitTypeLabel)) { commitTypeName = ""; commitTypeLabel = ""; } }}>{shell.tr("dialog.toolAdd")}</button>
-                </div>
-                <button class="text-button" type="button" onclick={() => shell.resetCommitTypes()}>{shell.tr("dialog.commitTypeReset")}</button>
-              </div>
-              <p class="empty">{shell.tr("dialog.commitTypesHint")}</p>
-            </div>
             <div class="pref-inline">{shell.tr("dialog.lengthIndicator")}
               <label>{shell.tr("dialog.lowLimit")} <input type="number" min="1" bind:value={shell.settings.messageLow} /></label>
               <label>{shell.tr("dialog.highLimit")} <input type="number" min="1" bind:value={shell.settings.messageHigh} /></label>

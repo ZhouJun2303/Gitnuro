@@ -96,7 +96,6 @@ fn stage_all_keeps_space_and_unicode_names() {
             sign_off_format: String::new(),
             skip_hooks: true,
             convention: false,
-            types: Vec::new(),
         },
     )
     .unwrap();
@@ -1012,7 +1011,6 @@ fn skip_hooks_commits_past_a_failing_hook() {
             sign_off_format: String::new(),
             skip_hooks: false,
             convention: false,
-            types: Vec::new(),
         },
     );
     assert!(blocked.is_err(), "hook should reject the commit");
@@ -1026,7 +1024,6 @@ fn skip_hooks_commits_past_a_failing_hook() {
             sign_off_format: String::new(),
             skip_hooks: true,
             convention: false,
-            types: Vec::new(),
         },
     )
     .unwrap();
@@ -1051,7 +1048,6 @@ fn commits_a_description_longer_than_the_windows_command_line() {
             sign_off_format: String::new(),
             skip_hooks: false,
             convention: false,
-            types: Vec::new(),
         },
     )
     .unwrap();

@@ -201,7 +201,6 @@ fn stage_all_leaves_unmerged_paths_alone_and_commit_refuses_them() {
             sign_off_format: String::new(),
             skip_hooks: true,
             convention: false,
-            types: Vec::new(),
         },
     )
     .unwrap_err()

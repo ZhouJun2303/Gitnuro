@@ -291,9 +291,6 @@ pub struct Settings {
     /// Last commit-message type chosen in the composer.
     #[serde(default = "commit_type_default")]
     pub commit_type: String,
-    /// Types offered by the commit composer. Empty keeps the built-in list.
-    #[serde(default)]
-    pub commit_types: Vec<CommitTypeRecord>,
     /// Update banner stays hidden for this version until a newer one is published.
     #[serde(default)]
     pub dismissed_update: String,
@@ -301,20 +298,6 @@ pub struct Settings {
     /// existing file means the install predates the guide, so it stays `seen`.
     #[serde(default = "features_intro_seen")]
     pub features_intro: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommitTypeRecord {
-    /// Lowercase name before the colon, such as `feat`.
-    #[serde(default)]
-    pub name: String,
-    /// `#rrggbb` swatch used by the picker.
-    #[serde(default)]
-    pub color: String,
-    /// Custom description shown in the picker. Empty keeps the built-in text.
-    #[serde(default)]
-    pub label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -605,7 +588,6 @@ impl Default for Settings {
             workspace_show_title: false,
             scan_depth: scan_depth_default(),
             commit_type: commit_type_default(),
-            commit_types: Vec::new(),
             dismissed_update: String::new(),
             features_intro: features_intro_seen(),
         }
@@ -1493,21 +1475,6 @@ mod tests {
     fn missing_commit_type_stays_feat() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings.commit_type, "feat");
-    }
-
-    #[test]
-    fn settings_keep_custom_commit_types() {
-        let settings: Settings = serde_json::from_str(
-            r##"{"commitTypes":[{"name":"ui","color":"#123456","label":"界面"},{"name":"feat"}]}"##,
-        )
-        .unwrap();
-        assert_eq!(settings.commit_types.len(), 2);
-        assert_eq!(settings.commit_types[0].name, "ui");
-        assert_eq!(settings.commit_types[0].color, "#123456");
-        assert_eq!(settings.commit_types[0].label, "界面");
-        assert_eq!(settings.commit_types[1].name, "feat");
-        assert!(settings.commit_types[1].label.is_empty());
-        assert!(Settings::default().commit_types.is_empty());
     }
 
     #[test]

@@ -110,6 +110,12 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.openHistoryTab("changes");
     return;
   }
+  if (id === "commit-filter") {
+    await showCommitBySummary(shell, "add lab submodules");
+    shell.searchOpen.detail = true;
+    shell.detailQuery = "libs/";
+    return;
+  }
   if (id === "tree") {
     await showHistory(shell);
     await shell.openHistoryTab("tree");
@@ -435,7 +441,6 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.prefTab = sceneId.startsWith("prefs-integration") ? "integration" : sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : "general";
       fillSourceRoots(shell);
       fillLabTools(shell);
-      if (sceneId === "prefs-commit") shell.resetCommitTypes();
       if (sceneId === "prefs-integration-merge") {
         shell.toolKind = "merge";
         shell.toolPick = "lab-merge-xlsx";

@@ -485,7 +485,7 @@ export function togglePatch(shell: ShellState, path: string) {
   }
 
 export async function toggleAllPatches(shell: ShellState) {
-    const paths = shell.commitFiles.map((file) => file.path);
+    const paths = shell.commitShown.map((file) => file.path);
     if (paths.length > 0 && paths.every((path) => shell.openPatchSet.has(path))) {
       shell.openPatches = [];
       return;

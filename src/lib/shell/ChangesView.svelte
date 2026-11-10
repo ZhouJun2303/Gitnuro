@@ -6,7 +6,7 @@
   import DiffPane from "./DiffPane.svelte";
   import { onVirtualScroll } from "../view";
   import type { Row, SearchKey, Side } from "./types";
-  import type { CommitType } from "./commitMessage";
+  import { COMMIT_TYPES, commitTypeColor, typeMessageKey, type CommitType } from "./commitMessage";
 
   const shell = getShell();
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
@@ -74,11 +74,9 @@
   }
 
   async function moveType(step: number) {
-    const list = shell.commitTypeList();
-    const index = list.findIndex((item) => item.name === shell.commitType);
-    const next = list[(index + step + list.length) % list.length];
-    if (!next) return;
-    shell.rememberCommitType(next.name);
+    const index = COMMIT_TYPES.indexOf(shell.commitType);
+    const next = COMMIT_TYPES[(index + step + COMMIT_TYPES.length) % COMMIT_TYPES.length];
+    shell.rememberCommitType(next);
     shell.fitSummary();
     await tick();
     document.querySelector<HTMLElement>(".type-option.selected")?.scrollIntoView({ block: "nearest" });
@@ -219,11 +217,11 @@
               <button
                 class="type-chip"
                 type="button"
-                style:--type-color={shell.commitTypeColor(shell.commitType)}
+                style:--type-color={commitTypeColor(shell.commitType)}
                 aria-label={shell.tr("chrome.commitType")}
                 aria-haspopup="listbox"
                 aria-expanded={typeOpen}
-                title={shell.commitTypeLabel(shell.commitType) ? `${shell.commitType}: ${shell.commitTypeLabel(shell.commitType)}` : shell.commitType}
+                title={`${shell.commitType}: ${shell.tr(typeMessageKey(shell.commitType))}`}
                 disabled={shell.busy}
                 onclick={() => (typeOpen = !typeOpen)}
                 onkeydown={onTypeKey}
@@ -235,19 +233,19 @@
               {#if typeOpen}
                 <button class="type-dismiss" type="button" tabindex="-1" aria-label={shell.tr("chrome.close")} onclick={() => (typeOpen = false)}></button>
                 <div class="type-menu" role="listbox" aria-label={shell.tr("chrome.commitType")} use:placeTypeMenu>
-                  {#each shell.commitTypeList() as type (type.name)}
+                  {#each COMMIT_TYPES as type (type)}
                     <button
                       class="type-option"
-                      class:selected={type.name === shell.commitType}
+                      class:selected={type === shell.commitType}
                       type="button"
                       role="option"
-                      aria-selected={type.name === shell.commitType}
-                      style:--type-color={type.color}
-                      onclick={() => pickType(type.name)}
+                      aria-selected={type === shell.commitType}
+                      style:--type-color={commitTypeColor(type)}
+                      onclick={() => pickType(type)}
                     >
                       <span class="type-swatch" aria-hidden="true"></span>
-                      <span class="type-name">{type.name}</span>
-                      <span class="type-detail">{shell.commitTypeLabel(type.name)}</span>
+                      <span class="type-name">{type}</span>
+                      <span class="type-detail">{shell.tr(typeMessageKey(type))}</span>
                     </button>
                   {/each}
                 </div>

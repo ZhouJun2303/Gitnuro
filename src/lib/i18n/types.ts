@@ -486,12 +486,6 @@ export type Messages = {
     branch: string;
     general: string;
     commitPage: string;
-    commitTypes: string;
-    commitTypesHint: string;
-    commitTypeName: string;
-    commitTypeColor: string;
-    commitTypeLabel: string;
-    commitTypeReset: string;
     integration: string;
     customCommands: string;
     sourceFolder: string;

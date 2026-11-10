@@ -21,8 +21,6 @@ pub struct CommitRequest {
     pub skip_hooks: bool,
     /// Editor commits check the subject against the built-in commit-msg rule and drop `#` commentary.
     pub convention: bool,
-    /// Types the convention accepts. Empty keeps the built-in list.
-    pub types: Vec<String>,
 }
 
 /// Stage the given work-tree paths, including new files.
@@ -146,8 +144,8 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
     if !unmerged_paths(repo)?.is_empty() {
         return Err(Error::Git("resolve all conflicts before committing".into()));
     }
-    if request.convention && !commit_subject_allowed(summary, &request.types) {
-        return Err(Error::Git(convention_error(&request.types)));
+    if request.convention && !commit_subject_allowed(summary) {
+        return Err(Error::Git(CONVENTION_ERROR.into()));
     }
     let mut description = if request.convention {
         strip_commentary(&request.description)
@@ -201,35 +199,18 @@ const COMMIT_TYPES: [&str; 10] = [
     "feat", "fix", "docs", "art", "style", "refactor", "test", "chore", "perf", "revert",
 ];
 
-/// Types the convention accepts, with configured names in lowercase. Empty keeps the built-in list.
-fn allowed_types(types: &[String]) -> Vec<String> {
-    let configured: Vec<String> = types
-        .iter()
-        .map(|item| item.trim().to_ascii_lowercase())
-        .filter(|item| !item.is_empty())
-        .collect();
-    if configured.is_empty() {
-        COMMIT_TYPES.iter().map(|item| item.to_string()).collect()
-    } else {
-        configured
-    }
-}
-
-fn convention_error(types: &[String]) -> String {
-    let allowed = allowed_types(types);
-    let example = allowed.first().map(String::as_str).unwrap_or("feat");
-    format!(
-        "ERROR: 提交信息不符合规范。\n允许格式: type:描述 或 type: 描述（冒号后空格可选）\n允许类型: {}\n示例: {example}: 新增挂机奖励结算逻辑",
-        allowed.join("|")
-    )
-}
+const CONVENTION_ERROR: &str = "\
+ERROR: 提交信息不符合规范。
+允许格式: type:描述 或 type: 描述（冒号后空格可选）
+允许类型: feat|fix|docs|art|style|refactor|test|chore|perf|revert
+示例: feat: 新增挂机奖励结算逻辑";
 
 /// Same rule as the commit-msg hook: `type: description`, with an optional space after the colon.
-fn commit_subject_allowed(summary: &str, types: &[String]) -> bool {
+fn commit_subject_allowed(summary: &str) -> bool {
     let Some((kind, rest)) = summary.split_once(':') else {
         return false;
     };
-    if !allowed_types(types).iter().any(|item| item == kind) {
+    if !COMMIT_TYPES.contains(&kind) {
         return false;
     }
     let rest = rest.trim_start_matches([' ', '\t', '\u{000B}', '\u{000C}', '\r']);
@@ -2019,17 +2000,7 @@ fn base64_encode(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod porcelain_tests {
-    use super::{commit_subject_allowed, count_hunk_markers, porcelain_z_paths, status_record_paths};
-
-    #[test]
-    fn configured_types_replace_the_builtin_rule() {
-        let types = vec!["ui".to_string(), "feat".to_string()];
-        assert!(commit_subject_allowed("ui: 调整按钮", &types));
-        assert!(commit_subject_allowed("feat: 新增", &types));
-        assert!(!commit_subject_allowed("fix: 修复", &types));
-        assert!(commit_subject_allowed("fix: 修复", &[]));
-        assert!(!commit_subject_allowed("ui: 调整按钮", &[]));
-    }
+    use super::{count_hunk_markers, porcelain_z_paths, status_record_paths};
 
     #[test]
     fn nul_paths_keep_space_tab_newline_and_unicode() {

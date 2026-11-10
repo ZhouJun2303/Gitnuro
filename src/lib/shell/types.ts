@@ -158,4 +158,4 @@ export type Place = {
     historyFilter: string;
   };
 
-export type SearchKey = "recent" | "side" | "commit" | "file"
+export type SearchKey = "recent" | "side" | "commit" | "file" | "detail"
