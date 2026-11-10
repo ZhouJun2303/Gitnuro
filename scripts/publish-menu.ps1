@@ -16,6 +16,7 @@ if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -Scope Global -Er
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $repo = "ZhouJun2303/Gitnuro"
 $devBranch = "feat/dev"
+. (Join-Path $PSScriptRoot "gh-retry.ps1")
 
 function Invoke-Git {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$GitArgs)
@@ -259,10 +260,8 @@ function Get-ChangelogNotes {
 }
 
 function Assert-ReleaseAvailable([string]$version) {
-    cmd /c "gh auth status >nul 2>nul"
-    if ($LASTEXITCODE -ne 0) { throw "gh 还没登录。先运行 gh auth login" }
-    cmd /c "gh release view v$version --repo $repo >nul 2>nul"
-    if ($LASTEXITCODE -eq 0 -and (Test-ManifestPublished $version)) {
+    Assert-GhAuthenticated
+    if ((Test-GitHubRelease -Tag "v$version" -Repo $repo) -and (Test-ManifestPublished $version)) {
         throw "GitHub 上已经有 v$version，请把版本号加高"
     }
 }
