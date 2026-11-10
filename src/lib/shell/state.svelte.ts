@@ -10,7 +10,7 @@ import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, remoteNameFromUrl, repoNameFromUrl, safeFolderName } from "../clonePath";
 import { featuresPageUrl } from "../featuresPage";
 import { resolveLocale, translate } from "../i18n";
-import { isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, type CommitType } from "./commitMessage";
+import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
@@ -45,7 +45,7 @@ import {
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
-import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
+import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 
@@ -272,6 +272,7 @@ export class ShellState {
     workspaceShowTitle: false,
     scanDepth: 5,
     commitType: "feat",
+    commitTypes: [],
     dismissedUpdate: "",
     featuresIntro: "seen",
     recoveryNotice: "",
@@ -3232,12 +3233,13 @@ export class ShellState {
       sourceDirectories: value.sourceDirectories ?? [],
       groupNames: value.groupNames ?? [],
     });
+    applyCommitTypes(this);
     this.syncRecentWorkspace();
     if (recovered) this.settings = { ...this.settings, recoveryNotice: "" };
     if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
     if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
     if (this.settings.aiPromptStyle !== "long") this.settings = { ...this.settings, aiPromptStyle: "short" };
-    if (!isCommitType(this.settings.commitType)) this.settings = { ...this.settings, commitType: "feat" };
+    if (!isCommitType(this.settings.commitType)) this.settings = { ...this.settings, commitType: this.preferredCommitType() };
     if (!this.settings.errorLogDays) this.settings = { ...this.settings, errorLogDays: 7 };
     this.pruneErrorLog();
     if (!this.snapshot && isCommitType(this.settings.commitType)) this.commitType = this.settings.commitType;
@@ -3462,7 +3464,27 @@ export class ShellState {
 
 
   preferredCommitType(): CommitType {
-    return isCommitType(this.settings.commitType) ? this.settings.commitType : "feat";
+    if (isCommitType(this.settings.commitType)) return this.settings.commitType;
+    return commitTypesOf(this.settings.commitTypes)[0]?.name ?? "feat";
+  }
+
+
+  /** Types offered by the composer, in display order. Empty settings mean the built-in list. */
+  commitTypeList() {
+    return commitTypesOf(this.settings.commitTypes);
+  }
+
+
+  commitTypeColor(type: string) {
+    return this.commitTypeList().find((item) => item.name === type)?.color ?? commitTypesOf(undefined)[0].color;
+  }
+
+
+  /** Custom description, or the translated built-in one. Custom types without a label have none. */
+  commitTypeLabel(type: string) {
+    const label = this.commitTypeList().find((item) => item.name === type)?.label;
+    if (label) return label;
+    return isBuiltinCommitType(type) ? this.tr(typeMessageKey(type)) : "";
   }
 
 
@@ -3471,6 +3493,31 @@ export class ShellState {
     if (this.settings.commitType === type) return;
     this.settings = { ...this.settings, commitType: type };
     void this.savePrefs(false);
+  }
+
+
+  addCommitType(name: string, color: string, label = "") {
+    return addCommitType(this, name, color, label);
+  }
+
+
+  renameCommitType(from: string, to: string) {
+    return renameCommitType(this, from, to);
+  }
+
+
+  setCommitTypeField(name: string, field: "color" | "label", value: string) {
+    return setCommitTypeField(this, name, field, value);
+  }
+
+
+  removeCommitType(name: string) {
+    return removeCommitType(this, name);
+  }
+
+
+  resetCommitTypes() {
+    return resetCommitTypes(this);
   }
 
 

@@ -10,6 +10,7 @@ import {
     type CommandRecord,
     type CommitDetail,
     type CommitRow,
+    type CommitTypeRecord,
     type ConflictSides,
     type ConflictView,
     type DiffLine,
@@ -29,7 +30,7 @@ import {
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StatusNoticeId } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 import type { ShellState } from "./state.svelte";
-import { alignCommitTemplate, isCommentary, isCommitType, splitSubject, withoutRepeatedSubject } from "./commitMessage";
+import { alignCommitTemplate, commitTypeName, commitTypesOf, isCommentary, isCommitType, setCommitTypes, splitSubject, validCommitTypeName, withoutRepeatedSubject } from "./commitMessage";
 
 export async function selectPrefTab(shell: ShellState, tab: PrefTab) {
     shell.prefTab = tab;
@@ -721,12 +722,66 @@ export async function savePrefs(shell: ShellState, close = true) {
     try {
       const saved = await invoke<Settings>("save_settings", { values });
       if (ticket === shell.prefsSave) {
-        const commitType = isCommitType(saved.commitType) ? saved.commitType : values.commitType;
-        shell.settings = isCommitType(commitType) ? { ...saved, commitType } : saved;
+        shell.settings = saved;
+        applyCommitTypes(shell);
       }
     } catch (error) {
       if (ticket === shell.prefsSave) shell.actionError = shell.message(error);
     }
+  }
+
+/** Point the composer helpers at the saved types and repair a type that was removed. */
+export function applyCommitTypes(shell: ShellState) {
+    setCommitTypes(shell.settings.commitTypes);
+    if (!isCommitType(shell.settings.commitType)) shell.settings = { ...shell.settings, commitType: shell.preferredCommitType() };
+    if (!isCommitType(shell.commitType)) shell.commitType = shell.preferredCommitType();
+  }
+
+function syncCommitTypes(shell: ShellState, next: CommitTypeRecord[]) {
+    const list = commitTypesOf(next);
+    shell.settings = { ...shell.settings, commitTypes: next.length ? list : [] };
+    setCommitTypes(shell.settings.commitTypes);
+    if (!isCommitType(shell.commitType)) shell.commitType = list[0]?.name ?? "";
+    if (!isCommitType(shell.settings.commitType)) shell.settings = { ...shell.settings, commitType: list[0]?.name ?? "" };
+  }
+
+export function addCommitType(shell: ShellState, value: string, color: string, label = "") {
+    const name = commitTypeName(value);
+    const list = commitTypesOf(shell.settings.commitTypes);
+    if (!validCommitTypeName(name) || list.some((item) => item.name === name)) return false;
+    syncCommitTypes(shell, [...list, { name, color, label: label.trim() }]);
+    return true;
+  }
+
+export function renameCommitType(shell: ShellState, from: string, value: string) {
+    const name = commitTypeName(value);
+    const list = commitTypesOf(shell.settings.commitTypes);
+    const taken = name !== from && list.some((item) => item.name === name);
+    if (!validCommitTypeName(name) || taken) return false;
+    if (name === from) return true;
+    if (shell.commitType === from) shell.commitType = name;
+    if (shell.settings.commitType === from) shell.settings = { ...shell.settings, commitType: name };
+    syncCommitTypes(shell, list.map((item) => (item.name === from ? { ...item, name } : item)));
+    return true;
+  }
+
+export function setCommitTypeField(shell: ShellState, name: string, field: "color" | "label", value: string) {
+    const list = commitTypesOf(shell.settings.commitTypes);
+    syncCommitTypes(shell, list.map((item) => (item.name === name ? { ...item, [field]: value } : item)));
+  }
+
+export function removeCommitType(shell: ShellState, name: string) {
+    const list = commitTypesOf(shell.settings.commitTypes);
+    if (list.length <= 1) return;
+    const next = list.filter((item) => item.name !== name);
+    if (shell.commitType === name) shell.commitType = next[0].name;
+    if (shell.settings.commitType === name) shell.settings = { ...shell.settings, commitType: next[0].name };
+    syncCommitTypes(shell, next);
+  }
+
+export function resetCommitTypes(shell: ShellState) {
+    shell.settings = { ...shell.settings, commitTypes: [] };
+    applyCommitTypes(shell);
   }
 
 export async function browseFolder(shell: ShellState, initial = "") {

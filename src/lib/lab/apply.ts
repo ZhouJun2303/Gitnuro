@@ -435,6 +435,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.prefTab = sceneId.startsWith("prefs-integration") ? "integration" : sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : "general";
       fillSourceRoots(shell);
       fillLabTools(shell);
+      if (sceneId === "prefs-commit") shell.resetCommitTypes();
       if (sceneId === "prefs-integration-merge") {
         shell.toolKind = "merge";
         shell.toolPick = "lab-merge-xlsx";

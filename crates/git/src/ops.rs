@@ -1444,6 +1444,7 @@ fn reword(repo: &Path, rev: &str, summary: &str) -> Result<(), Error> {
                 sign_off_format: String::new(),
                 skip_hooks: false,
                 convention: false,
+                types: Vec::new(),
             },
         )
     } else {
@@ -1822,6 +1823,7 @@ fn squash(repo: &Path, from: &str, to: &str, summary: &str) -> Result<(), Error>
             sign_off_format: String::new(),
             skip_hooks: false,
             convention: false,
+            types: Vec::new(),
         },
     )?;
     for id in later {
