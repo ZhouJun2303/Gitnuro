@@ -238,14 +238,24 @@ function Get-ChangelogNotes {
         }
         $groups[$label].Add($item)
     }
-    $parts = @()
-    foreach ($label in $order) {
-        $items = $groups[$label]
-        if ($items.Count -eq 0) { continue }
-        $parts += ($label + "：" + ($items -join "、"))
+    $total = 0
+    foreach ($label in $order) { $total += $groups[$label].Count }
+    if ($total -eq 0) { return "" }
+    $ranked = @()
+    for ($i = 0; $i -lt $order.Count; $i++) {
+        $label = $order[$i]
+        $count = $groups[$label].Count
+        if ($count -eq 0) { continue }
+        $ranked += [pscustomobject]@{ Label = $label; Count = $count; Order = $i }
     }
-    if ($parts.Count -eq 0) { return "" }
-    return ("本次更新 " + ($parts -join "；") + "。")
+    $ranked = @($ranked | Sort-Object -Property @{ Expression = "Count"; Descending = $true }, @{ Expression = "Order"; Ascending = $true })
+    $summary = if ($ranked.Count -eq 1) {
+        "本次更新${total}项：$($ranked[0].Label)。"
+    } else {
+        "本次更新${total}项，主要是$($ranked[0].Label)$($ranked[0].Count)项、$($ranked[1].Label)$($ranked[1].Count)项。"
+    }
+    if ($summary.Length -gt 30) { $summary = "本次更新${total}项。" }
+    return $summary
 }
 
 function Assert-ReleaseAvailable([string]$version) {
