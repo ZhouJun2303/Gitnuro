@@ -68,7 +68,7 @@ function subjectPattern(types: readonly CommitTypeRecord[]) {
 }
 
 function leadingPattern(types: readonly CommitTypeRecord[]) {
-  return new RegExp(`^(?:${types.map((item) => escapeRegExp(item.name)).join("|")})[^\\S\\r\\n]*[:：][^\\S\\r\\n]*`, "i");
+  return new RegExp(`^(${types.map((item) => escapeRegExp(item.name)).join("|")})[^\\S\\r\\n]*[:：][^\\S\\r\\n]*`, "i");
 }
 
 /** Point the helpers below at the configured types. Called when settings load or change. */
