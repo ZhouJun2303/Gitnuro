@@ -438,11 +438,26 @@ test("history restores its scroll position after switching sections", async ({ p
   expect(visible).toBeGreaterThan(0);
 });
 
-test("local commits keep full contrast and use bold", async ({ page }) => {
+test("pushed commits are bold, local ones stay regular and readable", async ({ page }) => {
   await openLabScene(page, "history", ".history .commit-row.unpushed");
-  const subject = page.locator(".history .commit-row.unpushed .subject").first();
-  expect(await subject.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("600");
-  expect(await subject.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+  const local = page.locator(".history .commit-row.unpushed .subject").first();
+  expect(await local.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("400");
+  expect(await local.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+  await page.locator(".history").evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+    node.dispatchEvent(new Event("scroll"));
+  });
+  await page.waitForTimeout(400);
+  const pushed = page.locator(".history .commit-row.pushed .subject").first();
+  await expect(pushed).toBeVisible();
+  expect(await pushed.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("600");
+});
+
+test("remote-only commits stay dimmed and regular", async ({ page }) => {
+  await openLabScene(page, "history-remote", ".history .commit-row.remote-only");
+  const subject = page.locator(".history .commit-row.remote-only .subject").nth(1);
+  expect(await subject.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("400");
+  expect(await subject.evaluate((node) => getComputedStyle(node).opacity)).toBe("0.55");
 });
 
 test("context menu arrows stay in the menu and restore focus", async ({ page }) => {

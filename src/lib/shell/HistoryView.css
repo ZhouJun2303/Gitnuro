@@ -174,7 +174,7 @@
     background: transparent;
   }
 
-.commit-row.unpushed .subject {
+.commit-row.pushed .subject {
     font-weight: 600;
   }
 

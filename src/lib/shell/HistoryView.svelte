@@ -78,6 +78,7 @@
                     class:selected={shell.selectedCommit === commit.id}
                     class:head={shell.refs?.head === commit.id}
                     class:unpushed={shell.isCommitUnpushed(commit)}
+                    class:pushed={(shell.refs?.remotes.length ?? 0) > 0 && !shell.isCommitUnpushed(commit) && commit.remoteOnly !== true}
                     class:remote-only={commit.remoteOnly === true}
                     class:good={shell.bisectMark(commit.id) === "good"}
                     class:bad={shell.bisectMark(commit.id) === "bad"}
@@ -149,7 +150,7 @@
                 {@const graphRow = shell.sampleShownGraph.rows[index] ?? []}
                 {@const tone = shell.laneTone(graphRow)}
                 {@const plate = shell.stashParts(commit.summary, commit.badges)}
-                <button class="commit-row" class:selected={shell.selectedCommit === commit.id || shell.selectedPath === commit.id} class:unpushed={shell.isCommitUnpushed(commit)} class:remote-only={commit.remoteOnly === true} type="button" onclick={() => shell.selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
+                <button class="commit-row" class:selected={shell.selectedCommit === commit.id || shell.selectedPath === commit.id} class:unpushed={shell.isCommitUnpushed(commit)} class:pushed={(shell.refs?.remotes.length ?? 0) > 0 && !shell.isCommitUnpushed(commit) && commit.remoteOnly !== true} class:remote-only={commit.remoteOnly === true} type="button" onclick={() => shell.selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
                   {@render laneGraph(graphRow, commit.id)}
                   <span class="commit-copy">
                     {@render branchChips(shell.branchRefLabels(commit.badges), tone, activeColor)}
