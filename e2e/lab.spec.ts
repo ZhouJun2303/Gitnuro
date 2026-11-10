@@ -133,6 +133,30 @@ test("file type rows assign custom suffixes to different tools", async ({ page }
   await expect(page.locator('.tool-type-row[data-suffix="csv"]')).toHaveCount(0);
 });
 
+test("commit types can be added, renamed and removed", async ({ page }) => {
+  await openLabScene(page, "prefs-commit", '[data-dialog="prefs"]');
+  const rows = page.locator(".commit-type-row:not(.commit-type-new)");
+  await expect(rows).toHaveCount(10);
+
+  const add = page.locator(".commit-type-new");
+  await add.locator(".commit-type-name").fill("ui");
+  await add.locator(".text-button").click();
+  await expect(rows).toHaveCount(11);
+  const added = rows.last();
+  await expect(added.locator(".commit-type-name")).toHaveValue("ui");
+
+  await added.locator(".commit-type-name").fill("ui2");
+  await added.locator(".commit-type-name").blur();
+  await expect(added.locator(".commit-type-name")).toHaveValue("ui2");
+
+  await added.locator(".commit-type-label").fill("界面");
+  await added.locator(".commit-type-label").blur();
+  await expect(added.locator(".commit-type-label")).toHaveValue("界面");
+
+  await added.locator(".text-button").click();
+  await expect(rows).toHaveCount(10);
+});
+
 test("command palette is blocked while a dialog is open", async ({ page }) => {
   await openLabScene(page, "dialog-prefs", '[data-dialog="prefs"]');
   await page.keyboard.press("Control+k");

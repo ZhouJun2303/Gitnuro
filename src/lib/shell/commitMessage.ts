@@ -1,36 +1,95 @@
-/** Same types as the built-in commit-msg rule and `commit-template.txt`. */
-export const COMMIT_TYPES = ["feat", "fix", "docs", "art", "style", "refactor", "test", "chore", "perf", "revert"] as const;
+import type { CommitTypeRecord } from "../status";
 
-export type CommitType = (typeof COMMIT_TYPES)[number];
+/** Built-in types, also the defaults in `commit-template.txt`. */
+export const COMMIT_TYPE_DEFAULTS: readonly CommitTypeRecord[] = [
+  { name: "feat", color: "#1a7f37", label: "" },
+  { name: "fix", color: "#cf222e", label: "" },
+  { name: "docs", color: "#0969da", label: "" },
+  { name: "art", color: "#bf3989", label: "" },
+  { name: "style", color: "#8250df", label: "" },
+  { name: "refactor", color: "#9a6700", label: "" },
+  { name: "test", color: "#0f766e", label: "" },
+  { name: "chore", color: "#52525b", label: "" },
+  { name: "perf", color: "#c2410c", label: "" },
+  { name: "revert", color: "#4338ca", label: "" },
+];
 
-const SUBJECT = /^(feat|fix|docs|art|style|refactor|test|chore|perf|revert):[^\S\r\n]*\S.*$/;
-const LEADING_TYPE = /^(feat|fix|docs|art|style|refactor|test|chore|perf|revert)[^\S\r\n]*[:：][^\S\r\n]*/i;
+export const COMMIT_TYPE_COLORS: Record<string, string> = Object.fromEntries(
+  COMMIT_TYPE_DEFAULTS.map((item) => [item.name, item.color]),
+);
 
-export function isCommitType(value: string): value is CommitType {
-  return (COMMIT_TYPES as readonly string[]).includes(value);
+const FALLBACK_COLOR = "#1a7f37";
+const COLOR = /^#[0-9a-f]{6}$/i;
+const NAME = /^[a-z0-9][a-z0-9_-]*$/;
+
+export type CommitType = string;
+
+export function isBuiltinCommitType(name: string) {
+  return COMMIT_TYPE_DEFAULTS.some((item) => item.name === name);
 }
 
-/**
- * Default swatch for each prefix. A later setting can pass a partial map to
- * `commitTypeColor` without changing the picker.
- */
-export const COMMIT_TYPE_COLORS: Record<CommitType, string> = {
-  feat: "#1a7f37",
-  fix: "#cf222e",
-  docs: "#0969da",
-  art: "#bf3989",
-  style: "#8250df",
-  refactor: "#9a6700",
-  test: "#0f766e",
-  chore: "#52525b",
-  perf: "#c2410c",
-  revert: "#4338ca",
-};
+/** Trim and drop unusable rows. An empty list means the built-in defaults. */
+export function commitTypesOf(records: readonly CommitTypeRecord[] | undefined): CommitTypeRecord[] {
+  const source = records?.length ? records : COMMIT_TYPE_DEFAULTS;
+  const out: CommitTypeRecord[] = [];
+  for (const record of source) {
+    const name = record.name.trim().toLowerCase();
+    if (!NAME.test(name) || out.some((item) => item.name === name)) continue;
+    const color = record.color?.trim() ?? "";
+    out.push({
+      name,
+      color: COLOR.test(color) ? color.toLowerCase() : (COMMIT_TYPE_COLORS[name] ?? FALLBACK_COLOR),
+      label: record.label?.trim() ?? "",
+    });
+  }
+  return out.length ? out : COMMIT_TYPE_DEFAULTS.map((item) => ({ ...item }));
+}
 
-export function commitTypeColor(type: string, overrides?: Partial<Record<string, string>>) {
-  const custom = overrides?.[type]?.trim();
-  if (custom) return custom;
-  return isCommitType(type) ? COMMIT_TYPE_COLORS[type] : COMMIT_TYPE_COLORS.feat;
+/** A name the composer can put before the colon. Lowercase keeps `splitSubject` matching. */
+export function commitTypeName(value: string) {
+  return value.trim().toLowerCase();
+}
+
+export function validCommitTypeName(name: string) {
+  return NAME.test(name);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+let registry: CommitTypeRecord[] = commitTypesOf(undefined);
+let registryNames = new Set(registry.map((item) => item.name));
+let SUBJECT = subjectPattern(registry);
+let LEADING_TYPE = leadingPattern(registry);
+
+function subjectPattern(types: readonly CommitTypeRecord[]) {
+  return new RegExp(`^(?:${types.map((item) => escapeRegExp(item.name)).join("|")}):[^\\S\\r\\n]*\\S.*$`);
+}
+
+function leadingPattern(types: readonly CommitTypeRecord[]) {
+  return new RegExp(`^(?:${types.map((item) => escapeRegExp(item.name)).join("|")})[^\\S\\r\\n]*[:：][^\\S\\r\\n]*`, "i");
+}
+
+/** Point the helpers below at the configured types. Called when settings load or change. */
+export function setCommitTypes(records: readonly CommitTypeRecord[] | undefined) {
+  registry = commitTypesOf(records);
+  registryNames = new Set(registry.map((item) => item.name));
+  SUBJECT = subjectPattern(registry);
+  LEADING_TYPE = leadingPattern(registry);
+}
+
+/** The configured types, in display order. */
+export function commitTypes() {
+  return registry;
+}
+
+export function isCommitType(value: string): value is CommitType {
+  return registryNames.has(value);
+}
+
+export function commitTypeColor(type: string) {
+  return registry.find((item) => item.name === type)?.color ?? FALLBACK_COLOR;
 }
 
 export function typeMessageKey(type: string) {
@@ -114,7 +173,7 @@ export function alignCommitTemplate(template: string) {
   const rest = lines.slice(1);
   const details = rest.flatMap((line) => {
     const match = /^(\s*#\s*)([A-Za-z]+)\s+(\S.*)$/.exec(line);
-    if (!match || !(COMMIT_TYPES as readonly string[]).includes(match[2])) return [];
+    if (!match || !isCommitType(match[2].toLowerCase())) return [];
     return [match[2]];
   });
   const width = Math.max(8, ...details.map((type) => type.length));
@@ -125,7 +184,7 @@ export function alignCommitTemplate(template: string) {
     .split("\n")
     .map((line) => {
       const match = /^(\s*#\s*)([A-Za-z]+)\s+(\S.*)$/.exec(line);
-      if (!match || !(COMMIT_TYPES as readonly string[]).includes(match[2])) return line;
+      if (!match || !isCommitType(match[2].toLowerCase())) return line;
       return `${match[1]}${match[2].padEnd(width, " ")} ${match[3].trim()}`;
     })
     .join("\n");

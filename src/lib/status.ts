@@ -138,6 +138,16 @@ export type BlameLine = {
   truncated?: boolean;
 };
 
+/** One entry in the commit composer's type picker. */
+export type CommitTypeRecord = {
+  /** Lowercase name before the colon, such as `feat`. */
+  name: string;
+  /** `#rrggbb` swatch. */
+  color: string;
+  /** Custom description. Empty keeps the translated description of a built-in type. */
+  label: string;
+};
+
 export type ToolRecord = {
   id: string;
   name: string;
@@ -274,6 +284,8 @@ export type Settings = {
   scanDepth: number;
   /** Last commit-message type chosen in the composer. */
   commitType: string;
+  /** Types offered by the composer. Empty keeps the built-in list. */
+  commitTypes: CommitTypeRecord[];
   /** Update banner stays hidden for this version until a newer one is published. */
   dismissedUpdate: string;
   /** `pending` on a brand-new install, otherwise `seen`. */

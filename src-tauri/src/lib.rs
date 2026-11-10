@@ -305,6 +305,16 @@ fn commit_changes(
     };
     let peel = use_fakeignore();
     let skip_hooks = skip_hooks.unwrap_or(false);
+    let types = settings::load()
+        .map(|values| {
+            values
+                .commit_types
+                .into_iter()
+                .map(|item| item.name)
+                .filter(|name| !name.trim().is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let (result, log) = awegit_git::capture_output(|| {
         write_then_status(path, |repo| {
             if peel {
@@ -320,6 +330,7 @@ fn commit_changes(
                     sign_off_format,
                     skip_hooks,
                     convention: !skip_hooks,
+                    types,
                 },
             )
         })

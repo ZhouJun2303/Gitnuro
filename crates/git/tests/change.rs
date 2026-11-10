@@ -55,6 +55,7 @@ fn stage_commit_and_diff_round_trip() {
             sign_off_format: String::new(),
             skip_hooks: false,
             convention: false,
+            types: Vec::new(),
         },
     );
     assert!(error.is_err());
@@ -70,6 +71,7 @@ fn stage_commit_and_diff_round_trip() {
             sign_off_format: String::new(),
             skip_hooks: false,
             convention: false,
+            types: Vec::new(),
         },
     )
     .unwrap();
@@ -113,6 +115,7 @@ fn editor_commit_requires_the_builtin_subject_and_drops_the_type_guide() {
             sign_off_format: String::new(),
             skip_hooks: false,
             convention: true,
+            types: Vec::new(),
         },
     );
     assert!(rejected.unwrap_err().to_string().contains("不符合规范"));
@@ -128,6 +131,7 @@ fn editor_commit_requires_the_builtin_subject_and_drops_the_type_guide() {
             sign_off_format: String::new(),
             skip_hooks: false,
             convention: true,
+            types: Vec::new(),
         },
     )
     .unwrap();
