@@ -169,10 +169,19 @@ if ($releaseExists) {
     }
     $tag = "v$version"
     $releaseNotes = if ($Notes) { $Notes } else { "AweGit $version" }
+    # Multi-line notes cannot survive the Windows command line; gh reads them from a file.
+    $notesFile = Join-Path $env:TEMP ("awegit-notes-" + [guid]::NewGuid().ToString("N") + ".txt")
+    [IO.File]::WriteAllText($notesFile, $releaseNotes, (New-Object System.Text.UTF8Encoding $false))
     $assets = @($nsis)
     if ($msi) { $assets += $msi.FullName }
-    gh release create $tag @assets --repo $repo --title "AweGit $version" --notes $releaseNotes
-    if ($LASTEXITCODE -ne 0) {
+    try {
+        gh release create $tag @assets --repo $repo --title "AweGit $version" --notes-file $notesFile
+        $releaseResult = $LASTEXITCODE
+    }
+    finally {
+        Remove-Item -LiteralPath $notesFile -Force -ErrorAction SilentlyContinue
+    }
+    if ($releaseResult -ne 0) {
         throw "Could not create GitHub release $tag"
     }
     Set-PublishStage "released"

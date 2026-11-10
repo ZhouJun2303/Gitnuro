@@ -193,6 +193,52 @@ function Get-CurrentBranch {
     return $branch
 }
 
+# Everything on this branch that the last publish did not ship yet.
+# origin/release is the boundary, not the v* tags: gh creates the tag
+# before the release branch is pushed, so tags land on the previous manifest commit.
+function Get-ChangelogNotes {
+    & git -C $root fetch --quiet origin release 2>$null | Out-Null
+    $base = $null
+    & git -C $root rev-parse -q --verify "origin/release" 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $base = "origin/release"
+    } else {
+        $tag = & git -C $root describe --tags --abbrev=0 --match "v*" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $tag) { $base = "$tag".Trim() }
+    }
+    $logArgs = @("-C", $root, "log", "--no-merges", "--pretty=format:%s")
+    if ($base) { $logArgs += "$base..HEAD" } else { $logArgs += @("-n", "50") }
+    $subjects = @(& git @logArgs 2>$null)
+
+    $labelByType = @{
+        feat = "新功能"; fix = "修复"; perf = "性能"; style = "界面"; art = "界面"
+        refactor = "重构"; docs = "文档"; test = "测试"
+    }
+    $order = @("新功能", "修复", "性能", "界面", "重构", "文档", "测试", "其他")
+    $groups = @{}
+    foreach ($label in $order) { $groups[$label] = New-Object System.Collections.Generic.List[string] }
+    foreach ($subject in $subjects) {
+        $text = "$subject".Trim()
+        if (-not $text) { continue }
+        if ($text -match '^chore:\s*(版本|发布|合并)\s*') { continue }
+        $label = "其他"
+        $item = $text
+        if ($text -match '^(feat|fix|docs|style|refactor|test|chore|perf|art|revert)(\([^)]*\))?:\s*(.+)$') {
+            $type = $Matches[1]
+            $item = $Matches[3].Trim()
+            if ($labelByType.ContainsKey($type)) { $label = $labelByType[$type] }
+        }
+        $groups[$label].Add($item)
+    }
+    $parts = @()
+    foreach ($label in $order) {
+        if ($groups[$label].Count -eq 0) { continue }
+        $bullets = ($groups[$label] | ForEach-Object { "- $_" }) -join "`n"
+        $parts += ($label + "`n" + $bullets)
+    }
+    return ($parts -join "`n`n")
+}
+
 function Assert-ReleaseAvailable([string]$version) {
     cmd /c "gh auth status >nul 2>nul"
     if ($LASTEXITCODE -ne 0) { throw "gh 还没登录。先运行 gh auth login" }
@@ -238,10 +284,18 @@ function Invoke-ReleaseFlow {
         } else {
             Write-Host "当前不在 $devBranch 或 release 上。会把 $branch 合并进 release，打包并上传，完成后回到 $branch"
         }
-        if (-not $ReleaseNotes -and -not $Confirm) {
-            $ReleaseNotes = Read-Host "更新说明（直接回车留空）"
+        if (-not $ReleaseNotes) {
+            $ReleaseNotes = Get-ChangelogNotes
+            Write-Host ""
+            if ($ReleaseNotes) {
+                Write-Host "更新说明（按上个发布版本以来的提交自动生成）"
+                Write-Host $ReleaseNotes
+            } else {
+                Write-Host "没找到上次发布之后的提交，更新说明用 AweGit $target"
+            }
+        } else {
+            Write-Host "说明：$ReleaseNotes"
         }
-        if ($ReleaseNotes) { Write-Host "说明：$ReleaseNotes" }
     } else {
         Write-Host "只打包，不上传"
     }
@@ -398,5 +452,6 @@ switch ($Action) {
         $current = Get-ProjectVersion
         Write-Host "$current  $(Get-BumpedVersion $current 'patch')  $(Get-CurrentBranch)"
     }
-    default { throw "未知选项 $Action。可用 patch、minor、major、set、current、package-patch、package。" }
+    "notes" { Get-ChangelogNotes }
+    default { throw "未知选项 $Action。可用 patch、minor、major、set、current、package-patch、package、status、notes。" }
 }
