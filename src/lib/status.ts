@@ -138,6 +138,16 @@ export type BlameLine = {
   truncated?: boolean;
 };
 
+export type ToolRecord = {
+  id: string;
+  name: string;
+  path: string;
+  /** Diff: `{left}` `{right}` `{file}`. Merge: `{ours}` `{theirs}` `{base}` `{working}` `{file}`. */
+  args: string;
+  /** Lowercase suffixes without the dot. Empty means every file. */
+  extensions: string[];
+};
+
 export type Settings = {
   theme: string;
   pullRebase: boolean;
@@ -228,6 +238,8 @@ export type Settings = {
   mergeToolName: string;
   mergeToolPath: string;
   mergeToolArgs: string;
+  diffTools: ToolRecord[];
+  mergeTools: ToolRecord[];
   ignoreSpace: boolean;
   verticalTabs: boolean;
   pinnedRefs: string[];

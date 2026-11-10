@@ -78,8 +78,8 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { sep: true, label: "" },
       { label: shell.tr("menu.blame"), disabled: locked, run: () => shell.showBlame(file.path) },
       { label: shell.tr("menu.history"), disabled: locked, run: () => void invoke("open_window", { view: "history", repo: shell.repoPath(), file: file.path }) },
-      { label: shell.tr("menu.externalDiff"), disabled: locked || !shell.settings.diffTool, run: () => void launchExternal(shell, "diff", file.path) },
-      { label: shell.tr("menu.externalMerge"), disabled: locked || file.letter !== "C" || !shell.settings.mergeTool, run: () => void launchExternal(shell, "merge", file.path) },
+      { label: shell.tr("menu.externalDiff"), disabled: locked, children: externalItems(shell, "diff", file.path) },
+      { label: shell.tr("menu.externalMerge"), disabled: locked || file.letter !== "C", children: externalItems(shell, "merge", file.path) },
       { label: shell.tr("menu.lfsLock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsLock", path: file.path }) },
       { label: shell.tr("menu.lfsUnlock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsUnlock", path: file.path }) },
       { sep: true, label: "" },
@@ -361,10 +361,33 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
     return items;
   }
 
-function diffChoices(shell: ShellState) {
-    if (shell.diffTools.length > 0) return shell.diffTools;
-    if (!shell.settings.diffToolPath.trim()) return [];
-    return [{ name: shell.settings.diffToolName || shell.settings.diffToolPath, path: shell.settings.diffToolPath, args: shell.settings.diffToolArgs, primary: true }];
+/** Tools for one file: exact suffix matches first, then all-files tools by priority. */
+export function externalItems(shell: ShellState, kind: "diff" | "merge", file: string): MenuItem[] {
+    const tools = shell.applicableTools(kind, file);
+    const items: MenuItem[] = tools.map((tool, index) => ({
+      label: `${index === 0 ? "✓ " : ""}${shell.toolLabel(tool)}`,
+      shortcut: shell.toolExtensionLabel(tool),
+      disabled: !tool.path.trim(),
+      run: () => void launchExternal(shell, kind, file, shell.composeTool(tool.path, tool.args)),
+    }));
+    if (items.length === 0) items.push({ label: shell.tr("menu.noExternalTools"), disabled: true });
+    items.push({ sep: true, label: "" });
+    items.push({ label: shell.tr("menu.configureTools"), run: () => shell.openToolSettings(kind) });
+    return items;
+  }
+
+function revisionExternalItems(shell: ShellState, file: string, parent: string, rev: string): MenuItem[] {
+    const tools = shell.applicableTools("diff", file);
+    const items: MenuItem[] = tools.map((tool, index) => ({
+      label: `${index === 0 ? "✓ " : ""}${shell.toolLabel(tool)}`,
+      shortcut: shell.toolExtensionLabel(tool),
+      disabled: !tool.path.trim(),
+      run: () => void invoke("launch_tool", { path: shell.repoPath(), kind: "diff", file, tool: shell.composeTool(tool.path, tool.args), left: parent, right: rev }).catch((error) => (shell.actionError = shell.message(error))),
+    }));
+    if (items.length === 0) items.push({ label: shell.tr("menu.noExternalTools"), disabled: true });
+    items.push({ sep: true, label: "" });
+    items.push({ label: shell.tr("menu.configureTools"), run: () => shell.openToolSettings("diff") });
+    return items;
   }
 
 export function revisionFileMenu(shell: ShellState, file: string): MenuItem[] {
@@ -372,15 +395,11 @@ export function revisionFileMenu(shell: ShellState, file: string): MenuItem[] {
     const parent = shell.commitDetail?.parents[0] ?? "";
     const added = shell.commitFiles.some((item) => item.path === file && item.kind === "added");
     const locked = shell.mode !== "live" || !rev;
-    const tools = diffChoices(shell);
-    const external: MenuItem = tools.length === 0 || !parent || added
+    const external: MenuItem = !parent || added
       ? { label: shell.tr("menu.externalDiff"), disabled: true }
       : {
           label: shell.tr("menu.externalDiff"),
-          children: tools.map((tool) => ({
-            label: tool.name || tool.path,
-            run: () => void invoke("launch_tool", { path: shell.repoPath(), kind: "diff", file, tool: shell.composeTool(tool.path, tool.args), left: parent, right: rev }).catch((error) => (shell.actionError = shell.message(error))),
-          })),
+          children: revisionExternalItems(shell, file, parent, rev),
         };
     return [
       { label: shell.tr("menu.open"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
@@ -406,12 +425,14 @@ export function revisionFileMenu(shell: ShellState, file: string): MenuItem[] {
 export function historyFileMenu(shell: ShellState, commit: CommitRow): MenuItem[] {
     const file = shell.historyFilter;
     const locked = shell.mode !== "live" || !file;
+    const parent = commit.parents[0] ?? "";
     const info = [commit.summary, commit.author, commit.at ? shell.forkWhen(commit.at) : commit.when, commit.id].filter((part) => part).join("\n");
     return [
       { label: shell.tr("menu.openSeparate"), disabled: locked, run: () => void invoke("open_window", { view: "blob", repo: shell.repoPath(), file, rev: commit.id }) },
       { label: shell.tr("menu.revealMain"), disabled: locked, run: () => void invoke("reveal_commit", { repo: shell.repoPath(), id: commit.id }).catch((error) => (shell.actionError = shell.message(error))) },
       { label: shell.tr("menu.open"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
+      { label: shell.tr("menu.externalDiff"), disabled: locked || !parent, children: revisionExternalItems(shell, file, parent, commit.id) },
       { label: shell.tr("menu.resetAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.resetAtCommit"), shell.tr("dialog.restoreFileBody", { name: file }), () => void shell.mutate({ action: "restoreFile", rev: commit.id, file })) },
       { label: shell.tr("menu.saveAs"), disabled: locked, run: () => void invoke("save_revision", { path: shell.repoPath(), rev: commit.id, file }).catch((error) => (shell.actionError = shell.message(error))) },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },

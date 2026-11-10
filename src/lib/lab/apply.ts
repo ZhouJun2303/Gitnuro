@@ -1,5 +1,5 @@
 import { invoke } from "../perf";
-import type { CommandRecord } from "../status";
+import type { CommandRecord, ToolRecord } from "../status";
 import type { ShellState } from "../shell/state.svelte";
 import { fillResolveDialog } from "../shell/dialogs.svelte";
 import type { LabDialog, LabScene } from "./scenes";
@@ -368,6 +368,19 @@ async function fillSurface(shell: ShellState, id: string) {
     window.setTimeout(() => { delete shell.jobs[key]; }, 2000);
     return;
   }
+  if (id === "external-tool-menu") {
+    shell.settings.diffTools = diffFixtures();
+    shell.settings.mergeTools = mergeFixtures();
+    const file = shell.shownUnstaged.find((item) => /\.(xlsx|xls)$/i.test(item.path)) ?? shell.shownUnstaged[0] ?? shell.shownStaged[0];
+    if (file) {
+      const side = shell.shownUnstaged.includes(file) ? "unstaged" : "staged";
+      const items = shell.fileMenu(file, side);
+      const external = items.find((item) => item.label === shell.tr("menu.externalMerge"));
+      shell.menu = { x: 220, y: 120, items };
+      shell.submenu = { x: 520, y: 250, items: external?.children ?? [] };
+    }
+    return;
+  }
   if (id === "menu") {
     shell.menu = {
       x: 72,
@@ -419,9 +432,13 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       fillSourceRoots(shell);
       break;
     case "prefs":
-      shell.prefTab = sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : sceneId === "prefs-integration" ? "integration" : "general";
+      shell.prefTab = sceneId.startsWith("prefs-integration") ? "integration" : sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : "general";
       fillSourceRoots(shell);
       fillLabTools(shell);
+      if (sceneId === "prefs-integration-merge") {
+        shell.toolKind = "merge";
+        shell.toolPick = "lab-merge-xlsx";
+      }
       break;
     case "update":
       shell.updateReleaseUrl = "https://github.com/ZhouJun2303/Gitnuro/releases/latest";
@@ -677,6 +694,21 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
   shell.dialog = dialog;
 }
 
+function diffFixtures(): ToolRecord[] {
+  return [
+    { id: "lab-diff-xlsx", name: "ExcelMergeFork", path: "D:\\MyGit\\ForkExcelMergeTool\\ExcelMergeFork.exe", args: "\"{right}\" \"{left}\"", extensions: ["xlsx", "xls"] },
+    { id: "lab-diff-bc", name: "Beyond Compare", path: "C:\\Program Files\\Beyond Compare 4\\BCompare.exe", args: "{left} {right}", extensions: [] },
+    { id: "lab-diff-code", name: "VS Code", path: "C:\\Program Files\\Microsoft VS Code\\Code.exe", args: "--diff \"{left}\" \"{right}\"", extensions: ["json", "ts", "svelte"] },
+  ];
+}
+
+function mergeFixtures(): ToolRecord[] {
+  return [
+    { id: "lab-merge-xlsx", name: "ExcelMergeFork", path: "D:\\MyGit\\ForkExcelMergeTool\\ExcelMergeFork.exe", args: "{ours},{base},{theirs},{working}", extensions: ["xlsx", "xls"] },
+    { id: "lab-merge-bc", name: "Beyond Compare", path: "C:\\Program Files\\Beyond Compare 4\\BCompare.exe", args: "{ours} {theirs} {base} {working}", extensions: [] },
+  ];
+}
+
 function fillLabTools(shell: ShellState) {
   shell.mergeTools = Array.from({ length: FILL }, (_, index) => {
     const n = pad(index + 1);
@@ -686,6 +718,10 @@ function fillLabTools(shell: ShellState) {
     const n = pad(index + 1);
     return { name: `Diff Tool ${n}`, path: `C:\\Tools\\diff-${n}.exe`, args: "$LOCAL $REMOTE", primary: index === 0 };
   });
+  shell.settings.diffTools = diffFixtures();
+  shell.settings.mergeTools = mergeFixtures();
+  shell.toolKind = "diff";
+  shell.toolPick = "lab-diff-xlsx";
   shell.aiModels = Array.from({ length: FILL }, (_, index) => `lab-model-${pad(index + 1)}`);
 }
 

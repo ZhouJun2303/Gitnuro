@@ -17,6 +17,7 @@
   import SplitHandle from "./SplitHandle.svelte";
   import PerfPanel from "./PerfPanel.svelte";
   import { cloneTarget, cloneUrl } from "./clonePath";
+  import { untrack } from "svelte";
   import { shortcutLabel } from "./keys";
   import { branchGroup, gravatarUrl, laneColors, splitDiff, type SplitRow } from "./view";
   import { type UpdateNotice } from "./status";
@@ -34,11 +35,15 @@
 
   $effect(() => {
     if (!shell.dialog && !shell.textMerge) return;
-    if (shell.commandLogOpen) shell.commandLogOpen = false;
-    if (shell.repoPickerOpen) shell.repoPickerOpen = false;
-    if (shell.menu) shell.dismissMenu(false);
-    if (shell.launchOpen) shell.closeLaunch();
-    if (shell.forgeOpen) shell.forgeOpen = null;
+    // Close other layers when a dialog opens, but do not track them: a menu
+    // opened from inside the dialog must stay open.
+    untrack(() => {
+      if (shell.commandLogOpen) shell.commandLogOpen = false;
+      if (shell.repoPickerOpen) shell.repoPickerOpen = false;
+      if (shell.menu) shell.dismissMenu(false);
+      if (shell.launchOpen) shell.closeLaunch();
+      if (shell.forgeOpen) shell.forgeOpen = null;
+    });
   });
 
   function openSubmenu(item: MenuItem, anchor: HTMLElement, focus = false) {

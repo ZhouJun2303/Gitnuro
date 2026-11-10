@@ -24,6 +24,16 @@ pub struct ExternalTools {
     pub diff: Vec<ExternalTool>,
 }
 
+/// A known tool that supports both modes, used by the settings import.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommonTool {
+    pub name: String,
+    pub path: String,
+    pub diff_args: String,
+    pub merge_args: String,
+}
+
 #[derive(Clone, Copy)]
 enum Kind {
     Merge,
@@ -60,6 +70,151 @@ pub fn fork_settings_file() -> Option<std::path::PathBuf> {
 /// Tools named in a Fork settings file, including programs that are not installed yet.
 pub fn tools_in_fork_text(text: &str) -> ExternalTools {
     tools_from_fork_json(text, |_| true)
+}
+
+/// Tools from well-known install folders. Only programs present on disk are returned.
+pub fn common_tools() -> Vec<CommonTool> {
+    let mut tools: Vec<CommonTool> = Vec::new();
+    for preset in common_presets() {
+        if preset.path.trim().is_empty() || !program_exists(&preset.path) {
+            continue;
+        }
+        if tools.iter().any(|item| same_path(&item.path, &preset.path)) {
+            continue;
+        }
+        tools.push(preset);
+    }
+    tools
+}
+
+fn common_presets() -> Vec<CommonTool> {
+    let program = |folder: &str, file: &str| {
+        std::env::var("ProgramFiles")
+            .ok()
+            .map(|base| Path::new(&base).join(folder).join(file).display().to_string())
+            .unwrap_or_default()
+    };
+    let program_x86 = |folder: &str, file: &str| {
+        std::env::var("ProgramFiles(x86)")
+            .ok()
+            .map(|base| Path::new(&base).join(folder).join(file).display().to_string())
+            .unwrap_or_default()
+    };
+    let local = |folder: &str, file: &str| {
+        std::env::var("LOCALAPPDATA")
+            .ok()
+            .map(|base| Path::new(&base).join(folder).join(file).display().to_string())
+            .unwrap_or_default()
+    };
+    let mut rows = vec![
+        CommonTool {
+            name: "Beyond Compare".into(),
+            path: program("Beyond Compare 5", "BCompare.exe"),
+            diff_args: "{left} {right}".into(),
+            merge_args: "{ours} {theirs} {base} {working}".into(),
+        },
+        CommonTool {
+            name: "Beyond Compare".into(),
+            path: program("Beyond Compare 4", "BCompare.exe"),
+            diff_args: "{left} {right}".into(),
+            merge_args: "{ours} {theirs} {base} {working}".into(),
+        },
+        CommonTool {
+            name: "WinMerge".into(),
+            path: program("WinMerge", "WinMergeU.exe"),
+            diff_args: "{left} {right}".into(),
+            merge_args: "-e -ub {ours} {theirs} {working}".into(),
+        },
+        CommonTool {
+            name: "KDiff3".into(),
+            path: program("KDiff3", "kdiff3.exe"),
+            diff_args: "{left} {right}".into(),
+            merge_args: "{base} {ours} {theirs} -o {working}".into(),
+        },
+        CommonTool {
+            name: "Meld".into(),
+            path: program("Meld", "Meld.exe"),
+            diff_args: "{left} {right}".into(),
+            merge_args: "{ours} {base} {theirs} -o {working}".into(),
+        },
+        CommonTool {
+            name: "P4Merge".into(),
+            path: program("Perforce", "p4merge.exe"),
+            diff_args: "{left} {right}".into(),
+            merge_args: "{base} {ours} {theirs} {working}".into(),
+        },
+        CommonTool {
+            name: "TortoiseGitMerge".into(),
+            path: program("TortoiseGit", "bin\\TortoiseGitMerge.exe"),
+            diff_args: "{left} {right}".into(),
+            merge_args: "-mine:{ours} -base:{base} -theirs:{theirs} -merged:{working}".into(),
+        },
+        CommonTool {
+            name: "VS Code".into(),
+            path: local("Programs\\Microsoft VS Code", "Code.exe"),
+            diff_args: "--diff \"{left}\" \"{right}\"".into(),
+            merge_args: String::new(),
+        },
+        CommonTool {
+            name: "VS Code".into(),
+            path: program("Microsoft VS Code", "Code.exe"),
+            diff_args: "--diff \"{left}\" \"{right}\"".into(),
+            merge_args: String::new(),
+        },
+    ];
+    for (folder, file) in [("WinMerge", "WinMergeU.exe"), ("KDiff3", "kdiff3.exe"), ("Meld", "Meld.exe")] {
+        rows.push(CommonTool {
+            name: folder.into(),
+            path: program_x86(folder, file),
+            diff_args: "{left} {right}".into(),
+            merge_args: match folder {
+                "KDiff3" => "{base} {ours} {theirs} -o {working}".into(),
+                "Meld" => "{ours} {base} {theirs} -o {working}".into(),
+                _ => "-e -ub {ours} {theirs} {working}".into(),
+            },
+        });
+    }
+    rows
+}
+
+pub fn file_suffix(file: &str) -> String {
+    let leaf = Path::new(file).file_name().and_then(|name| name.to_str()).unwrap_or(file);
+    match leaf.rfind('.') {
+        Some(at) if at > 0 && at + 1 < leaf.len() => leaf[at + 1..].to_ascii_lowercase(),
+        _ => String::new(),
+    }
+}
+
+pub fn normalize_extension(value: &str) -> String {
+    let text = value.trim();
+    if text == "*" {
+        return "*".into();
+    }
+    let text = text.strip_prefix("*.").unwrap_or(text);
+    text.trim_start_matches('.').to_ascii_lowercase()
+}
+
+fn tool_is_generic(tool: &crate::settings::ToolRecord) -> bool {
+    tool.extensions.is_empty() || tool.extensions.iter().all(|item| normalize_extension(item) == "*")
+}
+
+fn tool_matches(tool: &crate::settings::ToolRecord, suffix: &str) -> bool {
+    !suffix.is_empty()
+        && tool.extensions.iter().any(|item| {
+            let value = normalize_extension(item);
+            value == "*" || value == suffix
+        })
+}
+
+/// The first tool for this file: an exact extension match wins, then an all-files
+/// tool, then the top of the list. Ties keep list order, which is the priority.
+pub fn pick_tool<'a>(tools: &'a [crate::settings::ToolRecord], file: &str) -> Option<&'a crate::settings::ToolRecord> {
+    let suffix = file_suffix(file);
+    tools
+        .iter()
+        .find(|tool| tool_matches(tool, &suffix))
+        .or_else(|| tools.iter().find(|tool| tool_is_generic(tool)))
+        .or_else(|| tools.first())
 }
 
 fn fork_settings_path() -> Option<std::path::PathBuf> {
@@ -254,7 +409,7 @@ fn translate(kind: Kind, raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::tools_from_fork_json;
+    use super::{pick_tool, tools_from_fork_json};
 
     const FORK: &str = r#"{
       "ExternalMergeTools": [
@@ -316,5 +471,22 @@ mod tests {
         assert_eq!(tools.diff.len(), 1);
         assert_eq!(tools.diff[0].name, "Beyond Compare");
         assert_eq!(tools.diff[0].args, "{left} {right}");
+    }
+
+    #[test]
+    fn extension_tools_win_over_the_all_files_tool() {
+        use crate::settings::ToolRecord;
+        let tool = |id: &str, extensions: &[&str]| ToolRecord {
+            id: id.into(),
+            name: id.into(),
+            path: format!("{id}.exe"),
+            args: String::new(),
+            extensions: extensions.iter().map(|item| (*item).to_string()).collect(),
+        };
+        let list = vec![tool("generic", &[]), tool("sheet", &["xlsx"]), tool("sheet2", &["*.XLSX"])];
+        assert_eq!(pick_tool(&list, "data/book.xlsx").unwrap().id, "sheet");
+        assert_eq!(pick_tool(&list, "src/main.rs").unwrap().id, "generic");
+        assert_eq!(pick_tool(&list, "README").unwrap().id, "generic");
+        assert_eq!(pick_tool(&[tool("only", &["txt"])], "a.md").unwrap().id, "only");
     }
 }

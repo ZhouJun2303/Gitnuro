@@ -21,6 +21,7 @@ import {
     type StatusFile,
     type StatusSnapshot,
     type Suggestion,
+    type ToolRecord,
     type UpdateNotice,
     recentWorkspaceId,
     workspaceTabWidth,
@@ -688,8 +689,24 @@ export function composeTool(shell: ShellState, path: string, args: string) {
   }
 
 export function applyToolSettings(shell: ShellState) {
-    shell.settings.diffTool = shell.composeTool(shell.settings.diffToolPath, shell.settings.diffToolArgs);
-    shell.settings.mergeTool = shell.composeTool(shell.settings.mergeToolPath, shell.settings.mergeToolArgs);
+    for (const kind of toolKinds) {
+      const tool = defaultTool(shell, kind);
+      const name = tool?.name ?? "";
+      const path = tool?.path ?? "";
+      const args = tool?.args ?? "";
+      const command = composeTool(shell, path, args);
+      if (kind === "merge") {
+        shell.settings.mergeToolName = name;
+        shell.settings.mergeToolPath = path;
+        shell.settings.mergeToolArgs = args;
+        shell.settings.mergeTool = command;
+      } else {
+        shell.settings.diffToolName = name;
+        shell.settings.diffToolPath = path;
+        shell.settings.diffToolArgs = args;
+        shell.settings.diffTool = command;
+      }
+    }
     if (shell.settings.shellKind === "custom" && shell.settings.shellPath.trim()) {
       shell.settings.terminal = shell.composeTool(shell.settings.shellPath, shell.settings.shellArgs);
     }
@@ -940,6 +957,231 @@ export type ExternalTool = {
     primary: boolean;
   };
 
+export type CommonTool = {
+    name: string;
+    path: string;
+    diffArgs: string;
+    mergeArgs: string;
+  };
+
+export type ToolKind = "diff" | "merge";
+
+export type ToolSource = "detected" | "common";
+
+const toolKinds: ToolKind[] = ["diff", "merge"];
+
+function legacyToolName(shell: ShellState, kind: ToolKind) {
+    return kind === "merge" ? shell.settings.mergeToolName : shell.settings.diffToolName;
+  }
+
+function legacyToolPath(shell: ShellState, kind: ToolKind) {
+    return kind === "merge" ? shell.settings.mergeToolPath : shell.settings.diffToolPath;
+  }
+
+function legacyToolArgs(shell: ShellState, kind: ToolKind) {
+    return kind === "merge" ? shell.settings.mergeToolArgs : shell.settings.diffToolArgs;
+  }
+
+export function toolsOf(shell: ShellState, kind: ToolKind): ToolRecord[] {
+    return kind === "merge" ? shell.settings.mergeTools : shell.settings.diffTools;
+  }
+
+function setTools(shell: ShellState, kind: ToolKind, tools: ToolRecord[]) {
+    shell.settings = kind === "merge" ? { ...shell.settings, mergeTools: tools } : { ...shell.settings, diffTools: tools };
+  }
+
+export function newToolId() {
+    return `tool-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  }
+
+export function normalizeToolExtension(value: string) {
+    const text = value.trim();
+    if (text === "*") return "*";
+    return text.replace(/^\*\./, "").replace(/^\.+/, "").toLowerCase();
+  }
+
+export function toolFileSuffix(file: string) {
+    const leaf = file.split(/[/\\]/).pop() ?? file;
+    const dot = leaf.lastIndexOf(".");
+    return dot > 0 && dot < leaf.length - 1 ? leaf.slice(dot + 1).toLowerCase() : "";
+  }
+
+export function toolIsGeneric(tool: ToolRecord) {
+    return tool.extensions.length === 0 || tool.extensions.every((item) => normalizeToolExtension(item) === "*");
+  }
+
+function toolMatches(tool: ToolRecord, suffix: string) {
+    if (!suffix) return false;
+    return tool.extensions.some((item) => {
+      const value = normalizeToolExtension(item);
+      return value === "*" || value === suffix;
+    });
+  }
+
+/** Exact suffix matches first, then all-files tools. List order is the priority. */
+export function applicableTools(shell: ShellState, kind: ToolKind, file: string) {
+    const tools = toolsOf(shell, kind);
+    const suffix = toolFileSuffix(file);
+    const exact = tools.filter((tool) => toolMatches(tool, suffix));
+    const generic = tools.filter((tool) => toolIsGeneric(tool) && !exact.includes(tool));
+    const ordered = [...exact, ...generic];
+    return ordered.length > 0 ? ordered : tools;
+  }
+
+export function defaultTool(shell: ShellState, kind: ToolKind) {
+    const tools = toolsOf(shell, kind);
+    return tools.find(toolIsGeneric) ?? tools[0] ?? null;
+  }
+
+export function resolvedTool(shell: ShellState, kind: ToolKind, file: string) {
+    return applicableTools(shell, kind, file)[0] ?? defaultTool(shell, kind);
+  }
+
+export function toolLabel(tool: Pick<ToolRecord, "name" | "path"> | ExternalTool) {
+    const named = tool.name.trim();
+    if (named) return named;
+    const leaf = tool.path.split(/[/\\]/).pop() ?? "";
+    return leaf.replace(/\.(exe|bat|cmd|com)$/i, "") || leaf;
+  }
+
+export function toolExtensionLabel(tool: ToolRecord) {
+    return toolIsGeneric(tool) ? "*" : tool.extensions.map((item) => `.${normalizeToolExtension(item)}`).join(" ");
+  }
+
+export function toolTemplate(shell: ShellState, kind: ToolKind, file: string) {
+    const tool = resolvedTool(shell, kind, file);
+    if (tool?.path.trim()) return composeTool(shell, tool.path, tool.args);
+    return kind === "merge" ? shell.settings.mergeTool : shell.settings.diffTool;
+  }
+
+export function openToolSettings(shell: ShellState, kind: ToolKind, toolId = "") {
+    shell.prefTab = "integration";
+    shell.toolKind = kind;
+    shell.toolPick = toolId;
+    shell.dialog = "prefs";
+  }
+
+export function selectedTool(shell: ShellState, kind: ToolKind) {
+    const tools = toolsOf(shell, kind);
+    return tools.find((tool) => tool.id === shell.toolPick) ?? tools[0] ?? null;
+  }
+
+export function selectTool(shell: ShellState, toolId: string) {
+    shell.toolPick = toolId;
+  }
+
+export function addTool(shell: ShellState, kind: ToolKind) {
+    const tool: ToolRecord = { id: newToolId(), name: "", path: "", args: "", extensions: [] };
+    setTools(shell, kind, [...toolsOf(shell, kind), tool]);
+    shell.toolPick = tool.id;
+    void shell.savePrefs(false);
+    return tool;
+  }
+
+export function removeTool(shell: ShellState, kind: ToolKind, toolId: string) {
+    const tools = toolsOf(shell, kind);
+    if (!tools.some((tool) => tool.id === toolId)) return;
+    setTools(shell, kind, tools.filter((tool) => tool.id !== toolId));
+    if (shell.toolPick === toolId) shell.toolPick = "";
+    applyToolSettings(shell);
+    void shell.savePrefs(false);
+  }
+
+export function moveTool(shell: ShellState, kind: ToolKind, toolId: string, delta: number) {
+    const tools = [...toolsOf(shell, kind)];
+    const at = tools.findIndex((tool) => tool.id === toolId);
+    const next = at + delta;
+    if (at < 0 || next < 0 || next >= tools.length) return;
+    const [tool] = tools.splice(at, 1);
+    if (tool) tools.splice(next, 0, tool);
+    setTools(shell, kind, tools);
+    applyToolSettings(shell);
+    void shell.savePrefs(false);
+  }
+
+export function setToolExtensions(shell: ShellState, kind: ToolKind, toolId: string, text: string) {
+    const parts = text
+      .split(/[,;\s]+/)
+      .map(normalizeToolExtension)
+      .filter((item) => item.length > 0 && item !== "*");
+    const extensions = [...new Set(parts)];
+    const tools = toolsOf(shell, kind).map((tool) => (tool.id === toolId ? { ...tool, extensions } : tool));
+    setTools(shell, kind, tools);
+    applyToolSettings(shell);
+    void shell.savePrefs(false);
+  }
+
+export function setToolField(shell: ShellState, kind: ToolKind, toolId: string, field: "name" | "path" | "args", value: string) {
+    const tools = toolsOf(shell, kind).map((tool) => (tool.id === toolId ? { ...tool, [field]: value } : tool));
+    setTools(shell, kind, tools);
+    applyToolSettings(shell);
+    void shell.savePrefs(false);
+  }
+
+export function toolTypeRows(shell: ShellState, kind: ToolKind) {
+    const tools = toolsOf(shell, kind);
+    const suffixes = [...new Set(
+      tools.flatMap((tool) => tool.extensions.map(normalizeToolExtension).filter((item) => item.length > 0 && item !== "*")),
+    )].sort();
+    const rows = suffixes.map((suffix) => ({
+      key: suffix,
+      label: `.${suffix}`,
+      tool: tools.find((tool) => tool.extensions.some((item) => normalizeToolExtension(item) === suffix)) ?? null,
+    }));
+    rows.push({ key: "*", label: "*", tool: tools.find(toolIsGeneric) ?? null });
+    return rows;
+  }
+
+export async function browseToolPath(shell: ShellState, kind: ToolKind, toolId: string) {
+    if (!shell.inApp()) return;
+    const tool = toolsOf(shell, kind).find((item) => item.id === toolId);
+    try {
+      const file = await invoke<string | null>("pick_file", { initial: tool?.path.trim() || null, kind: "program" });
+      if (!file) return;
+      const tools = toolsOf(shell, kind).map((item) => {
+        if (item.id !== toolId) return item;
+        const name = item.name.trim() || toolLabel({ name: "", path: file });
+        return { ...item, name, path: file };
+      });
+      setTools(shell, kind, tools);
+      applyToolSettings(shell);
+      void shell.savePrefs(false);
+    } catch (error) {
+      shell.actionError = shell.message(error);
+    }
+  }
+
+export async function importTools(shell: ShellState, kind: ToolKind, source: ToolSource) {
+    let incoming: { name: string; path: string; args: string }[] = [];
+    try {
+      if (source === "common") {
+        const rows = await invoke<CommonTool[]>("common_tools");
+        incoming = rows
+          .map((row) => ({ name: row.name, path: row.path, args: kind === "merge" ? row.mergeArgs : row.diffArgs }))
+          .filter((row) => row.args.trim().length > 0);
+      } else {
+        const catalog = kind === "merge" ? shell.mergeTools : shell.diffTools;
+        incoming = catalog.map((item) => ({ name: item.name, path: item.path, args: item.args }));
+      }
+    } catch (error) {
+      shell.actionError = shell.message(error);
+      return 0;
+    }
+    const tools = [...toolsOf(shell, kind)];
+    let added = 0;
+    for (const item of incoming) {
+      if (!item.path.trim() || tools.some((tool) => shell.pathsMatch(tool.path, item.path))) continue;
+      tools.push({ id: newToolId(), name: item.name, path: item.path, args: item.args, extensions: [] });
+      added += 1;
+    }
+    if (added > 0) {
+      setTools(shell, kind, tools);
+      applyToolSettings(shell);
+      void shell.savePrefs(false);
+    }
+    return added;
+  }
+
 export async function loadExternalTools(shell: ShellState) {
     if (shell.labPage) return;
     if (!shell.backend()) {
@@ -955,51 +1197,42 @@ export async function loadExternalTools(shell: ShellState) {
     }
     shell.mergeTools = catalog.merge ?? [];
     shell.diffTools = catalog.diff ?? [];
-    const mergeChanged = await adoptTool(shell, "merge");
-    const diffChanged = await adoptTool(shell, "diff");
-    if (mergeChanged || diffChanged) {
-      shell.applyToolSettings();
+    let changed = false;
+    for (const kind of toolKinds) {
+      changed = ensureToolList(shell, kind, kind === "merge" ? shell.mergeTools : shell.diffTools) || changed;
+    }
+    if (changed) {
+      applyToolSettings(shell);
       await shell.savePrefs(false);
     }
   }
 
-async function adoptTool(shell: ShellState, kind: "merge" | "diff") {
-    const path = (kind === "merge" ? shell.settings.mergeToolPath : shell.settings.diffToolPath).trim();
+function ensureToolList(shell: ShellState, kind: ToolKind, catalog: ExternalTool[]) {
+    const list = toolsOf(shell, kind);
+    let changed = false;
+    const repaired = list.map((tool) => {
+      if (tool.id && tool.extensions) return tool;
+      changed = true;
+      return { ...tool, id: tool.id || newToolId(), extensions: tool.extensions ?? [] };
+    });
+    if (changed) setTools(shell, kind, repaired);
+    if (repaired.length > 0) return changed;
+    const path = legacyToolPath(shell, kind).trim();
     if (path) {
-      try {
-        if (await invoke<boolean>("program_exists", { path })) return false;
-      } catch {
-        return false;
-      }
-    }
-    const tools = kind === "merge" ? shell.mergeTools : shell.diffTools;
-    return writeTool(shell, kind, tools.find((item) => item.primary) ?? tools[0] ?? null);
-  }
-
-function writeTool(shell: ShellState, kind: "merge" | "diff", tool: ExternalTool | null) {
-    const name = tool?.name ?? "";
-    const path = tool?.path ?? "";
-    const args = tool?.args ?? "";
-    if (kind === "merge") {
-      if (shell.settings.mergeToolName === name && shell.settings.mergeToolPath === path && shell.settings.mergeToolArgs === args) return false;
-      shell.settings = { ...shell.settings, mergeToolName: name, mergeToolPath: path, mergeToolArgs: args };
+      const record: ToolRecord = {
+        id: newToolId(),
+        name: legacyToolName(shell, kind).trim() || toolLabel({ name: "", path }),
+        path,
+        args: legacyToolArgs(shell, kind),
+        extensions: [],
+      };
+      setTools(shell, kind, [record]);
       return true;
     }
-    if (shell.settings.diffToolName === name && shell.settings.diffToolPath === path && shell.settings.diffToolArgs === args) return false;
-    shell.settings = { ...shell.settings, diffToolName: name, diffToolPath: path, diffToolArgs: args };
+    const preset = catalog.find((item) => item.primary) ?? catalog[0];
+    if (!preset) return false;
+    setTools(shell, kind, [{ id: newToolId(), name: preset.name, path: preset.path, args: preset.args, extensions: [] }]);
     return true;
-  }
-
-export function useMergePreset(shell: ShellState, path: string) {
-    const preset = shell.mergeTools.find((item) => shell.pathsMatch(item.path, path));
-    if (!preset) return;
-    writeTool(shell, "merge", preset);
-  }
-
-export function useDiffPreset(shell: ShellState, path: string) {
-    const preset = shell.diffTools.find((item) => shell.pathsMatch(item.path, path));
-    if (!preset) return;
-    writeTool(shell, "diff", preset);
   }
 
 export function fillCommand(shell: ShellState, template: string, answers: Record<string, string>) {

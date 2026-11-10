@@ -2,8 +2,27 @@
   import { getShell } from "./context";
   import "./PrefsDialog.css";
   import { invoke } from "../perf";
+  import type { MenuItem } from "./types";
 
   const shell = getShell();
+
+  type ToolKind = "diff" | "merge";
+
+  async function importSource(kind: ToolKind, source: "detected" | "common") {
+    const count = await shell.importTools(kind, source);
+    shell.forkImportNote = count > 0
+      ? shell.tr("dialog.toolImported", { count: String(count) })
+      : shell.tr("dialog.toolNoImport");
+  }
+
+  function toolImportItems(kind: ToolKind): MenuItem[] {
+    return [
+      { label: shell.tr("dialog.toolImportDetected"), run: () => void importSource(kind, "detected") },
+      { label: shell.tr("dialog.toolImportCommon"), run: () => void importSource(kind, "common") },
+      { sep: true, label: "" },
+      { label: shell.tr("dialog.toolImportFork"), run: () => void shell.importForkFile() },
+    ];
+  }
 
 </script>
 
@@ -133,39 +152,68 @@
             {/if}
             <label>API key <input type="password" bind:value={shell.settings.aiApiKey} /></label>
           {:else if shell.prefTab === "integration"}
+            {@const kind = shell.toolKind}
+            {@const tools = shell.toolsOf(kind)}
+            {@const picked = shell.selectedTool(kind)}
+            {@const pickedAt = picked ? tools.findIndex((tool) => tool.id === picked.id) : -1}
             <label class="check"><input type="checkbox" bind:checked={shell.settings.highlightIssues} /> {shell.tr("dialog.issueLinks")}</label>
-            <div class="k">{shell.tr("dialog.externalMerge")}</div>
+            <div class="pref-tabs tool-tabs">
+              <button type="button" class:on={kind === "diff"} onclick={() => (shell.toolKind = "diff")}>{shell.tr("dialog.externalDiff")}</button>
+              <button type="button" class:on={kind === "merge"} onclick={() => (shell.toolKind = "merge")}>{shell.tr("dialog.externalMerge")}</button>
+            </div>
             <div class="tool-grid">
               <div class="tool-list">
-                {#each shell.mergeTools as tool (tool.path)}
-                  <button type="button" class:on={shell.pathsMatch(shell.settings.mergeToolPath, tool.path)} title={tool.path} onclick={() => shell.useMergePreset(tool.path)}>
-                    <span>{tool.name}</span>
-                    <span class="tool-path">{tool.path}</span>
+                {#each tools as tool, index (tool.id)}
+                  <button type="button" class:on={picked?.id === tool.id} title={tool.path} onclick={() => shell.selectTool(tool.id)}>
+                    <span class="tool-title"><em class="tool-rank">{index + 1}</em>{shell.toolLabel(tool) || shell.tr("dialog.toolUntitled")}</span>
+                    <span class="tool-path">{tool.path || shell.tr("dialog.toolNoPath")}</span>
+                    <span class="tool-path">{tool.extensions.length ? shell.toolExtensionLabel(tool) : shell.tr("dialog.toolAllFiles")}</span>
                   </button>
+                {:else}
+                  <p class="empty tool-empty">{shell.tr("dialog.toolEmpty")}</p>
                 {/each}
               </div>
               <div class="tool-fields">
-                <label>{shell.tr("dialog.name")} <input bind:value={shell.settings.mergeToolName} /></label>
-                <label>{shell.tr("dialog.toolPath")} <input bind:value={shell.settings.mergeToolPath} placeholder={shell.tr("dialog.toolHint")} /></label>
-                <label>{shell.tr("dialog.toolArguments")} <input bind:value={shell.settings.mergeToolArgs} /></label>
+                <div class="tool-actions">
+                  <button class="text-button" type="button" onclick={() => shell.addTool(kind)}>{shell.tr("dialog.toolAdd")}</button>
+                  <button class="text-button" type="button" disabled={!picked} onclick={() => picked && shell.removeTool(kind, picked.id)}>{shell.tr("dialog.toolRemove")}</button>
+                  <button class="text-button tool-import" type="button" onclick={(event) => shell.openMenu(event, toolImportItems(kind))}>{shell.tr("dialog.toolImport")}</button>
+                  <span class="grow"></span>
+                  <button class="text-button" type="button" disabled={pickedAt <= 0} title={shell.tr("dialog.toolMoveUp")} aria-label={shell.tr("dialog.toolMoveUp")} onclick={() => picked && shell.moveTool(kind, picked.id, -1)}>↑</button>
+                  <button class="text-button" type="button" disabled={pickedAt < 0 || pickedAt >= tools.length - 1} title={shell.tr("dialog.toolMoveDown")} aria-label={shell.tr("dialog.toolMoveDown")} onclick={() => picked && shell.moveTool(kind, picked.id, 1)}>↓</button>
+                </div>
+                {#if picked}
+                  <label>{shell.tr("dialog.name")}
+                    <input value={picked.name} placeholder={shell.toolLabel(picked)} onchange={(event) => shell.setToolField(kind, picked.id, "name", event.currentTarget.value)} />
+                  </label>
+                  <label>{shell.tr("dialog.toolPath")}
+                    <span class="tool-path-row">
+                      <input value={picked.path} placeholder={shell.tr("dialog.toolHint")} onchange={(event) => shell.setToolField(kind, picked.id, "path", event.currentTarget.value)} />
+                      <button class="text-button" type="button" onclick={() => void shell.browseToolPath(kind, picked.id)}>{shell.tr("dialog.browse")}</button>
+                    </span>
+                  </label>
+                  <label>{shell.tr("dialog.toolArguments")}
+                    <input value={picked.args} placeholder={kind === "merge" ? "{ours} {base} {theirs} {working}" : "{left} {right}"} onchange={(event) => shell.setToolField(kind, picked.id, "args", event.currentTarget.value)} />
+                  </label>
+                  <label>{shell.tr("dialog.toolExtensions")}
+                    <input value={picked.extensions.join(", ")} placeholder={shell.tr("dialog.toolAllFiles")} onchange={(event) => shell.setToolExtensions(kind, picked.id, event.currentTarget.value)} />
+                  </label>
+                  <p class="empty">{shell.tr("dialog.toolExtensionsHint")}</p>
+                {:else}
+                  <p class="empty">{shell.tr("dialog.toolNone")}</p>
+                {/if}
+                {#if shell.forkImportNote}<p class="empty">{shell.forkImportNote}</p>{/if}
               </div>
             </div>
-            <div class="k">{shell.tr("dialog.externalDiff")}</div>
-            <div class="tool-grid">
-              <div class="tool-list">
-                {#each shell.diffTools as tool (`diff-${tool.path}`)}
-                  <button type="button" class:on={shell.pathsMatch(shell.settings.diffToolPath, tool.path)} title={tool.path} onclick={() => shell.useDiffPreset(tool.path)}>
-                    <span>{tool.name}</span>
-                    <span class="tool-path">{tool.path}</span>
-                  </button>
+            {#if tools.length > 0}
+              <div class="tool-types">
+                <div class="k">{shell.tr("dialog.toolFileTypes")}</div>
+                {#each shell.toolTypeRows(kind) as row (row.key)}
+                  <div class="tool-type-row"><span>{row.label}</span><span>{row.tool ? shell.toolLabel(row.tool) : shell.tr("dialog.toolNone")}</span></div>
                 {/each}
+                <p class="empty">{shell.tr("dialog.toolPriorityHint")}</p>
               </div>
-              <div class="tool-fields">
-                <label>{shell.tr("dialog.name")} <input bind:value={shell.settings.diffToolName} /></label>
-                <label>{shell.tr("dialog.toolPath")} <input bind:value={shell.settings.diffToolPath} /></label>
-                <label>{shell.tr("dialog.toolArguments")} <input bind:value={shell.settings.diffToolArgs} /></label>
-              </div>
-            </div>
+            {/if}
             <div class="k">{shell.tr("dialog.shell")}</div>
             <label class="pref-inline">{shell.tr("dialog.shell")}
               <select bind:value={shell.settings.shellKind}>

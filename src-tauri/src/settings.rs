@@ -206,6 +206,12 @@ pub struct Settings {
     pub merge_tool_path: String,
     #[serde(default)]
     pub merge_tool_args: String,
+    /// Ordered external tools. List order is the priority; a tool with no
+    /// extensions is the fallback for every file.
+    #[serde(default)]
+    pub diff_tools: Vec<ToolRecord>,
+    #[serde(default)]
+    pub merge_tools: Vec<ToolRecord>,
     #[serde(default)]
     pub ignore_space: bool,
     #[serde(default)]
@@ -311,6 +317,24 @@ pub struct WorkspaceRecord {
     /// Count-based width kept in settings. The tab strip fills from the open repositories when its size or count is dirty.
     #[serde(default)]
     pub tab_width: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolRecord {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: String,
+    /// Arguments after the path. Diff tools use `{left}` `{right}` `{file}`;
+    /// merge tools use `{ours}` `{theirs}` `{base}` `{working}` `{file}`.
+    #[serde(default)]
+    pub args: String,
+    /// Lowercase suffixes without the dot. Empty, or `*`, matches every file.
+    #[serde(default)]
+    pub extensions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -529,6 +553,8 @@ impl Default for Settings {
             merge_tool_name: String::new(),
             merge_tool_path: String::new(),
             merge_tool_args: String::new(),
+            diff_tools: Vec::new(),
+            merge_tools: Vec::new(),
             ignore_space: false,
             vertical_tabs: false,
             pinned_refs: Vec::new(),
@@ -1097,9 +1123,41 @@ fn apply_tools(settings: &mut Settings, text: &str, count: &mut u32) {
         settings.diff_tool = compose_tool(&tool.path, &tool.args);
         *count += 1;
     }
+    append_imported(&mut settings.merge_tools, &tools.merge);
+    append_imported(&mut settings.diff_tools, &tools.diff);
 }
 
-fn compose_tool(path: &str, args: &str) -> String {
+fn append_imported(list: &mut Vec<ToolRecord>, imported: &[crate::tools::ExternalTool]) {
+    for tool in imported {
+        if list.iter().any(|item| same_tool_path(&item.path, &tool.path)) {
+            continue;
+        }
+        let id = format!("tool-{:016x}", path_hash(&tool.path));
+        list.push(ToolRecord {
+            id,
+            name: tool.name.clone(),
+            path: tool.path.clone(),
+            args: tool.args.clone(),
+            extensions: Vec::new(),
+        });
+    }
+}
+
+fn path_hash(path: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in path.trim().replace('/', "\\").to_ascii_lowercase().bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn same_tool_path(left: &str, right: &str) -> bool {
+    let norm = |value: &str| value.trim().trim_end_matches(['\\', '/']).replace('/', "\\").to_ascii_lowercase();
+    !left.trim().is_empty() && norm(left) == norm(right)
+}
+
+pub(crate) fn compose_tool(path: &str, args: &str) -> String {
     let file = path.trim();
     let rest = args.trim();
     if file.is_empty() {

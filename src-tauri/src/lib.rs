@@ -699,6 +699,11 @@ fn external_tools() -> tools::ExternalTools {
 }
 
 #[tauri::command]
+fn common_tools() -> Vec<tools::CommonTool> {
+    tools::common_tools()
+}
+
+#[tauri::command]
 fn program_exists(path: String) -> bool {
     tools::program_exists(&path)
 }
@@ -1255,14 +1260,20 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 }
 
 #[tauri::command]
-fn pick_file(initial: Option<String>) -> Result<Option<String>, String> {
+fn pick_file(initial: Option<String>, kind: Option<String>) -> Result<Option<String>, String> {
     let start = initial.unwrap_or_default();
+    let program = kind.as_deref() == Some("program");
     #[cfg(windows)]
     {
+        let filter = if program {
+            "Programs (*.exe;*.bat;*.cmd;*.com)|*.exe;*.bat;*.cmd;*.com|All files (*.*)|*.*"
+        } else {
+            "JSON (*.json)|*.json|All files (*.*)|*.*"
+        };
         let script = r#"
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 $dialog = New-Object System.Windows.Forms.OpenFileDialog
-$dialog.Filter = "JSON (*.json)|*.json|All files (*.*)|*.*"
+$dialog.Filter = $env:AWEGIT_PICK_FILTER
 $dialog.CheckFileExists = $true
 $start = $env:AWEGIT_PICK_START
 if ($start -and (Test-Path -LiteralPath $start)) {
@@ -1277,6 +1288,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
         let output = std::process::Command::new("powershell")
             .args(["-NoProfile", "-STA", "-Command", script])
             .env("AWEGIT_PICK_START", &start)
+            .env("AWEGIT_PICK_FILTER", filter)
             .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|error| error.to_string())?;
@@ -1290,8 +1302,10 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
     #[cfg(target_os = "macos")]
     {
         let _ = start;
+        let kinds = if program { "{\"public.executable\", \"public.unix-executable\"}" } else { "{\"public.json\"}" };
+        let script = format!("try\nPOSIX path of (choose file of type {kinds})\non error number -128\n\"\"\nend try");
         let output = std::process::Command::new("osascript")
-            .args(["-e", "try", "-e", "POSIX path of (choose file of type {\"public.json\"})", "-e", "on error number -128", "-e", "\"\"", "-e", "end try"])
+            .args(["-e", &script])
             .output()
             .map_err(|error| error.to_string())?;
         let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -1299,7 +1313,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        let _ = start;
+        let _ = (start, program);
         Err("This system has no file picker.".into())
     }
 }
@@ -1477,13 +1491,19 @@ struct LfsLockReport {
 fn launch_tool(path: Option<String>, kind: String, file: String, tool: Option<String>, left: Option<String>, right: Option<String>) -> Result<(), String> {
     let repo = repo_from(path)?;
     let values = settings::load()?;
+    let choices = if kind == "merge" { &values.merge_tools } else { &values.diff_tools };
+    let picked = tools::pick_tool(choices, &file).map(|item| settings::compose_tool(&item.path, &item.args));
+    let fallback = if kind == "merge" { values.merge_tool.clone() } else { values.diff_tool.clone() };
+    let template = tool
+        .filter(|item| !item.trim().is_empty())
+        .or(picked)
+        .unwrap_or(fallback);
     let result = if kind == "merge" {
-        awegit_git::launch_merge_tool(&repo, &values.merge_tool, &file)
+        awegit_git::launch_merge_tool(&repo, &template, &file)
     } else if let (Some(left), Some(right)) = (left.filter(|item| !item.is_empty()), right.filter(|item| !item.is_empty())) {
-        let template = tool.filter(|item| !item.trim().is_empty()).unwrap_or(values.diff_tool);
         awegit_git::launch_diff_pair(&repo, &template, &file, &left, &right)
     } else {
-        awegit_git::launch_diff_tool(&repo, &values.diff_tool, &file, false)
+        awegit_git::launch_diff_tool(&repo, &template, &file, false)
     };
     result.map_err(|error| error.to_string())
 }
@@ -2086,6 +2106,7 @@ pub fn run() {
             settings_path,
             import_fork_settings,
             external_tools,
+            common_tools,
             program_exists,
             watch_repository,
             open_terminal,

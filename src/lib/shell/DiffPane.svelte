@@ -5,7 +5,7 @@
   import { sampleImages } from "../sample";
   import { onVirtualScroll, type SplitRow } from "../view";
   import type { Row, Side } from "./types";
-  import { applyConflictChoice, mergeToolLabel, openConflictTool } from "./diff.svelte";
+  import { applyConflictChoice, mergeToolLabel, mergeToolMissing, openConflictTool } from "./diff.svelte";
   import BinaryDiff from "./BinaryDiff.svelte";
   import { formatBytes } from "../format";
   import type { ConflictParty } from "../status";
@@ -304,12 +304,16 @@
                 <div class="conflict-actions">
                   <button class="conflict-merge" type="button" disabled={(!pickOurs && !pickTheirs) || (shell.mode === "live" && shell.busy)} onclick={() => { if (batch && only && shell.mode === "live") void shell.resolvePicked(pickOurs ? "ours" : "theirs", conflictSelection); else void applyConflictChoice(shell, pickOurs, pickTheirs); }}>{only ? (batch ? shell.tr("menu.keepSideCount", { name: only, count: String(conflictSelection.length) }) : shell.tr("chrome.chooseSide", { name: only })) : pickOurs && pickTheirs ? shell.tr("chrome.mergeBoth") : shell.tr("chrome.mergeAction")}</button>
                   {#if tool && pickOurs && pickTheirs}
-                    <button class="conflict-tool" type="button" disabled={shell.mode === "live" && shell.busy} onclick={() => { if (shell.mode === "live") void openConflictTool(shell); }}>
-                      {shell.tr("chrome.mergeInTool", { name: tool })}
-                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </button>
+                    <span class="conflict-tool-group">
+                      <button class="conflict-tool" type="button" disabled={shell.mode === "live" && shell.busy} onclick={() => { if (shell.mode === "live") void openConflictTool(shell); }}>
+                        {shell.tr("chrome.mergeInTool", { name: tool })}
+                      </button>
+                      <button class="conflict-tool conflict-caret" type="button" disabled={shell.mode === "live" && shell.busy} aria-label={shell.tr("menu.externalMerge")} title={shell.tr("menu.externalMerge")} onclick={(event) => shell.openExternalToolMenu(event, "merge", shell.selectedPath ?? "")}>
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      </button>
+                    </span>
                   {/if}
-                  {#if shell.mode === "live" && tool && !shell.settings.mergeToolPath.trim()}
+                  {#if shell.mode === "live" && tool && mergeToolMissing(shell, shell.selectedPath)}
                     <p class="conflict-note">{shell.tr("chrome.toolPathMissing", { name: tool })}</p>
                   {/if}
                 </div>
@@ -323,6 +327,7 @@
           {:else if shell.mode === "live" && shell.section === "changes" && shell.selectedPath}
             <header class="diff-head">
               <span title={shell.selectedPath}>{shell.selectedPath}</span>
+              <button class="pane-chip" type="button" disabled={shell.busy} title={shell.tr("menu.externalDiff")} onclick={(event) => shell.openExternalToolMenu(event, "diff", shell.selectedPath ?? "")}>{shell.tr("chrome.externalDiff")}</button>
               {#if hunkList.length > 0}
                 <div class="hunk-tools" role="group" aria-label={shell.tr("chrome.hunkActions")}>
                   <button class="hunk-step" type="button" disabled={shell.busy} aria-label={shell.tr("menu.prevHunk")} title={shell.tr("menu.prevHunk")} onclick={() => stepHunk(-1)}>‹</button>

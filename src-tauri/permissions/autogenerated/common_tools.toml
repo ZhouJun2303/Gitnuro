@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-common-tools"
+description = "Enables the common_tools command without any pre-configured scope."
+commands.allow = ["common_tools"]
+
+[[permission]]
+identifier = "deny-common-tools"
+description = "Denies the common_tools command without any pre-configured scope."
+commands.deny = ["common_tools"]

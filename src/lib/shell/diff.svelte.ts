@@ -158,7 +158,9 @@ export function splitScroller(shell: ShellState, node: HTMLElement, columns?: { 
     };
   }
 
-export function mergeToolLabel(shell: ShellState) {
+export function mergeToolLabel(shell: ShellState, file = shell.selectedPath ?? "") {
+    const tool = shell.resolvedTool("merge", file);
+    if (tool) return shell.toolLabel(tool);
     const named = shell.settings.mergeToolName.trim();
     if (named) return named;
     const command = shell.settings.mergeTool.trim();
@@ -168,24 +170,31 @@ export function mergeToolLabel(shell: ShellState) {
     return base.replace(/\.exe$/i, "");
 }
 
-export function describeToolError(shell: ShellState, kind: "merge" | "diff", error: unknown) {
-    const name = (kind === "merge" ? shell.settings.mergeToolName : shell.settings.diffToolName).trim();
-    const path = (kind === "merge" ? shell.settings.mergeToolPath : shell.settings.diffToolPath).trim();
+export function mergeToolMissing(shell: ShellState, file = shell.selectedPath ?? "") {
+    const tool = shell.resolvedTool("merge", file);
+    if (tool) return !tool.path.trim();
+    return !shell.settings.mergeToolPath.trim();
+}
+
+export function describeToolError(shell: ShellState, kind: "merge" | "diff", error: unknown, file = shell.selectedPath ?? "") {
+    const tool = shell.resolvedTool(kind, file);
+    const name = (tool ? shell.toolLabel(tool) : kind === "merge" ? shell.settings.mergeToolName : shell.settings.diffToolName).trim();
+    const path = (tool?.path ?? (kind === "merge" ? shell.settings.mergeToolPath : shell.settings.diffToolPath)).trim();
     return [shell.tr("chrome.toolFailed", { name: name || shell.tr("chrome.toolUnnamed") }), shell.tr("chrome.toolPathLine", { path: path || shell.tr("chrome.toolPathEmpty") }), "", shell.message(error)].join("\n");
 }
 
-export async function launchExternal(shell: ShellState, kind: "merge" | "diff", file: string) {
+export async function launchExternal(shell: ShellState, kind: "merge" | "diff", file: string, template?: string) {
     if (!file || shell.busy) return;
     try {
-      await invoke("launch_tool", { path: shell.repoPath(), kind, file });
+      await invoke("launch_tool", { path: shell.repoPath(), kind, file, tool: template ?? shell.toolTemplate(kind, file) });
     } catch (error) {
-      shell.actionError = describeToolError(shell, kind, error);
+      shell.actionError = describeToolError(shell, kind, error, file);
     }
 }
 
 export async function openConflictTool(shell: ShellState) {
     const file = shell.selectedPath;
-    if (!file || !mergeToolLabel(shell) || shell.busy) return;
+    if (!file || !mergeToolLabel(shell, file) || shell.busy) return;
     await launchExternal(shell, "merge", file);
 }
 

@@ -34,6 +34,7 @@ import {
     type Suggestion,
     type GitRuntime,
     type RepoScan,
+    type ToolRecord,
     type UpdateNotice,
     type UpdateProgress,
     type WorkspaceRecord,
@@ -41,10 +42,10 @@ import {
     recentWorkspaceLimit,
     workspaceTabWidth,
   } from "../status";
-import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
+import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
-import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
+import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 
@@ -239,6 +240,8 @@ export class ShellState {
     mergeToolName: "",
     mergeToolPath: "",
     mergeToolArgs: "",
+    diffTools: [],
+    mergeTools: [],
     ignoreSpace: false,
     verticalTabs: false,
     pinnedRefs: [],
@@ -4762,22 +4765,90 @@ export class ShellState {
 
   diffTools = $state<ExternalTool[]>([]);
 
+  toolKind = $state<ToolKind>("diff");
+
+  toolPick = $state("");
+
 
 
   async loadExternalTools() {
     return loadExternalTools(this);
   }
 
-
-
-  useMergePreset(path: string) {
-    return useMergePreset(this, path);
+  toolsOf(kind: ToolKind) {
+    return toolsOf(this, kind);
   }
 
+  applicableTools(kind: ToolKind, file: string) {
+    return applicableTools(this, kind, file);
+  }
 
+  resolvedTool(kind: ToolKind, file: string) {
+    return resolvedTool(this, kind, file);
+  }
 
-  useDiffPreset(path: string) {
-    return useDiffPreset(this, path);
+  defaultTool(kind: ToolKind) {
+    return defaultTool(this, kind);
+  }
+
+  selectedTool(kind: ToolKind) {
+    return selectedTool(this, kind);
+  }
+
+  selectTool(toolId: string) {
+    selectTool(this, toolId);
+  }
+
+  addTool(kind: ToolKind) {
+    return addTool(this, kind);
+  }
+
+  removeTool(kind: ToolKind, toolId: string) {
+    removeTool(this, kind, toolId);
+  }
+
+  moveTool(kind: ToolKind, toolId: string, delta: number) {
+    moveTool(this, kind, toolId, delta);
+  }
+
+  setToolExtensions(kind: ToolKind, toolId: string, text: string) {
+    setToolExtensions(this, kind, toolId, text);
+  }
+
+  setToolField(kind: ToolKind, toolId: string, field: "name" | "path" | "args", value: string) {
+    setToolField(this, kind, toolId, field, value);
+  }
+
+  toolTypeRows(kind: ToolKind) {
+    return toolTypeRows(this, kind);
+  }
+
+  browseToolPath(kind: ToolKind, toolId: string) {
+    return browseToolPath(this, kind, toolId);
+  }
+
+  importTools(kind: ToolKind, source: ToolSource) {
+    return importTools(this, kind, source);
+  }
+
+  toolTemplate(kind: ToolKind, file: string) {
+    return toolTemplate(this, kind, file);
+  }
+
+  toolLabel(tool: { name: string; path: string }) {
+    return toolLabel(tool);
+  }
+
+  toolExtensionLabel(tool: ToolRecord) {
+    return toolExtensionLabel(tool);
+  }
+
+  openToolSettings(kind: ToolKind, toolId = "") {
+    openToolSettings(this, kind, toolId);
+  }
+
+  openExternalToolMenu(event: MouseEvent, kind: ToolKind, file: string) {
+    this.openMenu(event, externalItems(this, kind, file));
   }
 
 

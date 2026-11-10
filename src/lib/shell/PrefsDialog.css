@@ -92,9 +92,12 @@
 
 .diff-sample.plain .tok-word { color: inherit; }
 
-.tool-grid { display: grid; grid-template-columns: 180px 1fr; gap: 12px; }
+.tool-grid { display: grid; grid-template-columns: 200px 1fr; gap: 12px; }
 
-.tool-list { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; max-height: 140px; }
+.tool-tabs { align-self: flex-start; }
+.tool-tabs button { flex: 0 0 auto; min-width: 132px; }
+
+.tool-list { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; max-height: 260px; }
 
 .tool-list button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; border: 0; background: transparent; text-align: left; padding: 6px 8px; font: inherit; color: inherit; border-radius: 6px; }
 
@@ -106,7 +109,37 @@
 
 .tool-list button.on { background: var(--selection); color: var(--accent); font-weight: 500; }
 
+.tool-title { display: flex; align-items: center; gap: 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tool-rank { flex: none; min-width: 16px; height: 16px; border-radius: 4px; background: var(--field); color: var(--text-secondary); font-size: 10px; font-style: normal; line-height: 16px; text-align: center; }
+
+.tool-list button.on .tool-rank { background: var(--accent); color: #fff; }
+
+.tool-empty { padding: 8px; }
+
 .tool-fields { display: flex; flex-direction: column; gap: 8px; }
+
+.tool-actions { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+
+.tool-actions > .grow { flex: 1; }
+
+.tool-actions .text-button { margin-left: 0; }
+
+.tool-actions .text-button:disabled { opacity: 0.4; }
+
+.tool-path-row { display: flex; align-items: center; gap: 6px; }
+
+.tool-path-row input { flex: 1; min-width: 0; }
+
+.tool-path-row .text-button { flex: none; margin-left: 0; }
+
+.tool-types { display: flex; flex-direction: column; gap: 4px; }
+
+.tool-type-row { display: grid; grid-template-columns: 120px 1fr; gap: 8px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
+
+.tool-type-row span:first-child { font-family: var(--mono); color: var(--text-secondary); }
+
+.tool-type-row span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ai-actions {
   display: flex;
