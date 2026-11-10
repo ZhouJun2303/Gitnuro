@@ -85,7 +85,9 @@ pub fn pulls(remote_url: &str, github_token: &str, gitlab_token: &str, gitlab_ho
     if gitlab_token.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let api_host = if gitlab_host.trim().is_empty() { host } else { gitlab_host.trim().to_string() };
+    let Some(api_host) = gitlab_api_host(&host, gitlab_host) else {
+        return Ok(Vec::new());
+    };
     let encoded = project.replace('/', "%2F");
     let url = format!("https://{api_host}/api/v4/projects/{encoded}/merge_requests?state=opened&per_page=20");
     let text = http_get(&url, &[("PRIVATE-TOKEN", gitlab_token.trim())])?;
@@ -347,4 +349,29 @@ fn http_send(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&st
         return Err(crate::http::coded("network", &format!("HTTP {}", response.status)));
     }
     Ok(response.body)
+}
+
+/// Never send the GitLab token to a host derived from the repository URL alone.
+fn gitlab_api_host(origin: &str, configured: &str) -> Option<String> {
+    let configured = configured.trim();
+    if !configured.is_empty() {
+        return Some(configured.to_string());
+    }
+    if origin.eq_ignore_ascii_case("gitlab.com") {
+        return Some("gitlab.com".to_string());
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gitlab_token_only_goes_to_gitlab_or_the_configured_host() {
+        assert_eq!(gitlab_api_host("gitlab.com", ""), Some("gitlab.com".into()));
+        assert_eq!(gitlab_api_host("gitlab.com.evil.example", ""), None);
+        assert_eq!(gitlab_api_host("git.example.com", "git.example.com"), Some("git.example.com".into()));
+        assert_eq!(gitlab_api_host("evil.example", "gitlab.company.net"), Some("gitlab.company.net".into()));
+    }
 }

@@ -63,14 +63,16 @@ type Job = Box<dyn FnOnce() + Send>;
 
 struct WatchSlot {
     watcher: Mutex<Option<RecommendedWatcher>>,
+    alive: Arc<AtomicBool>,
 }
 
-struct RepoWatch(Mutex<Option<Arc<WatchSlot>>>);
+struct RepoWatch(Mutex<HashMap<PathBuf, Arc<WatchSlot>>>);
 
 /// What a batch of file events changed. `refs` means branches, `HEAD`, or an operation in progress.
 #[derive(Clone, serde::Serialize)]
 struct RepoChange {
     refs: bool,
+    path: String,
 }
 
 /// Transfer percent for one repository. The shell shows it only while that repository is open.
@@ -305,6 +307,16 @@ fn commit_changes(
     };
     let peel = use_fakeignore();
     let skip_hooks = skip_hooks.unwrap_or(false);
+    let types = settings::load()
+        .map(|values| {
+            values
+                .commit_types
+                .into_iter()
+                .map(|item| item.name)
+                .filter(|name| !name.trim().is_empty())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let (result, log) = awegit_git::capture_output(|| {
         write_then_status(path, |repo| {
             if peel {
@@ -320,6 +332,7 @@ fn commit_changes(
                     sign_off_format,
                     skip_hooks,
                     convention: !skip_hooks,
+                    types,
                 },
             )
         })
@@ -699,6 +712,16 @@ fn external_tools() -> tools::ExternalTools {
 }
 
 #[tauri::command]
+fn common_tools() -> Vec<tools::CommonTool> {
+    tools::common_tools()
+}
+
+#[tauri::command]
+fn editor_tools() -> Vec<tools::EditorTool> {
+    tools::editor_tools()
+}
+
+#[tauri::command]
 fn program_exists(path: String) -> bool {
     tools::program_exists(&path)
 }
@@ -706,10 +729,27 @@ fn program_exists(path: String) -> bool {
 #[tauri::command]
 fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, path: Option<String>) -> Result<(), String> {
     let repo = repo_from(path)?;
-    let mut slot = state.0.lock().map_err(|_| "watcher lock".to_string())?;
-    if let Some(previous) = slot.take() {
-        if let Ok(mut watcher) = previous.watcher.lock() {
-            watcher.take();
+    let key = watch_key(&repo);
+    let mut slots = state.0.lock().map_err(|_| "watcher lock".to_string())?;
+    // Opening another tab of the same repository must not rebuild the recursive watch.
+    if let Some(existing) = slots.get(&key) {
+        if existing.alive.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if let Some(stale) = slots.remove(&key) {
+            if let Ok(mut watcher) = stale.watcher.lock() {
+                watcher.take();
+            }
+        }
+    }
+    if slots.len() >= 8 {
+        let stale = slots.keys().find(|item| item.as_path() != key.as_path()).cloned();
+        if let Some(stale) = stale {
+            if let Some(previous) = slots.remove(&stale) {
+                if let Ok(mut watcher) = previous.watcher.lock() {
+                    watcher.take();
+                }
+            }
         }
     }
     let (sender, receiver) = mpsc::channel::<Vec<PathBuf>>();
@@ -749,9 +789,16 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
             started.elapsed().as_millis()
         ),
     );
-    let _ = app.emit("repo-changed", RepoChange { refs: true });
+    let _ = app.emit(
+        "repo-changed",
+        RepoChange {
+            refs: true,
+            path: repo.display().to_string(),
+        },
+    );
     let shared = Arc::new(WatchSlot {
         watcher: Mutex::new(Some(watcher)),
+        alive: Arc::new(AtomicBool::new(true)),
     });
     let thread_slot = Arc::clone(&shared);
     let root = repo.clone();
@@ -759,7 +806,7 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
         .name("awegit-watch".into())
         .spawn(move || settle_changes(&app, &root, git_dir, receiver, watched, thread_slot))
         .map_err(|error| error.to_string())?;
-    *slot = Some(shared);
+    slots.insert(key, shared);
     Ok(())
 }
 
@@ -1007,7 +1054,7 @@ fn settle_changes(
     mut watched: WatchSet,
     slot: Arc<WatchSlot>,
 ) {
-    while let Ok(mut paths) = receiver.recv() {
+    'watch: while let Ok(mut paths) = receiver.recv() {
         let started = Instant::now();
         let mut overflow = false;
         while started.elapsed() < WATCH_MAX_WAIT {
@@ -1019,7 +1066,7 @@ fn settle_changes(
             match receiver.recv_timeout(WATCH_QUIET) {
                 Ok(more) => paths.extend(more),
                 Err(RecvTimeoutError::Timeout) => break,
-                Err(RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Disconnected) => break 'watch,
             }
         }
         attach_new_dirs(repo, git_dir.as_deref(), &paths, &mut watched, &slot);
@@ -1027,13 +1074,20 @@ fn settle_changes(
             // The dropped events may have included refs; a full refresh is the safe answer.
             let recoveries = WATCH_RECOVERIES.fetch_add(1, Ordering::Relaxed) + 1;
             perf::write("INFO", "watch", &format!("repo-changed refs=true paths=overflow recoveries={recoveries}"));
-            let _ = app.emit("repo-changed", RepoChange { refs: true });
+            let _ = app.emit(
+                "repo-changed",
+                RepoChange {
+                    refs: true,
+                    path: repo.display().to_string(),
+                },
+            );
             continue;
         }
         let Some(change) = classify_changes(repo, &paths) else { continue };
         perf::write("INFO", "watch", &format!("repo-changed refs={} paths={}", change.refs, paths.len()));
         let _ = app.emit("repo-changed", change);
     }
+    slot.alive.store(false, Ordering::Release);
 }
 
 /// `None` when every path is Git bookkeeping the UI does not show, or matched by ignore rules.
@@ -1051,7 +1105,7 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
                 "index" => status = true,
                 "objects" | "modules" | "lfs" | "logs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit" | "gitnuro" | "fsmonitor--daemon"
                     if inner != "logs/refs/stash" => {}
-                _ => return Some(RepoChange { refs: true }),
+                _ => return Some(RepoChange { refs: true, path: repo.display().to_string() }),
             }
             continue;
         }
@@ -1066,7 +1120,7 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
         let ignored: HashSet<String> = awegit_git::ignored_paths(repo, &files).into_iter().collect();
         status = files.iter().any(|file| !ignored.contains(file));
     }
-    status.then_some(RepoChange { refs: false })
+    status.then_some(RepoChange { refs: false, path: repo.display().to_string() })
 }
 
 #[tauri::command]
@@ -1255,14 +1309,20 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 }
 
 #[tauri::command]
-fn pick_file(initial: Option<String>) -> Result<Option<String>, String> {
+fn pick_file(initial: Option<String>, kind: Option<String>) -> Result<Option<String>, String> {
     let start = initial.unwrap_or_default();
+    let program = kind.as_deref() == Some("program");
     #[cfg(windows)]
     {
+        let filter = if program {
+            "Programs (*.exe;*.bat;*.cmd;*.com)|*.exe;*.bat;*.cmd;*.com|All files (*.*)|*.*"
+        } else {
+            "JSON (*.json)|*.json|All files (*.*)|*.*"
+        };
         let script = r#"
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 $dialog = New-Object System.Windows.Forms.OpenFileDialog
-$dialog.Filter = "JSON (*.json)|*.json|All files (*.*)|*.*"
+$dialog.Filter = $env:AWEGIT_PICK_FILTER
 $dialog.CheckFileExists = $true
 $start = $env:AWEGIT_PICK_START
 if ($start -and (Test-Path -LiteralPath $start)) {
@@ -1277,6 +1337,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
         let output = std::process::Command::new("powershell")
             .args(["-NoProfile", "-STA", "-Command", script])
             .env("AWEGIT_PICK_START", &start)
+            .env("AWEGIT_PICK_FILTER", filter)
             .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|error| error.to_string())?;
@@ -1290,8 +1351,10 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
     #[cfg(target_os = "macos")]
     {
         let _ = start;
+        let kinds = if program { "{\"public.executable\", \"public.unix-executable\"}" } else { "{\"public.json\"}" };
+        let script = format!("try\nPOSIX path of (choose file of type {kinds})\non error number -128\n\"\"\nend try");
         let output = std::process::Command::new("osascript")
-            .args(["-e", "try", "-e", "POSIX path of (choose file of type {\"public.json\"})", "-e", "on error number -128", "-e", "\"\"", "-e", "end try"])
+            .args(["-e", &script])
             .output()
             .map_err(|error| error.to_string())?;
         let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -1299,7 +1362,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
     }
     #[cfg(not(any(windows, target_os = "macos")))]
     {
-        let _ = start;
+        let _ = (start, program);
         Err("This system has no file picker.".into())
     }
 }
@@ -1311,12 +1374,44 @@ fn file_preview(path: Option<String>, file: String) -> Result<Option<awegit_git:
 }
 
 #[tauri::command]
-fn cancel_operation(path: Option<String>) -> Result<(), String> {
-    match path {
-        Some(path) if !path.trim().is_empty() => awegit_git::cancel_repo(Path::new(&path)),
-        _ => awegit_git::cancel_running(),
+fn cancel_operation(path: Option<String>) -> Result<Option<String>, String> {
+    let requested = path.filter(|path| !path.trim().is_empty());
+    let stopped_write = match &requested {
+        Some(path) => awegit_git::cancel_repo(Path::new(path)),
+        None => awegit_git::cancel_running(),
+    };
+    let Some(path) = requested else {
+        return Ok(None);
+    };
+    if !stopped_write {
+        return Ok(None);
     }
-    Ok(())
+    // A killed write may leave `.git/index.lock`. Ask before deleting it: an
+    // external Git process can own that file too.
+    let Ok(repo) = repo_from(Some(path)) else {
+        return Ok(None);
+    };
+    let Some(lock) = awegit_git::index_lock_path(&repo) else {
+        return Ok(None);
+    };
+    if lock.is_file() {
+        Ok(Some(lock.display().to_string()))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn remove_index_lock(path: Option<String>) -> Result<bool, String> {
+    let repo = repo_from(path)?;
+    let Some(lock) = awegit_git::index_lock_path(&repo) else {
+        return Ok(false);
+    };
+    match std::fs::remove_file(&lock) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 /// Stop history/diff/blame reads without touching a queued write.
@@ -1477,13 +1572,19 @@ struct LfsLockReport {
 fn launch_tool(path: Option<String>, kind: String, file: String, tool: Option<String>, left: Option<String>, right: Option<String>) -> Result<(), String> {
     let repo = repo_from(path)?;
     let values = settings::load()?;
+    let choices = if kind == "merge" { &values.merge_tools } else { &values.diff_tools };
+    let picked = tools::pick_tool(choices, &file).map(|item| settings::compose_tool(&item.path, &item.args));
+    let fallback = if kind == "merge" { values.merge_tool.clone() } else { values.diff_tool.clone() };
+    let template = tool
+        .filter(|item| !item.trim().is_empty())
+        .or(picked)
+        .unwrap_or(fallback);
     let result = if kind == "merge" {
-        awegit_git::launch_merge_tool(&repo, &values.merge_tool, &file)
+        awegit_git::launch_merge_tool(&repo, &template, &file)
     } else if let (Some(left), Some(right)) = (left.filter(|item| !item.is_empty()), right.filter(|item| !item.is_empty())) {
-        let template = tool.filter(|item| !item.trim().is_empty()).unwrap_or(values.diff_tool);
         awegit_git::launch_diff_pair(&repo, &template, &file, &left, &right)
     } else {
-        awegit_git::launch_diff_tool(&repo, &values.diff_tool, &file, false)
+        awegit_git::launch_diff_tool(&repo, &template, &file, false)
     };
     result.map_err(|error| error.to_string())
 }
@@ -1752,8 +1853,11 @@ fn ssh_config_path() -> Result<std::path::PathBuf, String> {
 }
 
 #[tauri::command]
-fn open_editor(path: Option<String>, file: String, line: u32) -> Result<(), String> {
+fn open_editor(path: Option<String>, file: String, line: u32, tool: Option<String>) -> Result<(), String> {
     let repo = repo_from(path)?;
+    if let Some(tool) = tool.filter(|item| !item.trim().is_empty()) {
+        return awegit_git::launch_editor(&repo, &tool, &file, line).map_err(|error| error.to_string());
+    }
     let full = repo.join(&file);
     let spec = format!("{}:{line}", full.display());
     for bin in ["cursor", "code"] {
@@ -1839,6 +1943,15 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
     }
 }
 
+/// Saved app theme as a window theme, so the native title bar matches the webview from the first frame.
+fn saved_window_theme() -> Option<tauri::Theme> {
+    match settings::load().ok()?.theme.as_str() {
+        "dark" => Some(tauri::Theme::Dark),
+        "light" => Some(tauri::Theme::Light),
+        _ => None,
+    }
+}
+
 #[tauri::command]
 fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>, file: Option<String>, rev: Option<String>, width: Option<f64>, height: Option<f64>) -> Result<(), String> {
     let view_name = view.unwrap_or_default();
@@ -1885,6 +1998,7 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
     let window = tauri::webview::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
         .title("AweGit")
         .inner_size(width.clamp(480.0, 4000.0), height.clamp(360.0, 4000.0))
+        .theme(saved_window_theme())
         .resizable(true)
         .build()
         .map_err(|error| error.to_string())?;
@@ -2086,6 +2200,8 @@ pub fn run() {
             settings_path,
             import_fork_settings,
             external_tools,
+            common_tools,
+            editor_tools,
             program_exists,
             watch_repository,
             open_terminal,
@@ -2098,6 +2214,7 @@ pub fn run() {
             file_preview,
             cancel_operation,
             cancel_reads,
+            remove_index_lock,
             save_hidden_refs,
             save_expanded_groups,
             save_sign_off,
@@ -2155,9 +2272,14 @@ pub fn run() {
         ]);
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(RepoWatch(Mutex::new(None)))
+        .manage(RepoWatch(Mutex::new(HashMap::new())))
         .setup(|app| {
             perf::mark("setup");
+            if let Some(theme) = saved_window_theme() {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_theme(Some(theme));
+                }
+            }
             if let Ok(dir) = app.path().resource_dir() {
                 if let Some(cmd) = git_cmd(&dir) {
                     awegit_git::use_bundled_git(&cmd);

@@ -10,6 +10,7 @@
   import type { Row, Side, TreeEntry } from "./types";
 
   const shell = getShell();
+  const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
   const onBlobScroll = onVirtualScroll((top) => (shell.blobTop = top));
   const patchWindow = (node: HTMLElement, spec: { file: string; count: number; rowHeight: number; prefix?: Uint32Array | null }) => shell.trackPatch(node, spec);
@@ -24,6 +25,20 @@
             <button type="button" role="tab" aria-selected={shell.historyTab === "commit"} class:on={shell.historyTab === "commit"} onclick={() => shell.openHistoryTab("commit")}>{shell.tr("chrome.commit")}</button>
             <button type="button" role="tab" aria-selected={shell.historyTab === "changes"} class:on={shell.historyTab === "changes"} onclick={() => shell.openHistoryTab("changes")}>{shell.tr("chrome.changes")}</button>
             <button type="button" role="tab" aria-selected={shell.historyTab === "tree"} class:on={shell.historyTab === "tree"} onclick={() => shell.openHistoryTab("tree")}>{shell.tr("chrome.fileTree")}</button>
+            {#if shell.selectedCommit || shell.commitDetail}
+              <div class="detail-tools" role="presentation">
+                {#if shell.searchOpen.detail}
+                  <input class="search detail-filter" placeholder={shell.tr("chrome.filterFiles")} aria-label={shell.tr("chrome.filterFiles")} bind:value={shell.detailQuery} use:focusOnMount onkeydown={(event) => shell.searchKeys("detail", event)} onblur={() => shell.searchBlur("detail")} />
+                {/if}
+                <button class="icon-btn search-toggle" class:on={shell.searchOpen.detail} type="button" aria-label={shell.tr("chrome.filterFiles")} aria-pressed={shell.searchOpen.detail} title={shell.tr("chrome.filterFiles")} onmousedown={(event) => event.preventDefault()} onclick={() => shell.toggleSearch("detail")}>
+                  {#if shell.searchOpen.detail}
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>
+                  {:else}
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.25"/><path d="M10.25 10.25L13.5 13.5"/></svg>
+                  {/if}
+                </button>
+              </div>
+            {/if}
           </div>
           {#if shell.selectedCommit || shell.commitDetail}
             {@const name = shell.commitAuthorName()}
@@ -79,12 +94,15 @@
                   {#if shell.commitDetail?.body}<pre class="detail-body-text">{@render linked(shell.commitDetail.body)}</pre>{/if}
                 </div>
                 <div class="patch-head commit-files-head">
-                  <span class="meta">{shell.commitFiles.length}</span>
-                  {#if shell.commitFiles.length > 0}
+                  <span class="meta">{shell.detailFiltering ? `${shell.commitShown.length} / ${shell.commitFiles.length}` : shell.commitFiles.length}</span>
+                  {#if shell.commitShown.length > 0}
                     <button class="expand-all" type="button" onclick={() => void shell.toggleAllPatches()}>{shell.allPatchesOpen ? shell.tr("chrome.collapseAll") : shell.tr("chrome.expandAll")}</button>
                   {/if}
                 </div>
                 <div class="commit-files" use:commitList>
+                  {#if shell.detailFiltering && shell.commitFiles.length > 0 && shell.commitShown.length === 0}
+                    <p class="empty">{shell.tr("chrome.noMatch")}</p>
+                  {/if}
                   {#if shell.commitWindow.topSpacer > 0}
                     <div style:height="{shell.commitWindow.topSpacer}px"></div>
                   {/if}
@@ -118,9 +136,9 @@
               <div class="detail-split">
                 <div class="detail-tree" style:width="{shell.detailTreeWidth}px">
                   {#if shell.changeTree.length === 0}
-                    <p class="empty">{shell.tr("chrome.noChanges")}</p>
+                    <p class="empty">{shell.commitFiles.length === 0 ? shell.tr("chrome.noChanges") : shell.tr("chrome.noMatch")}</p>
                   {:else}
-                    {@render detailTree(shell.changeTree, shell.commitCollapsed, shell.toggleCommitDir.bind(shell), shell.selectChangeFile.bind(shell))}
+                    {@render detailTree(shell.changeTree, shell.detailFiltering ? [] : shell.commitCollapsed, shell.toggleCommitDir.bind(shell), shell.selectChangeFile.bind(shell))}
                   {/if}
                 </div>
                 <SplitHandle direction="vertical" bind:size={shell.detailTreeWidth} min={160} max={560} defaultSize={280} label={shell.tr("chrome.resizeTree")} onchange={shell.handleLayoutChange.bind(shell)} />
@@ -138,7 +156,7 @@
                   {#if shell.repoTree.length === 0}
                     <p class="empty">{shell.treePrepared === shell.selectedCommit ? shell.tr("chrome.noMatch") : shell.tr("chrome.reading")}</p>
                   {:else}
-                    {@render detailTree(shell.repoTree, shell.treeCollapsed, shell.toggleRepoDir.bind(shell), shell.selectTreeFile.bind(shell))}
+                    {@render detailTree(shell.repoTree, shell.detailFiltering ? [] : shell.treeCollapsed, shell.toggleRepoDir.bind(shell), shell.selectTreeFile.bind(shell))}
                   {/if}
                 </div>
                 <SplitHandle direction="vertical" bind:size={shell.detailTreeWidth} min={160} max={560} defaultSize={280} label={shell.tr("chrome.resizeTree")} onchange={shell.handleLayoutChange.bind(shell)} />

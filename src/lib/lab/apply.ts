@@ -1,5 +1,5 @@
 import { invoke } from "../perf";
-import type { CommandRecord } from "../status";
+import type { CommandRecord, ToolRecord } from "../status";
 import type { ShellState } from "../shell/state.svelte";
 import { fillResolveDialog } from "../shell/dialogs.svelte";
 import type { LabDialog, LabScene } from "./scenes";
@@ -108,6 +108,12 @@ async function fillSurface(shell: ShellState, id: string) {
   if (id === "commit-binary") {
     await showCommitBySummary(shell, "add the large pak");
     await shell.openHistoryTab("changes");
+    return;
+  }
+  if (id === "commit-filter") {
+    await showCommitBySummary(shell, "add lab submodules");
+    shell.searchOpen.detail = true;
+    shell.detailQuery = "libs/";
     return;
   }
   if (id === "tree") {
@@ -368,6 +374,19 @@ async function fillSurface(shell: ShellState, id: string) {
     window.setTimeout(() => { delete shell.jobs[key]; }, 2000);
     return;
   }
+  if (id === "external-tool-menu") {
+    shell.settings.diffTools = diffFixtures();
+    shell.settings.mergeTools = mergeFixtures();
+    const file = shell.shownUnstaged.find((item) => /\.(xlsx|xls)$/i.test(item.path)) ?? shell.shownUnstaged[0] ?? shell.shownStaged[0];
+    if (file) {
+      const side = shell.shownUnstaged.includes(file) ? "unstaged" : "staged";
+      const items = shell.fileMenu(file, side);
+      const external = items.find((item) => item.label === shell.tr("menu.externalMerge"));
+      shell.menu = { x: 220, y: 120, items };
+      shell.submenu = { x: 520, y: 250, items: external?.children ?? [] };
+    }
+    return;
+  }
   if (id === "menu") {
     shell.menu = {
       x: 72,
@@ -418,10 +437,28 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draft = shell.repoPath() ?? "";
       fillSourceRoots(shell);
       break;
+    case "editorImport":
+      shell.editorCandidates = [
+        { name: "Visual Studio Code", path: "C:\\Program Files\\Microsoft VS Code\\Code.exe", args: "-g \"{file}:{line}\"" },
+        { name: "Cursor", path: "C:\\Users\\lab\\AppData\\Local\\Programs\\cursor\\Cursor.exe", args: "-g \"{file}:{line}\"" },
+        { name: "Sublime Text", path: "C:\\Program Files\\Sublime Text\\sublime_text.exe", args: "\"{file}:{line}\"" },
+      ];
+      shell.editorPicked = [];
+      shell.editorDetecting = false;
+      break;
     case "prefs":
-      shell.prefTab = sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : sceneId === "prefs-integration" ? "integration" : "general";
+      shell.prefTab = sceneId.startsWith("prefs-integration") ? "integration" : sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : "general";
       fillSourceRoots(shell);
       fillLabTools(shell);
+      if (sceneId === "prefs-commit") shell.resetCommitTypes();
+      if (sceneId === "prefs-integration-merge") {
+        shell.toolKind = "merge";
+        shell.toolPick = "lab-merge-xlsx";
+      }
+      if (sceneId === "prefs-integration-editor") {
+        shell.toolKind = "editor";
+        shell.toolPick = "lab-editor-cursor";
+      }
       break;
     case "update":
       shell.updateReleaseUrl = "https://github.com/ZhouJun2303/Gitnuro/releases/latest";
@@ -465,7 +502,8 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draftUser = "实验室标签";
       break;
     case "remote":
-      shell.draft = "origin";
+      shell.remoteEdit = false;
+      shell.draft = "";
       shell.draftExtra = "https://example.com/lab/repo.git";
       break;
     case "squash":
@@ -665,7 +703,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draft = "实验室";
       break;
     case "colorTab":
-      shell.draft = "#5b8def";
+      shell.draft = sceneId === "dialog-colorTab-none" ? "" : "#5b8def";
       break;
     case "groupRename":
       shell.draft = "工作";
@@ -674,6 +712,28 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       break;
   }
   shell.dialog = dialog;
+}
+
+function diffFixtures(): ToolRecord[] {
+  return [
+    { id: "lab-diff-xlsx", name: "ExcelMergeFork", path: "D:\\MyGit\\ForkExcelMergeTool\\ExcelMergeFork.exe", args: "\"{right}\" \"{left}\"", extensions: ["xlsx", "xls"], fallback: false },
+    { id: "lab-diff-bc", name: "Beyond Compare", path: "C:\\Program Files\\Beyond Compare 4\\BCompare.exe", args: "{left} {right}", extensions: [], fallback: true },
+    { id: "lab-diff-code", name: "VS Code", path: "C:\\Program Files\\Microsoft VS Code\\Code.exe", args: "--diff \"{left}\" \"{right}\"", extensions: ["json", "ts", "svelte"], fallback: false },
+  ];
+}
+
+function mergeFixtures(): ToolRecord[] {
+  return [
+    { id: "lab-merge-xlsx", name: "ExcelMergeFork", path: "D:\\MyGit\\ForkExcelMergeTool\\ExcelMergeFork.exe", args: "{ours},{base},{theirs},{working}", extensions: ["xlsx", "xls"], fallback: false },
+    { id: "lab-merge-bc", name: "Beyond Compare", path: "C:\\Program Files\\Beyond Compare 4\\BCompare.exe", args: "{ours} {theirs} {base} {working}", extensions: [], fallback: true },
+  ];
+}
+
+function editorFixtures(): ToolRecord[] {
+  return [
+    { id: "lab-editor-code", name: "Visual Studio Code", path: "C:\\Program Files\\Microsoft VS Code\\Code.exe", args: "-g \"{file}:{line}\"", extensions: [], fallback: true },
+    { id: "lab-editor-cursor", name: "Cursor", path: "C:\\Users\\lab\\AppData\\Local\\Programs\\cursor\\Cursor.exe", args: "-g \"{file}:{line}\"", extensions: ["prefab", "unity", "ts", "json"], fallback: false },
+  ];
 }
 
 function fillLabTools(shell: ShellState) {
@@ -685,6 +745,11 @@ function fillLabTools(shell: ShellState) {
     const n = pad(index + 1);
     return { name: `Diff Tool ${n}`, path: `C:\\Tools\\diff-${n}.exe`, args: "$LOCAL $REMOTE", primary: index === 0 };
   });
+  shell.settings.diffTools = diffFixtures();
+  shell.settings.mergeTools = mergeFixtures();
+  shell.settings.editorTools = editorFixtures();
+  shell.toolKind = "diff";
+  shell.toolPick = "lab-diff-xlsx";
   shell.aiModels = Array.from({ length: FILL }, (_, index) => `lab-model-${pad(index + 1)}`);
 }
 

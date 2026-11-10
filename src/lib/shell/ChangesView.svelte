@@ -6,7 +6,7 @@
   import DiffPane from "./DiffPane.svelte";
   import { onVirtualScroll } from "../view";
   import type { Row, SearchKey, Side } from "./types";
-  import { COMMIT_TYPES, commitTypeColor, typeMessageKey, type CommitType } from "./commitMessage";
+  import type { CommitType } from "./commitMessage";
 
   const shell = getShell();
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
@@ -23,6 +23,10 @@
       void shell.loadDiff();
     }
   });
+
+  function openViewMenu(event: MouseEvent) {
+    shell.openMenu(event, shell.fileViewMenu());
+  }
 
   function flipFile(event: MouseEvent, path: string, side: Side) {
     if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.button !== 0) return;
@@ -70,9 +74,11 @@
   }
 
   async function moveType(step: number) {
-    const index = COMMIT_TYPES.indexOf(shell.commitType);
-    const next = COMMIT_TYPES[(index + step + COMMIT_TYPES.length) % COMMIT_TYPES.length];
-    shell.rememberCommitType(next);
+    const list = shell.commitTypeList();
+    const index = list.findIndex((item) => item.name === shell.commitType);
+    const next = list[(index + step + list.length) % list.length];
+    if (!next) return;
+    shell.rememberCommitType(next.name);
     shell.fitSummary();
     await tick();
     document.querySelector<HTMLElement>(".type-option.selected")?.scrollIntoView({ block: "nearest" });
@@ -213,11 +219,11 @@
               <button
                 class="type-chip"
                 type="button"
-                style:--type-color={commitTypeColor(shell.commitType)}
+                style:--type-color={shell.commitTypeColor(shell.commitType)}
                 aria-label={shell.tr("chrome.commitType")}
                 aria-haspopup="listbox"
                 aria-expanded={typeOpen}
-                title={`${shell.commitType}: ${shell.tr(typeMessageKey(shell.commitType))}`}
+                title={shell.commitTypeLabel(shell.commitType) ? `${shell.commitType}: ${shell.commitTypeLabel(shell.commitType)}` : shell.commitType}
                 disabled={shell.busy}
                 onclick={() => (typeOpen = !typeOpen)}
                 onkeydown={onTypeKey}
@@ -229,19 +235,19 @@
               {#if typeOpen}
                 <button class="type-dismiss" type="button" tabindex="-1" aria-label={shell.tr("chrome.close")} onclick={() => (typeOpen = false)}></button>
                 <div class="type-menu" role="listbox" aria-label={shell.tr("chrome.commitType")} use:placeTypeMenu>
-                  {#each COMMIT_TYPES as type (type)}
+                  {#each shell.commitTypeList() as type (type.name)}
                     <button
                       class="type-option"
-                      class:selected={type === shell.commitType}
+                      class:selected={type.name === shell.commitType}
                       type="button"
                       role="option"
-                      aria-selected={type === shell.commitType}
-                      style:--type-color={commitTypeColor(type)}
-                      onclick={() => pickType(type)}
+                      aria-selected={type.name === shell.commitType}
+                      style:--type-color={type.color}
+                      onclick={() => pickType(type.name)}
                     >
                       <span class="type-swatch" aria-hidden="true"></span>
-                      <span class="type-name">{type}</span>
-                      <span class="type-detail">{shell.tr(typeMessageKey(type))}</span>
+                      <span class="type-name">{type.name}</span>
+                      <span class="type-detail">{shell.commitTypeLabel(type.name)}</span>
                     </button>
                   {/each}
                 </div>
@@ -302,7 +308,7 @@
         </div>
       </div>
       {@render pickedActions(shell.pickedIn(shell.shownUnstaged), shell.pickedIn(shell.shownStaged))}
-      <div class="file-list" onscroll={onCombinedScroll} bind:clientHeight={shell.combinedHeight}>
+      <div class="file-list" role="group" onscroll={onCombinedScroll} bind:clientHeight={shell.combinedHeight} oncontextmenu={openViewMenu}>
         <div class="commit-window" style:height="{shell.combinedRows.length * shell.rowFile}px">
           {#each shell.combinedWindow.rows as entry, index (entry.key)}
             <div class="virtual-row" style:top="{(shell.combinedWindow.start + index) * shell.rowFile}px">
@@ -337,9 +343,9 @@
       </div>
       {@render pickedActions([], stagedPicked)}
       {#if shell.shownStaged.length === 0}
-        <p class="empty">{shell.staged.length === 0 ? shell.tr("chrome.noStaged") : shell.tr("chrome.noMatch")}</p>
+        <p class="empty" oncontextmenu={openViewMenu}>{shell.staged.length === 0 ? shell.tr("chrome.noStaged") : shell.tr("chrome.noMatch")}</p>
       {:else}
-        <div class="file-list staged-list" onscroll={onStagedScroll}>
+        <div class="file-list staged-list" role="group" onscroll={onStagedScroll} oncontextmenu={openViewMenu}>
           <div class="commit-window" style:height="{shell.stagedTree.length * shell.fileStride}px">
             {#each shell.stagedWindow.rows as entry, index (entry.key)}
               <div class="virtual-row" style:top="{(shell.stagedWindow.start + index) * shell.fileStride}px">
@@ -375,7 +381,7 @@
         </div>
       </div>
       {@render pickedActions(unstagedPicked, [])}
-      <div class="file-list" onscroll={onFileScroll}>
+      <div class="file-list" role="group" onscroll={onFileScroll} oncontextmenu={openViewMenu}>
         {#if shell.showIgnored}
             {#if (shell.facts?.ignored.length ?? 0) === 0}
               <p class="empty">{shell.tr("chrome.noIgnored")}</p>

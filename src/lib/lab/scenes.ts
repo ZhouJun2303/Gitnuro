@@ -33,6 +33,7 @@ export const dialogScenes = {
   clone: dialog("clone", "克隆"),
   open: dialog("open", "打开仓库"),
   prefs: dialog("prefs", "偏好设置"),
+  editorImport: dialog("editorImport", "识别文本编辑器"),
   reset: dialog("reset", "重置"),
   command: dialog("command", "自定义命令"),
   tag: dialog("tag", "新建标签"),
@@ -95,6 +96,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "history", group: "主界面", title: "历史", repo: "full", ready: ".commit-row" }),
   scene({ id: "history-remote", group: "主界面", title: "远程未拉取历史", repo: "behind", ready: ".commit-row.remote-only" }),
   scene({ id: "commit", group: "主界面", title: "提交详情", repo: "full", ready: ".detail" }),
+  scene({ id: "commit-filter", group: "主界面", title: "提交详情过滤文件", repo: "full", ready: ".detail .detail-filter" }),
   scene({ id: "commit-binary", group: "主界面", title: "提交中的二进制差异", repo: "full", ready: ".binary-summary" }),
   scene({ id: "tree", group: "主界面", title: "文件树", repo: "full", ready: ".tree-row" }),
   scene({ id: "sidebar", group: "主界面", title: "侧栏", repo: "full", ready: ".sidebar" }),
@@ -164,16 +166,23 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "reset-confirm", group: "叠层", title: "重置确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "cherry-confirm", group: "叠层", title: "拣选确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "menu", group: "叠层", title: "菜单", repo: "full", ready: "[data-layer=\"menu\"]" }),
+  scene({ id: "external-tool-menu", group: "叠层", title: "外部工具子菜单", repo: "conflict", ready: "[data-layer=\"submenu\"]" }),
   scene({ id: "workspace-menu-busy", group: "叠层", title: "工作区菜单：刷新中", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "prefs-git", group: "弹窗", title: "偏好设置 · Git", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-commit", group: "弹窗", title: "偏好设置 · 提交", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-integration", group: "弹窗", title: "偏好设置 · 集成", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-integration-merge", group: "弹窗", title: "偏好设置 · 集成 · 合并", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-integration-editor", group: "弹窗", title: "偏好设置 · 集成 · 文本编辑", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "update-downloading", group: "弹窗", title: "更新 · 下载中", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
   scene({ id: "update-current", group: "弹窗", title: "更新 · 已是最新", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
   scene({ id: "update-ready", group: "弹窗", title: "更新 · 安装程序已启动", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
 ];
 
-export const scenes: LabScene[] = [...surfaceScenes, ...Object.values(dialogScenes)];
+export const scenes: LabScene[] = [
+  ...surfaceScenes,
+  ...Object.values(dialogScenes),
+  scene({ id: "dialog-colorTab-none", group: "弹窗", title: "标签页颜色 · 无颜色", repo: "full", ready: '[data-dialog="colorTab"]', dialog: "colorTab" }),
+];
 
 export function sceneById(id: string) {
   return scenes.find((item) => item.id === id);

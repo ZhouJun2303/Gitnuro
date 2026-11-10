@@ -21,6 +21,7 @@ import {
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
 import type { ShellState } from "./state.svelte";
 import { launchExternal } from "./diff.svelte";
+import { openInEditor } from "./dialogs.svelte";
 
 export function branchItems(shell: ShellState) {
     const rows = shell.refs?.branches ?? [];
@@ -31,6 +32,16 @@ export function branchItems(shell: ShellState) {
       disabled: branch.current || shell.busy,
       run: () => void shell.mutate({ action: "checkout", name: branch.name }),
     }));
+  }
+
+export function folderFoldItems(shell: ShellState): MenuItem[] {
+    const locked = shell.fileLayout !== "tree";
+    return [
+      { label: shell.tr("chrome.expandAll"), disabled: locked, run: () => shell.setFolderFold("open-all") },
+      { label: shell.tr("chrome.collapseAll"), disabled: locked, run: () => shell.setFolderFold("close-all") },
+      { label: shell.tr("chrome.expandFirstLevel"), disabled: locked, run: () => shell.setFolderFold("open-first") },
+      { label: shell.tr("chrome.collapseFirstLevel"), disabled: locked, run: () => shell.setFolderFold("close-first") },
+    ];
   }
 
 export function fileViewMenu(shell: ShellState) {
@@ -50,6 +61,8 @@ export function fileViewMenu(shell: ShellState) {
       { label: shell.tr("chrome.viewAsTree"), checked: shell.fileLayout === "tree", run: () => shell.setLayout("tree") },
       { label: shell.tr("chrome.viewAsList"), checked: shell.fileLayout === "list", run: () => shell.setLayout("list") },
       { label: shell.tr("chrome.viewAsCombined"), checked: shell.fileLayout === "combined", run: () => shell.setLayout("combined") },
+      { sep: true, label: "" },
+      ...folderFoldItems(shell),
       { sep: true, label: "" },
       { label: shell.tr("chrome.conflictsOnly"), checked: shell.conflictsOnly, run: () => shell.setConflictsOnly(!shell.conflictsOnly) },
       { label: shell.tr("chrome.showIgnoredFiles"), checked: shell.showIgnored, run: () => { shell.showIgnored = !shell.showIgnored; if (shell.showIgnored) void shell.loadFacts(true, true); } },
@@ -78,8 +91,9 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { sep: true, label: "" },
       { label: shell.tr("menu.blame"), disabled: locked, run: () => shell.showBlame(file.path) },
       { label: shell.tr("menu.history"), disabled: locked, run: () => void invoke("open_window", { view: "history", repo: shell.repoPath(), file: file.path }) },
-      { label: shell.tr("menu.externalDiff"), disabled: locked || !shell.settings.diffTool, run: () => void launchExternal(shell, "diff", file.path) },
-      { label: shell.tr("menu.externalMerge"), disabled: locked || file.letter !== "C" || !shell.settings.mergeTool, run: () => void launchExternal(shell, "merge", file.path) },
+      { label: shell.tr("menu.externalDiff"), disabled: locked, children: externalItems(shell, "diff", file.path) },
+      { label: shell.tr("menu.externalMerge"), disabled: locked || file.letter !== "C", children: externalItems(shell, "merge", file.path) },
+      { label: shell.tr("menu.openInEditor"), disabled: locked || file.letter === "D", children: editorItems(shell, file.path, 0) },
       { label: shell.tr("menu.lfsLock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsLock", path: file.path }) },
       { label: shell.tr("menu.lfsUnlock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsUnlock", path: file.path }) },
       { sep: true, label: "" },
@@ -250,6 +264,8 @@ export function dirMenu(shell: ShellState, dir: string, side: Side) {
       { label: shell.tr("menu.addGitignore"), disabled: locked, run: () => void shell.addIgnore([dir], false, true) },
       { label: shell.tr("menu.addFakeignore"), disabled: locked, run: () => void shell.addIgnore([dir], true, true) },
       { label: files.length > 1 ? shell.tr("menu.stashFiles", { count }) : shell.tr("menu.stashFile"), disabled: locked || files.length === 0, run: () => shell.openStash(files) },
+      { sep: true, label: "" },
+      ...folderFoldItems(shell),
     ];
   }
 
@@ -332,7 +348,7 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
     const hunkCount = shell.diffLines.reduce((count, line) => count + (line.kind === "hunk" ? 1 : 0), 0);
     items.push(
       { label: shell.tr("menu.copyPatch"), disabled: indexes.length === 0, run: () => shell.copyPatch(indexes) },
-      { label: shell.tr("menu.showLine"), disabled: !shell.selectedPath, run: () => void invoke("open_editor", { path: shell.repoPath(), file: shell.selectedPath, line: shell.editorLineNo(clicked) }) },
+      { label: shell.tr("menu.openInEditorAtLine", { line: String(shell.editorLineNo(clicked)) }), disabled: !shell.selectedPath, children: shell.selectedPath ? editorItems(shell, shell.selectedPath, shell.editorLineNo(clicked)) : [] },
       { label: shell.tr("menu.lineHistory"), disabled: !historyOk || !shell.selectedPath, run: () => void shell.showLineHistory(historyLine) },
       { label: shell.tr("menu.popBlame"), disabled: !shell.selectedPath, run: () => void invoke("open_window", { view: "blame", repo: shell.repoPath(), file: shell.selectedPath }) },
       { sep: true, label: "" },
@@ -361,10 +377,57 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
     return items;
   }
 
-function diffChoices(shell: ShellState) {
-    if (shell.diffTools.length > 0) return shell.diffTools;
-    if (!shell.settings.diffToolPath.trim()) return [];
-    return [{ name: shell.settings.diffToolName || shell.settings.diffToolPath, path: shell.settings.diffToolPath, args: shell.settings.diffToolArgs, primary: true }];
+/** Tools for one file: exact suffix matches first, then all-files tools by priority. */
+export function externalItems(shell: ShellState, kind: "diff" | "merge", file: string): MenuItem[] {
+    const tools = shell.applicableTools(kind, file);
+    const items: MenuItem[] = tools.map((tool, index) => ({
+      label: `${index === 0 ? "✓ " : ""}${shell.toolLabel(tool)}`,
+      shortcut: shell.toolExtensionLabel(tool),
+      disabled: !tool.path.trim(),
+      run: () => void launchExternal(shell, kind, file, shell.composeTool(tool.path, tool.args)),
+    }));
+    if (items.length === 0) items.push({ label: shell.tr("menu.noExternalTools"), disabled: true });
+    items.push({ sep: true, label: "" });
+    items.push({ label: shell.tr("menu.configureTools"), run: () => shell.openToolSettings(kind) });
+    return items;
+  }
+
+/** Editors for one file: exact suffix matches first, then the fallback editor. */
+export function editorItems(shell: ShellState, file: string, line = 0): MenuItem[] {
+    const tools = shell.applicableTools("editor", file);
+    const items: MenuItem[] = tools.map((tool, index) => ({
+      label: `${index === 0 ? "✓ " : ""}${shell.toolLabel(tool)}`,
+      shortcut: shell.toolExtensionLabel(tool),
+      disabled: !tool.path.trim(),
+      run: () => void openInEditor(shell, file, line, shell.composeTool(tool.path, tool.args)),
+    }));
+    if (items.length === 0) items.push({ label: shell.tr("menu.noEditorTools"), disabled: true });
+    if (!tools.some((tool) => tool.path.trim())) {
+      items.push({ sep: true, label: "" });
+      items.push({
+        label: shell.tr("menu.autoEditor"),
+        run: () => {
+          const tool = shell.resolvedTool("editor", file);
+          void openInEditor(shell, file, line, tool?.path.trim() ? shell.composeTool(tool.path, tool.args) : undefined);
+        },
+      });
+    }
+    items.push({ label: shell.tr("menu.configureEditors"), run: () => shell.openToolSettings("editor") });
+    return items;
+  }
+
+function revisionExternalItems(shell: ShellState, file: string, parent: string, rev: string): MenuItem[] {
+    const tools = shell.applicableTools("diff", file);
+    const items: MenuItem[] = tools.map((tool, index) => ({
+      label: `${index === 0 ? "✓ " : ""}${shell.toolLabel(tool)}`,
+      shortcut: shell.toolExtensionLabel(tool),
+      disabled: !tool.path.trim(),
+      run: () => void invoke("launch_tool", { path: shell.repoPath(), kind: "diff", file, tool: shell.composeTool(tool.path, tool.args), left: parent, right: rev }).catch((error) => (shell.actionError = shell.message(error))),
+    }));
+    if (items.length === 0) items.push({ label: shell.tr("menu.noExternalTools"), disabled: true });
+    items.push({ sep: true, label: "" });
+    items.push({ label: shell.tr("menu.configureTools"), run: () => shell.openToolSettings("diff") });
+    return items;
   }
 
 export function revisionFileMenu(shell: ShellState, file: string): MenuItem[] {
@@ -372,19 +435,16 @@ export function revisionFileMenu(shell: ShellState, file: string): MenuItem[] {
     const parent = shell.commitDetail?.parents[0] ?? "";
     const added = shell.commitFiles.some((item) => item.path === file && item.kind === "added");
     const locked = shell.mode !== "live" || !rev;
-    const tools = diffChoices(shell);
-    const external: MenuItem = tools.length === 0 || !parent || added
+    const external: MenuItem = !parent || added
       ? { label: shell.tr("menu.externalDiff"), disabled: true }
       : {
           label: shell.tr("menu.externalDiff"),
-          children: tools.map((tool) => ({
-            label: tool.name || tool.path,
-            run: () => void invoke("launch_tool", { path: shell.repoPath(), kind: "diff", file, tool: shell.composeTool(tool.path, tool.args), left: parent, right: rev }).catch((error) => (shell.actionError = shell.message(error))),
-          })),
+          children: revisionExternalItems(shell, file, parent, rev),
         };
     return [
       { label: shell.tr("menu.open"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       external,
+      { label: shell.tr("menu.openInEditor"), disabled: locked, children: editorItems(shell, file, 0) },
       { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       {
         label: shell.tr("menu.resetFileTo"),
@@ -406,12 +466,14 @@ export function revisionFileMenu(shell: ShellState, file: string): MenuItem[] {
 export function historyFileMenu(shell: ShellState, commit: CommitRow): MenuItem[] {
     const file = shell.historyFilter;
     const locked = shell.mode !== "live" || !file;
+    const parent = commit.parents[0] ?? "";
     const info = [commit.summary, commit.author, commit.at ? shell.forkWhen(commit.at) : commit.when, commit.id].filter((part) => part).join("\n");
     return [
       { label: shell.tr("menu.openSeparate"), disabled: locked, run: () => void invoke("open_window", { view: "blob", repo: shell.repoPath(), file, rev: commit.id }) },
       { label: shell.tr("menu.revealMain"), disabled: locked, run: () => void invoke("reveal_commit", { repo: shell.repoPath(), id: commit.id }).catch((error) => (shell.actionError = shell.message(error))) },
       { label: shell.tr("menu.open"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
+      { label: shell.tr("menu.externalDiff"), disabled: locked || !parent, children: revisionExternalItems(shell, file, parent, commit.id) },
       { label: shell.tr("menu.resetAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.resetAtCommit"), shell.tr("dialog.restoreFileBody", { name: file }), () => void shell.mutate({ action: "restoreFile", rev: commit.id, file })) },
       { label: shell.tr("menu.saveAs"), disabled: locked, run: () => void invoke("save_revision", { path: shell.repoPath(), rev: commit.id, file }).catch((error) => (shell.actionError = shell.message(error))) },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },

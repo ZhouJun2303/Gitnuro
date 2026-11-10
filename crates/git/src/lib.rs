@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 pub use change::{
     blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line, discard_lines, file_diff, file_diff_with, file_preview,
-    launch_diff_pair, launch_diff_tool, launch_merge_tool, porcelain_z_paths, range_diff, resolve_conflict, resolve_conflicts, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths, staged_diff,
+    launch_diff_pair, launch_diff_tool, launch_editor, launch_merge_tool, porcelain_z_paths, range_diff, resolve_conflict, resolve_conflicts, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths, staged_diff,
     unstage_all, unstage_paths, workspace_diff, BlobView, CommitRequest, ConflictSides, ConflictView, DiffLine, DiffLineKind, FileDiff,
     FilePreview, LineEdit,
 };
@@ -21,7 +21,7 @@ pub use model::{
     blame_file, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log, commit_log_sorted,
     commit_tree, commits_from, compare_file, compare_files, file_history, ignored_paths, in_progress, lfs_available, lfs_locks,
     locate_ref, prompt_facts, rebase_conflicts, reflog, repo_sign_off_format, repository_refs, repository_summary, search_log, show_commit_file,
-    show_commit_file_with, BlameLine, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, LocatedRef, RefSnapshot, ReflogRow,
+    show_commit_file_with, index_lock_path, BlameLine, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, LocatedRef, RefSnapshot, ReflogRow,
     RemoteRow, RepoSummary, StashRow, SubmoduleRow, TagRow, WorktreeRow, write_expanded_groups, write_hidden_refs, write_sign_off,
 };
 pub use cli::{

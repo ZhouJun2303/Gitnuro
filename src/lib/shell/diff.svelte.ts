@@ -158,7 +158,9 @@ export function splitScroller(shell: ShellState, node: HTMLElement, columns?: { 
     };
   }
 
-export function mergeToolLabel(shell: ShellState) {
+export function mergeToolLabel(shell: ShellState, file = shell.selectedPath ?? "") {
+    const tool = shell.resolvedTool("merge", file);
+    if (tool) return shell.toolLabel(tool);
     const named = shell.settings.mergeToolName.trim();
     if (named) return named;
     const command = shell.settings.mergeTool.trim();
@@ -168,24 +170,31 @@ export function mergeToolLabel(shell: ShellState) {
     return base.replace(/\.exe$/i, "");
 }
 
-export function describeToolError(shell: ShellState, kind: "merge" | "diff", error: unknown) {
-    const name = (kind === "merge" ? shell.settings.mergeToolName : shell.settings.diffToolName).trim();
-    const path = (kind === "merge" ? shell.settings.mergeToolPath : shell.settings.diffToolPath).trim();
+export function mergeToolMissing(shell: ShellState, file = shell.selectedPath ?? "") {
+    const tool = shell.resolvedTool("merge", file);
+    if (tool) return !tool.path.trim();
+    return !shell.settings.mergeToolPath.trim();
+}
+
+export function describeToolError(shell: ShellState, kind: "merge" | "diff", error: unknown, file = shell.selectedPath ?? "") {
+    const tool = shell.resolvedTool(kind, file);
+    const name = (tool ? shell.toolLabel(tool) : kind === "merge" ? shell.settings.mergeToolName : shell.settings.diffToolName).trim();
+    const path = (tool?.path ?? (kind === "merge" ? shell.settings.mergeToolPath : shell.settings.diffToolPath)).trim();
     return [shell.tr("chrome.toolFailed", { name: name || shell.tr("chrome.toolUnnamed") }), shell.tr("chrome.toolPathLine", { path: path || shell.tr("chrome.toolPathEmpty") }), "", shell.message(error)].join("\n");
 }
 
-export async function launchExternal(shell: ShellState, kind: "merge" | "diff", file: string) {
+export async function launchExternal(shell: ShellState, kind: "merge" | "diff", file: string, template?: string) {
     if (!file || shell.busy) return;
     try {
-      await invoke("launch_tool", { path: shell.repoPath(), kind, file });
+      await invoke("launch_tool", { path: shell.repoPath(), kind, file, tool: template ?? shell.toolTemplate(kind, file) });
     } catch (error) {
-      shell.actionError = describeToolError(shell, kind, error);
+      shell.actionError = describeToolError(shell, kind, error, file);
     }
 }
 
 export async function openConflictTool(shell: ShellState) {
     const file = shell.selectedPath;
-    if (!file || !mergeToolLabel(shell) || shell.busy) return;
+    if (!file || !mergeToolLabel(shell, file) || shell.busy) return;
     await launchExternal(shell, "merge", file);
 }
 
@@ -485,6 +494,34 @@ export function asTree(shell: ShellState, files: Row[], collapsed = shell.collap
 
 export function toggleDir(shell: ShellState, path: string) {
     shell.collapsedDirs = shell.collapsedDirs.includes(path) ? shell.collapsedDirs.filter((item) => item !== path) : [...shell.collapsedDirs, path];
+  }
+
+export type FolderFold = "open-all" | "close-all" | "open-first" | "close-first";
+
+/** Directory paths (joined with `/`, same keying as `asTree`) within a depth range. */
+function dirsBetween(files: Row[], minDepth: number, maxDepth: number) {
+    const dirs = new Set<string>();
+    for (const file of files) {
+      const parts = file.path.split(/[/\\]/);
+      let acc = "";
+      for (let index = 0; index < parts.length - 1; index += 1) {
+        acc = acc ? `${acc}/${parts[index]}` : parts[index];
+        if (index >= minDepth && index <= maxDepth) dirs.add(acc);
+      }
+    }
+    return dirs;
+  }
+
+/**
+ * Fold every folder in both panes at once. `collapsedDirs` is shared by the
+ * unstaged and staged trees, so one action keeps the two panes in step.
+ */
+export function setFolderFold(shell: ShellState, mode: FolderFold) {
+    const files = [...shell.shownUnstaged, ...shell.shownStaged];
+    if (mode === "open-all") shell.collapsedDirs = [];
+    else if (mode === "close-all") shell.collapsedDirs = [...dirsBetween(files, 0, Number.MAX_SAFE_INTEGER)];
+    else if (mode === "open-first") shell.collapsedDirs = [...dirsBetween(files, 1, Number.MAX_SAFE_INTEGER)];
+    else shell.collapsedDirs = [...dirsBetween(files, 0, 0)];
   }
 
 export function toggleCommitDir(shell: ShellState, path: string) {
@@ -1014,6 +1051,8 @@ export function selectFile(shell: ShellState, path: string, side: Side, event?: 
     shell.blameLines = null;
     shell.diffAnchor = 0;
     shell.diffSelected = [];
+    shell.diffTop = 0;
+    if (shell.diffEl) shell.diffEl.scrollTop = 0;
     if (event?.shiftKey || event?.ctrlKey || event?.metaKey) {
       shell.picked = shell.picked.includes(path) ? shell.picked.filter((item) => item !== path) : [...shell.picked, path];
     } else {
@@ -1098,25 +1137,43 @@ export function dragDiffLine(shell: ShellState, index: number, event: MouseEvent
     const anchor = event.shiftKey ? shell.diffAnchor : index;
     if (!event.shiftKey) shell.diffAnchor = index;
     shell.selectDiffRange(anchor, index);
-    const move = (ev: MouseEvent) => {
+    let frame = 0;
+    let pendingX = event.clientX;
+    let pendingY = event.clientY;
+    let lastLine = index;
+    const apply = () => {
       const body = shell.diffEl;
-      if (body) {
-        const rect = body.getBoundingClientRect();
-        if (ev.clientY < rect.top + 28) body.scrollTop -= shell.diffRowHeight;
-        else if (ev.clientY > rect.bottom - 28) body.scrollTop += shell.diffRowHeight;
-      }
-      const hit = body
-        ? document.elementsFromPoint(ev.clientX, ev.clientY).find(
-            (node): node is HTMLElement =>
-              node instanceof HTMLElement && body.contains(node) && Number.isInteger(Number(node.dataset.line)),
-          )
-        : undefined;
+      if (!body) return;
+      const rect = body.getBoundingClientRect();
+      if (pendingY < rect.top + 28) body.scrollTop -= shell.diffRowHeight;
+      else if (pendingY > rect.bottom - 28) body.scrollTop += shell.diffRowHeight;
+      const hit = document.elementsFromPoint(pendingX, pendingY).find(
+        (node): node is HTMLElement =>
+          node instanceof HTMLElement && body.contains(node) && Number.isInteger(Number(node.dataset.line)),
+      );
       const next = Number(hit?.dataset.line);
-      if (Number.isInteger(next)) shell.selectDiffRange(anchor, next);
+      if (Number.isInteger(next) && next !== lastLine) {
+        lastLine = next;
+        shell.selectDiffRange(anchor, next);
+      }
+    };
+    const move = (ev: MouseEvent) => {
+      pendingX = ev.clientX;
+      pendingY = ev.clientY;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        apply();
+      });
     };
     const up = () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+        apply();
+      }
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);

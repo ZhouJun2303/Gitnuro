@@ -3,9 +3,9 @@
   import { getShell } from "./context";
   import "./DiffPane.css";
   import { sampleImages } from "../sample";
-  import { onVirtualScroll, type SplitRow } from "../view";
+  import { onVirtualScroll, wrapPrefix, type SplitRow } from "../view";
   import type { Row, Side } from "./types";
-  import { applyConflictChoice, mergeToolLabel, openConflictTool } from "./diff.svelte";
+  import { applyConflictChoice, mergeToolLabel, mergeToolMissing, openConflictTool } from "./diff.svelte";
   import BinaryDiff from "./BinaryDiff.svelte";
   import { formatBytes } from "../format";
   import type { ConflictParty } from "../status";
@@ -43,6 +43,8 @@
   });
 
   const hunkList = $derived(shell.mode === "live" && shell.section === "changes" ? shell.hunkRanges() : []);
+  const wrapLines = $derived(shell.settings.diffWordWrap && shell.settings.diffStyle !== "split" ? wrapPrefix(shell.diffLines) : null);
+  const wrapSplit = $derived(shell.settings.diffWordWrap && shell.settings.diffStyle === "split" ? wrapPrefix(shell.splitRows) : null);
   const conflictSelection = $derived(shell.section === "changes" ? shell.pickedConflicts() : []);
   const activeAt = $derived(hunkList.findIndex((range) => range.index === activeHunk));
 
@@ -138,16 +140,28 @@
     }
   }
 
-  function goMark(index: number) {
-    activeHunk = index;
-    hoveredHunk = index;
+  function goMark(line: number) {
+    const hunk = shell.hunkOf(line);
+    if (hunk != null) {
+      activeHunk = hunk;
+      hoveredHunk = hunk;
+      scrollToHunk(hunk);
+      return;
+    }
     const node = shell.diffEl;
     if (!node) return;
     if (shell.settings.diffStyle === "split") {
-      node.querySelector<HTMLElement>(`[data-line="${index}"]`)?.scrollIntoView({ block: "center" });
-      return;
+      const row = shell.splitRows.findIndex((item) => {
+        const left = shell.splitLineAt(item, "left");
+        const right = shell.splitLineAt(item, "right");
+        return left === line || right === line;
+      });
+      const units = wrapSplit ? (wrapSplit[Math.max(0, row)] ?? 0) : Math.max(0, row);
+      node.scrollTop = Math.max(0, units * shell.splitRowHeight);
+    } else {
+      const at = wrapLines ? (wrapLines[line] ?? line) : line;
+      node.scrollTop = Math.max(0, at * shell.diffRowHeight);
     }
-    node.scrollTop = Math.max(0, index * shell.diffRowHeight);
     shell.diffTop = node.scrollTop;
   }
 
@@ -161,9 +175,11 @@
         const right = shell.splitLineAt(item, "right");
         return (left != null && left >= range.start && left < range.end) || (right != null && right >= range.start && right < range.end);
       });
-      node.scrollTop = Math.max(0, (row < 0 ? 0 : row) * shell.splitRowHeight - 8);
+      const units = wrapSplit ? (wrapSplit[Math.max(0, row)] ?? 0) : Math.max(0, row);
+      node.scrollTop = Math.max(0, units * shell.splitRowHeight - 8);
     } else {
-      node.scrollTop = Math.max(0, range.start * shell.diffRowHeight - 8);
+      const at = wrapLines ? (wrapLines[range.start] ?? range.start) : range.start;
+      node.scrollTop = Math.max(0, at * shell.diffRowHeight - 8);
     }
     shell.diffTop = node.scrollTop;
   }
@@ -304,12 +320,16 @@
                 <div class="conflict-actions">
                   <button class="conflict-merge" type="button" disabled={(!pickOurs && !pickTheirs) || (shell.mode === "live" && shell.busy)} onclick={() => { if (batch && only && shell.mode === "live") void shell.resolvePicked(pickOurs ? "ours" : "theirs", conflictSelection); else void applyConflictChoice(shell, pickOurs, pickTheirs); }}>{only ? (batch ? shell.tr("menu.keepSideCount", { name: only, count: String(conflictSelection.length) }) : shell.tr("chrome.chooseSide", { name: only })) : pickOurs && pickTheirs ? shell.tr("chrome.mergeBoth") : shell.tr("chrome.mergeAction")}</button>
                   {#if tool && pickOurs && pickTheirs}
-                    <button class="conflict-tool" type="button" disabled={shell.mode === "live" && shell.busy} onclick={() => { if (shell.mode === "live") void openConflictTool(shell); }}>
-                      {shell.tr("chrome.mergeInTool", { name: tool })}
-                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </button>
+                    <span class="conflict-tool-group">
+                      <button class="conflict-tool" type="button" disabled={shell.mode === "live" && shell.busy} onclick={() => { if (shell.mode === "live") void openConflictTool(shell); }}>
+                        {shell.tr("chrome.mergeInTool", { name: tool })}
+                      </button>
+                      <button class="conflict-tool conflict-caret" type="button" disabled={shell.mode === "live" && shell.busy} aria-label={shell.tr("menu.externalMerge")} title={shell.tr("menu.externalMerge")} onclick={(event) => shell.openExternalToolMenu(event, "merge", shell.selectedPath ?? "")}>
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      </button>
+                    </span>
                   {/if}
-                  {#if shell.mode === "live" && tool && !shell.settings.mergeToolPath.trim()}
+                  {#if shell.mode === "live" && tool && mergeToolMissing(shell, shell.selectedPath)}
                     <p class="conflict-note">{shell.tr("chrome.toolPathMissing", { name: tool })}</p>
                   {/if}
                 </div>
@@ -323,6 +343,7 @@
           {:else if shell.mode === "live" && shell.section === "changes" && shell.selectedPath}
             <header class="diff-head">
               <span title={shell.selectedPath}>{shell.selectedPath}</span>
+              <button class="pane-chip" type="button" disabled={shell.busy} title={shell.tr("menu.externalDiff")} onclick={(event) => shell.openExternalToolMenu(event, "diff", shell.selectedPath ?? "")}>{shell.tr("chrome.externalDiff")}</button>
               {#if hunkList.length > 0}
                 <div class="hunk-tools" role="group" aria-label={shell.tr("chrome.hunkActions")}>
                   <button class="hunk-step" type="button" disabled={shell.busy} aria-label={shell.tr("menu.prevHunk")} title={shell.tr("menu.prevHunk")} onclick={() => stepHunk(-1)}>‹</button>

@@ -90,7 +90,7 @@
   function sectionActions(row: Extract<SideRow, { kind: "section" }>) {
     const actions: { label: string; run: () => void; icon?: "add" }[] = [];
     if (row.add === "branch") actions.push({ label: shell.tr("chrome.new"), icon: "add", run: () => { shell.draft = ""; shell.draftExtra = ""; shell.dialog = "branch"; } });
-    if (row.add === "remote") actions.push({ label: shell.tr("chrome.add"), icon: "add", run: () => { shell.draft = ""; shell.draftExtra = ""; shell.dialog = "remote"; } });
+    if (row.add === "remote") actions.push({ label: shell.tr("chrome.add"), icon: "add", run: () => { shell.remoteEdit = false; shell.draft = ""; shell.draftExtra = ""; shell.dialog = "remote"; } });
     if (row.add === "submodule") actions.push({ label: shell.tr("chrome.add"), icon: "add", run: () => { shell.draft = ""; shell.draftExtra = ""; shell.dialog = "submodule"; } });
     if (row.add === "worktree") actions.push({ label: shell.tr("chrome.add"), icon: "add", run: () => { shell.draft = ""; shell.draftExtra = shell.snapshot?.branch ?? ""; shell.dialog = "worktree"; } });
     if (row.showAll) actions.push({ label: shell.tr("chrome.showAll"), run: () => shell.showAllRefs() });
@@ -263,7 +263,7 @@
         {:else if row.kind === "remote"}
           <div class="side nested" class:selected={shell.sideSelected === `remote:${row.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("chrome.fetch"), run: () => shell.mutate({ action: "fetch", remote: row.name, prune: shell.settings.fetchPrune, tags: shell.settings.fetchTags }) },
-            { label: shell.tr("dialog.url"), run: () => { shell.draft = row.name; shell.draftExtra = row.url; shell.dialog = "remote"; } },
+            { label: shell.tr("dialog.url"), run: () => { shell.remoteEdit = true; shell.draft = row.name; shell.draftExtra = row.url; shell.dialog = "remote"; } },
             { label: shell.tr("menu.remove"), run: () => shell.mutate({ action: "removeRemote", name: row.name }) },
           ])}>
             <button class="file-select" type="button" aria-expanded={row.empty ? undefined : shell.sideOpen(`remote:${row.name}`)} title={row.url} onclick={() => (row.empty ? (shell.sideSelected = `remote:${row.name}`) : shell.pickSide(`remote:${row.name}`))}>

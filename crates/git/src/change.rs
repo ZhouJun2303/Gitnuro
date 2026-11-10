@@ -21,6 +21,8 @@ pub struct CommitRequest {
     pub skip_hooks: bool,
     /// Editor commits check the subject against the built-in commit-msg rule and drop `#` commentary.
     pub convention: bool,
+    /// Types the convention accepts. Empty keeps the built-in list.
+    pub types: Vec<String>,
 }
 
 /// Stage the given work-tree paths, including new files.
@@ -144,8 +146,8 @@ pub fn commit(repo: &Path, request: CommitRequest) -> Result<(), Error> {
     if !unmerged_paths(repo)?.is_empty() {
         return Err(Error::Git("resolve all conflicts before committing".into()));
     }
-    if request.convention && !commit_subject_allowed(summary) {
-        return Err(Error::Git(CONVENTION_ERROR.into()));
+    if request.convention && !commit_subject_allowed(summary, &request.types) {
+        return Err(Error::Git(convention_error(&request.types)));
     }
     let mut description = if request.convention {
         strip_commentary(&request.description)
@@ -199,18 +201,35 @@ const COMMIT_TYPES: [&str; 10] = [
     "feat", "fix", "docs", "art", "style", "refactor", "test", "chore", "perf", "revert",
 ];
 
-const CONVENTION_ERROR: &str = "\
-ERROR: 提交信息不符合规范。
-允许格式: type:描述 或 type: 描述（冒号后空格可选）
-允许类型: feat|fix|docs|art|style|refactor|test|chore|perf|revert
-示例: feat: 新增挂机奖励结算逻辑";
+/// Types the convention accepts, with configured names in lowercase. Empty keeps the built-in list.
+fn allowed_types(types: &[String]) -> Vec<String> {
+    let configured: Vec<String> = types
+        .iter()
+        .map(|item| item.trim().to_ascii_lowercase())
+        .filter(|item| !item.is_empty())
+        .collect();
+    if configured.is_empty() {
+        COMMIT_TYPES.iter().map(|item| item.to_string()).collect()
+    } else {
+        configured
+    }
+}
+
+fn convention_error(types: &[String]) -> String {
+    let allowed = allowed_types(types);
+    let example = allowed.first().map(String::as_str).unwrap_or("feat");
+    format!(
+        "ERROR: 提交信息不符合规范。\n允许格式: type:描述 或 type: 描述（冒号后空格可选）\n允许类型: {}\n示例: {example}: 新增挂机奖励结算逻辑",
+        allowed.join("|")
+    )
+}
 
 /// Same rule as the commit-msg hook: `type: description`, with an optional space after the colon.
-fn commit_subject_allowed(summary: &str) -> bool {
+fn commit_subject_allowed(summary: &str, types: &[String]) -> bool {
     let Some((kind, rest)) = summary.split_once(':') else {
         return false;
     };
-    if !COMMIT_TYPES.contains(&kind) {
+    if !allowed_types(types).iter().any(|item| item == kind) {
         return false;
     }
     let rest = rest.trim_start_matches([' ', '\t', '\u{000B}', '\u{000C}', '\r']);
@@ -326,6 +345,8 @@ pub struct FileDiff {
 
 const MAX_DIFF_LINES: usize = 4_000;
 const MAX_UNTRACKED_BYTES: u64 = 8_000_000;
+const MAX_LINE_EDIT_BYTES: usize = 16_000_000;
+const MAX_LFS_POINTER_BYTES: u64 = 4096;
 const MAX_DIFF_BYTES: usize = 8_000_000;
 const MAX_LARGE_FILE: u64 = 2_000_000;
 const MAX_PREVIEW_BYTES: u64 = 8_000_000;
@@ -345,8 +366,7 @@ pub fn stage_hunk(repo: &Path, path: &str, index: u32, unstage: bool, ignore_spa
     args.push("--");
     args.push(path);
     let output = run(repo, &args)?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let (preamble, hunks) = split_hunks(&text);
+    let (preamble, hunks) = split_hunks_bytes(&output.stdout);
     if hunks.is_empty() {
         if !unstage && index == 0 && !in_index(repo, path)? {
             return stage_paths(repo, &[path.to_string()]);
@@ -354,16 +374,16 @@ pub fn stage_hunk(repo: &Path, path: &str, index: u32, unstage: bool, ignore_spa
         return Err(Error::Git(format!("hunk {index} is not in {path}")));
     }
     let hunk = hunks.get(index as usize).ok_or_else(|| Error::Git(format!("hunk {index} is not in {path}")))?;
-    let mut patch = preamble;
-    patch.push_str(hunk);
-    if !patch.ends_with('\n') {
-        patch.push('\n');
+    let mut patch = preamble.to_vec();
+    patch.extend_from_slice(hunk);
+    if !patch.ends_with(b"\n") {
+        patch.push(b'\n');
     }
     let mut apply = vec!["apply", "--cached", "--unidiff-zero"];
     if unstage {
         apply.push("--reverse");
     }
-    run_stdin(repo, &apply, patch.as_bytes()).map(|_| ())
+    run_stdin(repo, &apply, &patch).map(|_| ())
 }
 
 /// Stage or unstage one added or removed line. `at` is the index carried on that diff line.
@@ -396,15 +416,14 @@ pub fn discard_hunk(repo: &Path, path: &str, index: u32, ignore_space: bool) -> 
     args.push("--");
     args.push(path);
     let output = run(repo, &args)?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let (preamble, hunks) = split_hunks(&text);
+    let (preamble, hunks) = split_hunks_bytes(&output.stdout);
     let hunk = hunks.get(index as usize).ok_or_else(|| Error::Git(format!("hunk {index} is not in {path}")))?;
-    let mut patch = preamble;
-    patch.push_str(hunk);
-    if !patch.ends_with('\n') {
-        patch.push('\n');
+    let mut patch = preamble.to_vec();
+    patch.extend_from_slice(hunk);
+    if !patch.ends_with(b"\n") {
+        patch.push(b'\n');
     }
-    run_stdin(repo, &["apply", "--reverse", "--unidiff-zero"], patch.as_bytes()).map(|_| ())
+    run_stdin(repo, &["apply", "--reverse", "--unidiff-zero"], &patch).map(|_| ())
 }
 
 /// Drop or restore one unstaged line in the work tree.
@@ -416,6 +435,9 @@ pub fn discard_line(repo: &Path, path: &str, text: &str, addition: bool, at: u32
     let full = repo.join(path);
     if !full.starts_with(repo) {
         return Err(Error::Path(path.to_string()));
+    }
+    if std::fs::metadata(&full).map(|meta| meta.len() > MAX_LINE_EDIT_BYTES as u64).unwrap_or(false) {
+        return Err(too_large_for_lines(path));
     }
     let current = match std::fs::read(&full) {
         Ok(bytes) => decode_text(&bytes, path, "discard the whole file instead")?,
@@ -515,8 +537,8 @@ pub fn stage_lines(repo: &Path, path: &str, lines: &[LineEdit], unstage: bool) -
         check_line_text(line, "staged")?;
     }
     let current = index_blob(repo, path)?;
-    if current.len() > 16_000_000 {
-        return Err(Error::Git(format!("{path} is too large for line staging; stage the whole file instead")));
+    if current.len() > MAX_LINE_EDIT_BYTES {
+        return Err(too_large_for_lines(path));
     }
     let current = decode_text(&current, path, "stage the whole file instead")?;
     let (mut body, eol) = split_keep_eol(&current);
@@ -533,6 +555,9 @@ pub fn discard_lines(repo: &Path, path: &str, lines: &[LineEdit]) -> Result<(), 
     let full = repo.join(path);
     if !full.starts_with(repo) {
         return Err(Error::Path(path.to_string()));
+    }
+    if std::fs::metadata(&full).map(|meta| meta.len() > MAX_LINE_EDIT_BYTES as u64).unwrap_or(false) {
+        return Err(too_large_for_lines(path));
     }
     let current = match std::fs::read(&full) {
         Ok(bytes) => decode_text(&bytes, path, "discard the whole file instead")?,
@@ -879,6 +904,9 @@ fn file_has_nul(repo: &Path, path: &str) -> bool {
 }
 
 fn blob_has_nul(repo: &Path, oid: &str) -> bool {
+    if matches!(spec_size(repo, oid), Some(size) if size > MAX_BLOB_READ_BYTES) {
+        return true;
+    }
     run(repo, &["cat-file", "blob", oid])
         .map(|output| output.stdout.iter().take(8192).any(|byte| *byte == 0))
         .unwrap_or(false)
@@ -978,8 +1006,16 @@ fn unmerged_stages(repo: &Path) -> Result<std::collections::BTreeMap<String, [bo
     Ok(stages)
 }
 
+fn too_large_for_lines(path: &str) -> Error {
+    Error::Git(format!("{path} is too large for line editing; edit the whole file instead"))
+}
+
 fn index_blob(repo: &Path, path: &str) -> Result<Vec<u8>, Error> {
-    match run(repo, &["show", &format!(":{path}")]) {
+    let spec = format!(":{path}");
+    if matches!(spec_size(repo, &spec), Some(size) if size > MAX_LINE_EDIT_BYTES as u64) {
+        return Err(too_large_for_lines(path));
+    }
+    match run(repo, &["show", &spec]) {
         Ok(output) => Ok(output.stdout),
         Err(Error::Git(_)) if !in_index(repo, path)? => Ok(Vec::new()),
         Err(error) => Err(error),
@@ -1009,28 +1045,25 @@ fn index_mode(repo: &Path, path: &str) -> String {
         .to_string()
 }
 
-fn split_hunks(text: &str) -> (String, Vec<String>) {
-    let mut preamble = String::new();
-    let mut hunks = Vec::new();
-    let mut current = String::new();
-    let mut in_hunk = false;
-    for line in text.split_inclusive('\n') {
-        if line.starts_with("@@") {
-            if in_hunk {
-                hunks.push(std::mem::take(&mut current));
-            }
-            in_hunk = true;
+/// Byte-level variant: non-UTF-8 file contents must reach `git apply` unchanged.
+fn split_hunks_bytes(text: &[u8]) -> (&[u8], Vec<&[u8]>) {
+    let mut starts = Vec::new();
+    let mut offset = 0;
+    for line in text.split_inclusive(|byte| *byte == b'\n') {
+        if line.starts_with(b"@@") {
+            starts.push(offset);
         }
-        if in_hunk {
-            current.push_str(line);
-        } else {
-            preamble.push_str(line);
-        }
+        offset += line.len();
     }
-    if in_hunk && !current.is_empty() {
-        hunks.push(current);
+    let Some(&first) = starts.first() else {
+        return (text, Vec::new());
+    };
+    let mut hunks = Vec::with_capacity(starts.len());
+    for (index, &start) in starts.iter().enumerate() {
+        let end = starts.get(index + 1).copied().unwrap_or(text.len());
+        hunks.push(&text[start..end]);
     }
-    (preamble, hunks)
+    (&text[..first], hunks)
 }
 
 /// Unified diff for one path. `staged` selects the index rather than the work tree.
@@ -1155,12 +1188,20 @@ pub(crate) fn spec_size(repo: &Path, spec: &str) -> Option<u64> {
 
 fn lfs_pointer_diff(repo: &Path, path: &str, staged: bool) -> Option<Vec<DiffLine>> {
     let left_spec = if staged { format!("HEAD:{path}") } else { format!(":{path}") };
-    let right_bytes = if staged {
-        run(repo, &["show", &format!(":{path}")]).ok().map(|output| output.stdout)
-    } else {
-        std::fs::read(repo.join(path)).ok()
+    let read_spec = |spec: &str| match spec_size(repo, spec) {
+        Some(size) if size <= MAX_LFS_POINTER_BYTES => run(repo, &["show", spec]).ok().map(|output| output.stdout),
+        _ => None,
     };
-    let left_bytes = run(repo, &["show", &left_spec]).ok().map(|output| output.stdout).unwrap_or_default();
+    let right_bytes = if staged {
+        read_spec(&format!(":{path}"))
+    } else {
+        let full = repo.join(path);
+        match std::fs::metadata(&full) {
+            Ok(meta) if meta.len() <= MAX_LFS_POINTER_BYTES => std::fs::read(&full).ok(),
+            _ => None,
+        }
+    };
+    let left_bytes = read_spec(&left_spec).unwrap_or_default();
     let right_bytes = right_bytes.unwrap_or_default();
     let left = lfs_pointer(&left_bytes);
     let right = lfs_pointer(&right_bytes);
@@ -1697,6 +1738,15 @@ pub fn launch_merge_tool(repo: &Path, template: &str, file: &str) -> Result<(), 
     ])
 }
 
+/// Open a work-tree file in an editor, expanding `{file}` to the full path
+/// and `{line}` to the line to reveal. Line 0 means the top of the file.
+pub fn launch_editor(repo: &Path, template: &str, file: &str, line: u32) -> Result<(), Error> {
+    let path = check_path(file)?;
+    let absolute = repo.join(path).display().to_string();
+    let line = line.max(1).to_string();
+    launch_template(repo, template, path, &[("{file}", &absolute), ("{line}", &line)])
+}
+
 fn stage_bytes(repo: &Path, path: &str, stage: u8) -> Vec<u8> {
     match run(repo, &["show", &format!(":{stage}:{path}")]) {
         Ok(output) => output.stdout,
@@ -1709,7 +1759,27 @@ fn tool_scratch() -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_nanos())
         .unwrap_or(0);
-    std::env::temp_dir().join("awegit-tool").join(format!("{tick}-{}", std::process::id()))
+    let root = std::env::temp_dir().join("awegit-tool");
+    prune_tool_scratch(&root);
+    root.join(format!("{tick}-{}", std::process::id()))
+}
+
+/// External diff/merge tools keep their copies until the app exits; drop day-old ones.
+fn prune_tool_scratch(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let Some(cutoff) = std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(24 * 60 * 60)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if meta.is_dir() && meta.modified().map(|at| at < cutoff).unwrap_or(false) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 fn write_copy(dir: &Path, role: &str, rel: &str, bytes: &[u8]) -> Result<String, Error> {
@@ -1802,6 +1872,11 @@ fn is_batch(program: &str) -> bool {
 
 fn spawn_tool(program: &str, args: &[String], cwd: &Path) -> std::io::Result<std::process::Child> {
     if is_batch(program) {
+        // cmd.exe reads its own command line, so an ampersand in a repository path
+        // becomes a second command even when Rust quotes the argument.
+        if !batch_argument_safe(program) || args.iter().any(|arg| !batch_argument_safe(arg)) {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "a batch tool path or argument contains a cmd.exe metacharacter"));
+        }
         // CreateProcess cannot run a batch file (os error 193). cmd.exe can.
         // Arguments stay separate so Rust quotes paths that contain spaces.
         let mut command = std::process::Command::new("cmd.exe");
@@ -1814,6 +1889,10 @@ fn spawn_tool(program: &str, args: &[String], cwd: &Path) -> std::io::Result<std
         return command.spawn();
     }
     std::process::Command::new(program).args(args).current_dir(cwd).spawn()
+}
+
+fn batch_argument_safe(value: &str) -> bool {
+    !value.chars().any(|ch| matches!(ch, '"' | '%' | '&' | '|' | '<' | '>' | '^' | '(' | ')' | '\r' | '\n'))
 }
 
 fn expand_template(template: &str, vars: &[(&str, &str)]) -> String {
@@ -2000,7 +2079,17 @@ fn base64_encode(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod porcelain_tests {
-    use super::{count_hunk_markers, porcelain_z_paths, status_record_paths};
+    use super::{commit_subject_allowed, count_hunk_markers, porcelain_z_paths, status_record_paths};
+
+    #[test]
+    fn configured_types_replace_the_builtin_rule() {
+        let types = vec!["ui".to_string(), "feat".to_string()];
+        assert!(commit_subject_allowed("ui: 调整按钮", &types));
+        assert!(commit_subject_allowed("feat: 新增", &types));
+        assert!(!commit_subject_allowed("fix: 修复", &types));
+        assert!(commit_subject_allowed("fix: 修复", &[]));
+        assert!(!commit_subject_allowed("ui: 调整按钮", &[]));
+    }
 
     #[test]
     fn nul_paths_keep_space_tab_newline_and_unicode() {

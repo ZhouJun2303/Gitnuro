@@ -463,6 +463,23 @@ section.diff > .diff-viewport {
     height: 12px;
   }
 
+.conflict-tool-group {
+    display: inline-flex;
+    align-items: center;
+  }
+
+.conflict-tool-group .conflict-tool:first-child {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+
+.conflict-tool-group .conflict-caret {
+    padding: 0 6px;
+    border-left: 0;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+
 /* Narrow diff panes would truncate both branch names to a couple of letters. */
 @container (max-width: 520px) {
   .conflict-row {

@@ -138,6 +138,28 @@ export type BlameLine = {
   truncated?: boolean;
 };
 
+/** One entry in the commit composer's type picker. */
+export type CommitTypeRecord = {
+  /** Lowercase name before the colon, such as `feat`. */
+  name: string;
+  /** `#rrggbb` swatch. */
+  color: string;
+  /** Custom description. Empty keeps the translated description of a built-in type. */
+  label: string;
+};
+
+export type ToolRecord = {
+  id: string;
+  name: string;
+  path: string;
+  /** Diff: `{left}` `{right}` `{file}`. Merge: `{ours}` `{theirs}` `{base}` `{working}` `{file}`. Editor: `{file}` `{line}`. */
+  args: string;
+  /** Lowercase suffixes without the dot. Empty means every file. */
+  extensions: string[];
+  /** Used for files that match no explicit extension rule. */
+  fallback: boolean;
+};
+
 export type Settings = {
   theme: string;
   pullRebase: boolean;
@@ -228,6 +250,9 @@ export type Settings = {
   mergeToolName: string;
   mergeToolPath: string;
   mergeToolArgs: string;
+  diffTools: ToolRecord[];
+  mergeTools: ToolRecord[];
+  editorTools: ToolRecord[];
   ignoreSpace: boolean;
   verticalTabs: boolean;
   pinnedRefs: string[];
@@ -259,6 +284,8 @@ export type Settings = {
   scanDepth: number;
   /** Last commit-message type chosen in the composer. */
   commitType: string;
+  /** Types offered by the composer. Empty keeps the built-in list. */
+  commitTypes: CommitTypeRecord[];
   /** Update banner stays hidden for this version until a newer one is published. */
   dismissedUpdate: string;
   /** `pending` on a brand-new install, otherwise `seen`. */

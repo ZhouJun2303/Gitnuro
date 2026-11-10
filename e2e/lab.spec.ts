@@ -101,6 +101,62 @@ test("dialog close button dismisses the dialog", async ({ page }) => {
   await expect(page.locator('[data-dialog="prefs"]')).toHaveCount(0);
 });
 
+test("tab color can be set and cleared", async ({ page }) => {
+  await openLabScene(page, "dialog-colorTab", '[data-dialog="colorTab"]');
+  const dialog = page.locator('[data-dialog="colorTab"]');
+  const none = dialog.locator(".swatch.none");
+  await expect(none).toHaveClass("swatch none");
+  await dialog.locator(".swatch:not(.none)").nth(1).click();
+  await expect(dialog.locator(".swatch:not(.none).on")).toHaveCount(1);
+  await none.click();
+  await expect(none).toHaveClass("swatch none on");
+  await expect(dialog.locator(".swatch:not(.none).on")).toHaveCount(0);
+
+  await openLabScene(page, "dialog-colorTab-none", '[data-dialog="colorTab"]');
+  await expect(page.locator('[data-dialog="colorTab"] .swatch.none')).toHaveClass("swatch none on");
+});
+
+test("file type rows assign custom suffixes to different tools", async ({ page }) => {
+  await openLabScene(page, "prefs-integration", '[data-dialog="prefs"]');
+  const jsonRow = page.locator('.tool-type-row[data-suffix="json"]');
+  await jsonRow.locator("select").selectOption({ label: "ExcelMergeFork" });
+  await expect(jsonRow.locator("select")).toHaveValue("lab-diff-xlsx");
+  await expect(page.locator(".tool-list button", { hasText: "VS Code" })).not.toContainText(".json");
+
+  const add = page.locator(".tool-type-add");
+  await add.locator("input").fill("csv");
+  await add.locator("select").selectOption({ label: "ExcelMergeFork" });
+  await add.locator("button").click();
+  const csvRow = page.locator('.tool-type-row[data-suffix="csv"]');
+  await expect(csvRow).toBeVisible();
+  await csvRow.locator("button").click();
+  await expect(page.locator('.tool-type-row[data-suffix="csv"]')).toHaveCount(0);
+});
+
+test("commit types can be added, renamed and removed", async ({ page }) => {
+  await openLabScene(page, "prefs-commit", '[data-dialog="prefs"]');
+  const rows = page.locator(".commit-type-row:not(.commit-type-new)");
+  await expect(rows).toHaveCount(10);
+
+  const add = page.locator(".commit-type-new");
+  await add.locator(".commit-type-name").fill("ui");
+  await add.locator(".text-button").click();
+  await expect(rows).toHaveCount(11);
+  const added = rows.last();
+  await expect(added.locator(".commit-type-name")).toHaveValue("ui");
+
+  await added.locator(".commit-type-name").fill("ui2");
+  await added.locator(".commit-type-name").blur();
+  await expect(added.locator(".commit-type-name")).toHaveValue("ui2");
+
+  await added.locator(".commit-type-label").fill("界面");
+  await added.locator(".commit-type-label").blur();
+  await expect(added.locator(".commit-type-label")).toHaveValue("界面");
+
+  await added.locator(".text-button").click();
+  await expect(rows).toHaveCount(10);
+});
+
 test("command palette is blocked while a dialog is open", async ({ page }) => {
   await openLabScene(page, "dialog-prefs", '[data-dialog="prefs"]');
   await page.keyboard.press("Control+k");
@@ -303,15 +359,20 @@ test("push and pull dialogs start with a branch", async ({ page }) => {
   await openLabScene(page, "dialog-push", '[data-dialog="push"]');
   const push = await page.locator('[data-dialog="push"] select').first().inputValue();
   expect(push).not.toBe("");
-  const tabs = page.locator('[data-dialog="push"] .push-tabs [role="tab"]');
+  const tabs = page.locator('[data-dialog="push"] .remote-tabs [role="tab"]');
   await expect(tabs).toHaveCount(2);
   await expect(tabs.filter({ hasText: "origin" })).toHaveAttribute("aria-selected", "true");
   await tabs.filter({ hasText: "mirror" }).click();
   await expect(tabs.filter({ hasText: "mirror" })).toHaveAttribute("aria-selected", "true");
   expect(await page.locator('[data-dialog="push"] select').nth(1).inputValue()).toMatch(/^mirror\//);
   await openLabScene(page, "dialog-pull", '[data-dialog="pull"]');
-  const pull = await page.locator('[data-dialog="pull"] select').nth(1).inputValue();
-  expect(pull).not.toBe("");
+  const pullSelect = page.locator('[data-dialog="pull"] .remote-target-body select').first();
+  expect(await pullSelect.inputValue()).not.toBe("");
+  const pullTabs = page.locator('[data-dialog="pull"] .remote-tabs [role="tab"]');
+  await expect(pullTabs.filter({ hasText: "origin" })).toHaveAttribute("aria-selected", "true");
+  await pullTabs.filter({ hasText: "mirror-01" }).click();
+  await expect(pullTabs.filter({ hasText: "mirror-01" })).toHaveAttribute("aria-selected", "true");
+  expect(await page.locator('[data-dialog="pull"] .remote-target-body').locator("select, input").first().inputValue()).not.toBe("");
 });
 
 test("command log keeps focus inside and closes with Escape", async ({ page }) => {
@@ -422,6 +483,27 @@ test("commit patch renders each hunk header once", async ({ page }) => {
   await expect(meta.first()).toBeVisible();
   await expect(meta.filter({ hasText: "@@" })).toHaveCount(1);
   expect(await page.locator(".detail .split-row").count()).toBeGreaterThan(0);
+});
+
+test("commit detail filter narrows files in every tab", async ({ page }) => {
+  await openLabScene(page, "commit-filter", ".detail .detail-filter");
+  const paths = page.locator(".commit-files .patch-path");
+  await expect(paths.first()).toBeVisible();
+  for (const text of await paths.allTextContents()) expect(text).toContain("libs/");
+
+  await page.locator('.detail-tabs [role="tab"]').nth(1).click();
+  const names = page.locator(".detail-tree .name");
+  await expect(names.first()).toHaveText("libs");
+  const changed = await names.allTextContents();
+  expect(changed.length).toBeGreaterThan(1);
+  for (const name of changed) expect(name === "libs" || name.startsWith("lib-")).toBe(true);
+
+  await page.locator('.detail-tabs [role="tab"]').nth(2).click();
+  await expect(names.first()).toHaveText("libs");
+  expect((await names.allTextContents()).every((name) => name === "libs" || name.startsWith("lib-"))).toBe(true);
+
+  await page.locator(".detail-filter").press("Escape");
+  await expect(page.locator(".detail-filter")).toHaveCount(0);
 });
 
 test("history restores its scroll position after switching sections", async ({ page }) => {

@@ -25,6 +25,27 @@ import type { StoredError } from "./types";
 import type { ShellState } from "./state.svelte";
 
 const ERROR_KEY = "awegit-errors";
+const PATCH_CACHE_LIMIT = 100;
+
+function cachePatch(shell: ShellState, file: string, diff: FileDiff) {
+    if (file in shell.patchCache || Object.keys(shell.patchCache).length < PATCH_CACHE_LIMIT) {
+      shell.patchCache = { ...shell.patchCache, [file]: diff };
+      return;
+    }
+    const evicted = Object.keys(shell.patchCache)[0];
+    const next: Record<string, FileDiff> = {};
+    for (const [key, value] of Object.entries(shell.patchCache)) {
+      if (key === evicted) continue;
+      next[key] = value;
+    }
+    next[file] = diff;
+    shell.patchCache = next;
+    if (evicted && shell.patchHeights[evicted] !== undefined) {
+      const heights = { ...shell.patchHeights };
+      delete heights[evicted];
+      shell.patchHeights = heights;
+    }
+  }
 
 export function readErrorLog(): StoredError[] {
     if (typeof localStorage === "undefined") return [];
@@ -454,17 +475,19 @@ export async function pickCommitFile(shell: ShellState, file: string) {
               unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
             });
         if (gen !== shell.patchGen) return;
-        shell.historyDiff = diff;
-        shell.patchCache[file] = diff;
+        cachePatch(shell, file, diff);
         shell.patchVersion += 1;
-        // The placeholder height must not clip the loaded patch.
-        if (shell.patchHeights[file] !== undefined) {
-          const heights = { ...shell.patchHeights };
-          delete heights[file];
-          shell.patchHeights = heights;
+        if (shell.historyFile === file) {
+          shell.historyDiff = diff;
+          // The placeholder height must not clip the loaded patch.
+          if (shell.patchHeights[file] !== undefined) {
+            const heights = { ...shell.patchHeights };
+            delete heights[file];
+            shell.patchHeights = heights;
+          }
         }
       } catch (error) {
-        if (gen === shell.patchGen) shell.actionError = shell.message(error);
+        if (gen === shell.patchGen && shell.historyFile === file) shell.actionError = shell.message(error);
       }
     });
   }
@@ -485,7 +508,7 @@ export function togglePatch(shell: ShellState, path: string) {
   }
 
 export async function toggleAllPatches(shell: ShellState) {
-    const paths = shell.commitFiles.map((file) => file.path);
+    const paths = shell.commitShown.map((file) => file.path);
     if (paths.length > 0 && paths.every((path) => shell.openPatchSet.has(path))) {
       shell.openPatches = [];
       return;

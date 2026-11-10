@@ -37,6 +37,10 @@
 
   function closeDialog() {
     if (shell.busy) return;
+    if (shell.dialog === "editorImport") {
+      shell.closeEditorImport();
+      return;
+    }
     shell.dialog = null;
   }
 
@@ -106,7 +110,7 @@
 </script>
 
 {#if shell.dialog}
-    <div class="scrim" role="presentation" onclick={() => { if (shell.busy) return; if (shell.dialog === "prefs") void shell.savePrefs(true); else shell.dialog = null; }}>
+    <div class="scrim" role="presentation" onclick={() => { if (shell.busy) return; if (shell.dialog === "prefs") void shell.savePrefs(true); else if (shell.dialog === "editorImport") shell.closeEditorImport(); else shell.dialog = null; }}>
       <div class="dialog {dialogSize(shell.dialog ?? "")}" class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} data-dialog={shell.dialog} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={trapTab}>
       <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={closeDialog}>×</button>
       <form
@@ -126,11 +130,15 @@
           else if (shell.dialog === "command") void shell.runCommand({ command: shell.draftUser || shell.draft, prompt: shell.commandPrompt });
           else if (shell.dialog === "flow") void shell.mutate({ action: "gitFlowStart", name: shell.draft, kind: shell.flowKind });
           else if (shell.dialog === "prefs") void shell.savePrefs();
+          else if (shell.dialog === "editorImport") shell.importEditorCandidates();
           else if (shell.dialog === "tag") {
             await shell.mutate({ action: "tag", name: shell.draft, rev: shell.draftExtra || "HEAD", message: shell.draftUser });
             if (!shell.actionError && shell.settings.pushTagOnCreate) await shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease });
           }
-          else if (shell.dialog === "remote") void shell.mutate({ action: "addRemote", name: shell.draft, url: shell.draftExtra });
+          else if (shell.dialog === "remote") {
+            if (shell.remoteEdit) void shell.mutate({ action: "setRemoteUrl", name: shell.draft, url: shell.draftExtra });
+            else void shell.mutate({ action: "addRemote", name: shell.remoteName(), url: shell.draftExtra });
+          }
           else if (shell.dialog === "fetch") {
             const remote = shell.syncAll ? null : shell.draft || null;
             const prune = shell.settings.fetchPrune;
@@ -263,6 +271,31 @@
       >
         {#if shell.dialog === "prefs"}
           <PrefsDialog />
+        {:else if shell.dialog === "editorImport"}
+          <h2>{shell.tr("dialog.detectEditors")}</h2>
+          {#if shell.editorDetecting}
+            <p class="empty">{shell.tr("dialog.detectingEditors")}</p>
+          {:else if shell.editorCandidates.length === 0}
+            <p class="empty">{shell.tr("dialog.noEditorsFound")}</p>
+          {:else}
+            <p class="empty">{shell.tr("dialog.editorImportHint")}</p>
+            <div class="editor-candidates">
+              {#each shell.editorCandidates as item (item.path)}
+                {@const added = shell.toolsOf("editor").some((tool) => shell.pathsMatch(tool.path, item.path))}
+                <label class="check editor-candidate">
+                  <input type="checkbox" disabled={added} checked={added || shell.editorPicked.some((path) => shell.pathsMatch(path, item.path))} onchange={() => shell.toggleEditorCandidate(item.path)} />
+                  <span class="editor-candidate-name">{item.name}</span>
+                  <span class="meta editor-candidate-path" title={item.path}>{added ? shell.tr("dialog.editorAlreadyAdded") : item.path}</span>
+                </label>
+              {/each}
+            </div>
+          {/if}
+          <div class="composer-row actions">
+            <button class="text-button" type="button" disabled={shell.editorDetecting} onclick={() => void shell.detectEditors()}>{shell.tr("dialog.detectAgain")}</button>
+            <span class="grow"></span>
+            <button class="text-button" type="button" onclick={() => shell.closeEditorImport()}>{shell.tr("dialog.cancel")}</button>
+            <button class="commit" type="submit" disabled={shell.writing || shell.editorPicked.length === 0}>{shell.tr("dialog.importSelected")}</button>
+          </div>
         {:else if shell.dialog === "update"}
           <UpdatePanel />
         {:else if shell.dialog === "reset"}
@@ -392,33 +425,39 @@
         {:else if shell.dialog === "pull"}
           <h2>{shell.tr("chrome.pull")}</h2>
           <p>{shell.tr("dialog.pullBody")}</p>
-          <label class="sync-row">
-            <span>{shell.tr("dialog.remoteName")}</span>
-            {#if (shell.refs?.remotes.length ?? 0) > 0}
-              <select value={shell.draft} onchange={(event) => { shell.draft = event.currentTarget.value; shell.draftExtra = shell.pullBranchFor(shell.draft); }}>
-                {#each shell.refs?.remotes ?? [] as remote (remote.name)}
-                  <option value={remote.name}>{remote.name}</option>
-                {/each}
-              </select>
-            {:else}
-              <input placeholder={shell.tr("dialog.remoteName")} bind:value={shell.draft} />
-            {/if}
-          </label>
-          <label class="sync-row">
-            <span>{shell.tr("dialog.branch")}</span>
-            {#if (shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches.length ?? 0) > 0}
-              <select bind:value={shell.draftExtra}>
-                {#if shell.draftExtra && !(shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches.includes(shell.draftExtra))}
-                  <option value={shell.draftExtra}>{shell.draft}/{shell.draftExtra}</option>
+          {#if (shell.refs?.remotes.length ?? 0) > 0}
+            <div class="sync-row remote-target">
+              <span>{shell.tr("dialog.remoteName")}</span>
+              <div class="remote-target-body">
+                <div class="remote-tabs" role="tablist" aria-label={shell.tr("dialog.remoteName")}>
+                  {#each shell.refs?.remotes ?? [] as remote (remote.name)}
+                    <button type="button" role="tab" title={remote.url ?? remote.name} class:on={shell.draft === remote.name} aria-selected={shell.draft === remote.name} onclick={() => { shell.draft = remote.name; shell.draftExtra = shell.pullBranchFor(remote.name); }}>{remote.name}</button>
+                  {/each}
+                </div>
+                {#if (shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches.length ?? 0) > 0}
+                  <select bind:value={shell.draftExtra} aria-label={shell.tr("dialog.branch")}>
+                    {#if shell.draftExtra && !(shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches.includes(shell.draftExtra))}
+                      <option value={shell.draftExtra}>{shell.draft}/{shell.draftExtra}</option>
+                    {/if}
+                    {#each shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches ?? [] as branch (branch)}
+                      <option value={branch}>{shell.draft}/{branch}</option>
+                    {/each}
+                  </select>
+                {:else}
+                  <input placeholder={shell.tr("dialog.branch")} aria-label={shell.tr("dialog.branch")} bind:value={shell.draftExtra} />
                 {/if}
-                {#each shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches ?? [] as branch (branch)}
-                  <option value={branch}>{shell.draft}/{branch}</option>
-                {/each}
-              </select>
-            {:else}
+              </div>
+            </div>
+          {:else}
+            <label class="sync-row">
+              <span>{shell.tr("dialog.remoteName")}</span>
+              <input placeholder={shell.tr("dialog.remoteName")} bind:value={shell.draft} />
+            </label>
+            <label class="sync-row">
+              <span>{shell.tr("dialog.branch")}</span>
               <input placeholder={shell.tr("dialog.branch")} bind:value={shell.draftExtra} />
-            {/if}
-          </label>
+            </label>
+          {/if}
           <div class="sync-row">
             <span>{shell.tr("dialog.pullInto")}</span>
             <strong class="sync-value">{shell.snapshot?.branch ?? ""}</strong>
@@ -442,11 +481,11 @@
               {/each}
             </select>
           </label>
-          <div class="sync-row push-target">
+          <div class="sync-row remote-target">
             <span>{shell.tr("dialog.pushTo")}</span>
-            <div class="push-target-body">
+            <div class="remote-target-body">
               {#if (shell.refs?.remotes ?? []).length > 0}
-                <div class="push-tabs" role="tablist" aria-label={shell.tr("dialog.pushTo")}>
+                <div class="remote-tabs" role="tablist" aria-label={shell.tr("dialog.pushTo")}>
                   {#each shell.refs?.remotes ?? [] as remote (remote.name)}
                     <button type="button" role="tab" title={remote.url ?? remote.name} class:on={shell.pushRemoteName() === remote.name} aria-selected={shell.pushRemoteName() === remote.name} onclick={() => shell.selectPushRemote(remote.name)}>{remote.name}</button>
                   {/each}
@@ -457,7 +496,7 @@
                   {/each}
                 </select>
               {:else}
-                <span class="push-target-empty">{shell.tr("dialog.noRemotes")}</span>
+                <span class="remote-target-empty">{shell.tr("dialog.noRemotes")}</span>
               {/if}
             </div>
           </div>
@@ -691,12 +730,13 @@
           </div>
         {:else if shell.dialog === "remote"}
           <h2>{shell.tr("chrome.groupRemote")}</h2>
-          <label>{shell.tr("dialog.name")}<input bind:value={shell.draft} /></label>
-          <label>{shell.tr("dialog.url")}<input bind:value={shell.draftExtra} /></label>
+          <label>{shell.tr("dialog.url")}<input placeholder="https://github.com/org/repo.git" bind:value={shell.draftExtra} /></label>
+          {#if !shell.remoteEdit && shell.draftExtra.trim()}
+            <p class="empty">{shell.tr("dialog.remoteNameAuto", { name: shell.remoteName() })}</p>
+          {/if}
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "setRemoteUrl", name: shell.draft, url: shell.draftExtra })}>{shell.tr("dialog.setRemoteUrl")}</button>
-            <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.create")}</button>
+            <button class="commit" type="submit" disabled={shell.writing || !shell.draftExtra.trim()}>{shell.tr(shell.remoteEdit ? "dialog.setRemoteUrl" : "dialog.create")}</button>
           </div>
         {:else if shell.dialog === "squash"}
           <h2>{shell.tr("dialog.squash")}</h2>
@@ -749,7 +789,7 @@
           <label>{shell.tr("dialog.clientId")}<input bind:value={shell.settings.oauthClientId} /></label>
           <div class="composer-row">
             <button class="text-button" type="button" onclick={() => void invoke<{ verificationUri: string; userCode: string }>("device_start", { forgeName: shell.hostForge, clientId: shell.settings.oauthClientId, host: shell.draftExtra }).then((value) => { shell.commandOutput = `${value.userCode}\n${value.verificationUri}`; shell.dialog = "output"; if (value.verificationUri) void openUrl(value.verificationUri); }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("dialog.deviceLogin")}</button>
-            <button class="text-button" type="button" onclick={() => void invoke<string>("device_poll").then((token) => { if (token === "pending") { shell.actionError = shell.tr("dialog.pending"); return; } shell.draftUser = token; })}>{shell.tr("dialog.pending")}</button>
+            <button class="text-button" type="button" onclick={() => void invoke<string>("device_poll").then((token) => { if (token === "pending") { shell.actionError = shell.tr("dialog.pending"); return; } shell.draftUser = token; }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("dialog.pending")}</button>
           </div>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
@@ -801,10 +841,11 @@
         {:else if shell.dialog === "colorTab"}
           <h2>{shell.tr("menu.tabColor")}</h2>
           <div class="composer-row swatch-row">
+            <button class="swatch none" type="button" class:on={!shell.draft} aria-pressed={!shell.draft} title={shell.tr("menu.noColor")} aria-label={shell.tr("menu.noColor")} onclick={() => (shell.draft = "")}></button>
             {#each ["#5b8def", "#e07a3d", "#3aa76d", "#c45b8a", "#7a6ad8", "#c9a227", "#d16464"] as color (color)}
               <button class="swatch" type="button" class:on={shell.draft === color} aria-pressed={shell.draft === color} style:background={color} aria-label={color} onclick={() => (shell.draft = color)}></button>
             {/each}
-            <input type="color" bind:value={shell.draft} aria-label={shell.tr("menu.tabColor")} />
+            <input type="color" value={shell.draft || "#5b8def"} aria-label={shell.tr("menu.tabColor")} oninput={(event) => (shell.draft = (event.currentTarget as HTMLInputElement).value)} />
           </div>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>

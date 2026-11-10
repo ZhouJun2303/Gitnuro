@@ -158,7 +158,7 @@
             {#if notice && primary}
               <button class="text-button identity-cancel" type="button" disabled={primary.disabled} onclick={() => shell.runStatusNoticeAction(notice.id, primary.id)}>{primary.label}</button>
             {:else if shell.workDepth > 0}
-              <button class="text-button identity-cancel" type="button" onclick={() => (shell.showingClone ? shell.cancelClone() : invoke("cancel_operation", { path: shell.meterPath || shell.repoPath() }))}>{shell.tr("chrome.cancel")}</button>
+              <button class="text-button identity-cancel" type="button" onclick={() => (shell.showingClone ? shell.cancelClone() : void shell.cancelOperation(shell.meterPath || shell.repoPath() || ""))}>{shell.tr("chrome.cancel")}</button>
             {/if}
             <button class="tool-btn stack branch-chip" type="button" aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.branchItems())}>
               <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
@@ -202,7 +202,7 @@
           { label: shell.tr("chrome.terminal"), disabled: shell.mode !== "live", run: () => void invoke("open_terminal", { path: repo }) },
           { label: shell.tr("chrome.explorer"), run: () => void shell.openLocal(repo) },
           { label: shell.tr("menu.renameTab"), run: () => { shell.draft = shell.tabText(repo); shell.draftExtra = repo; shell.dialog = "renameTab"; } },
-          { label: shell.tr("menu.tabColor"), run: () => { shell.draft = shell.tabColor(repo) || "#5b5bd6"; shell.draftExtra = repo; shell.dialog = "colorTab"; } },
+          { label: shell.tr("menu.tabColor"), run: () => { shell.draft = shell.tabColor(repo); shell.draftExtra = repo; shell.dialog = "colorTab"; } },
           { label: shell.tr("chrome.close"), run: () => shell.closeTab(repo) },
         ])}>
           <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabText(repo)} onclick={() => shell.openRepo(repo)}>{#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}{shell.tabText(repo)}</button>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getShell } from "./context";
   import "./MergePanel.css";
+  import { tick } from "svelte";
   import type { ConflictParty } from "../status";
   import type { MergePiece } from "./types";
   import { hunkIncludes, loadTextMerge } from "./dialogs.svelte";
@@ -20,7 +21,9 @@
   let leftPane = $state<HTMLElement | null>(null);
   let rightPane = $state<HTMLElement | null>(null);
   let resultPane = $state<HTMLElement | null>(null);
-  let syncing = false;
+  let mirroredPane: HTMLElement | null = null;
+  let mirroredTop = 0;
+  let mirroredLeft = 0;
   let editingResult = $state(false);
   let resultDirty = $state(false);
 
@@ -92,6 +95,29 @@
   $effect(() => {
     if (shell.textMerge && panel) panel.focus();
   });
+
+  // A merge can hold far more pieces than a screen; render a chunk per frame so
+  // opening it never blocks a whole frame (and matches the history paging rule).
+  let renderedCount = $state(0);
+  $effect(() => {
+    const total = shell.mergePieces.length;
+    if (total === 0) {
+      renderedCount = 0;
+      return;
+    }
+    if (renderedCount > total) renderedCount = total;
+    if (renderedCount >= total) return;
+    if (renderedCount === 0) {
+      renderedCount = Math.min(total, Math.max(1000, Math.ceil(total / 120)));
+      return;
+    }
+    const chunk = Math.max(1000, Math.ceil(total / 120));
+    const frame = requestAnimationFrame(() => {
+      renderedCount = Math.min(total, renderedCount + chunk);
+    });
+    return () => cancelAnimationFrame(frame);
+  });
+  const visiblePieces = $derived(shell.mergePieces.slice(0, Math.min(renderedCount, shell.mergePieces.length)));
 
   const hunkIndexes = $derived(
     shell.mergePieces
@@ -190,22 +216,31 @@
   }
 
   function syncScroll(source: "left" | "right", event: Event) {
-    if (syncing) return;
     const target = event.currentTarget;
     if (!(target instanceof HTMLElement)) return;
     const other = source === "left" ? rightPane : leftPane;
     if (!other) return;
-    syncing = true;
+    // Ignore the scroll event our own mirror assignment produced; the shorter
+    // pane may clamp, and syncing that clamped value back would drag the
+    // longer pane away from the position the user chose.
+    if (other === mirroredPane && Math.abs(other.scrollTop - mirroredTop) <= 1 && Math.abs(other.scrollLeft - mirroredLeft) <= 1) {
+      mirroredPane = null;
+      return;
+    }
+    mirroredPane = other;
     other.scrollTop = target.scrollTop;
     other.scrollLeft = target.scrollLeft;
-    queueMicrotask(() => {
-      syncing = false;
-    });
+    mirroredTop = other.scrollTop;
+    mirroredLeft = other.scrollLeft;
   }
 
-  function revealHunk(index: number) {
+  async function revealHunk(index: number) {
     const at = hunkIndexes.indexOf(index);
     if (at >= 0) activeConflict = at;
+    if (index >= renderedCount) {
+      renderedCount = Math.min(shell.mergePieces.length, index + 1000);
+      await tick();
+    }
     leftPane?.querySelector<HTMLElement>(`[data-merge-hunk="${index}"]`)?.scrollIntoView({ block: "nearest" });
     rightPane?.querySelector<HTMLElement>(`[data-merge-hunk="${index}"]`)?.scrollIntoView({ block: "nearest" });
     resultPane?.querySelector<HTMLElement>(`[data-merge-result="${index}"]`)?.scrollIntoView({ block: "nearest" });
@@ -216,7 +251,7 @@
     const next = (activeConflict + delta + conflictTotal) % conflictTotal;
     const index = hunkIndexes[next];
     if (index == null) return;
-    revealHunk(index);
+    void revealHunk(index);
   }
 
   function formatBytes(bytes: number) {
@@ -350,7 +385,7 @@
         <div class="merge-top">
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div class="merge-side left" bind:this={leftPane} onscroll={(event) => syncScroll("left", event)}>
-            {#each shell.mergePieces as piece, index (index)}
+            {#each visiblePieces as piece, index (index)}
               {#if piece.kind === "text"}
                 <pre class="merge-cell context">{piece.text}</pre>
               {:else}
@@ -380,7 +415,7 @@
           </div>
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div class="merge-side right" bind:this={rightPane} onscroll={(event) => syncScroll("right", event)}>
-            {#each shell.mergePieces as piece, index (index)}
+            {#each visiblePieces as piece, index (index)}
               {#if piece.kind === "text"}
                 <pre class="merge-cell context">{piece.text}</pre>
               {:else}
@@ -418,7 +453,7 @@
             <textarea class="merge-result-edit" aria-label={shell.tr("dialog.result")} spellcheck="false" bind:value={shell.mergeResult} oninput={() => (resultDirty = true)}></textarea>
           {:else}
             <div class="merge-result-scroll" bind:this={resultPane}>
-              {#each shell.mergePieces as piece, index (index)}
+              {#each visiblePieces as piece, index (index)}
                 {#if piece.kind === "text"}
                   <pre class="merge-result-text">{piece.text}</pre>
                 {:else if piece.pick === "none"}

@@ -7,10 +7,10 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { commits, diffs, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
-import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
+import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, remoteNameFromUrl, repoNameFromUrl, safeFolderName } from "../clonePath";
 import { featuresPageUrl } from "../featuresPage";
 import { resolveLocale, translate } from "../i18n";
-import { isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, type CommitType } from "./commitMessage";
+import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
@@ -34,6 +34,7 @@ import {
     type Suggestion,
     type GitRuntime,
     type RepoScan,
+    type ToolRecord,
     type UpdateNotice,
     type UpdateProgress,
     type WorkspaceRecord,
@@ -41,10 +42,10 @@ import {
     recentWorkspaceLimit,
     workspaceTabWidth,
   } from "../status";
-import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu } from "./menus";
-import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
+import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
+import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
-import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, useMergePreset, useDiffPreset, loadExternalTools, applyToolSettings, type ExternalTool, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly } from "./dialogs.svelte";
+import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 
@@ -239,6 +240,9 @@ export class ShellState {
     mergeToolName: "",
     mergeToolPath: "",
     mergeToolArgs: "",
+    diffTools: [],
+    mergeTools: [],
+    editorTools: [],
     ignoreSpace: false,
     verticalTabs: false,
     pinnedRefs: [],
@@ -269,6 +273,7 @@ export class ShellState {
     workspaceShowTitle: false,
     scanDepth: 5,
     commitType: "feat",
+    commitTypes: [],
     dismissedUpdate: "",
     featuresIntro: "seen",
     recoveryNotice: "",
@@ -446,6 +451,9 @@ export class ShellState {
   historyTop = $state(0);
 
 
+  commitNavTimer = 0;
+
+
   historyHeight = $state(0);
 
 
@@ -554,6 +562,10 @@ export class ShellState {
   draftExtra = $state("");
 
 
+  /** The remote dialog edits an existing remote's URL instead of adding one. */
+  remoteEdit = $state(false);
+
+
   mergeInto = $state("");
 
 
@@ -652,6 +664,9 @@ export class ShellState {
 
 
   blobLoaded = $state(false);
+
+
+  blobGen = 0;
   blobTruncated = $state(false);
 
 
@@ -783,7 +798,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.4");
+  appVersion = $state("2.0.5");
 
 
   passphrase = $state("");
@@ -831,10 +846,13 @@ export class ShellState {
   fileQuery = $state("");
 
 
+  detailQuery = $state("");
+
+
   recentQuery = $state("");
 
 
-  searchOpen = $state({ recent: false, side: false, commit: false, file: false });
+  searchOpen = $state({ recent: false, side: false, commit: false, file: false, detail: false });
 
 
   historyDiffTop = $state(0);
@@ -1255,7 +1273,7 @@ export class ShellState {
 
 
   jobKey(path: string | null | undefined) {
-    return (path ?? "").replace(/[\\/]+$/, "").replaceAll("\\", "/").toLowerCase();
+    return (path ?? "").replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "").replaceAll("\\", "/").toLowerCase();
   }
 
 
@@ -1505,16 +1523,22 @@ export class ShellState {
   sampleTree = $derived([...new Set(commits.flatMap((commit) => commit.files.map((file) => file.path)))]);
 
 
-  changeTree = $derived(this.asTree(this.commitFiles.map((file) => this.toRow(file)), this.commitCollapsed));
+  detailFiltering = $derived(this.detailQuery.trim().length > 0);
 
 
-  repoTree = $derived(this.asTree((this.mode === "live" ? this.treePaths : this.sampleTree).map((path) => ({ path, letter: "", tone: "modified" as const })), this.treeCollapsed));
+  commitShown = $derived(this.detailFiltering ? this.commitFiles.filter((file) => this.matchesQuery(file.path, this.detailQuery)) : this.commitFiles);
+
+
+  changeTree = $derived(this.asTree(this.commitShown.map((file) => this.toRow(file)), this.detailFiltering ? [] : this.commitCollapsed));
+
+
+  repoTree = $derived(this.asTree((this.mode === "live" ? this.treePaths : this.sampleTree).filter((path) => this.matchesQuery(path, this.detailQuery)).map((path) => ({ path, letter: "", tone: "modified" as const })), this.detailFiltering ? [] : this.treeCollapsed));
 
 
   openPatchSet = $derived(new Set(this.openPatches));
 
 
-  allPatchesOpen = $derived(this.commitFiles.length > 0 && this.commitFiles.every((file) => this.openPatchSet.has(file.path)));
+  allPatchesOpen = $derived(this.commitShown.length > 0 && this.commitShown.every((file) => this.openPatchSet.has(file.path)));
 
 
   /** Measured height wins; the estimate only positions rows before they first mount. */
@@ -1533,7 +1557,7 @@ export class ShellState {
     const open = this.openPatchSet;
     const rows: { key: string; kind: "file" | "patch"; path: string; file: StatusFile; top: number; height: number }[] = [];
     let top = 0;
-    for (const file of this.commitFiles) {
+    for (const file of this.commitShown) {
       rows.push({ key: `f:${file.path}`, kind: "file", path: file.path, file, top, height: 30 });
       top += 30;
       if (open.has(file.path)) {
@@ -2153,16 +2177,23 @@ export class ShellState {
 
   async loadBlobPane() {
     if (!this.blobFile) return;
+    const file = this.blobFile;
+    const rev = this.blobRev || "HEAD";
+    const path = this.repoPath();
+    const gen = ++this.blobGen;
+    const current = () => gen === this.blobGen && this.blobFile === file && (!path || this.viewing(path));
     this.blobLoaded = false;
     this.blobError = "";
     try {
-      const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null; truncated?: boolean }>("blob_view", { path: this.repoPath(), rev: this.blobRev || "HEAD", file: this.blobFile });
+      const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null; truncated?: boolean }>("blob_view", { path, rev, file });
+      if (!current()) return;
       this.blobBinary = view.binary && !view.preview && !view.text;
       this.blobPreview = view.preview;
       this.blobText = view.text;
       this.blobTruncated = view.truncated === true;
-      if (this.inApp()) await getCurrentWindow().setTitle(this.fileName(this.blobFile)).catch(() => {});
+      if (this.inApp()) await getCurrentWindow().setTitle(this.fileName(file)).catch(() => {});
     } catch (error) {
+      if (!current()) return;
       this.actionError = this.message(error);
       this.blobError = this.message(error);
       this.blobText = "";
@@ -2170,7 +2201,7 @@ export class ShellState {
       this.blobBinary = false;
       this.blobTruncated = false;
     } finally {
-      this.blobLoaded = true;
+      if (current()) this.blobLoaded = true;
     }
   }
 
@@ -2613,10 +2644,11 @@ export class ShellState {
     try {
       const gen = this.statusGen;
       const value = await invoke<StatusSnapshot>("workspace_status", { path });
-      if (gen !== this.statusGen || !this.viewing(path)) return;
-      this.applySnapshot(value);
-      if (scope === "full") await this.loadContext();
-      if (this.viewing(path)) await this.loadDiff();
+      if (gen === this.statusGen && this.viewing(path)) {
+        this.applySnapshot(value);
+        if (scope === "full") await this.loadContext();
+        if (this.viewing(path)) await this.loadDiff();
+      }
     } catch (error) {
       if (this.viewing(path)) {
         const text = this.message(error);
@@ -2626,10 +2658,10 @@ export class ShellState {
     } finally {
       this.refreshing = false;
       if (!silent) this.stopWork(path);
+      const next = this.refreshQueued;
+      this.refreshQueued = null;
+      if (next && this.viewing(path)) await this.refresh(next, silent);
     }
-    const next = this.refreshQueued;
-    this.refreshQueued = null;
-    if (next && this.viewing(path)) await this.refresh(next, silent);
   }
 
 
@@ -3225,12 +3257,13 @@ export class ShellState {
       sourceDirectories: value.sourceDirectories ?? [],
       groupNames: value.groupNames ?? [],
     });
+    applyCommitTypes(this);
     this.syncRecentWorkspace();
     if (recovered) this.settings = { ...this.settings, recoveryNotice: "" };
     if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
     if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
     if (this.settings.aiPromptStyle !== "long") this.settings = { ...this.settings, aiPromptStyle: "short" };
-    if (!isCommitType(this.settings.commitType)) this.settings = { ...this.settings, commitType: "feat" };
+    if (!isCommitType(this.settings.commitType)) this.settings = { ...this.settings, commitType: this.preferredCommitType() };
     if (!this.settings.errorLogDays) this.settings = { ...this.settings, errorLogDays: 7 };
     this.pruneErrorLog();
     if (!this.snapshot && isCommitType(this.settings.commitType)) this.commitType = this.settings.commitType;
@@ -3441,13 +3474,14 @@ export class ShellState {
     const path = this.repoPath() ?? "";
     if (!force && this.facts && this.factsPath === path) return this.facts;
     try {
-      const value = await invoke<RepoFacts>("repo_facts", { path: this.repoPath(), full });
+      const value = await invoke<RepoFacts>("repo_facts", { path, full });
+      if (!this.viewing(path)) return null;
       const kept = !full && this.facts && this.factsPath === path ? { ignored: this.facts.ignored, weekday: this.facts.weekday, hour: this.facts.hour, lfs: this.facts.lfs, hot: this.facts.hot } : {};
       this.facts = { ...value, ...kept };
       this.factsPath = path;
       return this.facts;
     } catch (error) {
-      this.actionError = this.message(error);
+      if (this.viewing(path)) this.actionError = this.message(error);
       return null;
     }
   }
@@ -3455,7 +3489,27 @@ export class ShellState {
 
 
   preferredCommitType(): CommitType {
-    return isCommitType(this.settings.commitType) ? this.settings.commitType : "feat";
+    if (isCommitType(this.settings.commitType)) return this.settings.commitType;
+    return commitTypesOf(this.settings.commitTypes)[0]?.name ?? "feat";
+  }
+
+
+  /** Types offered by the composer, in display order. Empty settings mean the built-in list. */
+  commitTypeList() {
+    return commitTypesOf(this.settings.commitTypes);
+  }
+
+
+  commitTypeColor(type: string) {
+    return this.commitTypeList().find((item) => item.name === type)?.color ?? commitTypesOf(undefined)[0].color;
+  }
+
+
+  /** Custom description, or the translated built-in one. Custom types without a label have none. */
+  commitTypeLabel(type: string) {
+    const label = this.commitTypeList().find((item) => item.name === type)?.label;
+    if (label) return label;
+    return isBuiltinCommitType(type) ? this.tr(typeMessageKey(type)) : "";
   }
 
 
@@ -3464,6 +3518,31 @@ export class ShellState {
     if (this.settings.commitType === type) return;
     this.settings = { ...this.settings, commitType: type };
     void this.savePrefs(false);
+  }
+
+
+  addCommitType(name: string, color: string, label = "") {
+    return addCommitType(this, name, color, label);
+  }
+
+
+  renameCommitType(from: string, to: string) {
+    return renameCommitType(this, from, to);
+  }
+
+
+  setCommitTypeField(name: string, field: "color" | "label", value: string) {
+    return setCommitTypeField(this, name, field, value);
+  }
+
+
+  removeCommitType(name: string) {
+    return removeCommitType(this, name);
+  }
+
+
+  resetCommitTypes() {
+    return resetCommitTypes(this);
   }
 
 
@@ -3719,6 +3798,17 @@ export class ShellState {
 
 
 
+  /** The name an added remote gets: derived from its URL and kept unique. */
+  remoteName() {
+    const base = remoteNameFromUrl(this.draftExtra);
+    const taken = new Set((this.refs?.remotes ?? []).map((remote) => remote.name));
+    let name = base;
+    for (let index = 2; taken.has(name); index += 1) name = `${base}-${index}`;
+    return name;
+  }
+
+
+
   splitRemoteRef(ref: string) {
     const remote = this.refs?.remotes.find((item) => ref.startsWith(`${item.name}/`));
     return remote ? { remote: remote.name, branch: ref.slice(remote.name.length + 1) } : null;
@@ -3795,7 +3885,7 @@ export class ShellState {
 
 
   searchQuery(key: SearchKey) {
-    return { recent: this.recentQuery, side: this.sideQuery, commit: this.commitQuery, file: this.fileQuery }[key];
+    return { recent: this.recentQuery, side: this.sideQuery, commit: this.commitQuery, file: this.fileQuery, detail: this.detailQuery }[key];
   }
 
 
@@ -3805,6 +3895,7 @@ export class ShellState {
     if (key === "recent") this.recentQuery = "";
     else if (key === "side") this.sideQuery = "";
     else if (key === "commit") this.commitQuery = "";
+    else if (key === "detail") this.detailQuery = "";
     else this.fileQuery = "";
   }
 
@@ -4146,7 +4237,25 @@ export class ShellState {
 
 
   async selectCommit(id: string, event?: MouseEvent) {
+    window.clearTimeout(this.commitNavTimer);
+    this.commitNavTimer = 0;
     return selectCommit(this, id, event);
+  }
+
+  /** Move the highlight now, load the expensive detail once the key repeat settles. */
+  selectCommitSoon(id: string) {
+    const path = this.repoPath();
+    this.comparePair = null;
+    this.selectedCommit = id;
+    const rowAt = this.historyItems.findIndex((row) => row.id === id);
+    if (rowAt >= 0) this.selectedIndex = rowAt;
+    this.blameLines = null;
+    this.historyTab = "commit";
+    window.clearTimeout(this.commitNavTimer);
+    this.commitNavTimer = window.setTimeout(() => {
+      this.commitNavTimer = 0;
+      if (this.viewing(path)) void this.selectCommit(id);
+    }, 90);
   }
 
 
@@ -4252,6 +4361,8 @@ export class ShellState {
         this.blameLines = null;
         this.expandedMerges = [];
         this.historyTab = "commit";
+        this.detailQuery = "";
+        this.searchOpen.detail = false;
         this.historyTop = 0;
         this.fileTop = 0;
         this.stagedTop = 0;
@@ -4570,6 +4681,12 @@ export class ShellState {
 
 
 
+  setFolderFold(mode: "open-all" | "close-all" | "open-first" | "close-first") {
+    return setFolderFold(this, mode);
+  }
+
+
+
   toggleCommitDir(path: string) {
     return toggleCommitDir(this, path);
   }
@@ -4747,22 +4864,132 @@ export class ShellState {
 
   diffTools = $state<ExternalTool[]>([]);
 
+  toolKind = $state<ToolKind>("diff");
+
+  toolPick = $state("");
+
+  editorCandidates = $state<EditorTool[]>([]);
+
+  editorPicked = $state<string[]>([]);
+
+  editorDetecting = $state(false);
+
 
 
   async loadExternalTools() {
     return loadExternalTools(this);
   }
 
-
-
-  useMergePreset(path: string) {
-    return useMergePreset(this, path);
+  toolsOf(kind: ToolKind) {
+    return toolsOf(this, kind);
   }
 
+  applicableTools(kind: ToolKind, file: string) {
+    return applicableTools(this, kind, file);
+  }
 
+  resolvedTool(kind: ToolKind, file: string) {
+    return resolvedTool(this, kind, file);
+  }
 
-  useDiffPreset(path: string) {
-    return useDiffPreset(this, path);
+  defaultTool(kind: ToolKind) {
+    return defaultTool(this, kind);
+  }
+
+  selectedTool(kind: ToolKind) {
+    return selectedTool(this, kind);
+  }
+
+  selectTool(toolId: string) {
+    selectTool(this, toolId);
+  }
+
+  addTool(kind: ToolKind) {
+    return addTool(this, kind);
+  }
+
+  removeTool(kind: ToolKind, toolId: string) {
+    removeTool(this, kind, toolId);
+  }
+
+  moveTool(kind: ToolKind, toolId: string, delta: number) {
+    moveTool(this, kind, toolId, delta);
+  }
+
+  setToolExtensions(kind: ToolKind, toolId: string, text: string) {
+    setToolExtensions(this, kind, toolId, text);
+  }
+
+  setToolField(kind: ToolKind, toolId: string, field: "name" | "path" | "args", value: string) {
+    setToolField(this, kind, toolId, field, value);
+  }
+
+  toolTypeRows(kind: ToolKind) {
+    return toolTypeRows(this, kind);
+  }
+
+  assignToolType(kind: ToolKind, suffix: string, toolId: string) {
+    assignToolType(this, kind, suffix, toolId);
+  }
+
+  removeToolType(kind: ToolKind, suffix: string) {
+    removeToolType(this, kind, suffix);
+  }
+
+  renameToolType(kind: ToolKind, oldSuffix: string, newSuffix: string) {
+    renameToolType(this, kind, oldSuffix, newSuffix);
+  }
+
+  setFallbackTool(kind: ToolKind, toolId: string) {
+    setFallbackTool(this, kind, toolId);
+  }
+
+  browseToolPath(kind: ToolKind, toolId: string) {
+    return browseToolPath(this, kind, toolId);
+  }
+
+  importTools(kind: ToolKind, source: ToolSource) {
+    return importTools(this, kind, source);
+  }
+
+  toolTemplate(kind: ToolKind, file: string) {
+    return toolTemplate(this, kind, file);
+  }
+
+  toolLabel(tool: { name: string; path: string }) {
+    return toolLabel(tool);
+  }
+
+  toolExtensionLabel(tool: ToolRecord) {
+    return toolExtensionLabel(tool);
+  }
+
+  openToolSettings(kind: ToolKind, toolId = "") {
+    openToolSettings(this, kind, toolId);
+  }
+
+  openEditorImport() {
+    openEditorImport(this);
+  }
+
+  detectEditors() {
+    return detectEditors(this);
+  }
+
+  toggleEditorCandidate(path: string) {
+    toggleEditorCandidate(this, path);
+  }
+
+  importEditorCandidates() {
+    importEditorCandidates(this);
+  }
+
+  closeEditorImport() {
+    closeEditorImport(this);
+  }
+
+  openExternalToolMenu(event: MouseEvent, kind: "diff" | "merge", file: string) {
+    this.openMenu(event, externalItems(this, kind, file));
   }
 
 
@@ -5084,6 +5311,11 @@ export class ShellState {
 
   removeBranch(name: string) {
     return removeBranch(this, name);
+  }
+
+
+  cancelOperation(path: string) {
+    return cancelOperation(this, path);
   }
 
 
@@ -5429,7 +5661,7 @@ export class ShellState {
       if (rows.length === 0) return;
       this.selectedIndex = Math.min(rows.length - 1, Math.max(0, this.selectedIndex + delta));
       const row = rows[this.selectedIndex];
-      if (row) void this.selectCommit(row.id);
+      if (row) this.selectCommitSoon(row.id);
       return;
     }
     const { target, rows } = this.fileTargetRows();
@@ -5958,8 +6190,10 @@ export class ShellState {
     const media = typeof window === "undefined" ? null : window.matchMedia("(prefers-color-scheme: dark)");
     const resolved = () => (this.settings.theme === "dark" || (this.settings.theme !== "light" && (media?.matches ?? false)) ? "dark" : "light");
     const paint = () => {
-    root.setAttribute("data-theme", resolved());
+    const theme = resolved();
+    root.setAttribute("data-theme", theme);
     root.lang = this.activeLocale === "zh" ? "zh-CN" : "en";
+    if (this.inApp()) void getCurrentWindow().setTheme(theme).catch(() => {});
     };
     paint();
     media?.addEventListener("change", paint);
@@ -6094,7 +6328,9 @@ export class ShellState {
     }
     }
     try {
-    unlisten = await listen<{ refs?: boolean } | null>("repo-changed", (event) => {
+    unlisten = await listen<{ refs?: boolean; path?: string } | null>("repo-changed", (event) => {
+      const path = event.payload?.path;
+      if (path && !this.viewing(path)) return;
       const scope = event.payload?.refs === false ? "status" : "full";
       if (this.busy) {
         // A write ignores refreshes for its whole duration; replay the newest event when it ends.

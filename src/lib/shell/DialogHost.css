@@ -58,6 +58,12 @@
     box-shadow: 0 0 0 2px var(--elevated), 0 0 0 4px var(--accent);
   }
 
+.swatch.none {
+    background:
+      linear-gradient(135deg, transparent 43%, var(--text-secondary) 43%, var(--text-secondary) 57%, transparent 57%),
+      var(--elevated);
+  }
+
 .dialog .swatch-row {
     align-items: center;
     flex-wrap: wrap;
@@ -260,15 +266,15 @@
     font-weight: 500;
   }
 
-.dialog .push-target {
+.dialog .remote-target {
     align-items: flex-start;
   }
 
-.dialog .push-target > span {
+.dialog .remote-target > span {
     padding-top: 6px;
   }
 
-.dialog .push-target-body {
+.dialog .remote-target-body {
     display: flex;
     flex: 1;
     min-width: 0;
@@ -276,12 +282,12 @@
     gap: 8px;
   }
 
-.dialog .push-target-empty {
+.dialog .remote-target-empty {
     padding: 6px 0;
     color: var(--text-secondary);
   }
 
-.dialog .push-tabs {
+.dialog .remote-tabs {
     display: flex;
     flex-wrap: wrap;
     gap: 2px;
@@ -290,7 +296,7 @@
     background: var(--field);
   }
 
-.dialog .push-tabs button {
+.dialog .remote-tabs button {
     min-height: 26px;
     height: auto;
     border: 0;
@@ -302,11 +308,11 @@
     white-space: nowrap;
   }
 
-.dialog .push-tabs button:hover {
+.dialog .remote-tabs button:hover {
     color: var(--text);
   }
 
-.dialog .push-tabs button.on {
+.dialog .remote-tabs button.on {
     color: var(--text);
     background: var(--elevated);
     font-weight: 500;
@@ -435,4 +441,26 @@
     min-height: 0;
     max-height: min(420px, calc(100vh - 300px));
     overflow: auto;
+}
+
+.editor-candidates {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: min(320px, calc(100vh - 320px));
+    overflow: auto;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+
+.editor-candidate { padding: 6px 8px; }
+
+.editor-candidate-name { flex: none; }
+
+.editor-candidate-path {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

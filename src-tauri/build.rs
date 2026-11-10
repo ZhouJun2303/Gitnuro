@@ -23,6 +23,8 @@ fn main() {
             "settings_path",
             "import_fork_settings",
             "external_tools",
+            "common_tools",
+            "editor_tools",
             "program_exists",
             "watch_repository",
             "open_terminal",

@@ -14,6 +14,10 @@
   const onHistoryScroll = onVirtualScroll((top) => (shell.historyTop = top));
   const activeColor = $derived(shell.activeLaneColor());
 
+  function focusSelectionSoon() {
+    requestAnimationFrame(() => shell.historyEl?.querySelector<HTMLElement>(".commit-row.selected")?.focus());
+  }
+
   function restoreHistory(node: HTMLElement) {
     const top = shell.historyTop;
     requestAnimationFrame(() => {
@@ -92,6 +96,10 @@
                     onclick={(event) => shell.selectCommit(commit.id, event)}
                     onkeydown={(event) => {
                       if (event.target !== event.currentTarget) return;
+                      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                        focusSelectionSoon();
+                        return;
+                      }
                       if (event.key !== "Enter" && event.key !== " ") return;
                       event.preventDefault();
                       event.stopPropagation();

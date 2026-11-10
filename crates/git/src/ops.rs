@@ -1444,6 +1444,7 @@ fn reword(repo: &Path, rev: &str, summary: &str) -> Result<(), Error> {
                 sign_off_format: String::new(),
                 skip_hooks: false,
                 convention: false,
+                types: Vec::new(),
             },
         )
     } else {
@@ -1822,6 +1823,7 @@ fn squash(repo: &Path, from: &str, to: &str, summary: &str) -> Result<(), Error>
             sign_off_format: String::new(),
             skip_hooks: false,
             convention: false,
+            types: Vec::new(),
         },
     )?;
     for id in later {
@@ -2091,8 +2093,8 @@ fn custom(repo: &Path, command: &str, marked: &str, sha: &str, branch: &str, fil
     }
     let repo_text = if marked.trim().is_empty() { repo.display().to_string() } else { marked.to_string() };
     for value in [&repo_text, sha, branch, file] {
-        if cfg!(windows) && (value.contains('"') || value.contains('%')) {
-            return Err(Error::Git("refusing a command value that contains \" or %".into()));
+        if cfg!(windows) && value.chars().any(|ch| matches!(ch, '"' | '%' | '&' | '|' | '<' | '>' | '^' | '(' | ')' | '\r' | '\n')) {
+            return Err(Error::Git("refusing a command value that contains a cmd.exe metacharacter".into()));
         }
     }
     let expanded = command

@@ -53,6 +53,7 @@ export type Dialog =
     | "renameTab"
     | "colorTab"
     | "groupRename"
+    | "editorImport"
     | "update"
     | null;
 
@@ -158,4 +159,4 @@ export type Place = {
     historyFilter: string;
   };
 
-export type SearchKey = "recent" | "side" | "commit" | "file"
+export type SearchKey = "recent" | "side" | "commit" | "file" | "detail"

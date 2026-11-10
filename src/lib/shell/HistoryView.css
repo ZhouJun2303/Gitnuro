@@ -24,12 +24,29 @@
   }
 
 .commit-row {
+    position: relative;
     height: var(--row-commit);
     padding: 0 8px;
   }
 
 .history .commit-row {
     gap: 0;
+  }
+
+.history .commit-row::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 4px;
+    bottom: 4px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+    background: transparent;
+    pointer-events: none;
+  }
+
+.history .commit-row.head::before {
+    background: color-mix(in srgb, var(--accent) 45%, transparent);
   }
 
 .history .commit-row:hover {
@@ -41,17 +58,27 @@
     background: var(--selection);
   }
 
+.history .commit-row.head.selected::before,
+  .history .commit-row.selected::before {
+    background: var(--accent);
+  }
+
+.history .commit-row:focus {
+    outline: none;
+  }
+
+.history .commit-row:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+
+.history .commit-row.selected:focus-visible {
+    box-shadow: none;
+  }
+
 .commit-row.virtual {
     position: absolute;
     left: 0;
-  }
-
-.commit-row.head {
-    box-shadow: inset 2px 0 0 var(--accent);
-  }
-
-.history .commit-row.head:not(:hover):not(.selected) {
-    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
 
 .subject {

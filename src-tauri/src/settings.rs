@@ -206,6 +206,15 @@ pub struct Settings {
     pub merge_tool_path: String,
     #[serde(default)]
     pub merge_tool_args: String,
+    /// Ordered external tools. List order is the priority; a tool with no
+    /// extensions is the fallback for every file.
+    #[serde(default)]
+    pub diff_tools: Vec<ToolRecord>,
+    #[serde(default)]
+    pub merge_tools: Vec<ToolRecord>,
+    /// Editors that open a file, optionally at a line.
+    #[serde(default)]
+    pub editor_tools: Vec<ToolRecord>,
     #[serde(default)]
     pub ignore_space: bool,
     #[serde(default)]
@@ -285,6 +294,9 @@ pub struct Settings {
     /// Last commit-message type chosen in the composer.
     #[serde(default = "commit_type_default")]
     pub commit_type: String,
+    /// Types offered by the commit composer. Empty keeps the built-in list.
+    #[serde(default)]
+    pub commit_types: Vec<CommitTypeRecord>,
     /// Update banner stays hidden for this version until a newer one is published.
     #[serde(default)]
     pub dismissed_update: String,
@@ -292,6 +304,20 @@ pub struct Settings {
     /// existing file means the install predates the guide, so it stays `seen`.
     #[serde(default = "features_intro_seen")]
     pub features_intro: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitTypeRecord {
+    /// Lowercase name before the colon, such as `feat`.
+    #[serde(default)]
+    pub name: String,
+    /// `#rrggbb` swatch used by the picker.
+    #[serde(default)]
+    pub color: String,
+    /// Custom description shown in the picker. Empty keeps the built-in text.
+    #[serde(default)]
+    pub label: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,6 +337,28 @@ pub struct WorkspaceRecord {
     /// Count-based width kept in settings. The tab strip fills from the open repositories when its size or count is dirty.
     #[serde(default)]
     pub tab_width: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolRecord {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: String,
+    /// Arguments after the path. Diff tools use `{left}` `{right}` `{file}`;
+    /// merge tools use `{ours}` `{theirs}` `{base}` `{working}` `{file}`;
+    /// editors use `{file}` and `{line}`.
+    #[serde(default)]
+    pub args: String,
+    /// Lowercase suffixes without the dot. Empty, or `*`, matches every file.
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    /// Used for files that match no explicit extension rule.
+    #[serde(default)]
+    pub fallback: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -529,6 +577,9 @@ impl Default for Settings {
             merge_tool_name: String::new(),
             merge_tool_path: String::new(),
             merge_tool_args: String::new(),
+            diff_tools: Vec::new(),
+            merge_tools: Vec::new(),
+            editor_tools: Vec::new(),
             ignore_space: false,
             vertical_tabs: false,
             pinned_refs: Vec::new(),
@@ -559,6 +610,7 @@ impl Default for Settings {
             workspace_show_title: false,
             scan_depth: scan_depth_default(),
             commit_type: commit_type_default(),
+            commit_types: Vec::new(),
             dismissed_update: String::new(),
             features_intro: features_intro_seen(),
         }
@@ -619,6 +671,20 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
         Some(name) => path.with_file_name(name),
         None => path.to_path_buf(),
     }
+}
+
+/// A temp name only this process can own, so two app instances never truncate each other's write.
+fn temp_sibling(path: &Path) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    sibling(path, &format!(".tmp-{}-{stamp}", std::process::id()))
+}
+
+fn remove_on_error(tmp: &Path, error: std::io::Error) -> String {
+    let _ = std::fs::remove_file(tmp);
+    error.to_string()
 }
 
 fn read_stored(path: &Path) -> Result<StoredFile, ReadIssue> {
@@ -697,7 +763,7 @@ fn save_at(path: &Path, settings: &Settings) -> Result<(), String> {
     stored.schema = SETTINGS_SCHEMA;
     crate::secrets::store_and_clear(&mut stored)?;
     let text = serde_json::to_string_pretty(&stored).map_err(|error| error.to_string())?;
-    let tmp = sibling(path, ".tmp");
+    let tmp = temp_sibling(path);
     {
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
@@ -705,26 +771,33 @@ fn save_at(path: &Path, settings: &Settings) -> Result<(), String> {
             .create(true)
             .truncate(true)
             .open(&tmp)
-            .map_err(|error| error.to_string())?;
-        file.write_all(text.as_bytes()).map_err(|error| error.to_string())?;
-        file.sync_all().map_err(|error| error.to_string())?;
+            .map_err(|error| remove_on_error(&tmp, error))?;
+        file.write_all(text.as_bytes()).map_err(|error| remove_on_error(&tmp, error))?;
+        file.sync_all().map_err(|error| remove_on_error(&tmp, error))?;
     }
     if read_stored(path).is_ok() {
         copy_durable(path, &sibling(path, ".bak"))?;
     }
-    replace_file(&tmp, path)?;
+    if let Err(error) = replace_file(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
+    }
     sync_parent(path);
     let _ = copy_durable(path, &sibling(path, ".bak"));
     Ok(())
 }
 
 fn copy_durable(from: &Path, to: &Path) -> Result<(), String> {
-    let tmp = sibling(to, ".tmp");
-    std::fs::copy(from, &tmp).map_err(|error| error.to_string())?;
+    let tmp = temp_sibling(to);
+    std::fs::copy(from, &tmp).map_err(|error| remove_on_error(&tmp, error))?;
     if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&tmp) {
         let _ = file.sync_all();
     }
-    replace_file(&tmp, to)
+    if let Err(error) = replace_file(&tmp, to) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
@@ -1097,9 +1170,42 @@ fn apply_tools(settings: &mut Settings, text: &str, count: &mut u32) {
         settings.diff_tool = compose_tool(&tool.path, &tool.args);
         *count += 1;
     }
+    append_imported(&mut settings.merge_tools, &tools.merge);
+    append_imported(&mut settings.diff_tools, &tools.diff);
 }
 
-fn compose_tool(path: &str, args: &str) -> String {
+fn append_imported(list: &mut Vec<ToolRecord>, imported: &[crate::tools::ExternalTool]) {
+    for tool in imported {
+        if list.iter().any(|item| same_tool_path(&item.path, &tool.path)) {
+            continue;
+        }
+        let id = format!("tool-{:016x}", path_hash(&tool.path));
+        list.push(ToolRecord {
+            id,
+            name: tool.name.clone(),
+            path: tool.path.clone(),
+            args: tool.args.clone(),
+            extensions: Vec::new(),
+            fallback: false,
+        });
+    }
+}
+
+fn path_hash(path: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in path.trim().replace('/', "\\").to_ascii_lowercase().bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn same_tool_path(left: &str, right: &str) -> bool {
+    let norm = |value: &str| value.trim().trim_end_matches(['\\', '/']).replace('/', "\\").to_ascii_lowercase();
+    !left.trim().is_empty() && norm(left) == norm(right)
+}
+
+pub(crate) fn compose_tool(path: &str, args: &str) -> String {
     let file = path.trim();
     let rest = args.trim();
     if file.is_empty() {
@@ -1413,6 +1519,21 @@ mod tests {
     fn missing_commit_type_stays_feat() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings.commit_type, "feat");
+    }
+
+    #[test]
+    fn settings_keep_custom_commit_types() {
+        let settings: Settings = serde_json::from_str(
+            r##"{"commitTypes":[{"name":"ui","color":"#123456","label":"界面"},{"name":"feat"}]}"##,
+        )
+        .unwrap();
+        assert_eq!(settings.commit_types.len(), 2);
+        assert_eq!(settings.commit_types[0].name, "ui");
+        assert_eq!(settings.commit_types[0].color, "#123456");
+        assert_eq!(settings.commit_types[0].label, "界面");
+        assert_eq!(settings.commit_types[1].name, "feat");
+        assert!(settings.commit_types[1].label.is_empty());
+        assert!(Settings::default().commit_types.is_empty());
     }
 
     #[test]

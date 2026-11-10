@@ -49,7 +49,7 @@ impl TempRepo {
         self.raw(args).status.code().unwrap_or(128)
     }
 
-    fn raw(&self, args: &[&str]) -> std::process::Output {
+    pub fn raw(&self, args: &[&str]) -> std::process::Output {
         Command::new("git")
             .current_dir(&self.path)
             .args(args)
