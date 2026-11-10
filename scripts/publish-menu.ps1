@@ -197,18 +197,26 @@ function Get-CurrentBranch {
 # origin/release is the boundary, not the v* tags: gh creates the tag
 # before the release branch is pushed, so tags land on the previous manifest commit.
 function Get-ChangelogNotes {
-    & git -C $root fetch --quiet origin release 2>$null | Out-Null
-    $base = $null
-    & git -C $root rev-parse -q --verify "origin/release" 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        $base = "origin/release"
-    } else {
-        $tag = & git -C $root describe --tags --abbrev=0 --match "v*" 2>$null
-        if ($LASTEXITCODE -eq 0 -and $tag) { $base = "$tag".Trim() }
+    # Best-effort refresh: a flaky network must not abort the publish; fall back
+    # to the existing ref. Native stderr would be a terminating error under Stop.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & git -C $root fetch --quiet origin release 2>$null | Out-Null
+        $base = $null
+        & git -C $root rev-parse -q --verify "origin/release" 2>$null | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $base = "origin/release"
+        } else {
+            $tag = & git -C $root describe --tags --abbrev=0 --match "v*" 2>$null
+            if ($LASTEXITCODE -eq 0 -and $tag) { $base = "$tag".Trim() }
+        }
+        $logArgs = @("-C", $root, "log", "--no-merges", "--pretty=format:%s")
+        if ($base) { $logArgs += "$base..HEAD" } else { $logArgs += @("-n", "50") }
+        $subjects = @(& git @logArgs 2>$null)
+    } finally {
+        $ErrorActionPreference = $previous
     }
-    $logArgs = @("-C", $root, "log", "--no-merges", "--pretty=format:%s")
-    if ($base) { $logArgs += "$base..HEAD" } else { $logArgs += @("-n", "50") }
-    $subjects = @(& git @logArgs 2>$null)
 
     $labelByType = @{
         feat = "新功能"; fix = "修复"; perf = "性能"; style = "界面"; art = "界面"
@@ -234,10 +242,10 @@ function Get-ChangelogNotes {
     foreach ($label in $order) {
         $items = $groups[$label]
         if ($items.Count -eq 0) { continue }
-        $bullets = ($items | ForEach-Object { "- $_" }) -join "`n"
-        $parts += ($label + "`n" + $bullets)
+        $parts += ($label + "：" + ($items -join "、"))
     }
-    return ($parts -join "`n`n")
+    if ($parts.Count -eq 0) { return "" }
+    return ("本次更新 " + ($parts -join "；") + "。")
 }
 
 function Assert-ReleaseAvailable([string]$version) {
