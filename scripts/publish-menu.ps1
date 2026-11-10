@@ -231,9 +231,14 @@ function Get-ChangelogNotes {
         $groups[$label].Add($item)
     }
     $parts = @()
+    $limit = 3
     foreach ($label in $order) {
-        if ($groups[$label].Count -eq 0) { continue }
-        $bullets = ($groups[$label] | ForEach-Object { "- $_" }) -join "`n"
+        $items = $groups[$label]
+        if ($items.Count -eq 0) { continue }
+        $bullets = (($items | Select-Object -First $limit) | ForEach-Object { "- $_" }) -join "`n"
+        if ($items.Count -gt $limit) {
+            $bullets += "`n- 另有 $($items.Count - $limit) 项"
+        }
         $parts += ($label + "`n" + $bullets)
     }
     return ($parts -join "`n`n")
