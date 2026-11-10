@@ -437,6 +437,15 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draft = shell.repoPath() ?? "";
       fillSourceRoots(shell);
       break;
+    case "editorImport":
+      shell.editorCandidates = [
+        { name: "Visual Studio Code", path: "C:\\Program Files\\Microsoft VS Code\\Code.exe", args: "-g \"{file}:{line}\"" },
+        { name: "Cursor", path: "C:\\Users\\lab\\AppData\\Local\\Programs\\cursor\\Cursor.exe", args: "-g \"{file}:{line}\"" },
+        { name: "Sublime Text", path: "C:\\Program Files\\Sublime Text\\sublime_text.exe", args: "\"{file}:{line}\"" },
+      ];
+      shell.editorPicked = [];
+      shell.editorDetecting = false;
+      break;
     case "prefs":
       shell.prefTab = sceneId.startsWith("prefs-integration") ? "integration" : sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : "general";
       fillSourceRoots(shell);

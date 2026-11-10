@@ -442,3 +442,25 @@
     max-height: min(420px, calc(100vh - 300px));
     overflow: auto;
 }
+
+.editor-candidates {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: min(320px, calc(100vh - 320px));
+    overflow: auto;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+
+.editor-candidate { padding: 6px 8px; }
+
+.editor-candidate-name { flex: none; }
+
+.editor-candidate-path {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

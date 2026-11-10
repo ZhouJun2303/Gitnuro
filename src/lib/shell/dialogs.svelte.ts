@@ -1307,10 +1307,7 @@ export async function browseToolPath(shell: ShellState, kind: ToolKind, toolId: 
 export async function importTools(shell: ShellState, kind: ToolKind, source: ToolSource) {
     let incoming: { name: string; path: string; args: string }[] = [];
     try {
-      if (kind === "editor") {
-        const rows = await invoke<EditorTool[]>("editor_tools");
-        incoming = rows.map((row) => ({ name: row.name, path: row.path, args: row.args }));
-      } else if (source === "common") {
+      if (source === "common") {
         const rows = await invoke<CommonTool[]>("common_tools");
         incoming = rows
           .map((row) => ({ name: row.name, path: row.path, args: kind === "merge" ? row.mergeArgs : row.diffArgs }))
@@ -1338,6 +1335,63 @@ export async function importTools(shell: ShellState, kind: ToolKind, source: Too
     return added;
   }
 
+/** Open the editor picker and scan install paths only now, when the user asked for it. */
+export function openEditorImport(shell: ShellState) {
+    shell.dialog = "editorImport";
+    shell.editorCandidates = [];
+    shell.editorPicked = [];
+    shell.editorDetecting = false;
+    void detectEditors(shell);
+  }
+
+export async function detectEditors(shell: ShellState) {
+    shell.editorDetecting = true;
+    try {
+      const rows = await invoke<EditorTool[]>("editor_tools");
+      if (shell.dialog !== "editorImport") return;
+      shell.editorCandidates = rows;
+      shell.editorPicked = shell.editorPicked.filter((path) => rows.some((row) => shell.pathsMatch(row.path, path)));
+    } catch (error) {
+      if (shell.dialog === "editorImport") shell.actionError = shell.message(error);
+    } finally {
+      shell.editorDetecting = false;
+    }
+  }
+
+export function toggleEditorCandidate(shell: ShellState, path: string) {
+    const on = shell.editorPicked.some((item) => shell.pathsMatch(item, path));
+    shell.editorPicked = on
+      ? shell.editorPicked.filter((item) => !shell.pathsMatch(item, path))
+      : [...shell.editorPicked, path];
+  }
+
+export function importEditorCandidates(shell: ShellState) {
+    const picked = shell.editorCandidates.filter((row) => shell.editorPicked.some((path) => shell.pathsMatch(path, row.path)));
+    const tools = [...toolsOf(shell, "editor")];
+    const fresh: ToolRecord[] = [];
+    for (const row of picked) {
+      if (!row.path.trim() || tools.some((tool) => shell.pathsMatch(tool.path, row.path))) continue;
+      const tool: ToolRecord = { id: newToolId(), name: row.name, path: row.path, args: row.args, extensions: [], fallback: false };
+      tools.push(tool);
+      fresh.push(tool);
+    }
+    if (fresh.length > 0) {
+      setTools(shell, "editor", tools);
+      shell.toolPick = fresh[0].id;
+      void shell.savePrefs(false);
+    }
+    closeEditorImport(shell);
+  }
+
+export function closeEditorImport(shell: ShellState) {
+    shell.editorCandidates = [];
+    shell.editorPicked = [];
+    shell.editorDetecting = false;
+    shell.dialog = "prefs";
+    shell.prefTab = "integration";
+    shell.toolKind = "editor";
+  }
+
 export async function loadExternalTools(shell: ShellState) {
     if (shell.labPage) return;
     if (!shell.backend()) {
@@ -1346,19 +1400,17 @@ export async function loadExternalTools(shell: ShellState) {
       return;
     }
     let catalog: { merge: ExternalTool[]; diff: ExternalTool[] };
-    let editors: EditorTool[] = [];
     try {
       catalog = await invoke("external_tools");
-      editors = await invoke<EditorTool[]>("editor_tools").catch(() => []);
     } catch {
       return;
     }
     shell.mergeTools = catalog.merge ?? [];
     shell.diffTools = catalog.diff ?? [];
-    let changed = false;
-    for (const kind of toolKinds) {
-      const source = kind === "editor" ? editors : kind === "merge" ? shell.mergeTools : shell.diffTools;
-      changed = ensureToolList(shell, kind, source) || changed;
+    // Editors are detected only from the "Detect" button, never at startup.
+    let changed = repairToolList(shell, "editor").changed;
+    for (const kind of ["diff", "merge"] as const) {
+      changed = ensureToolList(shell, kind, kind === "merge" ? shell.mergeTools : shell.diffTools) || changed;
     }
     if (changed) {
       applyToolSettings(shell);
@@ -1366,7 +1418,7 @@ export async function loadExternalTools(shell: ShellState) {
     }
   }
 
-function ensureToolList(shell: ShellState, kind: ToolKind, catalog: { name: string; path: string; args: string; primary?: boolean }[]) {
+function repairToolList(shell: ShellState, kind: ToolKind) {
     const list = toolsOf(shell, kind);
     let changed = false;
     const repaired = list.map((tool) => {
@@ -1375,8 +1427,13 @@ function ensureToolList(shell: ShellState, kind: ToolKind, catalog: { name: stri
       return { ...tool, id: tool.id || newToolId(), extensions: tool.extensions ?? [], fallback: tool.fallback ?? false };
     });
     if (changed) setTools(shell, kind, repaired);
+    return { list: repaired, changed };
+  }
+
+function ensureToolList(shell: ShellState, kind: ToolKind, catalog: { name: string; path: string; args: string; primary?: boolean }[]) {
+    const { list: repaired, changed } = repairToolList(shell, kind);
     if (repaired.length > 0) return changed;
-    const path = kind === "editor" ? "" : legacyToolPath(shell, kind).trim();
+    const path = legacyToolPath(shell, kind).trim();
     if (path) {
       const record: ToolRecord = {
         id: newToolId(),

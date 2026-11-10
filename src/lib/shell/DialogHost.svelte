@@ -37,6 +37,10 @@
 
   function closeDialog() {
     if (shell.busy) return;
+    if (shell.dialog === "editorImport") {
+      shell.closeEditorImport();
+      return;
+    }
     shell.dialog = null;
   }
 
@@ -106,7 +110,7 @@
 </script>
 
 {#if shell.dialog}
-    <div class="scrim" role="presentation" onclick={() => { if (shell.busy) return; if (shell.dialog === "prefs") void shell.savePrefs(true); else shell.dialog = null; }}>
+    <div class="scrim" role="presentation" onclick={() => { if (shell.busy) return; if (shell.dialog === "prefs") void shell.savePrefs(true); else if (shell.dialog === "editorImport") shell.closeEditorImport(); else shell.dialog = null; }}>
       <div class="dialog {dialogSize(shell.dialog ?? "")}" class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} data-dialog={shell.dialog} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={trapTab}>
       <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={closeDialog}>×</button>
       <form
@@ -126,6 +130,7 @@
           else if (shell.dialog === "command") void shell.runCommand({ command: shell.draftUser || shell.draft, prompt: shell.commandPrompt });
           else if (shell.dialog === "flow") void shell.mutate({ action: "gitFlowStart", name: shell.draft, kind: shell.flowKind });
           else if (shell.dialog === "prefs") void shell.savePrefs();
+          else if (shell.dialog === "editorImport") shell.importEditorCandidates();
           else if (shell.dialog === "tag") {
             await shell.mutate({ action: "tag", name: shell.draft, rev: shell.draftExtra || "HEAD", message: shell.draftUser });
             if (!shell.actionError && shell.settings.pushTagOnCreate) await shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease });
@@ -266,6 +271,31 @@
       >
         {#if shell.dialog === "prefs"}
           <PrefsDialog />
+        {:else if shell.dialog === "editorImport"}
+          <h2>{shell.tr("dialog.detectEditors")}</h2>
+          {#if shell.editorDetecting}
+            <p class="empty">{shell.tr("dialog.detectingEditors")}</p>
+          {:else if shell.editorCandidates.length === 0}
+            <p class="empty">{shell.tr("dialog.noEditorsFound")}</p>
+          {:else}
+            <p class="empty">{shell.tr("dialog.editorImportHint")}</p>
+            <div class="editor-candidates">
+              {#each shell.editorCandidates as item (item.path)}
+                {@const added = shell.toolsOf("editor").some((tool) => shell.pathsMatch(tool.path, item.path))}
+                <label class="check editor-candidate">
+                  <input type="checkbox" disabled={added} checked={added || shell.editorPicked.some((path) => shell.pathsMatch(path, item.path))} onchange={() => shell.toggleEditorCandidate(item.path)} />
+                  <span class="editor-candidate-name">{item.name}</span>
+                  <span class="meta editor-candidate-path" title={item.path}>{added ? shell.tr("dialog.editorAlreadyAdded") : item.path}</span>
+                </label>
+              {/each}
+            </div>
+          {/if}
+          <div class="composer-row actions">
+            <button class="text-button" type="button" disabled={shell.editorDetecting} onclick={() => void shell.detectEditors()}>{shell.tr("dialog.detectAgain")}</button>
+            <span class="grow"></span>
+            <button class="text-button" type="button" onclick={() => shell.closeEditorImport()}>{shell.tr("dialog.cancel")}</button>
+            <button class="commit" type="submit" disabled={shell.writing || shell.editorPicked.length === 0}>{shell.tr("dialog.importSelected")}</button>
+          </div>
         {:else if shell.dialog === "update"}
           <UpdatePanel />
         {:else if shell.dialog === "reset"}

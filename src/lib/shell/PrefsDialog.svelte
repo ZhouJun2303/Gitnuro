@@ -24,11 +24,6 @@
   }
 
   function toolImportItems(kind: ToolKind): MenuItem[] {
-    if (kind === "editor") {
-      return [
-        { label: shell.tr("dialog.toolImportDetected"), run: () => void importSource(kind, "detected") },
-      ];
-    }
     return [
       { label: shell.tr("dialog.toolImportDetected"), run: () => void importSource(kind, "detected") },
       { label: shell.tr("dialog.toolImportCommon"), run: () => void importSource(kind, "common") },
@@ -212,7 +207,11 @@
                 <div class="tool-actions">
                   <button class="text-button" type="button" onclick={() => shell.addTool(kind)}>{shell.tr("dialog.toolAdd")}</button>
                   <button class="text-button" type="button" disabled={!picked} onclick={() => picked && shell.removeTool(kind, picked.id)}>{shell.tr("dialog.toolRemove")}</button>
-                  <button class="text-button tool-import" type="button" onclick={(event) => shell.openMenu(event, toolImportItems(kind))}>{shell.tr("dialog.toolImport")}</button>
+                  {#if kind === "editor"}
+                    <button class="text-button tool-import" type="button" onclick={() => shell.openEditorImport()}>{shell.tr("dialog.detect")}</button>
+                  {:else}
+                    <button class="text-button tool-import" type="button" onclick={(event) => shell.openMenu(event, toolImportItems(kind))}>{shell.tr("dialog.toolImport")}</button>
+                  {/if}
                   <span class="grow"></span>
                   <button class="text-button" type="button" disabled={pickedAt <= 0} title={shell.tr("dialog.toolMoveUp")} aria-label={shell.tr("dialog.toolMoveUp")} onclick={() => picked && shell.moveTool(kind, picked.id, -1)}>↑</button>
                   <button class="text-button" type="button" disabled={pickedAt < 0 || pickedAt >= tools.length - 1} title={shell.tr("dialog.toolMoveDown")} aria-label={shell.tr("dialog.toolMoveDown")} onclick={() => picked && shell.moveTool(kind, picked.id, 1)}>↓</button>

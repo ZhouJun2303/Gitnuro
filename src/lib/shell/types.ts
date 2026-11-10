@@ -53,6 +53,7 @@ export type Dialog =
     | "renameTab"
     | "colorTab"
     | "groupRename"
+    | "editorImport"
     | "update"
     | null;
 

@@ -557,6 +557,14 @@ export type Messages = {
     toolImportDetected: string;
     toolImportCommon: string;
     toolImportFork: string;
+    detectEditors: string;
+    detect: string;
+    detectingEditors: string;
+    noEditorsFound: string;
+    editorImportHint: string;
+    editorAlreadyAdded: string;
+    detectAgain: string;
+    importSelected: string;
     toolMoveUp: string;
     toolMoveDown: string;
     toolDefault: string;

@@ -214,6 +214,12 @@ fn editor_presets() -> Vec<EditorTool> {
             .map(|base| Path::new(&base).join(folder).join(file).display().to_string())
             .unwrap_or_default()
     };
+    let program_x86 = |folder: &str, file: &str| {
+        std::env::var("ProgramFiles(x86)")
+            .ok()
+            .map(|base| Path::new(&base).join(folder).join(file).display().to_string())
+            .unwrap_or_default()
+    };
     let goto = "-g \"{file}:{line}\"";
     vec![
         EditorTool {
@@ -253,6 +259,21 @@ fn editor_presets() -> Vec<EditorTool> {
         },
         EditorTool {
             name: "Cursor".into(),
+            path: local("Programs\\cursor\\resources\\app\\bin", "cursor.cmd"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Cursor".into(),
+            path: program("Cursor", "Cursor.exe"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Cursor".into(),
+            path: on_path("cursor.exe"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Cursor".into(),
             path: on_path("cursor.cmd"),
             args: goto.into(),
         },
@@ -262,8 +283,23 @@ fn editor_presets() -> Vec<EditorTool> {
             args: goto.into(),
         },
         EditorTool {
+            name: "Windsurf".into(),
+            path: program("Windsurf", "Windsurf.exe"),
+            args: goto.into(),
+        },
+        EditorTool {
+            name: "Windsurf".into(),
+            path: on_path("windsurf.cmd"),
+            args: goto.into(),
+        },
+        EditorTool {
             name: "Sublime Text".into(),
             path: program("Sublime Text", "sublime_text.exe"),
+            args: "\"{file}:{line}\"".into(),
+        },
+        EditorTool {
+            name: "Sublime Text".into(),
+            path: program_x86("Sublime Text", "sublime_text.exe"),
             args: "\"{file}:{line}\"".into(),
         },
         EditorTool {
@@ -272,8 +308,23 @@ fn editor_presets() -> Vec<EditorTool> {
             args: "-n{line} \"{file}\"".into(),
         },
         EditorTool {
+            name: "Notepad++".into(),
+            path: program_x86("Notepad++", "notepad++.exe"),
+            args: "-n{line} \"{file}\"".into(),
+        },
+        EditorTool {
             name: "Zed".into(),
             path: local("Programs\\Zed", "Zed.exe"),
+            args: "\"{file}:{line}\"".into(),
+        },
+        EditorTool {
+            name: "Zed".into(),
+            path: program("Zed", "Zed.exe"),
+            args: "\"{file}:{line}\"".into(),
+        },
+        EditorTool {
+            name: "Zed".into(),
+            path: on_path("zed.exe"),
             args: "\"{file}:{line}\"".into(),
         },
     ]

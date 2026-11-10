@@ -33,6 +33,7 @@ export const dialogScenes = {
   clone: dialog("clone", "克隆"),
   open: dialog("open", "打开仓库"),
   prefs: dialog("prefs", "偏好设置"),
+  editorImport: dialog("editorImport", "识别文本编辑器"),
   reset: dialog("reset", "重置"),
   command: dialog("command", "自定义命令"),
   tag: dialog("tag", "新建标签"),
