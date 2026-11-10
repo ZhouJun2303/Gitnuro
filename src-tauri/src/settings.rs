@@ -673,6 +673,20 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
     }
 }
 
+/// A temp name only this process can own, so two app instances never truncate each other's write.
+fn temp_sibling(path: &Path) -> PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    sibling(path, &format!(".tmp-{}-{stamp}", std::process::id()))
+}
+
+fn remove_on_error(tmp: &Path, error: std::io::Error) -> String {
+    let _ = std::fs::remove_file(tmp);
+    error.to_string()
+}
+
 fn read_stored(path: &Path) -> Result<StoredFile, ReadIssue> {
     let text = std::fs::read_to_string(path).map_err(|error| ReadIssue::Io(error.to_string()))?;
     if text.trim().is_empty() {
@@ -749,7 +763,7 @@ fn save_at(path: &Path, settings: &Settings) -> Result<(), String> {
     stored.schema = SETTINGS_SCHEMA;
     crate::secrets::store_and_clear(&mut stored)?;
     let text = serde_json::to_string_pretty(&stored).map_err(|error| error.to_string())?;
-    let tmp = sibling(path, ".tmp");
+    let tmp = temp_sibling(path);
     {
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
@@ -757,26 +771,33 @@ fn save_at(path: &Path, settings: &Settings) -> Result<(), String> {
             .create(true)
             .truncate(true)
             .open(&tmp)
-            .map_err(|error| error.to_string())?;
-        file.write_all(text.as_bytes()).map_err(|error| error.to_string())?;
-        file.sync_all().map_err(|error| error.to_string())?;
+            .map_err(|error| remove_on_error(&tmp, error))?;
+        file.write_all(text.as_bytes()).map_err(|error| remove_on_error(&tmp, error))?;
+        file.sync_all().map_err(|error| remove_on_error(&tmp, error))?;
     }
     if read_stored(path).is_ok() {
         copy_durable(path, &sibling(path, ".bak"))?;
     }
-    replace_file(&tmp, path)?;
+    if let Err(error) = replace_file(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
+    }
     sync_parent(path);
     let _ = copy_durable(path, &sibling(path, ".bak"));
     Ok(())
 }
 
 fn copy_durable(from: &Path, to: &Path) -> Result<(), String> {
-    let tmp = sibling(to, ".tmp");
-    std::fs::copy(from, &tmp).map_err(|error| error.to_string())?;
+    let tmp = temp_sibling(to);
+    std::fs::copy(from, &tmp).map_err(|error| remove_on_error(&tmp, error))?;
     if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&tmp) {
         let _ = file.sync_all();
     }
-    replace_file(&tmp, to)
+    if let Err(error) = replace_file(&tmp, to) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn replace_file(from: &Path, to: &Path) -> Result<(), String> {
