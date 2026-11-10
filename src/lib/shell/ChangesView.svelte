@@ -24,6 +24,10 @@
     }
   });
 
+  function openViewMenu(event: MouseEvent) {
+    shell.openMenu(event, shell.fileViewMenu());
+  }
+
   function flipFile(event: MouseEvent, path: string, side: Side) {
     if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey || event.button !== 0) return;
     event.preventDefault();
@@ -302,7 +306,7 @@
         </div>
       </div>
       {@render pickedActions(shell.pickedIn(shell.shownUnstaged), shell.pickedIn(shell.shownStaged))}
-      <div class="file-list" onscroll={onCombinedScroll} bind:clientHeight={shell.combinedHeight}>
+      <div class="file-list" role="group" onscroll={onCombinedScroll} bind:clientHeight={shell.combinedHeight} oncontextmenu={openViewMenu}>
         <div class="commit-window" style:height="{shell.combinedRows.length * shell.rowFile}px">
           {#each shell.combinedWindow.rows as entry, index (entry.key)}
             <div class="virtual-row" style:top="{(shell.combinedWindow.start + index) * shell.rowFile}px">
@@ -337,9 +341,9 @@
       </div>
       {@render pickedActions([], stagedPicked)}
       {#if shell.shownStaged.length === 0}
-        <p class="empty">{shell.staged.length === 0 ? shell.tr("chrome.noStaged") : shell.tr("chrome.noMatch")}</p>
+        <p class="empty" oncontextmenu={openViewMenu}>{shell.staged.length === 0 ? shell.tr("chrome.noStaged") : shell.tr("chrome.noMatch")}</p>
       {:else}
-        <div class="file-list staged-list" onscroll={onStagedScroll}>
+        <div class="file-list staged-list" role="group" onscroll={onStagedScroll} oncontextmenu={openViewMenu}>
           <div class="commit-window" style:height="{shell.stagedTree.length * shell.fileStride}px">
             {#each shell.stagedWindow.rows as entry, index (entry.key)}
               <div class="virtual-row" style:top="{(shell.stagedWindow.start + index) * shell.fileStride}px">
@@ -375,7 +379,7 @@
         </div>
       </div>
       {@render pickedActions(unstagedPicked, [])}
-      <div class="file-list" onscroll={onFileScroll}>
+      <div class="file-list" role="group" onscroll={onFileScroll} oncontextmenu={openViewMenu}>
         {#if shell.showIgnored}
             {#if (shell.facts?.ignored.length ?? 0) === 0}
               <p class="empty">{shell.tr("chrome.noIgnored")}</p>

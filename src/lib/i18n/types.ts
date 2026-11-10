@@ -213,6 +213,8 @@ export type Messages = {
     parents: string;
     expandAll: string;
     collapseAll: string;
+    expandFirstLevel: string;
+    collapseFirstLevel: string;
     commitSubject: string;
     pushTags: string;
     treeView: string;

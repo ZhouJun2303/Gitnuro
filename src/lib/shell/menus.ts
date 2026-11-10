@@ -33,6 +33,16 @@ export function branchItems(shell: ShellState) {
     }));
   }
 
+export function folderFoldItems(shell: ShellState): MenuItem[] {
+    const locked = shell.fileLayout !== "tree";
+    return [
+      { label: shell.tr("chrome.expandAll"), disabled: locked, run: () => shell.setFolderFold("open-all") },
+      { label: shell.tr("chrome.collapseAll"), disabled: locked, run: () => shell.setFolderFold("close-all") },
+      { label: shell.tr("chrome.expandFirstLevel"), disabled: locked, run: () => shell.setFolderFold("open-first") },
+      { label: shell.tr("chrome.collapseFirstLevel"), disabled: locked, run: () => shell.setFolderFold("close-first") },
+    ];
+  }
+
 export function fileViewMenu(shell: ShellState) {
     const picked = shell.pickedIn(shell.shownUnstaged);
     const selection: MenuItem[] = picked.length > 1
@@ -50,6 +60,8 @@ export function fileViewMenu(shell: ShellState) {
       { label: shell.tr("chrome.viewAsTree"), checked: shell.fileLayout === "tree", run: () => shell.setLayout("tree") },
       { label: shell.tr("chrome.viewAsList"), checked: shell.fileLayout === "list", run: () => shell.setLayout("list") },
       { label: shell.tr("chrome.viewAsCombined"), checked: shell.fileLayout === "combined", run: () => shell.setLayout("combined") },
+      { sep: true, label: "" },
+      ...folderFoldItems(shell),
       { sep: true, label: "" },
       { label: shell.tr("chrome.conflictsOnly"), checked: shell.conflictsOnly, run: () => shell.setConflictsOnly(!shell.conflictsOnly) },
       { label: shell.tr("chrome.showIgnoredFiles"), checked: shell.showIgnored, run: () => { shell.showIgnored = !shell.showIgnored; if (shell.showIgnored) void shell.loadFacts(true, true); } },
@@ -250,6 +262,8 @@ export function dirMenu(shell: ShellState, dir: string, side: Side) {
       { label: shell.tr("menu.addGitignore"), disabled: locked, run: () => void shell.addIgnore([dir], false, true) },
       { label: shell.tr("menu.addFakeignore"), disabled: locked, run: () => void shell.addIgnore([dir], true, true) },
       { label: files.length > 1 ? shell.tr("menu.stashFiles", { count }) : shell.tr("menu.stashFile"), disabled: locked || files.length === 0, run: () => shell.openStash(files) },
+      { sep: true, label: "" },
+      ...folderFoldItems(shell),
     ];
   }
 

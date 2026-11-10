@@ -496,6 +496,34 @@ export function toggleDir(shell: ShellState, path: string) {
     shell.collapsedDirs = shell.collapsedDirs.includes(path) ? shell.collapsedDirs.filter((item) => item !== path) : [...shell.collapsedDirs, path];
   }
 
+export type FolderFold = "open-all" | "close-all" | "open-first" | "close-first";
+
+/** Directory paths (joined with `/`, same keying as `asTree`) within a depth range. */
+function dirsBetween(files: Row[], minDepth: number, maxDepth: number) {
+    const dirs = new Set<string>();
+    for (const file of files) {
+      const parts = file.path.split(/[/\\]/);
+      let acc = "";
+      for (let index = 0; index < parts.length - 1; index += 1) {
+        acc = acc ? `${acc}/${parts[index]}` : parts[index];
+        if (index >= minDepth && index <= maxDepth) dirs.add(acc);
+      }
+    }
+    return dirs;
+  }
+
+/**
+ * Fold every folder in both panes at once. `collapsedDirs` is shared by the
+ * unstaged and staged trees, so one action keeps the two panes in step.
+ */
+export function setFolderFold(shell: ShellState, mode: FolderFold) {
+    const files = [...shell.shownUnstaged, ...shell.shownStaged];
+    if (mode === "open-all") shell.collapsedDirs = [];
+    else if (mode === "close-all") shell.collapsedDirs = [...dirsBetween(files, 0, Number.MAX_SAFE_INTEGER)];
+    else if (mode === "open-first") shell.collapsedDirs = [...dirsBetween(files, 1, Number.MAX_SAFE_INTEGER)];
+    else shell.collapsedDirs = [...dirsBetween(files, 0, 0)];
+  }
+
 export function toggleCommitDir(shell: ShellState, path: string) {
     shell.commitCollapsed = shell.commitCollapsed.includes(path) ? shell.commitCollapsed.filter((item) => item !== path) : [...shell.commitCollapsed, path];
   }

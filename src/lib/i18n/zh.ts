@@ -213,6 +213,8 @@ export const zh: Messages = {
     parents: "父提交",
     expandAll: "全部展开",
     collapseAll: "全部收起",
+    expandFirstLevel: "展开一级目录",
+    collapseFirstLevel: "折叠一级目录",
     commitSubject: "写一句描述",
     pushTags: "推送标签",
     treeView: "树",

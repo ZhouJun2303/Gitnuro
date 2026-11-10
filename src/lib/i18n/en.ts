@@ -213,6 +213,8 @@ export const en: Messages = {
     parents: "Parents",
     expandAll: "Expand All",
     collapseAll: "Collapse All",
+    expandFirstLevel: "Expand First Level",
+    collapseFirstLevel: "Collapse First Level",
     commitSubject: "Describe the change",
     pushTags: "Push tags",
     treeView: "Tree",
