@@ -2093,8 +2093,8 @@ fn custom(repo: &Path, command: &str, marked: &str, sha: &str, branch: &str, fil
     }
     let repo_text = if marked.trim().is_empty() { repo.display().to_string() } else { marked.to_string() };
     for value in [&repo_text, sha, branch, file] {
-        if cfg!(windows) && (value.contains('"') || value.contains('%')) {
-            return Err(Error::Git("refusing a command value that contains \" or %".into()));
+        if cfg!(windows) && value.chars().any(|ch| matches!(ch, '"' | '%' | '&' | '|' | '<' | '>' | '^' | '(' | ')' | '\r' | '\n')) {
+            return Err(Error::Git("refusing a command value that contains a cmd.exe metacharacter".into()));
         }
     }
     let expanded = command

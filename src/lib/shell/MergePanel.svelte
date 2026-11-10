@@ -20,7 +20,9 @@
   let leftPane = $state<HTMLElement | null>(null);
   let rightPane = $state<HTMLElement | null>(null);
   let resultPane = $state<HTMLElement | null>(null);
-  let syncing = false;
+  let mirroredPane: HTMLElement | null = null;
+  let mirroredTop = 0;
+  let mirroredLeft = 0;
   let editingResult = $state(false);
   let resultDirty = $state(false);
 
@@ -190,17 +192,22 @@
   }
 
   function syncScroll(source: "left" | "right", event: Event) {
-    if (syncing) return;
     const target = event.currentTarget;
     if (!(target instanceof HTMLElement)) return;
     const other = source === "left" ? rightPane : leftPane;
     if (!other) return;
-    syncing = true;
+    // Ignore the scroll event our own mirror assignment produced; the shorter
+    // pane may clamp, and syncing that clamped value back would drag the
+    // longer pane away from the position the user chose.
+    if (other === mirroredPane && Math.abs(other.scrollTop - mirroredTop) <= 1 && Math.abs(other.scrollLeft - mirroredLeft) <= 1) {
+      mirroredPane = null;
+      return;
+    }
+    mirroredPane = other;
     other.scrollTop = target.scrollTop;
     other.scrollLeft = target.scrollLeft;
-    queueMicrotask(() => {
-      syncing = false;
-    });
+    mirroredTop = other.scrollTop;
+    mirroredLeft = other.scrollLeft;
   }
 
   function revealHunk(index: number) {

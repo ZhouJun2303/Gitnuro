@@ -454,17 +454,19 @@ export async function pickCommitFile(shell: ShellState, file: string) {
               unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
             });
         if (gen !== shell.patchGen) return;
-        shell.historyDiff = diff;
         shell.patchCache[file] = diff;
         shell.patchVersion += 1;
-        // The placeholder height must not clip the loaded patch.
-        if (shell.patchHeights[file] !== undefined) {
-          const heights = { ...shell.patchHeights };
-          delete heights[file];
-          shell.patchHeights = heights;
+        if (shell.historyFile === file) {
+          shell.historyDiff = diff;
+          // The placeholder height must not clip the loaded patch.
+          if (shell.patchHeights[file] !== undefined) {
+            const heights = { ...shell.patchHeights };
+            delete heights[file];
+            shell.patchHeights = heights;
+          }
         }
       } catch (error) {
-        if (gen === shell.patchGen) shell.actionError = shell.message(error);
+        if (gen === shell.patchGen && shell.historyFile === file) shell.actionError = shell.message(error);
       }
     });
   }

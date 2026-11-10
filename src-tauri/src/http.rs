@@ -329,7 +329,7 @@ fn scrub(text: &str) -> String {
         rest = &rest[at + scheme.len()..];
         if let Some(end) = rest.find('@') {
             let auth = &rest[..end];
-            if auth.contains(':') && !auth.contains('/') {
+            if !auth.is_empty() && !auth.contains('/') {
                 rest = &rest[end + 1..];
             }
         }
@@ -389,6 +389,13 @@ mod tests {
         let text = scrub("connect to http://user:s3cret@10.0.0.1:8080/path failed");
         assert!(!text.contains("s3cret"), "{text}");
         assert!(text.contains("10.0.0.1"), "{text}");
+
+        let token = scrub("connect to https://ghp_exampletoken@github.com/org/repo failed");
+        assert!(!token.contains("ghp_exampletoken"), "{token}");
+        assert!(token.contains("github.com/org/repo"), "{token}");
+
+        let path = scrub("see https://github.com/org/repo/path@v1 for details");
+        assert!(path.contains("repo/path@v1"), "{path}");
     }
 
     #[test]

@@ -3,7 +3,7 @@
   import { getShell } from "./context";
   import "./DiffPane.css";
   import { sampleImages } from "../sample";
-  import { onVirtualScroll, type SplitRow } from "../view";
+  import { onVirtualScroll, wrapPrefix, type SplitRow } from "../view";
   import type { Row, Side } from "./types";
   import { applyConflictChoice, mergeToolLabel, mergeToolMissing, openConflictTool } from "./diff.svelte";
   import BinaryDiff from "./BinaryDiff.svelte";
@@ -43,6 +43,8 @@
   });
 
   const hunkList = $derived(shell.mode === "live" && shell.section === "changes" ? shell.hunkRanges() : []);
+  const wrapLines = $derived(shell.settings.diffWordWrap && shell.settings.diffStyle !== "split" ? wrapPrefix(shell.diffLines) : null);
+  const wrapSplit = $derived(shell.settings.diffWordWrap && shell.settings.diffStyle === "split" ? wrapPrefix(shell.splitRows) : null);
   const conflictSelection = $derived(shell.section === "changes" ? shell.pickedConflicts() : []);
   const activeAt = $derived(hunkList.findIndex((range) => range.index === activeHunk));
 
@@ -138,16 +140,28 @@
     }
   }
 
-  function goMark(index: number) {
-    activeHunk = index;
-    hoveredHunk = index;
+  function goMark(line: number) {
+    const hunk = shell.hunkOf(line);
+    if (hunk != null) {
+      activeHunk = hunk;
+      hoveredHunk = hunk;
+      scrollToHunk(hunk);
+      return;
+    }
     const node = shell.diffEl;
     if (!node) return;
     if (shell.settings.diffStyle === "split") {
-      node.querySelector<HTMLElement>(`[data-line="${index}"]`)?.scrollIntoView({ block: "center" });
-      return;
+      const row = shell.splitRows.findIndex((item) => {
+        const left = shell.splitLineAt(item, "left");
+        const right = shell.splitLineAt(item, "right");
+        return left === line || right === line;
+      });
+      const units = wrapSplit ? (wrapSplit[Math.max(0, row)] ?? 0) : Math.max(0, row);
+      node.scrollTop = Math.max(0, units * shell.splitRowHeight);
+    } else {
+      const at = wrapLines ? (wrapLines[line] ?? line) : line;
+      node.scrollTop = Math.max(0, at * shell.diffRowHeight);
     }
-    node.scrollTop = Math.max(0, index * shell.diffRowHeight);
     shell.diffTop = node.scrollTop;
   }
 
@@ -161,9 +175,11 @@
         const right = shell.splitLineAt(item, "right");
         return (left != null && left >= range.start && left < range.end) || (right != null && right >= range.start && right < range.end);
       });
-      node.scrollTop = Math.max(0, (row < 0 ? 0 : row) * shell.splitRowHeight - 8);
+      const units = wrapSplit ? (wrapSplit[Math.max(0, row)] ?? 0) : Math.max(0, row);
+      node.scrollTop = Math.max(0, units * shell.splitRowHeight - 8);
     } else {
-      node.scrollTop = Math.max(0, range.start * shell.diffRowHeight - 8);
+      const at = wrapLines ? (wrapLines[range.start] ?? range.start) : range.start;
+      node.scrollTop = Math.max(0, at * shell.diffRowHeight - 8);
     }
     shell.diffTop = node.scrollTop;
   }

@@ -1051,6 +1051,8 @@ export function selectFile(shell: ShellState, path: string, side: Side, event?: 
     shell.blameLines = null;
     shell.diffAnchor = 0;
     shell.diffSelected = [];
+    shell.diffTop = 0;
+    if (shell.diffEl) shell.diffEl.scrollTop = 0;
     if (event?.shiftKey || event?.ctrlKey || event?.metaKey) {
       shell.picked = shell.picked.includes(path) ? shell.picked.filter((item) => item !== path) : [...shell.picked, path];
     } else {

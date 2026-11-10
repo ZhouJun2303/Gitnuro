@@ -149,6 +149,24 @@ fn discard_line_preserves_crlf_and_refuses_non_utf8() {
 }
 
 #[test]
+fn hunk_stage_preserves_non_utf8_bytes() {
+    let repo = repo();
+    let base = [0xff, b'\n', 0xfe, b'\n', b'a', b'\n'];
+    fs::write(repo.path.join("bin.txt"), base).unwrap();
+    repo.git(&["add", "bin.txt"]);
+    repo.git(&["commit", "-m", "base"]);
+    let changed = [0xff, b'\n', 0xfe, b'\n', b'b', b'\n'];
+    fs::write(repo.path.join("bin.txt"), changed).unwrap();
+
+    stage_hunk(&repo.path, "bin.txt", 0, false, false).unwrap();
+    assert_eq!(repo.raw(&["show", ":bin.txt"]).stdout, changed);
+    assert!(repo.output(&["diff", "--cached"]).contains("+b"));
+
+    stage_hunk(&repo.path, "bin.txt", 0, true, false).unwrap();
+    assert_eq!(repo.raw(&["show", ":bin.txt"]).stdout, base);
+}
+
+#[test]
 fn hunk_operations_follow_the_ignore_space_view() {
     let repo = repo();
     fs::write(repo.path.join("a.txt"), "a\nb\nc\nd\n").unwrap();

@@ -940,21 +940,56 @@ pub(crate) fn commit_config(repo: &Path) -> Vec<String> {
     prefix
 }
 
+fn askpass_dir() -> Option<&'static std::path::Path> {
+    static DIR: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        for attempt in 0..4 {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or(0);
+            let dir = std::env::temp_dir().join(format!("awegit-askpass-{}-{stamp}-{attempt}", std::process::id()));
+            match std::fs::create_dir(&dir) {
+                Ok(()) => {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+                    }
+                    return Some(dir);
+                }
+                Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(_) => return None,
+            }
+        }
+        None
+    })
+    .as_deref()
+}
+
+fn write_private(path: &std::path::Path, body: &str) -> Option<()> {
+    std::fs::write(path, body).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    Some(())
+}
+
 fn askpass_script() -> Option<String> {
-    let dir = std::env::temp_dir().join("awegit-askpass");
-    std::fs::create_dir_all(&dir).ok()?;
+    let dir = askpass_dir()?;
     let path = dir.join("ask.sh");
     let body = "#!/bin/sh\ncase \"$1\" in\n*[Uu]sername*)\n  printf '%s\\n' \"$AWE_ASK_USER\"\n  ;;\n*)\n  printf '%s\\n' \"$AWE_ASKPASS\"\n  ;;\nesac\n";
-    std::fs::write(&path, body).ok()?;
+    write_private(&path, body)?;
     Some(path.display().to_string().replace('\\', "/"))
 }
 
 fn gpg_wrapper() -> Option<String> {
-    let dir = std::env::temp_dir().join("awegit-askpass");
-    std::fs::create_dir_all(&dir).ok()?;
+    let dir = askpass_dir()?;
     let path = dir.join("gpgwrap.sh");
-    let body = "#!/bin/sh\ntmp=\"${TMP:-/tmp}/awegit-pass-$$\"\nprintf '%s\\n' \"$AWE_ASKPASS\" > \"$tmp\"\ngpg --batch --yes --pinentry-mode loopback --passphrase-file \"$tmp\" \"$@\"\ncode=$?\nrm -f \"$tmp\"\nexit $code\n";
-    std::fs::write(&path, body).ok()?;
+    let body = "#!/bin/sh\numask 077\ntmp=\"${TMP:-/tmp}/awegit-pass-$$\"\ntrap 'rm -f \"$tmp\"' EXIT INT TERM HUP\nprintf '%s\\n' \"$AWE_ASKPASS\" > \"$tmp\"\ngpg --batch --yes --pinentry-mode loopback --passphrase-file \"$tmp\" \"$@\"\n";
+    write_private(&path, body)?;
     Some(path.display().to_string().replace('\\', "/"))
 }
 

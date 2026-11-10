@@ -508,9 +508,29 @@ pub fn write_hidden_refs(repo: &Path, names: &[String]) -> Result<(), Error> {
     }
     let dir = absolute_git_dir(repo)?;
     let path = dir.join("awegit");
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let existing = read_local(&path)?;
     let next = rewrite_hidden_refs(&existing, names);
-    std::fs::write(&path, next).map_err(|source| Error::Read {
+    write_local(&path, &next)
+}
+
+fn read_local(path: &Path) -> Result<String, Error> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(text),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(source) => Err(Error::Read {
+            path: path.display().to_string(),
+            source,
+        }),
+    }
+}
+
+fn write_local(path: &Path, text: &str) -> Result<(), Error> {
+    let tmp = path.with_file_name("awegit.tmp");
+    std::fs::write(&tmp, text).map_err(|source| Error::Read {
+        path: tmp.display().to_string(),
+        source,
+    })?;
+    std::fs::rename(&tmp, path).map_err(|source| Error::Read {
         path: path.display().to_string(),
         source,
     })
@@ -705,23 +725,17 @@ pub fn write_sign_off(repo: &Path, enabled: bool, format: &str) -> Result<(), Er
     }
     let dir = absolute_git_dir(repo)?;
     let path = dir.join("awegit");
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let existing = read_local(&path)?;
     let next = rewrite_sign_off(&existing, enabled, format);
-    std::fs::write(&path, next).map_err(|source| Error::Read {
-        path: path.display().to_string(),
-        source,
-    })
+    write_local(&path, &next)
 }
 
 fn rewrite_local_key(repo: &Path, section: &str, key: &str, names: &[String]) -> Result<(), Error> {
     let dir = absolute_git_dir(repo)?;
     let path = dir.join("awegit");
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let existing = read_local(&path)?;
     let next = rewrite_key(&existing, section, key, names);
-    std::fs::write(&path, next).map_err(|source| Error::Read {
-        path: path.display().to_string(),
-        source,
-    })
+    write_local(&path, &next)
 }
 
 fn rewrite_key(text: &str, want_section: &str, want_key: &str, names: &[String]) -> String {

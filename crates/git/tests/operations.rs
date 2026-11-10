@@ -839,6 +839,40 @@ fn hidden_refs_stay_in_the_repository_file() {
 }
 
 #[test]
+fn unreadable_awegit_file_is_not_replaced() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "a\n", "base");
+    let path = repo.path.join(".git").join("awegit");
+    let original = [0xff, 0xfe, b'\n'];
+    fs::write(&path, original).unwrap();
+    let error = perform(
+        &repo.path,
+        Mutation::SetHidden { names: vec!["wip".into()] },
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("awegit"), "{error}");
+    assert_eq!(fs::read(&path).unwrap(), original);
+}
+
+#[cfg(windows)]
+#[test]
+fn custom_command_refuses_cmd_metacharacters() {
+    let repo = repo();
+    let error = perform(
+        &repo.path,
+        Mutation::Custom {
+            command: "echo ${repo}".into(),
+            repo: "C:\\a&b".into(),
+            sha: String::new(),
+            branch: String::new(),
+            file: String::new(),
+        },
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("refusing"), "{error}");
+}
+
+#[test]
 fn custom_command_expands_placeholders() {
     let repo = repo();
     let output = perform(

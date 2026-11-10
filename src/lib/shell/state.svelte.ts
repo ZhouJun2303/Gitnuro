@@ -2631,10 +2631,11 @@ export class ShellState {
     try {
       const gen = this.statusGen;
       const value = await invoke<StatusSnapshot>("workspace_status", { path });
-      if (gen !== this.statusGen || !this.viewing(path)) return;
-      this.applySnapshot(value);
-      if (scope === "full") await this.loadContext();
-      if (this.viewing(path)) await this.loadDiff();
+      if (gen === this.statusGen && this.viewing(path)) {
+        this.applySnapshot(value);
+        if (scope === "full") await this.loadContext();
+        if (this.viewing(path)) await this.loadDiff();
+      }
     } catch (error) {
       if (this.viewing(path)) {
         const text = this.message(error);
@@ -2644,10 +2645,10 @@ export class ShellState {
     } finally {
       this.refreshing = false;
       if (!silent) this.stopWork(path);
+      const next = this.refreshQueued;
+      this.refreshQueued = null;
+      if (next && this.viewing(path)) await this.refresh(next, silent);
     }
-    const next = this.refreshQueued;
-    this.refreshQueued = null;
-    if (next && this.viewing(path)) await this.refresh(next, silent);
   }
 
 
@@ -3460,13 +3461,14 @@ export class ShellState {
     const path = this.repoPath() ?? "";
     if (!force && this.facts && this.factsPath === path) return this.facts;
     try {
-      const value = await invoke<RepoFacts>("repo_facts", { path: this.repoPath(), full });
+      const value = await invoke<RepoFacts>("repo_facts", { path, full });
+      if (!this.viewing(path)) return null;
       const kept = !full && this.facts && this.factsPath === path ? { ignored: this.facts.ignored, weekday: this.facts.weekday, hour: this.facts.hour, lfs: this.facts.lfs, hot: this.facts.hot } : {};
       this.facts = { ...value, ...kept };
       this.factsPath = path;
       return this.facts;
     } catch (error) {
-      this.actionError = this.message(error);
+      if (this.viewing(path)) this.actionError = this.message(error);
       return null;
     }
   }

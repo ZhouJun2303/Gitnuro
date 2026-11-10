@@ -364,8 +364,7 @@ pub fn stage_hunk(repo: &Path, path: &str, index: u32, unstage: bool, ignore_spa
     args.push("--");
     args.push(path);
     let output = run(repo, &args)?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let (preamble, hunks) = split_hunks(&text);
+    let (preamble, hunks) = split_hunks_bytes(&output.stdout);
     if hunks.is_empty() {
         if !unstage && index == 0 && !in_index(repo, path)? {
             return stage_paths(repo, &[path.to_string()]);
@@ -373,16 +372,16 @@ pub fn stage_hunk(repo: &Path, path: &str, index: u32, unstage: bool, ignore_spa
         return Err(Error::Git(format!("hunk {index} is not in {path}")));
     }
     let hunk = hunks.get(index as usize).ok_or_else(|| Error::Git(format!("hunk {index} is not in {path}")))?;
-    let mut patch = preamble;
-    patch.push_str(hunk);
-    if !patch.ends_with('\n') {
-        patch.push('\n');
+    let mut patch = preamble.to_vec();
+    patch.extend_from_slice(hunk);
+    if !patch.ends_with(b"\n") {
+        patch.push(b'\n');
     }
     let mut apply = vec!["apply", "--cached", "--unidiff-zero"];
     if unstage {
         apply.push("--reverse");
     }
-    run_stdin(repo, &apply, patch.as_bytes()).map(|_| ())
+    run_stdin(repo, &apply, &patch).map(|_| ())
 }
 
 /// Stage or unstage one added or removed line. `at` is the index carried on that diff line.
@@ -415,15 +414,14 @@ pub fn discard_hunk(repo: &Path, path: &str, index: u32, ignore_space: bool) -> 
     args.push("--");
     args.push(path);
     let output = run(repo, &args)?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let (preamble, hunks) = split_hunks(&text);
+    let (preamble, hunks) = split_hunks_bytes(&output.stdout);
     let hunk = hunks.get(index as usize).ok_or_else(|| Error::Git(format!("hunk {index} is not in {path}")))?;
-    let mut patch = preamble;
-    patch.push_str(hunk);
-    if !patch.ends_with('\n') {
-        patch.push('\n');
+    let mut patch = preamble.to_vec();
+    patch.extend_from_slice(hunk);
+    if !patch.ends_with(b"\n") {
+        patch.push(b'\n');
     }
-    run_stdin(repo, &["apply", "--reverse", "--unidiff-zero"], patch.as_bytes()).map(|_| ())
+    run_stdin(repo, &["apply", "--reverse", "--unidiff-zero"], &patch).map(|_| ())
 }
 
 /// Drop or restore one unstaged line in the work tree.
@@ -1028,28 +1026,25 @@ fn index_mode(repo: &Path, path: &str) -> String {
         .to_string()
 }
 
-fn split_hunks(text: &str) -> (String, Vec<String>) {
-    let mut preamble = String::new();
-    let mut hunks = Vec::new();
-    let mut current = String::new();
-    let mut in_hunk = false;
-    for line in text.split_inclusive('\n') {
-        if line.starts_with("@@") {
-            if in_hunk {
-                hunks.push(std::mem::take(&mut current));
-            }
-            in_hunk = true;
+/// Byte-level variant: non-UTF-8 file contents must reach `git apply` unchanged.
+fn split_hunks_bytes(text: &[u8]) -> (&[u8], Vec<&[u8]>) {
+    let mut starts = Vec::new();
+    let mut offset = 0;
+    for line in text.split_inclusive(|byte| *byte == b'\n') {
+        if line.starts_with(b"@@") {
+            starts.push(offset);
         }
-        if in_hunk {
-            current.push_str(line);
-        } else {
-            preamble.push_str(line);
-        }
+        offset += line.len();
     }
-    if in_hunk && !current.is_empty() {
-        hunks.push(current);
+    let Some(&first) = starts.first() else {
+        return (text, Vec::new());
+    };
+    let mut hunks = Vec::with_capacity(starts.len());
+    for (index, &start) in starts.iter().enumerate() {
+        let end = starts.get(index + 1).copied().unwrap_or(text.len());
+        hunks.push(&text[start..end]);
     }
-    (preamble, hunks)
+    (&text[..first], hunks)
 }
 
 /// Unified diff for one path. `staged` selects the index rather than the work tree.
@@ -1830,6 +1825,11 @@ fn is_batch(program: &str) -> bool {
 
 fn spawn_tool(program: &str, args: &[String], cwd: &Path) -> std::io::Result<std::process::Child> {
     if is_batch(program) {
+        // cmd.exe reads its own command line, so an ampersand in a repository path
+        // becomes a second command even when Rust quotes the argument.
+        if !batch_argument_safe(program) || args.iter().any(|arg| !batch_argument_safe(arg)) {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "a batch tool path or argument contains a cmd.exe metacharacter"));
+        }
         // CreateProcess cannot run a batch file (os error 193). cmd.exe can.
         // Arguments stay separate so Rust quotes paths that contain spaces.
         let mut command = std::process::Command::new("cmd.exe");
@@ -1842,6 +1842,10 @@ fn spawn_tool(program: &str, args: &[String], cwd: &Path) -> std::io::Result<std
         return command.spawn();
     }
     std::process::Command::new(program).args(args).current_dir(cwd).spawn()
+}
+
+fn batch_argument_safe(value: &str) -> bool {
+    !value.chars().any(|ch| matches!(ch, '"' | '%' | '&' | '|' | '<' | '>' | '^' | '(' | ')' | '\r' | '\n'))
 }
 
 fn expand_template(template: &str, vars: &[(&str, &str)]) -> String {

@@ -310,11 +310,14 @@ export async function openTextMerge(shell: ShellState, file: string) {
     shell.section = "changes";
     const already = shell.selectedPath === file;
     shell.selectedPath = file;
+    const path = shell.repoPath();
+    const stillOpen = () => shell.mode !== "live" || (shell.viewing(path) && shell.selectedPath === file);
     let view = shell.mode === "sample" ? sampleConflictViews[file] : already ? shell.activeConflict : null;
     if (shell.mode === "live" && !view) {
       try {
-        view = await invoke<ConflictView>("conflict_view", { path: shell.repoPath(), file });
-        if (shell.selectedPath === file) shell.conflictView = view;
+        view = await invoke<ConflictView>("conflict_view", { path, file });
+        if (!stillOpen()) return;
+        shell.conflictView = view;
       } catch (error) {
         shell.actionError = shell.message(error);
         return;
@@ -328,7 +331,8 @@ export async function openTextMerge(shell: ShellState, file: string) {
       return;
     }
     try {
-      const sides = shell.mode === "sample" ? sampleConflictText[file] : await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
+      const sides = shell.mode === "sample" ? sampleConflictText[file] : await invoke<ConflictSides>("conflict_sides", { path, file });
+      if (!stillOpen()) return;
       if (!sides || sidesTooBig(sides)) {
         showFileMerge(shell, file);
         return;
@@ -534,8 +538,14 @@ export async function openForge(shell: ShellState, kind: "notes" | "pulls") {
       shell.pulls = samplePulls;
       return;
     }
-    if (kind === "notes") shell.notices = await invoke<({ id: string; title: string; url: string; unread: boolean }[])>("forge_notifications").catch(() => []);
-    else shell.pulls = await invoke<({ title: string; author: string; branch: string; url: string }[])>("forge_pulls", { path: shell.repoPath() }).catch(() => []);
+    const path = shell.repoPath();
+    if (kind === "notes") {
+      const notices = await invoke<({ id: string; title: string; url: string; unread: boolean }[])>("forge_notifications").catch(() => []);
+      if (shell.viewing(path)) shell.notices = notices;
+    } else {
+      const pulls = await invoke<({ title: string; author: string; branch: string; url: string }[])>("forge_pulls", { path }).catch(() => []);
+      if (shell.viewing(path)) shell.pulls = pulls;
+    }
   }
 
 export function setRebaseVerb(shell: ShellState, rev: string, verb: string) {
@@ -556,16 +566,17 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
     const messageText = shell.fullSummary.trim();
     if (!messageText) return;
     const description = isCommentary(shell.description) ? "" : shell.description;
+    const path = shell.repoPath();
     const value = await shell.runChange("commit_changes", { summary: messageText, description, amend: shell.amend, signOff: shell.signOff, skipHooks: shell.skipHooks });
     if (value === undefined) return;
     const failed = value ? "" : (shell.actionError ?? "");
     shell.recordCommand("commit", { title: shell.tr("chrome.commandCommit", { name: messageText || "HEAD" }), command: shell.gitLine(["commit", "-m", messageText]) }, (value?.log ?? failed).trim(), !!value, "user");
-    if (!shell.actionError) {
+    if (!shell.actionError && shell.viewing(path)) {
       shell.summary = "";
       shell.description = "";
       shell.amend = false;
       shell.skipHooks = false;
-      if (shell.snapshot?.path) shell.drafts.delete(shell.snapshot.path);
+      if (path) shell.drafts.delete(path);
       await shell.loadContext();
       void shell.fillTemplate();
       if (pushAfter || shell.settings.pushOnCommit) await shell.doPush();
@@ -1530,7 +1541,12 @@ export function openRebase(shell: ShellState) {
     shell.rebaseConflictFiles = [];
     shell.dialog = "rebase";
     if (shell.mode === "live") {
-      void invoke<string[]>("rebase_conflicts", { path: shell.repoPath(), onto: shell.selectedCommit }).then((files) => (shell.rebaseConflictFiles = files)).catch(() => (shell.rebaseConflictFiles = []));
+      const path = shell.repoPath();
+      const onto = shell.selectedCommit;
+      const stillEditing = () => shell.dialog === "rebase" && shell.mode === "live" && shell.selectedCommit === onto && shell.viewing(path);
+      void invoke<string[]>("rebase_conflicts", { path, onto })
+        .then((files) => { if (stillEditing()) shell.rebaseConflictFiles = files; })
+        .catch(() => { if (stillEditing()) shell.rebaseConflictFiles = []; });
     }
   }
 
