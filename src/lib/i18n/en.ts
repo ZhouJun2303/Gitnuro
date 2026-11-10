@@ -637,6 +637,7 @@ export const en: Messages = {
     mergeConflictTitle: "Merge Conflict",
     mergeConflictBody: "Automatic merge failed. Fix conflicts and then commit the result.",
     setRemoteUrl: "Set URL",
+    remoteNameAuto: "Remote name: {name}",
     squashHint: "Uses the selected commit through HEAD, or the consecutive commits you checked. Later commits are replayed. The range must contain no merge.",
     httpsLogin: "HTTPS login",
     httpsHint: "The password is sent to git credential approve and is not saved in settings.",

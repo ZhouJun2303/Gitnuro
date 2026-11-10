@@ -465,7 +465,8 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draftUser = "实验室标签";
       break;
     case "remote":
-      shell.draft = "origin";
+      shell.remoteEdit = false;
+      shell.draft = "";
       shell.draftExtra = "https://example.com/lab/repo.git";
       break;
     case "squash":

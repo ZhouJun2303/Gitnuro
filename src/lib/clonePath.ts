@@ -62,6 +62,17 @@ export function repoNameFromUrl(url: string): string {
   return safeFolderName(name);
 }
 
+/** A git-valid remote name taken from the URL, so the add-remote dialog never asks for one. */
+export function remoteNameFromUrl(url: string): string {
+  const base = repoNameFromUrl(remoteFromText(url) || url)
+    .replace(/\s+/g, "-")
+    .replace(/[~^:?*[\]\\{}@]/g, "")
+    .replace(/\.{2,}/g, ".")
+    .replace(/^[./-]+|[./]+$/g, "")
+    .replace(/\.lock$/i, "");
+  return base || "origin";
+}
+
 export function safeFolderName(name: string): string {
   const cleaned = name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "").replace(/[. ]+$/g, "").trim();
   if (!cleaned || cleaned === "." || cleaned === ".." || /^(con|prn|aux|nul|com\d|lpt\d)$/i.test(cleaned)) return "";

@@ -7,7 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { commits, diffs, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
-import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, repoNameFromUrl, safeFolderName } from "../clonePath";
+import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, remoteNameFromUrl, repoNameFromUrl, safeFolderName } from "../clonePath";
 import { featuresPageUrl } from "../featuresPage";
 import { resolveLocale, translate } from "../i18n";
 import { isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, type CommitType } from "./commitMessage";
@@ -552,6 +552,10 @@ export class ShellState {
 
 
   draftExtra = $state("");
+
+
+  /** The remote dialog edits an existing remote's URL instead of adding one. */
+  remoteEdit = $state(false);
 
 
   mergeInto = $state("");
@@ -3715,6 +3719,17 @@ export class ShellState {
     const fromUpstream = upstream.startsWith(`${remoteName}/`) ? upstream.slice(remoteName.length + 1) : "";
     const same = this.snapshot?.branch ?? "";
     return [fromUpstream, same].find((name) => name && branches.includes(name)) ?? branches[0] ?? same;
+  }
+
+
+
+  /** The name an added remote gets: derived from its URL and kept unique. */
+  remoteName() {
+    const base = remoteNameFromUrl(this.draftExtra);
+    const taken = new Set((this.refs?.remotes ?? []).map((remote) => remote.name));
+    let name = base;
+    for (let index = 2; taken.has(name); index += 1) name = `${base}-${index}`;
+    return name;
   }
 
 

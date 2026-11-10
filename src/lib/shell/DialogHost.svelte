@@ -130,7 +130,10 @@
             await shell.mutate({ action: "tag", name: shell.draft, rev: shell.draftExtra || "HEAD", message: shell.draftUser });
             if (!shell.actionError && shell.settings.pushTagOnCreate) await shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease });
           }
-          else if (shell.dialog === "remote") void shell.mutate({ action: "addRemote", name: shell.draft, url: shell.draftExtra });
+          else if (shell.dialog === "remote") {
+            if (shell.remoteEdit) void shell.mutate({ action: "setRemoteUrl", name: shell.draft, url: shell.draftExtra });
+            else void shell.mutate({ action: "addRemote", name: shell.remoteName(), url: shell.draftExtra });
+          }
           else if (shell.dialog === "fetch") {
             const remote = shell.syncAll ? null : shell.draft || null;
             const prune = shell.settings.fetchPrune;
@@ -691,12 +694,13 @@
           </div>
         {:else if shell.dialog === "remote"}
           <h2>{shell.tr("chrome.groupRemote")}</h2>
-          <label>{shell.tr("dialog.name")}<input bind:value={shell.draft} /></label>
-          <label>{shell.tr("dialog.url")}<input bind:value={shell.draftExtra} /></label>
+          <label>{shell.tr("dialog.url")}<input placeholder="https://github.com/org/repo.git" bind:value={shell.draftExtra} /></label>
+          {#if !shell.remoteEdit && shell.draftExtra.trim()}
+            <p class="empty">{shell.tr("dialog.remoteNameAuto", { name: shell.remoteName() })}</p>
+          {/if}
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="text-button" type="button" onclick={() => shell.mutate({ action: "setRemoteUrl", name: shell.draft, url: shell.draftExtra })}>{shell.tr("dialog.setRemoteUrl")}</button>
-            <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.create")}</button>
+            <button class="commit" type="submit" disabled={shell.writing || !shell.draftExtra.trim()}>{shell.tr(shell.remoteEdit ? "dialog.setRemoteUrl" : "dialog.create")}</button>
           </div>
         {:else if shell.dialog === "squash"}
           <h2>{shell.tr("dialog.squash")}</h2>

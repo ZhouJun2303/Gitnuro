@@ -637,6 +637,7 @@ export type Messages = {
     mergeConflictTitle: string;
     mergeConflictBody: string;
     setRemoteUrl: string;
+    remoteNameAuto: string;
     squashHint: string;
     httpsLogin: string;
     httpsHint: string;
