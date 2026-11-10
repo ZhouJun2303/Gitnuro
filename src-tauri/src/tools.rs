@@ -177,14 +177,6 @@ fn common_presets() -> Vec<CommonTool> {
     rows
 }
 
-pub fn file_suffix(file: &str) -> String {
-    let leaf = Path::new(file).file_name().and_then(|name| name.to_str()).unwrap_or(file);
-    match leaf.rfind('.') {
-        Some(at) if at > 0 && at + 1 < leaf.len() => leaf[at + 1..].to_ascii_lowercase(),
-        _ => String::new(),
-    }
-}
-
 pub fn normalize_extension(value: &str) -> String {
     let text = value.trim();
     if text == "*" {
@@ -195,24 +187,24 @@ pub fn normalize_extension(value: &str) -> String {
 }
 
 fn tool_is_generic(tool: &crate::settings::ToolRecord) -> bool {
-    tool.extensions.is_empty() || tool.extensions.iter().all(|item| normalize_extension(item) == "*")
+    tool.fallback || tool.extensions.is_empty() || tool.extensions.iter().all(|item| normalize_extension(item) == "*")
 }
 
-fn tool_matches(tool: &crate::settings::ToolRecord, suffix: &str) -> bool {
-    !suffix.is_empty()
-        && tool.extensions.iter().any(|item| {
-            let value = normalize_extension(item);
-            value == "*" || value == suffix
-        })
+fn tool_matches(tool: &crate::settings::ToolRecord, file: &str) -> bool {
+    let leaf = Path::new(file).file_name().and_then(|name| name.to_str()).unwrap_or(file).to_ascii_lowercase();
+    tool.extensions.iter().any(|item| {
+        let value = normalize_extension(item);
+        value == "*" || (!value.is_empty() && (leaf == value || leaf.ends_with(&format!(".{value}"))))
+    })
 }
 
-/// The first tool for this file: an exact extension match wins, then an all-files
-/// tool, then the top of the list. Ties keep list order, which is the priority.
+/// The first tool for this file: an exact extension match wins, then the
+/// fallback tool, then an all-files tool, then the top of the list.
 pub fn pick_tool<'a>(tools: &'a [crate::settings::ToolRecord], file: &str) -> Option<&'a crate::settings::ToolRecord> {
-    let suffix = file_suffix(file);
     tools
         .iter()
-        .find(|tool| tool_matches(tool, &suffix))
+        .find(|tool| tool_matches(tool, file))
+        .or_else(|| tools.iter().find(|tool| tool.fallback))
         .or_else(|| tools.iter().find(|tool| tool_is_generic(tool)))
         .or_else(|| tools.first())
 }
@@ -482,11 +474,14 @@ mod tests {
             path: format!("{id}.exe"),
             args: String::new(),
             extensions: extensions.iter().map(|item| (*item).to_string()).collect(),
+            fallback: extensions.is_empty(),
         };
         let list = vec![tool("generic", &[]), tool("sheet", &["xlsx"]), tool("sheet2", &["*.XLSX"])];
         assert_eq!(pick_tool(&list, "data/book.xlsx").unwrap().id, "sheet");
         assert_eq!(pick_tool(&list, "src/main.rs").unwrap().id, "generic");
         assert_eq!(pick_tool(&list, "README").unwrap().id, "generic");
         assert_eq!(pick_tool(&[tool("only", &["txt"])], "a.md").unwrap().id, "only");
+        let archives = vec![tool("generic", &[]), tool("archive", &["tar.gz"])];
+        assert_eq!(pick_tool(&archives, "bundle.tar.gz").unwrap().id, "archive");
     }
 }

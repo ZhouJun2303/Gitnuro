@@ -8,6 +8,11 @@
 
   type ToolKind = "diff" | "merge";
 
+  let typeSuffix = $state("");
+  let typeToolId = $state("");
+  const kindTools = $derived(shell.toolsOf(shell.toolKind));
+  const addToolPick = $derived(kindTools.find((tool) => tool.id === typeToolId) ?? kindTools[0] ?? null);
+
   async function importSource(kind: ToolKind, source: "detected" | "common") {
     const count = await shell.importTools(kind, source);
     shell.forkImportNote = count > 0
@@ -165,7 +170,7 @@
               <div class="tool-list">
                 {#each tools as tool, index (tool.id)}
                   <button type="button" class:on={picked?.id === tool.id} title={tool.path} onclick={() => shell.selectTool(tool.id)}>
-                    <span class="tool-title"><em class="tool-rank">{index + 1}</em>{shell.toolLabel(tool) || shell.tr("dialog.toolUntitled")}</span>
+                    <span class="tool-title"><em class="tool-rank">{index + 1}</em>{shell.toolLabel(tool) || shell.tr("dialog.toolUntitled")}{#if tool.fallback}<em class="tool-default">{shell.tr("dialog.toolDefault")}</em>{/if}</span>
                     <span class="tool-path">{tool.path || shell.tr("dialog.toolNoPath")}</span>
                     <span class="tool-path">{tool.extensions.length ? shell.toolExtensionLabel(tool) : shell.tr("dialog.toolAllFiles")}</span>
                   </button>
@@ -209,9 +214,40 @@
               <div class="tool-types">
                 <div class="k">{shell.tr("dialog.toolFileTypes")}</div>
                 {#each shell.toolTypeRows(kind) as row (row.key)}
-                  <div class="tool-type-row"><span>{row.label}</span><span>{row.tool ? shell.toolLabel(row.tool) : shell.tr("dialog.toolNone")}</span></div>
+                  {#if row.key === "*"}
+                    <div class="tool-type-row" data-suffix="*">
+                      <span class="tool-type-ext">*</span>
+                      <select value={row.tool?.id ?? ""} aria-label={shell.tr("dialog.toolTypePick")} onchange={(event) => shell.setFallbackTool(kind, event.currentTarget.value)}>
+                        {#if !row.tool}<option value="">{shell.tr("dialog.toolNone")}</option>{/if}
+                        {#each tools as tool (tool.id)}
+                          <option value={tool.id}>{shell.toolLabel(tool)}</option>
+                        {/each}
+                      </select>
+                      <span></span>
+                    </div>
+                  {:else}
+                    <div class="tool-type-row" data-suffix={row.key}>
+                      <input class="tool-type-ext" value={row.key} aria-label={shell.tr("dialog.toolTypeSuffix")} onchange={(event) => shell.renameToolType(kind, row.key, event.currentTarget.value)} />
+                      <select value={row.tool?.id ?? ""} aria-label={shell.tr("dialog.toolTypePick")} onchange={(event) => shell.assignToolType(kind, row.key, event.currentTarget.value)}>
+                        {#if !row.tool}<option value="">{shell.tr("dialog.toolNone")}</option>{/if}
+                        {#each tools as tool (tool.id)}
+                          <option value={tool.id}>{shell.toolLabel(tool)}</option>
+                        {/each}
+                      </select>
+                      <button class="text-button" type="button" title={shell.tr("dialog.toolRemove")} aria-label={shell.tr("dialog.toolRemove")} onclick={() => shell.removeToolType(kind, row.key)}>×</button>
+                    </div>
+                  {/if}
                 {/each}
-                <p class="empty">{shell.tr("dialog.toolPriorityHint")}</p>
+                <div class="tool-type-add">
+                  <input placeholder="xlsx" aria-label={shell.tr("dialog.toolTypeSuffix")} bind:value={typeSuffix} />
+                  <select aria-label={shell.tr("dialog.toolTypePick")} value={addToolPick?.id ?? ""} onchange={(event) => (typeToolId = event.currentTarget.value)}>
+                    {#each tools as tool (tool.id)}
+                      <option value={tool.id}>{shell.toolLabel(tool)}</option>
+                    {/each}
+                  </select>
+                  <button class="text-button" type="button" disabled={!typeSuffix.trim() || !addToolPick} onclick={() => { if (!addToolPick) return; shell.assignToolType(kind, typeSuffix, addToolPick.id); typeSuffix = ""; }}>{shell.tr("dialog.toolAdd")}</button>
+                </div>
+                <p class="empty">{shell.tr("dialog.toolTypeHint")}</p>
               </div>
             {/if}
             <div class="k">{shell.tr("dialog.shell")}</div>

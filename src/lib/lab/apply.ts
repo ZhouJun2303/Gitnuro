@@ -696,16 +696,16 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
 
 function diffFixtures(): ToolRecord[] {
   return [
-    { id: "lab-diff-xlsx", name: "ExcelMergeFork", path: "D:\\MyGit\\ForkExcelMergeTool\\ExcelMergeFork.exe", args: "\"{right}\" \"{left}\"", extensions: ["xlsx", "xls"] },
-    { id: "lab-diff-bc", name: "Beyond Compare", path: "C:\\Program Files\\Beyond Compare 4\\BCompare.exe", args: "{left} {right}", extensions: [] },
-    { id: "lab-diff-code", name: "VS Code", path: "C:\\Program Files\\Microsoft VS Code\\Code.exe", args: "--diff \"{left}\" \"{right}\"", extensions: ["json", "ts", "svelte"] },
+    { id: "lab-diff-xlsx", name: "ExcelMergeFork", path: "D:\\MyGit\\ForkExcelMergeTool\\ExcelMergeFork.exe", args: "\"{right}\" \"{left}\"", extensions: ["xlsx", "xls"], fallback: false },
+    { id: "lab-diff-bc", name: "Beyond Compare", path: "C:\\Program Files\\Beyond Compare 4\\BCompare.exe", args: "{left} {right}", extensions: [], fallback: true },
+    { id: "lab-diff-code", name: "VS Code", path: "C:\\Program Files\\Microsoft VS Code\\Code.exe", args: "--diff \"{left}\" \"{right}\"", extensions: ["json", "ts", "svelte"], fallback: false },
   ];
 }
 
 function mergeFixtures(): ToolRecord[] {
   return [
-    { id: "lab-merge-xlsx", name: "ExcelMergeFork", path: "D:\\MyGit\\ForkExcelMergeTool\\ExcelMergeFork.exe", args: "{ours},{base},{theirs},{working}", extensions: ["xlsx", "xls"] },
-    { id: "lab-merge-bc", name: "Beyond Compare", path: "C:\\Program Files\\Beyond Compare 4\\BCompare.exe", args: "{ours} {theirs} {base} {working}", extensions: [] },
+    { id: "lab-merge-xlsx", name: "ExcelMergeFork", path: "D:\\MyGit\\ForkExcelMergeTool\\ExcelMergeFork.exe", args: "{ours},{base},{theirs},{working}", extensions: ["xlsx", "xls"], fallback: false },
+    { id: "lab-merge-bc", name: "Beyond Compare", path: "C:\\Program Files\\Beyond Compare 4\\BCompare.exe", args: "{ours} {theirs} {base} {working}", extensions: [], fallback: true },
   ];
 }
 

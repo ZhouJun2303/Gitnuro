@@ -987,7 +987,16 @@ export function toolsOf(shell: ShellState, kind: ToolKind): ToolRecord[] {
   }
 
 function setTools(shell: ShellState, kind: ToolKind, tools: ToolRecord[]) {
-    shell.settings = kind === "merge" ? { ...shell.settings, mergeTools: tools } : { ...shell.settings, diffTools: tools };
+    const next = ensureFallback(tools);
+    shell.settings = kind === "merge" ? { ...shell.settings, mergeTools: next } : { ...shell.settings, diffTools: next };
+  }
+
+/** One tool owns the fallback for files that match no extension rule. */
+function ensureFallback(tools: ToolRecord[]) {
+    if (tools.length === 0 || tools.some((tool) => tool.fallback)) return tools;
+    const empty = tools.findIndex((tool) => tool.extensions.length === 0);
+    const at = empty >= 0 ? empty : 0;
+    return tools.map((tool, index) => (index === at ? { ...tool, fallback: true } : tool));
   }
 
 export function newToolId() {
@@ -1007,22 +1016,22 @@ export function toolFileSuffix(file: string) {
   }
 
 export function toolIsGeneric(tool: ToolRecord) {
-    return tool.extensions.length === 0 || tool.extensions.every((item) => normalizeToolExtension(item) === "*");
+    return tool.fallback || tool.extensions.length === 0 || tool.extensions.every((item) => normalizeToolExtension(item) === "*");
   }
 
-function toolMatches(tool: ToolRecord, suffix: string) {
-    if (!suffix) return false;
+function toolMatches(tool: ToolRecord, file: string) {
+    const leaf = (file.split(/[/\\]/).pop() ?? file).toLowerCase();
     return tool.extensions.some((item) => {
       const value = normalizeToolExtension(item);
-      return value === "*" || value === suffix;
+      if (value === "*") return true;
+      return value.length > 0 && (leaf === value || leaf.endsWith(`.${value}`));
     });
   }
 
 /** Exact suffix matches first, then all-files tools. List order is the priority. */
 export function applicableTools(shell: ShellState, kind: ToolKind, file: string) {
     const tools = toolsOf(shell, kind);
-    const suffix = toolFileSuffix(file);
-    const exact = tools.filter((tool) => toolMatches(tool, suffix));
+    const exact = tools.filter((tool) => toolMatches(tool, file));
     const generic = tools.filter((tool) => toolIsGeneric(tool) && !exact.includes(tool));
     const ordered = [...exact, ...generic];
     return ordered.length > 0 ? ordered : tools;
@@ -1030,7 +1039,7 @@ export function applicableTools(shell: ShellState, kind: ToolKind, file: string)
 
 export function defaultTool(shell: ShellState, kind: ToolKind) {
     const tools = toolsOf(shell, kind);
-    return tools.find(toolIsGeneric) ?? tools[0] ?? null;
+    return tools.find((tool) => tool.fallback) ?? tools.find(toolIsGeneric) ?? tools[0] ?? null;
   }
 
 export function resolvedTool(shell: ShellState, kind: ToolKind, file: string) {
@@ -1045,7 +1054,12 @@ export function toolLabel(tool: Pick<ToolRecord, "name" | "path"> | ExternalTool
   }
 
 export function toolExtensionLabel(tool: ToolRecord) {
-    return toolIsGeneric(tool) ? "*" : tool.extensions.map((item) => `.${normalizeToolExtension(item)}`).join(" ");
+    const parts = tool.extensions
+      .map(normalizeToolExtension)
+      .filter((item) => item.length > 0 && item !== "*")
+      .map((item) => `.${item}`);
+    if (tool.fallback) parts.unshift("*");
+    return parts.length > 0 ? parts.join(" ") : "*";
   }
 
 export function toolTemplate(shell: ShellState, kind: ToolKind, file: string) {
@@ -1071,7 +1085,7 @@ export function selectTool(shell: ShellState, toolId: string) {
   }
 
 export function addTool(shell: ShellState, kind: ToolKind) {
-    const tool: ToolRecord = { id: newToolId(), name: "", path: "", args: "", extensions: [] };
+    const tool: ToolRecord = { id: newToolId(), name: "", path: "", args: "", extensions: [], fallback: false };
     setTools(shell, kind, [...toolsOf(shell, kind), tool]);
     shell.toolPick = tool.id;
     void shell.savePrefs(false);
@@ -1128,8 +1142,72 @@ export function toolTypeRows(shell: ShellState, kind: ToolKind) {
       label: `.${suffix}`,
       tool: tools.find((tool) => tool.extensions.some((item) => normalizeToolExtension(item) === suffix)) ?? null,
     }));
-    rows.push({ key: "*", label: "*", tool: tools.find(toolIsGeneric) ?? null });
+    rows.push({ key: "*", label: "*", tool: defaultTool(shell, kind) });
     return rows;
+  }
+
+export function setFallbackTool(shell: ShellState, kind: ToolKind, toolId: string) {
+    if (!toolId) return;
+    const tools = toolsOf(shell, kind).map((tool) => ({ ...tool, fallback: tool.id === toolId }));
+    setTools(shell, kind, tools);
+    applyToolSettings(shell);
+    void shell.savePrefs(false);
+  }
+
+function cleanedExtensions(extensions: string[]) {
+    return [...new Set(
+      extensions
+        .map(normalizeToolExtension)
+        .filter((item) => item.length > 0 && item !== "*"),
+    )];
+  }
+
+/** Move `suffix` to `toolId`; every other tool loses it. */
+export function assignToolType(shell: ShellState, kind: ToolKind, suffix: string, toolId: string) {
+    const extension = normalizeToolExtension(suffix);
+    if (!extension || extension === "*" || !toolId) return;
+    const tools = toolsOf(shell, kind).map((tool) => tool.id === toolId
+      ? { ...tool, extensions: cleanedExtensions([...tool.extensions, extension]) }
+      : { ...tool, extensions: tool.extensions.filter((item) => normalizeToolExtension(item) !== extension) });
+    setTools(shell, kind, tools);
+    applyToolSettings(shell);
+    void shell.savePrefs(false);
+  }
+
+export function removeToolType(shell: ShellState, kind: ToolKind, suffix: string) {
+    const extension = normalizeToolExtension(suffix);
+    if (!extension || extension === "*") return;
+    const tools = toolsOf(shell, kind).map((tool) => ({
+      ...tool,
+      extensions: tool.extensions.filter((item) => normalizeToolExtension(item) !== extension),
+    }));
+    setTools(shell, kind, tools);
+    applyToolSettings(shell);
+    void shell.savePrefs(false);
+  }
+
+/** Rename a suffix in place, keeping the tool that owns it. */
+export function renameToolType(shell: ShellState, kind: ToolKind, oldSuffix: string, newSuffix: string) {
+    const from = normalizeToolExtension(oldSuffix);
+    const to = normalizeToolExtension(newSuffix);
+    if (!from || from === "*" || from === to) return;
+    if (!to || to === "*") {
+      removeToolType(shell, kind, from);
+      return;
+    }
+    const owner = toolsOf(shell, kind).find((tool) => tool.extensions.some((item) => normalizeToolExtension(item) === from));
+    if (!owner) return;
+    const tools = toolsOf(shell, kind).map((tool) => {
+      const extensions = tool.extensions.filter((item) => {
+        const value = normalizeToolExtension(item);
+        return value !== from && value !== to;
+      });
+      if (tool.id === owner.id) extensions.push(to);
+      return { ...tool, extensions: cleanedExtensions(extensions) };
+    });
+    setTools(shell, kind, tools);
+    applyToolSettings(shell);
+    void shell.savePrefs(false);
   }
 
 export async function browseToolPath(shell: ShellState, kind: ToolKind, toolId: string) {
@@ -1171,7 +1249,7 @@ export async function importTools(shell: ShellState, kind: ToolKind, source: Too
     let added = 0;
     for (const item of incoming) {
       if (!item.path.trim() || tools.some((tool) => shell.pathsMatch(tool.path, item.path))) continue;
-      tools.push({ id: newToolId(), name: item.name, path: item.path, args: item.args, extensions: [] });
+      tools.push({ id: newToolId(), name: item.name, path: item.path, args: item.args, extensions: [], fallback: false });
       added += 1;
     }
     if (added > 0) {
@@ -1211,9 +1289,9 @@ function ensureToolList(shell: ShellState, kind: ToolKind, catalog: ExternalTool
     const list = toolsOf(shell, kind);
     let changed = false;
     const repaired = list.map((tool) => {
-      if (tool.id && tool.extensions) return tool;
+      if (tool.id && tool.extensions && typeof tool.fallback === "boolean") return tool;
       changed = true;
-      return { ...tool, id: tool.id || newToolId(), extensions: tool.extensions ?? [] };
+      return { ...tool, id: tool.id || newToolId(), extensions: tool.extensions ?? [], fallback: tool.fallback ?? false };
     });
     if (changed) setTools(shell, kind, repaired);
     if (repaired.length > 0) return changed;
@@ -1225,13 +1303,14 @@ function ensureToolList(shell: ShellState, kind: ToolKind, catalog: ExternalTool
         path,
         args: legacyToolArgs(shell, kind),
         extensions: [],
+        fallback: true,
       };
       setTools(shell, kind, [record]);
       return true;
     }
     const preset = catalog.find((item) => item.primary) ?? catalog[0];
     if (!preset) return false;
-    setTools(shell, kind, [{ id: newToolId(), name: preset.name, path: preset.path, args: preset.args, extensions: [] }]);
+    setTools(shell, kind, [{ id: newToolId(), name: preset.name, path: preset.path, args: preset.args, extensions: [], fallback: true }]);
     return true;
   }
 

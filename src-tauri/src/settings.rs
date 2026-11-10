@@ -335,6 +335,9 @@ pub struct ToolRecord {
     /// Lowercase suffixes without the dot. Empty, or `*`, matches every file.
     #[serde(default)]
     pub extensions: Vec<String>,
+    /// Used for files that match no explicit extension rule.
+    #[serde(default)]
+    pub fallback: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1139,6 +1142,7 @@ fn append_imported(list: &mut Vec<ToolRecord>, imported: &[crate::tools::Externa
             path: tool.path.clone(),
             args: tool.args.clone(),
             extensions: Vec::new(),
+            fallback: false,
         });
     }
 }

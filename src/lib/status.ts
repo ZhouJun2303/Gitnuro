@@ -146,6 +146,8 @@ export type ToolRecord = {
   args: string;
   /** Lowercase suffixes without the dot. Empty means every file. */
   extensions: string[];
+  /** Used for files that match no explicit extension rule. */
+  fallback: boolean;
 };
 
 export type Settings = {

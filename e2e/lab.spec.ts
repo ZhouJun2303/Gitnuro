@@ -101,6 +101,23 @@ test("dialog close button dismisses the dialog", async ({ page }) => {
   await expect(page.locator('[data-dialog="prefs"]')).toHaveCount(0);
 });
 
+test("file type rows assign custom suffixes to different tools", async ({ page }) => {
+  await openLabScene(page, "prefs-integration", '[data-dialog="prefs"]');
+  const jsonRow = page.locator('.tool-type-row[data-suffix="json"]');
+  await jsonRow.locator("select").selectOption({ label: "ExcelMergeFork" });
+  await expect(jsonRow.locator("select")).toHaveValue("lab-diff-xlsx");
+  await expect(page.locator(".tool-list button", { hasText: "VS Code" })).not.toContainText(".json");
+
+  const add = page.locator(".tool-type-add");
+  await add.locator("input").fill("csv");
+  await add.locator("select").selectOption({ label: "ExcelMergeFork" });
+  await add.locator("button").click();
+  const csvRow = page.locator('.tool-type-row[data-suffix="csv"]');
+  await expect(csvRow).toBeVisible();
+  await csvRow.locator("button").click();
+  await expect(page.locator('.tool-type-row[data-suffix="csv"]')).toHaveCount(0);
+});
+
 test("command palette is blocked while a dialog is open", async ({ page }) => {
   await openLabScene(page, "dialog-prefs", '[data-dialog="prefs"]');
   await page.keyboard.press("Control+k");

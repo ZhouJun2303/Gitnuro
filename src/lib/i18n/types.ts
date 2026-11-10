@@ -543,6 +543,7 @@ export type Messages = {
     toolImportFork: string;
     toolMoveUp: string;
     toolMoveDown: string;
+    toolDefault: string;
     toolUntitled: string;
     toolNoPath: string;
     toolEmpty: string;
@@ -551,6 +552,9 @@ export type Messages = {
     toolImported: string;
     toolNoImport: string;
     toolPriorityHint: string;
+    toolTypeSuffix: string;
+    toolTypePick: string;
+    toolTypeHint: string;
     keepSpace: string;
     fetchBody: string;
     pullBody: string;
