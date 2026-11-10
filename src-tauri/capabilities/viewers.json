@@ -82,7 +82,6 @@
     "allow-review-branch",
     "allow-read-ssh-config",
     "allow-open-window",
-    "allow-open-editor",
     "allow-reveal-commit",
     "allow-reveal-path",
     "allow-git-runtime",
