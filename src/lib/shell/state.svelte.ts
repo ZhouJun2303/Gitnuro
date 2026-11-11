@@ -605,6 +605,18 @@ export class ShellState {
   mergeState = $state<MergeState | null>(null);
 
 
+  /** True when the conflict dialog explains an autostash that could not return cleanly. */
+  mergeConflictRestore = $state(false);
+
+
+  /** Local changes a blocked write moved into a stash; put back when the write settles. */
+  pendingRetryStash = $state<{ name: string; id?: string; operation: string } | null>(null);
+
+
+  /** Commit being replayed while a rebase is paused, shown in the continue dialog. */
+  continueDetail = $state<{ author: string; summary: string } | null>(null);
+
+
   mergeProgressAutoSummary = $state("");
 
 
@@ -1482,6 +1494,7 @@ export class ShellState {
       !this.summaryTooLong &&
       !this.busy &&
       !this.conflicted &&
+      !this.progress &&
       (this.mode !== "live" || this.staged.length > 0 || this.amend),
   );
 
@@ -2968,13 +2981,11 @@ export class ShellState {
 
   runStatusNoticeAction(id: StatusNoticeId, action: string) {
     if (id === "conflicts" || id === "progress") {
-      if (action === "abort") void this.mutate({ action: "abort" });
-      else if (action === "skip") void this.mutate({ action: "skip" });
+      if (action === "abort") void this.mutate({ action: "abort" }).then(() => this.settlePendingRetry());
+      else if (action === "skip") void this.mutate({ action: "skip" }).then(() => this.settlePendingRetry());
       else if (action === "continue") {
-        if (this.progress === "rebase") {
-          this.draft = "";
-          this.dialog = "continue";
-        } else void this.mutate({ action: "continue" });
+        if (this.progress === "rebase") void this.openContinue();
+        else void this.mutate({ action: "continue" }).then(() => this.settlePendingRetry());
       }
       return;
     }
@@ -3070,6 +3081,7 @@ export class ShellState {
       }
       if (!background) this.actionError = null;
       if (!background) this.stashRetry = null;
+      if (!background) this.mergeConflictRestore = false;
       const described = this.describeRequest(request);
       const action = String(request.action ?? "");
       const dialogBefore = this.dialog;
@@ -3096,8 +3108,16 @@ export class ShellState {
         }
         this.noteActivity(`${action}${output ? " output" : " ok"}`);
         this.recordCommand(action, described, value.log || output, true, source);
+        const restoreConflict = !background && this.viewing(path) && !superseded && this.conflictCount > 0 && this.flowConflictAction(action);
         if (!background && this.viewing(path) && this.dialog === dialogBefore) {
-          if (dialogBefore === "prefs") {
+          if (restoreConflict) {
+            // The operation finished, but the local changes it kept conflict with the result.
+            this.mergeConflictRestore = true;
+            this.commandOutput = (value.log ?? "").trim();
+            this.dialog = "mergeConflict";
+            this.actionError = null;
+            this.stashRetry = null;
+          } else if (dialogBefore === "prefs") {
             // Preferences stay open for LFS/author actions; the operation is recorded below.
           } else if (output) {
             this.commandOutput = output;
@@ -3118,6 +3138,7 @@ export class ShellState {
             /* keep the action error */
           }
           if (this.shouldShowMergeConflict(action, text)) {
+            this.mergeConflictRestore = false;
             this.commandOutput = text.trim();
             this.dialog = "mergeConflict";
             this.actionError = null;
@@ -3175,9 +3196,14 @@ export class ShellState {
       const stash = (this.refs?.stashes ?? []).find((item) => item.name === name);
       if (stash?.id) request.name = stash.id;
     }
-    await this.mutate({ action: "stash", message: this.tr("chrome.stashBlockedMessage"), includeUntracked: true });
+    const operation = this.describeRequest(request).title;
+    const count = (this.snapshot?.staged.length ?? 0) + (this.snapshot?.unstaged.length ?? 0);
+    await this.mutate({ action: "stash", message: this.tr("chrome.stashBlockedMessageFor", { operation, count: String(count) }), includeUntracked: true });
     if (this.actionError) return;
+    const stash = this.refs?.stashes[0];
+    if (stash) this.pendingRetryStash = { name: stash.name, id: stash.id, operation };
     await this.mutate(request, pending.source);
+    await this.settlePendingRetry(pending.source);
   }
 
 
@@ -3206,6 +3232,63 @@ export class ShellState {
     if (this.conflictCount > 0) return true;
     const lower = text.toLowerCase();
     return /conflict|fix conflicts|merge failed|could not apply|needs merge|unmerged (paths|files)|merging is not possible|自动合并失败/.test(lower);
+  }
+
+
+  /** Label for the composer button while an operation is paused. */
+  flowLabel() {
+    if (this.progress === "rebase") return this.tr("chrome.continueRebase");
+    if (this.progress === "merge") return this.tr("chrome.finishMerge");
+    if (this.progress === "cherryPick") return this.tr("chrome.continueCherryPick");
+    if (this.progress === "revert") return this.tr("chrome.continueRevert");
+    return this.tr("chrome.commit");
+  }
+
+
+  /** Continue the paused operation instead of creating a separate commit. */
+  continueFlow() {
+    if (!this.progress) return;
+    if (this.progress === "rebase") return this.openContinue();
+    return this.mutate({ action: "continue" }).then(() => this.settlePendingRetry());
+  }
+
+
+  /** Show which commit the paused rebase is replaying before asking for a message. */
+  async openContinue() {
+    this.draft = "";
+    this.continueDetail = null;
+    this.dialog = "continue";
+    if (this.mode !== "live") return;
+    const path = this.repoPath();
+    if (!path) return;
+    try {
+      const detail = await invoke<CommitDetail>("commit_detail", { path, id: "REBASE_HEAD" });
+      if (this.dialog === "continue" && this.viewing(path)) {
+        this.continueDetail = { author: detail.author, summary: detail.summary };
+      }
+    } catch {
+      /* a rebase without REBASE_HEAD has no commit to show */
+    }
+  }
+
+
+  /** Writes whose autostash can conflict after the operation itself finished. */
+  flowConflictAction(action: string) {
+    return ["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "checkout", "checkoutRemote", "cherryPick", "revert", "continue", "skip", "abort", "squash", "gitFlowFinish"].includes(action);
+  }
+
+
+  /** Put back local changes a blocked write moved into a stash. */
+  async settlePendingRetry(source: "user" | "background" = "user") {
+    const pending = this.pendingRetryStash;
+    if (!pending || this.busy || this.progress || this.conflicted) return;
+    const stash = (this.refs?.stashes ?? []).find((item) => (pending.id && item.id === pending.id) || item.name === pending.name);
+    this.pendingRetryStash = null;
+    if (!stash) return;
+    await this.mutate({ action: "stashApply", name: stash.id ?? stash.name }, source);
+    if (!this.actionError && !this.conflicted) {
+      await this.mutate({ action: "stashDrop", name: stash.id ?? stash.name }, source);
+    }
   }
 
 

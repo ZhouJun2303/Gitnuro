@@ -146,6 +146,11 @@ export type Messages = {
     compare: string;
     abort: string;
     continueAction: string;
+    continueRebase: string;
+    finishMerge: string;
+    continueCherryPick: string;
+    continueRevert: string;
+    flowHint: string;
     skip: string;
     updateAvailable: string;
     checkUpdate: string;
@@ -234,6 +239,7 @@ export type Messages = {
     stageConflictBinary: string;
     stashAndRetry: string;
     stashBlockedMessage: string;
+    stashBlockedMessageFor: string;
     bisect: string;
     ignored: string;
     stats: string;
@@ -683,12 +689,16 @@ export type Messages = {
     addSubmodule: string;
     addWorktree: string;
     continueRebase: string;
+    continueCurrent: string;
     continueHint: string;
     continueMessage: string;
     continueAction: string;
     commandOutput: string;
     mergeConflictTitle: string;
     mergeConflictBody: string;
+    mergeConflictBodyFlow: string;
+    restoreConflictTitle: string;
+    restoreConflictBody: string;
     setRemoteUrl: string;
     remoteNameAuto: string;
     squashHint: string;

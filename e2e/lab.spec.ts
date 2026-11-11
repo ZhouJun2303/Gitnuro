@@ -209,6 +209,15 @@ test("rebase rows start checked and can be excluded", async ({ page }) => {
   await expect(page.locator(".dialog-scroll input[type=checkbox]:checked")).toHaveCount(total);
 });
 
+test("a paused rebase turns the composer into continue", async ({ page }) => {
+  await openLabScene(page, "rebase-progress", '.identity-floor[data-layer="progress"]');
+  const button = page.locator(".composer button.commit");
+  await expect(button).toContainText(/Continue Rebase|继续变基/);
+  await expect(page.locator(".composer .convention-hint")).toContainText(/continue here|点这里继续/);
+  await button.click();
+  await expect(page.locator('[data-dialog="continue"]')).toBeVisible();
+});
+
 test("menu rows keep their full height", async ({ page }) => {
   await openLabScene(page, "menu", '[data-layer="menu"]');
   const height = await page.locator(".menu button").first().evaluate((node) => node.getBoundingClientRect().height);

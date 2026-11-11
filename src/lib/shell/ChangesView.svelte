@@ -215,7 +215,7 @@
           onchange={shell.handleLayoutChange.bind(shell)}
         />
 
-        <form class="composer" style:height="{shell.composerHeight}px" onsubmit={(event) => { event.preventDefault(); void shell.submitCommit(false); }}>
+        <form class="composer" style:height="{shell.composerHeight}px" onsubmit={(event) => { event.preventDefault(); if (shell.progress) void shell.continueFlow(); else void shell.submitCommit(false); }}>
           <div class="summary-line">
             <div class="type-picker" class:open={typeOpen}>
               <button
@@ -270,14 +270,16 @@
               <span>{shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}</span>
             </button>
           </div>
-          {#if shell.summary.trim() && !shell.skipHooks && !shell.summaryFitsConvention}
+          {#if shell.progress}
+            <p class="convention-hint">{shell.tr("chrome.flowHint")}</p>
+          {:else if shell.summary.trim() && !shell.skipHooks && !shell.summaryFitsConvention}
             <p class="convention-hint">{shell.tr("chrome.commitConvention")}</p>
           {/if}
           <textarea class="guided composer-desc flex-fill" class:guide-only={shell.descriptionIsGuide} placeholder={shell.tr("chrome.description")} aria-label={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
             <button class="text-button more" type="button" aria-label={shell.tr("chrome.more")} title={shell.tr("chrome.more")} onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>
-            <button class="commit" type="submit" disabled={!shell.canCommit || shell.mode !== "live"}>{shell.busy ? shell.tr("chrome.working") : shell.tr("chrome.commit")}</button>
+            <button class="commit" type="submit" disabled={shell.mode !== "live" || (shell.progress ? shell.busy || shell.conflicted : !shell.canCommit)}>{shell.busy ? shell.tr("chrome.working") : shell.progress ? shell.flowLabel() : shell.tr("chrome.commit")}</button>
           </div>
         </form>
       </div>

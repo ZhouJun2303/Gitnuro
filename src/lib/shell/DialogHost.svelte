@@ -180,7 +180,7 @@
           else if (shell.dialog === "reword") void shell.mutate({ action: "reword", rev: shell.draftExtra || "HEAD", summary: shell.draft });
           else if (shell.dialog === "rebase" && shell.selectedCommit) void shell.mutate({ action: "rebaseInteractive", onto: shell.selectedCommit, drop: [], steps: buildRebaseSteps(shell.rebaseSteps, shell.rebasePicked), autostash: true, updateRefs: shell.updateRefs });
           else if (shell.dialog === "merge") void shell.mutate({ action: "merge", name: shell.draft, squash: shell.draftExtra === "squash", noFf: shell.draftExtra === "no-ff", autostash: true, summary: shell.mergeSummary, description: shell.mergeBody });
-          else if (shell.dialog === "continue") void shell.mutate({ action: "continue", message: shell.draft });
+          else if (shell.dialog === "continue") void shell.mutate({ action: "continue", message: shell.draft }).then(() => shell.settlePendingRetry());
           else if (shell.dialog === "repo") {
             try {
               await invoke("set_repo_author", { path: shell.repoPath(), name: shell.draft, email: shell.draftExtra });
@@ -688,6 +688,9 @@
           </div>
         {:else if shell.dialog === "continue"}
           <h2>{shell.tr("dialog.continueRebase")}</h2>
+          {#if shell.continueDetail}
+            <p class="empty">{shell.tr("dialog.continueCurrent", { author: shell.continueDetail.author, summary: shell.continueDetail.summary })}</p>
+          {/if}
           <p class="empty">{shell.tr("dialog.continueHint")}</p>
           <label>{shell.tr("dialog.continueMessage")}<input bind:value={shell.draft} /></label>
           <div class="composer-row actions">
@@ -722,11 +725,11 @@
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
           </div>
         {:else if shell.dialog === "mergeConflict"}
-          <h2>{shell.tr("dialog.mergeConflictTitle")}</h2>
-          <p class="empty">{shell.tr("dialog.mergeConflictBody")}</p>
+          <h2>{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictTitle" : "dialog.mergeConflictTitle")}</h2>
+          <p class="empty">{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictBody" : shell.progress ? "dialog.mergeConflictBodyFlow" : "dialog.mergeConflictBody", { action: shell.flowLabel() })}</p>
           <pre class="diff-body merge-conflict-log" data-layer="merge-conflict">{shell.commandOutput}</pre>
           <div class="composer-row actions">
-            <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
+            <button class="text-button" type="button" onclick={() => { shell.mergeConflictRestore = false; shell.dialog = null; }}>{shell.tr("chrome.close")}</button>
           </div>
         {:else if shell.dialog === "remote"}
           <h2>{shell.tr("chrome.groupRemote")}</h2>

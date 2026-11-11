@@ -5,8 +5,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    blob_view, commit_log, conflict_view, discard_lines, file_diff, file_diff_with, file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs, search_commits,
-    search_log, stage_all, stage_hunk, stage_line, stage_lines, stage_paths, status, stop_process_tree, ChangeKind, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
+    blob_view, commit, commit_log, conflict_view, discard_lines, file_diff, file_diff_with,
+    file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs,
+    search_commits, search_log, stage_all, stage_hunk, stage_line, stage_lines, stage_paths,
+    status, stop_process_tree, ChangeKind, CommitRequest, InProgress, LineEdit, Mutation,
+    RebaseStep, ResetMode,
 };
 
 fn repo() -> common::TempRepo {
@@ -133,9 +136,15 @@ fn fetch_push_and_fast_forward() {
 
     let other = std::env::temp_dir().join(format!(
         "awegit-clone-{}",
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
-    git_at(&std::env::temp_dir(), &["clone", &url, other.to_str().unwrap()]);
+    git_at(
+        &std::env::temp_dir(),
+        &["clone", &url, other.to_str().unwrap()],
+    );
     let _cleanup = RemoveDir(other.clone());
     git_at(&other, &["config", "commit.gpgsign", "false"]);
     git_at(&other, &["config", "core.hooksPath", ".git/no-hooks"]);
@@ -144,7 +153,11 @@ fn fetch_push_and_fast_forward() {
 
     commit_file(&local, "a.txt", "two\n", "second");
     let ahead = repository_refs(&local.path).unwrap();
-    let main = ahead.branches.iter().find(|branch| branch.name == "main").unwrap();
+    let main = ahead
+        .branches
+        .iter()
+        .find(|branch| branch.name == "main")
+        .unwrap();
     assert_eq!(main.ahead, 1, "{main:?}");
     assert_eq!(main.behind, 0, "{main:?}");
 
@@ -160,7 +173,14 @@ fn fetch_push_and_fast_forward() {
     )
     .unwrap();
 
-    perform(&other, Mutation::Pull { rebase: false, autostash: false }).unwrap();
+    perform(
+        &other,
+        Mutation::Pull {
+            rebase: false,
+            autostash: false,
+        },
+    )
+    .unwrap();
     let log = git_at(&other, &["log", "--format=%s"]);
     assert!(log.contains("second"), "{log}");
     assert!(log.contains("first"), "{log}");
@@ -172,7 +192,14 @@ fn push_ref_same_name_pushes_the_chosen_branch() {
     let local = repo();
     commit_file(&local, "a.txt", "main\n", "main commit");
     let url = file_url(&origin.path);
-    perform(&local.path, Mutation::AddRemote { name: "origin".into(), url }).unwrap();
+    perform(
+        &local.path,
+        Mutation::AddRemote {
+            name: "origin".into(),
+            url,
+        },
+    )
+    .unwrap();
     local.git(&["checkout", "-b", "work"]);
     commit_file(&local, "a.txt", "work\n", "work commit");
     local.git(&["checkout", "main"]);
@@ -192,7 +219,10 @@ fn push_ref_same_name_pushes_the_chosen_branch() {
     .unwrap();
 
     let log = git_at(&origin.path, &["log", "--format=%s", "work"]);
-    assert!(log.contains("work commit"), "pushed HEAD instead of the branch tip: {log}");
+    assert!(
+        log.contains("work commit"),
+        "pushed HEAD instead of the branch tip: {log}"
+    );
 }
 
 #[test]
@@ -201,7 +231,14 @@ fn marks_commits_that_exist_only_on_a_remote() {
     let local = repo();
     commit_file(&local, "a.txt", "one\n", "first");
     let url = file_url(&origin.path);
-    perform(&local.path, Mutation::AddRemote { name: "origin".into(), url: url.clone() }).unwrap();
+    perform(
+        &local.path,
+        Mutation::AddRemote {
+            name: "origin".into(),
+            url: url.clone(),
+        },
+    )
+    .unwrap();
     perform(
         &local.path,
         Mutation::Push {
@@ -216,9 +253,15 @@ fn marks_commits_that_exist_only_on_a_remote() {
 
     let other = std::env::temp_dir().join(format!(
         "awegit-remote-only-{}",
-        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
-    git_at(&std::env::temp_dir(), &["clone", &url, other.to_str().unwrap()]);
+    git_at(
+        &std::env::temp_dir(),
+        &["clone", &url, other.to_str().unwrap()],
+    );
     let _cleanup = RemoveDir(other.clone());
     git_at(&other, &["config", "commit.gpgsign", "false"]);
     git_at(&other, &["config", "core.hooksPath", ".git/no-hooks"]);
@@ -228,20 +271,49 @@ fn marks_commits_that_exist_only_on_a_remote() {
     git_at(&other, &["add", "--", "a.txt"]);
     git_at(&other, &["commit", "-m", "second"]);
     git_at(&other, &["push", "origin", "HEAD:main"]);
-    perform(&local.path, Mutation::Fetch { remote: Some("origin".into()), prune: false, tags: false }).unwrap();
+    perform(
+        &local.path,
+        Mutation::Fetch {
+            remote: Some("origin".into()),
+            prune: false,
+            tags: false,
+        },
+    )
+    .unwrap();
 
     let rows = commit_log(&local.path, 50).unwrap();
-    let second = rows.iter().find(|row| row.summary == "second").expect("remote tip missing");
-    assert!(second.remote_only, "remote tip should be remote-only: {second:?}");
-    assert!(!second.unpushed, "remote tip should not be unpushed: {second:?}");
-    let first = rows.iter().find(|row| row.summary == "first").expect("local tip missing");
-    assert!(!first.remote_only && !first.unpushed, "shared base should be plain: {first:?}");
+    let second = rows
+        .iter()
+        .find(|row| row.summary == "second")
+        .expect("remote tip missing");
+    assert!(
+        second.remote_only,
+        "remote tip should be remote-only: {second:?}"
+    );
+    assert!(
+        !second.unpushed,
+        "remote tip should not be unpushed: {second:?}"
+    );
+    let first = rows
+        .iter()
+        .find(|row| row.summary == "first")
+        .expect("local tip missing");
+    assert!(
+        !first.remote_only && !first.unpushed,
+        "shared base should be plain: {first:?}"
+    );
 
     commit_file(&local, "b.txt", "local\n", "local work");
     let rows = commit_log(&local.path, 50).unwrap();
-    let work = rows.iter().find(|row| row.summary == "local work").expect("local commit missing");
+    let work = rows
+        .iter()
+        .find(|row| row.summary == "local work")
+        .expect("local commit missing");
     assert!(work.unpushed, "local commit should be unpushed: {work:?}");
-    assert!(!work.remote_only, "local commit should not be remote-only: {work:?}");
+    assert!(
+        !work.remote_only,
+        "local commit should not be remote-only: {work:?}"
+    );
 }
 
 #[test]
@@ -249,13 +321,39 @@ fn merge_conflict_rebase_abort_stash_and_tag() {
     let repo = repo();
     commit_file(&repo, "a.txt", "one\n", "base");
     fs::write(repo.path.join("a.txt"), "dirty\n").unwrap();
-    perform(&repo.path, Mutation::Stash { include_untracked: false, message: "wip".into() }).unwrap();
+    perform(
+        &repo.path,
+        Mutation::Stash {
+            include_untracked: false,
+            message: "wip".into(),
+        },
+    )
+    .unwrap();
     let clean = status(&repo.path).unwrap();
-    assert!(clean.staged.is_empty() && clean.unstaged.is_empty(), "{clean:?}");
+    assert!(
+        clean.staged.is_empty() && clean.unstaged.is_empty(),
+        "{clean:?}"
+    );
     let stashed = repository_refs(&repo.path).unwrap();
-    assert!(stashed.stashes.iter().any(|stash| stash.summary.contains("wip")), "{:?}", stashed.stashes);
-    perform(&repo.path, Mutation::StashPop { name: String::new() }).unwrap();
-    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "dirty\n");
+    assert!(
+        stashed
+            .stashes
+            .iter()
+            .any(|stash| stash.summary.contains("wip")),
+        "{:?}",
+        stashed.stashes
+    );
+    perform(
+        &repo.path,
+        Mutation::StashPop {
+            name: String::new(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+        "dirty\n"
+    );
     fs::write(repo.path.join("a.txt"), "one\n").unwrap();
 
     perform(
@@ -267,7 +365,11 @@ fn merge_conflict_rebase_abort_stash_and_tag() {
         },
     )
     .unwrap();
-    assert!(repository_refs(&repo.path).unwrap().tags.iter().any(|tag| tag.name == "v1"));
+    assert!(repository_refs(&repo.path)
+        .unwrap()
+        .tags
+        .iter()
+        .any(|tag| tag.name == "v1"));
 
     repo.git(&["checkout", "-b", "topic"]);
     commit_file(&repo, "a.txt", "topic\n", "topic");
@@ -291,7 +393,13 @@ fn merge_conflict_rebase_abort_stash_and_tag() {
 
     repo.git(&["checkout", "-b", "side", "HEAD~1"]);
     commit_file(&repo, "a.txt", "side\n", "side");
-    let rebase = perform(&repo.path, Mutation::Rebase { onto: "main".into(), autostash: false });
+    let rebase = perform(
+        &repo.path,
+        Mutation::Rebase {
+            onto: "main".into(),
+            autostash: false,
+        },
+    );
     assert!(rebase.is_err(), "rebase should conflict");
     assert_eq!(in_progress(&repo.path).unwrap(), Some(InProgress::Rebase));
     perform(&repo.path, Mutation::Abort).unwrap();
@@ -332,7 +440,10 @@ fn resets_cherry_pick_and_revert() {
     .unwrap();
     let mixed = status(&repo.path).unwrap();
     assert!(mixed.staged.is_empty(), "{mixed:?}");
-    assert!(mixed.unstaged.iter().any(|file| file.path == "b.txt"), "{mixed:?}");
+    assert!(
+        mixed.unstaged.iter().any(|file| file.path == "b.txt"),
+        "{mixed:?}"
+    );
 
     repo.git(&["add", "-A"]);
     repo.git(&["commit", "-m", "second-3"]);
@@ -344,20 +455,35 @@ fn resets_cherry_pick_and_revert() {
         },
     )
     .unwrap();
-    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "one\n");
+    assert_eq!(
+        fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+        "one\n"
+    );
     assert!(!repo.path.join("b.txt").exists());
     let hard = status(&repo.path).unwrap();
-    assert!(hard.staged.is_empty() && hard.unstaged.is_empty(), "{hard:?}");
+    assert!(
+        hard.staged.is_empty() && hard.unstaged.is_empty(),
+        "{hard:?}"
+    );
 
     repo.git(&["checkout", "-b", "side"]);
     commit_file(&repo, "c.txt", "c\n", "from-side");
     repo.git(&["checkout", "main"]);
-    perform(&repo.path, Mutation::CherryPick { rev: "side".into(), record: false }).unwrap();
+    perform(
+        &repo.path,
+        Mutation::CherryPick {
+            rev: "side".into(),
+            record: false,
+        },
+    )
+    .unwrap();
     assert!(repo.output(&["log", "--format=%s"]).contains("from-side"));
     assert!(repo.path.join("c.txt").exists());
     perform(&repo.path, Mutation::Revert { rev: "HEAD".into() }).unwrap();
     assert!(!repo.path.join("c.txt").exists());
-    assert!(repo.output(&["log", "-1", "--format=%s"]).contains("Revert"));
+    assert!(repo
+        .output(&["log", "-1", "--format=%s"])
+        .contains("Revert"));
 }
 
 #[test]
@@ -369,8 +495,20 @@ fn line_stage_keeps_the_other_line() {
     fs::write(repo.path.join("a.txt"), "1\nTWO\nTHREE\n4\n5\n").unwrap();
 
     let diff = file_diff(&repo.path, "a.txt", false).unwrap();
-    let line = diff.lines.iter().find(|line| line.text == "+TWO").expect("added line");
-    stage_line(&repo.path, "a.txt", "TWO", true, line.stage_at.expect("stage index"), false).unwrap();
+    let line = diff
+        .lines
+        .iter()
+        .find(|line| line.text == "+TWO")
+        .expect("added line");
+    stage_line(
+        &repo.path,
+        "a.txt",
+        "TWO",
+        true,
+        line.stage_at.expect("stage index"),
+        false,
+    )
+    .unwrap();
 
     let cached = repo.output(&["diff", "--cached"]);
     assert!(cached.contains("TWO"), "{cached}");
@@ -388,8 +526,20 @@ fn line_stage_handles_a_comma_in_the_path() {
     fs::write(repo.path.join("a,b.txt"), "1\nTWO\n2\n").unwrap();
 
     let diff = file_diff(&repo.path, "a,b.txt", false).unwrap();
-    let line = diff.lines.iter().find(|line| line.text == "+TWO").expect("added line");
-    stage_line(&repo.path, "a,b.txt", "TWO", true, line.stage_at.expect("stage index"), false).unwrap();
+    let line = diff
+        .lines
+        .iter()
+        .find(|line| line.text == "+TWO")
+        .expect("added line");
+    stage_line(
+        &repo.path,
+        "a,b.txt",
+        "TWO",
+        true,
+        line.stage_at.expect("stage index"),
+        false,
+    )
+    .unwrap();
 
     let cached = repo.output(&["diff", "--cached"]);
     assert!(cached.contains("TWO"), "{cached}");
@@ -399,7 +549,8 @@ fn line_stage_handles_a_comma_in_the_path() {
 fn preview_reads_a_png() {
     let repo = repo();
     let png = [
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52,
     ];
     fs::write(repo.path.join("dot.png"), png).unwrap();
     let preview = file_preview(&repo.path, "dot.png").unwrap().expect("png");
@@ -416,13 +567,19 @@ fn cancel_stops_a_child_process() {
     } else {
         command.arg("30");
     }
-    command.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
     let mut child = command.spawn().unwrap();
     let started = std::time::Instant::now();
     stop_process_tree(child.id());
     let status = child.wait().unwrap();
     assert!(!status.success(), "{status}");
-    assert!(started.elapsed() < std::time::Duration::from_secs(5), "cancel took {:?}", started.elapsed());
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "cancel took {:?}",
+        started.elapsed()
+    );
 }
 
 #[test]
@@ -438,7 +595,13 @@ fn hunk_stage_keeps_only_that_hunk() {
     assert!(cached.contains("2-changed"), "{cached}");
     assert!(!cached.contains("5-changed"), "{cached}");
     let unstaged = file_diff(&repo.path, "a.txt", false).unwrap();
-    assert!(unstaged.lines.iter().any(|line| line.text.contains("5-changed")), "{unstaged:?}");
+    assert!(
+        unstaged
+            .lines
+            .iter()
+            .any(|line| line.text.contains("5-changed")),
+        "{unstaged:?}"
+    );
 }
 
 #[test]
@@ -488,7 +651,10 @@ fn squash_replays_commits_after_the_range() {
         },
     )
     .unwrap();
-    assert_eq!(fs::read_to_string(repo.path.join("dirty.txt")).unwrap(), "nope\n");
+    assert_eq!(
+        fs::read_to_string(repo.path.join("dirty.txt")).unwrap(),
+        "nope\n"
+    );
     assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
     let log = repo.output(&["log", "--format=%s"]);
     assert!(log.contains("base"), "{log}");
@@ -519,7 +685,9 @@ fn squash_rejects_a_merge() {
     )
     .unwrap_err();
     assert!(error.to_string().contains("merge"), "{error}");
-    assert!(repo.output(&["log", "-1", "--format=%s"]).contains("merge topic"));
+    assert!(repo
+        .output(&["log", "-1", "--format=%s"])
+        .contains("merge topic"));
 }
 
 #[test]
@@ -529,16 +697,32 @@ fn submodule_and_worktree() {
     let app = repo();
     commit_file(&app, "app.txt", "app\n", "app");
     let url = file_url(&lib.path);
-    app.git(&["-c", "protocol.file.allow=always", "submodule", "add", &url, "vendor"]);
+    app.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &url,
+        "vendor",
+    ]);
     perform(&app.path, Mutation::SubmoduleUpdate).unwrap();
     let refs = repository_refs(&app.path).unwrap();
-    assert!(refs.submodules.iter().any(|row| row.path == "vendor" && row.ready), "{:?}", refs.submodules);
+    assert!(
+        refs.submodules
+            .iter()
+            .any(|row| row.path == "vendor" && row.ready),
+        "{:?}",
+        refs.submodules
+    );
 
     let wt = app.path.with_file_name(format!(
         "{}-wt",
         app.path.file_name().unwrap().to_string_lossy()
     ));
-    let _guard = RemoveWorktree { repo: app.path.clone(), path: wt.clone() };
+    let _guard = RemoveWorktree {
+        repo: app.path.clone(),
+        path: wt.clone(),
+    };
     perform(
         &app.path,
         Mutation::AddWorktree {
@@ -549,18 +733,42 @@ fn submodule_and_worktree() {
     .unwrap();
     let refs = repository_refs(&app.path).unwrap();
     assert!(refs.worktrees.len() >= 2, "{:?}", refs.worktrees);
-    assert!(refs.worktrees.iter().any(|row| row.branch.as_deref() == Some("extra")), "{:?}", refs.worktrees);
+    assert!(
+        refs.worktrees
+            .iter()
+            .any(|row| row.branch.as_deref() == Some("extra")),
+        "{:?}",
+        refs.worktrees
+    );
 }
 
 #[test]
 fn git_flow_start_and_finish() {
     let repo = repo();
     commit_file(&repo, "a.txt", "a\n", "base");
-    perform(&repo.path, Mutation::GitFlowStart { name: "demo".into(), kind: String::new() }).unwrap();
-    assert!(repo.output(&["rev-parse", "--abbrev-ref", "HEAD"]).contains("feature/demo"));
+    perform(
+        &repo.path,
+        Mutation::GitFlowStart {
+            name: "demo".into(),
+            kind: String::new(),
+        },
+    )
+    .unwrap();
+    assert!(repo
+        .output(&["rev-parse", "--abbrev-ref", "HEAD"])
+        .contains("feature/demo"));
     commit_file(&repo, "b.txt", "b\n", "feature work");
-    perform(&repo.path, Mutation::GitFlowFinish { name: "demo".into(), kind: String::new() }).unwrap();
-    assert!(repo.output(&["rev-parse", "--abbrev-ref", "HEAD"]).contains("develop"));
+    perform(
+        &repo.path,
+        Mutation::GitFlowFinish {
+            name: "demo".into(),
+            kind: String::new(),
+        },
+    )
+    .unwrap();
+    assert!(repo
+        .output(&["rev-parse", "--abbrev-ref", "HEAD"])
+        .contains("develop"));
     let log = repo.output(&["log", "--format=%s"]);
     assert!(log.contains("feature work"), "{log}");
     assert!(!repo.output(&["branch"]).contains("feature/demo"));
@@ -652,8 +860,14 @@ fn resolve_paths_keeps_the_chosen_side_for_every_file() {
         },
     )
     .unwrap();
-    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "side a\n");
-    assert_eq!(fs::read_to_string(repo.path.join("b.txt")).unwrap(), "side b\n");
+    assert_eq!(
+        fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+        "side a\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path.join("b.txt")).unwrap(),
+        "side b\n"
+    );
     assert!(repo.output(&["ls-files", "-u"]).trim().is_empty());
 }
 
@@ -711,11 +925,21 @@ fn merge_state_names_the_branches_and_files() {
         },
     );
     assert!(merge.is_err(), "expected a conflict");
-    let state = awegit_git::merge_state(&repo.path).unwrap().expect("merge in progress");
+    let state = awegit_git::merge_state(&repo.path)
+        .unwrap()
+        .expect("merge in progress");
     assert_eq!(state.source, "topic");
     assert_eq!(state.into, "main");
-    assert!(state.files.iter().any(|file| file.path == "a.txt"), "{:?}", state.files);
-    assert!(state.files.iter().any(|file| file.path == "b.txt"), "{:?}", state.files);
+    assert!(
+        state.files.iter().any(|file| file.path == "a.txt"),
+        "{:?}",
+        state.files
+    );
+    assert!(
+        state.files.iter().any(|file| file.path == "b.txt"),
+        "{:?}",
+        state.files
+    );
 }
 
 #[test]
@@ -822,7 +1046,10 @@ fn hidden_refs_stay_in_the_repository_file() {
         "[signoff]\n\tenabled = false\n[awegit]\n\thiddenRef = old\n",
     )
     .unwrap();
-    assert_eq!(repository_refs(&repo.path).unwrap().hidden_refs, vec!["old".to_string()]);
+    assert_eq!(
+        repository_refs(&repo.path).unwrap().hidden_refs,
+        vec!["old".to_string()]
+    );
     perform(
         &repo.path,
         Mutation::SetHidden {
@@ -831,7 +1058,10 @@ fn hidden_refs_stay_in_the_repository_file() {
     )
     .unwrap();
     let refs = repository_refs(&repo.path).unwrap();
-    assert_eq!(refs.hidden_refs, vec!["feature/a".to_string(), "wip".to_string()]);
+    assert_eq!(
+        refs.hidden_refs,
+        vec!["feature/a".to_string(), "wip".to_string()]
+    );
     let text = fs::read_to_string(repo.path.join(".git").join("awegit")).unwrap();
     assert!(text.contains("enabled = false"), "{text}");
     assert!(text.contains("hiddenRef = feature/a"), "{text}");
@@ -847,7 +1077,9 @@ fn unreadable_awegit_file_is_not_replaced() {
     fs::write(&path, original).unwrap();
     let error = perform(
         &repo.path,
-        Mutation::SetHidden { names: vec!["wip".into()] },
+        Mutation::SetHidden {
+            names: vec!["wip".into()],
+        },
     )
     .unwrap_err();
     assert!(error.to_string().contains("awegit"), "{error}");
@@ -912,7 +1144,9 @@ fn repository_file_keeps_hidden_refs_signoff_and_groups() {
     .unwrap();
     perform(
         &repo.path,
-        Mutation::SetHidden { names: vec!["feature/a".into()] },
+        Mutation::SetHidden {
+            names: vec!["feature/a".into()],
+        },
     )
     .unwrap();
     perform(
@@ -925,7 +1159,9 @@ fn repository_file_keeps_hidden_refs_signoff_and_groups() {
     .unwrap();
     perform(
         &repo.path,
-        Mutation::SetExpanded { names: vec!["feature".into()] },
+        Mutation::SetExpanded {
+            names: vec!["feature".into()],
+        },
     )
     .unwrap();
     let refs = repository_refs(&repo.path).unwrap();
@@ -942,25 +1178,37 @@ fn repository_file_keeps_hidden_refs_signoff_and_groups() {
 }
 
 #[test]
-fn conflict_keeps_a_backup_of_local_changes() {
+fn stash_pop_conflict_keeps_the_original_stash() {
     let repo = repo();
     commit_file(&repo, "a.txt", "one\n", "base");
     commit_file(&repo, "b.txt", "keep\n", "second file");
     fs::write(repo.path.join("a.txt"), "stashed\n").unwrap();
-    perform(&repo.path, Mutation::Stash { include_untracked: false, message: "wip".into() }).unwrap();
+    perform(
+        &repo.path,
+        Mutation::Stash {
+            include_untracked: false,
+            message: "wip".into(),
+        },
+    )
+    .unwrap();
     commit_file(&repo, "a.txt", "main\n", "main-edit");
     fs::write(repo.path.join("b.txt"), "local work\n").unwrap();
 
-    let popped = perform(&repo.path, Mutation::StashPop { name: String::new() });
+    let popped = perform(
+        &repo.path,
+        Mutation::StashPop {
+            name: String::new(),
+        },
+    );
     assert!(popped.is_err(), "stash pop should conflict");
     let stashes = repository_refs(&repo.path).unwrap().stashes;
-    let backup = stashes
-        .iter()
-        .find(|stash| stash.summary.contains("conflict backup"))
-        .unwrap_or_else(|| panic!("no backup in {stashes:?}"));
-    let saved = repo.output(&["show", &format!("{}:b.txt", backup.name)]);
-    assert_eq!(saved.replace("\r\n", "\n"), "local work\n");
-    assert!(stashes.iter().any(|stash| stash.summary.contains("wip")), "{stashes:?}");
+    // The stash that failed to pop is its own backup.
+    assert_eq!(stashes.len(), 1, "{stashes:?}");
+    assert!(stashes[0].summary.contains("wip"), "{stashes:?}");
+    assert_eq!(
+        fs::read_to_string(repo.path.join("b.txt")).unwrap(),
+        "local work\n"
+    );
 }
 
 #[test]
@@ -973,7 +1221,14 @@ fn clean_merge_leaves_no_backup() {
     fs::write(repo.path.join("a.txt"), "dirty\n").unwrap();
     perform(
         &repo.path,
-        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false, summary: String::new(), description: String::new() },
+        Mutation::Merge {
+            name: "topic".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
     )
     .unwrap();
     assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
@@ -984,16 +1239,48 @@ fn named_stash_pop_restores_that_stash() {
     let repo = repo();
     commit_file(&repo, "a.txt", "one\n", "base");
     fs::write(repo.path.join("a.txt"), "first\n").unwrap();
-    perform(&repo.path, Mutation::Stash { include_untracked: false, message: "first".into() }).unwrap();
+    perform(
+        &repo.path,
+        Mutation::Stash {
+            include_untracked: false,
+            message: "first".into(),
+        },
+    )
+    .unwrap();
     fs::write(repo.path.join("a.txt"), "second\n").unwrap();
-    perform(&repo.path, Mutation::Stash { include_untracked: false, message: "second".into() }).unwrap();
+    perform(
+        &repo.path,
+        Mutation::Stash {
+            include_untracked: false,
+            message: "second".into(),
+        },
+    )
+    .unwrap();
     let stashes = repository_refs(&repo.path).unwrap().stashes;
-    let older = stashes.iter().find(|stash| stash.summary.contains("first")).expect("older stash");
-    perform(&repo.path, Mutation::StashPop { name: older.name.clone() }).unwrap();
-    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "first\n");
+    let older = stashes
+        .iter()
+        .find(|stash| stash.summary.contains("first"))
+        .expect("older stash");
+    perform(
+        &repo.path,
+        Mutation::StashPop {
+            name: older.name.clone(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+        "first\n"
+    );
     let left = repository_refs(&repo.path).unwrap().stashes;
-    assert!(left.iter().any(|stash| stash.summary.contains("second")), "{left:?}");
-    assert!(!left.iter().any(|stash| stash.summary.contains("first")), "{left:?}");
+    assert!(
+        left.iter().any(|stash| stash.summary.contains("second")),
+        "{left:?}"
+    );
+    assert!(
+        !left.iter().any(|stash| stash.summary.contains("first")),
+        "{left:?}"
+    );
 }
 
 #[test]
@@ -1001,7 +1288,10 @@ fn reflog_and_tree_list_the_commit() {
     let repo = repo();
     commit_file(&repo, "note.txt", "hello\n", "note");
     let rows = awegit_git::reflog(&repo.path, 20).unwrap();
-    assert!(rows.iter().any(|row| row.summary.contains("note")), "{rows:?}");
+    assert!(
+        rows.iter().any(|row| row.summary.contains("note")),
+        "{rows:?}"
+    );
     let tree = awegit_git::commit_tree(&repo.path, "HEAD").unwrap();
     assert_eq!(tree, vec!["note.txt".to_string()]);
 }
@@ -1017,7 +1307,10 @@ fn merge_tree_names_the_conflict() {
     fs::write(repo.path.join("same.txt"), "main\n").unwrap();
     repo.git(&["commit", "-am", "main"]);
     let files = awegit_git::rebase_conflicts(&repo.path, "other").unwrap();
-    assert!(files.iter().any(|file| file.contains("same.txt")), "{files:?}");
+    assert!(
+        files.iter().any(|file| file.contains("same.txt")),
+        "{files:?}"
+    );
 }
 
 #[test]
@@ -1064,7 +1357,9 @@ fn skip_hooks_commits_past_a_failing_hook() {
         },
     )
     .unwrap();
-    assert!(repo.output(&["log", "-1", "--format=%s"]).contains("skipped"));
+    assert!(repo
+        .output(&["log", "-1", "--format=%s"])
+        .contains("skipped"));
 }
 
 #[test]
@@ -1073,8 +1368,13 @@ fn commits_a_description_longer_than_the_windows_command_line() {
     commit_file(&repo, "a.txt", "one\n", "base");
     fs::write(repo.path.join("a.txt"), "two\n").unwrap();
     repo.git(&["add", "--", "a.txt"]);
-    let description: String = (0..2000).map(|index| format!("M\tAssets/Editor/File{index}.asset\n")).collect();
-    assert!(description.len() > 32_767, "the test needs a body Windows cannot pass as one argument");
+    let description: String = (0..2000)
+        .map(|index| format!("M\tAssets/Editor/File{index}.asset\n"))
+        .collect();
+    assert!(
+        description.len() > 32_767,
+        "the test needs a body Windows cannot pass as one argument"
+    );
     awegit_git::commit(
         &repo.path,
         awegit_git::CommitRequest {
@@ -1100,8 +1400,20 @@ fn stash_records_its_parent() {
     commit_file(&repo, "a.txt", "one\n", "base");
     let parent = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
     fs::write(repo.path.join("a.txt"), "dirty\n").unwrap();
-    perform(&repo.path, Mutation::Stash { include_untracked: false, message: "keep".into() }).unwrap();
-    let stash = repository_refs(&repo.path).unwrap().stashes.into_iter().next().expect("stash");
+    perform(
+        &repo.path,
+        Mutation::Stash {
+            include_untracked: false,
+            message: "keep".into(),
+        },
+    )
+    .unwrap();
+    let stash = repository_refs(&repo.path)
+        .unwrap()
+        .stashes
+        .into_iter()
+        .next()
+        .expect("stash");
     assert!(stash.summary.contains("keep"), "{}", stash.summary);
     assert_eq!(stash.parent, parent);
 }
@@ -1109,7 +1421,13 @@ fn stash_records_its_parent() {
 #[test]
 fn rejects_an_option_shaped_revision() {
     let repo = repo();
-    let error = perform(&repo.path, Mutation::Checkout { name: "--force".into() }).unwrap_err();
+    let error = perform(
+        &repo.path,
+        Mutation::Checkout {
+            name: "--force".into(),
+        },
+    )
+    .unwrap_err();
     assert!(error.to_string().contains("--force"), "{error}");
 }
 
@@ -1120,7 +1438,10 @@ fn restore_file_checks_out_one_path() {
     commit_file(&repo, "a.txt", "next\n", "next");
     perform(
         &repo.path,
-        Mutation::RestoreFile { rev: "HEAD~1".into(), file: "a.txt".into() },
+        Mutation::RestoreFile {
+            rev: "HEAD~1".into(),
+            file: "a.txt".into(),
+        },
     )
     .unwrap();
     let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
@@ -1131,7 +1452,13 @@ fn restore_file_checks_out_one_path() {
 fn write_mailmap_replaces_the_root_file() {
     let repo = repo();
     commit_file(&repo, "a.txt", "a\n", "base");
-    perform(&repo.path, Mutation::WriteMailmap { text: "Alice <a@ex> <b@ex>\n".into() }).unwrap();
+    perform(
+        &repo.path,
+        Mutation::WriteMailmap {
+            text: "Alice <a@ex> <b@ex>\n".into(),
+        },
+    )
+    .unwrap();
     let text = fs::read_to_string(repo.path.join(".mailmap")).unwrap();
     assert_eq!(text, "Alice <a@ex> <b@ex>\n");
 }
@@ -1186,8 +1513,17 @@ fn checkout_stashes_local_changes_and_puts_them_back() {
     commit_file(&repo, "b.txt", "b\n", "topic");
     repo.git(&["checkout", "main"]);
     fs::write(repo.path.join("a.txt"), "dirty\n").unwrap();
-    perform(&repo.path, Mutation::Checkout { name: "topic".into() }).unwrap();
-    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "dirty\n");
+    perform(
+        &repo.path,
+        Mutation::Checkout {
+            name: "topic".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+        "dirty\n"
+    );
     assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
 }
 
@@ -1199,17 +1535,36 @@ fn checkout_keeps_the_autostash_when_restoring_conflicts() {
     commit_file(&repo, "a.txt", "topic\n", "topic");
     repo.git(&["checkout", "main"]);
     fs::write(repo.path.join("a.txt"), "local\n").unwrap();
-    assert!(perform(&repo.path, Mutation::Checkout { name: "topic".into() }).is_err());
+    // The checkout itself succeeds; putting the local edit back conflicts.
+    perform(
+        &repo.path,
+        Mutation::Checkout {
+            name: "topic".into(),
+        },
+    )
+    .unwrap();
     let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
     assert!(text.contains("<<<<<<<"), "{text}");
     let stashes = repository_refs(&repo.path).unwrap().stashes;
-    let stash = stashes.iter().find(|stash| stash.summary.contains("autostash")).expect("autostash");
-    assert!(stash.summary.contains("checkout topic"), "{}", stash.summary);
+    let stash = stashes
+        .iter()
+        .find(|stash| stash.summary.contains("autostash"))
+        .expect("autostash");
+    assert!(
+        stash.summary.contains("checkout topic"),
+        "{}",
+        stash.summary
+    );
     assert!(stash.summary.contains("a.txt"), "{}", stash.summary);
+    assert_eq!(
+        stashes.len(),
+        1,
+        "one operation keeps one stash: {stashes:?}"
+    );
 }
 
 #[test]
-fn conflicting_merge_keeps_a_backup() {
+fn conflicting_merge_keeps_the_autostash() {
     let repo = repo();
     commit_file(&repo, "a.txt", "base\n", "base");
     repo.git(&["checkout", "-b", "topic"]);
@@ -1230,12 +1585,53 @@ fn conflicting_merge_keeps_a_backup() {
     )
     .is_err());
     let stashes = repository_refs(&repo.path).unwrap().stashes;
-    let backup = stashes.iter().find(|stash| stash.summary.contains("conflict backup")).expect("conflict backup");
-    assert!(backup.summary.contains("merge topic"), "{}", backup.summary);
-    assert!(backup.summary.contains("a.txt"), "{}", backup.summary);
     assert_eq!(
-        repo.output(&["show", &format!("{}:a.txt", backup.name)]).replace("\r\n", "\n"),
+        stashes.len(),
+        1,
+        "one operation keeps one stash: {stashes:?}"
+    );
+    let stash = &stashes[0];
+    assert!(
+        stash.summary.contains("AweGit autostash"),
+        "{}",
+        stash.summary
+    );
+    assert!(stash.summary.contains("merge topic"), "{}", stash.summary);
+    assert!(stash.summary.contains("a.txt"), "{}", stash.summary);
+    assert_eq!(
+        repo.output(&["show", &format!("{}:a.txt", stash.name)])
+            .replace("\r\n", "\n"),
         "local\n"
+    );
+}
+
+#[test]
+fn autostash_restore_conflict_keeps_one_entry() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "a.txt", "topic\n", "topic");
+    repo.git(&["checkout", "main"]);
+    fs::write(repo.path.join("a.txt"), "local\n").unwrap();
+
+    // A checkout does not conflict; restoring the edit on top of the new branch does.
+    perform(
+        &repo.path,
+        Mutation::Checkout {
+            name: "topic".into(),
+        },
+    )
+    .unwrap();
+    let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
+    assert!(text.contains("<<<<<<<"), "{text}");
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    assert_eq!(stashes.len(), 1, "{stashes:?}");
+    assert!(stashes[0].summary.contains("checkout topic"), "{stashes:?}");
+    assert!(
+        !stashes
+            .iter()
+            .any(|stash| stash.summary.contains("conflict backup")),
+        "{stashes:?}"
     );
 }
 
@@ -1272,14 +1668,68 @@ fn native_autostash_says_what_and_why() {
 fn branch_and_tag_names_may_use_any_language() {
     let repo = repo();
     commit_file(&repo, "a.txt", "a\n", "base");
-    perform(&repo.path, Mutation::CreateBranch { name: "测试分支".into(), start: None }).unwrap();
-    perform(&repo.path, Mutation::Checkout { name: "测试分支".into() }).unwrap();
-    perform(&repo.path, Mutation::Tag { name: "v1.0+build5".into(), rev: String::new(), message: "说明".into() }).unwrap();
-    perform(&repo.path, Mutation::DeleteTag { name: "v1.0+build5".into() }).unwrap();
-    perform(&repo.path, Mutation::Checkout { name: "main".into() }).unwrap();
-    perform(&repo.path, Mutation::DeleteBranch { name: "测试分支".into(), force: false }).unwrap();
-    assert!(perform(&repo.path, Mutation::CreateBranch { name: "--force".into(), start: None }).is_err());
-    assert!(perform(&repo.path, Mutation::CreateBranch { name: "a b".into(), start: None }).is_err());
+    perform(
+        &repo.path,
+        Mutation::CreateBranch {
+            name: "测试分支".into(),
+            start: None,
+        },
+    )
+    .unwrap();
+    perform(
+        &repo.path,
+        Mutation::Checkout {
+            name: "测试分支".into(),
+        },
+    )
+    .unwrap();
+    perform(
+        &repo.path,
+        Mutation::Tag {
+            name: "v1.0+build5".into(),
+            rev: String::new(),
+            message: "说明".into(),
+        },
+    )
+    .unwrap();
+    perform(
+        &repo.path,
+        Mutation::DeleteTag {
+            name: "v1.0+build5".into(),
+        },
+    )
+    .unwrap();
+    perform(
+        &repo.path,
+        Mutation::Checkout {
+            name: "main".into(),
+        },
+    )
+    .unwrap();
+    perform(
+        &repo.path,
+        Mutation::DeleteBranch {
+            name: "测试分支".into(),
+            force: false,
+        },
+    )
+    .unwrap();
+    assert!(perform(
+        &repo.path,
+        Mutation::CreateBranch {
+            name: "--force".into(),
+            start: None
+        }
+    )
+    .is_err());
+    assert!(perform(
+        &repo.path,
+        Mutation::CreateBranch {
+            name: "a b".into(),
+            start: None
+        }
+    )
+    .is_err());
 }
 
 #[test]
@@ -1299,13 +1749,30 @@ fn search_log_finds_message_and_diff() {
     commit_file(&repo, "b.txt", "side\n", "only-on-side");
     repo.git(&["checkout", "main"]);
     let messages = search_log(&repo.path, "message", "repository", "needle", 20, false).unwrap();
-    assert!(messages.iter().any(|row| row.summary.contains("needle")), "{messages:?}");
+    assert!(
+        messages.iter().any(|row| row.summary.contains("needle")),
+        "{messages:?}"
+    );
     let diffs = search_log(&repo.path, "diff", "repository", "needle-token", 20, false).unwrap();
-    assert!(diffs.iter().any(|row| row.summary.contains("needle")), "{diffs:?}");
+    assert!(
+        diffs.iter().any(|row| row.summary.contains("needle")),
+        "{diffs:?}"
+    );
     let here = search_log(&repo.path, "message", "branch", "only-on-side", 20, false).unwrap();
     assert!(here.is_empty(), "{here:?}");
-    let everywhere = search_log(&repo.path, "message", "repository", "only-on-side", 20, false).unwrap();
-    assert!(everywhere.iter().any(|row| row.summary == "only-on-side"), "{everywhere:?}");
+    let everywhere = search_log(
+        &repo.path,
+        "message",
+        "repository",
+        "only-on-side",
+        20,
+        false,
+    )
+    .unwrap();
+    assert!(
+        everywhere.iter().any(|row| row.summary == "only-on-side"),
+        "{everywhere:?}"
+    );
     assert!(search_log(&repo.path, "message", "repository", "-needle", 20, false).is_err());
 }
 
@@ -1352,7 +1819,13 @@ fn append_ignore_adds_one_pattern_without_replacing_the_file() {
 fn write_gitignore_replaces_the_root_file() {
     let repo = repo();
     commit_file(&repo, "a.txt", "a\n", "base");
-    perform(&repo.path, Mutation::WriteGitignore { text: "target/\n".into() }).unwrap();
+    perform(
+        &repo.path,
+        Mutation::WriteGitignore {
+            text: "target/\n".into(),
+        },
+    )
+    .unwrap();
     let text = fs::read_to_string(repo.path.join(".gitignore")).unwrap();
     assert_eq!(text, "target/\n");
 }
@@ -1367,11 +1840,22 @@ fn resolve_text_writes_the_editor_result() {
     commit_file(&repo, "a.txt", "main\n", "main");
     let _ = perform(
         &repo.path,
-        Mutation::Merge { name: "side".into(), squash: false, no_ff: false, autostash: false, summary: String::new(), description: String::new() },
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
     );
     perform(
         &repo.path,
-        Mutation::Resolve { file: "a.txt".into(), side: "text".into(), text: "merged\n".into() },
+        Mutation::Resolve {
+            file: "a.txt".into(),
+            side: "text".into(),
+            text: "merged\n".into(),
+        },
     )
     .unwrap();
     let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
@@ -1385,15 +1869,26 @@ fn stash_conflict_names_the_patch_and_abort_clears_it() {
     fs::write(repo.path.join("a.txt"), "stashed\n").unwrap();
     perform(
         &repo.path,
-        Mutation::Stash { message: "wip".into(), include_untracked: false },
+        Mutation::Stash {
+            message: "wip".into(),
+            include_untracked: false,
+        },
     )
     .unwrap();
     commit_file(&repo, "a.txt", "main\n", "main-edit");
-    assert!(perform(&repo.path, Mutation::StashApply { name: "stash@{0}".into() }).is_err());
+    assert!(perform(
+        &repo.path,
+        Mutation::StashApply {
+            name: "stash@{0}".into()
+        }
+    )
+    .is_err());
     assert!(in_progress(&repo.path).unwrap().is_none());
     let snap = status(&repo.path).unwrap();
     assert!(
-        snap.unstaged.iter().any(|file| file.path == "a.txt" && file.kind == ChangeKind::Conflict),
+        snap.unstaged
+            .iter()
+            .any(|file| file.path == "a.txt" && file.kind == ChangeKind::Conflict),
         "{snap:?}"
     );
     let view = conflict_view(&repo.path, "a.txt").unwrap();
@@ -1410,9 +1905,19 @@ fn stash_conflict_names_the_patch_and_abort_clears_it() {
     assert!(theirs.subject.contains("wip"), "{}", theirs.subject);
     perform(&repo.path, Mutation::Abort).unwrap();
     let after = status(&repo.path).unwrap();
-    assert!(after.unstaged.is_empty() && after.staged.is_empty(), "{after:?}");
-    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "main\n");
-    assert!(repository_refs(&repo.path).unwrap().stashes.iter().any(|stash| stash.summary.contains("wip")));
+    assert!(
+        after.unstaged.is_empty() && after.staged.is_empty(),
+        "{after:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+        "main\n"
+    );
+    assert!(repository_refs(&repo.path)
+        .unwrap()
+        .stashes
+        .iter()
+        .any(|stash| stash.summary.contains("wip")));
 }
 
 #[test]
@@ -1429,7 +1934,14 @@ fn merge_conflict_names_both_branches() {
     commit_file(&repo, "gone.txt", "edited\n", "edit-gone");
     assert!(perform(
         &repo.path,
-        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false, summary: String::new(), description: String::new() },
+        Mutation::Merge {
+            name: "topic".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new()
+        },
     )
     .is_err());
     let edited = conflict_view(&repo.path, "a.txt").unwrap();
@@ -1463,7 +1975,14 @@ fn binary_merge_conflict() -> common::TempRepo {
     repo.git(&["commit", "-am", "main"]);
     assert!(perform(
         &repo.path,
-        Mutation::Merge { name: "topic".into(), squash: false, no_ff: false, autostash: false, summary: String::new(), description: String::new() },
+        Mutation::Merge {
+            name: "topic".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new()
+        },
     )
     .is_err());
     repo
@@ -1472,16 +1991,26 @@ fn binary_merge_conflict() -> common::TempRepo {
 #[test]
 fn merge_tool_without_program_explains_bad_exe() {
     let repo = binary_merge_conflict();
-    let error = launch_merge_tool(&repo.path, "{ours} {theirs} {working} {file}", "sheet.xlsx").unwrap_err();
+    let error = launch_merge_tool(&repo.path, "{ours} {theirs} {working} {file}", "sheet.xlsx")
+        .unwrap_err();
     let text = error.to_string();
     assert!(text.contains("os error 193"), "{text}");
     assert!(text.contains("sheet.xlsx"), "{text}");
     assert!(text.contains("not a Win32 application"), "{text}");
-    let program = text.lines().find_map(|line| line.strip_prefix("program: ")).unwrap_or_else(|| panic!("{text}"));
+    let program = text
+        .lines()
+        .find_map(|line| line.strip_prefix("program: "))
+        .unwrap_or_else(|| panic!("{text}"));
     assert!(program.ends_with("sheet.xlsx"), "{program}");
     assert_eq!(fs::read(program).unwrap(), b"PK\x03\x04main");
-    let command = text.lines().find_map(|line| line.strip_prefix("command: ")).unwrap_or_else(|| panic!("{text}"));
-    assert!(command.contains(&repo.path.join("sheet.xlsx").display().to_string()), "{command}");
+    let command = text
+        .lines()
+        .find_map(|line| line.strip_prefix("command: "))
+        .unwrap_or_else(|| panic!("{text}"));
+    assert!(
+        command.contains(&repo.path.join("sheet.xlsx").display().to_string()),
+        "{command}"
+    );
 }
 
 #[cfg(windows)]
@@ -1537,7 +2066,11 @@ fn stage_lines_applies_every_selected_line_in_one_pass() {
     let diff = file_diff(&repo.path, "a.txt", false).unwrap();
     let mut lines = Vec::new();
     for (text, addition) in [("+TWO", true), ("+FOUR", true)] {
-        let line = diff.lines.iter().find(|line| line.text == text).expect(text);
+        let line = diff
+            .lines
+            .iter()
+            .find(|line| line.text == text)
+            .expect(text);
         lines.push(LineEdit {
             text: text[1..].to_string(),
             addition,
@@ -1563,7 +2096,11 @@ fn discard_lines_removes_only_the_selected_lines() {
     let diff = file_diff(&repo.path, "a.txt", false).unwrap();
     let mut lines = Vec::new();
     for text in ["+TWO", "+FOUR"] {
-        let line = diff.lines.iter().find(|line| line.text == text).expect(text);
+        let line = diff
+            .lines
+            .iter()
+            .find(|line| line.text == text)
+            .expect(text);
         lines.push(LineEdit {
             text: text[1..].to_string(),
             addition: true,
@@ -1571,7 +2108,10 @@ fn discard_lines_removes_only_the_selected_lines() {
         });
     }
     discard_lines(&repo.path, "a.txt", &lines).unwrap();
-    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "1\nTHREE\n5\n");
+    assert_eq!(
+        fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+        "1\nTHREE\n5\n"
+    );
 }
 
 #[test]
@@ -1600,16 +2140,31 @@ fn discard_paths_restores_tracked_and_deletes_the_rest() {
     perform(
         &repo.path,
         Mutation::DiscardPaths {
-            files: vec!["a.txt".into(), "b.txt".into(), "c.txt".into(), "e.txt".into(), "missing.txt".into()],
+            files: vec![
+                "a.txt".into(),
+                "b.txt".into(),
+                "c.txt".into(),
+                "e.txt".into(),
+                "missing.txt".into(),
+            ],
         },
     )
     .unwrap();
-    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "one\n");
-    assert_eq!(fs::read_to_string(repo.path.join("b.txt")).unwrap(), "two\n");
+    assert_eq!(
+        fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+        "one\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path.join("b.txt")).unwrap(),
+        "two\n"
+    );
     assert!(!repo.path.join("c.txt").exists());
     assert!(!repo.path.join("e.txt").exists());
     let after = status(&repo.path).unwrap();
-    assert!(after.staged.is_empty() && after.unstaged.is_empty(), "{after:?}");
+    assert!(
+        after.staged.is_empty() && after.unstaged.is_empty(),
+        "{after:?}"
+    );
 }
 
 #[test]
@@ -1646,7 +2201,11 @@ fn merge_preview_fills_message() {
     repo.git(&["checkout", "main"]);
     let preview = merge_preview(&repo.path, "topic").unwrap();
     assert_eq!(preview.into, "main");
-    assert!(preview.files.iter().any(|file| file.path == "b.txt"), "{:?}", preview.files);
+    assert!(
+        preview.files.iter().any(|file| file.path == "b.txt"),
+        "{:?}",
+        preview.files
+    );
     perform(
         &repo.path,
         Mutation::Merge {
@@ -1683,13 +2242,31 @@ fn large_text_asset_loads_its_diff_on_demand() {
     let pending = file_diff(&repo.path, path, false).unwrap();
     assert!(pending.loadable, "{pending:?}");
     assert!(!pending.binary && pending.lines.is_empty(), "{pending:?}");
-    assert_eq!(pending.old_bytes, Some(large_asset("base").len() as u64), "{pending:?}");
-    assert_eq!(pending.new_bytes, Some(large_asset("working").len() as u64), "{pending:?}");
+    assert_eq!(
+        pending.old_bytes,
+        Some(large_asset("base").len() as u64),
+        "{pending:?}"
+    );
+    assert_eq!(
+        pending.new_bytes,
+        Some(large_asset("working").len() as u64),
+        "{pending:?}"
+    );
 
     let diff = file_diff_with(&repo.path, path, false, 3, false, true).unwrap();
     assert!(!diff.binary, "{diff:?}");
-    assert!(diff.lines.iter().any(|line| line.text == "+  m_Name: working"), "{diff:?}");
-    assert!(diff.lines.iter().all(|line| line.text != "large file skipped"), "{diff:?}");
+    assert!(
+        diff.lines
+            .iter()
+            .any(|line| line.text == "+  m_Name: working"),
+        "{diff:?}"
+    );
+    assert!(
+        diff.lines
+            .iter()
+            .all(|line| line.text != "large file skipped"),
+        "{diff:?}"
+    );
 }
 
 #[test]
@@ -1742,7 +2319,401 @@ fn large_untracked_text_loads_on_demand() {
 
     let diff = file_diff_with(&repo.path, "big.asset", false, 3, false, true).unwrap();
     assert!(!diff.binary, "{diff:?}");
-    assert!(diff.lines.iter().any(|line| line.text == "+  m_Name: untracked"), "{diff:?}");
+    assert!(
+        diff.lines
+            .iter()
+            .any(|line| line.text == "+  m_Name: untracked"),
+        "{diff:?}"
+    );
+}
+
+#[test]
+fn rebase_abort_restores_the_autostash_and_removes_it() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main-edit");
+    repo.git(&["checkout", "side"]);
+    fs::write(repo.path.join("a.txt"), "local\n").unwrap();
+
+    let rebase = perform(
+        &repo.path,
+        Mutation::Rebase {
+            onto: "main".into(),
+            autostash: true,
+        },
+    );
+    assert!(rebase.is_err(), "rebase should conflict");
+    assert_eq!(in_progress(&repo.path).unwrap(), Some(InProgress::Rebase));
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    assert_eq!(stashes.len(), 1, "{stashes:?}");
+    assert!(
+        stashes[0].summary.contains("AweGit autostash"),
+        "{stashes:?}"
+    );
+    assert!(stashes[0].summary.contains("rebase onto"), "{stashes:?}");
+
+    perform(&repo.path, Mutation::Abort).unwrap();
+    assert_eq!(in_progress(&repo.path).unwrap(), None);
+    assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
+    assert_eq!(
+        fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+        "local\n"
+    );
+}
+
+#[test]
+fn rebase_continue_puts_the_autostash_back() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    commit_file(&repo, "b.txt", "keep\n", "second");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main-edit");
+    repo.git(&["checkout", "side"]);
+    fs::write(repo.path.join("b.txt"), "local\n").unwrap();
+
+    assert!(perform(
+        &repo.path,
+        Mutation::Rebase {
+            onto: "main".into(),
+            autostash: true
+        }
+    )
+    .is_err());
+    fs::write(repo.path.join("a.txt"), "resolved\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    perform(
+        &repo.path,
+        Mutation::Continue {
+            message: String::new(),
+        },
+    )
+    .unwrap();
+    assert_eq!(in_progress(&repo.path).unwrap(), None);
+    assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
+    assert_eq!(
+        fs::read_to_string(repo.path.join("b.txt")).unwrap(),
+        "local\n"
+    );
+}
+
+#[test]
+fn rebase_restore_conflict_keeps_one_stash() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main-edit");
+    repo.git(&["checkout", "side"]);
+    fs::write(repo.path.join("a.txt"), "local\n").unwrap();
+
+    assert!(perform(
+        &repo.path,
+        Mutation::Rebase {
+            onto: "main".into(),
+            autostash: true
+        }
+    )
+    .is_err());
+    fs::write(repo.path.join("a.txt"), "resolved\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    perform(
+        &repo.path,
+        Mutation::Continue {
+            message: String::new(),
+        },
+    )
+    .unwrap();
+    // The rebase is over, but putting the local edit back conflicts again.
+    assert_eq!(in_progress(&repo.path).unwrap(), None);
+    let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
+    assert!(text.contains("<<<<<<<"), "{text}");
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    assert_eq!(stashes.len(), 1, "{stashes:?}");
+    assert!(
+        stashes[0].summary.contains("AweGit autostash"),
+        "{}",
+        stashes[0].summary
+    );
+}
+
+#[test]
+fn autostash_restores_the_index() {
+    let repo = repo();
+    commit_file(&repo, "keep.txt", "one\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "b.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "c.txt", "main\n", "main-edit");
+    fs::write(repo.path.join("keep.txt"), "staged\n").unwrap();
+    repo.git(&["add", "keep.txt"]);
+
+    perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: true,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .unwrap();
+    let next = status(&repo.path).unwrap();
+    assert!(
+        next.staged.iter().any(|file| file.path == "keep.txt"),
+        "{next:?}"
+    );
+    assert!(next.unstaged.is_empty(), "{next:?}");
+    assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
+}
+
+#[test]
+fn autostash_leaves_untracked_fakeignore_alone() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main-edit");
+    fs::write(repo.path.join("a.txt"), "local\n").unwrap();
+    fs::write(repo.path.join(".fakeignore"), "ignored.txt\n").unwrap();
+
+    assert!(perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: true,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .is_err());
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    assert_eq!(stashes.len(), 1, "{stashes:?}");
+    assert!(
+        !stashes[0].summary.contains(".fakeignore"),
+        "{}",
+        stashes[0].summary
+    );
+    assert!(
+        repo.path.join(".fakeignore").is_file(),
+        ".fakeignore must stay out of the stash"
+    );
+
+    perform(&repo.path, Mutation::Abort).unwrap();
+    assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
+    assert!(repo.path.join(".fakeignore").is_file());
+    assert_eq!(
+        fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+        "local\n"
+    );
+}
+
+#[test]
+fn pull_rebase_uses_one_visible_autostash() {
+    let origin = bare();
+    let local = repo();
+    let url = file_url(&origin.path);
+    perform(
+        &local.path,
+        Mutation::AddRemote {
+            name: "origin".into(),
+            url: url.clone(),
+        },
+    )
+    .unwrap();
+    commit_file(&local, "a.txt", "base\n", "first");
+    perform(
+        &local.path,
+        Mutation::Push {
+            remote: Some("origin".into()),
+            set_upstream: true,
+            tags: false,
+            force_with_lease: false,
+            force: false,
+        },
+    )
+    .unwrap();
+
+    let other = std::env::temp_dir().join(format!(
+        "awegit-pull-clone-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    git_at(
+        &std::env::temp_dir(),
+        &["clone", &url, other.to_str().unwrap()],
+    );
+    let _cleanup = RemoveDir(other.clone());
+    git_at(&other, &["config", "commit.gpgsign", "false"]);
+    git_at(&other, &["config", "core.hooksPath", ".git/no-hooks"]);
+    fs::write(other.join("a.txt"), "remote\n").unwrap();
+    git_at(&other, &["add", "a.txt"]);
+    git_at(&other, &["commit", "-m", "remote"]);
+    git_at(&other, &["push", "origin", "main"]);
+
+    local.git(&["checkout", "-b", "work"]);
+    commit_file(&local, "a.txt", "work\n", "work commit");
+    fs::write(local.path.join("a.txt"), "local\n").unwrap();
+
+    let pull = perform(
+        &local.path,
+        Mutation::PullRef {
+            remote: "origin".into(),
+            branch: "main".into(),
+            rebase: true,
+            autostash: true,
+        },
+    );
+    assert!(pull.is_err(), "pull should conflict");
+    assert_eq!(in_progress(&local.path).unwrap(), Some(InProgress::Rebase));
+    let stashes = repository_refs(&local.path).unwrap().stashes;
+    assert_eq!(stashes.len(), 1, "one pull keeps one stash: {stashes:?}");
+    assert!(
+        stashes[0]
+            .summary
+            .contains("AweGit autostash: pull origin/main"),
+        "{}",
+        stashes[0].summary
+    );
+    assert!(
+        stashes[0].summary.contains("a.txt"),
+        "{}",
+        stashes[0].summary
+    );
+
+    perform(&local.path, Mutation::Abort).unwrap();
+    assert!(repository_refs(&local.path).unwrap().stashes.is_empty());
+    assert_eq!(
+        fs::read_to_string(local.path.join("a.txt")).unwrap(),
+        "local\n"
+    );
+}
+
+#[test]
+fn stash_pop_accepts_a_pinned_commit_id() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    fs::write(repo.path.join("a.txt"), "pinned\n").unwrap();
+    perform(
+        &repo.path,
+        Mutation::Stash {
+            include_untracked: false,
+            message: "wip".into(),
+        },
+    )
+    .unwrap();
+    let stashes = repository_refs(&repo.path).unwrap().stashes;
+    let id = stashes[0].id.clone();
+    perform(&repo.path, Mutation::StashPop { name: id }).unwrap();
+    assert_eq!(
+        fs::read_to_string(repo.path.join("a.txt")).unwrap(),
+        "pinned\n"
+    );
+    assert!(repository_refs(&repo.path).unwrap().stashes.is_empty());
+}
+
+struct SessionGuard;
+
+impl SessionGuard {
+    fn new(name: &str, email: &str) -> Self {
+        awegit_git::configure(awegit_git::Session {
+            author_name: name.to_string(),
+            author_email: email.to_string(),
+            ..Default::default()
+        });
+        Self
+    }
+}
+
+impl Drop for SessionGuard {
+    fn drop(&mut self) {
+        awegit_git::configure(awegit_git::Session::default());
+    }
+}
+
+fn conflict_repo() -> common::TempRepo {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main-edit");
+    repo.git(&["checkout", "side"]);
+    repo
+}
+
+#[test]
+fn rebase_continue_keeps_the_original_author() {
+    let _session = SessionGuard::new("Bob", "bob@example.com");
+    let repo = conflict_repo();
+    let rebase = perform(
+        &repo.path,
+        Mutation::Rebase {
+            onto: "main".into(),
+            autostash: false,
+        },
+    );
+    assert!(rebase.is_err(), "rebase should conflict");
+    fs::write(repo.path.join("a.txt"), "resolved\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    perform(
+        &repo.path,
+        Mutation::Continue {
+            message: String::new(),
+        },
+    )
+    .unwrap();
+    let line = git_at(&repo.path, &["log", "-1", "--format=%an <%ae>|%cn <%ce>"]);
+    assert_eq!(
+        line.trim(),
+        "Test <test@example.com>|Bob <bob@example.com>",
+        "a rebase must keep the author and only change the committer: {line}"
+    );
+}
+
+#[test]
+fn commit_is_refused_while_a_rebase_is_paused() {
+    let repo = conflict_repo();
+    assert!(perform(
+        &repo.path,
+        Mutation::Rebase {
+            onto: "main".into(),
+            autostash: false
+        }
+    )
+    .is_err());
+    fs::write(repo.path.join("a.txt"), "resolved\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    let error = commit(
+        &repo.path,
+        CommitRequest {
+            summary: "feat: resolved".into(),
+            description: String::new(),
+            amend: false,
+            sign_off: false,
+            sign_off_format: String::new(),
+            skip_hooks: false,
+            convention: false,
+            types: Vec::new(),
+        },
+    )
+    .unwrap_err();
+    assert!(
+        error.to_string().contains("rebase is in progress"),
+        "{error}"
+    );
 }
 
 struct RemoveDir(PathBuf);

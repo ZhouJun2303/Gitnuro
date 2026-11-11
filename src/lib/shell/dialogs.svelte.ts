@@ -562,7 +562,13 @@ export function quick(shell: ShellState, event: MouseEvent, dialogName: Dialog, 
   }
 
 export async function submitCommit(shell: ShellState, pushAfter = false) {
-    if (shell.mode !== "live" || !shell.canCommit) return;
+    if (shell.mode !== "live") return;
+    if (shell.progress) {
+      // A rebase, merge, cherry-pick, or revert owns the next commit.
+      void shell.continueFlow();
+      return;
+    }
+    if (!shell.canCommit) return;
     const messageText = shell.fullSummary.trim();
     if (!messageText) return;
     const description = isCommentary(shell.description) ? "" : shell.description;
@@ -571,7 +577,7 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
     if (value === undefined) return;
     const failed = value ? "" : (shell.actionError ?? "");
     shell.recordCommand("commit", { title: shell.tr("chrome.commandCommit", { name: messageText || "HEAD" }), command: shell.gitLine(["commit", "-m", messageText]) }, (value?.log ?? failed).trim(), !!value, "user");
-    if (!shell.actionError && shell.viewing(path)) {
+    if (value && !shell.actionError && shell.viewing(path)) {
       shell.summary = "";
       shell.description = "";
       shell.amend = false;
@@ -579,7 +585,16 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
       if (path) shell.drafts.delete(path);
       await shell.loadContext();
       void shell.fillTemplate();
-      if (pushAfter || shell.settings.pushOnCommit) await shell.doPush();
+      // A commit can end a paused merge; the autostash it kept may come back as conflicts.
+      const restoreConflict = shell.conflictCount > 0;
+      if (restoreConflict) {
+        shell.mergeConflictRestore = true;
+        shell.commandOutput = (value.log ?? "").trim();
+        shell.dialog = "mergeConflict";
+        shell.actionError = null;
+      }
+      await shell.settlePendingRetry();
+      if (!restoreConflict && (pushAfter || shell.settings.pushOnCommit)) await shell.doPush();
     }
   }
 
