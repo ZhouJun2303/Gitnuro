@@ -1,6 +1,7 @@
 .diff-body {
   position: relative;
-  --hunk-edge: color-mix(in srgb, var(--accent) 45%, transparent);
+  --hunk-edge: color-mix(in srgb, var(--accent) 70%, transparent);
+  --hunk-wash: color-mix(in srgb, var(--accent) 13%, transparent);
 }
 
 .diff-load {
@@ -67,14 +68,20 @@
   --hunk-edge-b: 1px;
 }
 
+.diff-body .virtual-row.hunk-hover,
+.diff-body .split-row.hunk-hover > span,
+.diff-body .split-meta.hunk-hover {
+  background-image: linear-gradient(var(--hunk-wash), var(--hunk-wash));
+}
+
 .diff-body .virtual-row.hunk-hover.add,
 .diff-body .split-row.hunk-hover > span.add {
-  background: color-mix(in srgb, var(--diff-add) 78%, var(--elevated));
+  background-color: color-mix(in srgb, var(--diff-add) 78%, var(--elevated));
 }
 
 .diff-body .virtual-row.hunk-hover.del,
 .diff-body .split-row.hunk-hover > span.del {
-  background: color-mix(in srgb, var(--diff-del) 78%, var(--elevated));
+  background-color: color-mix(in srgb, var(--diff-del) 78%, var(--elevated));
 }
 
 .diff-viewport {
