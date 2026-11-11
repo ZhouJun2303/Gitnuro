@@ -5,6 +5,7 @@
 mod change;
 mod cli;
 mod fakeignore;
+mod locks;
 mod model;
 mod ops;
 mod proc;

@@ -727,10 +727,14 @@ fn run_prepared_capped(
         return Ok((output, false));
     }
     let stderr = settle_stderr(&output.stderr);
-    Err(Error::Git(if stderr.is_empty() {
+    let detail = if stderr.is_empty() {
         format!("git {} failed", args.join(" "))
     } else {
         stderr
+    };
+    Err(Error::Git(match crate::locks::explain(repo, &detail) {
+        Some(message) => format!("{message}\n{detail}"),
+        None => detail,
     }))
 }
 
