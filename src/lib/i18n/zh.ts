@@ -220,6 +220,8 @@ export const zh: Messages = {
     updateReleaseNotes: "更新说明",
     updateFileName: "安装包：{name}",
     updateCheckedAt: "上次检查 {time}",
+    updateSilentInstall: "静默安装",
+    updateSilentInstallHint: "点击“下载并安装”后不显示安装向导，完成后自动重新打开 AweGit。",
     settingsRecovered: "设置文件已损坏，已恢复上一份备份。",
     localOnly: "远程没有这个分支",
     trackedRemote: "远程有同名分支",

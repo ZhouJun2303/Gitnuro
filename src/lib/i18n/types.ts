@@ -181,6 +181,8 @@ export type Messages = {
     updateReleaseNotes: string;
     updateFileName: string;
     updateCheckedAt: string;
+    updateSilentInstall: string;
+    updateSilentInstallHint: string;
     settingsRecovered: string;
     localOnly: string;
     trackedRemote: string;

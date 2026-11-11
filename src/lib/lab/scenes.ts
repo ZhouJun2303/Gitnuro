@@ -198,6 +198,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "prefs-network", group: "弹窗", title: "偏好设置 · 网络", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-accounts", group: "弹窗", title: "偏好设置 · 账户", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-advanced", group: "弹窗", title: "偏好设置 · 高级", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "update-available", group: "弹窗", title: "更新 · 可安装", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
   scene({ id: "update-downloading", group: "弹窗", title: "更新 · 下载中", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
   scene({ id: "update-current", group: "弹窗", title: "更新 · 已是最新", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),
   scene({ id: "update-ready", group: "弹窗", title: "更新 · 安装程序已启动", repo: "full", ready: '[data-dialog="update"]', dialog: "update" }),

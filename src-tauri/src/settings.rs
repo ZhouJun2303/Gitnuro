@@ -310,6 +310,9 @@ pub struct Settings {
     /// Update banner stays hidden for this version until a newer one is published.
     #[serde(default)]
     pub dismissed_update: String,
+    /// Install an update without showing the installer window.
+    #[serde(default = "default_true")]
+    pub silent_install: bool,
     /// `pending` asks a new install to open the feature guide once. Missing on an
     /// existing file means the install predates the guide, so it stays `seen`.
     #[serde(default = "features_intro_seen")]
@@ -629,6 +632,7 @@ impl Default for Settings {
             commit_type: commit_type_default(),
             commit_types: Vec::new(),
             dismissed_update: String::new(),
+            silent_install: true,
             features_intro: features_intro_seen(),
         }
     }
@@ -1583,6 +1587,16 @@ mod tests {
         assert_eq!(settings.commit_types[1].name, "feat");
         assert!(settings.commit_types[1].label.is_empty());
         assert!(Settings::default().commit_types.is_empty());
+    }
+
+    #[test]
+    fn missing_silent_install_defaults_on_and_keeps_an_explicit_opt_out() {
+        assert!(serde_json::from_str::<Settings>("{}").unwrap().silent_install);
+        assert!(Settings::default().silent_install);
+        let settings: Settings = serde_json::from_str(r#"{"silentInstall":false}"#).unwrap();
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["silentInstall"], false);
+        assert!(!serde_json::from_value::<Settings>(saved).unwrap().silent_install);
     }
 
     #[test]

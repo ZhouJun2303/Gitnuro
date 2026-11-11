@@ -301,6 +301,7 @@ export class ShellState {
     commitType: "feat",
     commitTypes: [],
     dismissedUpdate: "",
+    silentInstall: true,
     featuresIntro: "seen",
     recoveryNotice: "",
   };
@@ -3513,7 +3514,7 @@ export class ShellState {
     this.updateCancelRequested = false;
     this.updateMessage = this.tr("chrome.updateDownloading");
     try {
-      await invoke("download_update", { url: notice.downloadUrl, sha256: notice.sha256 ?? "" });
+      await invoke("download_update", { url: notice.downloadUrl, sha256: notice.sha256 ?? "", silent: this.settings.silentInstall !== false });
       this.updatePhase = "ready";
       this.updatePercent = 100;
       this.updateMessage = this.tr("chrome.updateStarted");

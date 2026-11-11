@@ -1528,12 +1528,18 @@ fn update_release_page() -> String {
 }
 
 #[tauri::command]
-fn download_update(app: tauri::AppHandle, url: String, sha256: Option<String>) -> Result<(), String> {
+fn download_update(app: tauri::AppHandle, url: String, sha256: Option<String>, silent: Option<bool>) -> Result<(), String> {
+    let silent = silent.unwrap_or(true);
     http::with_net(net_options(), || {
-        updates::download_and_open(&url, sha256.as_deref(), |progress| {
+        updates::download_and_open(&url, sha256.as_deref(), silent, |progress| {
             let _ = app.emit("update-progress", progress);
         })
-    })
+    })?;
+    // The silent installer replaces the running binary and restarts the app itself.
+    if silent && cfg!(windows) {
+        app.exit(0);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -2514,7 +2520,7 @@ mod watch_plan_tests {
         let defaults: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         assert_eq!(observer["windows"], serde_json::json!(["flow-*"]));
         for permission in observer["permissions"].as_array().unwrap() {
-            assert!(matches!(permission.as_str().unwrap(), "core:default" | "core:window:allow-close" | "allow-operation-flow" | "allow-operation-history" | "allow-load-settings" | "allow-log-client"));
+            assert!(matches!(permission.as_str().unwrap(), "core:default" | "core:window:allow-close" | "allow-operation-flow" | "allow-operation-history" | "allow-load-settings" | "allow-save-settings" | "allow-log-client"));
         }
         for window in defaults["windows"].as_array().unwrap() {
             assert!(matches!(window.as_str().unwrap(), "main" | "desk" | "merge"));
