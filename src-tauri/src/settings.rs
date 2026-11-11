@@ -409,7 +409,7 @@ pub struct Account {
 }
 
 fn theme_default() -> String {
-    "system".into()
+    "apple".into()
 }
 fn default_true() -> bool {
     true
@@ -1773,6 +1773,18 @@ mod tests {
         settings.github_token = "secret".into();
         settings.commit_type = "fix".into();
         settings
+    }
+
+    #[test]
+    fn appearance_defaults_to_apple_and_preserves_saved_choices() {
+        let dir = TempSettings::new();
+        assert_eq!(load_at(&dir.path).unwrap().theme, "apple");
+        for theme in ["apple", "light", "dark", "system"] {
+            let mut settings = Settings::default();
+            settings.theme = theme.into();
+            save_at(&dir.path, &settings).unwrap();
+            assert_eq!(load_at(&dir.path).unwrap().theme, theme);
+        }
     }
 
     #[test]

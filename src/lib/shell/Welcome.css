@@ -16,36 +16,42 @@
   }
 
 .welcome-card {
-    width: 640px;
+    width: 720px;
     max-width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 28px;
   }
 
 .welcome-brand {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: 20px;
+    padding: 0 4px 8px;
   }
 
 .welcome-logo {
-    width: 44px;
-    height: 44px;
+    display: block;
+    width: 62px;
+    height: 62px;
     flex: none;
+    filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.15));
   }
 
 .welcome-titles h1 {
     margin: 0;
-    font-size: 22px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-family: var(--font-display);
+    font-size: 36px;
+    font-weight: 650;
+    line-height: 1.15;
+    letter-spacing: -0.05em;
   }
 
 .welcome-titles p {
-    margin: 4px 0 0;
+    margin: 8px 0 0;
     color: var(--text-secondary);
-    font-size: 13px;
+    font-size: 14px;
+    letter-spacing: 0.01em;
   }
 
 .welcome-error {
@@ -71,58 +77,64 @@
 .welcome-actions {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
+    gap: 14px;
   }
 
 .welcome-btn {
     border: 1px solid var(--line);
     background: var(--elevated);
-    border-radius: 10px;
-    padding: 16px 14px;
+    border-radius: var(--welcome-radius);
+    padding: 22px 20px;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 10px;
+    gap: 20px;
     color: var(--text);
     cursor: pointer;
     text-align: left;
-    transition: all 140ms ease;
+    box-shadow: var(--shadow-control);
+    font: inherit;
+    transition: border-color 140ms ease, background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
   }
 
 .welcome-btn:hover {
     border-color: var(--accent);
-    background: var(--selection);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    background: color-mix(in srgb, var(--accent) 4%, var(--elevated));
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-sm);
   }
 
 .welcome-btn svg {
-    width: 22px;
-    height: 22px;
-    color: var(--accent);
+    width: 36px;
+    height: 36px;
+    padding: 8px;
+    border-radius: var(--radius);
+    background: var(--field);
+    color: var(--text-secondary);
   }
 
 .btn-meta strong {
     display: block;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
   }
 
 .btn-meta span {
     display: block;
-    margin-top: 2px;
-    font-size: 11px;
+    margin-top: 5px;
+    font-size: 12px;
     color: var(--text-secondary);
   }
 
 .welcome-recent {
     border: 1px solid var(--line);
     background: var(--elevated);
-    border-radius: 10px;
-    padding: 16px;
+    border-radius: var(--welcome-radius);
+    padding: 18px 12px 12px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+    box-shadow: var(--shadow-control);
   }
 
 .recent-bar {
@@ -130,11 +142,13 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
+    padding: 0 8px 12px;
+    border-bottom: 1px solid var(--line);
   }
 
 .recent-bar h3 {
     margin: 0;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-secondary);
     text-transform: uppercase;
@@ -160,7 +174,7 @@
 .recent-card {
     border: 0;
     background: transparent;
-    padding: 8px 10px;
+    padding: 10px 12px;
     border-radius: 6px;
     display: flex;
     align-items: center;
@@ -169,6 +183,7 @@
     color: inherit;
     text-align: left;
     cursor: pointer;
+    font: inherit;
     transition: background 120ms ease;
   }
 
@@ -181,7 +196,7 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
   }
 
 .recent-title {
@@ -190,6 +205,7 @@
   }
 
 .recent-path {
+    font-family: var(--mono);
     font-size: 11px;
     color: var(--text-secondary);
     white-space: nowrap;
@@ -201,4 +217,28 @@
     font-size: 11px;
     color: var(--text-secondary);
     flex: none;
+    max-width: 48%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
+
+.welcome-btn:focus-visible, .recent-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+@media (max-width: 600px) {
+  .welcome-view { padding: 24px 16px; align-items: flex-start; }
+  .welcome-card { gap: 20px; }
+  .welcome-actions { grid-template-columns: 1fr; gap: 8px; }
+  .welcome-btn { flex-direction: row; align-items: center; gap: 14px; padding: 14px; }
+  .recent-stats { display: none; }
+}
+
+@media (max-height: 700px) {
+  .welcome-view { align-items: flex-start; padding-top: 24px; }
+  .welcome-card { gap: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-btn, .recent-card { transition: none; }
+  .welcome-btn:hover { transform: none; }
+}

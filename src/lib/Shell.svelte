@@ -161,7 +161,7 @@
     padding: 4px;
     background: var(--elevated);
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     display: flex;
     flex-direction: column;
@@ -181,7 +181,7 @@
     color: inherit;
     font: inherit;
     text-align: left;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     transition: background 120ms ease, color 120ms ease;
   }
 
@@ -291,7 +291,7 @@
     max-width: 100%;
     padding: 7px 10px;
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--field);
     font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
     font-size: 12.5px;
@@ -349,7 +349,7 @@
     flex-direction: column;
     background: var(--elevated);
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     overflow: hidden;
   }
@@ -401,7 +401,7 @@
 
 .repo-row {
     padding: 4px 8px 4px 22px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
   }
 
 .repo-row.folder { padding-left: 6px; }
@@ -482,7 +482,7 @@
     grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
     background: var(--elevated);
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     overflow: hidden;
   }
@@ -560,7 +560,7 @@
     width: 100%;
     padding: 8px 10px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -643,7 +643,7 @@
     padding: 14px;
     border: 1px solid color-mix(in srgb, var(--deleted) 40%, transparent);
     border-left: 4px solid var(--deleted);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--deleted) 7%, var(--elevated));
     color: var(--text);
     font-size: 14px;
@@ -667,7 +667,7 @@
 .palette {
     width: 520px;
     max-width: calc(100vw - 32px);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     background: var(--elevated);
     border: 1px solid var(--line);
     box-shadow: var(--shadow);
@@ -702,7 +702,7 @@
     flex: none;
     height: 24px;
     padding: 0 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: var(--field);
     color: var(--text-secondary);
     font-size: 12px;
@@ -723,7 +723,7 @@
     background: transparent;
     color: inherit;
     font: inherit;
-    border-radius: 8px;
+    border-radius: var(--radius);
     display: flex;
     align-items: center;
     justify-content: space-between;

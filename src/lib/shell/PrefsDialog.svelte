@@ -153,13 +153,30 @@
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.theme")}</span>
               <span class="pref-control">
-                <select bind:value={shell.settings.theme}>
+                <select aria-label={shell.tr("dialog.theme")} bind:value={shell.settings.theme}>
+                  <option value="apple">{shell.tr("dialog.apple")}</option>
                   <option value="system">{shell.tr("dialog.system")}</option>
                   <option value="light">{shell.tr("dialog.light")}</option>
                   <option value="dark">{shell.tr("dialog.dark")}</option>
                 </select>
               </span>
             </label>
+          </div>
+        </section>
+
+        <section class="pref-card">
+          <h3 class="pref-card-title">{shell.tr("dialog.themeStyles")}</h3>
+          <div class="theme-styles" role="group" aria-label={shell.tr("dialog.themeStyles")}>
+            {#each ["apple", "light", "dark"] as theme}
+              <button class="theme-style" class:on={shell.settings.theme === theme} type="button" aria-pressed={shell.settings.theme === theme} onclick={() => { shell.settings.theme = theme; void shell.savePrefs(false); }}>
+                <span class="theme-preview" class:code={theme === "dark"} class:apple={theme === "apple"} class:classic={theme === "light"} aria-hidden="true">
+                  <span class="theme-preview-bar"><i></i><i></i><i></i></span>
+                  <span class="theme-preview-body"><span class="theme-preview-side"><i></i><i></i><i></i></span><span class="theme-preview-content"><i></i><i></i><i></i><i></i></span></span>
+                </span>
+                <span class="theme-style-title">{shell.tr(theme === "apple" ? "dialog.apple" : theme === "dark" ? "dialog.dark" : "dialog.light")}<span class="theme-style-check" aria-hidden="true">{shell.settings.theme === theme ? "✓" : ""}</span></span>
+                <span class="theme-style-hint">{shell.tr(theme === "apple" ? "dialog.themeAppleHint" : theme === "dark" ? "dialog.themeCodeHint" : "dialog.themeLightHint")}</span>
+              </button>
+            {/each}
           </div>
         </section>
 

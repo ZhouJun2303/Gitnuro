@@ -475,6 +475,11 @@ export type Messages = {
     system: string;
     light: string;
     dark: string;
+    apple: string;
+    themeStyles: string;
+    themeCodeHint: string;
+    themeAppleHint: string;
+    themeLightHint: string;
     url: string;
     folderName: string;
     cloneInto: string;

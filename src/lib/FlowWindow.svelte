@@ -5,6 +5,7 @@
   import { invoke } from "./perf";
   import { translate, resolveLocale, type Locale } from "./i18n";
   import { broadcastLocale, onLocaleChange } from "./i18n/sync";
+  import { isAppearance, onAppearanceChange, resolveAppearance } from "./appearance";
   import { shortcut } from "./keys";
   import { buildFlowPipeline, isFutureStep, stateSymbol, type FlowCommit, type FlowDelta, type FlowNode, type FlowSnapshot, type FlowSummary } from "./operation-flow";
   import type { Settings } from "./status";
@@ -24,6 +25,7 @@
   let filePages = $state<Record<string, number>>({});
   let expanded = $state<Record<string, boolean>>({});
   let locale = $state<Locale>("zh");
+  let appearance = $state("apple");
   let error = $state("");
   let ready = $state(false);
   let scene = $state("");
@@ -160,6 +162,14 @@
 
   onMount(() => {
     const stopLocale = onLocaleChange((setting) => { locale = resolveLocale(setting); });
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const paint = () => {
+      const theme = resolveAppearance(appearance, media.matches);
+      document.documentElement.dataset.theme = theme;
+      if (desktop) void getCurrentWindow().setTheme(theme === "dark" ? "dark" : "light").catch(() => {});
+    };
+    const stopAppearance = onAppearanceChange((setting) => { appearance = setting; paint(); });
+    media.addEventListener("change", paint);
     const onLanguageShortcut = (event: KeyboardEvent) => {
       if (event.defaultPrevented || shortcut(event) !== "switchLanguage") return;
       event.preventDefault();
@@ -181,8 +191,8 @@
         const settings = await invoke<Settings>("load_settings");
         autoClose = settings.flowAutoClose === true;
         locale = scene ? params.get("locale") === "en" ? "en" : "zh" : resolveLocale(settings.locale);
-        if (scene && ["light", "dark"].includes(params.get("theme") ?? "")) settings.theme = params.get("theme")!;
-        document.documentElement.dataset.theme = settings.theme === "dark" || (settings.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+        appearance = scene && isAppearance(params.get("theme")) ? params.get("theme")! : settings.theme;
+        paint();
         if (scene.startsWith("operation-flow") && !repo) {
           const { flowFixture } = await import("./lab/flow-fixture");
           fixture = true; const sample = flowFixture(scene); repo = sample.summary.repo; replace(sample); history = [sample.summary];
@@ -220,7 +230,7 @@
     window.addEventListener("focus", refreshAutoClose);
     const poll = setInterval(() => { if (!document.hidden) void refresh(); }, 1000);
     const historyPoll = setInterval(() => { if (!document.hidden) void loadHistory(); }, 10_000);
-    return () => { disposed = true; generation++; stopLocale(); window.removeEventListener("keydown", onLanguageShortcut); clearInterval(poll); clearInterval(historyPoll); cancelAnimationFrame(scrollFrame); window.removeEventListener("focus", refreshAutoClose); unlisten.forEach((off) => off()); };
+    return () => { disposed = true; generation++; stopLocale(); stopAppearance(); media.removeEventListener("change", paint); window.removeEventListener("keydown", onLanguageShortcut); clearInterval(poll); clearInterval(historyPoll); cancelAnimationFrame(scrollFrame); window.removeEventListener("focus", refreshAutoClose); unlisten.forEach((off) => off()); };
   });
 </script>
 

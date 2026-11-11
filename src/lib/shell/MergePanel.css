@@ -3,7 +3,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--elevated);
   box-shadow: var(--shadow);
   animation: dialog-in 160ms ease-out;
@@ -85,7 +85,7 @@
   width: 24px;
   height: 24px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--elevated);
   color: var(--text-secondary);
   font-size: 16px;
@@ -102,7 +102,7 @@
   width: 28px;
   height: 28px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
   font-size: 18px;
@@ -514,7 +514,7 @@
   width: min(380px, 100%);
   padding: 28px 24px;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--elevated);
   box-shadow: var(--shadow-sm);
   color: var(--text-secondary);

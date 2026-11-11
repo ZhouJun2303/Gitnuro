@@ -2,6 +2,7 @@
   import { tick } from "svelte";
   import { getShell } from "./context";
   import "./Sidebar.css";
+  import BrandMark from "./BrandMark.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { branchGroup, onVirtualScroll, windowSlice } from "../view";
   import { liveSideRows, type SideRow } from "./sideRows";
@@ -147,7 +148,7 @@
 
       <div class="side-pin">
       <div class="side-brand">
-        <span>AweGit</span>
+        <span class="side-wordmark"><span class="side-logo"><BrandMark /></span>AweGit</span>
         <button class="icon-btn" type="button" title={shell.tr("chrome.preferences")} aria-label={shell.tr("chrome.preferences")} onclick={() => (shell.dialog = "prefs")}>{@render glyph("gear")}</button>
       </div>
       <button class="side nav" type="button" data-section="changes" class:selected={shell.section === "changes"} onclick={() => (shell.section = "changes")}>

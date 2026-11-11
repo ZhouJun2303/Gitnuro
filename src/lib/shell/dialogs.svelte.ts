@@ -1,6 +1,7 @@
 import { onMount, tick } from "svelte";
 import { invoke } from "../perf";
 import { broadcastLocale } from "../i18n/sync";
+import { broadcastAppearance } from "../appearance";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { commits, diffs, sampleConflictText, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
@@ -803,14 +804,17 @@ export async function savePrefs(shell: ShellState, close = true) {
     const ticket = ++shell.prefsSave;
     const values = shell.settings;
     const locale = values.locale;
+    const theme = values.theme;
     try {
       const saved = await invoke<Settings>("save_settings", { values });
       if (ticket === shell.prefsSave) {
         const localeChanged = shell.settings.locale !== locale;
-        shell.settings = localeChanged ? { ...saved, locale: shell.settings.locale } : saved;
+        const themeChanged = shell.settings.theme !== theme;
+        shell.settings = { ...saved, locale: shell.settings.locale, theme: shell.settings.theme };
         broadcastLocale(shell.settings.locale);
+        broadcastAppearance(shell.settings.theme);
         applyCommitTypes(shell);
-        if (localeChanged) void shell.savePrefs(false);
+        if (localeChanged || themeChanged) void shell.savePrefs(false);
       }
     } catch (error) {
       if (ticket === shell.prefsSave) shell.actionError = shell.message(error);

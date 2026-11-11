@@ -22,7 +22,7 @@ AweGit 是 Windows 和 macOS 上的 Git 客户端。界面用 Tauri 2 和 Svelte
 - **操作与冲突流程**：操作因待解决冲突停下时，自动打开只读的流程窗口，沿时间轴展示保存本地修改、获取、整合、恢复和结束各阶段的提交、文件、命令与时间。日志保存在仓库的 Git 目录里，支持中断恢复、重复冲突关联和后续步骤预测；自动打开和解决后自动关闭都能在偏好设置里关掉。
 - **远程与托管**：获取、拉取、推送会记住修剪、标签、变基这些选项；推送默认带 `--force-with-lease`；可以提交后立即推送，建标签时一起推。GitHub、GitLab、Bitbucket 和 Azure 账户、通知与拉取请求都在窗口内；支持令牌或设备码登录、HTTP / SOCKS 代理、证书和 SSL 校验。
 - **仓库工具**：后台克隆、新建仓库、Git Flow、交互变基、拣选、还原、压缩、软 / 混合 / 硬重置、二分查找；贮藏可以只收选中文件或从贮藏建分支；子模块、工作树、LFS 锁定、批量删除已合并分支；自定义命令可以给所有仓库或只给当前仓库，需要时再提问；SSH 配置、终端和文件管理器都能从仓库菜单打开。
-- **窗口与体验**：历史、文件内容和合并可以单独开窗口；快速启动搜索命令和文件；命令记录分开用户操作、后台、错误和通知；文件被占用时点名程序与 PID 并给出解除步骤；更新可以下载安装包并静默安装；Fork 设置可以导入。偏好设置共 11 个页签，语言支持中文、英文或跟随系统，主题支持浅色、深色或跟随系统。
+- **窗口与体验**：历史、文件内容和合并可以单独开窗口；快速启动搜索命令和文件；命令记录分开用户操作、后台、错误和通知；文件被占用时点名程序与 PID 并给出解除步骤；更新可以下载安装包并静默安装；Fork 设置可以导入。偏好设置共 11 个页签，语言支持中文、英文或跟随系统；主题提供 Apple Liquid Glass（默认）、经典白色、VS Code 黑色，也支持跟随系统，独立窗口同步切换。
 
 ### 下载与安装
 
@@ -92,7 +92,7 @@ AweGit is a Git client for Windows and macOS. The interface is built with Tauri 
 - **Operation pipeline**: when an operation stops on unresolved conflicts, a read-only pipeline window opens. A timeline shows save-local-edits, fetch, integrate, restore, and finish stages with their commits, files, commands, and timing. The log lives in the repository's Git directory and supports interrupted recovery, repeated-conflict links, and later-step prediction. Auto-open and close-after-resolve can be turned off in preferences.
 - **Remotes and hosting**: fetch, pull, and push remember prune, tag, and rebase options. Push uses `--force-with-lease` by default. A commit can push immediately, and a new tag can go with it. GitHub, GitLab, Bitbucket, and Azure accounts, notifications, and pull requests live in the window. Sign in with a token or a device code; configure HTTP/SOCKS proxies, certificates, and SSL verification.
 - **Repository tools**: background clone, new repository, Git Flow, interactive rebase, cherry-pick, revert, squash, soft/mixed/hard reset, and bisect. Stash selected files or grow a branch from a stash. Submodules, worktrees, LFS locking, and batch deletion of merged branches. Custom commands can be shared or limited to one repository and can ask for a value. SSH config, the terminal, and the file manager open from the repository menu.
-- **Window and experience**: history, file contents, and merge can each open in their own window. Quick launch searches commands and files. The command log separates your actions, background work, errors, and notices. A file held by another program is reported with its process name and PID plus recovery steps. Updates can download and silently install a package. Fork settings can be imported. Preferences have 11 tabs, language follows Chinese, English, or the system, and the theme follows light, dark, or the system.
+- **Window and experience**: history, file contents, and merge can each open in their own window. Quick launch searches commands and files. The command log separates your actions, background work, errors, and notices. A file held by another program is reported with its process name and PID plus recovery steps. Updates can download and silently install a package. Fork settings can be imported. Preferences have 11 tabs and support Chinese, English, or the system language. Choose Apple Liquid Glass (default), Classic White, VS Code Dark, or follow the system; appearance changes also reach independent windows.
 
 ### Download and install
 

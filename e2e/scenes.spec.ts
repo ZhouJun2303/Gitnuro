@@ -4,6 +4,7 @@ import { openScene } from "./helpers";
 import { mkdirSync, writeFileSync } from "node:fs";
 
 for (const variant of [
+  { name: "zh-apple", width: 1440, height: 900, locale: "zh", theme: "apple" },
   { name: "zh-light", width: 1440, height: 900, locale: "zh", theme: "light" },
   { name: "en-dark-compact", width: 960, height: 640, locale: "en", theme: "dark" },
 ]) {

@@ -174,12 +174,13 @@ export function stashItems(shell: ShellState) {
   }
 
 export function appearanceItems(shell: ShellState) {
-    const mark = (value: string) => ((shell.settings.theme || "system") === value ? "✓ " : "");
+    const mark = (value: string) => ((shell.settings.theme || "apple") === value ? "✓ " : "");
     const pick = (value: string) => () => {
       shell.settings.theme = value;
       void shell.savePrefs(false);
     };
     return [
+      { label: `${mark("apple")}${shell.tr("dialog.apple")}`, run: pick("apple") },
       { label: `${mark("system")}${shell.tr("dialog.system")}`, run: pick("system") },
       { label: `${mark("light")}${shell.tr("dialog.light")}`, run: pick("light") },
       { label: `${mark("dark")}${shell.tr("dialog.dark")}`, run: pick("dark") },

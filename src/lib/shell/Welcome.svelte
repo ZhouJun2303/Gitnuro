@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getShell } from "./context";
   import "./Welcome.css";
+  import BrandMark from "./BrandMark.svelte";
   import type { SearchKey } from "./types";
 
   const shell = getShell();
@@ -10,13 +11,7 @@
 <div class="welcome-view">
       <div class="welcome-card">
         <div class="welcome-brand">
-          <svg class="welcome-logo" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-            <circle cx="16" cy="16" r="14" stroke="var(--accent)" stroke-width="2.5" />
-            <circle cx="11" cy="11" r="3" fill="var(--accent)" />
-            <circle cx="21" cy="14" r="3" fill="var(--accent)" />
-            <circle cx="11" cy="21" r="3" fill="var(--accent)" />
-            <path d="M11 11v10M11 16c4 0 10-2 10-2" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" />
-          </svg>
+          <span class="welcome-logo"><BrandMark /></span>
           <div class="welcome-titles">
             <h1>AweGit</h1>
             <p>{shell.tr("chrome.welcomeTagline")}</p>
@@ -39,7 +34,7 @@
             </div>
           </button>
           <button class="welcome-btn" type="button" onclick={() => void shell.beginClone("clone")}>
-            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 11V4a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v7M6 14h7M10 11l3 3-3 3"/></svg>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9V3a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v3M5 12H2V6M9 8v6m-2-2 2 2 2-2M7 6h7"/></svg>
             <div class="btn-meta">
               <strong>{shell.tr("chrome.clone")}</strong>
               <span>{shell.tr("chrome.cloneHint")}</span>

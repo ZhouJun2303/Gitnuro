@@ -12,6 +12,7 @@ import { featuresPageUrl } from "../featuresPage";
 import { fileAccessReport } from "../fileAccess";
 import { resolveLocale, translate } from "../i18n";
 import { broadcastLocale, onLocaleChange } from "../i18n/sync";
+import { isAppearance, onAppearanceChange, resolveAppearance } from "../appearance";
 import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
@@ -174,7 +175,7 @@ export class ShellState {
 
 
   defaultSettings: Settings = {
-    theme: "system",
+    theme: "apple",
     pullRebase: false,
     fetchPrune: true,
     diffStyle: "split",
@@ -2483,7 +2484,7 @@ export class ShellState {
       this.adoptSettings({
         ...settings,
         locale: params.get("locale") === "en" ? "en" : params.get("locale") === "zh" ? "zh" : settings.locale,
-        theme: params.get("theme") === "dark" ? "dark" : params.get("theme") === "light" ? "light" : settings.theme,
+        theme: isAppearance(params.get("theme")) ? params.get("theme")! : settings.theme,
         authorName: settings.authorName || "AweGit Lab",
         authorEmail: settings.authorEmail || "lab@example.com",
         recent,
@@ -6378,12 +6379,12 @@ export class ShellState {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
     const media = typeof window === "undefined" ? null : window.matchMedia("(prefers-color-scheme: dark)");
-    const resolved = () => (this.settings.theme === "dark" || (this.settings.theme !== "light" && (media?.matches ?? false)) ? "dark" : "light");
+    const resolved = () => resolveAppearance(this.settings.theme, media?.matches ?? false);
     const paint = () => {
     const theme = resolved();
     root.setAttribute("data-theme", theme);
     root.lang = this.activeLocale === "zh" ? "zh-CN" : "en";
-    if (this.inApp()) void getCurrentWindow().setTheme(theme).catch(() => {});
+    if (this.inApp()) void getCurrentWindow().setTheme(theme === "dark" ? "dark" : "light").catch(() => {});
     };
     paint();
     media?.addEventListener("change", paint);
@@ -6447,6 +6448,7 @@ export class ShellState {
     };
     const onShortcut = this.onShortcut.bind(this);
     const stopLocale = onLocaleChange((locale) => { this.settings.locale = locale; });
+    const stopAppearance = onAppearanceChange((theme) => { this.settings.theme = theme; });
     const onRememberPointer = this.rememberPointer.bind(this);
     window.addEventListener("keydown", onShortcut);
     window.addEventListener("mousedown", onMouseNav);
@@ -6457,6 +6459,7 @@ export class ShellState {
     window.addEventListener("popstate", onPop);
     const detachNav = () => {
     stopLocale();
+    stopAppearance();
     window.clearTimeout(historyTimer);
     window.removeEventListener("keydown", onShortcut);
     window.removeEventListener("mousedown", onMouseNav);

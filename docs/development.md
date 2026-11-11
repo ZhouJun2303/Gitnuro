@@ -127,7 +127,7 @@ pnpm test:ui -- --reuse e2e/merge-layout.spec.ts
 
 试验台用浏览器看界面：`pnpm dev`，默认在 http://localhost:1420 。场景清单在 `src/lib/lab/scenes.ts`，新弹窗必须记入，否则 `pnpm check` 会失败。`.lab/` 不提交，种子脚本 `scripts/lab-seed.mjs` 和场景清单要提交。
 
-用户明确要求全面检查时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts`。每个有效场景分别检查中文浅色 1440×900、英文深色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
+用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
 
 已有 `pnpm dev` 服务时，可直接复用：PowerShell 中先设置 `$env:AWEGIT_UI_URL = 'http://127.0.0.1:1420'`，再执行 `pnpm exec playwright test e2e/merge-window.spec.ts`。这条命令使用现有试验台，不启动或停止开发服务。
 
@@ -172,6 +172,12 @@ Git 无法替换或写入工作区文件时，命令日志会逐个列出文件�
 合并左右内容与结果按 32 行拆块，大文件只渲染视口与少量缓冲块，单个巨大冲突和大段公共上下文也适用。高度索引处理块测量和定位；滚动状态每帧最多更新一次，选择一侧不会重建左右原始文本。验证覆盖 2.5 万行单个冲突、1000 个冲突之间的长上下文、双向滚动、键盘选择、失败重试及最小窗口布局。窗口持久化单元测试同时覆盖坏记录、负屏幕坐标、DPI 和两类窗口的独立记录；实际桌面多显示器操作仍需在 Tauri 窗口中验证。
 
 ## 语言、偏好设置与标签页
+
+界面有三套独立主题：「Apple Liquid Glass」（默认）、保留原始实色面板和配色的「经典白色」、「VS Code 黑色」。设置值分别为 `apple`、`light`、`dark`；已有 `light` / `dark` 选择保持兼容，`system` 仍按系统切换经典白色与 VS Code 黑色。新安装及缺少主题字段的设置使用 Apple，已有明确选择不会被覆盖。主窗口、文件历史、文件内容、合并与操作流程窗口即时同步主题，切换时保留编辑草稿；Apple 的原生标题栏使用浅色。
+
+颜色、字体和形状使用 `src/lib/theme.css` 中的共享变量；Apple 的玻璃材质、静态背景和悬浮布局集中在 `src/lib/AppleGlass.css`，只作用于 `data-theme="apple"`，不会覆盖经典白色与黑色主题。模糊只用于固定面板、菜单和弹窗，代码行与虚拟列表行不单独模糊。中文显式使用系统无衬线字体，代码和提交哈希使用等宽字体。减少透明效果的系统偏好会把玻璃面板改成实色。
+
+外观试验场景是 `prefs-appearance`。验证三套样式、保存重载、窄窗口操作及独立窗口同步：`pnpm test:ui -- --reuse e2e/appearance.spec.ts`。单个页面的外观检查示例：`pnpm test:ui -- --reuse e2e/scenes.spec.ts --grep "scene prefs-appearance$"`。只有修改覆盖全部页面的共享主题时才运行整个 `e2e/scenes.spec.ts`：160 个场景分别检查中文 Apple / 经典白色（1440×900）和英文 VS Code 黑色（960×640），截图在 `.lab/ui-audit/`。
 
 语言快捷键在首选项和输入框中也可使用，从当前显示语言切换到另一种语言并保存；也可在“外观”菜单中选择“切换语言”。首选项点击面板外空白处保持打开，通过右上角关闭按钮、“完成”或 `Escape` 关闭。试验台场景：`prefs-language`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|preferences backdrop|appearance menu"`。
 

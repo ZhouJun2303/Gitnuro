@@ -2003,7 +2003,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 fn saved_window_theme() -> Option<tauri::Theme> {
     match settings::load().ok()?.theme.as_str() {
         "dark" => Some(tauri::Theme::Dark),
-        "light" => Some(tauri::Theme::Light),
+        "light" | "apple" => Some(tauri::Theme::Light),
         _ => None,
     }
 }

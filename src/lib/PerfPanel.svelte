@@ -119,7 +119,7 @@
   }
   button {
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: var(--field);
     color: var(--text);
     font: inherit;

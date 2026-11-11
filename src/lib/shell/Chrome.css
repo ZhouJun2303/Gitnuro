@@ -1,7 +1,7 @@
 .chrome {
     display: flex;
     flex-direction: column;
-    background: var(--sidebar);
+    background: var(--chrome);
     border-bottom: 1px solid var(--line);
   }
 
@@ -10,8 +10,8 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    gap: 8px;
-    padding: 0 8px;
+    gap: 12px;
+    padding: 0 12px;
     container-type: inline-size;
   }
 
@@ -44,10 +44,10 @@
     max-width: min(540px, 50vw);
     height: 40px;
     padding: 3px;
-    border-radius: 13px;
+    border-radius: var(--identity-radius);
     background: var(--elevated);
-    border: 1px solid var(--line);
-    box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 12%, transparent);
+    border: 1px solid var(--control-edge);
+    box-shadow: var(--shadow-control);
     overflow: hidden;
   }
 
@@ -96,7 +96,7 @@
     white-space: nowrap;
   }
 
-.identity-copy strong { font-size: 13px; font-weight: 650; }
+.identity-copy strong { font-size: 13px; font-weight: 650; letter-spacing: -0.015em; }
 
 .identity-copy span { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); font-size: 11px; }
 
@@ -208,7 +208,7 @@
     min-width: 16px;
     height: 16px;
     padding: 0 4px;
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--elevated);
     color: var(--deleted);
     font-style: normal;
@@ -249,6 +249,7 @@
     height: 30px;
     padding: 0;
     border-top: 1px solid var(--line);
+    background: var(--sidebar);
   }
 
 .tabs {
@@ -262,8 +263,9 @@
 .tabs::-webkit-scrollbar { display: none; }
 
 .tab {
+    position: relative;
     height: 100%;
-    padding: 0 8px;
+    padding: 0 12px;
     border-radius: 0;
     border-right: 1px solid var(--line);
     color: var(--text-secondary);
@@ -283,6 +285,19 @@
 .tab.active {
     background: var(--elevated);
     color: var(--text);
+    font-weight: 600;
+  }
+
+.tab.active::after {
+    content: "";
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 0;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: var(--accent);
+    pointer-events: none;
   }
 
 .tab > .file-select {
@@ -321,7 +336,7 @@
 .tool-btn {
     height: 28px;
     padding: 0 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     color: var(--text);
     display: inline-flex;
     align-items: center;
@@ -346,12 +361,27 @@
     flex-direction: column;
     justify-content: center;
     gap: 3px;
-    font-size: 12px;
+    font-size: 11px;
+    font-weight: 500;
     line-height: 1;
     white-space: nowrap;
   }
 
 .tool-btn.stack > svg { width: 18px; height: 18px; color: var(--text-secondary); }
+
+.chrome-left > .tool-btn:first-child > svg { color: var(--text); }
+
+.chrome-left > .tool-btn:first-child { margin-right: 6px; }
+
+.chrome-left > .tool-btn:first-child::after {
+    content: "";
+    position: absolute;
+    right: -4px;
+    top: 10px;
+    bottom: 10px;
+    width: 1px;
+    background: var(--separator);
+  }
 
 .tool-btn.stack:hover:not(:disabled) > svg { color: var(--text); }
 
@@ -364,7 +394,7 @@
     min-width: 16px;
     height: 16px;
     padding: 0 4px;
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--accent);
     color: var(--on-accent);
     font-style: normal;
@@ -382,14 +412,14 @@
 .identity-floor .history-btn {
     width: 34px;
     height: 34px;
-    border-radius: 9px;
+    border-radius: var(--radius);
   }
 
 .identity-floor .tool-btn.stack.branch-chip {
     height: 34px;
     min-width: 56px;
     padding: 0 8px;
-    border-radius: 9px;
+    border-radius: var(--radius);
     background: transparent;
   }
 
@@ -432,8 +462,10 @@
     gap: 2px;
     height: 28px;
     padding: 0 6px;
-    background: var(--sidebar);
+    background: var(--chrome);
     border-bottom: 1px solid var(--line);
+    color: var(--text-secondary);
+    font-size: 12px;
   }
 
 .menubar button {
@@ -445,7 +477,7 @@
     border-radius: 4px;
   }
 
-.menubar button:hover { background: var(--selection); }
+.menubar button:hover { background: var(--selection); color: var(--text); }
 
 .tab.dirty .file-select::before {
     content: "";

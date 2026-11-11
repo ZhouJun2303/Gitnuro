@@ -1,21 +1,25 @@
 :root {
   color-scheme: light;
   /* Surfaces */
-  --sidebar: #f4f4f5;
-  --canvas: #fafafa;
+  --sidebar: #f0f0f2;
+  --canvas: #f8f8fa;
   --elevated: #ffffff;
+  --chrome: #f6f6f7;
+  --panel-head: #f4f4f6;
   /* Text */
-  --text: #18181b;
-  --text-secondary: #65656d;
+  --text: #242424;
+  --text-secondary: #707070;
   /* Lines and interaction */
-  --line: rgba(24, 24, 27, 0.08);
-  --separator: rgba(24, 24, 27, 0.08);
-  --hover: rgba(24, 24, 27, 0.04);
-  --pressed: rgba(24, 24, 27, 0.08);
-  --accent: #5b5bd6;
+  --line: rgba(0, 0, 0, 0.09);
+  --separator: rgba(0, 0, 0, 0.14);
+  --hover: rgba(0, 0, 0, 0.04);
+  --pressed: rgba(0, 0, 0, 0.08);
+  --accent: #353535;
   --on-accent: #ffffff;
-  --selection: color-mix(in srgb, var(--accent) 12%, transparent);
-  --field: rgba(24, 24, 27, 0.04);
+  --selection: rgba(0, 0, 0, 0.065);
+  --field: rgba(0, 0, 0, 0.035);
+  --control-edge: rgba(0, 0, 0, 0.15);
+  --highlight: rgba(255, 255, 255, 0.9);
   /* Status */
   --added: #1a7f37;
   --deleted: #cf222e;
@@ -23,10 +27,10 @@
   --on-added: #ffffff;
   --on-deleted: #ffffff;
   --on-modified: #ffffff;
-  --diff-add: #e6ffec;
-  --diff-del: #ffebe9;
+  --diff-add: #eaf5ee;
+  --diff-del: #fbeeed;
   /* Refs */
-  --ref-local: #4338ca;
+  --ref-local: #454545;
   --ref-local-bg: color-mix(in srgb, var(--ref-local) 14%, transparent);
   --ref-remote: #3f3f46;
   --ref-remote-bg: color-mix(in srgb, var(--ref-remote) 12%, transparent);
@@ -35,8 +39,10 @@
   --ref-stash: #92400e;
   --ref-stash-bg: color-mix(in srgb, var(--ref-stash) 16%, transparent);
   /* Typography */
-  --font: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --mono: "Cascadia Code", "Segoe UI Mono", ui-monospace, monospace;
+  /* Explicit CJK fallbacks prevent browser defaults from using a serif face. */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", var(--font);
+  --mono: "Cascadia Mono", "SFMono-Regular", "Consolas", "Liberation Mono", "PingFang SC", "Microsoft YaHei UI", monospace;
   --ui-scale: 13px;
   --diff-font: 13px;
   /* Rows */
@@ -48,13 +54,17 @@
   --guide: 72;
   /* Radii, shadows, focus */
   --radius-sm: 6px;
-  --radius: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 14px;
+  --radius: 9px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --pane-height: 36px;
+  --identity-radius: 12px;
+  --welcome-radius: 16px;
   --radius-pill: 999px;
-  --shadow-sm: 0 8px 24px rgba(24, 24, 27, 0.1);
-  --shadow-menu: 0 16px 40px rgba(24, 24, 27, 0.16);
-  --shadow: 0 24px 64px rgba(24, 24, 27, 0.18);
+  --shadow-control: inset 0 1px 0 var(--highlight), 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.04), 0 12px 28px rgba(0, 0, 0, 0.06);
+  --shadow-menu: 0 4px 12px rgba(0, 0, 0, 0.06), 0 20px 48px rgba(0, 0, 0, 0.14);
+  --shadow: 0 0 0 1px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.1), 0 32px 88px rgba(0, 0, 0, 0.2);
   --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
   --guide-line: #d4d4d8;
   /* Code and icon colors */
@@ -62,7 +72,7 @@
   --tok-string: #1a7f37;
   --tok-number: #9a6700;
   --tok-comment: var(--text-secondary);
-  --detail-accent: #2a63d6;
+  --detail-accent: var(--accent);
   --icon-folder: #e8b023;
   --icon-code: #6a7dff;
   --icon-json: #c8962e;
@@ -89,45 +99,59 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --sidebar: #1c1c1f;
-  --canvas: #141416;
-  --elevated: #232326;
-  --text: #f4f4f5;
-  --text-secondary: #a1a1aa;
-  --line: rgba(255, 255, 255, 0.08);
-  --separator: rgba(255, 255, 255, 0.08);
-  --hover: rgba(255, 255, 255, 0.06);
-  --pressed: rgba(255, 255, 255, 0.1);
-  --accent: #8b8cf8;
-  --on-accent: #18181b;
-  --selection: color-mix(in srgb, var(--accent) 16%, transparent);
-  --field: rgba(255, 255, 255, 0.06);
+  --sidebar: #181818;
+  --canvas: #1e1e1e;
+  --elevated: #252525;
+  --chrome: #202020;
+  --panel-head: #222222;
+  --text: #e5e5e5;
+  --text-secondary: #a0a0a0;
+  --line: rgba(255, 255, 255, 0.075);
+  --separator: rgba(255, 255, 255, 0.13);
+  --hover: rgba(255, 255, 255, 0.045);
+  --pressed: rgba(255, 255, 255, 0.09);
+  --accent: #dedede;
+  --on-accent: #202020;
+  --selection: rgba(255, 255, 255, 0.085);
+  --field: rgba(255, 255, 255, 0.04);
+  --control-edge: rgba(255, 255, 255, 0.14);
+  --highlight: rgba(255, 255, 255, 0.055);
+  --font: "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-display: var(--font);
+  --radius-sm: 3px;
+  --radius: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --pane-height: 32px;
+  --identity-radius: 5px;
+  --welcome-radius: 6px;
+  --shadow-control: inset 0 1px 0 var(--highlight);
   --added: #3fb950;
   --deleted: #ff7b72;
   --modified: #d4a72c;
   --on-added: #101411;
   --on-deleted: #1c1c1f;
   --on-modified: #1c1c1f;
-  --diff-add: #1e3a24;
-  --diff-del: #4a1f1f;
-  --ref-local: #c7d2fe;
-  --ref-local-bg: color-mix(in srgb, var(--ref-local) 22%, transparent);
+  --diff-add: #253329;
+  --diff-del: #382727;
+  --ref-local: #d4d4d4;
+  --ref-local-bg: color-mix(in srgb, var(--ref-local) 10%, transparent);
   --ref-remote: #e4e4e7;
   --ref-remote-bg: color-mix(in srgb, var(--ref-remote) 14%, transparent);
   --ref-tag: #86efac;
   --ref-tag-bg: color-mix(in srgb, var(--ref-tag) 22%, transparent);
   --ref-stash: #fcd34d;
   --ref-stash-bg: color-mix(in srgb, var(--ref-stash) 22%, transparent);
-  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.32);
+  --shadow-sm: 0 2px 6px rgba(0, 0, 0, 0.12), 0 12px 28px rgba(0, 0, 0, 0.2);
   --shadow-menu: 0 16px 40px rgba(0, 0, 0, 0.4);
   --shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
-  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
   --guide-line: #3f3f46;
   --tok-word: #c9a6ff;
   --tok-string: #7ee787;
   --tok-number: #e3b341;
   --tok-comment: var(--text-secondary);
-  --detail-accent: #6aa7ff;
+  --detail-accent: var(--accent);
   --icon-folder: #e2b33c;
   --icon-code: #8a9bff;
   --icon-json: #e0b04a;
@@ -196,7 +220,61 @@ body {
   color: var(--text);
   background: var(--canvas);
   letter-spacing: 0;
+  line-height: 1.5;
+  font-kerning: normal;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
+
+button, input, select, textarea { font-family: inherit; }
+
+input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color: var(--accent); }
+
+::selection { color: var(--text); background: color-mix(in srgb, var(--accent) 25%, transparent); }
+
+/* Preserve the original white palette independently of Apple Liquid Glass. */
+:root[data-theme="light"] {
+  --sidebar: #f4f4f5;
+  --canvas: #fafafa;
+  --chrome: #fafafa;
+  --panel-head: #fafafa;
+  --text: #18181b;
+  --text-secondary: #65656d;
+  --line: rgba(24, 24, 27, 0.08);
+  --separator: rgba(24, 24, 27, 0.08);
+  --accent: #5b5bd6;
+  --selection: color-mix(in srgb, var(--accent) 12%, transparent);
+  --field: rgba(24, 24, 27, 0.04);
+  --diff-add: #e6ffec;
+  --diff-del: #ffebe9;
+  --ref-local: #4338ca;
+  --detail-accent: #2a63d6;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --pane-height: 28px;
+  --identity-radius: 8px;
+  --welcome-radius: 12px;
+  --shadow-control: none;
+  --shadow-sm: 0 8px 24px rgba(24, 24, 27, 0.1);
+  --shadow-menu: 0 16px 40px rgba(24, 24, 27, 0.16);
+  --shadow: 0 24px 64px rgba(24, 24, 27, 0.18);
+}
+
+/* VS Code: flat, compact panels and square controls. */
+:root[data-theme="dark"] :is(.history-stage, .changes-column) { background: var(--canvas); }
+:root[data-theme="dark"] .tab.active { background: var(--canvas); }
+:root[data-theme="dark"] .tab.active::after { top: 0; bottom: auto; left: 0; right: 0; height: 1px; background: #8a8a8a; border-radius: 0; }
+:root[data-theme="dark"] .vertical-tabs .tab.active::after { top: 4px; bottom: 4px; right: auto; height: auto; width: 1px; }
+:root[data-theme="dark"] .sidebar .side.selected { box-shadow: inset 2px 0 0 #a0a0a0; }
+:root[data-theme="dark"] .commit { box-shadow: none; }
+:root[data-theme="dark"] .welcome-logo { filter: none; }
+:root[data-theme="dark"] .welcome-btn:hover { transform: none; box-shadow: none; }
+:root[data-theme="dark"] :is(.repo-row.current, .command-item.current),
+:root[data-theme="dark"] :is(.repo-row.current, .command-item.current):hover { background: var(--selection); color: var(--text); box-shadow: inset 2px 0 0 #8a8a8a; }
+:root[data-theme="dark"] .command-item.current :is(.time, .summary) { color: var(--text-secondary); }
+:root[data-theme="dark"] .repo-row.current .repo-glyph { color: var(--text-secondary); }
+:root[data-theme="dark"] .repo-row.current .repo-dot { border-color: var(--deleted); }
 
 :root :is(
   button,

@@ -10,7 +10,7 @@
 
 .side-pin {
     flex: none;
-    padding: 8px 0 6px;
+    padding: 10px 0 8px;
     background: var(--sidebar);
     border-bottom: 1px solid var(--line);
   }
@@ -56,7 +56,10 @@
 .side.section {
     position: relative;
     margin-top: 6px;
-    color: var(--text);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.035em;
   }
 
 .side-actions {
@@ -186,10 +189,23 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 32px;
-    padding: 0 6px 0 14px;
+    height: 36px;
+    padding: 0 8px 0 14px;
     font-weight: 600;
   }
+
+.side-wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 650;
+    letter-spacing: -0.035em;
+  }
+
+.side-logo { display: block; width: 23px; height: 23px; flex: none; }
 
 .side-brand .icon-btn {
     width: 28px;
@@ -200,7 +216,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 4px;
     height: 28px;
     margin-top: 2px;
   }
@@ -214,6 +230,7 @@
 .side-tool.on,
   .side-tool.on:hover:not(:disabled) {
     color: var(--accent);
+    background: var(--selection);
   }
 
 .side-filter {
@@ -223,8 +240,9 @@
     height: 28px;
     margin: 4px 10px 2px;
     padding: 0 8px;
-    border-radius: 6px;
-    background: var(--field);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--elevated) 50%, transparent);
+    border: 1px solid var(--line);
     color: var(--text-secondary);
   }
 
@@ -288,7 +306,7 @@
     height: 26px;
     padding: 0 8px;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: var(--elevated);
     color: var(--text);
     font: inherit;
@@ -321,7 +339,7 @@
     height: 28px;
     padding: 0 8px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text);
     font: inherit;
@@ -409,10 +427,24 @@
 
 .sidebar .side.selected,
   .sidebar .side.nav.selected {
-    background: color-mix(in srgb, var(--text) 12%, var(--sidebar));
-    color: var(--text);
+    background: var(--selection);
+    color: var(--accent);
+    box-shadow: inset 2px 0 0 var(--accent);
   }
 
 .side.nav { width: calc(100% - 12px); }
 
 .side.nav .count { margin-left: auto; }
+
+.side.nav .count {
+    min-width: 22px;
+    padding: 0 5px;
+    border-radius: 4px;
+    background: var(--field);
+    color: var(--text-secondary);
+    font-size: 10px;
+    line-height: 18px;
+    text-align: center;
+  }
+
+.side.nav.selected .count { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }

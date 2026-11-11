@@ -31,10 +31,11 @@
     display: flex;
     gap: 18px;
     align-items: stretch;
-    height: 32px;
+    height: var(--pane-height);
     padding: 0 16px;
     border-bottom: 1px solid var(--line);
     flex: none;
+    background: var(--panel-head);
   }
 
 .detail-tabs [role="tab"] {
@@ -80,7 +81,7 @@
 
 .avatar.tile.strip { width: 18px; height: 18px; font-size: 11px; line-height: 18px; border-radius: 3px; }
 
-.avatar.tile.lg { width: 36px; height: 36px; font-size: 16px; line-height: 36px; border-radius: 4px; }
+.avatar.tile.lg { width: 36px; height: 36px; font-size: 16px; line-height: 36px; border-radius: 9px; }
 
 .strip-author { font-weight: 600; flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -90,7 +91,7 @@
 
 .strip-subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.fork-card { padding: 12px 16px 8px; user-select: text; }
+.fork-card { padding: 16px 20px 12px; user-select: text; }
 
 .fork-person-wrap + .fork-person-wrap { margin-top: 10px; }
 
