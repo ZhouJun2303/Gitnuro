@@ -112,10 +112,13 @@ pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|prefer
 pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"
 pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"
 pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "tab context menu copies"
+pnpm test:ui -- --reuse e2e/tag-order.spec.ts --grep "tags"
 pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "file access errors"
 ```
 
 `--` 后的参数会传给 Playwright。已有 `.lab` 仓库且本次无需重建时，加 `--reuse` 可复用数据，避免重建整套试验台和清理正在使用的开发日志：`pnpm test:ui -- --reuse e2e/sync-toolbar.spec.ts`。需要恢复的仓库可先单独执行 `node scripts/lab-seed.mjs rebase conflict`。
+
+侧栏标签按时间由近到远排列：附注标签使用标签日期，轻量标签使用提交日期；目录分组按组内最新标签排列，组内保持时间倒序。前端以线性遍历保留后端顺序，不额外按名称排序，滚动沿用虚拟列表。试验台场景：`tag-order`；上方标签用例自动重建专用仓库，也可用 `node scripts/lab-seed.mjs tags` 单独重建。
 
 窗口位置持久化与冲突自动打开的相关 Rust 校验：
 

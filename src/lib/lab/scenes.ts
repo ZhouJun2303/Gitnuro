@@ -110,6 +110,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "commit-binary", group: "主界面", title: "提交中的二进制差异", repo: "full", ready: ".binary-summary" }),
   scene({ id: "tree", group: "主界面", title: "文件树", repo: "full", ready: ".tree-row" }),
   scene({ id: "sidebar", group: "主界面", title: "侧栏", repo: "full", ready: ".sidebar" }),
+  scene({ id: "tag-order", group: "主界面", title: "标签 · 时间倒序与目录分组", repo: "tags", ready: '.sidebar .file-select[title="v2.0.1"]' }),
   scene({ id: "branch-badges", group: "主界面", title: "分支角标", repo: "full", ready: ".sidebar .track-dot.missing" }),
   scene({ id: "vertical-tabs", group: "主界面", title: "垂直标签", repo: "full", ready: ".vertical-tabs" }),
   scene({ id: "tab-copy-path", group: "主界面", title: "项目标签 · 拷贝项目路径", repo: "full", ready: ".chrome-tabs .tab" }),
