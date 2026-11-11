@@ -112,6 +112,7 @@ pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|prefer
 pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"
 pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"
 pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "tab context menu copies"
+pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "file access errors"
 ```
 
 `--` 后的参数会传给 Playwright。已有 `.lab` 仓库且本次无需重建时，加 `--reuse` 可复用数据，避免重建整套试验台和清理正在使用的开发日志：`pnpm test:ui -- --reuse e2e/sync-toolbar.spec.ts`。需要恢复的仓库可先单独执行 `node scripts/lab-seed.mjs rebase conflict`。
@@ -129,6 +130,12 @@ pnpm test:app operation_observer_auto_close
 ```powershell
 cargo test -p awegit-git squash_replays_commits_after_the_range -- --test-threads=1
 ```
+
+## 文件占用提示
+
+Git 无法替换或写入工作区文件时，命令日志会逐个列出文件和原因。Windows 能识别占用程序时显示程序名与 PID，并提示保存工作、关闭文件或退出程序、在任务管理器核对残留进程，再刷新仓库状态并继续或重试操作。无法识别程序时，提示排查占用、只读属性和写权限，避免把所有访问失败都认定为占用。说明适用于各类文件及共用 Git 执行器的操作，原始 Git 错误仍完整保留并可复制。
+
+这类重要提示在日志中使用红色边框、16px 粗体标题和 14px 正文，文件、原因及程序/PID 加粗，窄窗口中自动换行且可以滚动查看解除步骤。从顶部“文件占用 / 访问受限”提示或错误列表打开，都能看到完整说明。试验台场景：`commands-file-access`、`commands-file-access-unknown`。相关验证：`pnpm test:git locks::tests` 和上方的 `file access errors` UI 用例；Windows 程序识别测试需要可访问 Restart Manager 的正常系统权限。
 
 ## 操作与冲突流程窗口
 

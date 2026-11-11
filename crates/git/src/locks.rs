@@ -8,15 +8,16 @@ use std::path::Path;
 
 /// Lines Git prints when a work-tree file cannot be replaced or removed.
 const FILE_MARKERS: [&str; 5] = [
-    "unable to unlink old '",
-    "unable to unlink '",
-    "could not unlink '",
-    "unable to create file '",
-    "unable to write file '",
+    "unable to unlink old ",
+    "unable to unlink ",
+    "could not unlink ",
+    "unable to create file ",
+    "unable to write file ",
 ];
 
-/// Failures that mean another program holds the file, rather than a bad path.
-const LOCK_REASONS: [&str; 8] = [
+/// Git can report these for locks, read-only files, or insufficient permissions.
+/// Only a known holding process confirms that another program has the file open.
+const ACCESS_REASONS: [&str; 10] = [
     "invalid argument",
     "permission denied",
     "access is denied",
@@ -25,42 +26,71 @@ const LOCK_REASONS: [&str; 8] = [
     "operation not permitted",
     "cannot access the file",
     "sharing violation",
+    "text file busy",
+    "read-only file system",
 ];
 
-/// Turn a Git failure about a locked work-tree file into a message that names
-/// the process holding it. Every other failure is left alone.
+/// Explain file access failures for every Git command, without assuming a file
+/// type or application. The caller keeps Git's original error after this advice.
 pub(crate) fn explain(repo: &Path, stderr: &str) -> Option<String> {
     let paths = locked_paths(stderr);
     if paths.is_empty() {
         return None;
     }
-    let mut apps: Vec<String> = Vec::new();
-    for path in &paths {
-        for app in holders(&repo.join(path)) {
-            if !apps.contains(&app) {
-                apps.push(app);
-            }
+    let files: Vec<_> = paths.into_iter().map(|path| {
+        let apps = holders(&repo.join(&path));
+        (path, apps)
+    }).collect();
+    Some(describe(&files))
+}
+
+fn describe(files: &[(String, Vec<String>)]) -> String {
+    let mut lines = vec!["Git operation failed: the following files could not be updated.".to_string()];
+    let mut unknown_holder = false;
+    for (path, apps) in files {
+        lines.push(format!("\nFile: {path}"));
+        if apps.is_empty() {
+            unknown_holder = true;
+            lines.push("Cause: Possible file lock, read-only attribute, or insufficient permissions; no holding process was identified.".into());
+        } else {
+            lines.push("Cause: File is in use (locked by another process).".into());
+            lines.push(format!("In use by: {}", apps.join(", ")));
         }
     }
-    let files = list_files(&paths);
-    Some(if apps.is_empty() {
-        format!("could not update {files}: the file is locked or read-only. Close the program using it or clear the read-only attribute, then try again.")
-    } else {
-        format!("could not update {files}: in use by {}. Close the program, then try again.", apps.join(", "))
-    })
+    lines.push("\nHow to release access:".into());
+    lines.push("1. Save your work and close the affected files in the programs using them. If a lock remains, fully quit those programs.".into());
+    #[cfg(windows)]
+    lines.push("2. If a listed program remains running, check its PID in Task Manager > Details. End only that process, after saving your work.".into());
+    #[cfg(not(windows))]
+    lines.push("2. If a listed program remains running, check its PID in Activity Monitor or your system process monitor. Quit only that process, after saving your work.".into());
+    if unknown_holder {
+        #[cfg(windows)]
+        lines.push("3. To find an unidentified holder, open Resource Monitor > CPU > Associated Handles and search for the file name. Also check the file's read-only attribute and your write permissions.".into());
+        #[cfg(not(windows))]
+        lines.push("3. To find an unidentified holder, use lsof with the file path or your system's open-file inspector. Also check the file's read-only attribute and your write permissions.".into());
+    }
+    let last = if unknown_holder { 4 } else { 3 };
+    lines.push(format!("{last}. After releasing access, refresh the repository status. If a Git operation is still in progress, continue that operation; otherwise retry the failed action."));
+    lines.join("\n")
 }
 
 fn locked_paths(stderr: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     for line in stderr.lines() {
-        if !lock_reason(line) {
-            continue;
-        }
+        let lower = line.to_ascii_lowercase();
         for marker in FILE_MARKERS {
-            let Some(start) = line.find(marker) else { continue };
+            let Some(start) = lower.find(marker) else { continue };
             let rest = &line[start + marker.len()..];
-            let Some(end) = rest.find('\'') else { continue };
-            let path = rest[..end].trim();
+            // Split at the error, not an apostrophe or a colon inside the path.
+            // Git quotes unlink paths, but normally leaves create paths unquoted.
+            let Some((path, reason)) = rest.rsplit_once(": ") else { continue };
+            if !access_reason(reason) {
+                break;
+            }
+            let path = path.trim();
+            let path = path.strip_prefix('\'').and_then(|value| value.strip_suffix('\''))
+                .or_else(|| path.strip_prefix('"').and_then(|value| value.strip_suffix('"')))
+                .unwrap_or(path);
             if !path.is_empty() && !found.iter().any(|item| item == path) {
                 found.push(path.to_string());
             }
@@ -70,18 +100,9 @@ fn locked_paths(stderr: &str) -> Vec<String> {
     found
 }
 
-fn lock_reason(line: &str) -> bool {
-    let lower = line.to_ascii_lowercase();
-    LOCK_REASONS.iter().any(|reason| lower.contains(reason))
-}
-
-fn list_files(paths: &[String]) -> String {
-    const SHOWN: usize = 3;
-    if paths.len() <= SHOWN {
-        paths.join(", ")
-    } else {
-        format!("{}, and {} more", paths[..SHOWN].join(", "), paths.len() - SHOWN)
-    }
+fn access_reason(reason: &str) -> bool {
+    let lower = reason.to_ascii_lowercase();
+    ACCESS_REASONS.iter().any(|candidate| lower.contains(candidate))
 }
 
 #[cfg(windows)]
@@ -221,18 +242,72 @@ mod tests {
         let repo = std::env::temp_dir();
         let message = explain(&repo, "error: unable to unlink old 'locked.xlsx': Invalid argument").unwrap();
         assert!(message.contains("locked.xlsx"));
-        assert!(message.contains("Close"));
+        assert!(message.contains("Possible file lock"));
+        assert!(message.contains("no holding process was identified"));
+        assert!(message.contains("How to release access:"));
+        assert!(message.contains("write permissions"));
+        assert!(!message.contains("Cause: File is in use"));
     }
 
     #[test]
-    fn lists_at_most_three_paths() {
-        let paths = vec!["a".to_string(), "b".to_string(), "c".to_string(), "d".to_string()];
-        assert_eq!(list_files(&paths), "a, b, c, and 1 more");
+    fn reads_unquoted_paths_and_apostrophes_without_losing_the_file_name() {
+        let stderr = "error: unable to create file docs/team's notes.md: Permission denied\n\
+                      error: unable to unlink old 'data/user's records.db': Invalid argument\n\
+                      error: unable to write file \"art/source file.psd\": Sharing violation";
+        assert_eq!(locked_paths(stderr), vec![
+            "docs/team's notes.md".to_string(),
+            "data/user's records.db".to_string(),
+            "art/source file.psd".to_string(),
+        ]);
+    }
+
+    #[test]
+    fn does_not_mistake_a_file_name_for_a_lock_reason() {
+        assert!(locked_paths("error: unable to unlink old 'permission denied.txt': No such file or directory").is_empty());
+        assert!(locked_paths("error: unable to create file 'resource busy.txt': No space left on device").is_empty());
+        assert!(locked_paths("fatal: Unable to create '.git/index.lock': File exists").is_empty());
+    }
+
+    #[test]
+    fn deduplicates_paths_across_git_errors() {
+        let stderr = "error: unable to unlink old 'data/cache.db': Permission denied\n\
+                      error: unable to create file data/cache.db: Permission denied";
+        assert_eq!(locked_paths(stderr), vec!["data/cache.db".to_string()]);
+    }
+
+    #[test]
+    fn confirmed_locks_include_the_cause_process_and_recovery_steps() {
+        let message = describe(&[("art/source.psd".into(), vec!["Image Editor (PID 123)".into()])]);
+        assert!(message.contains("Cause: File is in use (locked by another process)."), "{message}");
+        assert!(message.contains("In use by: Image Editor (PID 123)"), "{message}");
+        assert!(message.contains("Save your work"), "{message}");
+        assert!(message.contains("fully quit"), "{message}");
+        assert!(message.contains("check its PID"), "{message}");
+        assert!(message.contains("Git operation is still in progress, continue"), "{message}");
+        assert!(!message.contains("Possible file lock"), "{message}");
+    }
+
+    #[test]
+    fn keeps_each_file_with_its_own_holder_including_unidentified_files() {
+        let message = describe(&[
+            ("file-a.db".into(), vec!["Database (PID 11)".into()]),
+            ("file-b.psd".into(), vec!["Image Editor (PID 22)".into()]),
+            ("file-c.pdf".into(), vec![]),
+            ("file-d.txt".into(), vec!["Editor (PID 33)".into()]),
+        ]);
+        let first = message.split("File: file-b.psd").next().unwrap();
+        assert!(first.contains("Database (PID 11)"));
+        assert!(!first.contains("Image Editor"));
+        let unknown = message.split("File: file-c.pdf").nth(1).unwrap().split("File: file-d.txt").next().unwrap();
+        assert!(unknown.contains("no holding process was identified"));
+        assert!(!unknown.contains("Cause: File is in use"));
+        assert!(message.contains("File: file-d.txt"));
+        assert!(message.contains("write permissions"));
     }
 
     #[cfg(windows)]
     #[test]
-    fn merge_names_the_process_holding_the_file() {
+    fn writes_name_the_process_and_explain_how_to_release_the_file() {
         let repo = std::env::temp_dir().join(format!("awegit-lock-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&repo);
         std::fs::create_dir_all(&repo).unwrap();
@@ -257,10 +332,17 @@ mod tests {
         git(&["update-index", "--refresh"]);
 
         let lock = test_lock::FileLock::exclusive(&repo.join("held.txt"));
-        let message = crate::cli::run(&repo, &["merge", "--ff-only", "other"]).unwrap_err().to_string();
-        assert!(message.contains("could not update held.txt"), "{message}");
-        assert!(message.contains(&format!("PID {}", std::process::id())), "{message}");
+        for args in [&["merge", "--ff-only", "other"][..], &["checkout", "other"][..]] {
+            let message = crate::cli::run(&repo, args).unwrap_err().to_string();
+            assert!(message.contains("File: held.txt"), "{message}");
+            assert!(message.contains("Cause: File is in use (locked by another process)."), "{message}");
+            assert!(message.contains(&format!("PID {}", std::process::id())), "{message}");
+            assert!(message.contains("Task Manager > Details"), "{message}");
+            assert!(message.contains("unable to unlink"), "{message}");
+        }
         drop(lock);
+        git(&["merge", "--ff-only", "other"]);
+        assert_eq!(std::fs::read_to_string(repo.join("held.txt")).unwrap(), "two");
         let _ = std::fs::remove_dir_all(&repo);
     }
 

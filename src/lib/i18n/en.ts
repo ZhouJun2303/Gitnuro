@@ -306,6 +306,7 @@ export const en: Messages = {
     noRepositories: "No repositories yet",
     welcomeTitle: "Welcome to AweGit",
     commandHistory: "Commands",
+    fileAccessError: "File in use / access denied",
     commandAll: "All",
     commandUser: "User",
     commandBackground: "Background",

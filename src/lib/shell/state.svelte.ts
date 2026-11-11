@@ -9,6 +9,7 @@ import { commits, diffs, sampleConflictViews, sampleImages, sampleNotices, sampl
 import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, remoteNameFromUrl, repoNameFromUrl, safeFolderName } from "../clonePath";
 import { featuresPageUrl } from "../featuresPage";
+import { fileAccessReport } from "../fileAccess";
 import { resolveLocale, translate } from "../i18n";
 import { broadcastLocale, onLocaleChange } from "../i18n/sync";
 import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
@@ -1430,6 +1431,7 @@ export class ShellState {
       });
     }
     if (this.actionError) {
+      const accessReport = fileAccessReport(this.actionError);
       const actions: StatusNoticeAction[] = [];
       if (this.stashRetry) actions.push({ id: "stash", label: this.tr("chrome.stashAndRetry"), disabled: this.busy });
       actions.push({ id: "close", label: this.tr("chrome.close") });
@@ -1437,8 +1439,8 @@ export class ShellState {
         id: "error",
         priority: 3,
         tone: "error",
-        title: this.actionError,
-        detail: "",
+        title: accessReport ? this.tr("chrome.fileAccessError") : this.actionError,
+        detail: accessReport ? this.actionError : "",
         dataLayer: "error",
         floor: true,
         actions,

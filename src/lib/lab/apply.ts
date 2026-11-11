@@ -202,6 +202,31 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.openCommandLog();
     return;
   }
+  if (id === "commands-file-access" || id === "commands-file-access-unknown") {
+    const unknown = id.endsWith("-unknown");
+    const output = [
+      "Git operation failed: the following files could not be updated.",
+      "",
+      "File: art/角色 source.psd",
+      "Cause: File is in use (locked by another process).",
+      "In use by: Image Editor (PID 123)",
+      ...(unknown ? ["", "File: data/cache.db", "Cause: Possible file lock, read-only attribute, or insufficient permissions; no holding process was identified."] : []),
+      "",
+      "How to release access:",
+      "1. Save your work and close the affected files in the programs using them. If a lock remains, fully quit those programs.",
+      "2. If a listed program remains running, check its PID in Task Manager > Details. End only that process, after saving your work.",
+      ...(unknown ? ["3. To find an unidentified holder, open Resource Monitor > CPU > Associated Handles and search for the file name. Also check the file's read-only attribute and your write permissions."] : []),
+      `${unknown ? 4 : 3}. After releasing access, refresh the repository status. If a Git operation is still in progress, continue that operation; otherwise retry the failed action.`,
+      "error: unable to unlink old 'art/角色 source.psd': Invalid argument",
+      ...(unknown ? ["error: unable to create file data/cache.db: Permission denied"] : []),
+    ].join("\n");
+    shell.commandLog = [];
+    shell.errorLog = [];
+    shell.recordCommand("merge", { title: "Merge branch", command: "git merge --ff-only other" }, output, false, "user");
+    shell.actionError = output;
+    shell.openCommandLog("errors");
+    return;
+  }
   if (id === "notes") {
     shell.notices = Array.from({ length: FILL }, (_, index) => {
       const n = pad(index + 1);

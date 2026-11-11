@@ -431,6 +431,52 @@ test("command log opens on the newest row even when a stale id matches an old er
   expect(state.index).toBe(0);
 });
 
+test("file access errors highlight the cause and recovery steps and copy the full log", async ({ page, context }) => {
+  test.setTimeout(60_000);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  for (const width of [1440, 900]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const id of ["commands-file-access", "commands-file-access-unknown"]) {
+      await openLabScene(page, id, ".file-access-notice");
+      const notice = page.locator(".file-access-notice");
+      await expect(notice).toContainText("Cause: File is in use (locked by another process).");
+      await expect(notice).toContainText("Image Editor (PID 123)");
+      await expect(notice).toContainText("Save your work");
+      await expect(notice).toContainText("Task Manager > Details");
+      const heading = notice.locator(".file-access-heading").first();
+      await expect(heading).toBeInViewport();
+      const style = await heading.evaluate((node) => ({ size: parseFloat(getComputedStyle(node).fontSize), weight: Number(getComputedStyle(node).fontWeight) }));
+      expect(style.size).toBeGreaterThanOrEqual(16);
+      expect(style.weight).toBeGreaterThanOrEqual(700);
+      expect(await notice.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+      if (id.endsWith("-unknown")) {
+        await expect(notice).toContainText("no holding process was identified");
+        await expect(notice).toContainText("Resource Monitor > CPU > Associated Handles");
+      } else {
+        await expect(notice).not.toContainText("Possible file lock");
+      }
+      const lastStep = notice.locator("span").filter({ hasText: /^\d+\. After releasing access,/ });
+      await lastStep.scrollIntoViewIfNeeded();
+      await expect(lastStep).toBeInViewport();
+      await expect(page.locator(".command-detail pre")).toContainText("error: unable to unlink old 'art/角色 source.psd': Invalid argument");
+      await page.locator(".command-detail header button").click();
+      const copied = await page.evaluate(() => navigator.clipboard.readText());
+      expect(copied).toContain("In use by: Image Editor (PID 123)");
+      expect(copied).toContain("otherwise retry the failed action.");
+      expect(copied).toContain("error: unable to unlink old 'art/角色 source.psd': Invalid argument");
+      await page.keyboard.press("Escape");
+      const banner = page.locator('.identity-floor[data-layer="error"] .identity-copy');
+      await expect(banner).toContainText(/File in use \/ access denied|文件占用 \/ 访问受限/);
+      await banner.click();
+      await expect(notice).toBeVisible();
+      await expect(notice).toContainText("Image Editor (PID 123)");
+      await expect(page.locator(".command-detail pre")).toContainText("error: unable to unlink old 'art/角色 source.psd': Invalid argument");
+      if (width === 900) await page.evaluate(() => document.documentElement.dataset.theme = "dark");
+      await page.screenshot({ path: `.lab/file-access-${width}${id.endsWith("-unknown") ? "-unknown" : ""}.png` });
+    }
+  }
+});
+
 test("submenu opens and closes with the arrow keys", async ({ page }) => {
   await openLabScene(page, "menu", '[data-layer="menu"]');
   await page.keyboard.press("ArrowDown");

@@ -306,6 +306,7 @@ export const zh: Messages = {
     noRepositories: "还没有仓库",
     welcomeTitle: "欢迎使用 AweGit",
     commandHistory: "命令记录",
+    fileAccessError: "文件占用 / 访问受限",
     commandAll: "全部",
     commandUser: "用户",
     commandBackground: "后台",

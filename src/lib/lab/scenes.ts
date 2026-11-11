@@ -134,6 +134,8 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "picker-truncated", group: "主界面", title: "仓库选择器已截断", repo: "full", ready: "[data-scan-truncated]" }),
   scene({ id: "commands", group: "主界面", title: "命令记录", repo: "full", ready: "[data-layer=\"commands\"]" }),
   scene({ id: "commands-errors", group: "主界面", title: "命令记录：错误列表", repo: "full", ready: "[data-layer=\"commands\"]" }),
+  scene({ id: "commands-file-access", group: "主界面", title: "命令记录：文件被占用", repo: "even", ready: ".file-access-notice" }),
+  scene({ id: "commands-file-access-unknown", group: "主界面", title: "命令记录：占用与访问受限", repo: "even", ready: ".file-access-notice" }),
   scene({ id: "notes", group: "主界面", title: "通知", repo: "full", ready: "[data-layer=\"forge\"]" }),
   scene({ id: "pulls", group: "主界面", title: "拉取请求", repo: "full", ready: "[data-layer=\"forge\"]" }),
   scene({ id: "launch", group: "主界面", title: "快速启动", repo: "full", ready: "[data-layer=\"launch\"]" }),

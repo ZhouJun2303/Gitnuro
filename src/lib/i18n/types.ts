@@ -267,6 +267,7 @@ export type Messages = {
     noRepositories: string;
     welcomeTitle: string;
     commandHistory: string;
+    fileAccessError: string;
     commandAll: string;
     commandUser: string;
     commandBackground: string;
