@@ -2716,6 +2716,74 @@ fn commit_is_refused_while_a_rebase_is_paused() {
     );
 }
 
+#[test]
+fn another_flow_is_refused_while_a_rebase_is_paused() {
+    let repo = conflict_repo();
+    assert!(perform(
+        &repo.path,
+        Mutation::Rebase {
+            onto: "main".into(),
+            autostash: false
+        }
+    )
+    .is_err());
+    fs::write(repo.path.join("a.txt"), "resolved\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    let head = git_at(&repo.path, &["rev-parse", "HEAD"]);
+
+    let merge = perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "main".into(),
+            squash: false,
+            no_ff: false,
+            autostash: true,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .unwrap_err();
+    assert!(
+        merge.to_string().contains("rebase is in progress"),
+        "{merge}"
+    );
+    let checkout = perform(
+        &repo.path,
+        Mutation::Checkout {
+            name: "main".into(),
+        },
+    )
+    .unwrap_err();
+    assert!(
+        checkout.to_string().contains("rebase is in progress"),
+        "{checkout}"
+    );
+    let pick = perform(
+        &repo.path,
+        Mutation::CherryPick {
+            rev: "main".into(),
+            record: false,
+        },
+    )
+    .unwrap_err();
+    assert!(pick.to_string().contains("rebase is in progress"), "{pick}");
+
+    assert_eq!(in_progress(&repo.path).unwrap(), Some(InProgress::Rebase));
+    assert_eq!(
+        git_at(&repo.path, &["rev-parse", "HEAD"]).trim(),
+        head.trim()
+    );
+    // The paused flow still finishes normally after the refused writes.
+    perform(
+        &repo.path,
+        Mutation::Continue {
+            message: String::new(),
+        },
+    )
+    .unwrap();
+    assert_eq!(in_progress(&repo.path).unwrap(), None);
+}
+
 struct RemoveDir(PathBuf);
 
 impl Drop for RemoveDir {

@@ -99,9 +99,9 @@
           { label: shell.tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: shell.mode !== "live", run: () => void shell.doFetch() },
           { label: shell.tr("chrome.fetchAll"), disabled: shell.mode !== "live", run: () => void shell.mutate({ action: "fetch", remote: null, prune: shell.settings.fetchPrune, tags: shell.settings.fetchTags }) },
         ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span>{shell.tr("chrome.fetch")}</span></button>
-        <button class="tool-btn stack" type="button" title={shell.tr("chrome.pull")} disabled={shell.busy || shell.mode !== "live" || !shell.snapshot} onclick={() => shell.confirmSync("pull")} oncontextmenu={(event) => shell.openMenu(event, [
-          { label: shell.tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: shell.mode !== "live", run: () => void shell.doPull() },
-          { label: shell.tr("dialog.fastForward"), disabled: shell.mode !== "live", run: () => { shell.settings.pullRebase = false; void shell.doPull(); } },
+        <button class="tool-btn stack" type="button" title={shell.tr("chrome.pull")} disabled={shell.busy || shell.mode !== "live" || !shell.snapshot || !!shell.progress} onclick={() => shell.confirmSync("pull")} oncontextmenu={(event) => shell.openMenu(event, [
+          { label: shell.tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: shell.mode !== "live" || !!shell.progress, run: () => void shell.doPull() },
+          { label: shell.tr("dialog.fastForward"), disabled: shell.mode !== "live" || !!shell.progress, run: () => { shell.settings.pullRebase = false; void shell.doPull(); } },
         ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg><span>{shell.tr("chrome.pull")}</span>{#if shell.currentBranch && shell.currentBranch.behind > 0}<em class="sync-count">{shell.currentBranch.behind > 99 ? "99+" : shell.currentBranch.behind}</em>{/if}</button>
         <button class="tool-btn stack" type="button" title={shell.tr("chrome.push")} disabled={shell.busy || shell.mode !== "live" || !shell.snapshot} onclick={() => shell.confirmSync("push")} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: shell.mode !== "live", run: () => void shell.doPush() },

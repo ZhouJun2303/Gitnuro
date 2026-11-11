@@ -3072,6 +3072,12 @@ export class ShellState {
     const path = this.repoPath();
     if (!this.backend() || !path) return;
     const background = source === "background";
+    const action = String(request.action ?? "");
+    if (!background && this.progress && this.startsFlow(action)) {
+      // A paused rebase, merge, cherry-pick, or revert owns HEAD until it ends.
+      this.actionError = this.tr("chrome.finishFlowFirst");
+      return;
+    }
     if (!background) {
       if (this.userWrites > 0) return;
       this.userWrites += 1;
@@ -3087,7 +3093,6 @@ export class ShellState {
       if (!background) this.stashRetry = null;
       if (!background) this.mergeConflictRestore = false;
       const described = this.describeRequest(request);
-      const action = String(request.action ?? "");
       const dialogBefore = this.dialog;
       const refreshContext = this.needsContext(action);
       const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
@@ -3231,7 +3236,7 @@ export class ShellState {
 
   /** Pull/merge-style writes that leave unmerged paths get Fork-style conflict dialog. */
   shouldShowMergeConflict(action: string, text: string) {
-    const ops = new Set(["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashPop", "stashApply", "continue"]);
+    const ops = new Set(["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashPop", "stashApply", "continue", "skip", "gitFlowFinish"]);
     if (!ops.has(action)) return false;
     if (this.conflictCount > 0) return true;
     const lower = text.toLowerCase();
@@ -3274,6 +3279,12 @@ export class ShellState {
     } catch {
       /* a rebase without REBASE_HEAD has no commit to show */
     }
+  }
+
+
+  /** Writes that start a new flow; a paused flow owns HEAD until it ends. */
+  startsFlow(action: string) {
+    return ["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "checkout", "checkoutRemote", "reset", "reword", "squash", "stashBranch", "gitFlowStart", "gitFlowFinish"].includes(action);
   }
 
 

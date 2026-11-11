@@ -187,6 +187,7 @@ export const en: Messages = {
     readingStatus: "Reading repository status…",
     noChanges: "No changes in this view",
     inProgress: "{name} in progress",
+    finishFlowFirst: "Finish the current operation before starting another.",
     unmergedOne: "Working directory contains 1 unmerged file.",
     unmergedMany: "Working directory contains {count} unmerged files.",
     mergeConflict: "Merge conflict",

@@ -113,23 +113,23 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
 export function commitMenu(shell: ShellState, commit: { id: string; summary: string }) {
     const locked = shell.mode !== "live";
     return [
-      { label: shell.tr("menu.checkout"), disabled: locked, run: () => shell.requestCheckout(commit.id) },
-      { label: shell.tr("menu.cherryPick"), disabled: locked, run: () => void shell.previewCherry(commit.id, false, commit.summary) },
-      { label: shell.tr("menu.cherryPickRecord"), disabled: locked, run: () => void shell.previewCherry(commit.id, true, commit.summary) },
-      { label: shell.tr("menu.revert"), disabled: locked, run: () => shell.confirmRevert(commit.id, commit.summary) },
+      { label: shell.tr("menu.checkout"), disabled: locked || !!shell.progress, run: () => shell.requestCheckout(commit.id) },
+      { label: shell.tr("menu.cherryPick"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, false, commit.summary) },
+      { label: shell.tr("menu.cherryPickRecord"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, true, commit.summary) },
+      { label: shell.tr("menu.revert"), disabled: locked || !!shell.progress, run: () => shell.confirmRevert(commit.id, commit.summary) },
       {
         label: shell.tr("menu.reset"),
         children: [
-          { label: shell.tr("menu.soft"), disabled: locked, run: () => shell.confirmReset(commit.id, "soft", commit.summary) },
-          { label: shell.tr("menu.mixed"), disabled: locked, run: () => shell.confirmReset(commit.id, "mixed", commit.summary) },
-          { label: shell.tr("menu.hard"), disabled: locked, run: () => shell.ask(shell.tr("dialog.hardReset"), shell.tr("dialog.hardResetBody"), () => void shell.mutate({ action: "reset", rev: commit.id, mode: "hard" })) },
+          { label: shell.tr("menu.soft"), disabled: locked || !!shell.progress, run: () => shell.confirmReset(commit.id, "soft", commit.summary) },
+          { label: shell.tr("menu.mixed"), disabled: locked || !!shell.progress, run: () => shell.confirmReset(commit.id, "mixed", commit.summary) },
+          { label: shell.tr("menu.hard"), disabled: locked || !!shell.progress, run: () => shell.ask(shell.tr("dialog.hardReset"), shell.tr("dialog.hardResetBody"), () => void shell.mutate({ action: "reset", rev: commit.id, mode: "hard" })) },
         ],
       },
       { sep: true, label: "" },
       { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "branch"; } },
       { label: shell.tr("menu.createTag"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "tag"; } },
-      { label: shell.tr("menu.editMessage"), disabled: locked || !shell.refs?.head || commit.id !== shell.refs.head, run: () => { shell.draft = commit.summary; shell.draftExtra = commit.id; shell.dialog = "reword"; } },
-      { label: shell.tr("menu.interactiveRebase"), run: () => { shell.selectedCommit = commit.id; shell.openRebase(); } },
+      { label: shell.tr("menu.editMessage"), disabled: locked || !!shell.progress || !shell.refs?.head || commit.id !== shell.refs.head, run: () => { shell.draft = commit.summary; shell.draftExtra = commit.id; shell.dialog = "reword"; } },
+      { label: shell.tr("menu.interactiveRebase"), disabled: locked || !!shell.progress, run: () => { shell.selectedCommit = commit.id; shell.openRebase(); } },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },
       { label: shell.mergeOpen(commit.id) ? shell.tr("menu.fold") : shell.tr("menu.unfold"), disabled: !shell.mergeOwner(commit.id), run: () => shell.toggleFold(commit.id) },
       { label: shell.tr("menu.openWeb"), disabled: !shell.commitWeb(commit.id), run: () => void openUrl(shell.commitWeb(commit.id)) },
@@ -140,7 +140,7 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
 
 export function reflogMenu(shell: ShellState, row: { id: string; selector: string }) {
     return [
-      { label: shell.tr("menu.checkout"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "checkout", name: row.selector || row.id }) },
+      { label: shell.tr("menu.checkout"), disabled: shell.mode !== "live" || !!shell.progress, run: () => shell.mutate({ action: "checkout", name: row.selector || row.id }) },
       { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = row.id; shell.dialog = "branch"; } },
     ];
   }
@@ -152,8 +152,8 @@ export function viewItems(shell: ShellState) {
       { label: shell.tr("chrome.fileTree"), disabled: !shell.selectedCommit, run: () => { shell.section = "history"; void shell.openHistoryTab("tree"); } },
       { label: shell.tr("chrome.reflog"), run: () => { shell.section = "history"; void shell.showReflog(); } },
       { label: shell.tr("chrome.loadMore"), disabled: shell.mode !== "live", run: () => { shell.section = "history"; shell.logLimit += 200; void shell.loadContext(); } },
-      { label: shell.tr("menu.drop"), disabled: shell.mode !== "live" || shell.drops.length === 0 || shell.busy, run: () => shell.dropCommits() },
-      { label: shell.tr("dialog.squash"), disabled: shell.mode !== "live" || !shell.selectedCommit || shell.busy, run: () => { shell.draft = ""; shell.dialog = "squash"; } },
+      { label: shell.tr("menu.drop"), disabled: shell.mode !== "live" || shell.drops.length === 0 || shell.busy || !!shell.progress, run: () => shell.dropCommits() },
+      { label: shell.tr("dialog.squash"), disabled: shell.mode !== "live" || !shell.selectedCommit || shell.busy || !!shell.progress, run: () => { shell.draft = ""; shell.dialog = "squash"; } },
       { label: shell.tr("chrome.compare"), disabled: shell.mode !== "live" || shell.drops.length !== 2, run: () => shell.compareDrops() },
       { label: shell.tr("chrome.refresh"), shortcut: shortcutLabel("refresh"), run: () => void shell.refresh() },
       { label: shell.tr("chrome.preferences"), shortcut: shortcutLabel("settings"), run: () => (shell.dialog = "prefs") },

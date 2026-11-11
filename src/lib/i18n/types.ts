@@ -187,6 +187,7 @@ export type Messages = {
     readingStatus: string;
     noChanges: string;
     inProgress: string;
+    finishFlowFirst: string;
     unmergedOne: string;
     unmergedMany: string;
     mergeConflict: string;

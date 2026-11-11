@@ -592,10 +592,55 @@ fn snapshot_local_changes(repo: &Path) -> Option<String> {
 }
 
 fn apply(repo: &Path, mutation: Mutation) -> Result<(), Error> {
+    ensure_no_paused_flow(repo, &mutation)?;
     match conflict_label(&mutation) {
         Some(label) => with_conflict_backup(repo, &label, || apply_unguarded(repo, mutation)),
         None => apply_unguarded(repo, mutation),
     }
+}
+
+/// A paused rebase, merge, cherry-pick, or revert owns the index and `HEAD`.
+/// Git still lets a merge fast-forward, a checkout switch branches, or a
+/// cherry-pick add a commit on top of the paused state, so starting one of
+/// those writes here would rewrite the wrong base. Continue, skip, or abort
+/// ends the flow first. Commits that conclude a merge do not come through here.
+fn ensure_no_paused_flow(repo: &Path, mutation: &Mutation) -> Result<(), Error> {
+    if !starts_flow(mutation) {
+        return Ok(());
+    }
+    let Some(state) = in_progress(repo)? else {
+        return Ok(());
+    };
+    let name = match state {
+        InProgress::Merge => "merge",
+        InProgress::Rebase => "rebase",
+        InProgress::CherryPick => "cherry-pick",
+        InProgress::Revert => "revert",
+    };
+    Err(Error::Git(format!(
+        "a {name} is in progress; continue or abort it before starting another operation"
+    )))
+}
+
+fn starts_flow(mutation: &Mutation) -> bool {
+    matches!(
+        mutation,
+        Mutation::Pull { .. }
+            | Mutation::PullRef { .. }
+            | Mutation::Merge { .. }
+            | Mutation::Rebase { .. }
+            | Mutation::RebaseInteractive { .. }
+            | Mutation::CherryPick { .. }
+            | Mutation::Revert { .. }
+            | Mutation::Checkout { .. }
+            | Mutation::CheckoutRemote { .. }
+            | Mutation::Reset { .. }
+            | Mutation::Reword { .. }
+            | Mutation::Squash { .. }
+            | Mutation::StashBranch { .. }
+            | Mutation::GitFlowStart { .. }
+            | Mutation::GitFlowFinish { .. }
+    )
 }
 
 fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {

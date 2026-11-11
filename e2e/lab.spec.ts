@@ -214,6 +214,7 @@ test("a paused rebase turns the composer into continue", async ({ page }) => {
   const button = page.locator(".composer button.commit");
   await expect(button).toContainText(/Continue Rebase|继续变基/);
   await expect(page.locator(".composer .convention-hint")).toContainText(/continue here|点这里继续/);
+  await expect(page.locator('.tool-btn[title="Pull"], .tool-btn[title="拉取"]')).toBeDisabled();
   await button.click();
   const dialog = page.locator('[data-dialog="continue"]');
   await expect(dialog).toBeVisible();
@@ -592,7 +593,7 @@ test("horizontal splitter arrows do not move history selection", async ({ page }
   await openLabScene(page, "history", ".history .commit-row");
   const selected = () => page.evaluate(() => [...document.querySelectorAll(".history .commit-row")].findIndex((node) => node.classList.contains("selected")));
   const before = await selected();
-  const handle = page.locator(".split-handle.horizontal");
+  const handle = page.locator(".split-handle.horizontal").first();
   await handle.focus();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
