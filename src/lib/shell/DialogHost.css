@@ -157,7 +157,8 @@
   }
 
 .dialog.prefs {
-    height: min(720px, calc(100vh - 48px));
+    width: min(940px, calc(100vw - 32px));
+    height: min(760px, calc(100vh - 48px));
     overflow: hidden;
   }
 

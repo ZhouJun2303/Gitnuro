@@ -676,7 +676,7 @@ export async function loadAiModels(shell: ShellState) {
   }
 
 async function openAiSettings(shell: ShellState, field: "enabled" | "baseUrl" | "apiKey") {
-    shell.prefTab = field === "enabled" ? "git" : "commit";
+    shell.prefTab = "ai";
     shell.dialog = "prefs";
     await tick();
     const target = shell.prefPage?.querySelector<HTMLInputElement>(`[data-ai-field="${field}"]`);

@@ -1,90 +1,340 @@
-.pref-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--field); }
+.pref-shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 20px;
+}
 
-.pref-tabs button { flex: 1; min-height: 28px; height: auto; border: 0; background: transparent; color: var(--text-secondary); font: inherit; padding: 4px 10px; border-radius: 7px; white-space: nowrap; transition: background 120ms ease, color 120ms ease; }
+.pref-nav {
+  flex: none;
+  width: 172px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 16px 8px 0;
+  border-right: 1px solid var(--line);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
 
-.pref-tabs button:hover { color: var(--text); }
+.dialog .pref-title {
+  position: static;
+  margin: 2px 0 12px;
+  padding: 0 10px;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
 
-.pref-tabs button.on { color: var(--text); background: var(--elevated); font-weight: 500; box-shadow: 0 1px 2px var(--line), 0 0 0 1px var(--line); }
+.pref-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 10px;
+}
 
-.source-folders {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
+.pref-nav-group:first-of-type { margin-top: 0; }
 
-.source-folders > .text-button {
-    align-self: flex-start;
-    margin-left: 0;
-  }
+.pref-nav-group-title {
+  padding: 0 10px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
 
-.source-root .alias {
-    width: 128px;
-    flex: none;
-  }
+.pref-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.pref-nav-item svg {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  opacity: 0.8;
+}
+
+.pref-nav-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pref-nav-item:hover { background: var(--hover); color: var(--text); }
+
+.pref-nav-item.on {
+  background: var(--selection);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.pref-nav-item.on svg { opacity: 1; }
+
+.pref-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pref-head { flex: none; padding-top: 2px; }
+
+.pref-head-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dialog .pref-head-hint {
+  margin: 3px 0 0;
+  max-height: none;
+  overflow: visible;
+  white-space: normal;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.pref-page {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 2px 4px 12px 0;
+}
+
+.pref-card {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--canvas) 55%, transparent);
+  overflow: hidden;
+}
+
+.pref-card-title {
+  margin: 0;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+  background: color-mix(in srgb, var(--field) 45%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.pref-card-body {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 14px 12px;
+}
+
+.dialog .pref-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 36px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.dialog .pref-row + .pref-row {
+  border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.pref-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  color: var(--text);
+}
+
+.pref-control {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pref-control > select { width: 190px; }
+
+.pref-control > input { width: 200px; }
+
+.pref-control > input[type="number"] { width: 92px; }
+
+.dialog .pref-row.wide .pref-control {
+  flex: 1;
+  min-width: 0;
+  max-width: 62%;
+}
+
+.dialog .pref-row.wide .pref-control > :is(input, select, textarea) { width: 100%; }
+
+.dialog .pref-row.pref-toggle {
+  justify-content: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.pref-row.pref-toggle input[type="checkbox"] {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.pref-mini {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.pref-mini input { width: 72px; }
+
+.pref-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--field);
+}
+
+.pref-segment label.check {
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.pref-segment label.check:has(input:checked) {
+  background: var(--elevated);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.pref-segment input[type="radio"] { accent-color: var(--accent); }
+
+.pref-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.pref-card-actions .text-button { margin-left: 0; }
+
+.pref-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.pref-source-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.pref-source-row + .pref-source-row {
+  border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
+
+.pref-source-row .alias { width: 100%; }
+
+.pref-source-row .text-button { margin-left: 0; }
 
 .source-path {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-.dialog label.pref-inline {
-    flex-direction: row;
-    align-items: center;
-    gap: 10px;
-    font-size: inherit;
-    color: var(--text);
-  }
+.pref-command-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  font-size: 13px;
+}
 
-.dialog .pref-inline select,
-  .dialog .pref-inline input[type="number"] {
-    width: auto;
-    min-width: 88px;
-  }
+.pref-command-row + .pref-command-row {
+  border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+}
 
-.dialog .pref-inline > input:not([type="number"]) {
-    flex: 1;
-  }
+.pref-command-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
 
-.dialog .pref-page > .text-button {
-    align-self: flex-start;
-    margin-left: 0;
-  }
+.pref-command-row .meta {
+  flex: none;
+  font-size: 11px;
+}
+
+.pref-command-row .text-button { margin-left: 0; }
 
 .diff-sample .tok-word { color: var(--tok-word); }
-
-.pref-page { display: flex; flex-direction: column; gap: 10px; padding: 14px 0; }
-
-.pref-section { display: flex; flex-direction: column; gap: 8px; }
-
-.pref-section + .pref-section { margin-top: 8px; }
 
 .prefs-foot { align-items: center; }
 
 .prefs-foot .meta { margin-right: auto; }
 
-.pref-inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-
-.pref-inline input[type="number"] { width: 72px; }
-
 .diff-sample {
-    flex: none;
-    min-height: max-content;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    overflow: auto;
-    font-family: var(--mono);
-    font-size: var(--diff-font, 13px);
-    line-height: 1.45;
-    padding: 8px;
-  }
+  flex: none;
+  min-height: max-content;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: var(--diff-font, 13px);
+  line-height: 1.45;
+  padding: 8px;
+}
 
 .diff-sample > div {
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 .diff-sample .del { background: var(--diff-del); }
 
@@ -94,8 +344,47 @@
 
 .tool-grid { display: grid; grid-template-columns: 200px 1fr; gap: 12px; }
 
-.tool-tabs { align-self: flex-start; }
-.tool-tabs button { flex: 0 0 auto; min-width: 132px; }
+.pref-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--field);
+}
+
+.pref-tabs button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  height: auto;
+  padding: 4px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.pref-tabs button:hover { color: var(--text); }
+
+.pref-tabs button.on {
+  color: var(--text);
+  background: var(--elevated);
+  font-weight: 500;
+  box-shadow: 0 1px 2px var(--line), 0 0 0 1px var(--line);
+}
+
+.tool-tabs { display: flex; width: 100%; margin-bottom: 2px; }
+.tool-tabs button {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .tool-list { display: flex; flex-direction: column; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius); overflow: auto; max-height: 260px; }
 
@@ -195,12 +484,11 @@
 
 .commit-type-list > .text-button { margin-left: 0; }
 
-.ai-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.ai-actions .text-button {
-  margin-left: 0;
+@media (max-width: 720px) {
+  .pref-shell { gap: 12px; }
+  .pref-nav { width: 140px; padding-right: 10px; }
+  .pref-nav-item { font-size: 12px; gap: 7px; }
+  .pref-control > select { width: 150px; }
+  .pref-control > input { width: 160px; }
+  .tool-grid { grid-template-columns: 1fr; }
 }

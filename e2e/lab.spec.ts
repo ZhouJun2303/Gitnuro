@@ -836,8 +836,8 @@ test("merge panel opens as a standalone page", async ({ page }) => {
 });
 
 test("unified diff keeps row nodes while scrolling", async ({ page }) => {
-  await openLabScene(page, "prefs-git", '[data-dialog="prefs"]');
-  const style = page.locator('[data-dialog="prefs"] label', { hasText: "Diff view" }).locator("select");
+  await openLabScene(page, "prefs-diff", '[data-dialog="prefs"]');
+  const style = page.locator('[data-dialog="prefs"] [data-pref="diff-style"]');
   await style.selectOption("unified");
   await page.locator('[data-dialog="prefs"] .commit').click();
   await page.waitForTimeout(500);

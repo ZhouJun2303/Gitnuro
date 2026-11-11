@@ -219,11 +219,13 @@ pnpm package:mac
 
 语言快捷键在首选项和输入框中也可使用，从当前显示语言切换到另一种语言并保存；也可在“外观”菜单中选择“切换语言”。首选项点击面板外空白处保持打开，通过右上角关闭按钮、“完成”或 `Escape` 关闭。试验台场景：`prefs-language`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|preferences backdrop|appearance menu"`。
 
+首选项左侧按「常规 / 工作流 / 系统」分组导航，共 11 个页签：通用、工作区、差异、提交、AI、Git、集成、命令、网络、账户、高级；每个页签内按功能卡片分区。试验台按页签提供 `prefs-language`、`prefs-workspace`、`prefs-diff`、`prefs-commit`、`prefs-ai`、`prefs-git`、`prefs-integration`、`prefs-commands`、`prefs-network`、`prefs-accounts`、`prefs-advanced`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts`。
+
 切换语言会立即同步到已打开的独立历史、文件内容、合并和操作流程窗口；也可在独立窗口按相同快捷键切换，其他窗口同步更新。同步只更新语言，保留各窗口正在查看的内容和编辑草稿。验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"`。
 
 项目标签右键菜单提供“拷贝项目路径”，复制该标签对应仓库的完整路径；未选中的标签和自定义名称的标签同样适用。试验台场景：`tab-copy-path`；验证：`pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "tab context menu copies"`。
 
-点击生成提交说明时，若 AI 未启用、接口地址未填写，或后端报告未配置密钥，会打开偏好设置并滚动、聚焦到对应配置项；已通过环境变量配置密钥时仍可正常生成。试验台场景：`suggest-unconfigured`、`suggest-no-url`、`suggest-disabled`；验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"`。
+点击生成提交说明时，若 AI 未启用、接口地址未填写，或后端报告未配置密钥，会打开偏好设置的 AI 页签并滚动、聚焦到对应配置项；已通过环境变量配置密钥时仍可正常生成。试验台场景：`suggest-unconfigured`、`suggest-no-url`、`suggest-disabled`；验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"`。
 
 文件夹右键菜单在文件夹内文件全部被选中时，按整个选择范围显示数量，丢弃、删除和贮藏都作用于全部所选文件；只选中文件夹本身时仍只作用于该文件夹。验证：`pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "folder menu counts"`。
 

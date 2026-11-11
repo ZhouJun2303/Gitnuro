@@ -97,7 +97,7 @@ async function fillSurface(shell: ShellState, id: string) {
   }
   if (id.startsWith("suggest-")) {
     shell.section = "changes";
-    shell.prefTab = "general";
+    shell.prefTab = "ai";
     shell.settings.aiEnabled = id !== "suggest-disabled";
     shell.settings.aiBaseUrl = id === "suggest-no-url" ? "" : "https://example.invalid/v1";
     shell.settings.aiApiKey = "";
@@ -504,9 +504,23 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.editorPicked = [];
       shell.editorDetecting = false;
       break;
-    case "prefs":
+    case "prefs": {
+      const prefTabs: Record<string, "general" | "workspace" | "diff" | "commit" | "ai" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
+        "prefs-workspace": "workspace",
+        "prefs-diff": "diff",
+        "prefs-commit": "commit",
+        "prefs-ai": "ai",
+        "prefs-git": "git",
+        "prefs-integration": "integration",
+        "prefs-integration-merge": "integration",
+        "prefs-integration-editor": "integration",
+        "prefs-commands": "commands",
+        "prefs-network": "network",
+        "prefs-accounts": "accounts",
+        "prefs-advanced": "advanced",
+      };
       if (sceneId === "prefs-language") shell.settings.locale = "zh";
-      shell.prefTab = sceneId.startsWith("prefs-integration") ? "integration" : sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : "general";
+      shell.prefTab = prefTabs[sceneId] ?? "general";
       fillSourceRoots(shell);
       fillLabTools(shell);
       if (sceneId === "prefs-commit") shell.resetCommitTypes();
@@ -519,6 +533,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
         shell.toolPick = "lab-editor-cursor";
       }
       break;
+    }
     case "update":
       shell.updateReleaseUrl = "https://github.com/ZhouJun2303/Gitnuro/releases/latest";
       if (sceneId === "update-current") {

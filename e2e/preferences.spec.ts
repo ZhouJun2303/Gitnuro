@@ -32,10 +32,12 @@ test("language shortcut switches and saves from preferences, text fields and the
 
   await language.dispatchEvent("keydown", { key: "l", ctrlKey: true, altKey: true, repeat: true });
   await expect(language).toHaveValue("en");
+  await dialog.getByRole("button", { name: "Workspace", exact: true }).click();
   const alias = dialog.locator("input.alias").first();
   await alias.fill("language shortcut");
   await saveLocale(page, "zh", () => page.keyboard.press("Control+Alt+l"));
   await expect(alias).toHaveValue("language shortcut");
+  await dialog.getByRole("button", { name: "通用", exact: true }).click();
   await expect(language).toHaveValue("zh");
   await expect(dialog.getByRole("button", { name: "通用", exact: true })).toBeVisible();
 
@@ -62,7 +64,7 @@ test("preferences backdrop keeps the panel open and explicit controls close it",
   await expect(name).toBeVisible();
   await page.locator(".scrim").click({ position: { x: 8, y: 8 } });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "提交", exact: true })).toHaveClass("on");
+  await expect(dialog.getByRole("button", { name: "提交", exact: true })).toHaveClass(/on/);
   await dialog.getByRole("button", { name: "完成", exact: true }).click();
   await expect(dialog).toHaveCount(0);
 
@@ -88,9 +90,9 @@ test("appearance menu shows the language shortcut and switches language", async 
 });
 
 for (const scenario of [
-  { scene: "suggest-unconfigured", field: "apiKey", tab: "commit", requests: 1 },
-  { scene: "suggest-no-url", field: "baseUrl", tab: "commit", requests: 0 },
-  { scene: "suggest-disabled", field: "enabled", tab: "git", requests: 0 },
+  { scene: "suggest-unconfigured", field: "apiKey", requests: 1 },
+  { scene: "suggest-no-url", field: "baseUrl", requests: 0 },
+  { scene: "suggest-disabled", field: "enabled", requests: 0 },
 ]) {
   test(`generation button opens and focuses missing AI configuration (${scenario.field})`, async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 600 });
@@ -110,7 +112,7 @@ for (const scenario of [
     await expect(dialog).toBeVisible();
     await expect(target).toBeFocused();
     await expect(target).toBeInViewport();
-    await expect(dialog.locator(".pref-tabs > button.on")).toHaveText(scenario.tab === "git" ? "Git" : /提交|Commit/);
+    await expect(dialog.locator(".pref-nav-item.on")).toHaveText(/AI/);
     expect(suggestions).toBe(scenario.requests);
     await dialog.locator(".dialog-close").click();
     await expect(summary).toHaveValue("Keep this draft");
