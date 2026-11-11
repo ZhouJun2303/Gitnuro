@@ -170,7 +170,7 @@
       resultDirty = false;
       editingResult = false;
       run();
-    });
+    }, [], { danger: true });
   }
 
   function onLeft(event: Event) {

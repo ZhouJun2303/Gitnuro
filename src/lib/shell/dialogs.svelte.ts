@@ -524,8 +524,15 @@ export function confirmSync(shell: ShellState, kind: "fetch" | "pull" | "push") 
     shell.dialog = kind;
   }
 
-export function ask(shell: ShellState, title: string, body: string, run: () => void, files: string[] = []) {
-    shell.confirmAsk = { title, body, run, files };
+export function ask(
+    shell: ShellState,
+    title: string,
+    body: string,
+    run: () => void,
+    files: string[] = [],
+    extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "confirmLabel"> = {},
+  ) {
+    shell.confirmAsk = { title, body, files, ...extras, run };
   }
 
 export function liveOnly(shell: ShellState, run: () => void) {
@@ -1598,8 +1605,27 @@ export function moveStep(shell: ShellState, index: number, delta: number) {
     shell.rebaseSteps = copy;
   }
 
+/** Backend marker: the branch has commits that exist nowhere else. */
+const NOT_MERGED = "branch is not fully merged";
+
+/** Offer the force delete only after Git reported commits that would be lost. */
+export async function deleteBranchNow(shell: ShellState, name: string, force = false) {
+    const outcome = await shell.mutate({ action: "deleteBranch", name, force });
+    if (outcome !== "failed" || force) return;
+    if (!(shell.actionError ?? "").includes(NOT_MERGED)) return;
+    shell.actionError = null;
+    shell.ask(shell.tr("dialog.forceDeleteBranch"), shell.tr("dialog.forceDeleteBranchBody"), () => void deleteBranchNow(shell, name, true), [], {
+      subject: name,
+      danger: true,
+      confirmLabel: shell.tr("menu.forceDelete"),
+    });
+  }
+
 export function removeBranch(shell: ShellState, name: string) {
-    shell.ask(shell.tr("dialog.deleteBranch"), shell.tr("dialog.deleteBranchBody", { name }), () => void shell.mutate({ action: "deleteBranch", name }));
+    shell.ask(shell.tr("dialog.deleteBranch"), shell.tr("dialog.deleteBranchBody"), () => void deleteBranchNow(shell, name), [], {
+      subject: name,
+      danger: true,
+    });
   }
 
 /** Cancel a running command and offer to clear an index.lock the kill left behind. */
@@ -1609,8 +1635,10 @@ export async function cancelOperation(shell: ShellState, path: string) {
       if (!lock) return;
       shell.ask(
         shell.tr("dialog.staleIndexLock"),
-        shell.tr("dialog.staleIndexLockBody", { path: lock }),
+        shell.tr("dialog.staleIndexLockBody"),
         () => void invoke<boolean>("remove_index_lock", { path }).catch((error) => (shell.actionError = shell.message(error))),
+        [],
+        { subject: lock, danger: true, confirmLabel: shell.tr("menu.delete") },
       );
     } catch (error) {
       shell.actionError = shell.message(error);
@@ -1618,7 +1646,7 @@ export async function cancelOperation(shell: ShellState, path: string) {
   }
 
 export function hardReset(shell: ShellState) {
-    shell.ask(shell.tr("dialog.hardReset"), shell.tr("dialog.hardResetBody"), () => void shell.mutate({ action: "reset", rev: shell.draft || "HEAD", mode: "hard" }));
+    shell.ask(shell.tr("dialog.hardReset"), shell.tr("dialog.hardResetBody"), () => void shell.mutate({ action: "reset", rev: shell.draft || "HEAD", mode: "hard" }), [], { danger: true });
   }
 
 export async function selectWorkspace(shell: ShellState) {

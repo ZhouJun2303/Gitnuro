@@ -402,10 +402,10 @@ test("push and pull dialogs start with a branch", async ({ page }) => {
   await openLabScene(page, "dialog-pull", '[data-dialog="pull"]');
   const pullSelect = page.locator('[data-dialog="pull"] .remote-target-body select').first();
   expect(await pullSelect.inputValue()).not.toBe("");
-  const pullTabs = page.locator('[data-dialog="pull"] .remote-tabs [role="tab"]');
-  await expect(pullTabs.filter({ hasText: "origin" })).toHaveAttribute("aria-selected", "true");
-  await pullTabs.filter({ hasText: "mirror-01" }).click();
-  await expect(pullTabs.filter({ hasText: "mirror-01" })).toHaveAttribute("aria-selected", "true");
+  // Many remotes use a select instead of a wrapping tab strip.
+  await expect(page.locator('[data-dialog="pull"] .remote-tabs')).toHaveCount(0);
+  await pullSelect.selectOption("mirror-01");
+  await expect(pullSelect).toHaveValue("mirror-01");
   expect(await page.locator('[data-dialog="pull"] .remote-target-body').locator("select, input").first().inputValue()).not.toBe("");
 });
 
@@ -542,6 +542,19 @@ test("cherry-picking asks before it runs", async ({ page }) => {
   await expect(confirm).toContainText("Cherry-pick (note source commit)");
   await expect(confirm).toContainText("records the source commit");
   await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
+test("branch confirmation keeps the branch name on one line", async ({ page }) => {
+  await openLabScene(page, "force-delete-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("Force delete branch");
+  const subject = confirm.locator(".confirm-subject");
+  await expect(subject).toHaveText("rewrite/tauri");
+  await expect(subject).toHaveCSS("white-space", "nowrap");
+  const box = await subject.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.height).toBeLessThan(40);
+  await expect(confirm.locator(".commit")).toHaveClass(/danger/);
 });
 
 test("multi-file confirmation lists one file per line with a total", async ({ page }) => {

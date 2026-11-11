@@ -230,7 +230,7 @@
                 { label: shell.tr("menu.merge"), disabled: !!shell.progress, run: () => { shell.draft = row.name; shell.draftExtra = shell.settings.mergeNoFf ? "no-ff" : "ff"; shell.dialog = "merge"; } },
                 { label: shell.tr("menu.rebaseOnto"), disabled: !!shell.progress, run: () => shell.mutate({ action: "rebase", onto: row.name, autostash: true }) },
                 { label: shell.tr("menu.delete"), run: () => shell.removeBranch(row.name) },
-                { label: shell.tr("menu.forceDelete"), run: () => shell.ask(shell.tr("menu.forceDelete"), row.name, () => void shell.mutate({ action: "deleteBranch", name: row.name, force: true })) },
+                { label: shell.tr("menu.forceDelete"), run: () => shell.ask(shell.tr("dialog.forceDeleteBranch"), shell.tr("dialog.forceDeleteBranchBody"), () => void shell.mutate({ action: "deleteBranch", name: row.name, force: true }), [], { subject: row.name, danger: true, confirmLabel: shell.tr("menu.forceDelete") }) },
               ] : []),
               { label: shell.pinnedHere.has(row.name) ? shell.tr("menu.unpin") : shell.tr("menu.pin"), run: () => shell.togglePin(row.name) },
               { label: shell.tr("menu.createPr"), disabled: !shell.pullRequestUrl(row.name), run: () => void openUrl(shell.pullRequestUrl(row.name)) },
@@ -284,7 +284,7 @@
               { label: shell.tr("menu.checkout"), run: () => shell.mutate({ action: "checkoutRemote", remote: row.remote, branch: row.name }) },
               { label: shell.tr("menu.pullInto"), run: () => shell.mutate({ action: "pullRef", remote: row.remote, branch: row.name, rebase: shell.settings.pullRebase, autostash: true }) },
               { label: shell.tr("menu.pushHere"), run: () => shell.mutate({ action: "pushRef", remote: row.remote, branch: row.name, forceWithLease: shell.settings.forceWithLease }) },
-              { label: shell.tr("menu.deleteRemote"), run: () => shell.ask(shell.tr("menu.deleteRemote"), shell.tr("dialog.deleteRemoteBody", { name: `${row.remote}/${row.name}` }), () => void shell.mutate({ action: "deleteRemoteBranch", remote: row.remote, branch: row.name })) },
+              { label: shell.tr("menu.deleteRemote"), run: () => shell.ask(shell.tr("menu.deleteRemote"), shell.tr("dialog.deleteRemoteBody"), () => void shell.mutate({ action: "deleteRemoteBranch", remote: row.remote, branch: row.name }), [], { subject: `${row.remote}/${row.name}`, danger: true, confirmLabel: shell.tr("menu.deleteRemote") }) },
               { label: shell.tr("menu.copyName"), run: () => shell.copyText(`${row.remote}/${row.name}`) },
             ])}
           >
@@ -298,8 +298,8 @@
         {:else if row.kind === "tag"}
           <div class="side nested" class:deep={row.deep} class:selected={shell.sideSelected === `tag:${row.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.checkout"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "checkout", name: row.name }) },
-            { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), row.name, () => void shell.mutate({ action: "deleteTag", name: row.name })) },
-            { label: shell.tr("menu.deleteRemoteTag"), disabled: shell.mode !== "live" || !shell.refs?.remotes[0], run: () => { const remote = shell.refs?.remotes[0]?.name ?? ""; shell.ask(shell.tr("menu.deleteRemoteTag"), `${remote} ${row.name}`, () => void shell.mutate({ action: "deleteRemoteTag", remote, name: row.name })); } },
+            { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), shell.tr("dialog.deleteTagBody"), () => void shell.mutate({ action: "deleteTag", name: row.name }), [], { subject: row.name, danger: true }) },
+            { label: shell.tr("menu.deleteRemoteTag"), disabled: shell.mode !== "live" || !shell.refs?.remotes[0], run: () => { const remote = shell.refs?.remotes[0]?.name ?? ""; shell.ask(shell.tr("menu.deleteRemoteTag"), shell.tr("dialog.deleteRemoteTagBody"), () => void shell.mutate({ action: "deleteRemoteTag", remote, name: row.name }), [], { subject: `${remote} ${row.name}`, danger: true }); } },
             { label: shell.tr("menu.copyName"), run: () => shell.copyText(row.name) },
           ])}>
             <button class="file-select" type="button" title={row.name} onclick={() => { shell.sideSelected = `tag:${row.name}`; void shell.locateRef(row.name); }} ondblclick={() => void shell.quickCheckout(row.name)}><span class="twist"></span>{@render glyph("tag")}<span class="name">{row.label}</span></button>
@@ -308,7 +308,7 @@
           <div class="side nested" class:selected={shell.sideSelected === `stash:${row.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.apply"), disabled: shell.mode !== "live", run: () => shell.confirmApplyStash(row.name, row.summary) },
             { label: shell.tr("menu.pop"), disabled: shell.mode !== "live", run: () => shell.confirmPopStash(row.name) },
-            { label: shell.tr("menu.drop"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.drop"), row.summary, () => void shell.mutate({ action: "stashDrop", name: row.name })) },
+            { label: shell.tr("menu.drop"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.drop"), shell.tr("dialog.dropStashBody"), () => void shell.mutate({ action: "stashDrop", name: row.name }), [], { subject: row.summary, danger: true }) },
             { label: shell.tr("menu.renameStash"), disabled: shell.mode !== "live", run: () => { shell.draft = row.summary; shell.draftExtra = row.name; shell.dialog = "stashRename"; } },
             { label: shell.tr("menu.stashPatch"), disabled: shell.mode !== "live", run: () => void shell.mutate({ action: "stashPatch", name: row.name }) },
             { label: shell.tr("menu.stashBranch"), disabled: shell.mode !== "live", run: () => { shell.draft = ""; shell.draftExtra = row.name; shell.dialog = "stashBranch"; } },
@@ -321,14 +321,14 @@
             { label: shell.tr("menu.openFile"), disabled: !row.ready, run: () => shell.openRepo(shell.fullPath(row.path)) },
             { label: shell.tr("menu.sync"), disabled: shell.mode !== "live" || !row.ready, run: () => shell.mutate({ action: "submoduleSync", path: row.path }) },
             { label: shell.tr("menu.update"), disabled: shell.mode !== "live" || !row.ready, run: () => shell.mutate({ action: "submoduleUpdate" }) },
-            { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), row.path, () => void shell.mutate({ action: "submoduleRemove", path: row.path })) },
+            { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), shell.tr("dialog.removeSubmoduleBody"), () => void shell.mutate({ action: "submoduleRemove", path: row.path }), [], { subject: row.path, danger: true }) },
           ])}>
             <button class="file-select" type="button" title={row.path} onclick={() => (shell.sideSelected = `submodule:${row.path}`)} ondblclick={() => row.ready && shell.openRepo(shell.fullPath(row.path))}><span class="twist"></span>{@render glyph("submodule")}<span class="name">{row.path}</span></button>
           </div>
         {:else if row.kind === "worktree"}
           <div class="side nested" class:selected={shell.sideSelected === `worktree:${row.path}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.openFile"), disabled: shell.mode !== "live", run: () => shell.openRepo(row.path) },
-            { label: shell.tr("menu.remove"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.remove"), row.path, () => void shell.mutate({ action: "removeWorktree", path: row.path })) },
+            { label: shell.tr("menu.remove"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.remove"), shell.tr("dialog.removeWorktreeBody"), () => void shell.mutate({ action: "removeWorktree", path: row.path }), [], { subject: row.path, danger: true }) },
           ])}>
             <button class="file-select" type="button" title={row.path} onclick={() => (shell.sideSelected = `worktree:${row.path}`)} ondblclick={() => shell.mode === "live" && shell.openRepo(row.path)}><span class="twist"></span>{@render glyph("worktree")}<span class="name">{row.branch ?? shell.folderName(row.path)}</span></button>
           </div>
@@ -363,7 +363,7 @@
             { label: shell.tr("menu.merge"), disabled: !!shell.progress, run: () => { shell.draft = shell.branchLabel; shell.draftExtra = "ff"; shell.dialog = "merge"; } },
             { label: shell.tr("menu.rebaseOnto"), disabled: true },
             { label: shell.tr("menu.rename"), run: () => { shell.draft = shell.branchLabel; shell.draftExtra = shell.branchLabel; shell.dialog = "rename"; } },
-            { label: shell.tr("menu.delete"), run: () => shell.ask(shell.tr("dialog.deleteBranch"), shell.tr("dialog.deleteBranchBody", { name: shell.branchLabel }), () => {}) },
+            { label: shell.tr("menu.delete"), run: () => shell.ask(shell.tr("dialog.deleteBranch"), shell.tr("dialog.deleteBranchBody"), () => {}, [], { subject: shell.branchLabel, danger: true }) },
             { label: shell.tr("menu.setUpstream"), run: () => { shell.draft = shell.branchLabel; shell.draftExtra = "origin/main"; shell.dialog = "upstream"; } },
             { label: shell.tr("menu.copyName"), run: () => shell.copyText(shell.branchLabel) },
             { label: shell.tr("menu.hide"), disabled: true },
@@ -398,7 +398,7 @@
             { label: shell.tr("menu.checkout"), disabled: true },
             { label: shell.tr("menu.pullInto"), disabled: true },
             { label: shell.tr("menu.pushHere"), disabled: true },
-            { label: shell.tr("menu.deleteRemote"), run: () => shell.ask(shell.tr("menu.deleteRemote"), shell.tr("dialog.deleteRemoteBody", { name: "origin/main" }), () => {}) },
+            { label: shell.tr("menu.deleteRemote"), run: () => shell.ask(shell.tr("menu.deleteRemote"), shell.tr("dialog.deleteRemoteBody"), () => {}, [], { subject: "origin/main", danger: true, confirmLabel: shell.tr("menu.deleteRemote") }) },
             { label: shell.tr("menu.copyName"), run: () => shell.copyText("origin/main") },
           ])}
         >
@@ -428,8 +428,8 @@
           {#if shell.folderOpen(tagFolder)}
           <div class="side nested" class:deep={!!group} class:selected={shell.sideSelected === `tag:${tag.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.checkout"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "checkout", name: tag.name }) },
-            { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), tag.name, () => void shell.mutate({ action: "deleteTag", name: tag.name })) },
-            { label: shell.tr("menu.deleteRemoteTag"), disabled: shell.mode !== "live" || !shell.refs?.remotes[0], run: () => { const remote = shell.refs?.remotes[0]?.name ?? ""; shell.ask(shell.tr("menu.deleteRemoteTag"), `${remote} ${tag.name}`, () => void shell.mutate({ action: "deleteRemoteTag", remote, name: tag.name })); } },
+            { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), shell.tr("dialog.deleteTagBody"), () => void shell.mutate({ action: "deleteTag", name: tag.name }), [], { subject: tag.name, danger: true }) },
+            { label: shell.tr("menu.deleteRemoteTag"), disabled: shell.mode !== "live" || !shell.refs?.remotes[0], run: () => { const remote = shell.refs?.remotes[0]?.name ?? ""; shell.ask(shell.tr("menu.deleteRemoteTag"), shell.tr("dialog.deleteRemoteTagBody"), () => void shell.mutate({ action: "deleteRemoteTag", remote, name: tag.name }), [], { subject: `${remote} ${tag.name}`, danger: true }); } },
             { label: shell.tr("menu.copyName"), run: () => shell.copyText(tag.name) },
           ])}>
             <button class="file-select" type="button" title={tag.name} onclick={() => { shell.sideSelected = `tag:${tag.name}`; void shell.locateRef(tag.name); }} ondblclick={() => void shell.quickCheckout(tag.name)}><span class="twist"></span>{@render glyph("tag")}<span class="name">{group ? tag.name.slice(group.length + 1) : tag.name}</span></button>
@@ -444,7 +444,7 @@
           <div class="side nested" class:selected={shell.sideSelected === `stash:${stash.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.apply"), disabled: shell.mode !== "live", run: () => shell.confirmApplyStash(stash.name, stash.summary) },
             { label: shell.tr("menu.pop"), disabled: shell.mode !== "live", run: () => shell.confirmPopStash(stash.name) },
-            { label: shell.tr("menu.drop"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.drop"), stash.summary, () => void shell.mutate({ action: "stashDrop", name: stash.name })) },
+            { label: shell.tr("menu.drop"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.drop"), shell.tr("dialog.dropStashBody"), () => void shell.mutate({ action: "stashDrop", name: stash.name }), [], { subject: stash.summary, danger: true }) },
             { label: shell.tr("menu.renameStash"), disabled: shell.mode !== "live", run: () => { shell.draft = stash.summary; shell.draftExtra = stash.name; shell.dialog = "stashRename"; } },
             { label: shell.tr("menu.stashPatch"), disabled: shell.mode !== "live", run: () => void shell.mutate({ action: "stashPatch", name: stash.name }) },
             { label: shell.tr("menu.stashBranch"), disabled: shell.mode !== "live", run: () => { shell.draft = ""; shell.draftExtra = stash.name; shell.dialog = "stashBranch"; } },
@@ -465,7 +465,7 @@
             { label: shell.tr("menu.openFile"), disabled: !row.ready, run: () => shell.openRepo(shell.fullPath(row.path)) },
             { label: shell.tr("menu.sync"), disabled: shell.mode !== "live" || !row.ready, run: () => shell.mutate({ action: "submoduleSync", path: row.path }) },
             { label: shell.tr("menu.update"), disabled: shell.mode !== "live" || !row.ready, run: () => shell.mutate({ action: "submoduleUpdate" }) },
-            { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), row.path, () => void shell.mutate({ action: "submoduleRemove", path: row.path })) },
+            { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), shell.tr("dialog.removeSubmoduleBody"), () => void shell.mutate({ action: "submoduleRemove", path: row.path }), [], { subject: row.path, danger: true }) },
           ])}>
             <button class="file-select" type="button" title={row.path} onclick={() => (shell.sideSelected = `submodule:${row.path}`)} ondblclick={() => row.ready && shell.openRepo(shell.fullPath(row.path))}><span class="twist"></span>{@render glyph("submodule")}<span class="name">{row.path}</span></button>
           </div>
@@ -481,7 +481,7 @@
           {#if shell.matchesQuery(row.path, shell.sideQuery) || shell.matchesQuery(row.branch ?? "", shell.sideQuery)}
           <div class="side nested" class:selected={shell.sideSelected === `worktree:${row.path}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.openFile"), disabled: shell.mode !== "live", run: () => shell.openRepo(row.path) },
-            { label: shell.tr("menu.remove"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.remove"), row.path, () => void shell.mutate({ action: "removeWorktree", path: row.path })) },
+            { label: shell.tr("menu.remove"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.remove"), shell.tr("dialog.removeWorktreeBody"), () => void shell.mutate({ action: "removeWorktree", path: row.path }), [], { subject: row.path, danger: true }) },
           ])}>
             <button class="file-select" type="button" title={row.path} onclick={() => (shell.sideSelected = `worktree:${row.path}`)} ondblclick={() => shell.mode === "live" && shell.openRepo(row.path)}><span class="twist"></span>{@render glyph("worktree")}<span class="name">{row.branch ?? shell.folderName(row.path)}</span></button>
           </div>

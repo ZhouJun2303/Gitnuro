@@ -30,6 +30,21 @@
     padding-right: 26px;
   }
 
+.dialog-subject {
+    min-width: 0;
+    max-width: 100%;
+    padding: 7px 10px;
+    border-radius: 8px;
+    background: var(--field);
+    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-size: 12.5px;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    user-select: text;
+  }
+
 .dialog-error {
     margin: 0;
     padding: 8px 10px;
@@ -136,9 +151,13 @@
   }
 
 .stash-paths {
-    max-height: 160px;
+    max-height: 180px;
     margin: 0;
     white-space: pre-wrap;
+  }
+
+.dialog pre.stash-paths {
+    max-height: 180px;
   }
 
 .merge-conflict-log {
@@ -195,9 +214,12 @@
 .account-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 2px;
     max-height: 220px;
     overflow: auto;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
   }
 
 .dialog .text-button.pick {
@@ -359,6 +381,9 @@
     flex-direction: column;
     gap: 2px;
     flex: none;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
   }
 
 .workspace-row {
@@ -444,6 +469,14 @@
     overflow: auto;
 }
 
+.dialog-scroll .composer-row > span:not(.meta) {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .editor-candidates {
     display: flex;
     flex-direction: column;
@@ -453,6 +486,27 @@
     padding: 4px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
+}
+
+.branch-pick-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    max-height: min(360px, 52vh);
+    overflow: auto;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+
+.branch-pick-list label.check {
+    padding: 2px 4px;
+    border-radius: 6px;
+}
+
+.branch-pick-list label.check:hover {
+    background: var(--hover);
 }
 
 .editor-candidate { padding: 6px 8px; }

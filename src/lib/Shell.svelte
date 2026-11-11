@@ -253,6 +253,83 @@
     font-size: 12px;
   }
 
+.dialog.confirm {
+    gap: 10px;
+    padding: 20px 22px 16px;
+  }
+
+.dialog.confirm h2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+  }
+
+.confirm-title-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+.confirm-mark {
+    width: 22px;
+    height: 22px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--deleted) 16%, transparent);
+    color: var(--deleted);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+.confirm-subject {
+    min-width: 0;
+    max-width: 100%;
+    padding: 7px 10px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: var(--field);
+    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-size: 12.5px;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    user-select: text;
+  }
+
+.dialog.confirm.danger .confirm-subject {
+    border-color: color-mix(in srgb, var(--deleted) 22%, transparent);
+    background: color-mix(in srgb, var(--deleted) 6%, var(--field));
+  }
+
+.dialog.confirm .confirm-body {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+  }
+
+.dialog.confirm .confirm-detail {
+    max-height: 20vh;
+    overflow: auto;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+  }
+
+.dialog .commit.danger {
+    background: var(--deleted);
+    color: var(--on-deleted);
+  }
+
+.dialog .commit.danger:focus-visible {
+    outline-color: var(--deleted);
+  }
+
 .shell {
     height: 100vh;
     display: flex;
@@ -894,15 +971,21 @@
     <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => shell.dismissMenu()}></button>
   {/if}
   {#if shell.confirmAsk}
+    {@const ask = shell.confirmAsk}
     <div class="scrim confirm-scrim" role="presentation">
-      <div class="dialog sm" data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ".commit" }}>
-        <h2 id="confirm-title">{shell.confirmAsk.title}</h2>
-        {#if shell.confirmAsk.body}<p>{shell.confirmAsk.body}</p>{/if}
-        {#if shell.confirmAsk.files?.length}
+      <div class="dialog sm confirm" class:danger={ask.danger} data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={ask.body ? "confirm-body" : undefined} tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ".commit" }}>
+        <h2 id="confirm-title">
+          {#if ask.danger}<span class="confirm-mark" aria-hidden="true">!</span>{/if}
+          <span class="confirm-title-text">{ask.title}</span>
+        </h2>
+        {#if ask.subject}<div class="confirm-subject" data-confirm-subject title={ask.subject}>{ask.subject}</div>{/if}
+        {#if ask.body}<p class="confirm-body" id="confirm-body">{ask.body}</p>{/if}
+        {#if ask.detail}<p class="confirm-detail">{ask.detail}</p>{/if}
+        {#if ask.files?.length}
           <div class="confirm-files" data-confirm-files>
-            <div class="confirm-count">{shell.tr("dialog.fileCount", { count: String(shell.confirmAsk.files.length) })}</div>
+            <div class="confirm-count">{shell.tr("dialog.fileCount", { count: String(ask.files.length) })}</div>
             <ol>
-              {#each shell.confirmAsk.files as file (file)}
+              {#each ask.files as file (file)}
                 {@const cut = file.lastIndexOf("/")}
                 <li title={file}><span class="confirm-file-dir">{cut > 0 ? file.slice(0, cut + 1) : ""}</span><span class="confirm-file-name">{cut > 0 ? file.slice(cut + 1) : file}</span></li>
               {/each}
@@ -911,7 +994,7 @@
         {/if}
         <div class="composer-row actions">
           <button class="text-button" type="button" onclick={() => (shell.confirmAsk = null)}>{shell.tr("dialog.cancel")}</button>
-          <button class="commit" type="button" onclick={() => { const run = shell.confirmAsk?.run; shell.confirmAsk = null; run?.(); }}>{shell.tr("dialog.confirm")}</button>
+          <button class="commit" class:danger={ask.danger} type="button" onclick={() => { const run = shell.confirmAsk?.run; shell.confirmAsk = null; run?.(); }}>{ask.confirmLabel ?? shell.tr("dialog.confirm")}</button>
         </div>
       </div>
     </div>

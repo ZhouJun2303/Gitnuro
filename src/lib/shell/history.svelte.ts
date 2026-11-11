@@ -147,10 +147,9 @@ export async function previewCherry(shell: ShellState, rev: string, record: bool
     const preview = text.trim().replace(/^[0-9a-f]{40,64}\s*/i, "").trim();
     const target = summary ? `${rev.slice(0, 7)} "${summary}"` : rev.slice(0, 7);
     const note = record ? ` ${shell.tr("dialog.cherryPickRecordNote")}` : "";
-    const intro = `${shell.tr("dialog.cherryPickBody", { target })}${note}`;
-    const body = preview ? `${intro}\n\n${preview}` : intro;
+    const intro = `${shell.tr("dialog.cherryPickBody")}${note}`;
     const title = shell.tr(record ? "menu.cherryPickRecord" : "menu.cherryPick");
-    shell.ask(title, body, () => void shell.mutate({ action: "cherryPick", rev, record }));
+    shell.ask(title, intro, () => void shell.mutate({ action: "cherryPick", rev, record }), [], { subject: target, detail: preview });
   }
 
 export function toggleFold(shell: ShellState, id: string) {

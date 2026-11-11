@@ -79,7 +79,17 @@ export type MenuItem = { label: string; run?: () => void; disabled?: boolean; sh
 
 export type MenuItems = MenuItem[] | (() => MenuItem[]);
 
-export type ConfirmAsk = { title: string; body: string; files?: string[]; run: () => void };
+export type ConfirmAsk = {
+    title: string;
+    body: string;
+    /** The name, path, or summary the action targets. Shown on one line. */
+    subject?: string;
+    detail?: string;
+    danger?: boolean;
+    confirmLabel?: string;
+    files?: string[];
+    run: () => void;
+};
 
 export type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row; depth: number };
 

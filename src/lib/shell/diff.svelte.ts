@@ -739,20 +739,20 @@ export async function deletePicked(shell: ShellState, files = [...shell.picked])
 
 export function confirmPicked(shell: ShellState, files: string[], title: string, run: (files: string[]) => Promise<void>) {
     if (files.length === 0 || shell.mode !== "live") return;
-    shell.ask(title, "", () => void run(files), files);
+    shell.ask(title, "", () => void run(files), files, { danger: true });
   }
 
 export function discardChosen(shell: ShellState, files: string[]) {
     const names = files.filter((path) => path.length > 0);
     if (names.length === 0 || shell.mode !== "live") return;
-    shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => void shell.discardPicked(names), names);
+    shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => void shell.discardPicked(names), names, { danger: true });
   }
 
 export function deleteChosen(shell: ShellState, files: string[]) {
     const names = files.filter((path) => path.length > 0);
     if (names.length === 0 || shell.mode !== "live") return;
     if (names.length === 1) {
-      shell.ask(shell.tr("menu.deleteFile"), shell.tr("dialog.deleteBody", { name: names[0] ?? "" }), () => void shell.mutate({ action: "delete", file: names[0] }));
+      shell.ask(shell.tr("menu.deleteFile"), shell.tr("dialog.deleteBody"), () => void shell.mutate({ action: "delete", file: names[0] }), [], { subject: names[0], danger: true });
       return;
     }
     shell.confirmPicked(names, shell.tr("chrome.deleteSelected"), shell.deletePicked.bind(shell));

@@ -1761,6 +1761,58 @@ fn branch_and_tag_names_may_use_any_language() {
 }
 
 #[test]
+fn delete_branch_accepts_a_stale_upstream() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "b.txt", "two\n", "topic work");
+    // The tracking branch stayed at the fork point, so `git branch -d` refuses
+    // even though HEAD ends up with every commit.
+    repo.git(&["update-ref", "refs/remotes/origin/topic", "main"]);
+    repo.git(&["config", "branch.topic.remote", "origin"]);
+    repo.git(&["config", "branch.topic.merge", "refs/heads/topic"]);
+    repo.git(&["checkout", "main"]);
+    repo.git(&["merge", "--ff-only", "topic"]);
+    perform(
+        &repo.path,
+        Mutation::DeleteBranch {
+            name: "topic".into(),
+            force: false,
+        },
+    )
+    .unwrap();
+    assert!(git_at(&repo.path, &["branch", "--list", "topic"]).trim().is_empty());
+}
+
+#[test]
+fn delete_branch_reports_unmerged_work() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "b.txt", "two\n", "topic work");
+    repo.git(&["checkout", "main"]);
+    let error = perform(
+        &repo.path,
+        Mutation::DeleteBranch {
+            name: "topic".into(),
+            force: false,
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("branch is not fully merged"), "{error}");
+    assert!(!git_at(&repo.path, &["branch", "--list", "topic"]).trim().is_empty());
+    perform(
+        &repo.path,
+        Mutation::DeleteBranch {
+            name: "topic".into(),
+            force: true,
+        },
+    )
+    .unwrap();
+}
+
+#[test]
 fn search_commits_finds_added_text() {
     let repo = repo();
     commit_file(&repo, "a.txt", "needle-token\n", "base");

@@ -741,9 +741,13 @@ textarea {
     position: sticky;
     bottom: 0;
     z-index: 2;
-    margin-top: -6px;
-    padding: 6px 0 2px;
+    padding: 10px 0 2px;
     background: var(--elevated);
+  }
+
+.dialog form .composer-row.actions {
+    margin-top: 2px;
+    border-top: 1px solid var(--line);
   }
 
 .dialog .composer-row.actions > .grow,

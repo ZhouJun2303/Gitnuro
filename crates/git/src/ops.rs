@@ -727,15 +727,13 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             run(repo, &["checkout", check_rev(&name)?]).map(|_| ())
         }),
         Mutation::CreateBranch { name, start } => create_branch(repo, &name, start.as_deref()),
-        Mutation::DeleteBranch { name, force } => run(
-            repo,
-            &[
-                "branch",
-                if force { "-D" } else { "-d" },
-                check_name(&name)?,
-            ],
-        )
-        .map(|_| ()),
+        Mutation::DeleteBranch { name, force } => {
+            if force {
+                run(repo, &["branch", "-D", check_name(&name)?]).map(|_| ())
+            } else {
+                delete_branch(repo, &name)
+            }
+        }
         Mutation::Merge {
             name,
             squash,
@@ -1325,6 +1323,41 @@ fn has_untracked(repo: &Path, files: &[String]) -> bool {
     run(repo, &args)
         .map(|output| output.stdout.iter().any(|byte| !byte.is_ascii_whitespace()))
         .unwrap_or(false)
+}
+
+/// `git branch -d` also refuses a branch that is not merged into its upstream,
+/// even when HEAD already contains every commit. Deleting the local branch is
+/// safe whenever all its commits are in HEAD or in its upstream; only a branch
+/// with commits nowhere else stays an error and asks the UI for confirmation.
+fn delete_branch(repo: &Path, name: &str) -> Result<(), Error> {
+    let name = check_name(name)?;
+    let error = match run(repo, &["branch", "-d", name]) {
+        Ok(_) => return Ok(()),
+        Err(error) => error,
+    };
+    let Some(tip) = revision(repo, &format!("refs/heads/{name}")) else {
+        return Err(error);
+    };
+    let upstream = revision(repo, &format!("{name}@{{upstream}}"));
+    let safe = is_ancestor(repo, &tip, "HEAD")
+        || upstream
+            .as_deref()
+            .is_some_and(|upstream| is_ancestor(repo, &tip, upstream));
+    if safe {
+        return run(repo, &["branch", "-D", name]).map(|_| ());
+    }
+    Err(Error::Git(format!("branch is not fully merged\n{error}")))
+}
+
+fn revision(repo: &Path, rev: &str) -> Option<String> {
+    let output = run(repo, &["rev-parse", "--verify", "--quiet", rev]).ok()?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+/// A non-zero exit means "not an ancestor"; any failure here is treated as unsafe.
+fn is_ancestor(repo: &Path, ancestor: &str, descendant: &str) -> bool {
+    run(repo, &["merge-base", "--is-ancestor", ancestor, descendant]).is_ok()
 }
 
 fn create_branch(repo: &Path, name: &str, start: Option<&str>) -> Result<(), Error> {

@@ -3341,7 +3341,7 @@ export class ShellState {
     const note = this.settings.applyStashDelete
       ? this.tr("dialog.applyStashDeleteNote")
       : this.tr("dialog.applyStashKeepNote");
-    this.ask(this.tr("dialog.applyStash"), `${this.tr("dialog.applyStashBody", { summary })} ${note}`, () => void this.applyStash(name));
+    this.ask(this.tr("dialog.applyStash"), this.tr("dialog.applyStashBody"), () => void this.applyStash(name), [], { subject: summary, detail: note });
   }
 
 
@@ -3352,7 +3352,7 @@ export class ShellState {
       return;
     }
     const summary = stash?.summary || name || "";
-    this.ask(this.tr("dialog.popStash"), this.tr("dialog.popStashBody", { summary }), () => void this.mutate({ action: "stashPop", name: name ?? stash?.name }));
+    this.ask(this.tr("dialog.popStash"), this.tr("dialog.popStashBody"), () => void this.mutate({ action: "stashPop", name: name ?? stash?.name }), [], { subject: summary });
   }
 
 
@@ -3360,14 +3360,15 @@ export class ShellState {
     const short = rev.slice(0, 7);
     const target = summary ? `${short} "${summary}"` : short;
     const title = this.tr(mode === "soft" ? "dialog.softReset" : "dialog.mixedReset");
-    const body = this.tr(mode === "soft" ? "dialog.softResetBody" : "dialog.mixedResetBody", { target });
-    this.ask(title, body, () => void this.mutate({ action: "reset", rev, mode }));
+    const body = this.tr(mode === "soft" ? "dialog.softResetBody" : "dialog.mixedResetBody");
+    this.ask(title, body, () => void this.mutate({ action: "reset", rev, mode }), [], { subject: target });
   }
 
 
 
   confirmRevert(id: string, summary: string) {
-    this.ask(this.tr("dialog.revert"), this.tr("dialog.revertBody", { short: id.slice(0, 7), summary }), () => void this.mutate({ action: "revert", rev: id }));
+    const subject = `${id.slice(0, 7)} ${summary}`.trim();
+    this.ask(this.tr("dialog.revert"), this.tr("dialog.revertBody"), () => void this.mutate({ action: "revert", rev: id }), [], { subject });
   }
 
 
@@ -4117,8 +4118,8 @@ export class ShellState {
 
 
 
-  ask(title: string, body: string, run: () => void, files: string[] = []) {
-    return ask(this, title, body, run, files);
+  ask(title: string, body: string, run: () => void, files: string[] = [], extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "confirmLabel"> = {}) {
+    return ask(this, title, body, run, files, extras);
   }
 
 

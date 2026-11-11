@@ -176,6 +176,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "conflict-large-asset", group: "叠层", title: "大文本冲突", repo: "conflict", ready: ".merge-large" }),
   scene({ id: "file-merge", group: "叠层", title: "二进制合并", repo: "conflict", ready: "[data-layer=\"text-merge\"]" }),
   scene({ id: "confirm", group: "叠层", title: "确认框", repo: "full", ready: "[data-layer=\"confirm\"]" }),
+  scene({ id: "force-delete-confirm", group: "叠层", title: "强制删除分支确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "discard-many-confirm", group: "叠层", title: "多文件丢弃确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "stash-apply-confirm", group: "叠层", title: "应用贮藏确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "revert-confirm", group: "叠层", title: "还原确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),

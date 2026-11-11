@@ -391,7 +391,11 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.draft = "feature/lab";
     shell.draftExtra = "main";
     shell.dialog = "branch";
-    shell.confirmAsk = { title: "删除分支", body: "确认删除 topic？", run: () => {} };
+    shell.confirmAsk = { title: shell.tr("dialog.deleteBranch"), body: shell.tr("dialog.deleteBranchBody"), subject: "rewrite/tauri", danger: true, confirmLabel: shell.tr("menu.delete"), run: () => {} };
+    return;
+  }
+  if (id === "force-delete-confirm") {
+    shell.confirmAsk = { title: shell.tr("dialog.forceDeleteBranch"), body: shell.tr("dialog.forceDeleteBranchBody"), subject: "rewrite/tauri", danger: true, confirmLabel: shell.tr("menu.forceDelete"), run: () => {} };
     return;
   }
   if (id === "discard-many-confirm") {
@@ -404,7 +408,7 @@ async function fillSurface(shell: ShellState, id: string) {
       "docs/release-notes.md",
     ];
     shell.discardChosen(names);
-    if (!shell.confirmAsk) shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => {}, names);
+    if (!shell.confirmAsk) shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => {}, names, { danger: true });
     return;
   }
   if (id === "stash-apply-confirm") {
