@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use awegit_git::{
-    blob_view, commit, commit_log, conflict_view, discard_lines, file_diff, file_diff_with,
-    file_preview, in_progress, launch_merge_tool, merge_preview, perform, repository_refs,
-    search_commits, search_log, stage_all, stage_hunk, stage_line, stage_lines, stage_paths,
-    status, stop_process_tree, ChangeKind, CommitRequest, InProgress, LineEdit, Mutation,
-    RebaseStep, ResetMode,
+    blob_view, commit, commit_log, commits_from, conflict_view, discard_lines, file_diff,
+    file_diff_with, file_preview, in_progress, launch_merge_tool, merge_preview, perform,
+    repository_refs, search_commits, search_log, stage_all, stage_hunk, stage_line, stage_lines,
+    stage_paths, status, stop_process_tree, ChangeKind, CommitRequest, InProgress, LineEdit,
+    Mutation, RebaseStep, ResetMode,
 };
 
 fn repo() -> common::TempRepo {
@@ -302,6 +302,34 @@ fn marks_commits_that_exist_only_on_a_remote() {
         !first.remote_only && !first.unpushed,
         "shared base should be plain: {first:?}"
     );
+
+    // Another local branch reaches the fetched commit: the whole-repository view keeps it
+    // plain, but a view filtered to main and its upstream still fades it.
+    local.git(&["branch", "keep", "origin/main"]);
+    let rows = commit_log(&local.path, 50).unwrap();
+    let second = rows
+        .iter()
+        .find(|row| row.summary == "second")
+        .expect("remote tip missing");
+    assert!(
+        !second.remote_only,
+        "a local branch reaches it: {second:?}"
+    );
+    let revs = ["main".to_string(), "origin/main".to_string()];
+    let rows = commits_from(&local.path, 50, &revs, false).unwrap();
+    let second = rows
+        .iter()
+        .find(|row| row.summary == "second")
+        .expect("remote tip missing");
+    assert!(
+        second.remote_only,
+        "main does not reach it: {second:?}"
+    );
+    let first = rows
+        .iter()
+        .find(|row| row.summary == "first")
+        .expect("shared base missing");
+    assert!(!first.remote_only, "main reaches the base: {first:?}");
 
     commit_file(&local, "b.txt", "local\n", "local work");
     let rows = commit_log(&local.path, 50).unwrap();

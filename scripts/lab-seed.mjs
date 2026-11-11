@@ -466,6 +466,8 @@ cloneFrom(fileUrl(remote), behind);
 commit(writer, "README.md", "base\nremote moved\n", "remote moved");
 git(writer, ["push", "origin", "HEAD:main"]);
 git(behind, ["fetch", "origin"]);
+// A local branch already holds the fetched tip; the filtered view still fades it.
+git(behind, ["branch", "keep", "origin/main"]);
 
 const origin = fileUrl(remote);
 const full = join(repos, "full");
