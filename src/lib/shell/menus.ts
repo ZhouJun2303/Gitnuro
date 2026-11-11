@@ -252,7 +252,11 @@ export function commitExtras(shell: ShellState) {
 export function dirMenu(shell: ShellState, dir: string, side: Side) {
     const unstage = side === "staged";
     const locked = shell.mode !== "live";
-    const files = shell.filesInDir(dir, side);
+    // A right-click on a fully picked folder acts on the whole selection, so the counts
+    // in the menu match what will actually be discarded, deleted or stashed.
+    const fullyPicked = side === "staged" ? shell.pickedStagedDirs.has(dir) : shell.pickedUnstagedDirs.has(dir);
+    const source = side === "staged" ? shell.shownStaged : shell.shownUnstaged;
+    const files = fullyPicked ? shell.pickedIn(source) : shell.filesInDir(dir, side);
     const count = String(files.length);
     return [
       {

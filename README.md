@@ -225,6 +225,8 @@ pnpm package:mac
 
 点击生成提交说明时，若 AI 未启用、接口地址未填写，或后端报告未配置密钥，会打开偏好设置并滚动、聚焦到对应配置项；已通过环境变量配置密钥时仍可正常生成。试验台场景：`suggest-unconfigured`、`suggest-no-url`、`suggest-disabled`；验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"`。
 
+文件夹右键菜单在文件夹内文件全部被选中时，按整个选择范围显示数量，丢弃、删除和贮藏都作用于全部所选文件；只选中文件夹本身时仍只作用于该文件夹。验证：`pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "folder menu counts"`。
+
 ## 下载
 
 安装包发布在 [Releases](https://github.com/ZhouJun2303/Gitnuro/releases)。版本清单是 `release` 分支根目录的 `latest.json`。

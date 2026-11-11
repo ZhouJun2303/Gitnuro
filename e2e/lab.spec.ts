@@ -926,3 +926,24 @@ test("a folder click selects its files, double-click stages it, the twist only f
   await twist.click();
   await expect(child).toHaveCount(1);
 });
+
+test("a folder menu counts every picked file, not just the folder's", async ({ page }) => {
+  test.setTimeout(60_000);
+  await openLabScene(page, "changes", ".file-list");
+  await page.locator(".unstaged-pane .pane-more").click();
+  await page.locator('[data-layer="menu"] button', { hasText: /View as Tree|按树查看/ }).click();
+
+  const unstaged = page.locator(".unstaged-pane");
+  const folder = unstaged.locator('button.file-select[title="pending"]');
+  await folder.click();
+  await expect(unstaged.locator(".dir-row.picked")).toHaveCount(1);
+
+  await page.keyboard.press("Control+a");
+  const pickedText = await unstaged.locator(".pick-count").textContent();
+  const total = Number(pickedText?.match(/\d+/)?.[0] ?? 0);
+  expect(total).toBeGreaterThan(24);
+
+  await folder.click({ button: "right" });
+  const menu = page.locator('[data-layer="menu"]');
+  await expect(menu.locator("button", { hasText: /Discard changes in|丢弃所选/ }).first()).toContainText(String(total));
+});
