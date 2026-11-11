@@ -195,8 +195,8 @@ function Get-CurrentBranch {
 }
 
 # Everything on this branch that the last publish did not ship yet.
-# origin/release is the boundary, not the v* tags: gh creates the tag
-# before the release branch is pushed, so tags land on the previous manifest commit.
+# origin/release is the boundary, not the v* tags: tags made before the
+# publish scripts tagged the manifest commit sit on the previous release.
 function Get-ChangelogNotes {
     # Best-effort refresh: a flaky network must not abort the publish; fall back
     # to the existing ref. Native stderr would be a terminating error under Stop.
@@ -379,7 +379,7 @@ function Invoke-ReleaseFlow {
                         Write-Host "发布没有完成，已撤回 release 上这次合并。"
                     }
                 } elseif ($stage -eq "released") {
-                    Write-Host "安装包已经上传，版本清单还没有推到 release。再发布一次当前版本即可，不要改版本号。"
+                    Write-Host "GitHub release 和标签已经创建，版本清单还没有推到 release。再发布一次当前版本即可，不要改版本号。"
                 }
                 throw
             } finally {

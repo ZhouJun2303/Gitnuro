@@ -1,6 +1,6 @@
 ﻿# Package AweGit for Windows, upload the installers, and publish the version manifest.
 # Run this on the release branch. publish.bat merges feat/dev into release first.
-# It commits latest.json at the repo root and pushes origin release.
+# It commits latest.json, tags that commit, uploads the installers, then pushes origin release.
 
 param(
     [string]$Notes = ""
@@ -74,17 +74,114 @@ function Write-LatestManifest([string]$version, [string]$notes, [string]$nsisPat
     }
 }
 
-function Submit-Manifest([string]$version) {
+function Commit-Manifest([string]$version) {
     Push-Location $root
     try {
-        git add -- latest.json
+        git add -- latest.json | Out-Null
         $staged = git diff --cached --name-only -- latest.json
         if ($staged) {
-            git commit -m "chore: 发布 $version"
+            git commit -m "chore: 发布 $version" | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 throw "Could not commit latest.json"
             }
         }
+        return (& git -C $root rev-parse HEAD).Trim()
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Get-InstallerAssets([string]$version, [string]$nsis) {
+    $assets = @()
+    if (Test-Path $nsis) { $assets += $nsis }
+    $msiDir = Join-Path $bundle "msi"
+    if (Test-Path $msiDir) {
+        $msi = Get-ChildItem -Path $msiDir -Filter "AweGit_${version}_x64*.msi" | Select-Object -First 1
+        if ($msi) { $assets += $msi.FullName }
+    }
+    return ,$assets
+}
+
+function Sync-ReleaseAssets([string]$tag, [string[]]$assets) {
+    $listed = Invoke-GhRetry @("release", "view", $tag, "--repo", $repo, "--json", "assets", "--jq", ".assets[].name") "读取 release $tag 的附件"
+    $have = @($listed -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $missing = @($assets | Where-Object { $have -notcontains [IO.Path]::GetFileName($_) })
+    if ($missing.Count -gt 0) {
+        Invoke-GhRetry (@("release", "upload", $tag) + $missing + @("--repo", $repo, "--clobber")) "上传 release 附件" | Out-Null
+    }
+}
+
+# An earlier publish can leave the tag on a commit that never reached release.
+# No GitHub release exists for that tag at this point, so it is safe to replace.
+# A tag already inside release history is not ours to move.
+function Reset-StaleTag([string]$tag) {
+    Push-Location $root
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & git -C $root tag -d $tag 2>$null | Out-Null
+        $remote = (& git -C $root ls-remote --tags --refs origin "refs/tags/$tag" 2>$null | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) { throw "Could not read tag $tag from origin" }
+        if (-not $remote) { return }
+        & git -C $root fetch --quiet origin release 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "Could not fetch origin release" }
+        $peek = "refs/awegit-stale/$tag"
+        & git -C $root fetch --quiet --force origin "refs/tags/${tag}:${peek}" 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "Could not fetch tag $tag" }
+        & git -C $root merge-base --is-ancestor $peek origin/release 2>$null
+        $inRelease = $LASTEXITCODE -eq 0
+        & git -C $root update-ref -d $peek
+        # Fetching a tag ref also recreates it under refs/tags locally.
+        & git -C $root tag -d $tag 2>$null | Out-Null
+        if ($inRelease) {
+            throw "标签 $tag 指向 release 上已有的提交，但 GitHub 上没有对应的 release。先手动确认这个标签。"
+        }
+        & git -c lfs.locksverify=false push origin ":refs/tags/$tag" 2>$null
+        if ($LASTEXITCODE -ne 0) { throw "Could not remove stale tag $tag from origin" }
+        Write-Host "清理上次没有完成的标签 $tag"
+    }
+    finally {
+        $ErrorActionPreference = $previous
+        Pop-Location
+    }
+}
+
+function New-ReleaseTag([string]$tag, [string]$commit, [string]$version) {
+    Push-Location $root
+    try {
+        & git -C $root tag -a $tag $commit -m "AweGit $version"
+        if ($LASTEXITCODE -ne 0) { throw "Could not create tag $tag" }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Push-ReleaseTag([string]$tag) {
+    Push-Location $root
+    try {
+        $pushed = $false
+        foreach ($attempt in 1..3) {
+            git -c lfs.locksverify=false push origin "refs/tags/$tag"
+            if ($LASTEXITCODE -eq 0) { $pushed = $true; break }
+            if ($attempt -lt 3) {
+                Write-Host "推送标签 $tag 没有成功，正在重试 ($attempt)"
+                Start-Sleep -Seconds (5 * $attempt)
+            }
+        }
+        if (-not $pushed) {
+            throw "Could not push tag $tag"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Push-Release {
+    Push-Location $root
+    try {
         # Nothing in this repo is stored in Git LFS. The pre-push hook still
         # POSTs /info/lfs/locks/verify, and GitHub often closes that call with
         # EOF, which rejects the push after the installer is already uploaded.
@@ -139,14 +236,19 @@ Assert-GhAuthenticated
 
 $bundle = Join-Path $root "target\release\bundle"
 $nsis = Join-Path $bundle "nsis\AweGit_${version}_x64-setup.exe"
-$releaseExists = Test-GitHubRelease -Tag "v$version" -Repo $repo
+$tag = "v$version"
+$releaseExists = Test-GitHubRelease -Tag $tag -Repo $repo
 
 if ($releaseExists) {
-    Write-Host "GitHub 上已经有 v$version，改为推送版本清单"
+    Write-Host "GitHub 上已经有 $tag，改为推送版本清单"
     Set-PublishStage "released"
+    $assets = @(Get-InstallerAssets $version $nsis)
+    if ($assets.Count -gt 0) {
+        Sync-ReleaseAssets $tag $assets
+    }
     if (-not (Test-ManifestReady $version)) {
         if (-not (Test-Path $nsis)) {
-            throw "GitHub release v$version already exists, and latest.json does not point at it"
+            throw "GitHub release $tag already exists, and latest.json does not point at it"
         }
         Write-LatestManifest $version $Notes $nsis
     }
@@ -159,20 +261,23 @@ if ($releaseExists) {
     if (-not (Test-Path $nsis)) {
         throw "Missing installer $nsis"
     }
-    $msiDir = Join-Path $bundle "msi"
-    $msi = $null
-    if (Test-Path $msiDir) {
-        $msi = Get-ChildItem -Path $msiDir -Filter "AweGit_${version}_x64*.msi" | Select-Object -First 1
-    }
-    $tag = "v$version"
+    $assets = @(Get-InstallerAssets $version $nsis)
     $releaseNotes = if ($Notes) { $Notes } else { "AweGit $version" }
     # Multi-line notes cannot survive the Windows command line; gh reads them from a file.
     $notesFile = Join-Path $env:TEMP ("awegit-notes-" + [guid]::NewGuid().ToString("N") + ".txt")
     [IO.File]::WriteAllText($notesFile, $releaseNotes, (New-Object System.Text.UTF8Encoding $false))
-    $assets = @($nsis)
-    if ($msi) { $assets += $msi.FullName }
+    $tagPushed = $false
     try {
-        $createArgs = @("release", "create", $tag) + $assets + @("--repo", $repo, "--title", "AweGit $version", "--notes-file", $notesFile)
+        # The manifest commit is tagged before the release exists, so the tag
+        # names the exact commit release will end up at. Letting gh create the
+        # tag would put it on origin release, still the previous publish.
+        Write-LatestManifest $version $Notes $nsis
+        $commit = Commit-Manifest $version
+        Reset-StaleTag $tag
+        New-ReleaseTag $tag $commit $version
+        Push-ReleaseTag $tag
+        $tagPushed = $true
+        $createArgs = @("release", "create", $tag) + $assets + @("--verify-tag", "--repo", $repo, "--title", "AweGit $version", "--notes-file", $notesFile)
         $created = $false
         $lastText = ""
         for ($attempt = 1; $attempt -le 6 -and -not $created; $attempt++) {
@@ -189,23 +294,28 @@ if ($releaseExists) {
         if (-not $created) {
             throw "Could not create GitHub release $tag：$lastText"
         }
+        # From here the tag and release are live: keep the local manifest
+        # commit so a retry pushes the same commit and the tag stays on release.
+        Set-PublishStage "released"
+        $tagPushed = $false
         # A create that timed out midway can leave the release without its
         # installers; upload whatever is still missing.
-        $listed = Invoke-GhRetry @("release", "view", $tag, "--repo", $repo, "--json", "assets", "--jq", ".assets[].name") "读取 release $tag 的附件"
-        $have = @($listed -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-        $missing = @($assets | Where-Object { $have -notcontains [IO.Path]::GetFileName($_) })
-        if ($missing.Count -gt 0) {
-            Invoke-GhRetry (@("release", "upload", $tag) + $missing + @("--repo", $repo, "--clobber")) "上传 release 附件" | Out-Null
+        Sync-ReleaseAssets $tag $assets
+    }
+    catch {
+        if ($tagPushed) {
+            # The release was never created, so drop the local tag; the retry
+            # then tags its fresh manifest commit instead.
+            & git -C $root tag -d $tag 2>$null | Out-Null
         }
+        throw
     }
     finally {
         Remove-Item -LiteralPath $notesFile -Force -ErrorAction SilentlyContinue
     }
-    Set-PublishStage "released"
-    Write-LatestManifest $version $Notes $nsis
 }
 
-Submit-Manifest $version
+Push-Release
 $published = Read-JsonFile (Join-Path $root "latest.json")
 Write-Host "Published v$version"
 Write-Host ([string]$published.downloadUrl)

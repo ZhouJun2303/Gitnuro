@@ -169,6 +169,8 @@ pnpm package:windows
 
 在 `feat/dev` 上发布时，脚本会先提交版本号，再切到 `release` 合并这个分支，打包上传后回到 `feat/dev`。从其他分支发布也走同一条合并路径。工作区要是干净的，并且 `gh` 已经登录。
 
+发布过程中的顺序是：提交 `latest.json`，在这个清单提交上打 `v版本号` 标签并推送，上传安装包，最后推送 `release`。标签和 GitHub release 指向同一个提交；清单最后推送，避免更新检查拿到还没上传完的安装包。
+
 已经在 `release` 分支、并且不想改版本号时，仍可以用 `pnpm publish:windows`。
 
 不要提交 `target\`、`src-tauri\target\`、`node_modules\` 和下载下来的 MinGit。
