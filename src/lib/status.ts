@@ -238,6 +238,7 @@ export type Settings = {
   errorLogDays: number;
   flowHistoryDays: number;
   flowAutoOpen: boolean;
+  flowAutoClose: boolean;
   messageLow: number;
   messageHigh: number;
   spellChecking: string;

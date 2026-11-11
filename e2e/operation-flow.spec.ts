@@ -181,37 +181,95 @@ test("long pipelines virtualize rows and retain the complete phase overview", as
 
 test("observer follows conflicts resolved elsewhere and closes only after final stash recovery", async ({ page }) => {
   test.setTimeout(90_000);
-  await lab("lab_restore", { name: "operation" });
-  const layout = await lab<Record<string, string>>("lab_layout"); const path = layout.operation;
-  const mutate = (request: Record<string, unknown>) => lab<MutationResult>("mutate", { path, request });
-  const snapshot = () => lab<FlowSnapshot>("operation_flow", { path });
-  const start = await mutate({ action: "rebase", onto: "incoming", autostash: true });
-  expect(start.outcome).toBe("conflict"); const id = start.flow!.id;
-  await page.goto(`/?scene=operation-flow&view=flow&file=live&repo=${encodeURIComponent(path)}&rev=${id}`);
-  const activeTitle = page.locator(".flow-node.active h2");
-  await expect(activeTitle).toHaveText("第 1 轮冲突");
-  await expect(page.locator(".flow-window button")).toHaveCount(0);
-  // Writes represent the main workspace. The observer only receives updates.
-  await mutate({ action: "resolve", file: "note.txt", side: "text", text: "resolved first\n" });
-  expect((await snapshot()).summary.canAutoClose).toBe(false);
-  await expect(page.locator('.flow-header > .flow-badge')).toContainText("等待继续");
-  await mutate({ action: "continue", message: "" });
-  await expect(activeTitle).toHaveText("第 2 轮冲突");
-  await expect(page.locator(".flow-node.active")).toBeInViewport();
-  await mutate({ action: "resolve", file: "note.txt", side: "text", text: "resolved second\n" });
-  await mutate({ action: "continue", message: "" });
-  await expect(activeTitle).toHaveText("第 3 轮冲突");
-  const restoring = await snapshot(); expect(restoring.summary.progress).toBeNull(); expect(restoring.summary.canAutoClose).toBe(false);
-  expect(restoring.nodes.filter((node) => node.kind === "conflict")).toHaveLength(3);
-  await page.waitForTimeout(1700);
-  await expect(page.locator(".flow-window")).not.toHaveAttribute("data-closed", "true");
-  await mutate({ action: "resolve", file: "note.txt", side: "text", text: "restored local work\n" });
-  await expect(page.locator(".flow-window")).toHaveAttribute("data-closed", "true", { timeout: 10_000 });
-  expect((await snapshot()).summary.id).toBe(id);
-  await page.goto(`/?scene=operation-flow&view=flow&file=history&repo=${encodeURIComponent(path)}&rev=${id}`);
-  await expect(page.locator(".flow-footer")).toContainText("窗口保持打开");
-  await page.waitForTimeout(1700);
-  await expect(page.locator(".flow-window")).not.toHaveAttribute("data-closed", "true");
+  const original = await lab<Settings>("load_settings");
+  await lab("save_settings", { values: { ...original, flowAutoClose: true } });
+  try {
+    await lab("lab_restore", { name: "operation" });
+    const layout = await lab<Record<string, string>>("lab_layout"); const path = layout.operation;
+    const mutate = (request: Record<string, unknown>) => lab<MutationResult>("mutate", { path, request });
+    const snapshot = () => lab<FlowSnapshot>("operation_flow", { path });
+    const start = await mutate({ action: "rebase", onto: "incoming", autostash: true });
+    expect(start.outcome).toBe("conflict"); const id = start.flow!.id;
+    await page.goto(`/?scene=operation-flow&view=flow&file=live&repo=${encodeURIComponent(path)}&rev=${id}`);
+    const activeTitle = page.locator(".flow-node.active h2");
+    await expect(activeTitle).toHaveText("第 1 轮冲突");
+    await expect(page.locator(".flow-window button")).toHaveCount(0);
+    // Writes represent the main workspace. The observer only receives updates.
+    await mutate({ action: "resolve", file: "note.txt", side: "text", text: "resolved first\n" });
+    expect((await snapshot()).summary.canAutoClose).toBe(false);
+    await expect(page.locator('.flow-header > .flow-badge')).toContainText("等待继续");
+    await mutate({ action: "continue", message: "" });
+    await expect(activeTitle).toHaveText("第 2 轮冲突");
+    await expect(page.locator(".flow-node.active")).toBeInViewport();
+    await mutate({ action: "resolve", file: "note.txt", side: "text", text: "resolved second\n" });
+    await mutate({ action: "continue", message: "" });
+    await expect(activeTitle).toHaveText("第 3 轮冲突");
+    const restoring = await snapshot(); expect(restoring.summary.progress).toBeNull(); expect(restoring.summary.canAutoClose).toBe(false);
+    expect(restoring.nodes.filter((node) => node.kind === "conflict")).toHaveLength(3);
+    await page.waitForTimeout(1700);
+    await expect(page.locator(".flow-window")).not.toHaveAttribute("data-closed", "true");
+    await mutate({ action: "resolve", file: "note.txt", side: "text", text: "restored local work\n" });
+    await expect(page.locator(".flow-window")).toHaveAttribute("data-closed", "true", { timeout: 10_000 });
+    expect((await snapshot()).summary.id).toBe(id);
+    await page.goto(`/?scene=operation-flow&view=flow&file=history&repo=${encodeURIComponent(path)}&rev=${id}`);
+    await expect(page.locator(".flow-footer")).toContainText("窗口保持打开");
+    await page.waitForTimeout(1700);
+    await expect(page.locator(".flow-window")).not.toHaveAttribute("data-closed", "true");
+  } finally { await lab("save_settings", { values: original }); }
+});
+
+test("observer automatic closing defaults off and its switch is saved in preferences", async ({ page }) => {
+  test.setTimeout(60_000);
+  const original = await lab<Settings>("load_settings");
+  try {
+    const legacy: Partial<Settings> = { ...original };
+    delete legacy.flowAutoClose;
+    const defaults = await lab<Settings>("save_settings", { values: legacy });
+    expect(defaults.flowAutoClose).toBe(false);
+    await page.goto("/?scene=prefs-flow");
+    await expect(page.locator('[data-lab-scene="prefs-flow"]')).toBeVisible();
+    const toggle = page.getByRole("checkbox", { name: /解决所有冲突后自动关闭流程窗口|Automatically close the flow window after resolving all conflicts/, exact: true });
+    await expect(toggle).not.toBeChecked();
+    await toggle.check();
+    await page.locator('[data-dialog="prefs"] .commit').click();
+    await expect.poll(async () => (await lab<Settings>("load_settings")).flowAutoClose).toBe(true);
+    await page.goto("/?scene=prefs-flow");
+    await expect(toggle).toBeChecked();
+    await toggle.uncheck();
+    await page.locator('[data-dialog="prefs"] .commit').click();
+    await expect.poll(async () => (await lab<Settings>("load_settings")).flowAutoClose).toBe(false);
+    await page.goto("/?scene=prefs-flow");
+    await expect(toggle).not.toBeChecked();
+  } finally { await lab("save_settings", { values: original }); }
+});
+
+test("observer automatic closing keeps completed windows open until enabled and rechecks before closing", async ({ page }) => {
+  test.setTimeout(60_000);
+  const original = await lab<Settings>("load_settings");
+  const setAutoClose = (enabled: boolean) => lab("save_settings", { values: { ...original, flowAutoClose: enabled } });
+  const focus = () => page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  try {
+    await setAutoClose(false);
+    await page.goto("/?scene=operation-flow-completed&view=flow&file=live");
+    await expect(page.locator(".flow-footer")).toHaveText("流程已完成，窗口保持打开");
+    await page.waitForTimeout(1700);
+    await expect(page.locator(".flow-window")).not.toHaveAttribute("data-closed", "true");
+
+    await setAutoClose(true);
+    await focus();
+    await expect(page.locator(".flow-footer")).toContainText("1.5 秒后关闭");
+    await setAutoClose(false);
+    await expect(page.locator(".flow-footer")).toHaveText("流程已完成，窗口保持打开");
+    await expect(page.locator(".flow-window")).not.toHaveAttribute("data-closed", "true");
+
+    await setAutoClose(true);
+    await focus();
+    await expect(page.locator(".flow-window")).toHaveAttribute("data-closed", "true");
+    await page.goto("/?scene=operation-flow-history&view=flow&file=history");
+    await expect(page.locator(".flow-footer")).toContainText("窗口保持打开");
+    await page.waitForTimeout(1700);
+    await expect(page.locator(".flow-window")).not.toHaveAttribute("data-closed", "true");
+  } finally { await lab("save_settings", { values: original }); }
 });
 
 test("observer automatic opening for unresolved conflicts can be disabled and saved in preferences", async ({ page }) => {

@@ -231,6 +231,14 @@ async function fillSurface(shell: ShellState, id: string) {
     return;
   }
   if (id === "conflict") return showChange(shell, "src/both-sides.ts", "unstaged");
+  if (id === "conflict-compact") {
+    shell.sidebarCollapsed = false;
+    shell.sidebarWidth = 280;
+    shell.changesWidth = 650;
+    shell.settings.verticalTabs = false;
+    shell.settings.mergeTools = mergeFixtures();
+    return showChange(shell, "data/sheet.xlsx", "unstaged");
+  }
   if (id === "conflict-batch") {
     shell.section = "changes";
     shell.picked = [];

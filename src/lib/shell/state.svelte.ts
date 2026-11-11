@@ -249,6 +249,7 @@ export class ShellState {
     errorLogDays: 7,
     flowHistoryDays: 3,
     flowAutoOpen: true,
+    flowAutoClose: false,
     messageLow: 50,
     messageHigh: 70,
     spellChecking: "disable",

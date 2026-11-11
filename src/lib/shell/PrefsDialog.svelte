@@ -100,6 +100,7 @@
             <label class="check"><input type="checkbox" bind:checked={shell.settings.compactBranchLabels} /> {shell.tr("dialog.compactLabels")}</label>
             <label class="pref-inline">{shell.tr("dialog.errorLogDays")} <input type="number" min="1" max="90" bind:value={shell.settings.errorLogDays} onchange={() => { shell.settings.errorLogDays = shell.errorDays(); shell.pruneErrorLog(); }} /></label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.flowAutoOpen} /> {shell.tr("flow.autoOpen")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.settings.flowAutoClose} /> {shell.tr("flow.autoClose")}</label>
             <label class="pref-inline">{shell.tr("flow.historyDays")} <input type="number" min="1" max="90" bind:value={shell.settings.flowHistoryDays} onchange={() => { shell.settings.flowHistoryDays = Math.min(90, Math.max(1, Math.round(shell.settings.flowHistoryDays || 3))); }} /></label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.fetchAllRemotes} /> {shell.tr("dialog.fetchAllRemotes")}</label>
             <label class="check"><input type="checkbox" bind:checked={shell.settings.pushAllTags} /> {shell.tr("dialog.pushAllTags")}</label>

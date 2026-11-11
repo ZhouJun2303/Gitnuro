@@ -183,6 +183,9 @@ pub struct Settings {
     /// Automatically show the read-only operation observer.
     #[serde(default = "default_true")]
     pub flow_auto_open: bool,
+    /// Close the operation observer after all conflicts and follow-up steps finish.
+    #[serde(default)]
+    pub flow_auto_close: bool,
     #[serde(default = "low_limit")]
     pub message_low: u32,
     #[serde(default = "high_limit")]
@@ -576,6 +579,7 @@ impl Default for Settings {
             error_log_days: error_days(),
             flow_history_days: flow_days(),
             flow_auto_open: true,
+            flow_auto_close: false,
             message_low: low_limit(),
             message_high: high_limit(),
             spell_checking: spell_off(),
@@ -1543,6 +1547,21 @@ mod tests {
         let saved = serde_json::to_value(&settings).unwrap();
         assert_eq!(saved["flowAutoOpen"], false);
         assert!(!serde_json::from_value::<Settings>(saved).unwrap().flow_auto_open);
+    }
+
+    #[test]
+    fn operation_observer_auto_close_defaults_off_and_keeps_an_explicit_choice() {
+        let settings: Settings = serde_json::from_str(r#"{"flowAutoOpen":true}"#).unwrap();
+        assert!(!settings.flow_auto_close);
+        assert!(!Settings::default().flow_auto_close);
+        for enabled in [false, true] {
+            let settings: Settings = serde_json::from_value(serde_json::json!({
+                "flowAutoClose": enabled,
+            })).unwrap();
+            let saved = serde_json::to_value(&settings).unwrap();
+            assert_eq!(saved["flowAutoClose"], enabled);
+            assert_eq!(serde_json::from_value::<Settings>(saved).unwrap().flow_auto_close, enabled);
+        }
     }
 
     #[test]

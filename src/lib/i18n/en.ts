@@ -3,6 +3,7 @@ import type { Messages } from "./types";
 export const en: Messages = {
   flow: {
     observer: "Read-only observer", observerHint: "Resolve conflicts in the main window · Follow the complete pipeline here", autoOpen: "Automatically open the flow window when an operation has unresolved conflicts",
+    autoClose: "Automatically close the flow window after resolving all conflicts", staysOpen: "Workflow completed. This window stays open",
     overview: "Complete pipeline", pipelineHint: "Runs from left to right · Select a phase to view its steps", progress: "Completed {done} / {total} steps", executionDetails: "Commands and observations",
     "phase-saved": "Save local changes", "phase-fetch": "Fetch remote commits", "phase-integration": "Integrate commits", "phase-restore": "Restore local changes", "phase-finished": "Finish",
     "fetch-inferred": "Commit integration has started; no separate fetch command was recorded.",
@@ -230,7 +231,7 @@ export const en: Messages = {
     unmergedOne: "Working directory contains 1 unmerged file.",
     unmergedMany: "Working directory contains {count} unmerged files.",
     mergeConflict: "Merge conflict",
-    mergeConflictHint: "Left is {theirs}; right is {ours}. Check the side to keep — checking both joins them, or use a merge tool.",
+    mergeConflictHint: "Choose a version to keep, select both to combine, or use a merge tool.",
     conflictSelected: "{count} conflict files selected; a single side applies to all of them.",
     mergeAction: "Merge",
     mergeBoth: "Keep both and merge",

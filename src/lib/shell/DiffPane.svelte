@@ -299,10 +299,10 @@
                   <svg class="conflict-warn" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.4 14.8 13.4H1.2L8 1.4z"/><path d="M8 6.1v3.3" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r=".75" fill="#fff"/></svg>
                   <strong>{shell.tr("chrome.mergeConflict")}</strong>
                 </div>
-                <p class="conflict-hint">{shell.tr("chrome.mergeConflictHint", { theirs: view.theirs.label, ours: view.ours.label })}</p>
+                <p class="conflict-hint">{shell.tr("chrome.mergeConflictHint")}</p>
                 <div class="conflict-file">
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.2" d="M3.2 1.5h6L12.8 5v9.5H3.2z"/><path fill="none" stroke="currentColor" stroke-width="1.2" d="M9.1 1.6V5.1h3.6"/></svg>
-                  <span>{shell.fileName(shell.selectedPath)}</span>
+                  <span title={shell.selectedPath}>{shell.fileName(shell.selectedPath)}</span>
                 </div>
                 {#if batch}
                   <p class="conflict-selection" role="status">{shell.tr("chrome.conflictSelected", { count: String(conflictSelection.length) })}</p>

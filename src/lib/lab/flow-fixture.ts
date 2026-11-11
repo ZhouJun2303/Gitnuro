@@ -53,7 +53,7 @@ export function flowFixture(scene: string): FlowSnapshot {
     nodes.splice(3, 0, ...completed);
     nodes.forEach((node, index) => { node.createdAt = at + index; node.at = at + index; });
   }
-  const history = scene === "operation-flow-history";
+  const history = scene === "operation-flow-history" || scene === "operation-flow-completed";
   if (history) {
     for (const item of nodes) { item.state = "completed"; for (const file of item.files) file.resolved = true; }
     nodes.push(node("finished", "finished", "completed", { target: remote }));

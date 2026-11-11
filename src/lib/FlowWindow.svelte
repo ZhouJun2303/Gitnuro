@@ -13,6 +13,7 @@
   let repo = $state("");
   let selectedId = $state("");
   let live = $state(false);
+  let autoClose = $state(false);
   let retainOpen = $state(false);
   let closed = $state(false);
   let summary = $state.raw<FlowSummary | null>(null);
@@ -74,6 +75,7 @@
   const completed = $derived(graph.reduce((done, node) => done + Number(node.state === "completed" || node.state === "processed"), 0));
   const current = $derived(graph.find((node) => node.key === activeKey));
   const currentIndex = $derived(graph.findIndex((node) => node.key === activeKey));
+  const shouldAutoClose = $derived(autoClose && live && !retainOpen && summary?.canAutoClose && summary.state === "completed");
 
   function replace(value: FlowSnapshot | null) {
     if (!value) { summary = null; nodes = []; return; }
@@ -133,12 +135,14 @@
   });
 
   $effect(() => {
-    if (!ready || !live || retainOpen || !summary?.canAutoClose || summary.state !== "completed") return;
+    if (!ready || !shouldAutoClose || !summary) return;
     const id = summary.id, sequence = summary.sequence;
     const timer = setTimeout(async () => {
       try {
+        const settings = await invoke<Settings>("load_settings");
+        if (!settings.flowAutoClose) { autoClose = false; return; }
         const value = fixture ? { summary } : await invoke<FlowSnapshot | null>("operation_flow", { path: repo, id: null });
-        if (disposed || !live || retainOpen || summary?.id !== id || summary.sequence !== sequence) return;
+        if (disposed || !autoClose || !live || retainOpen || summary?.id !== id || summary.sequence !== sequence) return;
         if (value?.summary && value.summary.id !== id) { await navigate(value.summary.id, true); return; }
         if (!value?.summary || value.summary.sequence !== sequence || !value.summary.canAutoClose) { await refresh(); return; }
         if (desktop) await getCurrentWindow().close();
@@ -156,6 +160,7 @@
     const boot = async () => {
       try {
         const settings = await invoke<Settings>("load_settings");
+        autoClose = settings.flowAutoClose === true;
         locale = scene ? "zh" : resolveLocale(settings.locale);
         document.documentElement.dataset.theme = settings.theme === "dark" || (settings.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
         if (scene.startsWith("operation-flow") && !repo) {
@@ -187,9 +192,15 @@
       } catch (cause) { error = String(cause); ready = true; }
     };
     void boot();
+    const refreshAutoClose = () => {
+      void invoke<Settings>("load_settings").then((settings) => {
+        if (!disposed) autoClose = settings.flowAutoClose === true;
+      }).catch((cause) => { if (!disposed) error = String(cause); });
+    };
+    window.addEventListener("focus", refreshAutoClose);
     const poll = setInterval(() => { if (!document.hidden) void refresh(); }, 1000);
     const historyPoll = setInterval(() => { if (!document.hidden) void loadHistory(); }, 10_000);
-    return () => { disposed = true; generation++; clearInterval(poll); clearInterval(historyPoll); cancelAnimationFrame(scrollFrame); unlisten.forEach((off) => off()); };
+    return () => { disposed = true; generation++; clearInterval(poll); clearInterval(historyPoll); cancelAnimationFrame(scrollFrame); window.removeEventListener("focus", refreshAutoClose); unlisten.forEach((off) => off()); };
   });
 </script>
 
@@ -270,5 +281,5 @@
       </div>
     </div>
   </section>
-  <footer class="flow-footer" aria-live="polite"><span>{live && !retainOpen && summary?.canAutoClose ? tr("closing") : !live || retainOpen ? tr("retained") : tr("note")}</span>{#if summary?.pendingStash}<span title={summary.pendingStash}>{tr("pending")} <code>{short(summary.pendingStash)}</code></span>{/if}</footer>
+  <footer class="flow-footer" aria-live="polite"><span>{shouldAutoClose ? tr("closing") : !live || retainOpen ? tr("retained") : summary?.canAutoClose ? tr("staysOpen") : tr("note")}</span>{#if summary?.pendingStash}<span title={summary.pendingStash}>{tr("pending")} <code>{short(summary.pendingStash)}</code></span>{/if}</footer>
 </main>

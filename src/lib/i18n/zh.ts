@@ -3,6 +3,7 @@ import type { Messages } from "./types";
 export const zh: Messages = {
   flow: {
     observer: "只读观察", observerHint: "在主窗口处理冲突 · 此处按顺序展示完整流程", autoOpen: "操作遇到待解决冲突时自动打开流程窗口",
+    autoClose: "解决所有冲突后自动关闭流程窗口", staysOpen: "流程已完成，窗口保持打开",
     overview: "完整流水线", pipelineHint: "从左到右依次执行 · 点击阶段查看步骤", progress: "已完成 {done} / {total} 步", executionDetails: "执行命令与记录",
     "phase-saved": "保存本地修改", "phase-fetch": "获取远程提交", "phase-integration": "整合提交", "phase-restore": "恢复本地修改", "phase-finished": "结束",
     "fetch-inferred": "已进入提交整合阶段；未记录单独的获取命令。",
@@ -230,7 +231,7 @@ export const zh: Messages = {
     unmergedOne: "工作区有 1 个未合并的文件。",
     unmergedMany: "工作区有 {count} 个未合并的文件。",
     mergeConflict: "合并冲突",
-    mergeConflictHint: "左侧是 {theirs} 的版本，右侧是 {ours} 的版本。勾选要保留的一侧，两侧都勾选会拼接；也可以直接用合并工具。",
+    mergeConflictHint: "勾选要保留的版本；两侧都选可合并，也可以使用合并工具。",
     conflictSelected: "已选中 {count} 个冲突文件，只勾一侧会应用到全部选中项。",
     mergeAction: "合并",
     mergeBoth: "保留两边并合并",
