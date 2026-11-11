@@ -23,6 +23,20 @@ export function flowFixture(scene: string): FlowSnapshot {
     node("restore", "local-restore", "planned", { source: saved, stash: saved.id, detail: "restore-after-integration" }),
     node("later", "replay", "conditional", { source: commit("77", "feat: remember recent workspace"), detail: "preview-conditional" }),
   ];
+  const details = scene === "operation-flow-details";
+  if (details) nodes[0].detail = [
+    "From https://github.com/example/workspace",
+    " * branch            main       -> FETCH_HEAD",
+    ...Array.from({ length: 12 }, (_, index) => `Auto-merging src/section-${index + 1}.ts`),
+    "error: could not apply 63eee33... chore: test1",
+    'hint: Resolve all conflicts manually, mark them as resolved with',
+    'hint: "git add/rm <conflicted_files>", then run "git rebase --continue".',
+    'hint: You can instead skip this commit: run "git rebase --skip".',
+    'hint: To abort and get back to the state before "git rebase",',
+    'hint: run "git rebase --abort".',
+    'hint: Disable this message with "git config set advice.mergeConflict false"',
+    "Could not apply 63eee33... # chore: test1",
+  ].join("\n");
   if (scene === "operation-flow-long") {
     const completed = Array.from({ length: 1200 }, (_, index) => node(`step-${index}`, "replay", "completed", { source: commit(String(index.toString(16)), `feat: workspace change ${index + 1}`), createdAt: at + index }));
     nodes.splice(3, 0, ...completed);
@@ -35,7 +49,7 @@ export function flowFixture(scene: string): FlowSnapshot {
   }
   return { summary: {
     id: "1700000000000-1-1", repo: "D:/Projects/workspace", kind: "pull", state: history ? "completed" : "conflict", sequence: 20,
-    startedAt: at, endedAt: history ? Date.now() : null, activeStep: history ? "finished" : "second", canAutoClose: history,
+    startedAt: at, endedAt: history ? Date.now() : null, activeStep: history ? "finished" : details ? "pull" : scene === "operation-flow-stash" ? "saved" : "second", canAutoClose: history,
     branch: "feat/workspace", before, after: remote, progress: history ? null : "rebase", pendingStash: history ? "" : saved.id, recordingError: "", previous: "",
   }, nodes };
 }

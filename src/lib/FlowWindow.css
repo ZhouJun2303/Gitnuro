@@ -15,19 +15,39 @@
 .flow-meta > span:last-child { white-space: nowrap; }
 .flow-meta > span > span { margin: 0 10px; }
 .flow-graph-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.flow-legend { display: flex; align-items: center; gap: 22px; padding: 14px 32px; font-size: 11px; }
-.flow-follow { margin-left: auto; color: var(--text-secondary); }
+.flow-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 22px; padding: 14px 32px; font-size: 11px; }
+.flow-legend-key { display: inline-flex; align-items: center; gap: 6px; }
+.flow-legend-key::before { content: ""; width: 12px; height: 12px; box-sizing: border-box; border: 1px solid currentColor; border-radius: 3px; background: color-mix(in srgb, currentColor 12%, var(--elevated)); }
+.flow-legend-key[data-state="completed"] { opacity: .78; }
+.flow-legend-key[data-state="current"] { color: var(--accent); }
+.flow-legend-key[data-state="stash"] { color: var(--ref-stash); }
+.flow-legend-key[data-state="planned"] { opacity: .55; }
+.flow-legend-key[data-state="planned"]::before { border-style: dashed; background: var(--field); }
+.flow-follow { margin-left: auto; color: var(--text); font-weight: 550; }
 .flow-lanes { display: grid; grid-template-columns: 1fr 120px 1fr; padding: 0 48px 12px; max-width: 1240px; width: 100%; align-self: center; box-sizing: border-box; color: var(--text-secondary); font-size: 11px; border-bottom: 1px solid var(--line); }
 .flow-lanes span:nth-child(2) { text-align: center; }
 .flow-lanes span:last-child { text-align: right; }
 .flow-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .flow-track { position: relative; width: calc(100% - 96px); max-width: 1144px; margin: 0 auto; }
-.flow-row { position: absolute; left: 0; right: 0; contain: layout style; --flow-color: var(--text-secondary); }
-.flow-roads { position: absolute; top: 0; left: 0; width: 100%; height: 344px; fill: none; pointer-events: none; }
-.flow-axis { stroke: var(--line); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.flow-row { position: absolute; left: 0; right: 0; contain: layout style; --flow-color: var(--text-secondary); --flow-surface: var(--elevated); }
+.flow-row.past { opacity: .78; }
+.flow-row[data-state="completed"], .flow-row[data-state="processed"] { opacity: .78; --flow-surface: color-mix(in srgb, var(--added) 6%, var(--elevated)); }
+.flow-row[data-state="skipped"], .flow-row[data-state="aborted"], .flow-row[data-state="superseded"] { opacity: .7; }
+.flow-row[data-state="planned"], .flow-row[data-state="predicted"], .flow-row[data-state="conditional"] { opacity: .55; --flow-surface: var(--field); }
+.flow-row:has(.flow-evidence[open]) { opacity: 1; }
+.flow-row.active { opacity: 1; --flow-surface: color-mix(in srgb, var(--flow-color) 10%, var(--elevated)); }
+.flow-row.active::before { content: ""; position: absolute; inset: 4px -16px 8px; border: 1px solid color-mix(in srgb, var(--flow-color) 35%, var(--line)); border-left: 4px solid var(--flow-color); border-radius: 14px; background: color-mix(in srgb, var(--flow-color) 6%, var(--canvas)); }
+.flow-row.active .flow-side, .flow-row.active .flow-node { border-color: color-mix(in srgb, var(--flow-color) 55%, var(--line)); }
+.flow-roads { position: absolute; top: 0; left: 0; width: 100%; height: 100%; fill: none; pointer-events: none; }
+.flow-axis { stroke: var(--flow-color); stroke-width: 2.5; vector-effect: non-scaling-stroke; opacity: .45; }
 .flow-road { stroke: var(--flow-color); stroke-width: 2.5; vector-effect: non-scaling-stroke; opacity: .65; }
 .flow-direction { stroke: var(--flow-color); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-.flow-side { position: absolute; top: 16px; height: 126px; width: calc(50% - 60px); box-sizing: border-box; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--elevated); box-shadow: 0 2px 6px rgb(0 0 0 / 2%); overflow: hidden; }
+.flow-stash-road { stroke: var(--ref-stash); stroke-width: 3; vector-effect: non-scaling-stroke; }
+.flow-stash-direction { stroke: var(--ref-stash); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.flow-stash-road.predicted, .flow-stash-direction.predicted { stroke-dasharray: 6 7; opacity: .6; }
+.flow-stash-label { position: absolute; top: 168px; right: 0; writing-mode: vertical-rl; font-size: 10px; letter-spacing: 2px; color: var(--ref-stash); background: var(--canvas); padding: 6px 2px; border-radius: 4px; }
+.flow-row.has-stash .flow-right { right: 36px; width: calc(50% - 96px); }
+.flow-side { position: absolute; top: 16px; height: 126px; width: calc(50% - 60px); box-sizing: border-box; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--flow-surface); box-shadow: 0 2px 6px rgb(0 0 0 / 2%); overflow: hidden; }
 .flow-left { left: 0; border-top: 2px solid color-mix(in srgb, var(--accent) 55%, var(--line)); }
 .flow-right { right: 0; border-top: 2px solid color-mix(in srgb, var(--modified) 55%, var(--line)); }
 .flow-caption { color: var(--text-secondary); font-size: 10px; }
@@ -40,9 +60,12 @@
 .flow-side code { color: var(--text); }
 .flow-command { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: auto; }
 .flow-junction { position: absolute; top: 178px; left: 50%; transform: translateX(-50%); width: 32px; height: 32px; display: flex; justify-content: center; align-items: center; box-sizing: border-box; border: 2px solid var(--flow-color); border-radius: 50%; color: var(--flow-color); background: var(--elevated); font-size: 14px; font-weight: 650; z-index: 1; }
-.flow-node { position: absolute; top: 224px; left: 50%; transform: translateX(-50%); width: min(760px, calc(100% - 100px)); max-height: 100px; box-sizing: border-box; border: 1px solid var(--line); background: var(--elevated); border-radius: 8px; padding: 11px 16px; overflow: auto; scrollbar-width: thin; }
+.flow-node { position: absolute; top: 224px; left: 50%; transform: translateX(-50%); width: min(760px, calc(100% - 100px)); max-height: 100px; box-sizing: border-box; border: 1px solid var(--line); background: var(--flow-surface); border-radius: 8px; padding: 11px 16px; overflow: auto; scrollbar-width: thin; }
+.flow-node.expanded { max-height: 360px; }
 .flow-node.active { border-color: var(--flow-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--flow-color) 9%, transparent); }
 .flow-node-heading { display: flex; gap: 10px; align-items: center; }
+.flow-step-number { color: var(--text-secondary); font: 10px var(--mono); white-space: nowrap; }
+.flow-current { color: var(--flow-color); background: color-mix(in srgb, var(--flow-color) 14%, var(--elevated)); border-radius: 5px; padding: 4px 7px; font-size: 10px; font-weight: 650; white-space: nowrap; }
 .flow-node h2 { margin: 0; font-size: 12px; font-weight: 650; }
 .flow-node-heading time { margin-left: auto; color: var(--text-secondary); font-size: 10px; white-space: nowrap; }
 .flow-badge { font-size: 10px; color: var(--text-secondary); background: var(--field); border-radius: 5px; padding: 4px 7px; white-space: nowrap; }
@@ -61,7 +84,8 @@
 .flow-row[data-state="running"] { --flow-color: var(--accent); }
 .flow-row[data-state="conflict"], .flow-row[data-state="waiting"], .flow-row[data-state="paused"] { --flow-color: var(--modified); }
 .flow-row[data-state="failed"], .flow-row[data-state="interrupted"] { --flow-color: var(--deleted); }
-.flow-row[data-state="planned"] .flow-road, .flow-row[data-state="predicted"] .flow-road, .flow-row[data-state="conditional"] .flow-road { stroke-dasharray: 6 7; opacity: .4; }
+.flow-row[data-state="planned"] .flow-road, .flow-row[data-state="predicted"] .flow-road, .flow-row[data-state="conditional"] .flow-road,
+.flow-row[data-state="planned"] .flow-axis, .flow-row[data-state="predicted"] .flow-axis, .flow-row[data-state="conditional"] .flow-axis { stroke-dasharray: 6 7; opacity: .4; }
 .flow-row[data-state="planned"] .flow-side, .flow-row[data-state="predicted"] .flow-side, .flow-row[data-state="conditional"] .flow-side,
 .flow-row[data-state="planned"] .flow-node, .flow-row[data-state="predicted"] .flow-node, .flow-row[data-state="conditional"] .flow-node { border-style: dashed; }
 .flow-row[data-state="running"] .flow-road { stroke-dasharray: 9 7; animation: flow-traffic 1s linear infinite; }
@@ -76,5 +100,6 @@
 @keyframes flow-traffic { to { stroke-dashoffset: -32; } }
 @keyframes flow-pulse { 50% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--flow-color) 10%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .flow-road, .flow-junction { animation: none !important; } }
-@media (max-width: 1000px) { .flow-header { gap: 12px; } .flow-heading-line { gap: 8px; } .flow-heading h1 { font-size: 17px; } .flow-history { max-width: 220px; } .flow-follow { display: none; } }
+@media (max-width: 1000px) { .flow-header { gap: 12px; } .flow-heading-line { gap: 8px; } .flow-heading h1 { font-size: 17px; } .flow-history { max-width: 220px; } .flow-follow { flex-basis: 100%; margin-left: 0; } }
 @media (max-width: 700px) { .flow-header { flex-wrap: wrap; padding: 16px; } .flow-heading { flex-basis: 100%; } .flow-history { flex: 1; max-width: none; } .flow-meta, .flow-footer { padding-left: 16px; padding-right: 16px; } .flow-meta { flex-direction: column; gap: 6px; } .flow-legend { gap: 12px; padding: 12px 16px; flex-wrap: wrap; } .flow-lanes { padding-left: 16px; padding-right: 16px; grid-template-columns: 1fr 70px 1fr; font-size: 10px; } .flow-track { width: calc(100% - 32px); } .flow-side { width: calc(50% - 24px); padding: 12px; gap: 8px; } .flow-side > strong { font-size: 11px; } .flow-side-foot > :last-child { display: none; } .flow-node { width: calc(100% - 20px); padding: 10px; } .flow-node-heading { gap: 6px; flex-wrap: wrap; } .flow-node-heading time { font-size: 9px; } .flow-footer { flex-direction: column; gap: 4px; } }
+@media (max-width: 700px) { .flow-row.has-stash .flow-right { width: calc(50% - 60px); } .flow-row.has-stash .flow-node { left: calc(50% - 16px); width: calc(100% - 68px); } .flow-row.active::before { left: -8px; right: -8px; } }

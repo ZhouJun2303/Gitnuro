@@ -15,6 +15,27 @@ test("observer joins left and right commits onto the timeline without action but
   const active = page.locator(".flow-row.active");
   await expect(active.locator(".flow-node h2")).toHaveText("第 2 轮冲突");
   await expect(active.locator(".flow-node")).toBeInViewport();
+  await expect(active).toHaveAttribute("aria-current", "step");
+  await expect(active.locator(".flow-current")).toHaveText("当前步骤");
+  await expect(active.locator(".flow-step-number")).toHaveText("6 / 8");
+  await expect(page.locator(".flow-follow")).toHaveText("当前步骤 · 6 / 8 · 第 2 轮冲突");
+  const treatment = await page.locator(".flow-track").evaluate((track) => {
+    const style = (selector: string) => getComputedStyle(track.querySelector(selector)!);
+    return {
+      current: Number(style(".flow-row.active").opacity),
+      completed: Number(style('[data-node="clean"]').opacity),
+      future: Number(style('[data-node="restore"]').opacity),
+      currentSurface: style(".flow-row.active .flow-node").backgroundColor,
+      completedSurface: style('[data-node="clean"] .flow-node').backgroundColor,
+      futureSurface: style('[data-node="restore"] .flow-node').backgroundColor,
+      currentBorder: getComputedStyle(track.querySelector(".flow-row.active")!, "::before").borderLeftWidth,
+    };
+  });
+  expect(treatment.current).toBe(1);
+  expect(treatment.completed).toBeLessThan(treatment.current);
+  expect(treatment.future).toBeLessThan(treatment.completed);
+  expect(treatment.currentBorder).toBe("4px");
+  expect(new Set([treatment.currentSurface, treatment.completedSurface, treatment.futureSurface]).size).toBe(3);
   await expect(active.locator(".flow-left")).toContainText("test: cover workspace navigation");
   await expect(active.locator(".flow-right")).toContainText("refactor: reorganize navigation");
   await expect(page.locator(".flow-observer")).toHaveText("只读观察");
@@ -36,6 +57,70 @@ test("observer joins left and right commits onto the timeline without action but
   await expect(prior).toContainText("已解决并暂存");
   expect(commands.every((command) => ["load_settings", "log_client"].includes(command))).toBe(true);
   await expect(page.locator(".flow-window")).not.toHaveAttribute("data-closed", "true");
+});
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 640, height: 800 }]) {
+  test(`expanded step logs grow without overlapping following steps (${viewport.width}px)`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/?scene=operation-flow-details&view=flow&file=live");
+    const row = page.locator('[data-node="pull"]');
+    const node = row.locator(".flow-node");
+    const next = page.locator('[data-node="saved"]');
+    await expect(node).toBeInViewport();
+    const collapsed = await node.evaluate((element) => element.clientHeight);
+    const originalNextTop = await next.evaluate((element) => element.offsetTop);
+    await row.locator("summary").click();
+    await expect(row.locator("details")).toHaveAttribute("open", "");
+    await expect.poll(() => node.evaluate((element) => element.clientHeight)).toBeGreaterThan(300);
+    expect(await node.evaluate((element) => element.clientHeight)).toBeGreaterThan(collapsed);
+    expect(await next.evaluate((element) => element.offsetTop)).toBeGreaterThan(originalNextTop);
+    const gap = await page.locator(".flow-track").evaluate((track) => {
+      const bottom = track.querySelector('[data-node="pull"] .flow-node')!.getBoundingClientRect().bottom;
+      return track.querySelector('[data-node="saved"]')!.getBoundingClientRect().top - bottom;
+    });
+    expect(gap).toBeGreaterThanOrEqual(20);
+    await expect(node).toContainText("Could not apply 63eee33... # chore: test1");
+    await page.screenshot({ path: `.lab/operation-flow-details-${viewport.width}.png` });
+    await node.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    expect(await node.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+
+    const scroll = page.locator(".flow-scroll");
+    await scroll.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    await expect(row).toHaveCount(0);
+    await scroll.evaluate((element) => { element.scrollTop = 0; });
+    await expect(row.locator("details")).toHaveAttribute("open", "");
+    await expect.poll(() => node.evaluate((element) => element.clientHeight)).toBeGreaterThan(300);
+    await row.locator("summary").click();
+    await expect(row.locator("details")).not.toHaveAttribute("open", "");
+    await expect.poll(() => next.evaluate((element) => element.offsetTop)).toBe(originalNextTop);
+    expect(await node.evaluate((element) => element.clientHeight)).toBeLessThanOrEqual(100);
+    await expect(page.locator(".flow-follow")).toBeVisible();
+  });
+}
+
+test("saved local changes branch out, stay in their lane and merge back only on restore", async ({ page }) => {
+  await page.goto("/?scene=operation-flow-stash&view=flow&file=live");
+  const saved = page.locator('[data-node="saved"]');
+  await expect(saved).toHaveAttribute("data-stash-route", "out");
+  await expect(saved.locator(".flow-stash-label")).toHaveText("分出 · 保存本地修改");
+  await expect(saved.locator(".flow-road-right")).toHaveCount(0);
+  expect(await page.locator('[data-node="pull"]').evaluate((element) => Number(getComputedStyle(element).opacity))).toBeLessThan(1);
+  const stash = await saved.getAttribute("data-stash");
+  await expect(page.locator('[data-node="fetch"]')).toHaveAttribute("data-stash", stash!);
+  await expect(page.locator('[data-node="fetch"]')).toHaveAttribute("data-stash-route", "held");
+  await page.screenshot({ path: ".lab/operation-flow-stash-save.png" });
+  await page.locator(".flow-scroll").evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  const restore = page.locator('[data-node="restore"]');
+  await expect(restore).toHaveAttribute("data-stash-route", "in");
+  await expect(restore).toHaveAttribute("data-stash", stash!);
+  await expect(restore.locator(".flow-stash-road")).toHaveClass(/predicted/);
+  await expect(restore.locator(".flow-stash-label")).toHaveText("汇入 · 恢复本地修改");
+  await page.screenshot({ path: ".lab/operation-flow-stash-restore.png" });
+
+  await page.goto("/?scene=operation-flow-history&view=flow&file=history");
+  await expect(page.locator('[data-node="restore"]')).toHaveAttribute("data-stash-route", "in");
+  await expect(page.locator('[data-node="restore"] .flow-stash-road')).not.toHaveClass(/predicted/);
+  await expect(page.locator('[data-node="finished"]')).not.toHaveAttribute("data-stash-route");
 });
 
 test("long observation flows render visible rows and manually viewed history stays open", async ({ page }) => {

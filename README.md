@@ -86,7 +86,7 @@ pnpm start
 
 调试程序是 `target\debug\awegit.exe`，它加载 http://127.0.0.1:1420 。单独双击它之前要先有开发服务，否则窗口里无法连接。`pnpm start` 会自己拉起页面服务和窗口。
 
-1420 上已经有页面服务时，再执行 `pnpm start` 会沿用它并打开窗口。这个端口被占用后再另起一个开发服务会失败。
+1420 上已经有页面服务时，`pnpm start` 会沿用并持续监测它；服务停止后自动接管，自己启动的 Vite 意外退出时也会重启。启动、退出原因和 Vite 输出保存在 `.lab/logs/dev-server.log`。
 
 设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令只留在当前进程里，HTTPS 密码交给 Git 的凭据存储。API key、代理密码和各平台 token 放在系统凭据库（Windows 凭据管理器、macOS 钥匙串），配置文件里这些字段是空的。
 
