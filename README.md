@@ -2,242 +2,150 @@
 
 AweGit 是 Windows 和 macOS 上的 Git 客户端。界面用 Tauri 2 和 SvelteKit，后端是 Rust。状态用 gitoxide 读取，差异文本、历史和写操作走本机的 `git`。
 
-命令都在仓库根目录执行。下面的 `pnpm` 脚本定义在 `package.json`。
+**[中文](#中文) · [English](#english)**
 
-## 分支与协作
+| 历史视图 | 操作与冲突流程 |
+| --- | --- |
+| ![历史视图](docs/screenshots/history.png) | ![操作与冲突流程](docs/screenshots/flow.png) |
 
-- `feat/dev`：日常开发分支，功能和修复都提交到这里
-- `release`：发布分支，只接收从 `feat/dev` 合并过来的发布提交，`latest.json` 也放在这个分支
-- `main`、`rewrite/tauri`：历史分支，不再用于新开发
+---
 
-`release` 受 GitHub 规则集 “Protect Release branch” 保护：不能删除、不能强制推送，改动必须走 Pull Request，只有仓库所有者 `ZhouJun2303` 可以直接绕过规则。
+## 中文
 
-发布在 `feat/dev` 上运行 `publish.bat`。脚本提交版本号，切到 `release` 合并，打包上传，最后回到 `feat/dev`。
+### 功能
 
-协作者这样提交：
+- **工作区与标签页**：给源码目录起别名（工作 / 个人），克隆和打开都从那一层开始。每个工作区记住自己的仓库、打开的标签和当前标签；标签可以改名、上色、竖排，关闭后能重新打开，标题栏可以显示工作区名。
+- **本地试验隔离**：仓库根目录的 `.fakeignore` 用 `.gitignore` 语法，把本地测试文件从变更列表里藏起来，不改 Git 自己的忽略规则。全部暂存和提交前会把匹配的已暂存文件移出，不会误提交；冲突文件始终显示。
+- **变更与提交**：分栏差异、语法高亮、行内改动标记、空白显示或忽略、上下文行数、自动换行；按块暂存、丢弃或复制。提交主题强制写成 `type: 描述`，支持 AI 生成简单或详细说明、提交并推送、修订、署名、签名和跳过钩子。
+- **历史与差异**：当前分支或所有分支的提交图，领先 / 落后、远程缺失和未推送都有标记；按说明或内容搜索提交；文件历史、追溯、引用日志、任意版本的文件内容；提交统计和 mailmap；图片差异支持并排、滑动、洋葱皮和像素差分。侧栏标签按时间倒序，目录分组按组内最新标签排列。
+- **合并与冲突**：左右两侧是对方和自己的版本，只勾一侧就保留那一侧，两侧都勾按顺序合并；多个冲突文件可以批量保留同一侧。可以交给外部合并工具或在单独窗口修改；合并对话框写好来源分支、说明和文件列表；工作区不干净时先自动贮藏；有未选择的冲突时不能完成解决。
+- **操作与冲突流程**：操作因待解决冲突停下时，自动打开只读的流程窗口，沿时间轴展示保存本地修改、获取、整合、恢复和结束各阶段的提交、文件、命令与时间。日志保存在仓库的 Git 目录里，支持中断恢复、重复冲突关联和后续步骤预测；自动打开和解决后自动关闭都能在偏好设置里关掉。
+- **远程与托管**：获取、拉取、推送会记住修剪、标签、变基这些选项；推送默认带 `--force-with-lease`；可以提交后立即推送，建标签时一起推。GitHub、GitLab、Bitbucket 和 Azure 账户、通知与拉取请求都在窗口内；支持令牌或设备码登录、HTTP / SOCKS 代理、证书和 SSL 校验。
+- **仓库工具**：后台克隆、新建仓库、Git Flow、交互变基、拣选、还原、压缩、软 / 混合 / 硬重置、二分查找；贮藏可以只收选中文件或从贮藏建分支；子模块、工作树、LFS 锁定、批量删除已合并分支；自定义命令可以给所有仓库或只给当前仓库，需要时再提问；SSH 配置、终端和文件管理器都能从仓库菜单打开。
+- **窗口与体验**：历史、文件内容和合并可以单独开窗口；快速启动搜索命令和文件；命令记录分开用户操作、后台、错误和通知；文件被占用时点名程序与 PID 并给出解除步骤；更新可以下载安装包并静默安装；Fork 设置可以导入。偏好设置共 11 个页签，语言支持中文、英文或跟随系统，主题支持浅色、深色或跟随系统。
 
-1. 从 `feat/dev` 拉出自己的分支，建议命名 `feat/<主题>` 或 `fix/<主题>`
-2. 在自己的分支上提交并推送到 `origin`
-3. 向 `feat/dev` 开 Pull Request。仓库默认分支是 `release`，开 PR 时要把 base 手动改成 `feat/dev`
-4. 不直接向 `release` 提交或开 PR；发布提交和 `latest.json` 只由发布脚本更新
+### 下载与安装
 
-## 提交说明
+安装包发布在 [GitHub Releases](https://github.com/ZhouJun2303/Gitnuro/releases)。版本清单是 `release` 分支根目录的 `latest.json`。
 
-提交框左侧是类型选择器，主题必须写成 `type: 描述`，可用类型：
+- **Windows**：NSIS 的 `AweGit_<版本>_x64-setup.exe` 和 MSI。安装包自带 MinGit 2.56.0，日常操作不需要另装 Git。当前版本是 2.0.7，安装包文件名是 `AweGit_2.0.7_x64-setup.exe` 和 `AweGit_2.0.7_x64_en-US.msi`。
+- **macOS**：磁盘镜像在 `target/release/bundle` 或 Releases。使用系统 Git，不打包 MinGit；没有 Developer ID 签名时安装包未签名、未公证，需要在系统设置中允许打开。
 
-`feat`、`fix`、`docs`、`art`、`style`、`refactor`、`test`、`chore`、`perf`、`revert`
+设置保存在 Windows 的 `%APPDATA%\AweGit\settings.json`、macOS 的 `~/Library/Application Support/AweGit/settings.json`。API key、代理密码和各平台 token 放在系统凭据库，配置文件里这些字段是空的。
 
-在主题里直接输入 `fix: 修复登录` 时，`fix` 会自动移到左侧选择器，输入框里只留下描述；重复写 `feat: feat: 新增` 也只会保留一个类型。冒号后的空格可省，中文冒号也认。类型不符时提交按钮不可用（勾选跳过钩子时除外）。
+### 快速开始
 
-类型列表是固定的，没有“自定义类型”设置；要加类型得同时改 `src/lib/shell/commitMessage.ts`、`crates/git/src/change.rs` 和 `src-tauri/src/ai.rs`。
-
-## `.fakeignore`
-
-工作区根目录放一个 `.fakeignore`，用 `.gitignore` 语法，把本地测试改动从变更列表里藏起来：
-
-```gitignore
-# 本地试验
-notes/
-*.local.json
-```
-
-它不改 `.gitignore`，也不改 Git 的忽略规则。默认启用；变更页的视图菜单里可以关闭，右键文件可以“加入到 fake 忽略文件”。“全部暂存”和提交前，AweGit 会把匹配的已暂存文件移出暂存区，所以不会误提交。冲突文件始终显示。
-
-## 准备
-
-每个新终端先装好依赖。`pnpm start`、`pnpm test`、`pnpm tauri` 和 `pnpm package:windows` 会自己把 WinLibs 和 `%USERPROFILE%\.cargo\bin` 排到 PATH 前面。`pnpm check` 不编译 Rust。
+需要 Node.js、pnpm 和 Rust 工具链。Windows 的 PATH、WinLibs 和工具链细节见 [开发与发布](docs/development.md)。
 
 ```powershell
 pnpm install
-```
-
-直接在终端里跑 `cargo` 时，这个会话还要自己补 PATH：
-
-```powershell
-$env:PATH = "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\mingw64\bin;$env:USERPROFILE\.cargo\bin;" + $env:PATH
-```
-
-Windows 工具链是 `nightly-x86_64-pc-windows-gnu`。WinLibs 的 `mingw64\bin` 里要有 `as.exe` 和能完成链接的 `gcc`。不要改 rustup 的全局默认工具链，也不要在仓库根目录放 `rust-toolchain.toml`。
-
-macOS 使用系统 Git 和系统上的 `cargo`，不需要上面的 PATH。
-
-## 快捷命令
-
-| 要做的事 | 命令 | 结果 |
-| --- | --- | --- |
-| 启动桌面程序 | `pnpm start` | 编译 Rust（仅第一次或改过后），并打开窗口 |
-| 类型检查 | `pnpm check` | Svelte 和 TypeScript，不跑 Git |
-| Rust 测试 | `pnpm test` | `awegit-git` 和 `awegit` 的单元测试，使用临时仓库 |
-| 打 Windows 安装包 | `pnpm package:windows` | `target\release\bundle` 下的 exe 和 msi |
-| 发布到 GitHub | `publish.bat` | 选择版本号，打包并上传到 Release |
-| 打 macOS 安装包 | `pnpm package:mac` | 只能在 Mac 上运行，产物在 `target/release/bundle` |
-
-`pnpm start` 就是 `pnpm tauri dev`。`pnpm test` 跑 `scripts/test-all.mjs`，依次执行 `cargo test -p awegit-git` 和 `cargo test -p awegit --lib`，都加 `--test-threads=1`。
-
-## 启动桌面程序
-
-```powershell
 pnpm start
 ```
 
-第一次会编译 Tauri，之后改界面走已经打开的 Vite，不必重编 Rust。改了 `src-tauri` 或 `crates/git` 再执行一次 `pnpm start`。
+常用命令：
 
-界面调试用这个窗口自带的检查器。调试版启动时会自动打开。正式包没有检查器。
-
-调试程序是 `target\debug\awegit.exe`，它加载 http://127.0.0.1:1420 。单独双击它之前要先有开发服务，否则窗口里无法连接。`pnpm start` 会自己拉起页面服务和窗口。
-
-1420 上已经有页面服务时，`pnpm start` 会沿用并持续监测它；服务停止后自动接管，自己启动的 Vite 意外退出时也会重启。启动、退出原因和 Vite 输出保存在 `.lab/logs/dev-server.log`。
-
-设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令只留在当前进程里，HTTPS 密码交给 Git 的凭据存储。API key、代理密码和各平台 token 放在系统凭据库（Windows 凭据管理器、macOS 钥匙串），配置文件里这些字段是空的。
-
-重新链接桌面程序前先关掉 `awegit.exe`。它占着 `WebView2Loader.dll` 时，`cargo build -p awegit` 会失败。Vite 可以留着。
-
-## 测试
-
-```powershell
-pnpm check
-pnpm test
-```
-
-`pnpm check` 查界面类型。`pnpm test` 跑状态、差异、提交、变基、贮藏这些 Git 行为，以及设置、更新和凭据这些桌面单元测试。仓库都建在临时目录里。测试不打开窗口，也不要拿当前这个 AweGit 仓库去做暂存或提交实验。
-
-每次验证只运行本次修改相关的测试，UI 不跑全量场景。改动界面时补对应的试验台场景，用测试文件和 `--grep` 选择相关用例：
-
-```powershell
-pnpm test:ui -- e2e/sync-toolbar.spec.ts
-pnpm test:ui -- e2e/operation-flow.spec.ts --grep "observer automatic opening"
-pnpm test:ui -- --reuse e2e/operation-flow.spec.ts --grep "observer automatic closing|observer follows conflicts"
-pnpm test:ui -- --reuse e2e/conflict-pane.spec.ts --grep "conflict pane"
-pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|preferences backdrop|appearance menu"
-pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"
-pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"
-pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "tab context menu copies"
-pnpm test:ui -- --reuse e2e/tag-order.spec.ts --grep "tags"
-pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "file access errors"
-```
-
-`--` 后的参数会传给 Playwright。已有 `.lab` 仓库且本次无需重建时，加 `--reuse` 可复用数据，避免重建整套试验台和清理正在使用的开发日志：`pnpm test:ui -- --reuse e2e/sync-toolbar.spec.ts`。需要恢复的仓库可先单独执行 `node scripts/lab-seed.mjs rebase conflict`。
-
-侧栏标签按时间由近到远排列：附注标签使用标签日期，轻量标签使用提交日期；目录分组按组内最新标签排列，组内保持时间倒序。前端以线性遍历保留后端顺序，不额外按名称排序，滚动沿用虚拟列表。试验台场景：`tag-order`；上方标签用例自动重建专用仓库，也可用 `node scripts/lab-seed.mjs tags` 单独重建。
-
-窗口位置持久化与冲突自动打开的相关 Rust 校验：
-
-```powershell
-pnpm test:app flow_window::tests
-pnpm test:app flows::tests
-pnpm test:app operation_observer_auto_close
-```
-
-只跑一个 Git 测试：
-
-```powershell
-cargo test -p awegit-git squash_replays_commits_after_the_range -- --test-threads=1
-```
-
-## 文件占用提示
-
-Git 无法替换或写入工作区文件时，命令日志会逐个列出文件和原因。Windows 能识别占用程序时显示程序名与 PID，并提示保存工作、关闭文件或退出程序、在任务管理器核对残留进程，再刷新仓库状态并继续或重试操作。无法识别程序时，提示排查占用、只读属性和写权限，避免把所有访问失败都认定为占用。说明适用于各类文件及共用 Git 执行器的操作，原始 Git 错误仍完整保留并可复制。
-
-这类重要提示在日志中使用红色边框、16px 粗体标题和 14px 正文，文件、原因及程序/PID 加粗，窄窗口中自动换行且可以滚动查看解除步骤。从顶部“文件占用 / 访问受限”提示或错误列表打开，都能看到完整说明。试验台场景：`commands-file-access`、`commands-file-access-unknown`。相关验证：`pnpm test:git locks::tests` 和上方的 `file access errors` UI 用例；Windows 程序识别测试需要可访问 Restart Manager 的正常系统权限。
-
-## 操作与冲突流程窗口
-
-“操作与冲突流程”仅在本次操作实际出现待解决冲突时自动打开，包括整合提交和恢复本地修改时的冲突；正常操作、普通失败、预测冲突，以及冲突已解决但尚待继续的状态都不会触发自动打开。重新打开仓库时仍有待解决冲突，会恢复对应流程窗口。偏好设置中的“操作遇到待解决冲突时自动打开流程窗口”可关闭此行为，操作历史仍可从仓库菜单手动查看。相关验证：`pnpm test:app flows::tests` 与 `pnpm test:ui -- --reuse e2e/operation-flow.spec.ts --grep "observer automatic opening"`。
-
-“操作与冲突流程”窗口关闭时保存位置、大小和最大化状态，手动关闭和流程完成后的自动关闭都适用。下次自动弹出或查看历史时恢复，重启应用后也保留；多个仓库共享最后关闭的窗口布局。窗口布局单独存放在设置文件同目录的 `flow-window.json`，原来的显示器断开时会回到可见屏幕。
-
-偏好设置 → 常规中的“解决所有冲突后自动关闭流程窗口”默认不勾选，旧设置文件也默认不自动关闭。启用后，等待所有冲突解决、后续操作与本地修改恢复全部完成，再于 1.5 秒后关闭；等待继续或仍有待恢复贮藏时保持打开，手动查看历史也保持打开。已打开的流程窗口在重新获得焦点时读取最新开关，关闭前再次核对设置。试验台场景：`prefs-flow`、`operation-flow-completed`；相关验证命令见上方的自动关闭用例。
-
-获取、拉取、推送按当前仓库的实际状态启用：前台操作执行中全部禁用；合并、变基等流程未完成或仍有冲突时，获取可用，拉取和推送禁用；处理完成后恢复。工具栏、仓库菜单、右键菜单和快捷键遵循同一规则。单纯查看历史流程不会禁用这些操作。
-
-主窗口的冲突面板会随差异区域宽度调整：窄面板中每个版本与自己的勾选框对齐，较窄时提交号另起一行，操作按钮填满可用宽度并允许换行；高度不足时可滚动访问标题和操作。试验台场景为 `conflict-compact`，相关 UI 用例覆盖 240、300、500 和 760 像素宽度及较低的面板高度。
-
-## 打包
-
-Windows：
-
-```powershell
-pnpm package:windows
-```
-
-脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build`。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。版本号以 `src-tauri/Cargo.toml` 为准，`node scripts/check-versions.mjs` 会核对安装包、清单和关于页。当前版本是 2.0.7：
-
-- `target\release\bundle\nsis\AweGit_2.0.7_x64-setup.exe`
-- `target\release\bundle\msi\AweGit_2.0.7_x64_en-US.msi`
-
-发布到 GitHub 时，在仓库根目录双击或运行 `publish.bat`。第 1 项会把修订号加一（2.0.0 变成 2.0.1），然后打包并上传。也可以选次版本、主版本、指定版本、不改版本，或只打包不上传。
-
-在 `feat/dev` 上发布时，脚本会先提交版本号，再切到 `release` 合并这个分支，打包上传后回到 `feat/dev`。从其他分支发布也走同一条合并路径。工作区要是干净的，并且 `gh` 已经登录。
-
-发布过程中的顺序是：提交 `latest.json`，在这个清单提交上打 `v版本号` 标签并推送，上传安装包，最后推送 `release`。标签和 GitHub release 指向同一个提交；清单最后推送，避免更新检查拿到还没上传完的安装包。
-
-已经在 `release` 分支、并且不想改版本号时，仍可以用 `pnpm publish:windows`。
-
-不要提交 `target\`、`src-tauri\target\`、`node_modules\` 和下载下来的 MinGit。
-
-macOS 上：
-
-```sh
-pnpm package:mac
-```
-
-使用系统 Git，不把 Windows 的 MinGit 打进应用。磁盘镜像在 `target/release/bundle`。
-
-## 窗口快捷键
-
-下面是 Windows 上的按键。macOS 上，除了切换标签的 `Ctrl+Tab` 和 `Ctrl+Shift+Tab`，其余带 Ctrl 的组合改为 Command。方向键仍是上、下。`Escape` 关闭当前对话框。
-
-| 操作 | 按键 |
+| 要做的事 | 命令 |
 | --- | --- |
-| 刷新 | `F5` 或 `Ctrl+R` |
-| 提交 | `Ctrl+Enter` |
-| 提交并推送 | `Ctrl+Shift+Enter` |
-| 暂存或取消暂存 | `Ctrl+Shift+S` |
-| 全部暂存或全部取消暂存 | `Ctrl+Alt+Shift+S` |
-| 丢弃修改 | `Delete`、`Ctrl+Shift+D` 或 `Backspace` |
-| 全选当前列表或差异，再按一次取消 | `Ctrl+A` |
-| 粘贴补丁 | `Ctrl+Shift+V` |
-| 获取 | `Ctrl+Shift+F` 或 `Ctrl+Alt+Shift+F` |
-| 拉取 | `Ctrl+Shift+L` 或 `Ctrl+Alt+Shift+L` |
-| 推送 | `Ctrl+Shift+P` 或 `Ctrl+Alt+Shift+P` |
-| 贮藏 | `Ctrl+Shift+H` |
-| 分支 | `Ctrl+Shift+B` |
-| 标签 | `Ctrl+Alt+T` |
-| 克隆 | `Ctrl+N` |
-| 新建仓库 | `Ctrl+Shift+N` |
-| 打开仓库 | `Ctrl+O` 或 `Ctrl+T` |
-| 关闭标签页 | `Ctrl+W` |
-| 重新打开关闭的标签 | `Ctrl+Shift+T` |
-| 上一个 / 下一个标签 | `Ctrl+Shift+Tab` / `Ctrl+Tab` |
-| 变更 / 历史 | `Ctrl+1` / `Ctrl+2` |
-| 当前分支 / 所有分支 | `Ctrl+Shift+A` |
-| 定位当前分支 | `Ctrl+0` |
-| 快速启动 | `Ctrl+K` |
-| 搜索提交 | `Ctrl+F` |
-| 后退 / 前进 | `Alt+Left` / `Alt+Right` |
-| 设置 | `Ctrl+,` |
-| 切换中英文 | `Ctrl+Alt+L` |
-| 在文件管理器中显示 | `Ctrl+Alt+O` |
-| 放大 / 缩小 | `Ctrl+=` / `Ctrl+-` |
+| 启动桌面程序（等同 `pnpm tauri dev`） | `pnpm start` |
+| 浏览器试验台 | `pnpm dev` |
+| 类型检查 | `pnpm check` |
+| Rust 单元测试 | `pnpm test` |
+| 本次改动相关的 UI 用例 | `pnpm test:ui -- <测试文件> --grep <用例名称>` |
+| 打 Windows 安装包 | `pnpm package:windows` |
+| 打 macOS 安装包 | `pnpm package:mac` |
+| 发布到 GitHub | `publish.bat` |
 
-终端从仓库菜单打开，没有单独的快捷键。
+UI 用例只跑本次修改涉及的场景，不跑全量。新弹窗要记入 `src/lib/lab/scenes.ts`，否则 `pnpm check` 会失败。
 
-语言快捷键在首选项和输入框中也可使用，从当前显示语言切换到另一种语言并保存；也可在“外观”菜单中选择“切换语言”。首选项点击面板外空白处保持打开，通过右上角关闭按钮、“完成”或 `Escape` 关闭。试验台场景：`prefs-language`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|preferences backdrop|appearance menu"`。
+### 分支、提交与发布
 
-首选项左侧按「常规 / 工作流 / 系统」分组导航，共 11 个页签：通用、工作区、差异、提交、AI、Git、集成、命令、网络、账户、高级；每个页签内按功能卡片分区。试验台按页签提供 `prefs-language`、`prefs-workspace`、`prefs-diff`、`prefs-commit`、`prefs-ai`、`prefs-git`、`prefs-integration`、`prefs-commands`、`prefs-network`、`prefs-accounts`、`prefs-advanced`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts`。
+- `feat/dev`：日常开发分支，功能和修复都提交到这里。
+- `release`：发布分支，只放发布提交和 `latest.json`，受 GitHub 规则集保护，只有仓库所有者能直接推送。
+- 协作者从 `feat/dev` 开分支，向 `feat/dev` 提 Pull Request。仓库默认分支是 `release`，base 要手动改成 `feat/dev`。
+- 发布在 `feat/dev` 上运行 `publish.bat`：提交版本号、合并进 `release`、打包上传，再回到 `feat/dev`。
 
-切换语言会立即同步到已打开的独立历史、文件内容、合并和操作流程窗口；也可在独立窗口按相同快捷键切换，其他窗口同步更新。同步只更新语言，保留各窗口正在查看的内容和编辑草稿。验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"`。
+提交主题写成 `type: 描述`，类型有 `feat`、`fix`、`docs`、`art`、`style`、`refactor`、`test`、`chore`、`perf`、`revert`。输入框里写 `fix: 修复登录` 时类型会自动移到左侧选择器，中文冒号也认。
 
-项目标签右键菜单提供“拷贝项目路径”，复制该标签对应仓库的完整路径；未选中的标签和自定义名称的标签同样适用。试验台场景：`tab-copy-path`；验证：`pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "tab context menu copies"`。
+### 更多文档
 
-点击生成提交说明时，若 AI 未启用、接口地址未填写，或后端报告未配置密钥，会打开偏好设置的 AI 页签并滚动、聚焦到对应配置项；已通过环境变量配置密钥时仍可正常生成。试验台场景：`suggest-unconfigured`、`suggest-no-url`、`suggest-disabled`；验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"`。
+- [功能介绍页](docs/index.html)（[在线版](https://zhoujun2303.github.io/Gitnuro/)）：带截图的功能介绍，支持中英文切换。
+- [开发与发布](docs/development.md)：环境准备、测试、试验台、打包、发布流程和完整快捷键表。
+- 快捷键：在功能介绍页的[快捷键](https://zhoujun2303.github.io/Gitnuro/#shortcuts)一节，或开发文档的“窗口快捷键”。
 
-文件夹右键菜单在文件夹内文件全部被选中时，按整个选择范围显示数量，丢弃、删除和贮藏都作用于全部所选文件；只选中文件夹本身时仍只作用于该文件夹。验证：`pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "folder menu counts"`。
-
-## 下载
-
-安装包发布在 [Releases](https://github.com/ZhouJun2303/Gitnuro/releases)。版本清单是 `release` 分支根目录的 `latest.json`。
-
-## 许可证
+### 许可证
 
 AweGit 基于 Gitnuro 修改，以 GNU GPL v3 发布。详见 [NOTICE](NOTICE) 和 [LICENSE](LICENSE)。
+
+---
+
+## English
+
+AweGit is a Git client for Windows and macOS. The interface is built with Tauri 2 and SvelteKit; the backend is Rust. Status is read with gitoxide, while diffs, history, and write operations go through the local `git`.
+
+### Features
+
+- **Workspaces and tabs**: give each source folder an alias such as Work or Personal, and clone or open from that root. A workspace remembers its repositories, open tabs, and selected tab. Tabs can be renamed, colored, laid out vertically, and reopened after closing; the title bar can show the workspace name.
+- **Local experiment isolation**: a `.fakeignore` at the repository root uses `.gitignore` syntax to hide local files from the change lists without changing Git's own ignore rules. Stage-all and commit move matching staged files back out, so they are not committed by accident. Conflicts stay visible.
+- **Changes and commits**: split diffs with syntax highlighting, inline change marks, whitespace display or ignore, context lines, and wrapping. Stage, discard, or copy a hunk. The subject must read `type: description`. AI can generate a short or long message, and the same box supports commit-and-push, amend, sign-off, signing, and skipping hooks.
+- **History and diffs**: a graph for the current branch or every branch, with ahead/behind, missing remote, and unpushed markers. Search commits by message or content. Open file history, blame, reflog, and any revision of a file. Commit stats and mailmap. Image diffs support side by side, swipe, onion skin, and pixel difference. Sidebar tags run newest first, with directory groups sorted by their latest tag.
+- **Merge and conflicts**: theirs and ours sit side by side. Pick one side, or both to combine them in order; a selection of conflict files can take the same side together. Send a file to an external merge tool or a separate window. The merge dialog fills in both branches, the message, and the file list. A dirty work tree is stashed first. Resolve stays unavailable while a conflict is unpicked.
+- **Operation pipeline**: when an operation stops on unresolved conflicts, a read-only pipeline window opens. A timeline shows save-local-edits, fetch, integrate, restore, and finish stages with their commits, files, commands, and timing. The log lives in the repository's Git directory and supports interrupted recovery, repeated-conflict links, and later-step prediction. Auto-open and close-after-resolve can be turned off in preferences.
+- **Remotes and hosting**: fetch, pull, and push remember prune, tag, and rebase options. Push uses `--force-with-lease` by default. A commit can push immediately, and a new tag can go with it. GitHub, GitLab, Bitbucket, and Azure accounts, notifications, and pull requests live in the window. Sign in with a token or a device code; configure HTTP/SOCKS proxies, certificates, and SSL verification.
+- **Repository tools**: background clone, new repository, Git Flow, interactive rebase, cherry-pick, revert, squash, soft/mixed/hard reset, and bisect. Stash selected files or grow a branch from a stash. Submodules, worktrees, LFS locking, and batch deletion of merged branches. Custom commands can be shared or limited to one repository and can ask for a value. SSH config, the terminal, and the file manager open from the repository menu.
+- **Window and experience**: history, file contents, and merge can each open in their own window. Quick launch searches commands and files. The command log separates your actions, background work, errors, and notices. A file held by another program is reported with its process name and PID plus recovery steps. Updates can download and silently install a package. Fork settings can be imported. Preferences have 11 tabs, language follows Chinese, English, or the system, and the theme follows light, dark, or the system.
+
+### Download and install
+
+Packages are published on [GitHub Releases](https://github.com/ZhouJun2303/Gitnuro/releases). The version manifest is `latest.json` at the root of the `release` branch.
+
+- **Windows**: the NSIS `AweGit_<version>_x64-setup.exe` and an MSI. The installer bundles MinGit 2.56.0, so no separate Git installation is needed.
+- **macOS**: the disk image is under `target/release/bundle` or on Releases. macOS uses the system Git and does not bundle MinGit. Without a Developer ID the build is unsigned and not notarized, so macOS asks you to allow it in System Settings.
+
+Settings live at `%APPDATA%\AweGit\settings.json` on Windows and `~/Library/Application Support/AweGit/settings.json` on macOS. API keys, proxy passwords, and per-platform tokens go to the OS credential store, leaving those fields empty in the file.
+
+### Quick start
+
+Node.js, pnpm, and a Rust toolchain are required. Windows PATH, WinLibs, and toolchain details are in [Development and release](docs/development.md) (Chinese).
+
+```powershell
+pnpm install
+pnpm start
+```
+
+Common commands:
+
+| What you want | Command |
+| --- | --- |
+| Start the desktop app (same as `pnpm tauri dev`) | `pnpm start` |
+| Browser lab | `pnpm dev` |
+| Type check | `pnpm check` |
+| Rust unit tests | `pnpm test` |
+| UI tests related to this change | `pnpm test:ui -- <spec file> --grep <test name>` |
+| Build the Windows installers | `pnpm package:windows` |
+| Build the macOS package | `pnpm package:mac` |
+| Publish to GitHub | `publish.bat` |
+
+UI tests run only the scenes touched by the change, never the full set. A new dialog must be added to `src/lib/lab/scenes.ts`, or `pnpm check` fails.
+
+### Branches, commits, and releases
+
+- `feat/dev` is the daily branch for features and fixes.
+- `release` holds release commits and `latest.json`. It is protected, and only the repository owner can push to it directly.
+- Contributors branch from `feat/dev` and open pull requests against `feat/dev`. The repository default branch is `release`, so the base must be changed by hand.
+- Run `publish.bat` on `feat/dev` to commit the version, merge into `release`, build, upload, and return to `feat/dev`.
+
+Subjects read `type: description`, with types `feat`, `fix`, `docs`, `art`, `style`, `refactor`, `test`, `chore`, `perf`, and `revert`. Typing `fix: repair login` moves `fix` into the selector on the left; a full-width colon works too.
+
+### More documentation
+
+- [Feature guide](docs/index.html) ([online](https://zhoujun2303.github.io/Gitnuro/)): screenshots and feature notes, with a Chinese/English switch.
+- [Development and release](docs/development.md): environment, tests, lab, packaging, publishing, and the full shortcut table (Chinese).
+- Shortcuts: the [shortcuts section](https://zhoujun2303.github.io/Gitnuro/#shortcuts) of the feature guide, or "窗口快捷键" in the development doc.
+
+### License
+
+AweGit is based on Gitnuro and released under the GNU GPL v3. See [NOTICE](NOTICE) and [LICENSE](LICENSE).
+
+---
+
+[回到顶部](#awegit) · [Back to top](#awegit)
