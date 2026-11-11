@@ -160,6 +160,12 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.sideQuery = "";
     return;
   }
+  if (id === "tag-order") {
+    shell.collapsedSide = ["branches", "remotes", "stashes", "submodules", "worktrees"];
+    shell.sideQuery = "";
+    if (shell.refs) shell.refs = { ...shell.refs, hiddenRefs: [], expandedGroups: ["tag:release", "tag:archive"] };
+    return;
+  }
   if (id === "vertical-tabs") {
     shell.settings = { ...shell.settings, verticalTabs: true };
     return;

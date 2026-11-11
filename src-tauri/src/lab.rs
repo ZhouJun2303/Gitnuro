@@ -182,6 +182,7 @@ fn layout() -> Result<Value, String> {
         "remote": text(root.join("remote.git")),
         "remotePush": text(root.join("remote-push.git")),
         "full": text(repos.join("full")),
+        "tags": text(repos.join("tags")),
         "conflict": text(repos.join("conflict")),
         "merge": text(repos.join("merge")),
         "rebase": text(repos.join("rebase")),

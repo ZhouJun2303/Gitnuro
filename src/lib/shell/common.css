@@ -416,21 +416,47 @@ textarea {
   }
 
 .ref {
-    height: 16px;
-    padding: 0 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 18px;
+    padding: 0 6px;
+    border: 1px solid transparent;
     border-radius: 4px;
     background: var(--field);
+    color: var(--text-secondary);
     font-size: 11px;
     line-height: 16px;
+    white-space: nowrap;
+    flex: none;
+    vertical-align: middle;
   }
 
-.ref.local { background: var(--ref-local-bg); color: var(--ref-local); }
+.ref-icon {
+    width: 11px;
+    height: 11px;
+    flex: none;
+    stroke-width: 2.2;
+  }
 
-.ref.remote { background: var(--ref-remote-bg); color: var(--ref-remote); }
+.ref-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
-.ref.tag { background: var(--ref-tag-bg); color: var(--ref-tag); }
+.ref.local { border-color: color-mix(in srgb, var(--ref-local) 35%, transparent); background: var(--ref-local-bg); color: var(--ref-local); }
 
-.ref.stash { background: var(--ref-stash-bg); color: var(--ref-stash); }
+.ref.remote { border-color: color-mix(in srgb, var(--ref-remote) 26%, transparent); background: var(--ref-remote-bg); color: var(--ref-remote); }
+
+.ref.tag {
+    border-color: color-mix(in srgb, var(--ref-tag) 38%, transparent);
+    background: var(--ref-tag-bg);
+    color: var(--ref-tag);
+    font-weight: 500;
+  }
+
+.ref.stash { border-color: color-mix(in srgb, var(--ref-stash) 35%, transparent); background: var(--ref-stash-bg); color: var(--ref-stash); }
 
 .name-plate {
     display: inline-flex;
@@ -1010,7 +1036,7 @@ input[type="checkbox"]:disabled,
 
 .avatar.tile { border-radius: 3px; color: white; }
 
-.ref.compact { max-width: 88px; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: bottom; }
+.ref.compact { max-width: 88px; }
 
 .k { color: var(--text-secondary); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
 

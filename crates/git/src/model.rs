@@ -244,7 +244,7 @@ pub fn search_log(
     let (output, _) = with_read(|| run_capped(repo, &args, 16_000_000))?;
     let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
     assign_lanes(&mut commits);
-    mark_remote_state(repo, &mut commits);
+    mark_remote_state(repo, &mut commits, &[]);
     Ok(commits)
 }
 
@@ -344,11 +344,11 @@ fn log_with(
     let (output, _) = with_read(|| run_capped(repo, &args, 16_000_000))?;
     let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
     assign_lanes(&mut commits);
-    with_read(|| mark_remote_state(repo, &mut commits));
+    with_read(|| mark_remote_state(repo, &mut commits, &revs));
     Ok(commits)
 }
 
-fn mark_remote_state(repo: &Path, commits: &mut [CommitRow]) {
+fn mark_remote_state(repo: &Path, commits: &mut [CommitRow], revs: &[&str]) {
     if commits.is_empty() {
         return;
     }
@@ -379,17 +379,17 @@ fn mark_remote_state(repo: &Path, commits: &mut [CommitRow]) {
             }
         }
     }
-    if let Ok(output) = run(
-        repo,
-        &[
-            "rev-list",
-            "--remotes",
-            "--not",
-            "--branches",
-            "HEAD",
-            "--max-count=20000",
-        ],
-    ) {
+    let scope = remote_scope(repo, revs);
+    let mut remote_only_args = vec!["rev-list", "--max-count=20000"];
+    match &scope {
+        Some((remote, local)) => {
+            remote_only_args.extend(remote.iter().map(String::as_str));
+            remote_only_args.push("--not");
+            remote_only_args.extend(local.iter().map(String::as_str));
+        }
+        None => remote_only_args.extend(["--remotes", "--not", "--branches", "HEAD"]),
+    };
+    if let Ok(output) = run(repo, &remote_only_args) {
         let text = String::from_utf8_lossy(&output.stdout);
         let remote_only: std::collections::HashSet<&str> = text
             .lines()
@@ -404,6 +404,31 @@ fn mark_remote_state(repo: &Path, commits: &mut [CommitRow]) {
             }
         }
     }
+}
+
+/// Remote and local refs among the revisions a filtered view walks. `None` when the view is
+/// not scoped to refs (all branches, file history), so the comparison covers the repository.
+fn remote_scope(repo: &Path, revs: &[&str]) -> Option<(Vec<String>, Vec<String>)> {
+    if revs.is_empty() {
+        return None;
+    }
+    let mut args = vec!["rev-parse", "--symbolic-full-name"];
+    args.extend_from_slice(revs);
+    let output = run(repo, &args).ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut remote = Vec::new();
+    let mut local = Vec::new();
+    for (rev, full) in revs.iter().zip(text.lines()) {
+        if full.starts_with("refs/remotes/") {
+            remote.push((*rev).to_string());
+        } else if full.starts_with("refs/heads/") {
+            local.push((*rev).to_string());
+        }
+    }
+    if remote.is_empty() || local.is_empty() {
+        return None;
+    }
+    Some((remote, local))
 }
 
 /// A remote adds a section to `.git/config`; reading that file avoids a `git remote`

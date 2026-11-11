@@ -112,10 +112,13 @@ pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|prefer
 pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"
 pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"
 pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "tab context menu copies"
+pnpm test:ui -- --reuse e2e/tag-order.spec.ts --grep "tags"
 pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "file access errors"
 ```
 
 `--` 后的参数会传给 Playwright。已有 `.lab` 仓库且本次无需重建时，加 `--reuse` 可复用数据，避免重建整套试验台和清理正在使用的开发日志：`pnpm test:ui -- --reuse e2e/sync-toolbar.spec.ts`。需要恢复的仓库可先单独执行 `node scripts/lab-seed.mjs rebase conflict`。
+
+侧栏标签按时间由近到远排列：附注标签使用标签日期，轻量标签使用提交日期；目录分组按组内最新标签排列，组内保持时间倒序。前端以线性遍历保留后端顺序，不额外按名称排序，滚动沿用虚拟列表。试验台场景：`tag-order`；上方标签用例自动重建专用仓库，也可用 `node scripts/lab-seed.mjs tags` 单独重建。
 
 窗口位置持久化与冲突自动打开的相关 Rust 校验：
 
@@ -157,14 +160,16 @@ Windows：
 pnpm package:windows
 ```
 
-脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build`。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。版本号以 `src-tauri/Cargo.toml` 为准，`node scripts/check-versions.mjs` 会核对安装包、清单和关于页。当前版本是 2.0.6：
+脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build`。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。版本号以 `src-tauri/Cargo.toml` 为准，`node scripts/check-versions.mjs` 会核对安装包、清单和关于页。当前版本是 2.0.7：
 
-- `target\release\bundle\nsis\AweGit_2.0.6_x64-setup.exe`
-- `target\release\bundle\msi\AweGit_2.0.6_x64_en-US.msi`
+- `target\release\bundle\nsis\AweGit_2.0.7_x64-setup.exe`
+- `target\release\bundle\msi\AweGit_2.0.7_x64_en-US.msi`
 
 发布到 GitHub 时，在仓库根目录双击或运行 `publish.bat`。第 1 项会把修订号加一（2.0.0 变成 2.0.1），然后打包并上传。也可以选次版本、主版本、指定版本、不改版本，或只打包不上传。
 
 在 `feat/dev` 上发布时，脚本会先提交版本号，再切到 `release` 合并这个分支，打包上传后回到 `feat/dev`。从其他分支发布也走同一条合并路径。工作区要是干净的，并且 `gh` 已经登录。
+
+发布过程中的顺序是：提交 `latest.json`，在这个清单提交上打 `v版本号` 标签并推送，上传安装包，最后推送 `release`。标签和 GitHub release 指向同一个提交；清单最后推送，避免更新检查拿到还没上传完的安装包。
 
 已经在 `release` 分支、并且不想改版本号时，仍可以用 `pnpm publish:windows`。
 

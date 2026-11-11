@@ -837,7 +837,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.6");
+  appVersion = $state("2.0.7");
 
 
   passphrase = $state("");
@@ -2055,8 +2055,18 @@ export class ShellState {
 
   visibleTags = $derived.by(() => {
     const rows = (this.refs?.tags ?? []).filter((tag) => !this.refHidden(tag.name) && this.matchesQuery(tag.name, this.sideQuery));
-    const order = new Map(orderRefNames(rows.map((tag) => tag.name)).map((name, index) => [name, index]));
-    return rows.slice().sort((a, b) => (order.get(a.name) ?? 0) - (order.get(b.name) ?? 0));
+    if (!rows.some((tag) => tag.name.includes("/"))) return rows;
+    // Git returns newest first. Keep that order within folders and place each folder
+    // at its newest tag, in one linear pass instead of sorting names on the UI thread.
+    const groups = new Map<string, typeof rows>();
+    for (const tag of rows) {
+      const group = branchGroup(tag.name);
+      const key = group ? `${group}/` : tag.name;
+      const bucket = groups.get(key);
+      if (bucket) bucket.push(tag);
+      else groups.set(key, [tag]);
+    }
+    return Array.from(groups.values()).flat();
   });
 
 

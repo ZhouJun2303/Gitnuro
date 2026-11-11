@@ -414,7 +414,24 @@ function seedBisectRepo() {
   git(path, ["bisect", "start", "HEAD", "HEAD~2"]);
 }
 
+function seedTagsRepo() {
+  const path = join(repos, "tags");
+  wipe(path);
+  initWork(path);
+  const dated = (day) => ({ extraEnv: { GIT_AUTHOR_DATE: `2024-01-${pad(day)}T12:00:00Z`, GIT_COMMITTER_DATE: `2024-01-${pad(day)}T12:00:00Z` } });
+  for (const [index, name] of ["v2.0.6", "v2.0.10", "v2.0.0"].entries()) {
+    git(path, ["commit", "--allow-empty", "-m", name], dated(index + 1));
+    git(path, ["tag", name]);
+  }
+  // Annotated tags use their own date, even when pointing at an older commit.
+  git(path, ["tag", "-a", "v2.0.1", "HEAD~2", "-m", "latest release"], dated(4));
+  for (const [index, name] of ["archive/v9", "release/v8", "archive/v1", "release/v1"].entries()) {
+    git(path, ["tag", "-a", name, "HEAD", "-m", name], dated(index + 5));
+  }
+}
+
 const restore = {
+  tags: seedTagsRepo,
   operation: seedOperationRepo,
   conflict: seedConflictRepo,
   merge: seedMergeRepo,
@@ -466,6 +483,8 @@ cloneFrom(fileUrl(remote), behind);
 commit(writer, "README.md", "base\nremote moved\n", "remote moved");
 git(writer, ["push", "origin", "HEAD:main"]);
 git(behind, ["fetch", "origin"]);
+// A local branch already holds the fetched tip; the filtered view still fades it.
+git(behind, ["branch", "keep", "origin/main"]);
 
 const origin = fileUrl(remote);
 const full = join(repos, "full");
@@ -615,6 +634,7 @@ seedRebaseRepo();
 seedOperationRepo();
 seedCherryRepo();
 seedRevertRepo();
+seedTagsRepo();
 
 const detached = join(repos, "detached");
 initWork(detached);
