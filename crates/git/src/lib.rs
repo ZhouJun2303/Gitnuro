@@ -6,6 +6,7 @@ mod autostash;
 mod change;
 mod cli;
 mod fakeignore;
+pub mod flow;
 mod locks;
 mod model;
 mod ops;
@@ -38,7 +39,7 @@ pub use model::{
     TagRow, WorktreeRow,
 };
 pub use ops::{
-    approve_credential, cherry_preview, merge_preview, merge_state, merged_branches, perform,
+    approve_credential, cherry_preview, merge_preview, merge_state, merged_branches, perform, perform_stashed,
     pick_history, repo_facts, repo_facts_brief, scan_repositories, search_commits, set_repo_author,
     tracked_directories, HotPath, MergeFile, MergePreview, MergeState, Mutation, RebaseStep,
     RepoFacts, ResetMode, ScanResult, SearchHit, TrackedDirs,

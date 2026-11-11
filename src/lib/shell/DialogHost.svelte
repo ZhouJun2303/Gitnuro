@@ -180,7 +180,7 @@
           else if (shell.dialog === "reword") void shell.mutate({ action: "reword", rev: shell.draftExtra || "HEAD", summary: shell.draft });
           else if (shell.dialog === "rebase" && shell.selectedCommit) void shell.mutate({ action: "rebaseInteractive", onto: shell.selectedCommit, drop: [], steps: buildRebaseSteps(shell.rebaseSteps, shell.rebasePicked), autostash: true, updateRefs: shell.updateRefs });
           else if (shell.dialog === "merge") void shell.mutate({ action: "merge", name: shell.draft, squash: shell.draftExtra === "squash", noFf: shell.draftExtra === "no-ff", autostash: true, summary: shell.mergeSummary, description: shell.mergeBody });
-          else if (shell.dialog === "continue") void shell.mutate({ action: "continue", message: shell.editContinue ? shell.draft : "" }).then(() => shell.settlePendingRetry());
+          else if (shell.dialog === "continue") void shell.mutate({ action: "continue", message: shell.editContinue ? shell.draft : "" });
           else if (shell.dialog === "repo") {
             try {
               await invoke("set_repo_author", { path: shell.repoPath(), name: shell.draft, email: shell.draftExtra });
@@ -539,7 +539,7 @@
           </div>
         {:else if shell.dialog === "rebase"}
           <h2>{shell.tr("dialog.rebase")}</h2>
-          <p class="empty">{shell.rebaseConflictFiles.length === 0 ? shell.tr("dialog.conflictNone") : shell.tr("dialog.conflictSome", { name: shell.rebaseConflictFiles.join(", ") })}</p>
+          <p class="empty">{!shell.rebaseConflictKnown ? shell.tr("flow.preview-unavailable") : shell.rebaseConflictFiles.length === 0 ? shell.tr("dialog.conflictNone") : shell.tr("dialog.conflictSome", { name: shell.rebaseConflictFiles.join(", ") })}</p>
           <p class="empty">{shell.tr("dialog.rebaseInclude")}</p>
           <label class="check"><input type="checkbox" bind:checked={shell.updateRefs} /> {shell.tr("dialog.updateRefs")}</label>
           <div class="dialog-scroll">

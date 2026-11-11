@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::thread::ScopedJoinHandle;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::change::{parse_diff, spec_size, FileDiff};
 use crate::cli::{check_path, check_rev, run, run_capped, run_output, run_stdin_output, with_read};
@@ -141,7 +141,7 @@ pub struct RefSnapshot {
     pub sign_off_format: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum InProgress {
     Merge,
@@ -1539,34 +1539,11 @@ fn parse_count(bytes: &[u8]) -> u32 {
 
 /// Files that would conflict if HEAD were rebased onto `onto`. An empty list means a clean replay.
 pub fn rebase_conflicts(repo: &Path, onto: &str) -> Result<Vec<String>, Error> {
-    let onto = check_rev(onto)?;
-    let output = run_output(
-        repo,
-        &["merge-tree", "--write-tree", "--name-only", "HEAD", onto],
-    )?;
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("unknown option") || stderr.contains("usage:") {
-        return Err(Error::Git(stderr.trim().to_string()));
+    let preview = crate::flow::preview(repo, onto, true, &[])?;
+    if !preview.detail.is_empty() && !(preview.detail == "conditional-after-conflict-or-limit" && preview.steps.iter().any(|step| step.state == "conflict")) {
+        return Err(Error::Git(preview.detail));
     }
-    if output.status.success() {
-        return Ok(Vec::new());
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    Ok(text
-        .lines()
-        .map(str::trim)
-        .filter(|line| {
-            !line.is_empty()
-                && !line.starts_with("CONFLICT")
-                && !line.starts_with("Auto-merging")
-                && !is_object_id(line)
-        })
-        .map(str::to_string)
-        .collect())
-}
-
-fn is_object_id(line: &str) -> bool {
-    line.len() == 40 && line.bytes().all(|byte| byte.is_ascii_hexdigit())
+    Ok(preview.steps.into_iter().flat_map(|step| step.files).collect())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

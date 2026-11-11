@@ -593,7 +593,6 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
         shell.dialog = "mergeConflict";
         shell.actionError = null;
       }
-      await shell.settlePendingRetry();
       if (!restoreConflict && (pushAfter || shell.settings.pushOnCommit)) await shell.doPush();
     }
   }
@@ -1554,14 +1553,15 @@ export function openRebase(shell: ShellState) {
     shell.rebaseSteps = newer.map((commit) => ({ verb: "pick", rev: commit.id, summary: commit.summary, message: commit.summary }));
     shell.rebasePicked = newer.map((commit) => commit.id);
     shell.rebaseConflictFiles = [];
+    shell.rebaseConflictKnown = false;
     shell.dialog = "rebase";
     if (shell.mode === "live") {
       const path = shell.repoPath();
       const onto = shell.selectedCommit;
       const stillEditing = () => shell.dialog === "rebase" && shell.mode === "live" && shell.selectedCommit === onto && shell.viewing(path);
       void invoke<string[]>("rebase_conflicts", { path, onto })
-        .then((files) => { if (stillEditing()) shell.rebaseConflictFiles = files; })
-        .catch(() => { if (stillEditing()) shell.rebaseConflictFiles = []; });
+        .then((files) => { if (stillEditing()) { shell.rebaseConflictFiles = files; shell.rebaseConflictKnown = true; } })
+        .catch(() => { if (stillEditing()) shell.rebaseConflictKnown = false; });
     }
   }
 

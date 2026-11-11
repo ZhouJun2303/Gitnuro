@@ -684,6 +684,7 @@ fn run_prepared_capped(
     allow_failure: bool,
     cap: Option<usize>,
 ) -> Result<(std::process::Output, bool), Error> {
+    let mut flow_command = crate::flow::CommandSpan::start(args);
     let progress = progress_hook();
     let mut command = git_command();
     command.current_dir(repo).env("GIT_TERMINAL_PROMPT", "0");
@@ -739,6 +740,7 @@ fn run_prepared_capped(
     for (key, value) in env {
         command.env(key, value);
     }
+    flow_command.configure(&mut command);
     let started = std::time::Instant::now();
     let owned = operation_path(repo);
     let (mut child, group) =
@@ -804,6 +806,7 @@ fn run_prepared_capped(
         }
     }
     untrack(pid);
+    flow_command.finish(output.status.success(), &output.stderr);
     if truncated {
         let note = failure_note(output.status.success(), true, &output.stderr);
         if let Some(hook) = TRACE.get() {

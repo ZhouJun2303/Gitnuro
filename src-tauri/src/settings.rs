@@ -177,6 +177,12 @@ pub struct Settings {
     /// How many days of operation failures the command log keeps.
     #[serde(default = "error_days")]
     pub error_log_days: u32,
+    /// Completed operation graphs are retained locally for this many days.
+    #[serde(default = "flow_days")]
+    pub flow_history_days: u32,
+    /// Automatically show the read-only operation observer.
+    #[serde(default = "default_true")]
+    pub flow_auto_open: bool,
     #[serde(default = "low_limit")]
     pub message_low: u32,
     #[serde(default = "high_limit")]
@@ -447,6 +453,7 @@ fn support_prefix() -> String {
 fn locale_default() -> String {
     "system".into()
 }
+fn flow_days() -> u32 { 3 }
 fn diff_font() -> u32 {
     13
 }
@@ -567,6 +574,8 @@ impl Default for Settings {
             push_on_commit: false,
             compact_branch_labels: false,
             error_log_days: error_days(),
+            flow_history_days: flow_days(),
+            flow_auto_open: true,
             message_low: low_limit(),
             message_high: high_limit(),
             spell_checking: spell_off(),
@@ -1523,6 +1532,17 @@ mod tests {
     fn missing_commit_type_stays_feat() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings.commit_type, "feat");
+    }
+
+    #[test]
+    fn operation_observer_defaults_on_and_keeps_an_explicit_opt_out() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(settings.flow_auto_open);
+        assert!(Settings::default().flow_auto_open);
+        let settings: Settings = serde_json::from_str(r#"{"flowAutoOpen":false}"#).unwrap();
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["flowAutoOpen"], false);
+        assert!(!serde_json::from_value::<Settings>(saved).unwrap().flow_auto_open);
     }
 
     #[test]

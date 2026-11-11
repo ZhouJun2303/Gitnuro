@@ -1,5 +1,6 @@
 mod ai;
 mod forge;
+mod flows;
 mod http;
 mod lab;
 mod perf;
@@ -244,18 +245,32 @@ fn apply_session() {
 }
 
 fn write_then_status(path: Option<String>, write: impl FnOnce(&Path) -> Result<(), awegit_git::Error>) -> Result<awegit_git::StatusSnapshot, String> {
+    write_kind_then_status(path, "stage", write)
+}
+
+fn write_kind_then_status(path: Option<String>, kind: &str, write: impl FnOnce(&Path) -> Result<(), awegit_git::Error>) -> Result<awegit_git::StatusSnapshot, String> {
     let given = path.clone();
     let repo = repo_from(path)?;
     let _turn = repo_turn(&repo);
     apply_session();
     let report = report_path(given, &repo);
-    awegit_git::with_operation_repo(&report, || write(&repo)).map_err(|error| error.to_string())?;
+    let flow = flows::begin_kind(&repo, kind, None);
+    let action = || awegit_git::with_operation_repo(&report, || {
+        write(&repo)?;
+        awegit_git::flow::restore_pending(&repo)
+    });
+    let result = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
+    if let Some(flow) = flow { flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), kind); }
+    result.map_err(|error| error.to_string())?;
     read_status(&repo)
 }
 
 #[tauri::command]
 fn workspace_status(path: Option<String>) -> Result<awegit_git::StatusSnapshot, String> {
-    read_status(&repo_from(path)?)
+    let repo = repo_from(path)?;
+    let status = read_status(&repo)?;
+    flows::reconcile(&repo);
+    Ok(status)
 }
 
 #[tauri::command]
@@ -318,7 +333,7 @@ fn commit_changes(
         })
         .unwrap_or_default();
     let (result, log) = awegit_git::capture_output(|| {
-        write_then_status(path, |repo| {
+        write_kind_then_status(path, "commit", |repo| {
             if peel {
                 awegit_git::unstage_fakeignored(repo)?;
             }
@@ -426,6 +441,9 @@ struct MutationReport {
     output: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     log: String,
+    outcome: String,
+    error: String,
+    flow: Option<flows::Summary>,
 }
 
 #[derive(serde::Serialize)]
@@ -437,7 +455,7 @@ struct CommitReport {
 }
 
 #[tauri::command]
-fn mutate(path: Option<String>, request: awegit_git::Mutation) -> Result<MutationReport, String> {
+fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Option<bool>) -> Result<MutationReport, String> {
     let given = path.clone();
     let repo = repo_from(path)?;
     let next = match &request {
@@ -449,14 +467,41 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation) -> Result<Mutatio
     let _turn = repo_turn(&next);
     apply_session();
     record_action(&request);
+    let action_name = action_label(&request);
+    let flow = flows::begin(&repo, &request);
     let report = report_path(given, &repo);
-    let (result, log) = awegit_git::capture_output(|| awegit_git::with_operation_repo(&report, || awegit_git::perform(&repo, request)));
-    let output = result.map_err(|error| error.to_string())?;
+    let action = || awegit_git::capture_output(|| awegit_git::with_operation_repo(&report, || {
+        let output = if retry_stash.unwrap_or(false) { awegit_git::perform_stashed(&repo, request)? } else { awegit_git::perform(&repo, request)? };
+        if matches!(action_name, "resolve" | "resolvePaths" | "stagePaths" | "stageHunk" | "stageLine" | "stageLines") {
+            awegit_git::flow::restore_pending(&repo)?;
+        }
+        Ok::<_, awegit_git::Error>(output)
+    }));
+    let (result, log) = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
+    let flow = flow.map(|flow| flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name));
+    let status = read_status(&next)?;
+    let conflicted = status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict);
+    let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
+    let error = result.as_ref().err().map(ToString::to_string).unwrap_or_default();
+    let output = result.unwrap_or_default();
     Ok(MutationReport {
-        status: read_status(&next)?,
+        status,
         output,
         log,
+        outcome,
+        error,
+        flow,
     })
+}
+
+#[tauri::command]
+fn operation_flow(path: Option<String>, id: Option<String>) -> Result<Option<flows::Snapshot>, String> {
+    flows::snapshot(&repo_from(path)?, id)
+}
+
+#[tauri::command]
+fn operation_history(path: Option<String>, offset: Option<usize>, limit: Option<usize>) -> Result<Vec<flows::Summary>, String> {
+    flows::history(&repo_from(path)?, offset.unwrap_or(0), limit.unwrap_or(25))
 }
 
 fn record_action(request: &awegit_git::Mutation) {
@@ -684,8 +729,10 @@ fn load_settings() -> Result<settings::Settings, String> {
 #[tauri::command]
 fn save_settings(mut values: settings::Settings) -> Result<settings::Settings, String> {
     values.recovery_notice.clear();
+    values.flow_history_days = values.flow_history_days.clamp(1, 90);
     settings::save(&values)?;
     remember_fakeignore(values.fake_ignore);
+    std::thread::spawn(flows::cleanup_known);
     Ok(values)
 }
 
@@ -729,6 +776,8 @@ fn program_exists(path: String) -> bool {
 #[tauri::command]
 fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, path: Option<String>) -> Result<(), String> {
     let repo = repo_from(path)?;
+    let resume_repo = repo.clone();
+    std::thread::spawn(move || flows::resume(&resume_repo));
     let key = watch_key(&repo);
     let mut slots = state.0.lock().map_err(|_| "watcher lock".to_string())?;
     // Opening another tab of the same repository must not rebuild the recursive watch.
@@ -1958,16 +2007,23 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
     let repo_name = repo.unwrap_or_default();
     let file_name = file.unwrap_or_default();
     let rev_name = rev.unwrap_or_default();
+    let flow_label;
     let label = match view_name.as_str() {
         "blame" => "blame",
         "history" => "history",
         "blob" => "blob",
         "merge" => "merge",
+        "flow" => {
+            use sha2::{Digest, Sha256};
+            let identity = awegit_git::flow::git_dir(Path::new(&repo_name)).map_err(|error| error.to_string())?;
+            flow_label = format!("flow-{:x}", Sha256::digest(identity.to_string_lossy().as_bytes()));
+            flow_label.as_str()
+        }
         _ => "desk",
     };
     if let Some(window) = app.get_webview_window(label) {
         let _ = window.set_focus();
-        if label == "history" || label == "blob" || label == "merge" {
+        if label == "history" || label == "blob" || label == "merge" || view_name == "flow" {
             let _ = app.emit(
                 "awegit-navigate",
                 WindowNav { view: view_name, repo: repo_name, file: file_name, rev: rev_name },
@@ -1990,7 +2046,7 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
     // Keep the root path: SvelteKit's dev server and client router both 404 on `/index.html`.
     // A query-only relative reference resolves against the dev server or the tauri protocol base.
     let url = if query.is_empty() { "index.html".to_string() } else { format!("?{query}") };
-    let (width, height) = if label == "merge" {
+    let (width, height) = if label == "merge" || view_name == "flow" {
         (width.unwrap_or(1280.0), height.unwrap_or(840.0))
     } else {
         (1100.0, 720.0)
@@ -2190,6 +2246,8 @@ pub fn run() {
             show_commit_file,
             in_progress,
             mutate,
+            operation_flow,
+            operation_history,
             file_history,
             blame_file,
             load_settings,
@@ -2287,6 +2345,7 @@ pub fn run() {
                 show_devtools(&window);
             }
             let handle = app.handle().clone();
+            flows::install(handle.clone());
             perf::watch_main_thread(handle.clone());
             awegit_git::set_progress(move |path, percent| {
                 let _ = handle.emit("git-progress", GitProgress { path: path.to_string(), percent });
@@ -2441,6 +2500,19 @@ mod watch_plan_tests {
         fs::create_dir_all(root.join(".git")).unwrap();
         assert!(super::path_is_revealable(&note, &[]));
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn operation_observer_has_only_read_permissions() {
+        let observer: serde_json::Value = serde_json::from_str(include_str!("../capabilities/flows.json")).unwrap();
+        let defaults: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        assert_eq!(observer["windows"], serde_json::json!(["flow-*"]));
+        for permission in observer["permissions"].as_array().unwrap() {
+            assert!(matches!(permission.as_str().unwrap(), "core:default" | "core:window:allow-close" | "allow-operation-flow" | "allow-operation-history" | "allow-load-settings" | "allow-log-client"));
+        }
+        for window in defaults["windows"].as_array().unwrap() {
+            assert!(matches!(window.as_str().unwrap(), "main" | "desk" | "merge"));
+        }
     }
 
     #[test]

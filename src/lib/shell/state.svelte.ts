@@ -247,6 +247,8 @@ export class ShellState {
     pushOnCommit: false,
     compactBranchLabels: false,
     errorLogDays: 7,
+    flowHistoryDays: 3,
+    flowAutoOpen: true,
     messageLow: 50,
     messageHigh: 70,
     spellChecking: "disable",
@@ -607,10 +609,6 @@ export class ShellState {
 
   /** True when the conflict dialog explains an autostash that could not return cleanly. */
   mergeConflictRestore = $state(false);
-
-
-  /** Local changes a blocked write moved into a stash; put back when the write settles. */
-  pendingRetryStash = $state<{ name: string; id?: string; operation: string } | null>(null);
 
 
   /** Commit being replayed while a rebase is paused, shown in the continue dialog. */
@@ -1081,6 +1079,7 @@ export class ShellState {
 
 
   rebaseConflictFiles = $state<string[]>([]);
+  rebaseConflictKnown = $state(false);
 
 
   updateRefs = $state(false);
@@ -2985,11 +2984,11 @@ export class ShellState {
 
   runStatusNoticeAction(id: StatusNoticeId, action: string) {
     if (id === "conflicts" || id === "progress") {
-      if (action === "abort") void this.mutate({ action: "abort" }).then(() => this.settlePendingRetry());
-      else if (action === "skip") void this.mutate({ action: "skip" }).then(() => this.settlePendingRetry());
+      if (action === "abort") void this.mutate({ action: "abort" });
+      else if (action === "skip") void this.mutate({ action: "skip" });
       else if (action === "continue") {
         if (this.progress === "rebase") void this.openContinue();
-        else void this.mutate({ action: "continue" }).then(() => this.settlePendingRetry());
+        else void this.mutate({ action: "continue" });
       }
       return;
     }
@@ -3068,7 +3067,7 @@ export class ShellState {
 
 
 
-  async mutate(request: Record<string, unknown>, source: "user" | "background" = "user") {
+  async mutate(request: Record<string, unknown>, source: "user" | "background" = "user", retryStash = false) {
     const path = this.repoPath();
     if (!this.backend() || !path) return;
     const background = source === "background";
@@ -3101,7 +3100,7 @@ export class ShellState {
         started = true;
       }
       try {
-        const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request });
+        const value = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash });
         const output = value.output ?? "";
         // A foreground write started while this was running will paint the later status itself.
         const superseded = background && this.busy;
@@ -3110,8 +3109,10 @@ export class ShellState {
           if (refreshContext) await this.loadContext();
           if (!background && this.viewing(path)) await this.loadDiff();
         }
+        if (value.outcome === "failed" || value.outcome === "conflict") throw new Error(value.error || value.log || "Git conflict");
         if (followSubmodules) {
-          const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request: { action: "submoduleUpdate" } });
+          const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } });
+          if (follow.outcome === "failed") throw new Error(follow.error || follow.log);
           if (this.viewing(path)) this.applySnapshot(follow);
           this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
         }
@@ -3135,6 +3136,7 @@ export class ShellState {
             this.dialog = null;
           }
         }
+        return "completed" as const;
       } catch (error) {
         const text = this.message(error);
         this.noteActivity(`${String(request.action ?? "")} failed`);
@@ -3158,6 +3160,7 @@ export class ShellState {
             if (action === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
           }
         }
+        return this.conflictCount > 0 ? "conflict" as const : "failed" as const;
       } finally {
         if (started) this.stopWork(path);
       }
@@ -3205,14 +3208,7 @@ export class ShellState {
       const stash = (this.refs?.stashes ?? []).find((item) => item.name === name);
       if (stash?.id) request.name = stash.id;
     }
-    const operation = this.describeRequest(request).title;
-    const count = (this.snapshot?.staged.length ?? 0) + (this.snapshot?.unstaged.length ?? 0);
-    await this.mutate({ action: "stash", message: this.tr("chrome.stashBlockedMessageFor", { operation, count: String(count) }), includeUntracked: true });
-    if (this.actionError) return;
-    const stash = this.refs?.stashes[0];
-    if (stash) this.pendingRetryStash = { name: stash.name, id: stash.id, operation };
-    await this.mutate(request, pending.source);
-    await this.settlePendingRetry(pending.source);
+    await this.mutate(request, pending.source, true);
   }
 
 
@@ -3258,7 +3254,7 @@ export class ShellState {
   continueFlow() {
     if (!this.progress) return;
     if (this.progress === "rebase") return this.openContinue();
-    return this.mutate({ action: "continue" }).then(() => this.settlePendingRetry());
+    return this.mutate({ action: "continue" });
   }
 
 
@@ -3294,21 +3290,6 @@ export class ShellState {
   }
 
 
-  /** Put back local changes a blocked write moved into a stash. */
-  async settlePendingRetry(source: "user" | "background" = "user") {
-    const pending = this.pendingRetryStash;
-    if (!pending || this.busy || this.progress || this.conflicted) return;
-    const stash = (this.refs?.stashes ?? []).find((item) => (pending.id && item.id === pending.id) || item.name === pending.name);
-    this.pendingRetryStash = null;
-    if (!stash) return;
-    await this.mutate({ action: "stashApply", name: stash.id ?? stash.name }, source);
-    if (!this.actionError && !this.conflicted) {
-      await this.mutate({ action: "stashDrop", name: stash.id ?? stash.name }, source);
-    }
-  }
-
-
-
   doPush() {
     const current = this.refs?.branches.find((branch) => branch.current);
     const remote = this.refs?.remotes[0]?.name ?? null;
@@ -3324,8 +3305,9 @@ export class ShellState {
 
 
   async applyStash(name: string) {
-    await this.mutate({ action: "stashApply", name });
-    if (!this.actionError && this.settings.applyStashDelete) await this.mutate({ action: "stashDrop", name });
+    const pinned = this.refs?.stashes.find((stash) => stash.name === name || stash.id === name)?.id ?? name;
+    // Git pop drops only after a successful apply; a conflicted entry stays intact.
+    return this.mutate({ action: this.settings.applyStashDelete ? "stashPop" : "stashApply", name: pinned });
   }
 
 

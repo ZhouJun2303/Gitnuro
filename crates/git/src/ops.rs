@@ -456,6 +456,31 @@ pub fn perform(repo: &Path, mutation: Mutation) -> Result<String, Error> {
     apply(repo, mutation).map(|_| String::new())
 }
 
+/// A blocked write's retry uses the same durable autostash as ordinary flows.
+/// Never leave the restoration identity in a webview's memory alone.
+pub fn perform_stashed(repo: &Path, mut mutation: Mutation) -> Result<String, Error> {
+    ensure_no_paused_flow(repo, &mutation)?;
+    match &mut mutation {
+        Mutation::Pull { autostash, .. } | Mutation::PullRef { autostash, .. } |
+        Mutation::Merge { autostash, .. } | Mutation::Rebase { autostash, .. } |
+        Mutation::RebaseInteractive { autostash, .. } => { *autostash = true; perform(repo, mutation) }
+        Mutation::StashApply { name } | Mutation::StashPop { name } => {
+            // Creating our stash renumbers stash@{n}.
+            *name = crate::flow::commit(repo, if name.is_empty() { "refs/stash" } else { name })
+                .ok_or_else(|| Error::Rev(name.clone()))?.id;
+            let mut output = String::new();
+            with_autostash(repo, "retry stash", || { output = perform(repo, mutation)?; Ok(()) })?;
+            Ok(output)
+        }
+        Mutation::ApplyPatch { .. } => {
+            let mut output = String::new();
+            with_autostash(repo, "retry patch", || { output = perform(repo, mutation)?; Ok(()) })?;
+            Ok(output)
+        }
+        _ => perform(repo, mutation),
+    }
+}
+
 /// Full object ids make stash messages hard to scan; the UI already shows them.
 fn short_rev(rev: &str) -> String {
     let rev = rev.trim();
@@ -609,6 +634,9 @@ fn ensure_no_paused_flow(repo: &Path, mutation: &Mutation) -> Result<(), Error> 
         return Ok(());
     }
     let Some(state) = in_progress(repo)? else {
+        if autostash::has_unmerged(repo) {
+            return Err(Error::Git("resolve the current conflicts before starting another operation".into()));
+        }
         return Ok(());
     };
     let name = match state {
@@ -638,6 +666,8 @@ fn starts_flow(mutation: &Mutation) -> bool {
             | Mutation::Reword { .. }
             | Mutation::Squash { .. }
             | Mutation::StashBranch { .. }
+            | Mutation::StashApply { .. }
+            | Mutation::StashPop { .. }
             | Mutation::GitFlowStart { .. }
             | Mutation::GitFlowFinish { .. }
     )

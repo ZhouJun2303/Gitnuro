@@ -201,6 +201,7 @@ export function repositoryItems(shell: ShellState) {
       { label: shell.tr("chrome.lfsFiles"), disabled: locked, run: () => { void shell.loadFacts(true, true); shell.dialog = "lfs"; } },
       { label: shell.tr("chrome.githubRepo"), disabled: locked, run: () => { shell.draft = ""; shell.draftExtra = ""; shell.draftUser = ""; shell.privateRepo = false; shell.hostForge = "github"; shell.dialog = "github"; } },
       { label: shell.tr("chrome.activity"), run: () => shell.openCommandLog() },
+      { label: shell.tr("flow.title"), disabled: locked, run: () => void invoke("open_window", { view: "flow", repo: shell.repoPath(), file: "history" }) },
       { label: shell.tr("chrome.contentSearch"), disabled: locked, run: () => { shell.section = "history"; shell.searchOpen.commit = true; shell.commitQuery = "S:"; } },
       { label: shell.tr("chrome.stale"), disabled: locked, run: () => void invoke<string[]>("merged_branches", { path: shell.repoPath() }).then((names) => { shell.staleNames = names; shell.stalePicked = []; shell.dialog = "stale"; }) },
       { label: shell.tr("chrome.mailmap"), disabled: locked, run: () => void invoke<{ text?: string }>("blob_view", { path: shell.repoPath(), rev: "HEAD", file: ".mailmap" }).then((view) => { shell.draft = view.text ?? ""; shell.dialog = "mailmap"; }).catch(() => { shell.draft = ""; shell.dialog = "mailmap"; }) },

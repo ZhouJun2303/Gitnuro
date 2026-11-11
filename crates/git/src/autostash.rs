@@ -74,6 +74,13 @@ pub(crate) fn push(repo: &Path, label: &str) -> Result<Option<String>, Error> {
         }
         return Err(error);
     }
+    crate::flow::emit(crate::flow::Event {
+        key: format!("saved-{oid}"), kind: "local-saved".into(), state: "completed".into(),
+        stash: oid.clone(), source: crate::flow::commit(repo, &oid),
+        base: crate::flow::commit(repo, &format!("{oid}^1")),
+        files: listed.into_iter().map(|path| crate::flow::File { path, ..Default::default() }).collect(),
+        ..Default::default()
+    });
     Ok(Some(oid))
 }
 
@@ -89,20 +96,35 @@ pub(crate) fn finish_if_settled(repo: &Path) -> Result<Restored, Error> {
     }
     let Some(index) = stash_index(repo, &oid) else {
         set_pending_autostash(repo, None)?;
+        crate::flow::emit(crate::flow::Event {
+            key: format!("restore-{oid}"), kind: "local-restore".into(), state: "failed".into(),
+            stash: oid, detail: "stash-missing".into(), ..Default::default()
+        });
         return Ok(Restored::Missing);
     };
     let selector = format!("stash@{{{index}}}");
+    let event = crate::flow::Event {
+        key: format!("restore-{oid}"), kind: "local-restore".into(), state: "running".into(),
+        stash: oid.clone(), source: crate::flow::commit(repo, &oid), target: crate::flow::commit(repo, "HEAD"),
+        base: crate::flow::commit(repo, &format!("{oid}^1")), ..Default::default()
+    };
+    crate::flow::emit(event.clone());
     match run(repo, &["stash", "apply", "--index", &selector]) {
         Ok(_) => {
-            let _ = run(repo, &["stash", "drop", &selector]);
+            let dropped = run(repo, &["stash", "drop", &selector]).is_ok();
             set_pending_autostash(repo, None)?;
+            crate::flow::emit(crate::flow::Event {
+                state: "completed".into(), detail: if dropped { "stash-restored" } else { "stash-restored-kept" }.into(), ..event
+            });
             Ok(Restored::Applied)
         }
         Err(error) => {
             set_pending_autostash(repo, None)?;
             if has_unmerged(repo) {
+                crate::flow::emit(crate::flow::Event { state: "conflict".into(), detail: "stash-kept".into(), ..event });
                 Ok(Restored::Conflict)
             } else {
+                crate::flow::emit(crate::flow::Event { state: "failed".into(), detail: "stash-kept".into(), ..event });
                 Err(error)
             }
         }

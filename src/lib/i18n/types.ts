@@ -1,6 +1,7 @@
 export type Locale = "en" | "zh";
 
 export type Messages = {
+  flow: Record<string, string>;
   chrome: {
     open: string;
     workspace: string;

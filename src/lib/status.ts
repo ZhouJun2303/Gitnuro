@@ -236,6 +236,8 @@ export type Settings = {
   pushOnCommit: boolean;
   compactBranchLabels: boolean;
   errorLogDays: number;
+  flowHistoryDays: number;
+  flowAutoOpen: boolean;
   messageLow: number;
   messageHigh: number;
   spellChecking: string;

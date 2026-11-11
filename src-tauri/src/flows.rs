@@ -1,0 +1,1602 @@
+//! Durable app-owned operation journals. A delta contains one changed node,
+//! never a copy of the whole graph. Git remains the authority for resolution.
+
+use std::collections::{HashMap, HashSet};
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use awegit_git::flow::{self, Checkpoint, Commit, Event, File, Observer};
+use awegit_git::{InProgress, Mutation};
+use serde::{Deserialize, Serialize};
+use tauri::Emitter;
+
+static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+static SESSIONS: OnceLock<Mutex<HashMap<PathBuf, Arc<Session>>>> = OnceLock::new();
+static RECOVERY: Mutex<()> = Mutex::new(());
+static IDS: AtomicU64 = AtomicU64::new(1);
+
+fn sessions() -> &'static Mutex<HashMap<PathBuf, Arc<Session>>> {
+    SESSIONS.get_or_init(Default::default)
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Summary {
+    pub id: String,
+    pub repo: String,
+    pub kind: String,
+    pub state: String,
+    pub sequence: u64,
+    pub started_at: u64,
+    pub ended_at: Option<u64>,
+    pub active_step: String,
+    pub can_auto_close: bool,
+    pub branch: String,
+    pub before: Option<Commit>,
+    pub after: Option<Commit>,
+    pub progress: Option<InProgress>,
+    pub pending_stash: String,
+    pub recording_error: String,
+    pub previous: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Node {
+    #[serde(flatten)]
+    pub event: Event,
+    pub created_at: u64,
+    pub round: u32,
+    pub repeat_of: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Delta {
+    pub summary: Summary,
+    pub node: Option<Node>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Snapshot {
+    pub summary: Summary,
+    pub nodes: Vec<Node>,
+}
+
+struct Data {
+    snapshot: Snapshot,
+    round: u32,
+    round_key: String,
+    generation: u64,
+    writing: bool,
+    aborted: bool,
+    failed: bool,
+    request_key: String,
+    last_checkpoint: Option<Checkpoint>,
+}
+
+pub struct Session {
+    repo: PathBuf,
+    directory: PathBuf,
+    data: Mutex<Data>,
+}
+
+pub fn install(app: tauri::AppHandle) {
+    let _ = APP.set(app);
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(3600));
+        cleanup_known();
+    });
+    std::thread::spawn(cleanup_known);
+}
+
+fn days() -> u32 {
+    super::settings::load()
+        .map(|settings| settings.flow_history_days.clamp(1, 90))
+        .unwrap_or(3)
+}
+
+fn directory(repo: &Path) -> Result<PathBuf, String> {
+    flow::git_dir(repo)
+        .map(|path| path.join("awegit-flow"))
+        .map_err(|error| error.to_string())
+}
+
+fn broadcast(delta: &Delta) {
+    if let Some(app) = APP.get() {
+        let _ = app.emit("operation-flow", delta);
+    }
+}
+
+#[cfg(not(test))]
+fn open(repo: &Path, id: &str) {
+    if !super::settings::load().map(|settings| settings.flow_auto_open).unwrap_or(true) {
+        return;
+    }
+    let Some(app) = APP.get() else { return };
+    let app = app.clone();
+    let repo = repo.display().to_string();
+    let id = id.to_string();
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if !super::settings::load().map(|settings| settings.flow_auto_open).unwrap_or(true) {
+            return;
+        }
+        if let Err(error) = super::open_window(
+            handle,
+            Some("flow".into()),
+            Some(repo),
+            Some("live".into()),
+            Some(id),
+            Some(1280.0),
+            Some(840.0),
+        ) {
+            super::perf::write("WARN", "operation-flow-window", &error);
+        }
+    });
+}
+
+#[cfg(test)]
+fn open(_repo: &Path, _id: &str) {}
+
+impl Session {
+    fn publish(&self, data: &mut Data, node: Option<Node>) {
+        data.snapshot.summary.sequence += 1;
+        let delta = Delta {
+            summary: data.snapshot.summary.clone(),
+            node,
+        };
+        let result = (|| -> Result<(), String> {
+            fs::create_dir_all(&self.directory).map_err(|error| error.to_string())?;
+            let path = self
+                .directory
+                .join(format!("{}.jsonl", data.snapshot.summary.id));
+            let mut file = OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(path)
+                .map_err(|error| error.to_string())?;
+            serde_json::to_writer(&mut file, &delta).map_err(|error| error.to_string())?;
+            file.write_all(b"\n").map_err(|error| error.to_string())?;
+            // The summary is a small index. The append-only journal is authoritative.
+            let index = self
+                .directory
+                .join(format!("{}.json", data.snapshot.summary.id));
+            let temporary = index.with_extension("tmp");
+            fs::write(
+                &temporary,
+                serde_json::to_vec(&data.snapshot.summary).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            fs::rename(&temporary, &index).map_err(|error| error.to_string())?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            data.snapshot.summary.recording_error = error;
+        }
+        broadcast(&Delta {
+            summary: data.snapshot.summary.clone(),
+            node: delta.node,
+        });
+    }
+
+    fn put(&self, data: &mut Data, mut event: Event) {
+        if event.at == 0 {
+            event.at = flow::now();
+        }
+        let at = data
+            .snapshot
+            .nodes
+            .iter()
+            .position(|node| node.event.key == event.key);
+        let created_at = at
+            .map(|index| data.snapshot.nodes[index].created_at)
+            .unwrap_or(event.at);
+        let round = at
+            .map(|index| data.snapshot.nodes[index].round)
+            .unwrap_or(data.round);
+        let repeat_of = if let Some(index) = at {
+            data.snapshot.nodes[index].repeat_of.clone()
+        } else if event.kind == "conflict" {
+            data.snapshot
+                .nodes
+                .iter()
+                .rev()
+                .find(|node| {
+                    node.event.kind == "conflict"
+                        && node.event.key != event.key
+                        && node
+                            .event
+                            .files
+                            .iter()
+                            .any(|old| event.files.iter().any(|file| old.path == file.path))
+                })
+                .map(|node| node.event.key.clone())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let node = Node {
+            event,
+            created_at,
+            round,
+            repeat_of,
+        };
+        if matches!(
+            node.event.state.as_str(),
+            "running" | "conflict" | "waiting"
+        ) {
+            data.snapshot.summary.active_step = node.event.key.clone();
+        }
+        if let Some(index) = at {
+            data.snapshot.nodes[index] = node.clone();
+        } else {
+            data.snapshot.nodes.push(node.clone());
+        }
+        self.publish(data, Some(node));
+    }
+
+    pub fn observer(self: &Arc<Self>) -> Observer {
+        let session = self.clone();
+        Arc::new(move |mut event| {
+            let fetched = event.detail == "git-child"
+                && event.state == "running"
+                && matches!(event.kind.as_str(), "rebase" | "merge");
+            let rebase = event.kind == "rebase";
+            if event.detail == "git-child"
+                && (fetched || (event.kind == "fetch" && event.state == "completed"))
+            {
+                event.source = flow::commit(&session.repo, "FETCH_HEAD");
+            }
+            let mut data = session
+                .data
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if fetched {
+                event.target = data.snapshot.summary.before.clone();
+            }
+            // A real command is never overwritten by a late preview.
+            if event.kind == "local-saved" {
+                data.snapshot.summary.pending_stash = event.stash.clone();
+                session.put(
+                    &mut data,
+                    Event {
+                        key: format!("restore-{}", event.stash),
+                        kind: "local-restore".into(),
+                        state: "planned".into(),
+                        stash: event.stash.clone(),
+                        source: event.source.clone(),
+                        base: event.base.clone(),
+                        files: event.files.clone(),
+                        detail: "restore-after-integration".into(),
+                        ..Default::default()
+                    },
+                );
+            }
+            if event.kind == "local-restore" {
+                if event.files.is_empty() {
+                    event.files = data
+                        .snapshot
+                        .nodes
+                        .iter()
+                        .find(|node| {
+                            node.event.kind == "local-saved" && node.event.stash == event.stash
+                        })
+                        .map(|node| node.event.files.clone())
+                        .unwrap_or_default();
+                }
+                if matches!(event.state.as_str(), "completed" | "conflict") {
+                    data.snapshot.summary.pending_stash.clear();
+                }
+                if event.state == "failed" {
+                    data.failed = true;
+                }
+            }
+            session.put(&mut data, event);
+            drop(data);
+            if fetched {
+                session.preview("FETCH_HEAD".into(), rebase, Vec::new());
+            }
+        })
+    }
+
+    pub fn finish(&self, result: Result<(), String>, action: &str) -> Summary {
+        let checkpoint = flow::checkpoint(&self.repo);
+        let mut data = self.data.lock().unwrap_or_else(|error| error.into_inner());
+        data.writing = false;
+        if action == "abort" && result.is_ok() {
+            data.aborted = true;
+        }
+        let paused = checkpoint
+            .as_ref()
+            .is_ok_and(|point| point.progress.is_some() || !point.files.is_empty());
+        let request_key = data.request_key.clone();
+        if let Some(node) = data
+            .snapshot
+            .nodes
+            .iter()
+            .find(|node| node.event.key == request_key)
+            .cloned()
+        {
+            let mut event = node.event;
+            event.state = if paused {
+                "waiting"
+            } else if result.is_ok() {
+                "completed"
+            } else {
+                "failed"
+            }
+            .into();
+            self.put(&mut data, event);
+        }
+        if let Err(error) = &result {
+            if !paused {
+                data.failed = true;
+            }
+            let key = format!("failure-{}", data.snapshot.summary.sequence);
+            self.put(
+                &mut data,
+                Event {
+                    key,
+                    kind: "error".into(),
+                    state: if paused { "paused" } else { "failed" }.into(),
+                    detail: flow::redact(error),
+                    ..Default::default()
+                },
+            );
+        }
+        match checkpoint {
+            Ok(checkpoint) => self.reconcile_locked(&mut data, checkpoint, action),
+            Err(error) => {
+                data.snapshot.summary.state = "failed".into();
+                data.snapshot.summary.recording_error = error.to_string();
+                self.publish(&mut data, None);
+            }
+        }
+        data.snapshot.summary.clone()
+    }
+
+    fn reconcile_locked(&self, data: &mut Data, checkpoint: Checkpoint, action: &str) {
+        data.last_checkpoint = Some(checkpoint.clone());
+        data.snapshot.summary.after = checkpoint.head.clone();
+        data.snapshot.summary.progress = checkpoint.progress;
+        if !checkpoint.branch.is_empty() {
+            data.snapshot.summary.branch = checkpoint.branch.clone();
+        }
+        // A failed restore retains its stash identity even after Git's pending marker clears.
+        if !checkpoint.pending_stash.is_empty() {
+            data.snapshot.summary.pending_stash = checkpoint.pending_stash.clone();
+        }
+        let paths: HashSet<_> = checkpoint
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect();
+        let existing = data
+            .snapshot
+            .nodes
+            .iter()
+            .position(|node| node.event.key == data.round_key);
+        if let Some(index) = existing {
+            let mut event = data.snapshot.nodes[index].event.clone();
+            let mut changed = false;
+            let current_source = checkpoint.replay.as_ref().or(checkpoint.incoming.as_ref());
+            let same_replay = if checkpoint.progress.is_some() {
+                event.source.as_ref().map(|commit| &commit.id)
+                    == current_source.map(|commit| &commit.id)
+            } else {
+                // Stash apply has no sequencer HEAD. Stage identities preserve this round
+                // while files are resolved one at a time.
+                checkpoint.files.iter().all(|file| {
+                    event.files.iter().any(|old| {
+                        old.path == file.path
+                            && old.base == file.base
+                            && old.ours == file.ours
+                            && old.theirs == file.theirs
+                    })
+                })
+            };
+            for file in &mut event.files {
+                let resolved = !same_replay || !paths.contains(file.path.as_str());
+                if resolved != file.resolved {
+                    file.resolved = resolved;
+                    changed = true;
+                }
+            }
+            if paths.is_empty() || !same_replay {
+                let next = if paths.is_empty() && checkpoint.progress.is_some() && same_replay {
+                    "waiting"
+                } else if action == "skip" {
+                    "skipped"
+                } else if action == "abort" {
+                    "aborted"
+                } else {
+                    "completed"
+                };
+                if event.state != next {
+                    event.state = next.into();
+                    changed = true;
+                }
+            }
+            if changed {
+                self.put(data, event);
+            }
+        }
+        let current_exists = data
+            .snapshot
+            .nodes
+            .iter()
+            .any(|node| node.event.key == data.round_key && node.event.state == "conflict");
+        if !checkpoint.files.is_empty() && !current_exists {
+            data.round += 1;
+            data.round_key = format!("conflict-{}-{}", data.round, data.snapshot.summary.sequence);
+            let restore = data.snapshot.nodes.iter().rev().find(|node| {
+                (node.event.kind == "local-restore" && node.event.state == "conflict")
+                    || matches!(
+                        node.event.kind.as_str(),
+                        "stashApply" | "stashPop" | "stashBranch"
+                    )
+            });
+            let stash_source = restore.and_then(|node| node.event.source.clone());
+            let stash = restore
+                .map(|node| node.event.stash.clone())
+                .unwrap_or_default();
+            let source = checkpoint
+                .replay
+                .clone()
+                .or(checkpoint.incoming.clone())
+                .or(stash_source);
+            self.put(
+                data,
+                Event {
+                    key: data.round_key.clone(),
+                    kind: "conflict".into(),
+                    state: "conflict".into(),
+                    files: checkpoint.files.clone(),
+                    source,
+                    target: checkpoint.head.clone(),
+                    base: checkpoint
+                        .base
+                        .clone()
+                        .or_else(|| restore.and_then(|node| node.event.base.clone())),
+                    stash,
+                    detail: if checkpoint.progress.is_none() {
+                        "local-vs-result"
+                    } else if checkpoint.progress == Some(InProgress::Rebase) {
+                        "replay-vs-accumulated"
+                    } else if checkpoint.progress == Some(InProgress::Revert) {
+                        "revert-vs-current"
+                    } else {
+                        "source-vs-target"
+                    }
+                    .into(),
+                    ..Default::default()
+                },
+            );
+            open(&self.repo, &data.snapshot.summary.id);
+        }
+        // Saved original commit ids from sequencer checkpoints remain distinct across rounds.
+        for original in &checkpoint.done {
+            if let Some(node) = data
+                .snapshot
+                .nodes
+                .iter()
+                .find(|node| node.event.key == format!("replay-{original}"))
+                .cloned()
+            {
+                let mut event = node.event;
+                event.state = if checkpoint
+                    .replay
+                    .as_ref()
+                    .is_some_and(|commit| &commit.id == original)
+                    && !checkpoint.files.is_empty()
+                {
+                    "conflict"
+                } else {
+                    "completed"
+                }
+                .into();
+                if event.state
+                    != data
+                        .snapshot
+                        .nodes
+                        .iter()
+                        .find(|node| node.event.key == event.key)
+                        .unwrap()
+                        .event
+                        .state
+                {
+                    self.put(data, event);
+                }
+            }
+        }
+        if !checkpoint.files.is_empty() {
+            data.failed = false; // Git's pause explains the unsuccessful command.
+            data.snapshot.summary.state = "conflict".into();
+            data.snapshot.summary.active_step = data.round_key.clone();
+        } else if checkpoint.progress.is_some() || !checkpoint.pending_stash.is_empty() {
+            data.snapshot.summary.state = "waiting".into();
+            if let Some(node) = data
+                .snapshot
+                .nodes
+                .iter()
+                .find(|node| node.event.key == data.round_key)
+            {
+                data.snapshot.summary.active_step = node.event.key.clone();
+            }
+        } else if data.writing {
+            data.snapshot.summary.state = "running".into();
+        } else if data.aborted {
+            data.snapshot.summary.state = "aborted".into();
+            data.snapshot.summary.ended_at.get_or_insert_with(flow::now);
+        } else if data.failed {
+            data.snapshot.summary.state = "failed".into();
+            data.snapshot.summary.ended_at.get_or_insert_with(flow::now);
+        } else {
+            data.snapshot.summary.state = "completed".into();
+            data.snapshot.summary.ended_at.get_or_insert_with(flow::now);
+            let remaining: Vec<_> = data
+                .snapshot
+                .nodes
+                .iter()
+                .filter(|node| {
+                    matches!(
+                        node.event.state.as_str(),
+                        "planned" | "predicted" | "conditional" | "waiting" | "conflict"
+                    )
+                })
+                .map(|node| node.event.clone())
+                .collect();
+            for mut event in remaining {
+                event.state = if event.kind == "replay" {
+                    "processed"
+                } else if event.kind == "conflict" || event.kind == "local-restore" {
+                    "completed"
+                } else {
+                    "superseded"
+                }
+                .into();
+                if event.kind == "local-restore" {
+                    event.detail = "stash-kept".into();
+                }
+                event.detail = if event.kind == "replay" {
+                    "git-processed-sequence".into()
+                } else {
+                    event.detail
+                };
+                self.put(data, event);
+            }
+            data.snapshot.summary.pending_stash.clear();
+            self.put(
+                data,
+                Event {
+                    key: "finished".into(),
+                    kind: "finished".into(),
+                    state: "completed".into(),
+                    target: checkpoint.head,
+                    ..Default::default()
+                },
+            );
+            data.snapshot.summary.active_step = "finished".into();
+        }
+        data.snapshot.summary.can_auto_close = data.snapshot.summary.state == "completed"
+            && data.snapshot.summary.pending_stash.is_empty();
+        self.publish(data, None);
+    }
+
+    pub fn refresh(&self) {
+        let writing = self
+            .data
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .writing;
+        if writing {
+            return;
+        }
+        if let Ok(checkpoint) = flow::checkpoint(&self.repo) {
+            let mut data = self.data.lock().unwrap_or_else(|error| error.into_inner());
+            if !data.writing
+                && data.last_checkpoint.as_ref() != Some(&checkpoint)
+                && matches!(
+                    data.snapshot.summary.state.as_str(),
+                    "conflict" | "waiting" | "running"
+                )
+            {
+                self.reconcile_locked(&mut data, checkpoint, "refresh");
+            }
+        }
+    }
+
+    fn preview(
+        self: &Arc<Self>,
+        onto: String,
+        rebase: bool,
+        instructions: Vec<awegit_git::RebaseStep>,
+    ) {
+        let Some(onto) = flow::commit(&self.repo, &onto) else {
+            return;
+        };
+        let head = self
+            .data
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .snapshot
+            .summary
+            .before
+            .clone();
+        let Some(head) = head else { return };
+        let plan = if !rebase {
+            vec![onto.clone()]
+        } else if instructions.is_empty() {
+            flow::replay_commits(&self.repo, &onto.id, &head.id).unwrap_or_default()
+        } else {
+            instructions
+                .iter()
+                .filter_map(|step| flow::commit(&self.repo, &step.rev))
+                .collect()
+        };
+        {
+            let mut data = self.data.lock().unwrap_or_else(|error| error.into_inner());
+            for commit in plan {
+                let key = format!("replay-{}", commit.id);
+                if data.snapshot.nodes.iter().any(|node| node.event.key == key) {
+                    continue;
+                }
+                self.put(
+                    &mut data,
+                    Event {
+                        key,
+                        kind: if rebase { "replay" } else { "integration" }.into(),
+                        state: "planned".into(),
+                        source: Some(commit),
+                        target: Some(onto.clone()),
+                        detail: "preview-conditional".into(),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        let session = self.clone();
+        let generation = self
+            .data
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .generation;
+        std::thread::spawn(move || {
+            let preview =
+                flow::preview_at(&session.repo, &onto.id, &head.id, rebase, &instructions);
+            let mut data = session
+                .data
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if data.generation != generation || data.snapshot.summary.ended_at.is_some() {
+                return;
+            }
+            match preview {
+                Ok(preview) => {
+                    for step in preview.steps {
+                        let key = format!("replay-{}", step.commit.id);
+                        if data.snapshot.nodes.iter().any(|node| {
+                            node.event.key == key
+                                && matches!(node.event.state.as_str(), "completed" | "conflict")
+                        }) {
+                            continue;
+                        }
+                        session.put(
+                            &mut data,
+                            Event {
+                                key,
+                                kind: if rebase { "replay" } else { "integration" }.into(),
+                                state: if step.state == "dropped" {
+                                    "skipped"
+                                } else if matches!(step.state.as_str(), "conditional" | "unknown") {
+                                    "conditional"
+                                } else {
+                                    "predicted"
+                                }
+                                .into(),
+                                source: Some(step.commit),
+                                target: preview.source.clone(),
+                                detail: format!("preview-{}", step.state),
+                                files: step
+                                    .files
+                                    .into_iter()
+                                    .map(|path| File {
+                                        path,
+                                        ..Default::default()
+                                    })
+                                    .collect(),
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    if !preview.detail.is_empty() {
+                        session.put(
+                            &mut data,
+                            Event {
+                                key: "preview-note".into(),
+                                kind: "preview".into(),
+                                state: "conditional".into(),
+                                detail: preview.detail,
+                                ..Default::default()
+                            },
+                        );
+                    }
+                }
+                Err(_) => session.put(
+                    &mut data,
+                    Event {
+                        key: "preview-note".into(),
+                        kind: "preview".into(),
+                        state: "conditional".into(),
+                        detail: "preview-unavailable".into(),
+                        ..Default::default()
+                    },
+                ),
+            }
+            if !data.writing {
+                if let Some(checkpoint) = data.last_checkpoint.clone() {
+                    session.reconcile_locked(&mut data, checkpoint, "preview");
+                }
+            }
+        });
+    }
+}
+
+fn tracked(kind: &str) -> bool {
+    matches!(
+        kind,
+        "fetch"
+            | "stash"
+            | "stashPaths"
+            | "stashDrop"
+            | "reword"
+            | "gitFlowStart"
+            | "pull"
+            | "pullRef"
+            | "push"
+            | "pushRef"
+            | "merge"
+            | "rebase"
+            | "rebaseInteractive"
+            | "cherryPick"
+            | "revert"
+            | "reset"
+            | "checkout"
+            | "checkoutRemote"
+            | "stashApply"
+            | "stashPop"
+            | "stashBranch"
+            | "applyPatch"
+            | "squash"
+            | "gitFlowFinish"
+    )
+}
+
+fn active(repo: &Path) -> Option<Arc<Session>> {
+    let directory = directory(repo).ok()?;
+    if let Some(session) = sessions()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .get(&directory)
+        .cloned()
+    {
+        return Some(session);
+    }
+    // Status refresh and a newly opened flow window can request recovery together.
+    // Only one reader may repair and resume a journal.
+    let _recovery = RECOVERY.lock().unwrap_or_else(|error| error.into_inner());
+    if let Some(session) = sessions()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .get(&directory)
+        .cloned()
+    {
+        return Some(session);
+    }
+    let summary = history(repo, 0, 1).ok()?.into_iter().next()?;
+    if !matches!(summary.state.as_str(), "conflict" | "waiting" | "running") {
+        return None;
+    }
+    let snapshot = read_snapshot(&directory, &summary.id).ok()?;
+    repair_tail(&directory, &summary.id);
+    let interrupted = snapshot.summary.state == "running";
+    let round = snapshot
+        .nodes
+        .iter()
+        .map(|node| node.round)
+        .max()
+        .unwrap_or(0);
+    let round_key = snapshot
+        .nodes
+        .iter()
+        .rev()
+        .find(|node| node.event.kind == "conflict")
+        .map(|node| node.event.key.clone())
+        .unwrap_or_default();
+    let session = Arc::new(Session {
+        repo: repo.to_path_buf(),
+        directory: directory.clone(),
+        data: Mutex::new(Data {
+            snapshot,
+            round,
+            round_key,
+            generation: 0,
+            writing: false,
+            aborted: false,
+            failed: interrupted,
+            request_key: String::new(),
+            last_checkpoint: None,
+        }),
+    });
+    if interrupted {
+        let mut data = session
+            .data
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let unfinished: Vec<_> = data
+            .snapshot
+            .nodes
+            .iter()
+            .filter(|node| node.event.state == "running")
+            .map(|node| node.event.clone())
+            .collect();
+        for mut event in unfinished {
+            event.state = "interrupted".into();
+            event.detail = "recording-interrupted".into();
+            session.put(&mut data, event);
+        }
+    }
+    sessions()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .insert(directory, session.clone());
+    Some(session)
+}
+
+pub fn begin(repo: &Path, request: &Mutation) -> Option<Arc<Session>> {
+    let kind = super::action_label(request);
+    begin_kind(repo, kind, Some(request))
+}
+
+pub fn begin_kind(repo: &Path, kind: &str, request: Option<&Mutation>) -> Option<Arc<Session>> {
+    let existing = active(repo);
+    let continuation = matches!(
+        kind,
+        "continue"
+            | "skip"
+            | "abort"
+            | "commit"
+            | "resolve"
+            | "resolvePaths"
+            | "stage"
+            | "stagePaths"
+            | "stageHunk"
+            | "stageLine"
+            | "stageLines"
+            | "stashDrop"
+    );
+    let reusable = existing.as_ref().is_some_and(|session| {
+        let data = session
+            .data
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        matches!(
+            data.snapshot.summary.state.as_str(),
+            "conflict" | "waiting" | "running"
+        )
+    });
+    if !tracked(kind) && !(continuation && reusable) {
+        return None;
+    }
+    let checkpoint = flow::checkpoint(repo).ok()?;
+    let session = if reusable {
+        existing.unwrap()
+    } else {
+        let directory = directory(repo).ok()?;
+        let previous = history(repo, 0, 1)
+            .ok()
+            .and_then(|items| items.first().map(|summary| summary.id.clone()))
+            .unwrap_or_default();
+        let id = format!(
+            "{}-{}-{}",
+            flow::now(),
+            std::process::id(),
+            IDS.fetch_add(1, Ordering::Relaxed)
+        );
+        let summary = Summary {
+            id,
+            repo: repo.display().to_string(),
+            kind: kind.into(),
+            state: "running".into(),
+            sequence: 0,
+            started_at: flow::now(),
+            ended_at: None,
+            active_step: String::new(),
+            can_auto_close: false,
+            branch: checkpoint.branch.clone(),
+            before: checkpoint.head.clone(),
+            after: checkpoint.head.clone(),
+            progress: checkpoint.progress,
+            pending_stash: checkpoint.pending_stash.clone(),
+            recording_error: String::new(),
+            previous,
+        };
+        let session = Arc::new(Session {
+            repo: repo.to_path_buf(),
+            directory: directory.clone(),
+            data: Mutex::new(Data {
+                snapshot: Snapshot {
+                    summary,
+                    nodes: Vec::new(),
+                },
+                round: 0,
+                round_key: String::new(),
+                generation: 0,
+                writing: false,
+                aborted: false,
+                failed: false,
+                request_key: String::new(),
+                last_checkpoint: None,
+            }),
+        });
+        sessions()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .insert(directory, session.clone());
+        session
+    };
+    {
+        let mut data = session
+            .data
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        data.generation += 1;
+        data.writing = true;
+        if !matches!(kind, "stage" | "resolve" | "resolvePaths") {
+            data.failed = false;
+        }
+        data.snapshot.summary.ended_at = None;
+        data.snapshot.summary.can_auto_close = false;
+        data.snapshot.summary.state = "running".into();
+        let key = format!("action-{}", data.snapshot.summary.sequence);
+        data.request_key = key.clone();
+        let source = request.and_then(|request| match request {
+            Mutation::StashApply { name }
+            | Mutation::StashPop { name }
+            | Mutation::StashBranch { name, .. } => {
+                flow::commit(repo, if name.is_empty() { "refs/stash" } else { name })
+            }
+            Mutation::CherryPick { rev, .. }
+            | Mutation::Revert { rev }
+            | Mutation::Reset { rev, .. } => flow::commit(repo, rev),
+            Mutation::Merge { name, .. } => flow::commit(repo, name),
+            Mutation::Rebase { onto, .. } | Mutation::RebaseInteractive { onto, .. } => {
+                flow::commit(repo, onto)
+            }
+            _ => None,
+        });
+        let stash = if kind.starts_with("stash") {
+            source
+                .as_ref()
+                .map(|commit| commit.id.clone())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let base = if !stash.is_empty() {
+            flow::commit(repo, &format!("{stash}^1"))
+        } else {
+            None
+        };
+        session.put(
+            &mut data,
+            Event {
+                key,
+                kind: kind.into(),
+                state: "running".into(),
+                detail: match kind {
+                    "reset" => "reset-baseline",
+                    "revert" => "revert-new-commit",
+                    _ => "requested",
+                }
+                .into(),
+                source,
+                stash,
+                base,
+                target: checkpoint.head,
+                ..Default::default()
+            },
+        );
+        let id = data.snapshot.summary.id.clone();
+        // A successful push is also visible briefly: a remote may advance after our last fetch.
+        if tracked(kind) && !matches!(kind, "fetch" | "stash" | "stashPaths" | "stashDrop") {
+            open(repo, &id);
+        }
+    }
+    let preview = request.and_then(|request| match request {
+        Mutation::Merge { name, .. } => Some((name.clone(), false, Vec::new())),
+        Mutation::Rebase { onto, .. } => Some((onto.clone(), true, Vec::new())),
+        Mutation::RebaseInteractive { onto, steps, .. } => {
+            Some((onto.clone(), true, steps.clone()))
+        }
+        _ => None,
+    });
+    if let Some((onto, rebase, steps)) = preview {
+        session.preview(onto, rebase, steps);
+    }
+    Some(session)
+}
+
+pub fn reconcile(repo: &Path) {
+    if let Some(session) = active(repo) {
+        session.refresh();
+    }
+}
+
+pub fn resume(repo: &Path) {
+    let _turn = super::repo_turn(repo);
+    if let Some(session) = active(repo) {
+        if let Ok(point) = flow::checkpoint(repo) {
+            if point.progress.is_none() && point.files.is_empty() && !point.pending_stash.is_empty()
+            {
+                {
+                    let mut data = session
+                        .data
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    data.writing = true;
+                    data.failed = false;
+                }
+                let result = flow::observe(session.observer(), || flow::restore_pending(repo))
+                    .map_err(|error| error.to_string());
+                session.finish(result, "restore");
+            }
+        }
+        session.refresh();
+        let data = session
+            .data
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if matches!(data.snapshot.summary.state.as_str(), "conflict" | "waiting") {
+            open(repo, &data.snapshot.summary.id);
+        }
+    }
+}
+
+fn repair_tail(directory: &Path, id: &str) {
+    let path = directory.join(format!("{id}.jsonl"));
+    let Ok(file) = fs::File::open(&path) else {
+        return;
+    };
+    let mut reader = BufReader::new(file);
+    let mut valid = 0;
+    loop {
+        let mut line = Vec::new();
+        let Ok(length) = reader.read_until(b'\n', &mut line) else {
+            return;
+        };
+        if length == 0 {
+            break;
+        }
+        if line.last() != Some(&b'\n') || serde_json::from_slice::<Delta>(&line).is_err() {
+            break;
+        }
+        valid += length as u64;
+    }
+    if let Ok(file) = OpenOptions::new().write(true).open(path) {
+        let _ = file.set_len(valid);
+    }
+}
+
+fn read_snapshot(directory: &Path, id: &str) -> Result<Snapshot, String> {
+    if id.is_empty() || !id.chars().all(|ch| ch.is_ascii_digit() || ch == '-') {
+        return Err("invalid flow id".into());
+    }
+    let file =
+        fs::File::open(directory.join(format!("{id}.jsonl"))).map_err(|error| error.to_string())?;
+    let mut summary = None;
+    let mut nodes: Vec<Node> = Vec::new();
+    let mut positions = HashMap::new();
+    for line in BufReader::new(file).lines() {
+        let line = line.map_err(|error| error.to_string())?;
+        // An interrupted final append does not invalidate the preceding journal.
+        let Ok(delta) = serde_json::from_str::<Delta>(&line) else {
+            break;
+        };
+        if let Some(node) = delta.node {
+            if let Some(index) = positions.get(&node.event.key).copied() {
+                nodes[index] = node;
+            } else {
+                positions.insert(node.event.key.clone(), nodes.len());
+                nodes.push(node);
+            }
+        }
+        summary = Some(delta.summary);
+    }
+    Ok(Snapshot {
+        summary: summary.ok_or("empty flow journal")?,
+        nodes,
+    })
+}
+
+pub fn snapshot(repo: &Path, id: Option<String>) -> Result<Option<Snapshot>, String> {
+    let directory = directory(repo)?;
+    if let Some(session) = active(repo) {
+        session.refresh();
+        let data = session
+            .data
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if id
+            .as_ref()
+            .is_none_or(|id| id.is_empty() || *id == data.snapshot.summary.id)
+        {
+            return Ok(Some(data.snapshot.clone()));
+        }
+    }
+    let id = id.filter(|id| !id.is_empty()).or_else(|| {
+        history(repo, 0, 1)
+            .ok()?
+            .first()
+            .map(|summary| summary.id.clone())
+    });
+    id.map(|id| read_snapshot(&directory, &id)).transpose()
+}
+
+pub fn history(repo: &Path, offset: usize, limit: usize) -> Result<Vec<Summary>, String> {
+    let directory = directory(repo)?;
+    prune(&directory, days(), flow::now());
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut paths: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    paths.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    Ok(paths
+        .into_iter()
+        .skip(offset)
+        .take(limit.min(100))
+        .filter_map(|path| serde_json::from_slice::<Summary>(&fs::read(path).ok()?).ok())
+        .collect())
+}
+
+fn prune(directory: &Path, days: u32, now: u64) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    let cutoff = now.saturating_sub(u64::from(days.clamp(1, 90)) * 86_400_000);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_none_or(|ext| ext != "json") {
+            continue;
+        }
+        let Some(summary) = fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Summary>(&bytes).ok())
+        else {
+            continue;
+        };
+        if summary.ended_at.is_some_and(|ended| ended < cutoff) {
+            let _ = fs::remove_file(path.with_extension("jsonl"));
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+pub fn cleanup_known() {
+    let values = super::settings::load().unwrap_or_default();
+    let mut repos: HashSet<PathBuf> = values.recent.iter().map(PathBuf::from).collect();
+    repos.extend(
+        sessions()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .values()
+            .map(|session| session.repo.clone()),
+    );
+    for repo in repos {
+        if let Ok(directory) = directory(&repo) {
+            prune(&directory, values.flow_history_days, flow::now());
+        }
+    }
+    let cutoff =
+        flow::now().saturating_sub(u64::from(values.flow_history_days.clamp(1, 90)) * 86_400_000);
+    sessions()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .retain(|_, session| {
+            let data = session
+                .data
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            data.writing
+                || data
+                    .snapshot
+                    .summary
+                    .ended_at
+                    .is_none_or(|ended| ended >= cutoff)
+        });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    struct Repo(PathBuf);
+    impl Repo {
+        fn new() -> Self {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .join(".lab/flow-tests");
+            let path = root.join(format!(
+                "{}-{}",
+                flow::now(),
+                IDS.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join("global-config"), "").unwrap();
+            let repo = Self(path);
+            repo.git(&["init", "-b", "main"]);
+            for (key, value) in [
+                ("user.name", "Flow Test"),
+                ("user.email", "flow@test.local"),
+                ("commit.gpgsign", "false"),
+                ("core.autocrlf", "false"),
+                ("core.hooksPath", ".git/no-hooks"),
+            ] {
+                repo.git(&["config", key, value]);
+            }
+            repo.save("note", "base\n", "base");
+            repo
+        }
+        fn git(&self, args: &[&str]) -> String {
+            let output = Command::new("git")
+                .current_dir(&self.0)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", self.0.join("global-config"))
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_AUTHOR_NAME", "Flow Test")
+                .env("GIT_AUTHOR_EMAIL", "flow@test.local")
+                .env("GIT_COMMITTER_NAME", "Flow Test")
+                .env("GIT_COMMITTER_EMAIL", "flow@test.local")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().into()
+        }
+        fn save(&self, file: &str, body: &str, message: &str) {
+            fs::write(self.0.join(file), body).unwrap();
+            self.git(&["add", "--", file]);
+            self.git(&["commit", "-m", message]);
+        }
+        fn run(&self, request: Mutation) -> Summary {
+            let kind = super::super::action_label(&request);
+            let session = begin(&self.0, &request).unwrap();
+            let result = flow::observe(session.observer(), || {
+                awegit_git::perform(&self.0, request)?;
+                if matches!(kind, "stagePaths" | "resolve" | "resolvePaths") {
+                    flow::restore_pending(&self.0)?;
+                }
+                Ok::<_, awegit_git::Error>(())
+            });
+            session.finish(result.map_err(|error| error.to_string()), kind)
+        }
+        fn resolve(&self, body: &str) -> Summary {
+            fs::write(self.0.join("note"), body).unwrap();
+            self.run(Mutation::StagePaths {
+                files: vec!["note".into()],
+                unstage: false,
+            })
+        }
+        fn snapshot(&self) -> Snapshot {
+            snapshot(&self.0, None).unwrap().unwrap()
+        }
+    }
+    impl Drop for Repo {
+        fn drop(&mut self) {
+            if let Ok(directory) = directory(&self.0) {
+                sessions().lock().unwrap().remove(&directory);
+            }
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn separated_conflict_rounds_and_final_stash_conflict_keep_one_live_workflow() {
+        let repo = Repo::new();
+        repo.git(&["branch", "remote"]);
+        repo.save("note", "local one\n", "first local");
+        let first = repo.git(&["rev-parse", "HEAD"]);
+        repo.save("clean", "clean\n", "between conflicts");
+        let clean = repo.git(&["rev-parse", "HEAD"]);
+        repo.save("note", "local two\n", "second local");
+        let second = repo.git(&["rev-parse", "HEAD"]);
+        repo.git(&["checkout", "remote"]);
+        repo.save("note", "remote\n", "incoming");
+        repo.git(&["checkout", "main"]);
+        fs::write(repo.0.join("note"), "uncommitted\n").unwrap();
+        let started = repo.run(Mutation::Rebase {
+            onto: "remote".into(),
+            autostash: true,
+        });
+        assert_eq!(started.state, "conflict");
+        assert!(!started.can_auto_close);
+        let saved = started.pending_stash.clone();
+        assert!(!saved.is_empty());
+        assert_eq!(
+            repo.snapshot()
+                .nodes
+                .iter()
+                .find(|node| node.event.kind == "conflict")
+                .unwrap()
+                .event
+                .source
+                .as_ref()
+                .unwrap()
+                .id,
+            first
+        );
+        let staged = repo.resolve("resolved first\n");
+        assert_eq!(staged.state, "waiting");
+        assert!(!staged.can_auto_close);
+        let continued = repo.run(Mutation::Continue {
+            message: String::new(),
+        });
+        assert_eq!(continued.id, started.id);
+        assert_eq!(continued.state, "conflict");
+        let snapshot = repo.snapshot();
+        let rounds: Vec<_> = snapshot
+            .nodes
+            .iter()
+            .filter(|node| node.event.kind == "conflict")
+            .collect();
+        assert_eq!(rounds.len(), 2);
+        assert_eq!(rounds[0].event.state, "completed");
+        assert!(rounds[0].event.files[0].resolved);
+        assert_eq!(rounds[1].event.source.as_ref().unwrap().id, second);
+        assert_eq!(rounds[1].event.base.as_ref().unwrap().id, clean);
+        assert_eq!(rounds[1].repeat_of, rounds[0].event.key);
+        assert_eq!(snapshot.summary.active_step, rounds[1].event.key);
+        assert!(snapshot
+            .nodes
+            .iter()
+            .any(|node| node.event.key == format!("replay-{clean}")
+                && node.event.state == "completed"));
+        repo.resolve("resolved second\n");
+        let restoring = repo.run(Mutation::Continue {
+            message: String::new(),
+        });
+        assert!(restoring.progress.is_none());
+        assert_eq!(restoring.state, "conflict");
+        assert!(!restoring.can_auto_close);
+        let snapshot = repo.snapshot();
+        let rounds: Vec<_> = snapshot
+            .nodes
+            .iter()
+            .filter(|node| node.event.kind == "conflict")
+            .collect();
+        assert_eq!(rounds.len(), 3);
+        assert_eq!(rounds[2].event.stash, saved);
+        assert_eq!(rounds[2].event.source.as_ref().unwrap().id, saved);
+        assert_eq!(snapshot.summary.active_step, rounds[2].event.key);
+        let sequence = snapshot.summary.sequence;
+        assert_eq!(
+            repo.snapshot().summary.sequence,
+            sequence,
+            "unchanged polling must not append journal records"
+        );
+        let finished = repo.resolve("restored local work\n");
+        assert_eq!(finished.state, "completed");
+        assert!(finished.can_auto_close);
+        assert!(finished.pending_stash.is_empty());
+        assert_eq!(
+            repo.git(&["rev-parse", "refs/stash"]),
+            saved,
+            "conflicted stash is retained after manual resolution"
+        );
+        assert_eq!(
+            repo.snapshot()
+                .nodes
+                .iter()
+                .filter(|node| node.event.kind == "local-saved")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn stash_round_does_not_repeat_on_each_refresh_and_journal_survives_a_torn_tail() {
+        let repo = Repo::new();
+        fs::write(repo.0.join("note"), "saved\n").unwrap();
+        repo.git(&["stash", "push"]);
+        let stash = repo.git(&["rev-parse", "refs/stash"]);
+        repo.save("note", "new base\n", "advance");
+        let started = repo.run(Mutation::StashPop {
+            name: stash.clone(),
+        });
+        assert_eq!(started.state, "conflict");
+        let before = repo.snapshot();
+        for _ in 0..3 {
+            assert_eq!(repo.snapshot().summary.sequence, before.summary.sequence);
+        }
+        let directory = directory(&repo.0).unwrap();
+        let path = directory.join(format!("{}.jsonl", started.id));
+        OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"{\"summary\":")
+            .unwrap();
+        sessions().lock().unwrap().remove(&directory);
+        let restored = repo.snapshot();
+        assert_eq!(restored.summary.id, started.id);
+        let finished = repo.resolve("resolved\n");
+        assert!(finished.can_auto_close);
+        let disk = read_snapshot(&directory, &started.id).unwrap();
+        assert_eq!(disk.summary.state, "completed");
+        assert_eq!(
+            disk.nodes
+                .iter()
+                .filter(|node| node.event.kind == "conflict")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn revert_conflict_records_the_original_postimage_as_its_base() {
+        let repo = Repo::new();
+        repo.save("note", "original change\n", "original");
+        let original = repo.git(&["rev-parse", "HEAD"]);
+        repo.save("note", "later change\n", "later");
+        let target = repo.git(&["rev-parse", "HEAD"]);
+        let started = repo.run(Mutation::Revert {
+            rev: original.clone(),
+        });
+        assert_eq!(started.state, "conflict");
+        let snapshot = repo.snapshot();
+        let round = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.event.kind == "conflict")
+            .unwrap();
+        assert_eq!(round.event.source.as_ref().unwrap().id, original);
+        assert_eq!(round.event.base.as_ref().unwrap().id, original);
+        assert_eq!(round.event.target.as_ref().unwrap().id, target);
+        assert_eq!(
+            round.event.files[0].base,
+            repo.git(&["rev-parse", &format!("{original}:note")])
+        );
+        repo.run(Mutation::Abort);
+    }
+
+    #[test]
+    fn skip_and_abort_are_retained_as_distinct_outcomes() {
+        let repo = Repo::new();
+        repo.git(&["branch", "remote"]);
+        repo.save("note", "local\n", "local");
+        repo.git(&["checkout", "remote"]);
+        repo.save("note", "remote\n", "remote");
+        repo.git(&["checkout", "main"]);
+        repo.run(Mutation::Rebase {
+            onto: "remote".into(),
+            autostash: true,
+        });
+        let skipped = repo.run(Mutation::Skip);
+        assert!(skipped.can_auto_close);
+        assert!(repo
+            .snapshot()
+            .nodes
+            .iter()
+            .any(|node| node.event.kind == "conflict" && node.event.state == "skipped"));
+        repo.save("note", "local again\n", "again");
+        repo.git(&["checkout", "remote"]);
+        repo.save("note", "remote again\n", "remote again");
+        repo.git(&["checkout", "main"]);
+        repo.run(Mutation::Rebase {
+            onto: "remote".into(),
+            autostash: true,
+        });
+        let aborted = repo.run(Mutation::Abort);
+        assert_eq!(aborted.state, "aborted");
+        assert!(!aborted.can_auto_close);
+    }
+
+    #[test]
+    fn interrupted_write_is_not_left_running_after_recovery() {
+        let repo = Repo::new();
+        let request = Mutation::Reset {
+            rev: "HEAD".into(),
+            mode: awegit_git::ResetMode::Soft,
+        };
+        let session = begin(&repo.0, &request).unwrap();
+        let id = session.data.lock().unwrap().snapshot.summary.id.clone();
+        sessions()
+            .lock()
+            .unwrap()
+            .remove(&directory(&repo.0).unwrap());
+        let recovered = repo.snapshot();
+        assert_eq!(recovered.summary.id, id);
+        assert_eq!(recovered.summary.state, "failed");
+        assert!(!recovered.summary.can_auto_close);
+        assert!(recovered
+            .nodes
+            .iter()
+            .any(|node| node.event.state == "interrupted"));
+        assert!(!recovered
+            .nodes
+            .iter()
+            .any(|node| node.event.state == "running"));
+    }
+
+    #[test]
+    fn failed_push_and_following_pull_keep_separate_linked_histories() {
+        let repo = Repo::new();
+        let push = || Mutation::Push {
+            remote: None,
+            set_upstream: false,
+            tags: false,
+            force_with_lease: false,
+            force: false,
+        };
+        let failed = repo.run(push());
+        assert_eq!(failed.state, "failed");
+        assert!(!failed.can_auto_close);
+        let pulled = repo.run(Mutation::Pull {
+            rebase: false,
+            autostash: true,
+        });
+        assert_ne!(pulled.id, failed.id);
+        assert_eq!(pulled.kind, "pull");
+        assert_eq!(pulled.previous, failed.id);
+        let retried = repo.run(push());
+        assert_ne!(retried.id, pulled.id);
+        assert_eq!(retried.kind, "push");
+        assert_eq!(retried.previous, pulled.id);
+    }
+
+    #[test]
+    fn retention_removes_only_expired_finished_workflows() {
+        let repo = Repo::new();
+        let summary = repo.run(Mutation::Reset {
+            rev: "HEAD".into(),
+            mode: awegit_git::ResetMode::Soft,
+        });
+        let directory = directory(&repo.0).unwrap();
+        let mut ended = summary.clone();
+        ended.ended_at = Some(1);
+        ended.started_at = 1;
+        fs::write(
+            directory.join(format!("{}.json", ended.id)),
+            serde_json::to_vec(&ended).unwrap(),
+        )
+        .unwrap();
+        let mut active = ended.clone();
+        active.id = "100-1-2".into();
+        active.state = "conflict".into();
+        active.ended_at = None;
+        fs::write(
+            directory.join("100-1-2.json"),
+            serde_json::to_vec(&active).unwrap(),
+        )
+        .unwrap();
+        prune(&directory, 3, 4 * 86_400_000);
+        assert!(!directory.join(format!("{}.jsonl", ended.id)).exists());
+        assert!(directory.join("100-1-2.json").exists());
+    }
+}

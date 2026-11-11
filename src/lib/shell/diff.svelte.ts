@@ -1306,12 +1306,13 @@ export async function applyLineOps(shell: ShellState, action: "stageLine" | "dis
         return at == null ? [] : [{ text: shell.lineText(entry.line), addition: entry.line.kind === "add", at }];
       });
       if (lines.length === 0) return;
-      const value = await invoke<StatusSnapshot & { output?: string }>("mutate", {
+      const value = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", {
         path,
         request: action === "stageLine"
           ? { action: "stageLines", file, lines, unstage }
           : { action: "discardLines", file, lines },
       });
+      if (value.outcome === "failed") throw new Error(value.error || value.log);
       if (shell.viewing(path)) {
         shell.applySnapshot(value);
         await shell.loadDiff();

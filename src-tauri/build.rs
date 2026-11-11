@@ -16,6 +16,8 @@ fn main() {
             "show_commit_file",
             "in_progress",
             "mutate",
+            "operation_flow",
+            "operation_history",
             "file_history",
             "blame_file",
             "load_settings",
