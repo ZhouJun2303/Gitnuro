@@ -601,6 +601,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draftUser = "AweGit Lab <lab@example.com>";
       break;
     case "continue":
+      shell.editContinue = true;
       shell.draft = "继续变基并保留说明";
       break;
     case "gitignore":

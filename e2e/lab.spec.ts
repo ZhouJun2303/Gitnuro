@@ -215,7 +215,12 @@ test("a paused rebase turns the composer into continue", async ({ page }) => {
   await expect(button).toContainText(/Continue Rebase|继续变基/);
   await expect(page.locator(".composer .convention-hint")).toContainText(/continue here|点这里继续/);
   await button.click();
-  await expect(page.locator('[data-dialog="continue"]')).toBeVisible();
+  const dialog = page.locator('[data-dialog="continue"]');
+  await expect(dialog).toBeVisible();
+  const message = dialog.locator('input:not([type="checkbox"])');
+  await expect(message).toHaveCount(0);
+  await dialog.locator('input[type="checkbox"]').check();
+  await expect(message).toBeVisible();
 });
 
 test("menu rows keep their full height", async ({ page }) => {

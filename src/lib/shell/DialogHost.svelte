@@ -180,7 +180,7 @@
           else if (shell.dialog === "reword") void shell.mutate({ action: "reword", rev: shell.draftExtra || "HEAD", summary: shell.draft });
           else if (shell.dialog === "rebase" && shell.selectedCommit) void shell.mutate({ action: "rebaseInteractive", onto: shell.selectedCommit, drop: [], steps: buildRebaseSteps(shell.rebaseSteps, shell.rebasePicked), autostash: true, updateRefs: shell.updateRefs });
           else if (shell.dialog === "merge") void shell.mutate({ action: "merge", name: shell.draft, squash: shell.draftExtra === "squash", noFf: shell.draftExtra === "no-ff", autostash: true, summary: shell.mergeSummary, description: shell.mergeBody });
-          else if (shell.dialog === "continue") void shell.mutate({ action: "continue", message: shell.draft }).then(() => shell.settlePendingRetry());
+          else if (shell.dialog === "continue") void shell.mutate({ action: "continue", message: shell.editContinue ? shell.draft : "" }).then(() => shell.settlePendingRetry());
           else if (shell.dialog === "repo") {
             try {
               await invoke("set_repo_author", { path: shell.repoPath(), name: shell.draft, email: shell.draftExtra });
@@ -692,7 +692,8 @@
             <p class="empty">{shell.tr("dialog.continueCurrent", { author: shell.continueDetail.author, summary: shell.continueDetail.summary })}</p>
           {/if}
           <p class="empty">{shell.tr("dialog.continueHint")}</p>
-          <label>{shell.tr("dialog.continueMessage")}<input bind:value={shell.draft} /></label>
+          <label class="check"><input type="checkbox" bind:checked={shell.editContinue} /> {shell.tr("dialog.continueEdit")}</label>
+          {#if shell.editContinue}<label>{shell.tr("dialog.continueMessage")}<input bind:value={shell.draft} /></label>{/if}
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.continueAction")}</button>

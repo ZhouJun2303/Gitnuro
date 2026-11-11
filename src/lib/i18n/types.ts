@@ -691,6 +691,7 @@ export type Messages = {
     continueRebase: string;
     continueCurrent: string;
     continueHint: string;
+    continueEdit: string;
     continueMessage: string;
     continueAction: string;
     commandOutput: string;

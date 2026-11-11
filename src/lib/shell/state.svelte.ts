@@ -617,6 +617,10 @@ export class ShellState {
   continueDetail = $state<{ author: string; summary: string } | null>(null);
 
 
+  /** The continue dialog hides its message field until the user asks to edit it. */
+  editContinue = $state(false);
+
+
   mergeProgressAutoSummary = $state("");
 
 
@@ -3256,6 +3260,7 @@ export class ShellState {
   /** Show which commit the paused rebase is replaying before asking for a message. */
   async openContinue() {
     this.draft = "";
+    this.editContinue = false;
     this.continueDetail = null;
     this.dialog = "continue";
     if (this.mode !== "live") return;
