@@ -630,6 +630,24 @@ test("remote-only commits stay dimmed and regular", async ({ page }) => {
   expect(await subject.evaluate((node) => getComputedStyle(node).opacity)).toBe("0.55");
 });
 
+test("tags render as chips after branch refs and before the subject", async ({ page }) => {
+  await openLabScene(page, "history", ".history .commit-row");
+  await page.locator('.sidebar button[title="v2.0.0"]').click();
+  const row = page.locator(".history .commit-row").filter({ has: page.locator(".ref.tag") }).first();
+  await expect(row.locator(".ref.tag .ref-icon").first()).toBeVisible();
+  const layout = await row.evaluate((node) => {
+    const copy = node.querySelector(".commit-copy")!;
+    const lane = node.querySelector(".lane-names")!.getBoundingClientRect();
+    const tag = node.querySelector(".ref.tag")!.getBoundingClientRect();
+    const order = [...copy.children].map((child) => child.className);
+    return { order, laneRight: lane.right, tagLeft: tag.left, tagRight: tag.right, subjectLeft: node.querySelector(".subject")!.getBoundingClientRect().left };
+  });
+  expect(layout.order.indexOf("lane-names")).toBeLessThan(layout.order.indexOf("badges"));
+  expect(layout.order.indexOf("badges")).toBeLessThan(layout.order.indexOf("subject"));
+  expect(layout.tagLeft).toBeGreaterThanOrEqual(layout.laneRight);
+  expect(layout.tagRight).toBeLessThanOrEqual(layout.subjectLeft);
+});
+
 test("context menu arrows stay in the menu and restore focus", async ({ page }) => {
   await openLabScene(page, "history", ".history .commit-row");
   const row = page.locator(".history .commit-row").nth(2);

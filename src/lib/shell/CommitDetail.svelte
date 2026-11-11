@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getShell } from "./context";
   import StashPlates from "./StashPlates.svelte";
+  import RefChip from "./RefChip.svelte";
   import BinaryDiff from "./BinaryDiff.svelte";
   import "./CommitDetail.css";
   import SplitHandle from "../SplitHandle.svelte";
@@ -82,8 +83,9 @@
                     </div>
                   {/if}
                   {#if shell.commitRefs().length > 0}
+                    {@const refs = [...shell.branchRefLabels(shell.commitRefs()), ...shell.plainRefLabels(shell.commitRefs())]}
                     <div class="fork-row"><span class="k">{shell.tr("chrome.refsLabel")}</span>
-                      {#each shell.commitRefs() as label (label)}<span class="ref {shell.refKind(label)}" class:compact={shell.settings.compactBranchLabels}>{label}</span>{/each}
+                      {#each refs as label (label)}<RefChip {label} kind={shell.refKind(label)} compact={shell.settings.compactBranchLabels} />{/each}
                     </div>
                   {/if}
                   {#if plate}

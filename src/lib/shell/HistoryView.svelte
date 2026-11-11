@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getShell } from "./context";
   import StashPlates from "./StashPlates.svelte";
+  import RefChip from "./RefChip.svelte";
   import "./HistoryView.css";
   import SplitHandle from "../SplitHandle.svelte";
   import CommitDetail from "./CommitDetail.svelte";
@@ -110,15 +111,15 @@
                     {@render laneGraph(graphRow, commit.id)}
                     <span class="commit-copy">
                       {@render branchChips(shell.branchRefLabels(commit.refs), tone, activeColor)}
+                      {#if shell.plainRefLabels(commit.refs).length > 0}
+                        <span class="badges">
+                          {#each shell.plainRefLabels(commit.refs) as label (label)}<RefChip {label} kind={shell.refKind(label)} compact={shell.settings.compactBranchLabels} />{/each}
+                        </span>
+                      {/if}
                       {#if plate}
                         <StashPlates branch={plate.branch} message={plate.message} />
                       {:else}
                         <span class="subject">{@render linked(commit.summary)}</span>
-                      {/if}
-                      {#if shell.plainRefLabels(commit.refs).length > 0}
-                        <span class="badges">
-                          {#each shell.plainRefLabels(commit.refs) as label (label)}<span class="ref {shell.refKind(label)}" class:compact={shell.settings.compactBranchLabels}>{label}</span>{/each}
-                        </span>
                       {/if}
                     </span>
                     <span class="commit-side">
@@ -162,15 +163,15 @@
                   {@render laneGraph(graphRow, commit.id)}
                   <span class="commit-copy">
                     {@render branchChips(shell.branchRefLabels(commit.badges), tone, activeColor)}
+                    {#if shell.plainRefLabels(commit.badges).length > 0}
+                      <span class="badges">
+                        {#each shell.plainRefLabels(commit.badges) as label (label)}<RefChip {label} kind={shell.refKind(label)} compact={shell.settings.compactBranchLabels} />{/each}
+                      </span>
+                    {/if}
                     {#if plate}
                       <StashPlates branch={plate.branch} message={plate.message} />
                     {:else}
                       <span class="subject">{@render linked(commit.summary)}</span>
-                    {/if}
-                    {#if shell.plainRefLabels(commit.badges).length > 0}
-                      <span class="badges">
-                        {#each shell.plainRefLabels(commit.badges) as label (label)}<span class="ref {shell.refKind(label)}" class:compact={shell.settings.compactBranchLabels}>{label}</span>{/each}
-                      </span>
                     {/if}
                   </span>
                   <span class="commit-side">
