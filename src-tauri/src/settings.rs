@@ -101,7 +101,8 @@ pub struct Settings {
     pub force_with_lease: bool,
     #[serde(default = "default_true")]
     pub ai_enabled: bool,
-    #[serde(default)]
+    /// Language of AI commit messages: `zh` or `en`. Chinese is the default.
+    #[serde(default = "ai_language_default")]
     pub ai_language: String,
     #[serde(default = "ai_max")]
     pub ai_max_chars: u32,
@@ -422,6 +423,9 @@ fn sign_off_format() -> String {
 fn ai_max() -> u32 {
     12_000
 }
+fn ai_language_default() -> String {
+    "zh".into()
+}
 fn prompt_style() -> String {
     "short".into()
 }
@@ -528,7 +532,7 @@ impl Default for Settings {
             sign_off_format: sign_off_format(),
             force_with_lease: true,
             ai_enabled: true,
-            ai_language: String::new(),
+            ai_language: ai_language_default(),
             ai_max_chars: ai_max(),
             ai_prompt: String::new(),
             ai_prompt_style: prompt_style(),
@@ -1519,6 +1523,12 @@ mod tests {
     fn missing_commit_type_stays_feat() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings.commit_type, "feat");
+    }
+
+    #[test]
+    fn missing_ai_language_defaults_to_chinese() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.ai_language, "zh");
     }
 
     #[test]

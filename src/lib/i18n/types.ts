@@ -99,6 +99,7 @@ export type Messages = {
     suggestNeedKey: string;
     suggestNeedUrl: string;
     suggestEmpty: string;
+    suggestLanguage: string;
     suggestFormat: string;
     commitAndPush: string;
     commit: string;

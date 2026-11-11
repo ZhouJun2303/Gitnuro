@@ -2025,7 +2025,7 @@ fn encode_query(text: &str) -> String {
 }
 
 #[tauri::command]
-fn suggest_commit_message(path: Option<String>, style: Option<String>, language: Option<String>) -> Result<ai::Suggestion, String> {
+fn suggest_commit_message(path: Option<String>, style: Option<String>) -> Result<ai::Suggestion, String> {
     let repo = repo_from(path)?;
     let mut values = settings::load()?;
     if let Some(style) = style.as_deref().map(str::trim).filter(|style| !style.is_empty()) {
@@ -2036,9 +2036,6 @@ fn suggest_commit_message(path: Option<String>, style: Option<String>, language:
                 "short".to_string()
             };
         }
-    }
-    if let Some(language) = language.as_deref().map(str::trim).filter(|language| !language.is_empty()) {
-        values.ai_language = language.to_string();
     }
     http::with_net(http::NetOptions::from_settings(&values), || ai::suggest(&repo, &values))
 }

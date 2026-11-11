@@ -369,7 +369,12 @@
             <div class="pref-section">
               <div class="k">{shell.tr("dialog.ai")}</div>
               <label class="check"><input type="checkbox" bind:checked={shell.settings.aiEnabled} /> {shell.tr("dialog.aiEnabled")}</label>
-              <label>{shell.tr("dialog.aiLanguage")} <input bind:value={shell.settings.aiLanguage} placeholder="English" /></label>
+              <label>{shell.tr("dialog.aiLanguage")}
+                <select bind:value={shell.settings.aiLanguage}>
+                  <option value="zh">{shell.tr("dialog.chinese")}</option>
+                  <option value="en">{shell.tr("dialog.english")}</option>
+                </select>
+              </label>
               <label>{shell.tr("dialog.aiMaxChars")} <input type="number" bind:value={shell.settings.aiMaxChars} /></label>
               <label>{shell.tr("dialog.promptExtra")} <input bind:value={shell.settings.aiPrompt} placeholder={shell.tr("dialog.promptExtra")} /></label>
               <label>{shell.tr("dialog.aiTemperature")} <input type="number" step="0.1" bind:value={shell.settings.aiTemperature} /></label>

@@ -191,7 +191,7 @@ export class ShellState {
     signOffFormat: "Signed-off-by: %user <%email>",
     forceWithLease: true,
     aiEnabled: true,
-    aiLanguage: "",
+    aiLanguage: "zh",
     aiMaxChars: 12000,
     aiPrompt: "",
     aiPromptStyle: "short",
@@ -3262,6 +3262,10 @@ export class ShellState {
     if (recovered) this.settings = { ...this.settings, recoveryNotice: "" };
     if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
     if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
+    if (this.settings.aiLanguage !== "zh" && this.settings.aiLanguage !== "en") {
+      const legacy = this.settings.aiLanguage.trim();
+      this.settings = { ...this.settings, aiLanguage: /^(en|english)$/i.test(legacy) ? "en" : "zh" };
+    }
     if (this.settings.aiPromptStyle !== "long") this.settings = { ...this.settings, aiPromptStyle: "short" };
     if (!isCommitType(this.settings.commitType)) this.settings = { ...this.settings, commitType: this.preferredCommitType() };
     if (!this.settings.errorLogDays) this.settings = { ...this.settings, errorLogDays: 7 };

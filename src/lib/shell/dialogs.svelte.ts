@@ -597,6 +597,7 @@ function explainSuggest(shell: ShellState, error: unknown) {
     if (text.startsWith("Add an API key")) return shell.tr("chrome.suggestNeedKey");
     if (text.startsWith("Set an API base URL")) return shell.tr("chrome.suggestNeedUrl");
     if (text.startsWith("The model returned an empty")) return shell.tr("chrome.suggestEmpty");
+    if (text.startsWith("The model did not reply in")) return shell.tr("chrome.suggestLanguage");
     if (text.startsWith("The model reply does not match")) {
       const detail = text.slice("The model reply does not match the commit format:".length).trim();
       const reason = shell.tr("chrome.suggestFormat");
@@ -677,10 +678,9 @@ export async function suggestMessage(shell: ShellState) {
     }
     const style = shell.settings.aiPromptStyle === "long" ? "long" : "short";
     const styleName = shell.tr(style === "long" ? "chrome.promptLong" : "chrome.promptShort");
-    const language = shell.settings.aiLanguage.trim() || (shell.activeLocale === "zh" ? "中文" : "English");
     shell.startWork(shell.tr("chrome.suggestGenerate", { style: styleName }), path);
     try {
-      const value = await invoke<Suggestion>("suggest_commit_message", { path, style, language });
+      const value = await invoke<Suggestion>("suggest_commit_message", { path, style });
       if (shell.viewing(path)) {
         shell.applySubject(value.summary);
         shell.description = withoutRepeatedSubject(value.description, shell.commitType, shell.summary);
