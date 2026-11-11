@@ -80,6 +80,12 @@ async function showCommitBySummary(shell: ShellState, summary: string) {
 }
 
 async function fillSurface(shell: ShellState, id: string) {
+  if (id === "contextual-diff") return showChange(shell, "sample.ts", "unstaged");
+  if (id === "contextual-history") {
+    await showHistory(shell);
+    await shell.openHistoryTab("changes");
+    return;
+  }
   if (id === "sync-busy") {
     const path = shell.repoPath() ?? "";
     shell.jobs = { ...shell.jobs, [shell.jobKey(path)]: { label: "pull", percent: 42, depth: 1 } };

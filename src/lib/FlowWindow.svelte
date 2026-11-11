@@ -1,4 +1,6 @@
 <script lang="ts">
+  import PreferenceControls from "./PreferenceControls.svelte";
+  import { onPreferenceChange, savePreferencePatch, normalizePreferences, preferenceKeys, type PreferencePatch } from "./preferences";
   import { onMount, tick, untrack } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -17,6 +19,42 @@
   let selectedId = $state("");
   let live = $state(false);
   let autoClose = $state(false);
+  let flowSettings = $state<Settings | null>(null);
+  let savedFlow: Settings | null = null;
+  let flowRevision = 0;
+  const pendingFlow = new Map<string, number>();
+  let flowSave = Promise.resolve();
+  function receiveFlowPreferences(patch: PreferencePatch) {
+    if (!flowSettings) return;
+    if (savedFlow) savedFlow = { ...savedFlow, ...patch };
+    const available = Object.fromEntries(Object.entries(patch).filter(([key]) => !pendingFlow.has(key)));
+    flowSettings = { ...flowSettings, ...available };
+    autoClose = flowSettings.flowAutoClose;
+  }
+  function updateFlowPreferences(update: PreferencePatch) {
+    if (!flowSettings) return;
+    const patch = normalizePreferences(update), revision = ++flowRevision;
+    for (const key of Object.keys(patch)) pendingFlow.set(key, revision);
+    flowSettings = { ...flowSettings, ...patch };
+    autoClose = flowSettings.flowAutoClose;
+    flowSave = flowSave.then(async () => {
+      try {
+        const saved = await savePreferencePatch(patch);
+        for (const key of Object.keys(saved)) if (pendingFlow.get(key) === revision) pendingFlow.delete(key);
+        receiveFlowPreferences(saved);
+        error = "";
+      } catch (cause) {
+        const rollback: PreferencePatch = {};
+        for (const key of preferenceKeys) {
+          if (patch[key] === undefined || pendingFlow.get(key) !== revision) continue;
+          pendingFlow.delete(key);
+          Object.assign(rollback, { [key]: savedFlow?.[key] });
+        }
+        receiveFlowPreferences(rollback);
+        error = `${translate(locale, "chrome.preferenceSaveFailed")} ${String(cause)}`;
+      }
+    });
+  }
   let retainOpen = $state(false);
   let closed = $state(false);
   let summary = $state.raw<FlowSummary | null>(null);
@@ -161,6 +199,7 @@
   });
 
   onMount(() => {
+    const stopPreferences = onPreferenceChange(receiveFlowPreferences);
     const stopLocale = onLocaleChange((setting) => { locale = resolveLocale(setting); });
     const media = matchMedia("(prefers-color-scheme: dark)");
     const paint = () => {
@@ -189,6 +228,8 @@
     const boot = async () => {
       try {
         const settings = await invoke<Settings>("load_settings");
+        flowSettings = settings;
+        savedFlow = settings;
         autoClose = settings.flowAutoClose === true;
         locale = scene ? params.get("locale") === "en" ? "en" : "zh" : resolveLocale(settings.locale);
         appearance = scene && isAppearance(params.get("theme")) ? params.get("theme")! : settings.theme;
@@ -224,13 +265,13 @@
     void boot();
     const refreshAutoClose = () => {
       void invoke<Settings>("load_settings").then((settings) => {
-        if (!disposed) autoClose = settings.flowAutoClose === true;
+        if (!disposed) receiveFlowPreferences({ flowAutoOpen: settings.flowAutoOpen, flowAutoClose: settings.flowAutoClose, flowHistoryDays: settings.flowHistoryDays });
       }).catch((cause) => { if (!disposed) error = String(cause); });
     };
     window.addEventListener("focus", refreshAutoClose);
     const poll = setInterval(() => { if (!document.hidden) void refresh(); }, 1000);
     const historyPoll = setInterval(() => { if (!document.hidden) void loadHistory(); }, 10_000);
-    return () => { disposed = true; generation++; stopLocale(); stopAppearance(); media.removeEventListener("change", paint); window.removeEventListener("keydown", onLanguageShortcut); clearInterval(poll); clearInterval(historyPoll); cancelAnimationFrame(scrollFrame); window.removeEventListener("focus", refreshAutoClose); unlisten.forEach((off) => off()); };
+    return () => { disposed = true; generation++; stopPreferences(); stopLocale(); stopAppearance(); media.removeEventListener("change", paint); window.removeEventListener("keydown", onLanguageShortcut); clearInterval(poll); clearInterval(historyPoll); cancelAnimationFrame(scrollFrame); window.removeEventListener("focus", refreshAutoClose); unlisten.forEach((off) => off()); };
   });
 </script>
 
@@ -250,6 +291,7 @@
     </select></label>
     <span class="flow-badge" data-state={summary?.state}>{stateSymbol(summary?.state ?? "planned")} {label(summary?.state ?? "planned")}</span>
   </header>
+  {#if flowSettings}<PreferenceControls values={flowSettings} keys={["flowAutoOpen", "flowAutoClose", "flowHistoryDays"]} tr={(key) => translate(locale, key)} onchange={updateFlowPreferences} />{/if}
   <div class="flow-meta"><span>{tr("observerHint")}</span><span>{tr("progress", { done: String(completed), total: String(graph.length) })}</span></div>
   {#if error}<div class="flow-error" role="alert">{error}</div>{/if}
   {#if summary?.recordingError}<div class="flow-error" role="alert">{tr("recording", { error: summary.recordingError })}</div>{/if}

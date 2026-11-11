@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PreferenceToolbar from "./shell/PreferenceToolbar.svelte";
   import { setShell } from "./shell/context";
   import Chrome from "./shell/Chrome.svelte";
   import Welcome from "./shell/Welcome.svelte";
@@ -873,6 +874,7 @@
           <button type="button" class:on={shell.commandFilter === "errors"} class:alert={shell.recentErrors.length > 0} onclick={() => shell.showCommandFilter("errors")}>{shell.tr("chrome.commandErrors")}{#if shell.recentErrors.length > 0}<em>{shell.recentErrors.length}</em>{/if}</button>
           <button type="button" class:on={shell.commandFilter === "notices"} onclick={() => shell.showCommandFilter("notices")}>{shell.tr("chrome.commandNotices")}{#if shell.statusNotices.length > 0}<em>{shell.statusNotices.length}</em>{/if}</button>
         </div>
+        <PreferenceToolbar keys={["errorLogDays"]} />
         <div class="command-items">
           {#each shell.visibleCommands() as item (item.id)}
             <button class="command-item" class:current={item.id === shell.commandPick} class:failed={!item.ok} class:notice={!!item.noticeId} type="button" onclick={() => (shell.commandPick = item.id)}>

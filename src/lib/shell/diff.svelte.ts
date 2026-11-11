@@ -1,4 +1,5 @@
 import { invoke } from "../perf";
+import { restoreDiffReading } from "./diffReading";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
 import { branchGroup, changedRanges, commitGraph, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
@@ -252,6 +253,7 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
       });
       if (token === shell.diffToken && shell.viewing(path)) {
         if (!shell.same(shell.diff, value)) shell.diff = value;
+        restoreDiffReading(shell, file);
         shell.diffError = null;
         if (value.binary) {
           const preview = await invoke<FilePreview | null>("file_preview", { path, file });
@@ -291,21 +293,13 @@ export function pairSetting(shell: ShellState, list: string[], path: string, val
   }
 
 export function setLayout(shell: ShellState, next: "list" | "tree" | "combined") {
-    shell.settings = { ...shell.settings, fileLayout: next, treeFiles: next === "tree" };
-    void shell.savePrefs(false);
+    void shell.updatePreferences({ fileLayout: next });
   }
 
 export async function toggleFakeIgnore(shell: ShellState) {
-    shell.settings = { ...shell.settings, fakeIgnore: shell.settings.fakeIgnore === false };
-    await shell.savePrefs(false);
-    if (shell.mode !== "live") return;
-    try {
-      shell.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path: shell.repoPath() }));
-      await shell.loadDiff();
-    } catch (error) {
-      shell.actionError = shell.message(error);
-    }
+    await shell.updatePreferences({ fakeIgnore: shell.settings.fakeIgnore === false });
   }
+
 
 export function openFileView(shell: ShellState, event: MouseEvent) {
     event.stopPropagation();
@@ -600,7 +594,7 @@ export function markedLine(shell: ShellState, text: string, other: string, path:
 
 export function patchOf(shell: ShellState, file: string) {
     shell.patchVersion;
-    return shell.patchCache[file] ?? (shell.historyDiff?.path === file ? shell.historyDiff : null);
+    return shell.patchCache[file] ?? shell.stalePatchCache[file] ?? (shell.historyDiff?.path === file ? shell.historyDiff : null);
   }
 
 export function pickedIn(shell: ShellState, rows: Row[]) {
@@ -1122,7 +1116,7 @@ export function normalPath(shell: ShellState, path: string) {
   }
 
 export function lineText(shell: ShellState, line: DiffLine) {
-    return line.text.startsWith("+") || line.text.startsWith("-") || line.text.startsWith(" ")
+    return line.kind !== "meta" && line.kind !== "hunk" && /^[+ -]/.test(line.text)
       ? line.text.slice(1)
       : line.text;
   }

@@ -184,11 +184,11 @@
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecDate")}</h3>
           <div class="pref-card-body">
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.dateRelative} />
+              <input type="checkbox" checked={shell.settings.dateRelative} data-preference="dateRelative" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ dateRelative: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.dateRelative")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.date24h} />
+              <input type="checkbox" checked={shell.settings.date24h} data-preference="date24h" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ date24h: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.date24")}</span>
             </label>
             <label class="pref-row wide">
@@ -206,23 +206,23 @@
               <span class="pref-label">{shell.tr("dialog.workspaceTitle")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.tabIndicator} />
+              <input type="checkbox" checked={shell.settings.tabIndicator} data-preference="tabIndicator" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ tabIndicator: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.tabIndicator")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.verticalTabs} />
+              <input type="checkbox" checked={shell.settings.verticalTabs} data-preference="verticalTabs" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ verticalTabs: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.verticalTabs")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.compactBranchLabels} />
+              <input type="checkbox" checked={shell.settings.compactBranchLabels} data-preference="compactBranchLabels" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ compactBranchLabels: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.compactLabels")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.treeFiles} />
+              <input type="checkbox" checked={shell.settings.treeFiles} data-preference="treeFiles" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ treeFiles: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("chrome.treeView")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.swapPanes} />
+              <input type="checkbox" checked={shell.settings.swapPanes} data-preference="swapPanes" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ swapPanes: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.swapPanes")}</span>
             </label>
           </div>
@@ -236,11 +236,11 @@
               <span class="pref-control">
                 <span class="pref-segment">
                   <label class="check">
-                    <input type="radio" name="commit-sort" value="topo" checked={shell.settings.commitSort === "topo"} onchange={() => { shell.settings.commitSort = "topo"; if (shell.mode === "live") void shell.loadContext(); }} />
+                    <input type="radio" name="commit-sort" value="topo" checked={shell.settings.commitSort === "topo"} onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ commitSort: "topo" }); }} />
                     {shell.tr("dialog.topologically")}
                   </label>
                   <label class="check">
-                    <input type="radio" name="commit-sort" value="date" checked={shell.settings.commitSort !== "topo"} onchange={() => { shell.settings.commitSort = "date"; if (shell.mode === "live") void shell.loadContext(); }} />
+                    <input type="radio" name="commit-sort" value="date" checked={shell.settings.commitSort !== "topo"} onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ commitSort: "date" }); }} />
                     {shell.tr("dialog.byDate")}
                   </label>
                 </span>
@@ -249,7 +249,7 @@
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.maxCommits")}</span>
               <span class="pref-control">
-                <input type="number" min="50" max="100000" bind:value={shell.settings.maxCommits} onchange={() => { shell.settings.maxCommits = Math.min(100000, Math.max(50, Math.round(shell.settings.maxCommits || 500))); shell.logLimit = shell.settings.maxCommits; if (shell.mode === "live") void shell.loadContext(); }} />
+                <input type="number" min="50" max="100000" value={shell.settings.maxCommits} data-preference="maxCommits" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ maxCommits: event.currentTarget.valueAsNumber }); }} />
               </span>
             </label>
           </div>
@@ -283,7 +283,7 @@
               <span class="pref-control"><input type="number" min="1" max="20" bind:value={shell.settings.scanDepth} /></span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.showWorktrees} />
+              <input type="checkbox" checked={shell.settings.showWorktrees} data-preference="showWorktrees" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ showWorktrees: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.showWorktrees")}</span>
             </label>
           </div>
@@ -304,32 +304,32 @@
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecDiffDisplay")}</h3>
           <div class="pref-card-body">
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.showDiffMarks} />
+              <input type="checkbox" checked={shell.settings.showDiffMarks} data-preference="showDiffMarks" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ showDiffMarks: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.showMarks")}</span>
             </label>
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.fontSize")}</span>
-              <span class="pref-control"><input type="number" min="8" max="32" bind:value={shell.settings.diffFontSize} /></span>
+              <span class="pref-control"><input type="number" min="8" max="32" value={shell.settings.diffFontSize} data-preference="diffFontSize" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ diffFontSize: event.currentTarget.valueAsNumber }); }} /></span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.disableSyntaxHighlight} />
+              <input type="checkbox" checked={shell.settings.disableSyntaxHighlight} data-preference="disableSyntaxHighlight" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ disableSyntaxHighlight: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.disableHighlight")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.diffWordWrap} />
+              <input type="checkbox" checked={shell.settings.diffWordWrap} data-preference="diffWordWrap" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ diffWordWrap: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.wordWrap")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.ignoreSpace} />
+              <input type="checkbox" checked={shell.settings.ignoreSpace} data-preference="ignoreSpace" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ ignoreSpace: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.ignoreSpace")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.showWhitespace} />
+              <input type="checkbox" checked={shell.settings.showWhitespace} data-preference="showWhitespace" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ showWhitespace: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.showSpace")}</span>
             </label>
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.diffContext")}</span>
-              <span class="pref-control"><input type="number" min="0" max="100" bind:value={shell.settings.diffContext} /></span>
+              <span class="pref-control"><input type="number" min="0" max="100" value={shell.settings.diffContext} data-preference="diffContext" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ diffContext: event.currentTarget.valueAsNumber }); }} /></span>
             </label>
           </div>
         </section>
@@ -340,7 +340,7 @@
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.diffStyle")}</span>
               <span class="pref-control">
-                <select data-pref="diff-style" bind:value={shell.settings.diffStyle}>
+                <select data-pref="diff-style" value={shell.settings.diffStyle} data-preference="diffStyle" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ diffStyle: event.currentTarget.value }); }}>
                   <option value="split">{shell.tr("dialog.diffSplit")}</option>
                   <option value="unified">{shell.tr("dialog.diffUnified")}</option>
                 </select>
@@ -349,14 +349,14 @@
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.linesHeight")}</span>
               <span class="pref-control">
-                <select bind:value={shell.settings.linesHeight}>
+                <select value={shell.settings.linesHeight} data-preference="linesHeight" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ linesHeight: event.currentTarget.value }); }}>
                   <option value="compact">{shell.tr("dialog.lineCompact")}</option>
                   <option value="spaced">{shell.tr("dialog.lineSpaced")}</option>
                 </select>
               </span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.showEntireFile} />
+              <input type="checkbox" checked={shell.settings.showEntireFile} data-preference="showEntireFile" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ showEntireFile: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.wholeFile")}</span>
             </label>
           </div>
@@ -399,7 +399,7 @@
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.spellChecking")}</span>
               <span class="pref-control">
-                <select bind:value={shell.settings.spellChecking}>
+                <select value={shell.settings.spellChecking} data-preference="spellChecking" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ spellChecking: event.currentTarget.value }); }}>
                   <option value="disable">{shell.tr("dialog.spellDisable")}</option>
                   <option value="enable">{shell.tr("dialog.spellEnable")}</option>
                 </select>
@@ -410,7 +410,7 @@
               <span class="pref-control"><input type="number" min="20" max="200" bind:value={shell.settings.pageGuide} /></span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.highlightIssues} />
+              <input type="checkbox" checked={shell.settings.highlightIssues} data-preference="highlightIssues" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ highlightIssues: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.issueLinks")}</span>
             </label>
           </div>
@@ -426,7 +426,7 @@
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.aiLanguage")}</span>
               <span class="pref-control">
-                <select bind:value={shell.settings.aiLanguage}>
+                <select value={shell.settings.aiLanguage} data-preference="aiLanguage" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ aiLanguage: event.currentTarget.value }); }}>
                   <option value="zh">{shell.tr("dialog.chinese")}</option>
                   <option value="en">{shell.tr("dialog.english")}</option>
                 </select>
@@ -435,7 +435,7 @@
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.promptStyle")}</span>
               <span class="pref-control">
-                <select bind:value={shell.settings.aiPromptStyle}>
+                <select value={shell.settings.aiPromptStyle} data-preference="aiPromptStyle" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ aiPromptStyle: event.currentTarget.value }); }}>
                   <option value="short">{shell.tr("dialog.promptShort")}</option>
                   <option value="long">{shell.tr("dialog.promptLong")}</option>
                 </select>
@@ -498,23 +498,23 @@
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecGitFetch")}</h3>
           <div class="pref-card-body">
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.fetchAutomatically} />
+              <input type="checkbox" checked={shell.settings.fetchAutomatically} data-preference="fetchAutomatically" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ fetchAutomatically: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.fetchAuto")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.fetchTags} />
+              <input type="checkbox" checked={shell.settings.fetchTags} data-preference="fetchTags" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ fetchTags: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.fetchTagsAlways")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.fetchAllRemotes} />
+              <input type="checkbox" checked={shell.settings.fetchAllRemotes} data-preference="fetchAllRemotes" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ fetchAllRemotes: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.fetchAllRemotes")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.fetchPrune} />
+              <input type="checkbox" checked={shell.settings.fetchPrune} data-preference="fetchPrune" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ fetchPrune: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.pruneOnFetch")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.pullRebase} />
+              <input type="checkbox" checked={shell.settings.pullRebase} data-preference="pullRebase" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ pullRebase: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.pullWithRebase")}</span>
             </label>
           </div>
@@ -524,11 +524,11 @@
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecGitPush")}</h3>
           <div class="pref-card-body">
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.pushOnCommit} />
+              <input type="checkbox" checked={shell.settings.pushOnCommit} data-preference="pushOnCommit" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ pushOnCommit: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.pushOnCommit")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.pushAllTags} />
+              <input type="checkbox" checked={shell.settings.pushAllTags} data-preference="pushAllTags" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ pushAllTags: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.pushAllTags")}</span>
             </label>
             <label class="pref-row pref-toggle">
@@ -579,7 +579,7 @@
               <span class="pref-label">{shell.tr("dialog.mergeNoFfPref")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.signCommits} />
+              <input type="checkbox" checked={shell.settings.signCommits} data-preference="signCommits" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ signCommits: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.signCommits")}</span>
             </label>
             <label class="pref-row pref-toggle">
@@ -615,7 +615,7 @@
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecLinks")}</h3>
           <div class="pref-card-body">
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.highlightIssues} />
+              <input type="checkbox" checked={shell.settings.highlightIssues} data-preference="highlightIssues" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ highlightIssues: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.issueLinks")}</span>
             </label>
           </div>
@@ -890,7 +890,7 @@
               <span class="pref-control"><input bind:value={shell.settings.authorEmail} placeholder={shell.tr("dialog.authorPlaceholder")} /></span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.gravatar} />
+              <input type="checkbox" checked={shell.settings.gravatar} data-preference="gravatar" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ gravatar: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("dialog.gravatar")}</span>
             </label>
             <div class="pref-card-actions">
@@ -935,17 +935,17 @@
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecFlow")}</h3>
           <div class="pref-card-body">
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.flowAutoOpen} />
+              <input type="checkbox" checked={shell.settings.flowAutoOpen} data-preference="flowAutoOpen" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ flowAutoOpen: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("flow.autoOpen")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.flowAutoClose} />
+              <input type="checkbox" checked={shell.settings.flowAutoClose} data-preference="flowAutoClose" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ flowAutoClose: event.currentTarget.checked }); }} />
               <span class="pref-label">{shell.tr("flow.autoClose")}</span>
             </label>
             <label class="pref-row">
               <span class="pref-label">{shell.tr("flow.historyDays")}</span>
               <span class="pref-control">
-                <input type="number" min="1" max="90" bind:value={shell.settings.flowHistoryDays} onchange={() => { shell.settings.flowHistoryDays = Math.min(90, Math.max(1, Math.round(shell.settings.flowHistoryDays || 3))); }} />
+                <input type="number" min="1" max="90" value={shell.settings.flowHistoryDays} data-preference="flowHistoryDays" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ flowHistoryDays: event.currentTarget.valueAsNumber }); }} />
               </span>
             </label>
           </div>
@@ -961,7 +961,7 @@
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.errorLogDays")}</span>
               <span class="pref-control">
-                <input type="number" min="1" max="90" bind:value={shell.settings.errorLogDays} onchange={() => { shell.settings.errorLogDays = shell.errorDays(); shell.pruneErrorLog(); }} />
+                <input type="number" min="1" max="90" value={shell.settings.errorLogDays} data-preference="errorLogDays" onchange={(event) => { event.stopPropagation(); void shell.updatePreferences({ errorLogDays: event.currentTarget.valueAsNumber }); }} />
               </span>
             </label>
             <label class="pref-row wide">

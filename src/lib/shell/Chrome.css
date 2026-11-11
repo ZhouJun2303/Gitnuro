@@ -514,3 +514,6 @@
     max-width: 100%;
   }
 }
+
+.tab-options { flex: none; }
+.tab-options .preference-toolbar { padding: 0 8px; border: 0; background: transparent; gap: 8px; }

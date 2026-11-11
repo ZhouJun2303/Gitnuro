@@ -183,6 +183,7 @@ fn layout() -> Result<Value, String> {
         "remotePush": text(root.join("remote-push.git")),
         "full": text(repos.join("full")),
         "tags": text(repos.join("tags")),
+        "preferences": text(repos.join("preferences")),
         "conflict": text(repos.join("conflict")),
         "merge": text(repos.join("merge")),
         "rebase": text(repos.join("rebase")),
@@ -291,6 +292,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             req(args, "id")?,
             req(args, "file")?,
             req(args, "unified")?,
+            req(args, "ignoreSpace")?,
         )),
         "in_progress" => done_result(super::in_progress(req(args, "path")?)),
         "file_history" => done_result(super::file_history(req(args, "path")?, req(args, "file")?, req(args, "limit")?)),
@@ -299,7 +301,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "operation_flow" => done_result(super::operation_flow(req(args, "path")?, req(args, "id")?)),
         "operation_history" => done_result(super::operation_history(req(args, "path")?, req(args, "offset")?, req(args, "limit")?)),
         "load_settings" => done_result(super::load_settings()),
-        "save_settings" => done_result(super::save_settings(req(args, "values")?)),
+        "save_settings" => done_result(super::save_settings(req(args, "values")?, req(args, "patch")?)),
         "settings_path" => done_result(super::settings_path()),
         "import_fork_settings" => {
             let path: Option<String> = req(args, "path")?;
@@ -347,6 +349,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             req(args, "to")?,
             req(args, "file")?,
             req(args, "unified")?,
+            req(args, "ignoreSpace")?,
         )),
         "set_repo_author" => done_result(super::set_repo_author(req(args, "path")?, req(args, "name")?, req(args, "email")?)),
         "revision_preview" => done_result(super::revision_preview(req(args, "path")?, req(args, "rev")?, req(args, "file")?)),

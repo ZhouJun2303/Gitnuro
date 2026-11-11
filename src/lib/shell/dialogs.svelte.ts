@@ -607,7 +607,7 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
       void shell.continueFlow();
       return;
     }
-    if (!shell.canCommit) return;
+    if (!shell.canCommit || !await shell.waitPreferences()) return;
     const messageText = shell.fullSummary.trim();
     if (!messageText) return;
     const description = isCommentary(shell.description) ? "" : shell.description;
@@ -639,8 +639,7 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
 export function togglePromptStyle(shell: ShellState, event: MouseEvent) {
     event.preventDefault();
     const aiPromptStyle = shell.settings.aiPromptStyle === "long" ? "short" : "long";
-    shell.settings = { ...shell.settings, aiPromptStyle };
-    void shell.savePrefs(false);
+    void shell.updatePreferences({ aiPromptStyle });
   }
 
 function explainSuggest(shell: ShellState, error: unknown) {
@@ -723,6 +722,7 @@ async function openAiSettings(shell: ShellState, field: "enabled" | "baseUrl" | 
   }
 
 export async function suggestMessage(shell: ShellState) {
+    if (!await shell.waitPreferences()) return;
     const path = shell.repoPath();
     if (shell.busy) return;
     shell.actionError = null;
@@ -798,6 +798,7 @@ export function applyToolSettings(shell: ShellState) {
   }
 
 export async function savePrefs(shell: ShellState, close = true) {
+    if (!await shell.waitPreferences()) return;
     shell.applyToolSettings();
     if (close) shell.dialog = null;
     if (!shell.backend()) return;

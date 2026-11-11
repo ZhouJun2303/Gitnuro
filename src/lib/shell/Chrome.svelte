@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PreferenceToolbar from "./PreferenceToolbar.svelte";
   import { getShell } from "./context";
   import { fillWorkspaceTabs } from "../status";
   import "./Chrome.css";
@@ -195,6 +196,7 @@
       </div>
     </div>
     <div class="chrome-tabs">
+      <div class="tab-options"><PreferenceToolbar keys={["verticalTabs", "tabIndicator"]} /></div>
       <div class="chrome-side tabs" use:fillTabs={shell.repos.length}>
       {#each shell.repos as repo (repo)}
         {@const job = shell.jobs[shell.jobKey(repo)]}

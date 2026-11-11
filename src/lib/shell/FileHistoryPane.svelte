@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DiffToolbar from "./DiffToolbar.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getShell } from "./context";
   import BinaryDiff from "./BinaryDiff.svelte";
@@ -123,6 +124,8 @@
         </div>
       {/if}
     </section>
+    <div class="history-diff-pane">
+    {#if !shell.historyDiff?.binary}<DiffToolbar />{/if}
     <section
       class="history-diff"
       role="group"
@@ -144,7 +147,7 @@
           {#if splitWindow.beforePx > 0}<div class="split-gap" style:height="{splitWindow.beforePx}px"></div>{/if}
           {#each splitWindow.rows as row, offset (splitWindow.start + offset)}
             {#if row.meta}
-              <div class="split-meta">{row.left}</div>
+              <div class="split-meta" data-line={row.lineIndex}>{row.left}</div>
             {:else}
               <div class="split-row">
                 {@render splitCell(row, "left")}
@@ -160,12 +163,13 @@
           <div class="commit-window" class:wrap-window={shell.settings.diffWordWrap} style:height="{shell.historyDiffWindow.height}px">
             {#each shell.historyDiffWindow.rows as line, index (`h-${shell.historyDiffWindow.start + index}`)}
               {@const at = shell.historyDiffWindow.start + index}
-              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{shell.historyDiffWindow.tops[index] ?? 0}px" style:height={shell.settings.diffWordWrap ? "auto" : `${diffRow}px`} style:line-height={shell.settings.diffWordWrap ? "1.45" : `${diffRow}px`}>{line.text}</span>
+              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} data-line={at} style:top="{shell.historyDiffWindow.tops[index] ?? 0}px" style:height={shell.settings.diffWordWrap ? "auto" : `${diffRow}px`} style:line-height={`${diffRow}px`}>{#each shell.markedLine(shell.settings.showDiffMarks ? line.text : shell.lineText(line), "", shell.historyFile ?? "") as token}<span class={token.cls}>{token.text}</span>{/each}</span>
             {/each}
           </div>
         </div>
       {/if}
     </section>
+    </div>
   </div>
 </div>
 
@@ -175,7 +179,7 @@
   {@const text = side === "left" ? row.left : row.right}
   {@const other = side === "left" ? row.right : row.left}
   {@const paired = Boolean(row.left && row.right && row.left !== row.right && (row.leftKind === "delete" || row.rightKind === "add"))}
-  <span class="split-no" class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}>{(side === "left" ? row.leftNo : row.rightNo) ?? ""}</span>
+  <span class="split-no" data-line={shell.splitLineAt(row, side) ?? undefined} class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}>{(side === "left" ? row.leftNo : row.rightNo) ?? ""}</span>
   <span class="split-code" data-side={side} class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}><span class="split-text">{#if shell.settings.showDiffMarks && kind === mark}{side === "left" ? "-" : "+"}{/if}{#each shell.markedLine(text, paired ? other : "", shell.historyDiff?.path ?? "") as token, tokenIndex (`${side}-${tokenIndex}`)}<span class={token.cls} class:intra={token.hot}>{token.text}</span>{/each}</span></span>
 {/snippet}
 
@@ -187,6 +191,7 @@
 {/snippet}
 
 <style>
+  .history-diff-pane { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
   .file-history {
     flex: 1;
     min-height: 0;

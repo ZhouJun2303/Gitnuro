@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PreferenceToolbar from "./PreferenceToolbar.svelte";
   import { onMount, tick } from "svelte";
   import { getShell } from "./context";
   import "./ChangesView.css";
@@ -150,6 +151,10 @@
 </script>
 
 <section class="changes-column" style:width="{shell.changesWidth}px">
+  <PreferenceToolbar keys={["fileLayout", "swapPanes", "fakeIgnore"]} label={shell.tr("chrome.fileLayout")}>
+    <label class="check"><input type="checkbox" checked={shell.showIgnored} onchange={() => { shell.showIgnored = !shell.showIgnored; if (shell.showIgnored) void shell.loadFacts(true, true); }} />{shell.tr("chrome.showIgnoredFiles")}</label>
+    {#if shell.conflictCount > 0}<label class="check"><input type="checkbox" checked={shell.conflictsOnly} onchange={() => shell.setConflictsOnly(!shell.conflictsOnly)} />{shell.tr("chrome.conflictsOnly")}</label>{/if}
+  </PreferenceToolbar>
         {#if shell.fileLayout === "combined"}
           <div class="status-pane unstaged-pane flex-fill">{@render combinedPane()}</div>
         {:else if !shell.settings.swapPanes}
@@ -207,15 +212,18 @@
         <SplitHandle
           direction="horizontal"
           bind:size={shell.composerHeight}
-          min={120}
+          min={250}
           max={450}
-          defaultSize={170}
+          defaultSize={270}
           reverse
           label={shell.tr("chrome.resizeComposer")}
           onchange={shell.handleLayoutChange.bind(shell)}
         />
 
         <form class="composer" style:height="{shell.composerHeight}px" onsubmit={(event) => { event.preventDefault(); if (shell.progress) void shell.continueFlow(); else void shell.submitCommit(false); }}>
+          <PreferenceToolbar keys={["pushOnCommit", "signCommits", "spellChecking"]}>
+            <label class="check" title={shell.tr("dialog.signOffRepo")}><input type="checkbox" checked={shell.signOff} disabled={shell.busy} onchange={() => shell.toggleSignOff()} />Signed-off-by</label>
+          </PreferenceToolbar>
           <div class="summary-line">
             <div class="type-picker" class:open={typeOpen}>
               <button
@@ -256,6 +264,9 @@
               {/if}
             </div>
             <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} aria-label={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength={shell.summaryRoom} aria-invalid={shell.summaryTooLong || (!shell.skipHooks && shell.summary.trim().length > 0 && !shell.summaryFitsConvention)} spellcheck={shell.settings.spellChecking === "enable"} oninput={() => shell.normalizeSummary()} />
+
+          </div>
+          <PreferenceToolbar keys={["aiPromptStyle", "aiLanguage"]} label={shell.tr("dialog.ai")}>
             <button
               class="suggest-message"
               class:long={shell.settings.aiPromptStyle === "long"}
@@ -269,7 +280,7 @@
               <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.1 9.15 5.7 13.8 6.9 9.15 8.05 8 12.7 6.85 8.05 2.2 6.9l4.65-1.2z"/></svg>
               <span>{shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}</span>
             </button>
-          </div>
+          </PreferenceToolbar>
           {#if shell.progress}
             <p class="convention-hint">{shell.tr("chrome.flowHint")}</p>
           {:else if shell.summary.trim() && !shell.skipHooks && !shell.summaryFitsConvention}
@@ -279,7 +290,7 @@
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
             <button class="text-button more" type="button" aria-label={shell.tr("chrome.more")} title={shell.tr("chrome.more")} onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>
-            <button class="commit" type="submit" disabled={shell.mode !== "live" || (shell.progress ? shell.busy || shell.conflicted : !shell.canCommit)}>{shell.busy ? shell.tr("chrome.working") : shell.progress ? shell.flowLabel() : shell.tr("chrome.commit")}</button>
+            <button class="commit" type="submit" disabled={shell.mode !== "live" || (shell.progress ? shell.busy || shell.conflicted : !shell.canCommit)}>{shell.busy ? shell.tr("chrome.working") : shell.progress ? shell.flowLabel() : shell.tr(shell.settings.pushOnCommit ? "chrome.commitAndPush" : "chrome.commit")}</button>
           </div>
         </form>
       </div>

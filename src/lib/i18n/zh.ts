@@ -1,6 +1,14 @@
 import type { Messages } from "./types";
 
 export const zh: Messages = {
+  toolbar: {
+    diffStyle: "视图", linesHeight: "行高", diffFontSize: "字号", diffContext: "上下文",
+    showEntireFile: "整个文件", diffWordWrap: "自动换行", showWhitespace: "空白符", ignoreSpace: "忽略空白",
+    showDiffMarks: "+/− 标记", disableSyntaxHighlight: "语法高亮", fileLayout: "布局", tree: "树形", list: "列表", combined: "混合",
+    swapPanes: "暂存区在上", maxCommits: "加载条数", pushOnCommit: "提交后推送", signCommits: "签名提交", spellChecking: "拼写",
+    aiPromptStyle: "生成风格", aiLanguage: "语言", flowAutoOpen: "冲突时自动打开", flowAutoClose: "成功后自动关闭",
+    flowHistoryDays: "保留天数", errorLogDays: "错误保留天数",
+  },
   flow: {
     observer: "只读观察", observerHint: "在主窗口处理冲突 · 此处按顺序展示完整流程", autoOpen: "操作遇到待解决冲突时自动打开流程窗口",
     autoClose: "解决所有冲突后自动关闭流程窗口", staysOpen: "流程已完成，窗口保持打开",
@@ -42,6 +50,15 @@ export const zh: Messages = {
     applyPatch: "应用补丁", squash: "压缩提交", gitFlowFinish: "完成 Git Flow", previous: "查看上次操作", confirm: "确认", cancel: "取消",
   },
   chrome: {
+    syntaxHighlight: "语法高亮",
+    fileLayout: "文件布局",
+    viewOptions: "显示与操作选项",
+    contextWhileWhole: "显示整个文件时无需设置上下文行数",
+    swapWhileCombined: "混合布局中不区分上下区域",
+    preferenceSaveFailed: "设置保存失败，已恢复原值。",
+    verticalTabLayout: "纵向标签",
+    tabChanges: "变更标记",
+
     open: "打开",
     workspace: "工作区",
     recentWorkspace: "最近工作区",

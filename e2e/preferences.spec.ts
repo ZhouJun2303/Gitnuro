@@ -11,7 +11,7 @@ async function saveLocale(page: Page, locale: string, action: () => Promise<unkn
   const saved = page.waitForResponse((response) => {
     if (!response.url().endsWith("/__lab/invoke") || response.request().method() !== "POST") return false;
     const body = response.request().postDataJSON();
-    return body.cmd === "save_settings" && body.args.values.locale === locale;
+    return body.cmd === "save_settings" && body.args.values?.locale === locale;
   });
   await action();
   expect((await (await saved).json()).ok).toBe(true);
@@ -170,7 +170,7 @@ test("independent windows update language immediately and retain merge edits", a
     const arrived = new Promise<void>((resolve) => { saveArrived = resolve; });
     await page.route("**/__lab/invoke", async (route) => {
       const body = route.request().postDataJSON();
-      if (body.cmd !== "save_settings" || body.args.values.locale !== "en") return route.continue();
+      if (body.cmd !== "save_settings" || body.args.values?.locale !== "en") return route.continue();
       const response = await route.fetch();
       saveArrived();
       await heldSave;

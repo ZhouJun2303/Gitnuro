@@ -121,6 +121,11 @@ pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "file access errors"
 pnpm test:ui -- --reuse e2e/merge-window.spec.ts
 pnpm test:ui -- --reuse e2e/merge-many.spec.ts
 pnpm test:ui -- --reuse e2e/merge-layout.spec.ts
+node scripts/lab-seed.mjs preferences
+pnpm test:ui -- --reuse e2e/contextual-preferences.spec.ts
+pnpm test:ui -- --reuse e2e/scenes.spec.ts --grep "scene (contextual-diff$|contextual-history$|file-history$|dialog-fetch$|dialog-pull$|dialog-push$|dialog-tag$|dialog-branch$|dialog-stash$|dialog-rebase$|operation-flow$|commands$|prefs-diff$|prefs-flow$)"
+pnpm test:git revision_diff_preferences
+pnpm test:app preferences::tests
 ```
 
 `--` 后的参数会传给 Playwright。已有 `.lab` 仓库且本次无需重建时，加 `--reuse` 可复用数据，避免重建整套试验台和清理正在使用的开发日志：`pnpm test:ui -- --reuse e2e/sync-toolbar.spec.ts`。需要恢复的仓库可先单独执行 `node scripts/lab-seed.mjs rebase conflict`。
@@ -130,6 +135,16 @@ pnpm test:ui -- --reuse e2e/merge-layout.spec.ts
 用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
 
 已有 `pnpm dev` 服务时，可直接复用：PowerShell 中先设置 `$env:AWEGIT_UI_URL = 'http://127.0.0.1:1420'`，再执行 `pnpm exec playwright test e2e/merge-window.spec.ts`。这条命令使用现有试验台，不启动或停止开发服务。
+
+### 区域快捷设置
+
+差异、文件列表、提交历史、提交编辑器、同步弹窗、仓库标签、侧栏、流程窗口和命令记录顶部提供相关选项。差异工具栏由变更、提交详情、提交比较和文件历史共用；整文件模式禁用上下文行数，混合文件布局禁用上下区域交换。提交编辑器的推送和签名选项即时保存，AI 风格及语言放在生成按钮旁；Signed-off-by 保持仓库级设置。分支切换、贮藏未跟踪文件、变基引用更新及标签创建后的推送属于本次操作，标签推送每次打开从默认值初始化。
+
+`src/lib/preferences.ts` 定义字段和范围，`PreferenceControls.svelte` 提供统一控件。相关区域及首选项共用 `save_settings({ patch })`，Rust 在设置写入锁内读取最新值并合并指定字段，保留完整设置保存接口的兼容性。窗口间通过 Tauri 事件同步，试验台使用 BroadcastChannel；失败回退控件并保留草稿。提交及 AI 生成等待设置保存完成；错误日志保留期保存成功后才清理旧日志。
+
+仅影响显示的设置不重新读取 Git。上下文、整文件及忽略空白会使历史补丁缓存失效，旧内容保留到新结果到达；版本号阻止旧请求覆盖新选项。切换布局、字号和行高时按源文件行号恢复阅读位置，用户主动滚动会取消延迟恢复。展开补丁和长差异继续按可见范围渲染，改设置不丢失当前提交、文件及草稿。
+
+`contextual-diff` 和 `contextual-history` 使用专用的 `preferences` 试验仓库，覆盖空白修改、实质修改、分隔较远的差异块及已暂存文件。行为测试包含保存回读、并发字段更新、窗口同步、失败回退、旧响应防护、阅读位置、展开补丁尾行、模拟提交及标签推送、错误日志保留，以及 960×640 主界面和 480×360 流程窗口。测试中的提交和推送请求均被拦截，不实际执行。
 
 侧栏标签按时间由近到远排列：附注标签使用标签日期，轻量标签使用提交日期；目录分组按组内最新标签排列，组内保持时间倒序。前端以线性遍历保留后端顺序，不额外按名称排序，滚动沿用虚拟列表。试验台场景：`tag-order`；上方标签用例自动重建专用仓库，也可用 `node scripts/lab-seed.mjs tags` 单独重建。
 

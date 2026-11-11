@@ -495,7 +495,7 @@ textarea {
     overflow: auto;
     font-family: var(--mono);
     font-size: var(--diff-font, 13px);
-    line-height: 1.45;
+    line-height: var(--diff-row, 19px);
     user-select: text;
   }
 
@@ -974,7 +974,7 @@ input[type="checkbox"]:disabled,
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     height: auto;
-    line-height: 1.45;
+    line-height: var(--diff-row, 19px);
     overflow: visible;
     content-visibility: auto;
     contain-intrinsic-size: auto 18px;
@@ -994,7 +994,8 @@ input[type="checkbox"]:disabled,
     overflow: hidden;
 }
 
-.diff-body.split.virtual .split-row > span {
+.diff-body.split.virtual .split-row > span,
+.diff-body.split.virtual .split-meta {
     height: var(--split-row);
     line-height: var(--split-row);
   }

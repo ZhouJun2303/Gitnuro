@@ -1,6 +1,14 @@
 import type { Messages } from "./types";
 
 export const en: Messages = {
+  toolbar: {
+    diffStyle: "View", linesHeight: "Line height", diffFontSize: "Font", diffContext: "Context",
+    showEntireFile: "Whole file", diffWordWrap: "Wrap", showWhitespace: "Whitespace", ignoreSpace: "Ignore whitespace",
+    showDiffMarks: "+/− marks", disableSyntaxHighlight: "Highlight", fileLayout: "Layout", tree: "Tree", list: "List", combined: "Combined",
+    swapPanes: "Staged on top", maxCommits: "Limit", pushOnCommit: "Push after commit", signCommits: "Sign commits", spellChecking: "Spelling",
+    aiPromptStyle: "Style", aiLanguage: "Language", flowAutoOpen: "Open on conflict", flowAutoClose: "Close on success",
+    flowHistoryDays: "Keep days", errorLogDays: "Keep errors (days)",
+  },
   flow: {
     observer: "Read-only observer", observerHint: "Resolve conflicts in the main window · Follow the complete pipeline here", autoOpen: "Automatically open the flow window when an operation has unresolved conflicts",
     autoClose: "Automatically close the flow window after resolving all conflicts", staysOpen: "Workflow completed. This window stays open",
@@ -42,6 +50,15 @@ export const en: Messages = {
     applyPatch: "Apply patch", squash: "Squash commits", gitFlowFinish: "Finish Git Flow", previous: "View previous operation", confirm: "Confirm", cancel: "Cancel",
   },
   chrome: {
+    syntaxHighlight: "Syntax highlighting",
+    fileLayout: "File layout",
+    viewOptions: "View and operation options",
+    contextWhileWhole: "Context lines do not apply while showing the entire file",
+    swapWhileCombined: "Combined layout has a single file area",
+    preferenceSaveFailed: "Could not save preferences. The previous value was restored.",
+    verticalTabLayout: "Vertical tabs",
+    tabChanges: "Change indicators",
+
     open: "Open",
     workspace: "Workspace",
     recentWorkspace: "Recent workspace",

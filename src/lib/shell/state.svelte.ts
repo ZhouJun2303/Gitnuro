@@ -1,3 +1,5 @@
+import { onPreferenceChange, type PreferencePatch } from "../preferences";
+import { updatePreferences, receivePreferences, waitPreferences, adoptPreferences } from "./preferenceActions";
 import { onMount, tick } from "svelte";
 import { pushState } from "$app/navigation";
 import { invoke } from "../perf";
@@ -450,6 +452,7 @@ export class ShellState {
 
 
   patchCache = $state.raw<Record<string, FileDiff>>({});
+  stalePatchCache = $state.raw<Record<string, FileDiff>>({});
   /** Bumped when a patch is added in place, so readers do not copy the whole map. */
   patchVersion = $state(0);
 
@@ -582,6 +585,13 @@ export class ShellState {
 
 
   prefsSave = 0;
+  diffPreferencesVersion = $state(0);
+  updatePreferences(patch: PreferencePatch) { return updatePreferences(this, patch); }
+  waitPreferences() { return waitPreferences(this); }
+  toggleSignOff() {
+    this.signOff = !this.signOff;
+    if (this.mode === "live") void this.mutate({ action: "setSignOff", enabled: this.signOff, format: this.refs?.signOffFormat || this.settings.signOffFormat });
+  }
 
 
   draft = $state("");
@@ -1218,7 +1228,7 @@ export class ShellState {
   unstagedHeight = $state<number>(this.initialLayout.unstagedHeight ?? 280);
 
 
-  composerHeight = $state<number>(this.initialLayout.composerHeight ?? 170);
+  composerHeight = $state<number>(Math.max(250, this.initialLayout.composerHeight ?? 270));
 
 
   historyDetailHeight = $state<number>(this.initialLayout.historyDetailHeight ?? 280);
@@ -1736,17 +1746,17 @@ export class ShellState {
   }
 
 
-  loadCommitPatch(node: HTMLElement, path: string) {
-    let current = path;
+  loadCommitPatch(node: HTMLElement, value: { path: string; version: number }) {
+    let current = value;
     const load = (file: string) => {
       if (!this.patchCache[file]) this.requestPatch(file);
     };
-    load(current);
+    load(current.path);
     return {
-      update(next: string) {
-        if (next === current) return;
+      update(next: { path: string; version: number }) {
+        if (next.path === current.path && next.version === current.version) return;
         current = next;
-        load(current);
+        load(current.path);
       },
     };
   }
@@ -1755,6 +1765,7 @@ export class ShellState {
   /** Patches loading for on-screen rows. Four at a time keeps a fast scroll from
    * spawning dozens of git processes. */
   private patchQueue: string[] = [];
+  private patchQueueGeneration = 0;
   private patchLoading = new Set<string>();
 
   requestPatch(file: string) {
@@ -1768,7 +1779,9 @@ export class ShellState {
       const file = this.patchQueue.shift();
       if (!file || this.patchCache[file]) continue;
       this.patchLoading.add(file);
+      const generation = this.patchQueueGeneration;
       void this.ensurePatch(file).finally(() => {
+        if (generation !== this.patchQueueGeneration) return;
         this.patchLoading.delete(file);
         this.pumpPatches();
       });
@@ -1776,6 +1789,7 @@ export class ShellState {
   }
 
   clearPatchQueue() {
+    this.patchQueueGeneration++;
     this.patchQueue = [];
     this.patchLoading.clear();
   }
@@ -1950,7 +1964,7 @@ export class ShellState {
   });
 
 
-  diffRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)));
+  diffRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)) + (this.settings.linesHeight === "spaced" ? 4 : 0));
 
 
   diffWindow = $derived(virtualLines(this.diffLines, this.diffTop, this.diffRowHeight, this.windowRows(this.diffHeight, this.diffRowHeight), this.settings.diffWordWrap));
@@ -3429,6 +3443,7 @@ export class ShellState {
     const limit = Math.min(100000, Math.max(1, this.settings.maxCommits || 500));
     if (resetHistory || this.logLimit === 500) this.logLimit = limit;
     this.signOff = this.settings.signOff;
+    adoptPreferences(this);
     this.showPendingUpdate(false);
     if (recovered && !this.actionError) this.actionError = this.tr("chrome.settingsRecovered");
   }
@@ -4420,8 +4435,8 @@ export class ShellState {
 
 
 
-  async pickCommitFile(file: string) {
-    return pickCommitFile(this, file);
+  async pickCommitFile(file: string, select = true) {
+    return pickCommitFile(this, file, select);
   }
 
 
@@ -6447,6 +6462,7 @@ export class ShellState {
     this.goBack();
     };
     const onShortcut = this.onShortcut.bind(this);
+    const stopPreferences = onPreferenceChange((patch) => receivePreferences(this, patch));
     const stopLocale = onLocaleChange((locale) => { this.settings.locale = locale; });
     const stopAppearance = onAppearanceChange((theme) => { this.settings.theme = theme; });
     const onRememberPointer = this.rememberPointer.bind(this);
@@ -6458,6 +6474,7 @@ export class ShellState {
     const historyTimer = window.setTimeout(addHistoryEntry, 0);
     window.addEventListener("popstate", onPop);
     const detachNav = () => {
+    stopPreferences();
     stopLocale();
     stopAppearance();
     window.clearTimeout(historyTimer);

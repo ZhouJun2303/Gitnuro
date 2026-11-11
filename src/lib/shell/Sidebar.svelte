@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PreferenceToolbar from "./PreferenceToolbar.svelte";
   import { tick } from "svelte";
   import { getShell } from "./context";
   import "./Sidebar.css";
@@ -165,6 +166,7 @@
         <button class="icon-btn side-tool" class:on={shell.sideView === "search"} type="button" title={shell.tr("chrome.searchCommits")} aria-label={shell.tr("chrome.searchCommits")} aria-pressed={shell.sideView === "search"} onclick={() => shell.showSideSearch()}>{@render glyph("search")}</button>
       </div>
       {#if shell.sideView === "refs"}
+      <PreferenceToolbar keys={["showWorktrees"]} />
       <label class="side-filter">
         {@render glyph("search")}
         <input placeholder={shell.tr("chrome.filter")} aria-label={shell.tr("chrome.filterSidebar")} bind:this={shell.sideFilter} bind:value={shell.sideQuery} onkeydown={(event) => { if (event.key === "Escape") { event.stopPropagation(); shell.sideQuery = ""; } }} />

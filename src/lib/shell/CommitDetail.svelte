@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DiffToolbar from "./DiffToolbar.svelte";
   import { getShell } from "./context";
   import StashPlates from "./StashPlates.svelte";
   import RefChip from "./RefChip.svelte";
@@ -18,7 +19,7 @@
   const commitScroll = (node: HTMLElement) => shell.trackCommitScroll(node);
   const commitList = (node: HTMLElement) => shell.trackCommitList(node);
   const measureCommitPatch = (node: HTMLElement, path: string) => shell.measureCommitPatch(node, path);
-  const loadCommitPatch = (node: HTMLElement, path: string) => shell.loadCommitPatch(node, path);
+  const loadCommitPatch = (node: HTMLElement, value: { path: string; version: number }) => shell.loadCommitPatch(node, value);
 </script>
 
 <section class="detail" style:height="{shell.historyDetailHeight}px">
@@ -55,6 +56,9 @@
                 <span class="strip-subject" title={shell.commitSubject()}>{@render linked(shell.commitSubject())}</span>
               {/if}
             </div>
+          {/if}
+          {#if (shell.selectedCommit || shell.commitDetail) && shell.historyTab !== "tree" && (shell.historyTab === "commit" || !shell.historyDiff?.binary)}
+            <DiffToolbar />
           {/if}
           <div class="detail-body">
             {#if !shell.selectedCommit && !shell.commitDetail}
@@ -123,7 +127,7 @@
                         class="commit-patch"
                         style:height={shell.patchHeights[entry.path] ? `${shell.patchHeights[entry.path]}px` : undefined}
                         use:measureCommitPatch={entry.path}
-                        use:loadCommitPatch={entry.path}
+                        use:loadCommitPatch={{ path: entry.path, version: shell.diffPreferencesVersion }}
                       >
                         {@render filePatch(entry.path, false)}
                       </div>
@@ -355,7 +359,7 @@
           <div class="commit-window" class:wrap-window={shell.settings.diffWordWrap} style:height={prefix ? `${(prefix[live.lines.length] ?? 0) * diffRow}px` : `${live.lines.length * diffRow}px`} use:patchWindow={{ file: `${file}:uni`, count: live.lines.length, rowHeight: diffRow, prefix }}>
             {#each live.lines.slice(view.start, view.end) as line, offset (`uni-${file}-${view.start + offset}`)}
               {@const index = view.start + offset}
-              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{(prefix ? (prefix[index] ?? 0) : index) * diffRow}px">{#each shell.paint(line.text, file) as token, tokenIndex (`ut-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} data-line={index} style:top="{(prefix ? (prefix[index] ?? 0) : index) * diffRow}px">{#each shell.markedLine(shell.settings.showDiffMarks ? line.text : shell.lineText(line), "", file) as token, tokenIndex (`ut-${index}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
             {/each}
           </div>
         </div>

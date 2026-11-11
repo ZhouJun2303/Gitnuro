@@ -430,7 +430,21 @@ function seedTagsRepo() {
   }
 }
 
+function seedPreferencesRepo() {
+  const path = join(repos, "preferences");
+  wipe(path);
+  initWork(path);
+  const content = Array.from({ length: 240 }, (_, index) => `export const line${index + 1} = ${index + 1};`).join("\n") + "\n";
+  commit(path, "sample.ts", content, "feat: preference fixture");
+  const changed = content.replace("line120 =", "line120   =").replace("line160 = 160", "line160 = -160");
+  commit(path, "sample.ts", changed, "fix: spacing and value");
+  write(path, "sample.ts", changed.replace("line60 =", "line60   =").replace("line200 = 200", "line200 = -200"));
+  write(path, "ready.txt", "ready to commit\n");
+  git(path, ["add", "ready.txt"]);
+}
+
 const restore = {
+  preferences: seedPreferencesRepo,
   tags: seedTagsRepo,
   operation: seedOperationRepo,
   conflict: seedConflictRepo,
@@ -635,6 +649,7 @@ seedOperationRepo();
 seedCherryRepo();
 seedRevertRepo();
 seedTagsRepo();
+seedPreferencesRepo();
 
 const detached = join(repos, "detached");
 initWork(detached);

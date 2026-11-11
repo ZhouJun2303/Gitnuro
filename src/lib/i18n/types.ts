@@ -1,8 +1,25 @@
 export type Locale = "en" | "zh";
 
 export type Messages = {
+  toolbar: {
+    diffStyle: string; linesHeight: string; diffFontSize: string; diffContext: string;
+    showEntireFile: string; diffWordWrap: string; showWhitespace: string; ignoreSpace: string;
+    showDiffMarks: string; disableSyntaxHighlight: string; fileLayout: string; tree: string; list: string; combined: string;
+    swapPanes: string; maxCommits: string; pushOnCommit: string; signCommits: string; spellChecking: string;
+    aiPromptStyle: string; aiLanguage: string; flowAutoOpen: string; flowAutoClose: string;
+    flowHistoryDays: string; errorLogDays: string;
+  };
   flow: Record<string, string>;
   chrome: {
+    syntaxHighlight: string;
+    fileLayout: string;
+    viewOptions: string;
+    contextWhileWhole: string;
+    swapWhileCombined: string;
+    preferenceSaveFailed: string;
+    verticalTabLayout: string;
+    tabChanges: string;
+
     open: string;
     workspace: string;
     recentWorkspace: string;

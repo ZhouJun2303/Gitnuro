@@ -27,7 +27,7 @@ for (const variant of [
           return route.fulfill({ json: { ok: true, value: settings } });
         }
         if (cmd === "save_settings") {
-          settings = args.values;
+          settings = args.patch ? { ...settings, ...args.patch } : args.values;
           return route.fulfill({ json: { ok: true, value: settings } });
         }
         return route.continue();

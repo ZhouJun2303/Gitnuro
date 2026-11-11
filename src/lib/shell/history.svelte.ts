@@ -1,5 +1,6 @@
 import { onMount, tick } from "svelte";
 import { invoke } from "../perf";
+import { restoreDiffReading } from "./diffReading";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { branchGroup, changedRanges, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, rowAtUnit, sameHistory, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
@@ -28,6 +29,11 @@ const ERROR_KEY = "awegit-errors";
 const PATCH_CACHE_LIMIT = 100;
 
 function cachePatch(shell: ShellState, file: string, diff: FileDiff) {
+    if (shell.stalePatchCache[file]) {
+      const stale = { ...shell.stalePatchCache };
+      delete stale[file];
+      shell.stalePatchCache = stale;
+    }
     if (file in shell.patchCache || Object.keys(shell.patchCache).length < PATCH_CACHE_LIMIT) {
       shell.patchCache = { ...shell.patchCache, [file]: diff };
       return;
@@ -421,15 +427,22 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
       shell.commitFiles = files;
       const file = files[0]?.path ?? null;
       shell.historyFile = file;
+      const optionsVersion = shell.diffPreferencesVersion;
       const diff = file
         ? await invoke<FileDiff>("show_commit_file", {
             path: shell.repoPath(),
             id,
             file,
             unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
+            ignoreSpace: shell.settings.ignoreSpace,
           })
         : null;
       if (gen !== shell.patchGen || shell.selectedCommit !== id || shell.historyFile !== file) {
+        await detailTask;
+        return;
+      }
+      if (optionsVersion !== shell.diffPreferencesVersion) {
+        if (file) await shell.pickCommitFile(file, false);
         await detailTask;
         return;
       }
@@ -447,15 +460,16 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
     });
   }
 
-export async function pickCommitFile(shell: ShellState, file: string) {
+export async function pickCommitFile(shell: ShellState, file: string, select = true) {
     const gen = shell.patchGen;
-    shell.historyFile = file;
+    const optionsVersion = shell.diffPreferencesVersion;
+    if (select) shell.historyFile = file;
     const cached = shell.patchCache[file];
     if (cached) {
-      shell.historyDiff = cached;
+      if (shell.historyFile === file) shell.historyDiff = cached;
       return;
     }
-    shell.historyDiff = null;
+    if (select) shell.historyDiff = null;
     if (!shell.comparePair && !shell.selectedCommit) return;
     await shell.withWork(shell.tr("chrome.readingFile"), async () => {
       try {
@@ -466,34 +480,37 @@ export async function pickCommitFile(shell: ShellState, file: string) {
               to: shell.comparePair[1],
               file,
               unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
+              ignoreSpace: shell.settings.ignoreSpace,
             })
           : await invoke<FileDiff>("show_commit_file", {
               path: shell.repoPath(),
               id: shell.selectedCommit ?? "",
               file,
               unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
+              ignoreSpace: shell.settings.ignoreSpace,
             });
-        if (gen !== shell.patchGen) return;
+        if (gen !== shell.patchGen || optionsVersion !== shell.diffPreferencesVersion) return;
         cachePatch(shell, file, diff);
         shell.patchVersion += 1;
         if (shell.historyFile === file) {
           shell.historyDiff = diff;
-          // The placeholder height must not clip the loaded patch.
-          if (shell.patchHeights[file] !== undefined) {
-            const heights = { ...shell.patchHeights };
-            delete heights[file];
-            shell.patchHeights = heights;
-          }
         }
+        // Every expanded patch must grow when its new context arrives.
+        if (shell.patchHeights[file] !== undefined) {
+          const heights = { ...shell.patchHeights };
+          delete heights[file];
+          shell.patchHeights = heights;
+        }
+        restoreDiffReading(shell, file);
       } catch (error) {
-        if (gen === shell.patchGen && shell.historyFile === file) shell.actionError = shell.message(error);
+        if (gen === shell.patchGen && optionsVersion === shell.diffPreferencesVersion && shell.historyFile === file) shell.actionError = shell.message(error);
       }
     });
   }
 
 export async function ensurePatch(shell: ShellState, file: string) {
     if (shell.mode !== "live" || shell.patchCache[file] || (!shell.selectedCommit && !shell.comparePair)) return;
-    await shell.pickCommitFile(file);
+    await shell.pickCommitFile(file, false);
   }
 
 export function togglePatch(shell: ShellState, path: string) {
@@ -610,6 +627,7 @@ export function differentCommitter(shell: ShellState, detail: CommitDetail | nul
 export function resetCommitView(shell: ShellState) {
     shell.patchGen += 1;
     shell.patchCache = {};
+    shell.stalePatchCache = {};
     shell.patchVersion += 1;
     shell.patchHeights = {};
     shell.openPatches = [];

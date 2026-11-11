@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PreferenceToolbar from "./PreferenceToolbar.svelte";
   import { getShell } from "./context";
   import "./DialogHost.css";
   import PrefsDialog from "./PrefsDialog.svelte";
@@ -11,6 +12,7 @@
 
   const shell = getShell();
   let diagnosticsCopied = $state(false);
+  let pushNewTag = $state(false);
 
   async function copyDiagnostics() {
     try {
@@ -66,6 +68,7 @@
     if (dialog !== "credential") shell.draftSecret = "";
     primedDialog = dialog;
     shell.actionError = null;
+    if (dialog === "tag") pushNewTag = shell.settings.pushTagOnCreate;
     if (dialog === "branch") shell.checkoutNewBranch = shell.settings.checkoutAfterCreate;
     if (dialog === "rebase") shell.updateRefs = shell.settings.rebaseUpdateRefs;
     if (dialog === "merge") {
@@ -117,7 +120,7 @@
         onchange={() => { if (shell.dialog === "prefs") void shell.savePrefs(false); }}
         onsubmit={async (event) => {
           event.preventDefault();
-          if (shell.writing) return;
+          if (shell.writing || !await shell.waitPreferences()) return;
           if (shell.dialog === "branch") {
             const name = shell.branchName(shell.draft);
             await shell.mutate({ action: "createBranch", name, start: shell.draftExtra || null });
@@ -132,8 +135,9 @@
           else if (shell.dialog === "prefs") void shell.savePrefs();
           else if (shell.dialog === "editorImport") shell.importEditorCandidates();
           else if (shell.dialog === "tag") {
+            const pushAfter = pushNewTag;
             await shell.mutate({ action: "tag", name: shell.draft, rev: shell.draftExtra || "HEAD", message: shell.draftUser });
-            if (!shell.actionError && shell.settings.pushTagOnCreate) await shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease });
+            if (!shell.actionError && pushAfter) await shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease });
           }
           else if (shell.dialog === "remote") {
             if (shell.remoteEdit) void shell.mutate({ action: "setRemoteUrl", name: shell.draft, url: shell.draftExtra });
@@ -143,8 +147,6 @@
             const remote = shell.syncAll ? null : shell.draft || null;
             const prune = shell.settings.fetchPrune;
             const tags = shell.syncTags;
-            shell.settings = { ...shell.settings, fetchPrune: prune, fetchAllRemotes: shell.syncAll, fetchTags: tags };
-            void shell.savePrefs(false);
             shell.dialog = null;
             void shell.mutate({ action: "fetch", remote, prune, tags });
           }
@@ -152,8 +154,6 @@
             const request = shell.draft && shell.draftExtra
               ? { action: "pullRef", remote: shell.draft, branch: shell.draftExtra, rebase: shell.syncRebase, autostash: true }
               : { action: "pull", rebase: shell.syncRebase, autostash: true };
-            shell.settings = { ...shell.settings, pullRebase: shell.syncRebase };
-            void shell.savePrefs(false);
             shell.dialog = null;
             void shell.mutate(request);
           }
@@ -162,8 +162,6 @@
             const request = target && shell.pushBranch
               ? { action: "pushRef", remote: target.remote, branch: shell.pushBranch, remoteBranch: target.branch, setUpstream: target.setUpstream, tags: shell.syncTags, forceWithLease: shell.syncForce, force: false }
               : { action: "push", remote: shell.draft || null, setUpstream: !shell.refs?.branches.some((branch) => branch.current && branch.upstream), tags: shell.syncTags, forceWithLease: shell.syncForce };
-            shell.settings = { ...shell.settings, pushAllTags: shell.syncTags };
-            void shell.savePrefs(false);
             shell.dialog = null;
             void shell.mutate(request);
           }
@@ -331,9 +329,9 @@
           </div>
         {:else if shell.dialog === "branch"}
           <h2>{shell.tr("dialog.newBranch")}</h2>
+          <div class="operation-options"><label class="check"><input type="checkbox" bind:checked={shell.checkoutNewBranch} /> {shell.tr("dialog.checkoutAfter")}</label></div>
           <label>{shell.tr("dialog.name")}<input bind:value={shell.draft} /></label>
           <label>{shell.tr("dialog.startPoint")}<input bind:value={shell.draftExtra} /></label>
-          <label class="check"><input type="checkbox" bind:checked={shell.checkoutNewBranch} /> {shell.tr("dialog.checkoutAfter")}</label>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.create")}</button>
@@ -392,6 +390,7 @@
           </div>
         {:else if shell.dialog === "tag"}
           <h2>{shell.tr("dialog.newTag")}</h2>
+          <div class="operation-options"><label class="check"><input data-tag-push type="checkbox" bind:checked={pushNewTag} />{shell.tr("dialog.pushTagOnCreate")}</label></div>
           <label>{shell.tr("dialog.name")}<input bind:value={shell.draft} /></label>
           <label>{shell.tr("dialog.tagRevision")}<input bind:value={shell.draftExtra} /></label>
           <label>{shell.tr("dialog.tagMessage")}<input bind:value={shell.draftUser} /></label>
@@ -402,6 +401,12 @@
         {:else if shell.dialog === "fetch"}
           <h2>{shell.tr("chrome.fetch")}</h2>
           <p>{shell.tr("dialog.fetchBody")}</p>
+          <PreferenceToolbar keys={["fetchAutomatically"]} />
+          <div class="operation-options">
+          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncAll} onchange={(event) => { void shell.updatePreferences({ fetchAllRemotes: event.currentTarget.checked }); }} /> {shell.tr("dialog.fetchAllRemotes")}</label>
+          <label class="check sync-indent"><input type="checkbox" checked={shell.settings.fetchPrune} onchange={(event) => { void shell.updatePreferences({ fetchPrune: event.currentTarget.checked }); }} /> {shell.tr("dialog.pruneOnFetch")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncTags} onchange={(event) => { void shell.updatePreferences({ fetchTags: event.currentTarget.checked }); }} /> {shell.tr("dialog.includeTags")}</label>
+          </div>
           <label class="sync-row">
             <span>{shell.tr("dialog.remoteName")}</span>
             {#if (shell.refs?.remotes.length ?? 0) > 0}
@@ -414,9 +419,6 @@
               <input placeholder={shell.tr("dialog.remoteName")} bind:value={shell.draft} disabled={shell.syncAll} />
             {/if}
           </label>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncAll} onchange={(event) => { shell.settings = { ...shell.settings, fetchAllRemotes: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.fetchAllRemotes")}</label>
-          <label class="check sync-indent"><input type="checkbox" checked={shell.settings.fetchPrune} onchange={(event) => { shell.settings = { ...shell.settings, fetchPrune: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.pruneOnFetch")}</label>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncTags} onchange={(event) => { shell.settings = { ...shell.settings, fetchTags: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.includeTags")}</label>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("chrome.fetch")}</button>
@@ -424,6 +426,7 @@
         {:else if shell.dialog === "pull"}
           <h2>{shell.tr("chrome.pull")}</h2>
           <p>{shell.tr("dialog.pullBody")}</p>
+          <div class="operation-options"><label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncRebase} onchange={(event) => { void shell.updatePreferences({ pullRebase: event.currentTarget.checked }); }} /> {shell.tr("dialog.pullWithRebase")}</label></div>
           {#if (shell.refs?.remotes.length ?? 0) > 0}
             <div class="sync-row remote-target">
               <span>{shell.tr("dialog.remoteName")}</span>
@@ -473,7 +476,6 @@
             <span>{shell.tr("dialog.pullInto")}</span>
             <strong class="sync-value">{shell.snapshot?.branch ?? ""}</strong>
           </div>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncRebase} onchange={(event) => { shell.settings = { ...shell.settings, pullRebase: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.pullWithRebase")}</label>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("chrome.pull")}</button>
@@ -481,6 +483,10 @@
         {:else if shell.dialog === "push"}
           <h2>{shell.tr("chrome.push")}</h2>
           <p>{shell.tr("dialog.pushBody")}</p>
+          <div class="operation-options">
+          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncTags} onchange={(event) => { void shell.updatePreferences({ pushAllTags: event.currentTarget.checked }); }} /> {shell.tr("dialog.pushAllTags")}</label>
+          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncForce} /> {shell.tr("dialog.forcePush")}</label>
+          </div>
           <label class="sync-row">
             <span>{shell.tr("dialog.branch")}</span>
             <select value={shell.pushBranch} onchange={(event) => { shell.pushBranch = event.currentTarget.value; shell.resetPushTarget(); }}>
@@ -519,14 +525,13 @@
               {/if}
             </div>
           </div>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncTags} onchange={(event) => { shell.settings = { ...shell.settings, pushAllTags: event.currentTarget.checked }; void shell.savePrefs(false); }} /> {shell.tr("dialog.pushAllTags")}</label>
-          <label class="check sync-indent"><input type="checkbox" bind:checked={shell.syncForce} /> {shell.tr("dialog.forcePush")}</label>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("chrome.push")}</button>
           </div>
         {:else if shell.dialog === "stash"}
           <h2>{shell.tr("chrome.stash")}</h2>
+          <div class="operation-options"><label class="check"><input type="checkbox" bind:checked={shell.includeUntracked} /> {shell.tr("dialog.includeUntracked")}</label></div>
           {#if shell.stashFiles.length === 1}
             <div class="dialog-subject" title={shell.stashFiles[0]}>{shell.stashFiles[0]}</div>
           {:else if shell.stashFiles.length > 1}
@@ -534,7 +539,6 @@
             <pre class="diff-body stash-paths">{shell.stashFiles.join("\n")}</pre>
           {/if}
           <label>{shell.tr("dialog.message")}<input bind:value={shell.draft} /></label>
-          <label class="check"><input type="checkbox" bind:checked={shell.includeUntracked} /> {shell.tr("dialog.includeUntracked")}</label>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("chrome.stash")}</button>
@@ -564,9 +568,9 @@
           </div>
         {:else if shell.dialog === "rebase"}
           <h2>{shell.tr("dialog.rebase")}</h2>
+          <div class="operation-options"><label class="check"><input type="checkbox" bind:checked={shell.updateRefs} /> {shell.tr("dialog.updateRefs")}</label></div>
           <p class="empty">{!shell.rebaseConflictKnown ? shell.tr("flow.preview-unavailable") : shell.rebaseConflictFiles.length === 0 ? shell.tr("dialog.conflictNone") : shell.tr("dialog.conflictSome", { name: shell.rebaseConflictFiles.join(", ") })}</p>
           <p class="empty">{shell.tr("dialog.rebaseInclude")}</p>
-          <label class="check"><input type="checkbox" bind:checked={shell.updateRefs} /> {shell.tr("dialog.updateRefs")}</label>
           <div class="dialog-scroll">
           {#each shell.rebaseSteps as step, index (step.rev)}
             <div class="composer-row" role="listitem" draggable="true" ondragstart={() => (shell.dragStep = index)} ondragover={(event) => event.preventDefault()} ondrop={() => { if (shell.dragStep == null || shell.dragStep === index) return; const copy = [...shell.rebaseSteps]; const [item] = copy.splice(shell.dragStep, 1); copy.splice(index, 0, item); shell.rebaseSteps = copy; shell.dragStep = null; }}>

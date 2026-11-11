@@ -105,3 +105,21 @@
   .flow-commits { gap: 10px; } .flow-commit-meta { display: none; } .flow-caption { display: none; }
   .flow-footer { flex-direction: column; gap: 4px; }
 }
+
+@media (max-height: 520px) {
+  .flow-header { padding: 8px 12px; gap: 8px; flex-wrap: nowrap; }
+  .flow-heading { flex: 1; }
+  .flow-heading-line { gap: 6px; flex-wrap: wrap; }
+  .flow-heading h1 { font-size: 15px; }
+  .flow-heading p { margin-top: 4px; }
+  .flow-history { flex: none; max-width: 35%; }
+  .flow-meta { padding: 4px 12px; }
+  .flow-meta > span:first-child, .flow-overview-heading, .flow-overview small, .flow-legend-key { display: none; }
+  .flow-overview { margin: 6px 12px 0; padding: 4px; }
+  .flow-overview a { flex-direction: row; align-items: center; gap: 4px; margin-right: 8px; }
+  .flow-overview li:not(:last-child)::after { display: none; }
+  .flow-phase-symbol { width: 18px; height: 18px; flex-basis: 18px; }
+  .flow-overview strong { font-size: 10px; }
+  .flow-legend { padding: 6px 12px; }
+  .flow-footer { padding: 5px 12px; font-size: 10px; }
+}

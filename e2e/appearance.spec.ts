@@ -15,7 +15,7 @@ test.beforeEach(async ({ context }) => {
       return route.fulfill({ json: { ok: true, value: settings } });
     }
     if (cmd === "save_settings") {
-      settings = args.values;
+      settings = args.patch ? { ...settings, ...args.patch } : args.values;
       return route.fulfill({ json: { ok: true, value: settings } });
     }
     return route.continue();
@@ -46,7 +46,7 @@ test("three independent themes default to Apple and the selection survives reloa
 
   const saved = page.waitForResponse((response) => response.url().endsWith("/__lab/invoke")
     && response.request().postDataJSON().cmd === "save_settings"
-    && response.request().postDataJSON().args.values.theme === "apple");
+    && response.request().postDataJSON().args.values?.theme === "apple");
   await apple.click();
   await saved;
   await expect(page.locator("html")).toHaveAttribute("data-theme", "apple");

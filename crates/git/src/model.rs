@@ -1142,42 +1142,25 @@ pub fn show_commit_file_with(
     path: &str,
     context: u32,
 ) -> Result<FileDiff, Error> {
+    show_commit_file_options(repo, id, path, context, false)
+}
+
+pub fn show_commit_file_options(
+    repo: &Path,
+    id: &str,
+    path: &str,
+    context: u32,
+    ignore_space: bool,
+) -> Result<FileDiff, Error> {
     let id = check_rev(id)?;
     let path = check_path(path)?;
     let unified = format!("--unified={}", context.min(1_000_000));
     let base = merge_base_of(repo, id);
-    let (output, capped) = with_read(|| match base {
-        Some(ref base) => run_capped(
-            repo,
-            &[
-                "--literal-pathspecs",
-                "diff",
-                "--no-ext-diff",
-                "--no-color",
-                &unified,
-                base,
-                id,
-                "--",
-                path,
-            ],
-            8_000_000,
-        ),
-        None => run_capped(
-            repo,
-            &[
-                "--literal-pathspecs",
-                "show",
-                "--no-ext-diff",
-                "--no-color",
-                &unified,
-                "--format=",
-                id,
-                "--",
-                path,
-            ],
-            8_000_000,
-        ),
-    })?;
+    let mut args = vec!["--literal-pathspecs", if base.is_some() { "diff" } else { "show" }, "--no-ext-diff", "--no-color", &unified];
+    if ignore_space { args.push("--ignore-all-space"); }
+    if let Some(ref base) = base { args.push(base); } else { args.push("--format="); }
+    args.extend([id, "--", path]);
+    let (output, capped) = with_read(|| run_capped(repo, &args, 8_000_000))?;
     let mut parsed = parse_diff(path, false, &String::from_utf8_lossy(&output.stdout));
     parsed.truncated |= capped;
     if parsed.binary {
@@ -1254,27 +1237,25 @@ pub fn compare_file(
     path: &str,
     context: u32,
 ) -> Result<FileDiff, Error> {
+    compare_file_options(repo, from, to, path, context, false)
+}
+
+pub fn compare_file_options(
+    repo: &Path,
+    from: &str,
+    to: &str,
+    path: &str,
+    context: u32,
+    ignore_space: bool,
+) -> Result<FileDiff, Error> {
     let from = check_rev(from)?;
     let to = check_rev(to)?;
     let path = check_path(path)?;
     let unified = format!("--unified={}", context.min(1_000_000));
-    let (output, capped) = with_read(|| {
-        run_capped(
-            repo,
-            &[
-                "--literal-pathspecs",
-                "diff",
-                "--no-ext-diff",
-                "--no-color",
-                &unified,
-                from,
-                to,
-                "--",
-                path,
-            ],
-            8_000_000,
-        )
-    })?;
+    let mut args = vec!["--literal-pathspecs", "diff", "--no-ext-diff", "--no-color", &unified];
+    if ignore_space { args.push("--ignore-all-space"); }
+    args.extend([from, to, "--", path]);
+    let (output, capped) = with_read(|| run_capped(repo, &args, 8_000_000))?;
     let mut parsed = parse_diff(path, false, &String::from_utf8_lossy(&output.stdout));
     parsed.truncated |= capped;
     if parsed.binary {
@@ -1943,6 +1924,35 @@ mod locate_tests {
             "git {args:?} {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn revision_diff_preferences_apply_to_history_and_comparison() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.lab").join(format!("diff-preferences-{nanos}"));
+        fs::create_dir_all(&path).unwrap();
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+        let _cleanup = Cleanup(path.clone());
+        git(&path, &["init", "-b", "main"]);
+        git(&path, &["config", "user.name", "Test"]);
+        git(&path, &["config", "user.email", "test@example.com"]);
+        git(&path, &["config", "commit.gpgsign", "false"]);
+        git(&path, &["config", "core.hooksPath", ".git/no-hooks"]);
+        let base = (0..30).map(|i| format!("line {i}\n")).collect::<String>();
+        fs::write(path.join("sample.txt"), &base).unwrap();
+        git(&path, &["add", "."]);
+        git(&path, &["commit", "-m", "test: base"]);
+        // A root commit must still display added content when whitespace is ignored.
+        assert!(!show_commit_file_options(&path, "HEAD", "sample.txt", 3, true).unwrap().lines.is_empty());
+        fs::write(path.join("sample.txt"), base.replace("line 15", "line    15")).unwrap();
+        git(&path, &["commit", "-am", "test: spacing"]);
+        let narrow = show_commit_file_with(&path, "HEAD", "sample.txt", 0).unwrap();
+        let whole = show_commit_file_options(&path, "HEAD", "sample.txt", 100000, false).unwrap();
+        assert!(whole.lines.len() > narrow.lines.len());
+        assert!(show_commit_file_options(&path, "HEAD", "sample.txt", 3, true).unwrap().lines.is_empty());
+        assert!(compare_file_options(&path, "HEAD~1", "HEAD", "sample.txt", 3, true).unwrap().lines.is_empty());
+        assert!(!compare_file(&path, "HEAD~1", "HEAD", "sample.txt", 3).unwrap().lines.is_empty());
     }
 
     #[test]

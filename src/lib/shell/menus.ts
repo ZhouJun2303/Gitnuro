@@ -243,7 +243,7 @@ export function helpItems(shell: ShellState) {
 
 export function commitExtras(shell: ShellState) {
     return [
-      { label: `${shell.signOff ? "✓ " : ""}${shell.tr("chrome.signOff")}`, run: () => { shell.signOff = !shell.signOff; if (shell.mode === "live") void shell.mutate({ action: "setSignOff", enabled: shell.signOff, format: shell.refs?.signOffFormat || shell.settings.signOffFormat }); } },
+      { label: `${shell.signOff ? "✓ " : ""}${shell.tr("chrome.signOff")}`, run: () => shell.toggleSignOff() },
       { label: `${shell.skipHooks ? "✓ " : ""}${shell.tr("chrome.skipHooks")}`, run: () => (shell.skipHooks = !shell.skipHooks) },
       { label: shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") }), disabled: shell.busy || shell.staged.length === 0, run: () => void shell.suggestMessage() },
       { label: shell.tr("chrome.commitAndPush"), disabled: !shell.canCommit, run: () => void shell.submitCommit(true) },
@@ -366,18 +366,14 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
         label: shell.tr("dialog.ignoreSpace"),
         checked: shell.settings.ignoreSpace,
         run: () => {
-          shell.settings.ignoreSpace = !shell.settings.ignoreSpace;
-          shell.diffSelected = [];
-          void shell.savePrefs(false);
-          void shell.loadDiff();
+          void shell.updatePreferences({ ignoreSpace: !shell.settings.ignoreSpace });
         },
       },
       {
         label: shell.tr("dialog.showSpace"),
         checked: shell.settings.showWhitespace,
         run: () => {
-          shell.settings.showWhitespace = !shell.settings.showWhitespace;
-          void shell.savePrefs(false);
+          void shell.updatePreferences({ showWhitespace: !shell.settings.showWhitespace });
         },
       },
     );

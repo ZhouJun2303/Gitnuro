@@ -1,4 +1,5 @@
 <script lang="ts">
+  import DiffToolbar from "./DiffToolbar.svelte";
   import { tick } from "svelte";
   import { getShell } from "./context";
   import "./DiffPane.css";
@@ -363,6 +364,7 @@
                 <button class="pane-chip danger" type="button" disabled={shell.busy} onclick={() => shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(shell.discardableSelected.length) }), () => void shell.applyLineOps("discardLine", shell.discardableSelected), [], { danger: true })}>{shell.tr("menu.discardLines")}</button>
               {/if}
             </header>
+            {#if !shell.diff?.binary && shell.preview?.mime !== "application/pdf"}<DiffToolbar />{/if}
             {#if shell.diff && shell.diff.lines.length > 0}
               <div class="minimap" role="presentation">
                 {#each shell.minimapMarks as mark (`m-${mark.index}`)}
@@ -435,7 +437,7 @@
                       <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.oldNo ?? ""}</span>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
                       <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.newNo ?? ""}</span>
-                      {#each shell.paint(line.text, shell.selectedPath ?? "") as token, tokenIndex (`d${at}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
+                      {#each shell.paint(shell.settings.showDiffMarks ? line.text : shell.lineText(line), shell.selectedPath ?? "") as token, tokenIndex (`d${at}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
                     </span>
                   {/each}
                 </div>
@@ -448,6 +450,7 @@
             <header class="diff-head">
               <span>{shell.selectedPath}</span>
             </header>
+            <DiffToolbar />
             {#if shell.settings.diffStyle === "split"}
               <div class="diff-body split pick-{shell.splitPick}" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} role="presentation" onmousedown={shell.pickSplitSide.bind(shell)} use:splitScroller={shell.splitColumnsOf(shell.sampleSplit)}>
                 {#each shell.sampleSplit as row, index (index)}

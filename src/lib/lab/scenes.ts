@@ -95,6 +95,8 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "suggest-disabled", group: "主界面", title: "生成提交说明 · 未启用 AI", repo: "full", ready: ".suggest-message" }),
   scene({ id: "changes-combined", group: "主界面", title: "合并列表", repo: "full", ready: ".status-pane .virtual-row" }),
   scene({ id: "diff-text", group: "主界面", title: "文本差异", repo: "full", ready: ".diff-body" }),
+  scene({ id: "contextual-diff", group: "就地设置", title: "差异与提交工具栏", repo: "preferences", ready: "section.diff [data-preference=diffStyle]" }),
+  scene({ id: "contextual-history", group: "就地设置", title: "历史与提交差异工具栏", repo: "preferences", ready: ".detail .diff-body" }),
   scene({ id: "diff-image", group: "主界面", title: "图片差异", repo: "full", ready: ".image-stage" }),
   scene({ id: "diff-binary", group: "主界面", title: "二进制差异", repo: "full", ready: ".binary-diff" }),
   scene({ id: "diff-binary-large", group: "主界面", title: "超大二进制差异", repo: "full", ready: ".binary-diff" }),

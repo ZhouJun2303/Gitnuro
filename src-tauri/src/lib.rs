@@ -7,6 +7,7 @@ mod lab;
 mod perf;
 mod secrets;
 mod settings;
+mod preferences;
 mod tools;
 mod updates;
 
@@ -411,9 +412,9 @@ fn commit_files(path: Option<String>, id: String) -> Result<Vec<awegit_git::File
 }
 
 #[tauri::command]
-fn show_commit_file(path: Option<String>, id: String, file: String, unified: Option<u32>) -> Result<awegit_git::FileDiff, String> {
+fn show_commit_file(path: Option<String>, id: String, file: String, unified: Option<u32>, ignore_space: Option<bool>) -> Result<awegit_git::FileDiff, String> {
     let repo = repo_from(path)?;
-    awegit_git::show_commit_file_with(&repo, &id, &file, unified.unwrap_or(3)).map_err(|error| error.to_string())
+    awegit_git::show_commit_file_options(&repo, &id, &file, unified.unwrap_or(3), ignore_space.unwrap_or(false)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -728,7 +729,19 @@ fn load_settings() -> Result<settings::Settings, String> {
 }
 
 #[tauri::command]
-fn save_settings(mut values: settings::Settings) -> Result<settings::Settings, String> {
+fn save_settings(values: Option<settings::Settings>, patch: Option<preferences::PreferencePatch>) -> Result<settings::Settings, String> {
+    // The desktop uses SETTINGS_LANE; the HTTP lab can call this concurrently.
+    static WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _write = WRITE.lock().map_err(|_| "Settings writer is unavailable")?;
+    let mut values = match (values, patch) {
+        (Some(values), None) => values,
+        (None, Some(patch)) => {
+            let mut values = settings::load()?;
+            patch.apply(&mut values)?;
+            values
+        },
+        _ => return Err("Supply either settings or a preference patch".into()),
+    };
     values.recovery_notice.clear();
     values.flow_history_days = values.flow_history_days.clamp(1, 90);
     settings::save(&values)?;
@@ -1566,9 +1579,9 @@ fn compare_files(path: Option<String>, from: String, to: String) -> Result<Vec<a
 }
 
 #[tauri::command]
-fn compare_file(path: Option<String>, from: String, to: String, file: String, unified: Option<u32>) -> Result<awegit_git::FileDiff, String> {
+fn compare_file(path: Option<String>, from: String, to: String, file: String, unified: Option<u32>, ignore_space: Option<bool>) -> Result<awegit_git::FileDiff, String> {
     let repo = repo_from(path)?;
-    awegit_git::compare_file(&repo, &from, &to, &file, unified.unwrap_or(3)).map_err(|error| error.to_string())
+    awegit_git::compare_file_options(&repo, &from, &to, &file, unified.unwrap_or(3), ignore_space.unwrap_or(false)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

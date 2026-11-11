@@ -1,4 +1,5 @@
 <script lang="ts">
+  import PreferenceToolbar from "./PreferenceToolbar.svelte";
   import { getShell } from "./context";
   import StashPlates from "./StashPlates.svelte";
   import RefChip from "./RefChip.svelte";
@@ -47,6 +48,7 @@
               <button class="text-button" type="button" onclick={() => { shell.historyFilter = ""; void shell.loadContext(); }}>{shell.tr("chrome.allCommits")}</button>
             {/if}
           </div>
+          <PreferenceToolbar keys={["commitSort", "maxCommits", "dateRelative", "date24h", "compactBranchLabels", "gravatar", "highlightIssues"]} />
         </div>
         <section class="history flex-fill" bind:this={shell.historyEl} bind:clientHeight={shell.historyHeight} use:restoreHistory onscroll={onHistoryScroll}>
           {#if shell.contentHits}
