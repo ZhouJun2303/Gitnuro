@@ -786,7 +786,7 @@ test("unified diff keeps row nodes while scrolling", async ({ page }) => {
   expect(result ?? 0).toBeLessThan(80);
 });
 
-test("a folder double-click stages it and the twist only folds", async ({ page }) => {
+test("a folder click selects its files, double-click stages it, the twist only folds", async ({ page }) => {
   test.setTimeout(60_000);
   await openLabScene(page, "changes", ".file-list");
   await page.locator(".unstaged-pane .pane-more").click();
@@ -812,8 +812,23 @@ test("a folder double-click stages it and the twist only folds", async ({ page }
   await expect(child).toHaveCount(0);
   await expect(staged.locator('button.file-select[title="pending"]')).toHaveCount(0);
 
+  // Clicking a folded folder picks every file under it without unfolding it.
   await folder.click();
+  await expect(child).toHaveCount(0);
+  await expect(page.locator(".unstaged-pane .pick-count")).toContainText("24");
+  await expect(unstaged.locator(".dir-row.picked")).toHaveCount(1);
+
+  // Delete with the folder selected targets the whole folder, not one file.
+  await page.keyboard.press("Delete");
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText(/共 24 个文件|24 files/);
+  await expect(confirm).toContainText("pending/file-01.txt");
+  await page.keyboard.press("Escape");
+  await expect(confirm).toHaveCount(0);
+
+  await twist.click();
   await expect(child).toHaveCount(1);
+  await expect(page.locator(".unstaged-pane .file.selected")).toHaveCount(1);
 
   await folder.locator(".name").dblclick();
   await expect(child).toHaveCount(0);

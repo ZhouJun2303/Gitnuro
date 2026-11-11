@@ -34,8 +34,10 @@
     void shell.flipStage(path, side);
   }
 
-  // A click on the folder name waits so a double-click can stage it without
-  // also folding. The twist folds immediately and never stages.
+  // A click on the folder name picks every file under it, so discard and
+  // stage act on the whole folder. The pick bar appears above the list, so the
+  // selection waits briefly: a double-click stages the folder without moving
+  // the row out from under the second click.
   let dirClickTimer = 0;
 
   function clearDirClick() {
@@ -49,12 +51,12 @@
     shell.toggleDir(path);
   }
 
-  function onDirClick(event: MouseEvent, path: string) {
+  function onDirClick(event: MouseEvent, path: string, side: Side) {
     if (event.button !== 0 || event.detail > 1) return;
     clearDirClick();
     dirClickTimer = window.setTimeout(() => {
       dirClickTimer = 0;
-      shell.toggleDir(path);
+      shell.selectFolder(path, side, event);
     }, 280);
   }
 
@@ -282,11 +284,11 @@
 
 {#snippet dirRow(path: string, side: Side, depth: number)}
       {@const open = !shell.collapsedDirs.includes(path)}
-      <div class="tree-row" style:padding-left="{8 + depth * 16}px" role="group" oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
+      <div class="tree-row dir-row" class:picked={side === "staged" ? shell.pickedStagedDirs.has(path) : shell.pickedUnstagedDirs.has(path)} style:padding-left="{8 + depth * 16}px" role="group" oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
         <button class="twist-btn" type="button" aria-expanded={open} aria-label={shell.fileName(path)} onclick={(event) => onTwistClick(event, path)}>
           {@render disclosure(open)}
         </button>
-        <button class="file-select" type="button" title={path} onclick={(event) => onDirClick(event, path)} ondblclick={(event) => flipDir(event, path, side)}>
+        <button class="file-select" type="button" title={path} onclick={(event) => onDirClick(event, path, side)} ondblclick={(event) => flipDir(event, path, side)}>
           {@render folderIcon()}
           <span class="name">{shell.fileName(path)}</span>
         </button>
@@ -444,7 +446,7 @@
         oncontextmenu={(event) => shell.openMenu(event, shell.fileMenu(file, side))}
         ondblclick={(event) => flipFile(event, file.path, side)}
       >
-        <button class="file-select" type="button" title={file.path} onclick={(event) => shell.selectFile(file.path, side, event)}>
+        <button class="file-select" type="button" title={file.path} onclick={(event) => { clearDirClick(); shell.selectFile(file.path, side, event); }}>
           {#if shell.fileLayout === "tree"}
             {@render treeLine(file.path, file.letter)}
           {:else}
