@@ -108,6 +108,10 @@ pnpm test:ui -- e2e/sync-toolbar.spec.ts
 pnpm test:ui -- e2e/operation-flow.spec.ts --grep "observer automatic opening"
 pnpm test:ui -- --reuse e2e/operation-flow.spec.ts --grep "observer automatic closing|observer follows conflicts"
 pnpm test:ui -- --reuse e2e/conflict-pane.spec.ts --grep "conflict pane"
+pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|preferences backdrop|appearance menu"
+pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"
+pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"
+pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "tab context menu copies"
 ```
 
 `--` 后的参数会传给 Playwright。已有 `.lab` 仓库且本次无需重建时，加 `--reuse` 可复用数据，避免重建整套试验台和清理正在使用的开发日志：`pnpm test:ui -- --reuse e2e/sync-toolbar.spec.ts`。需要恢复的仓库可先单独执行 `node scripts/lab-seed.mjs rebase conflict`。
@@ -200,10 +204,19 @@ pnpm package:mac
 | 搜索提交 | `Ctrl+F` |
 | 后退 / 前进 | `Alt+Left` / `Alt+Right` |
 | 设置 | `Ctrl+,` |
+| 切换中英文 | `Ctrl+Alt+L` |
 | 在文件管理器中显示 | `Ctrl+Alt+O` |
 | 放大 / 缩小 | `Ctrl+=` / `Ctrl+-` |
 
 终端从仓库菜单打开，没有单独的快捷键。
+
+语言快捷键在首选项和输入框中也可使用，从当前显示语言切换到另一种语言并保存；也可在“外观”菜单中选择“切换语言”。首选项点击面板外空白处保持打开，通过右上角关闭按钮、“完成”或 `Escape` 关闭。试验台场景：`prefs-language`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|preferences backdrop|appearance menu"`。
+
+切换语言会立即同步到已打开的独立历史、文件内容、合并和操作流程窗口；也可在独立窗口按相同快捷键切换，其他窗口同步更新。同步只更新语言，保留各窗口正在查看的内容和编辑草稿。验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"`。
+
+项目标签右键菜单提供“拷贝项目路径”，复制该标签对应仓库的完整路径；未选中的标签和自定义名称的标签同样适用。试验台场景：`tab-copy-path`；验证：`pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "tab context menu copies"`。
+
+点击生成提交说明时，若 AI 未启用、接口地址未填写，或后端报告未配置密钥，会打开偏好设置并滚动、聚焦到对应配置项；已通过环境变量配置密钥时仍可正常生成。试验台场景：`suggest-unconfigured`、`suggest-no-url`、`suggest-disabled`；验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"`。
 
 ## 下载
 

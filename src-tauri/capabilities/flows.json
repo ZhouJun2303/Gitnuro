@@ -9,6 +9,7 @@
     "allow-operation-flow",
     "allow-operation-history",
     "allow-load-settings",
+    "allow-save-settings",
     "allow-log-client"
   ]
 }

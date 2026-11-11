@@ -10,6 +10,7 @@ import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, remoteNameFromUrl, repoNameFromUrl, safeFolderName } from "../clonePath";
 import { featuresPageUrl } from "../featuresPage";
 import { resolveLocale, translate } from "../i18n";
+import { broadcastLocale, onLocaleChange } from "../i18n/sync";
 import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
@@ -4556,6 +4557,12 @@ export class ShellState {
     return savePrefs(this, close);
   }
 
+  switchLanguage() {
+    this.settings.locale = this.activeLocale === "zh" ? "en" : "zh";
+    broadcastLocale(this.settings.locale);
+    void this.savePrefs(false);
+  }
+
 
 
   async browseFolder(initial = "") {
@@ -6052,6 +6059,12 @@ export class ShellState {
 
   onShortcut(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
+    const action = shortcut(event);
+    if (action === "switchLanguage") {
+      event.preventDefault();
+      if (!event.repeat && !event.isComposing) this.switchLanguage();
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c") {
       if (typing(event) || this.dialog || this.launchOpen) return;
       if (this.heldText) {
@@ -6077,7 +6090,6 @@ export class ShellState {
     }
     if (this.activateLayer(event)) return;
     if (this.dialog || this.textMerge || this.confirmAsk) return;
-    const action = shortcut(event);
     if (!action) return;
     // Command log, repository picker, menus, quick launch and forge are modal enough
     // that shortcuts must not write behind them. Escape still closes the top layer.
@@ -6387,6 +6399,7 @@ export class ShellState {
     this.goBack();
     };
     const onShortcut = this.onShortcut.bind(this);
+    const stopLocale = onLocaleChange((locale) => { this.settings.locale = locale; });
     const onRememberPointer = this.rememberPointer.bind(this);
     window.addEventListener("keydown", onShortcut);
     window.addEventListener("mousedown", onMouseNav);
@@ -6396,6 +6409,7 @@ export class ShellState {
     const historyTimer = window.setTimeout(addHistoryEntry, 0);
     window.addEventListener("popstate", onPop);
     const detachNav = () => {
+    stopLocale();
     window.clearTimeout(historyTimer);
     window.removeEventListener("keydown", onShortcut);
     window.removeEventListener("mousedown", onMouseNav);

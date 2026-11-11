@@ -184,6 +184,7 @@ export function appearanceItems(shell: ShellState) {
       { label: `${mark("light")}${shell.tr("dialog.light")}`, run: pick("light") },
       { label: `${mark("dark")}${shell.tr("dialog.dark")}`, run: pick("dark") },
       { sep: true, label: "" },
+      { label: shell.tr("chrome.switchLanguage"), shortcut: shortcutLabel("switchLanguage"), run: () => shell.switchLanguage() },
       { label: shell.tr("chrome.preferences"), shortcut: shortcutLabel("settings"), run: () => (shell.dialog = "prefs") },
     ];
   }

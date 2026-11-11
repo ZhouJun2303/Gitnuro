@@ -27,6 +27,7 @@ export type Messages = {
     terminal: string;
     explorer: string;
     preferences: string;
+    switchLanguage: string;
     about: string;
     performance: string;
     quickLaunch: string;
@@ -379,6 +380,7 @@ export type Messages = {
     showLine: string;
     lineHistory: string;
     renameTab: string;
+    copyProjectPath: string;
     tabColor: string;
     noColor: string;
     bareForce: string;

@@ -1,5 +1,6 @@
 .diff-body {
   position: relative;
+  --hunk-edge: color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .diff-load {
@@ -27,9 +28,43 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Outline the hovered hunk as one box: side edges on every row, horizontal edges only on its outer rows. */
+.diff-body .split-row > span,
+.diff-body .split-meta {
+  position: relative;
+}
+
+.diff-body .virtual-row.hunk-hover::after,
+.diff-body .split-row.hunk-hover > span::after,
+.diff-body .split-meta.hunk-hover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: solid var(--hunk-edge);
+  border-width: var(--hunk-edge-t, 0) var(--hunk-edge-r, 0) var(--hunk-edge-b, 0) var(--hunk-edge-l, 0);
+  pointer-events: none;
+}
+
 .diff-body .virtual-row.hunk-hover,
-.diff-body .split-row.hunk-hover > span {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+.diff-body .split-meta.hunk-hover {
+  --hunk-edge-l: 1px;
+  --hunk-edge-r: 1px;
+}
+
+.diff-body .split-row.hunk-hover > span:first-child { --hunk-edge-l: 1px; }
+
+.diff-body .split-row.hunk-hover > span:last-child { --hunk-edge-r: 1px; }
+
+.diff-body .virtual-row.hunk-hover.hunk-top,
+.diff-body .split-meta.hunk-hover.hunk-top,
+.diff-body .split-row.hunk-hover.hunk-top > span {
+  --hunk-edge-t: 1px;
+}
+
+.diff-body .virtual-row.hunk-hover.hunk-bottom,
+.diff-body .split-meta.hunk-hover.hunk-bottom,
+.diff-body .split-row.hunk-hover.hunk-bottom > span {
+  --hunk-edge-b: 1px;
 }
 
 .diff-body .virtual-row.hunk-hover.add,

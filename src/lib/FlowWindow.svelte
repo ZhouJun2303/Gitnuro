@@ -4,6 +4,8 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { invoke } from "./perf";
   import { translate, resolveLocale, type Locale } from "./i18n";
+  import { broadcastLocale, onLocaleChange } from "./i18n/sync";
+  import { shortcut } from "./keys";
   import { buildFlowPipeline, isFutureStep, stateSymbol, type FlowCommit, type FlowDelta, type FlowNode, type FlowSnapshot, type FlowSummary } from "./operation-flow";
   import type { Settings } from "./status";
   import "./FlowWindow.css";
@@ -135,6 +137,10 @@
   });
 
   $effect(() => {
+    document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
+  });
+
+  $effect(() => {
     if (!ready || !shouldAutoClose || !summary) return;
     const id = summary.id, sequence = summary.sequence;
     const timer = setTimeout(async () => {
@@ -153,6 +159,19 @@
   });
 
   onMount(() => {
+    const stopLocale = onLocaleChange((setting) => { locale = resolveLocale(setting); });
+    const onLanguageShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || shortcut(event) !== "switchLanguage") return;
+      event.preventDefault();
+      if (event.repeat || event.isComposing) return;
+      locale = locale === "zh" ? "en" : "zh";
+      const next = locale;
+      broadcastLocale(next);
+      void invoke<Settings>("load_settings")
+        .then((settings) => invoke("save_settings", { values: { ...settings, locale: next } }))
+        .catch((cause) => { if (!disposed) error = String(cause); });
+    };
+    window.addEventListener("keydown", onLanguageShortcut);
     const params = new URLSearchParams(window.location.search);
     scene = params.get("scene") ?? ""; repo = params.get("repo") ?? "";
     selectedId = params.get("rev") ?? ""; live = params.get("file") === "live";
@@ -200,7 +219,7 @@
     window.addEventListener("focus", refreshAutoClose);
     const poll = setInterval(() => { if (!document.hidden) void refresh(); }, 1000);
     const historyPoll = setInterval(() => { if (!document.hidden) void loadHistory(); }, 10_000);
-    return () => { disposed = true; generation++; clearInterval(poll); clearInterval(historyPoll); cancelAnimationFrame(scrollFrame); window.removeEventListener("focus", refreshAutoClose); unlisten.forEach((off) => off()); };
+    return () => { disposed = true; generation++; stopLocale(); window.removeEventListener("keydown", onLanguageShortcut); clearInterval(poll); clearInterval(historyPoll); cancelAnimationFrame(scrollFrame); window.removeEventListener("focus", refreshAutoClose); unlisten.forEach((off) => off()); };
   });
 </script>
 

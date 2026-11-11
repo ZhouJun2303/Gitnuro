@@ -163,7 +163,7 @@
                 <option value="long">{shell.tr("dialog.promptLong")}</option>
               </select>
             </label>
-            <label>Base URL <input bind:value={shell.settings.aiBaseUrl} oninput={() => { shell.aiModels = []; shell.aiEndpointNote = ""; }} /></label>
+            <label>Base URL <input data-ai-field="baseUrl" bind:value={shell.settings.aiBaseUrl} oninput={() => { shell.aiModels = []; shell.aiEndpointNote = ""; }} /></label>
             <div class="ai-actions">
               <button class="text-button" type="button" disabled={shell.aiEndpointBusy !== ""} onclick={() => void shell.testAiEndpoint()}>{shell.aiEndpointBusy === "test" ? shell.tr("chrome.working") : shell.tr("dialog.testEndpoint")}</button>
               <button class="text-button" type="button" disabled={shell.aiEndpointBusy !== ""} onclick={() => void shell.loadAiModels()}>{shell.aiEndpointBusy === "models" ? shell.tr("chrome.working") : shell.tr("dialog.fetchModels")}</button>
@@ -182,7 +182,7 @@
                 </select>
               </label>
             {/if}
-            <label>API key <input type="password" bind:value={shell.settings.aiApiKey} /></label>
+            <label>API key <input data-ai-field="apiKey" type="password" bind:value={shell.settings.aiApiKey} /></label>
           {:else if shell.prefTab === "integration"}
             {@const kind = shell.toolKind}
             {@const tools = shell.toolsOf(kind)}
@@ -371,7 +371,7 @@
             </div>
             <div class="pref-section">
               <div class="k">{shell.tr("dialog.ai")}</div>
-              <label class="check"><input type="checkbox" bind:checked={shell.settings.aiEnabled} /> {shell.tr("dialog.aiEnabled")}</label>
+              <label class="check"><input data-ai-field="enabled" type="checkbox" bind:checked={shell.settings.aiEnabled} /> {shell.tr("dialog.aiEnabled")}</label>
               <label>{shell.tr("dialog.aiLanguage")}
                 <select bind:value={shell.settings.aiLanguage}>
                   <option value="zh">{shell.tr("dialog.chinese")}</option>

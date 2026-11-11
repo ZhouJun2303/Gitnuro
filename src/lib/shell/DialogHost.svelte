@@ -110,7 +110,7 @@
 </script>
 
 {#if shell.dialog}
-    <div class="scrim" role="presentation" onclick={() => { if (shell.busy) return; if (shell.dialog === "prefs") void shell.savePrefs(true); else if (shell.dialog === "editorImport") shell.closeEditorImport(); else shell.dialog = null; }}>
+    <div class="scrim" role="presentation" onclick={() => { if (shell.busy || shell.dialog === "prefs") return; closeDialog(); }}>
       <div class="dialog {dialogSize(shell.dialog ?? "")}" class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} data-dialog={shell.dialog} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={trapTab}>
       <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={closeDialog}>×</button>
       <form

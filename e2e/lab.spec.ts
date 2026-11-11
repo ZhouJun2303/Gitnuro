@@ -101,6 +101,25 @@ test("dialog close button dismisses the dialog", async ({ page }) => {
   await expect(page.locator('[data-dialog="prefs"]')).toHaveCount(0);
 });
 
+test("tab context menu copies the clicked project's full path", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const layout = await lab("lab_layout") as { full: string; even: string };
+  await openLabScene(page, "tab-copy-path", ".chrome-tabs .tab");
+  const active = page.locator(".chrome-tabs .tab.active");
+  await active.click({ button: "right" });
+  await page.locator('[data-layer="menu"] button', { hasText: /拷贝项目路径|Copy project path/ }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(layout.full);
+
+  const other = page.locator(".chrome-tabs .tab", { hasText: "MyTest" });
+  await expect(other).not.toHaveClass(/active/);
+  await other.click({ button: "right" });
+  await page.locator('[data-layer="menu"] button', { hasText: /拷贝项目路径|Copy project path/ }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(layout.even);
+  await expect(active).toHaveCount(1);
+  await expect(other).not.toHaveClass(/active/);
+  await expect(page.locator('[data-layer="menu"]')).toHaveCount(0);
+});
+
 test("tab color can be set and cleared", async ({ page }) => {
   await openLabScene(page, "dialog-colorTab", '[data-dialog="colorTab"]');
   const dialog = page.locator('[data-dialog="colorTab"]');

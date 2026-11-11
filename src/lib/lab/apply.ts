@@ -95,6 +95,14 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.section = "changes";
     return;
   }
+  if (id.startsWith("suggest-")) {
+    shell.section = "changes";
+    shell.prefTab = "general";
+    shell.settings.aiEnabled = id !== "suggest-disabled";
+    shell.settings.aiBaseUrl = id === "suggest-no-url" ? "" : "https://example.invalid/v1";
+    shell.settings.aiApiKey = "";
+    return;
+  }
   if (id === "changes-combined") {
     shell.section = "changes";
     shell.setLayout("combined");
@@ -154,6 +162,13 @@ async function fillSurface(shell: ShellState, id: string) {
   }
   if (id === "vertical-tabs") {
     shell.settings = { ...shell.settings, verticalTabs: true };
+    return;
+  }
+  if (id === "tab-copy-path") {
+    const layout = await invoke<{ full: string; even: string }>("lab_layout");
+    shell.settings.verticalTabs = false;
+    shell.repos = [layout.full, layout.even];
+    shell.settings.tabLabels = shell.pairSetting(shell.settings.tabLabels, layout.even, "MyTest");
     return;
   }
   if (id === "picker") {
@@ -465,6 +480,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.editorDetecting = false;
       break;
     case "prefs":
+      if (sceneId === "prefs-language") shell.settings.locale = "zh";
       shell.prefTab = sceneId.startsWith("prefs-integration") ? "integration" : sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : "general";
       fillSourceRoots(shell);
       fillLabTools(shell);

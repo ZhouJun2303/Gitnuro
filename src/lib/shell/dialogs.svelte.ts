@@ -1,5 +1,6 @@
 import { onMount, tick } from "svelte";
 import { invoke } from "../perf";
+import { broadcastLocale } from "../i18n/sync";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { commits, diffs, sampleConflictText, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
@@ -674,6 +675,15 @@ export async function loadAiModels(shell: ShellState) {
     }
   }
 
+async function openAiSettings(shell: ShellState, field: "enabled" | "baseUrl" | "apiKey") {
+    shell.prefTab = field === "enabled" ? "git" : "commit";
+    shell.dialog = "prefs";
+    await tick();
+    const target = shell.prefPage?.querySelector<HTMLInputElement>(`[data-ai-field="${field}"]`);
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: "center" });
+  }
+
 export async function suggestMessage(shell: ShellState) {
     const path = shell.repoPath();
     if (shell.busy) return;
@@ -683,7 +693,11 @@ export async function suggestMessage(shell: ShellState) {
       return;
     }
     if (!shell.settings.aiEnabled) {
-      shell.actionError = shell.tr("chrome.suggestOff");
+      await openAiSettings(shell, "enabled");
+      return;
+    }
+    if (!shell.settings.aiBaseUrl.trim()) {
+      await openAiSettings(shell, "baseUrl");
       return;
     }
     if (shell.staged.length === 0) {
@@ -700,7 +714,13 @@ export async function suggestMessage(shell: ShellState) {
         shell.description = withoutRepeatedSubject(value.description, shell.commitType, shell.summary);
       }
     } catch (error) {
-      if (shell.viewing(path)) shell.actionError = explainSuggest(shell, error);
+      if (shell.viewing(path)) {
+        const text = shell.message(error);
+        if (text.startsWith("Add an API key")) await openAiSettings(shell, "apiKey");
+        else if (text.startsWith("Set an API base URL")) await openAiSettings(shell, "baseUrl");
+        else if (text.startsWith("AI commit messages are turned off")) await openAiSettings(shell, "enabled");
+        else shell.actionError = explainSuggest(shell, error);
+      }
     } finally {
       shell.stopWork(path);
     }
@@ -745,11 +765,15 @@ export async function savePrefs(shell: ShellState, close = true) {
     if (!shell.backend()) return;
     const ticket = ++shell.prefsSave;
     const values = shell.settings;
+    const locale = values.locale;
     try {
       const saved = await invoke<Settings>("save_settings", { values });
       if (ticket === shell.prefsSave) {
-        shell.settings = saved;
+        const localeChanged = shell.settings.locale !== locale;
+        shell.settings = localeChanged ? { ...saved, locale: shell.settings.locale } : saved;
+        broadcastLocale(shell.settings.locale);
         applyCommitTypes(shell);
+        if (localeChanged) void shell.savePrefs(false);
       }
     } catch (error) {
       if (ticket === shell.prefsSave) shell.actionError = shell.message(error);
