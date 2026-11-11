@@ -17,6 +17,7 @@
   import SplitHandle from "./SplitHandle.svelte";
   import PerfPanel from "./PerfPanel.svelte";
   import { cloneTarget, cloneUrl } from "./clonePath";
+  import { fileAccessReport } from "./fileAccess";
   import { untrack } from "svelte";
   import { shortcutLabel } from "./keys";
   import { branchGroup, gravatarUrl, laneColors, splitDiff, type SplitRow } from "./view";
@@ -559,6 +560,23 @@
 
 .command-detail pre strong { font-weight: 700; }
 
+.file-access-notice {
+    display: block;
+    margin: 10px 0;
+    padding: 14px;
+    border: 1px solid color-mix(in srgb, var(--deleted) 40%, transparent);
+    border-left: 4px solid var(--deleted);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--deleted) 7%, var(--elevated));
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+
+.file-access-heading { font-size: 16px; font-weight: 800; color: var(--deleted); }
+.file-access-important { font-weight: 700; }
+
 .palette-scrim {
     position: fixed;
     inset: 0;
@@ -761,6 +779,11 @@
     {/each}
   {/snippet}
 
+  {#snippet commandOutput(output: string, command = "")}
+    {@const report = fileAccessReport(output)}
+    <pre>{#if command}<strong>$ {command}</strong>{/if}{#if output}{command ? "\n\n" : ""}{#if report}<span class="file-access-notice" role="note">{#each report.lines as line, index}<span class:file-access-heading={index === 0 || line === "How to release access:"} class:file-access-important={/^(File:|Cause:|In use by:)/.test(line)}>{line}{index < report.lines.length - 1 ? "\n" : ""}</span>{/each}</span>{report.detail ? `\n${report.detail}` : ""}{:else}{output}{/if}{/if}</pre>
+  {/snippet}
+
   {#if shell.commandLogOpen}
     {@const picked = shell.pickedCommand()}
     <div class="command-log" data-layer="commands" style:left="{shell.commandPos.x}px" style:top="{shell.commandPos.y}px" style:width="{shell.commandPos.width}px" style:height="{shell.commandPos.maxHeight}px" role="dialog" aria-modal="true" aria-label={shell.tr("chrome.commandHistory")} tabindex="-1" use:overlayFocus={{ close: () => (shell.commandLogOpen = false), focus: ".command-item.current" }}>
@@ -792,7 +815,7 @@
             <strong>{picked.title}</strong>
             <span>{shell.tr("chrome.commandNotices")}</span>
           </header>
-          {#if picked.output}<pre>{picked.output}</pre>{/if}
+          {#if picked.output}{@render commandOutput(picked.output)}{/if}
           {#if notice && notice.actions.length > 0}
             <div class="composer-row notice-actions">
               {#each notice.actions as action (action.id)}
@@ -806,7 +829,7 @@
             <span>{picked.ok ? shell.tr("chrome.commandSucceeded") : shell.tr("chrome.commandFailed")} {shell.commandStamp(picked.at)}</span>
             {#if !picked.ok}<button class="text-button" type="button" onclick={() => shell.copyNoted(picked.output)}>{shell.errorCopied ? shell.tr("chrome.copied") : shell.tr("chrome.copyError")}</button>{/if}
           </header>
-          <pre>{#if picked.command}<strong>$ {picked.command}</strong>{/if}{#if picked.output}{picked.command ? "\n\n" : ""}{picked.output}{/if}</pre>
+          {@render commandOutput(picked.output, picked.command)}
         {:else}
           <p class="repo-empty">{shell.tr("chrome.commandEmpty")}</p>
         {/if}

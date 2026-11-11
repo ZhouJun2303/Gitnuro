@@ -101,7 +101,8 @@ pub struct Settings {
     pub force_with_lease: bool,
     #[serde(default = "default_true")]
     pub ai_enabled: bool,
-    #[serde(default)]
+    /// Language of AI commit messages: `zh` or `en`. Chinese is the default.
+    #[serde(default = "ai_language_default")]
     pub ai_language: String,
     #[serde(default = "ai_max")]
     pub ai_max_chars: u32,
@@ -176,6 +177,15 @@ pub struct Settings {
     /// How many days of operation failures the command log keeps.
     #[serde(default = "error_days")]
     pub error_log_days: u32,
+    /// Completed operation graphs are retained locally for this many days.
+    #[serde(default = "flow_days")]
+    pub flow_history_days: u32,
+    /// Automatically show the read-only operation observer.
+    #[serde(default = "default_true")]
+    pub flow_auto_open: bool,
+    /// Close the operation observer after all conflicts and follow-up steps finish.
+    #[serde(default)]
+    pub flow_auto_close: bool,
     #[serde(default = "low_limit")]
     pub message_low: u32,
     #[serde(default = "high_limit")]
@@ -300,6 +310,9 @@ pub struct Settings {
     /// Update banner stays hidden for this version until a newer one is published.
     #[serde(default)]
     pub dismissed_update: String,
+    /// Install an update without showing the installer window.
+    #[serde(default = "default_true")]
+    pub silent_install: bool,
     /// `pending` asks a new install to open the feature guide once. Missing on an
     /// existing file means the install predates the guide, so it stays `seen`.
     #[serde(default = "features_intro_seen")]
@@ -422,6 +435,9 @@ fn sign_off_format() -> String {
 fn ai_max() -> u32 {
     12_000
 }
+fn ai_language_default() -> String {
+    "zh".into()
+}
 fn prompt_style() -> String {
     "short".into()
 }
@@ -443,6 +459,7 @@ fn support_prefix() -> String {
 fn locale_default() -> String {
     "system".into()
 }
+fn flow_days() -> u32 { 3 }
 fn diff_font() -> u32 {
     13
 }
@@ -528,7 +545,7 @@ impl Default for Settings {
             sign_off_format: sign_off_format(),
             force_with_lease: true,
             ai_enabled: true,
-            ai_language: String::new(),
+            ai_language: ai_language_default(),
             ai_max_chars: ai_max(),
             ai_prompt: String::new(),
             ai_prompt_style: prompt_style(),
@@ -563,6 +580,9 @@ impl Default for Settings {
             push_on_commit: false,
             compact_branch_labels: false,
             error_log_days: error_days(),
+            flow_history_days: flow_days(),
+            flow_auto_open: true,
+            flow_auto_close: false,
             message_low: low_limit(),
             message_high: high_limit(),
             spell_checking: spell_off(),
@@ -612,6 +632,7 @@ impl Default for Settings {
             commit_type: commit_type_default(),
             commit_types: Vec::new(),
             dismissed_update: String::new(),
+            silent_install: true,
             features_intro: features_intro_seen(),
         }
     }
@@ -1522,6 +1543,38 @@ mod tests {
     }
 
     #[test]
+    fn operation_observer_defaults_on_and_keeps_an_explicit_opt_out() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(settings.flow_auto_open);
+        assert!(Settings::default().flow_auto_open);
+        let settings: Settings = serde_json::from_str(r#"{"flowAutoOpen":false}"#).unwrap();
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["flowAutoOpen"], false);
+        assert!(!serde_json::from_value::<Settings>(saved).unwrap().flow_auto_open);
+    }
+
+    #[test]
+    fn operation_observer_auto_close_defaults_off_and_keeps_an_explicit_choice() {
+        let settings: Settings = serde_json::from_str(r#"{"flowAutoOpen":true}"#).unwrap();
+        assert!(!settings.flow_auto_close);
+        assert!(!Settings::default().flow_auto_close);
+        for enabled in [false, true] {
+            let settings: Settings = serde_json::from_value(serde_json::json!({
+                "flowAutoClose": enabled,
+            })).unwrap();
+            let saved = serde_json::to_value(&settings).unwrap();
+            assert_eq!(saved["flowAutoClose"], enabled);
+            assert_eq!(serde_json::from_value::<Settings>(saved).unwrap().flow_auto_close, enabled);
+        }
+    }
+
+    #[test]
+    fn missing_ai_language_defaults_to_chinese() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.ai_language, "zh");
+    }
+
+    #[test]
     fn settings_keep_custom_commit_types() {
         let settings: Settings = serde_json::from_str(
             r##"{"commitTypes":[{"name":"ui","color":"#123456","label":"界面"},{"name":"feat"}]}"##,
@@ -1534,6 +1587,16 @@ mod tests {
         assert_eq!(settings.commit_types[1].name, "feat");
         assert!(settings.commit_types[1].label.is_empty());
         assert!(Settings::default().commit_types.is_empty());
+    }
+
+    #[test]
+    fn missing_silent_install_defaults_on_and_keeps_an_explicit_opt_out() {
+        assert!(serde_json::from_str::<Settings>("{}").unwrap().silent_install);
+        assert!(Settings::default().silent_install);
+        let settings: Settings = serde_json::from_str(r#"{"silentInstall":false}"#).unwrap();
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["silentInstall"], false);
+        assert!(!serde_json::from_value::<Settings>(saved).unwrap().silent_install);
     }
 
     #[test]

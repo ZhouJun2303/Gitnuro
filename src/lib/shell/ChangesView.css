@@ -3,6 +3,10 @@
     background: color-mix(in srgb, var(--selection) 55%, transparent);
   }
 
+.tree-row.dir-row.picked > .file-select {
+    background: color-mix(in srgb, var(--selection) 55%, transparent);
+  }
+
 .changes-column {
     flex: none;
     min-width: 0;

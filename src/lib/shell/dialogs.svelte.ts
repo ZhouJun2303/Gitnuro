@@ -1,5 +1,6 @@
 import { onMount, tick } from "svelte";
 import { invoke } from "../perf";
+import { broadcastLocale } from "../i18n/sync";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { commits, diffs, sampleConflictText, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
@@ -562,7 +563,13 @@ export function quick(shell: ShellState, event: MouseEvent, dialogName: Dialog, 
   }
 
 export async function submitCommit(shell: ShellState, pushAfter = false) {
-    if (shell.mode !== "live" || !shell.canCommit) return;
+    if (shell.mode !== "live") return;
+    if (shell.progress) {
+      // A rebase, merge, cherry-pick, or revert owns the next commit.
+      void shell.continueFlow();
+      return;
+    }
+    if (!shell.canCommit) return;
     const messageText = shell.fullSummary.trim();
     if (!messageText) return;
     const description = isCommentary(shell.description) ? "" : shell.description;
@@ -571,7 +578,7 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
     if (value === undefined) return;
     const failed = value ? "" : (shell.actionError ?? "");
     shell.recordCommand("commit", { title: shell.tr("chrome.commandCommit", { name: messageText || "HEAD" }), command: shell.gitLine(["commit", "-m", messageText]) }, (value?.log ?? failed).trim(), !!value, "user");
-    if (!shell.actionError && shell.viewing(path)) {
+    if (value && !shell.actionError && shell.viewing(path)) {
       shell.summary = "";
       shell.description = "";
       shell.amend = false;
@@ -579,7 +586,15 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
       if (path) shell.drafts.delete(path);
       await shell.loadContext();
       void shell.fillTemplate();
-      if (pushAfter || shell.settings.pushOnCommit) await shell.doPush();
+      // A commit can end a paused merge; the autostash it kept may come back as conflicts.
+      const restoreConflict = shell.conflictCount > 0;
+      if (restoreConflict) {
+        shell.mergeConflictRestore = true;
+        shell.commandOutput = (value.log ?? "").trim();
+        shell.dialog = "mergeConflict";
+        shell.actionError = null;
+      }
+      if (!restoreConflict && (pushAfter || shell.settings.pushOnCommit)) await shell.doPush();
     }
   }
 
@@ -597,6 +612,7 @@ function explainSuggest(shell: ShellState, error: unknown) {
     if (text.startsWith("Add an API key")) return shell.tr("chrome.suggestNeedKey");
     if (text.startsWith("Set an API base URL")) return shell.tr("chrome.suggestNeedUrl");
     if (text.startsWith("The model returned an empty")) return shell.tr("chrome.suggestEmpty");
+    if (text.startsWith("The model did not reply in")) return shell.tr("chrome.suggestLanguage");
     if (text.startsWith("The model reply does not match")) {
       const detail = text.slice("The model reply does not match the commit format:".length).trim();
       const reason = shell.tr("chrome.suggestFormat");
@@ -659,6 +675,15 @@ export async function loadAiModels(shell: ShellState) {
     }
   }
 
+async function openAiSettings(shell: ShellState, field: "enabled" | "baseUrl" | "apiKey") {
+    shell.prefTab = "ai";
+    shell.dialog = "prefs";
+    await tick();
+    const target = shell.prefPage?.querySelector<HTMLInputElement>(`[data-ai-field="${field}"]`);
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: "center" });
+  }
+
 export async function suggestMessage(shell: ShellState) {
     const path = shell.repoPath();
     if (shell.busy) return;
@@ -668,7 +693,11 @@ export async function suggestMessage(shell: ShellState) {
       return;
     }
     if (!shell.settings.aiEnabled) {
-      shell.actionError = shell.tr("chrome.suggestOff");
+      await openAiSettings(shell, "enabled");
+      return;
+    }
+    if (!shell.settings.aiBaseUrl.trim()) {
+      await openAiSettings(shell, "baseUrl");
       return;
     }
     if (shell.staged.length === 0) {
@@ -677,16 +706,21 @@ export async function suggestMessage(shell: ShellState) {
     }
     const style = shell.settings.aiPromptStyle === "long" ? "long" : "short";
     const styleName = shell.tr(style === "long" ? "chrome.promptLong" : "chrome.promptShort");
-    const language = shell.settings.aiLanguage.trim() || (shell.activeLocale === "zh" ? "中文" : "English");
     shell.startWork(shell.tr("chrome.suggestGenerate", { style: styleName }), path);
     try {
-      const value = await invoke<Suggestion>("suggest_commit_message", { path, style, language });
+      const value = await invoke<Suggestion>("suggest_commit_message", { path, style });
       if (shell.viewing(path)) {
         shell.applySubject(value.summary);
         shell.description = withoutRepeatedSubject(value.description, shell.commitType, shell.summary);
       }
     } catch (error) {
-      if (shell.viewing(path)) shell.actionError = explainSuggest(shell, error);
+      if (shell.viewing(path)) {
+        const text = shell.message(error);
+        if (text.startsWith("Add an API key")) await openAiSettings(shell, "apiKey");
+        else if (text.startsWith("Set an API base URL")) await openAiSettings(shell, "baseUrl");
+        else if (text.startsWith("AI commit messages are turned off")) await openAiSettings(shell, "enabled");
+        else shell.actionError = explainSuggest(shell, error);
+      }
     } finally {
       shell.stopWork(path);
     }
@@ -731,11 +765,15 @@ export async function savePrefs(shell: ShellState, close = true) {
     if (!shell.backend()) return;
     const ticket = ++shell.prefsSave;
     const values = shell.settings;
+    const locale = values.locale;
     try {
       const saved = await invoke<Settings>("save_settings", { values });
       if (ticket === shell.prefsSave) {
-        shell.settings = saved;
+        const localeChanged = shell.settings.locale !== locale;
+        shell.settings = localeChanged ? { ...saved, locale: shell.settings.locale } : saved;
+        broadcastLocale(shell.settings.locale);
         applyCommitTypes(shell);
+        if (localeChanged) void shell.savePrefs(false);
       }
     } catch (error) {
       if (ticket === shell.prefsSave) shell.actionError = shell.message(error);
@@ -1539,14 +1577,15 @@ export function openRebase(shell: ShellState) {
     shell.rebaseSteps = newer.map((commit) => ({ verb: "pick", rev: commit.id, summary: commit.summary, message: commit.summary }));
     shell.rebasePicked = newer.map((commit) => commit.id);
     shell.rebaseConflictFiles = [];
+    shell.rebaseConflictKnown = false;
     shell.dialog = "rebase";
     if (shell.mode === "live") {
       const path = shell.repoPath();
       const onto = shell.selectedCommit;
       const stillEditing = () => shell.dialog === "rebase" && shell.mode === "live" && shell.selectedCommit === onto && shell.viewing(path);
       void invoke<string[]>("rebase_conflicts", { path, onto })
-        .then((files) => { if (stillEditing()) shell.rebaseConflictFiles = files; })
-        .catch(() => { if (stillEditing()) shell.rebaseConflictFiles = []; });
+        .then((files) => { if (stillEditing()) { shell.rebaseConflictFiles = files; shell.rebaseConflictKnown = true; } })
+        .catch(() => { if (stillEditing()) shell.rebaseConflictKnown = false; });
     }
   }
 

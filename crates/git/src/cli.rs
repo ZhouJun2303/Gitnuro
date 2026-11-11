@@ -5,8 +5,8 @@
 //! what the user already has configured. Nothing here writes the global gitconfig.
 
 use std::cell::{Cell, RefCell};
-use std::io::Read;
 use std::ffi::{OsStr, OsString};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -60,7 +60,10 @@ fn progress_hook() -> Option<ProgressHook> {
 
 /// Stable identity for one repository. Slash direction and a trailing slash do not matter.
 pub fn repo_key(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase()
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase()
 }
 
 thread_local! {
@@ -91,7 +94,9 @@ pub fn with_operation_repo<T>(path: &Path, body: impl FnOnce() -> T) -> T {
 }
 
 fn operation_path(fallback: &Path) -> PathBuf {
-    OPERATION_REPO.with(|slot| slot.borrow().clone()).unwrap_or_else(|| fallback.to_path_buf())
+    OPERATION_REPO
+        .with(|slot| slot.borrow().clone())
+        .unwrap_or_else(|| fallback.to_path_buf())
 }
 
 thread_local! {
@@ -255,14 +260,18 @@ pub fn parse_git_version(text: &str) -> Option<(u32, u32)> {
         return None;
     }
     let rest = rest.strip_prefix("git version ").unwrap_or(rest);
-    let mut numbers = rest.split(|c: char| !c.is_ascii_digit()).filter(|part| !part.is_empty());
+    let mut numbers = rest
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|part| !part.is_empty());
     let major = numbers.next()?.parse().ok()?;
     let minor = numbers.next()?.parse().ok()?;
     Some((major, minor))
 }
 
 fn version_at_least(parsed: Option<(u32, u32)>, major: u32, minor: u32) -> bool {
-    parsed.is_some_and(|(found_major, found_minor)| found_major > major || (found_major == major && found_minor >= minor))
+    parsed.is_some_and(|(found_major, found_minor)| {
+        found_major > major || (found_major == major && found_minor >= minor)
+    })
 }
 
 /// Probe Git once for the about dialog. Startup still opens when Git is missing or old.
@@ -271,7 +280,15 @@ pub fn git_runtime() -> GitRuntime {
     let text = git_version_text();
     let parsed = parse_git_version(&text);
     let version = parsed
-        .map(|_| text.trim().strip_prefix("git version ").unwrap_or(text.trim()).split_whitespace().next().unwrap_or("").to_string())
+        .map(|_| {
+            text.trim()
+                .strip_prefix("git version ")
+                .unwrap_or(text.trim())
+                .split_whitespace()
+                .next()
+                .unwrap_or("")
+                .to_string()
+        })
         .unwrap_or_default();
     GitRuntime {
         program,
@@ -286,7 +303,9 @@ fn git_version_text() -> String {
     let mut command = git_command();
     command.arg("--version");
     match command.output() {
-        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        Ok(output) if output.status.success() => {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        }
         _ => String::new(),
     }
 }
@@ -294,7 +313,10 @@ fn git_version_text() -> String {
 fn lfs_runs() -> bool {
     let mut command = git_command();
     command.args(["lfs", "version"]);
-    command.output().map(|output| output.status.success()).unwrap_or(false)
+    command
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 /// How to start the Git under `dir` (its `cmd` folder), when that copy can run.
@@ -358,7 +380,9 @@ fn launch_from_system_path() -> Option<GitLaunch> {
 }
 
 fn apply_path(command: &mut Command, prefix: Option<&OsStr>) {
-    let Some(prefix) = prefix.filter(|prefix| !prefix.is_empty()) else { return };
+    let Some(prefix) = prefix.filter(|prefix| !prefix.is_empty()) else {
+        return;
+    };
     let mut path = OsString::from(prefix);
     path.push(if cfg!(windows) { ";" } else { ":" });
     if let Some(current) = std::env::var_os("PATH") {
@@ -422,7 +446,13 @@ fn lock_tracked() -> std::sync::MutexGuard<'static, Vec<Tracked>> {
 
 fn track(key: String, pid: u32, read: bool, group: crate::proc::Group) -> u64 {
     let generation = NEXT_GENERATION.fetch_add(1, Ordering::Relaxed);
-    lock_tracked().push(Tracked { key, pid, generation, read, group });
+    lock_tracked().push(Tracked {
+        key,
+        pid,
+        generation,
+        read,
+        group,
+    });
     generation
 }
 
@@ -440,7 +470,10 @@ fn stop_generation(generation: u64) {
 /// Stop every `git` process this library started, including grandchildren.
 /// Returns true when a write (not just a read) was among them.
 pub fn cancel_running() -> bool {
-    let entries: Vec<(u64, bool)> = lock_tracked().iter().map(|item| (item.generation, item.read)).collect();
+    let entries: Vec<(u64, bool)> = lock_tracked()
+        .iter()
+        .map(|item| (item.generation, item.read))
+        .collect();
     let stopped_write = entries.iter().any(|(_, read)| !read);
     for (generation, _) in entries {
         stop_generation(generation);
@@ -497,36 +530,69 @@ pub fn stop_process_tree(pid: u32) {
     crate::proc::kill_pid(pid);
 }
 
+/// Which identity variables a child process receives. Rebase, cherry-pick, and
+/// revert keep the original author, so they only replace the committer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AuthorMode {
+    /// Author and committer, for commits this app creates.
+    Both,
+    /// Committer only, for history rewrites that must keep their authors.
+    CommitterOnly,
+    /// Neither. Used when a repository-local author should win.
+    Repo,
+}
+
 pub fn run(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, &[], None, true, false)
+    run_prepared(repo, args, &[], None, AuthorMode::Both, false)
 }
 
 /// Like `run`, but a non-zero exit still returns the output. Spawn failures stay errors.
 pub fn run_output(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, &[], None, true, true)
+    run_prepared(repo, args, &[], None, AuthorMode::Both, true)
 }
 
-pub fn run_env(repo: &Path, args: &[&str], env: &[(&str, &str)]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, env, None, true, false)
+pub fn run_env(
+    repo: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> Result<std::process::Output, Error> {
+    run_prepared(repo, args, env, None, AuthorMode::Both, false)
+}
+
+/// Like [`run_env`], but leaves the author of rewritten commits alone.
+pub(crate) fn run_env_committer_only(
+    repo: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> Result<std::process::Output, Error> {
+    run_prepared(repo, args, env, None, AuthorMode::CommitterOnly, false)
 }
 
 pub fn run_stdin(repo: &Path, args: &[&str], stdin: &[u8]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, &[], Some(stdin), true, false)
+    run_prepared(repo, args, &[], Some(stdin), AuthorMode::Both, false)
 }
 
 /// Like `run_stdin`, but a non-zero exit still returns the output.
-pub(crate) fn run_stdin_output(repo: &Path, args: &[&str], stdin: &[u8]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, &[], Some(stdin), true, true)
+pub(crate) fn run_stdin_output(
+    repo: &Path,
+    args: &[&str],
+    stdin: &[u8],
+) -> Result<std::process::Output, Error> {
+    run_prepared(repo, args, &[], Some(stdin), AuthorMode::Both, true)
 }
 
 /// Like `run_stdin`, but keeps a repository-local `user.name`.
-pub(crate) fn run_stdin_repo_author(repo: &Path, args: &[&str], stdin: &[u8]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, &[], Some(stdin), false, false)
+pub(crate) fn run_stdin_repo_author(
+    repo: &Path,
+    args: &[&str],
+    stdin: &[u8],
+) -> Result<std::process::Output, Error> {
+    run_prepared(repo, args, &[], Some(stdin), AuthorMode::Repo, false)
 }
 
 /// Run git without replacing a repository-local `user.name`.
 pub(crate) fn run_repo_author(repo: &Path, args: &[&str]) -> Result<std::process::Output, Error> {
-    run_prepared(repo, args, &[], None, false, false)
+    run_prepared(repo, args, &[], None, AuthorMode::Repo, false)
 }
 
 /// True when this repository has its own `user.name`.
@@ -539,7 +605,9 @@ pub(crate) fn has_local_author(repo: &Path) -> bool {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     match command.output() {
-        Ok(output) => output.status.success() && output.stdout.iter().any(|byte| !byte.is_ascii_whitespace()),
+        Ok(output) => {
+            output.status.success() && output.stdout.iter().any(|byte| !byte.is_ascii_whitespace())
+        }
         Err(_) => false,
     }
 }
@@ -549,23 +617,32 @@ fn run_prepared(
     args: &[&str],
     env: &[(&str, &str)],
     stdin_bytes: Option<&[u8]>,
-    apply_author: bool,
+    author: AuthorMode,
     allow_failure: bool,
 ) -> Result<std::process::Output, Error> {
-    run_prepared_capped(repo, args, env, stdin_bytes, apply_author, allow_failure, None).map(|(output, _)| output)
+    run_prepared_capped(repo, args, env, stdin_bytes, author, allow_failure, None)
+        .map(|(output, _)| output)
 }
 
 /// Like `run`, but stops reading after `limit` bytes and kills the child.
 ///
 /// A huge diff, blame, or log would otherwise be buffered in full before the UI can
 /// truncate it. The returned flag says the output is incomplete.
-pub fn run_capped(repo: &Path, args: &[&str], limit: usize) -> Result<(std::process::Output, bool), Error> {
-    run_prepared_capped(repo, args, &[], None, true, false, Some(limit))
+pub fn run_capped(
+    repo: &Path,
+    args: &[&str],
+    limit: usize,
+) -> Result<(std::process::Output, bool), Error> {
+    run_prepared_capped(repo, args, &[], None, AuthorMode::Both, false, Some(limit))
 }
 
 /// Run a command with many pathspecs. Short lists stay on the command line; long
 /// ones go through `--pathspec-from-file=-` so Windows never hits the 32K limit.
-pub(crate) fn run_paths(repo: &Path, prefix: &[&str], paths: &[String]) -> Result<std::process::Output, Error> {
+pub(crate) fn run_paths(
+    repo: &Path,
+    prefix: &[&str],
+    paths: &[String],
+) -> Result<std::process::Output, Error> {
     if paths.is_empty() {
         return run(repo, prefix);
     }
@@ -603,10 +680,11 @@ fn run_prepared_capped(
     args: &[&str],
     env: &[(&str, &str)],
     stdin_bytes: Option<&[u8]>,
-    apply_author: bool,
+    author: AuthorMode,
     allow_failure: bool,
     cap: Option<usize>,
 ) -> Result<(std::process::Output, bool), Error> {
+    let mut flow_command = crate::flow::CommandSpan::start(args);
     let progress = progress_hook();
     let mut command = git_command();
     command.current_dir(repo).env("GIT_TERMINAL_PROMPT", "0");
@@ -627,12 +705,22 @@ fn run_prepared_capped(
         command.env("HTTP_PROXY", &session.proxy);
         command.env("HTTPS_PROXY", &session.proxy);
     }
-    if apply_author && !session.author_name.is_empty() {
+    // The identity is decided here, not by whatever shell started the app.
+    command
+        .env_remove("GIT_AUTHOR_NAME")
+        .env_remove("GIT_AUTHOR_EMAIL")
+        .env_remove("GIT_COMMITTER_NAME")
+        .env_remove("GIT_COMMITTER_EMAIL");
+    if author == AuthorMode::Both && !session.author_name.is_empty() {
         command.env("GIT_AUTHOR_NAME", &session.author_name);
+    }
+    if author != AuthorMode::Repo && !session.author_name.is_empty() {
         command.env("GIT_COMMITTER_NAME", &session.author_name);
     }
-    if apply_author && !session.author_email.is_empty() {
+    if author == AuthorMode::Both && !session.author_email.is_empty() {
         command.env("GIT_AUTHOR_EMAIL", &session.author_email);
+    }
+    if author != AuthorMode::Repo && !session.author_email.is_empty() {
         command.env("GIT_COMMITTER_EMAIL", &session.author_email);
     }
     if !session.ssl_verify {
@@ -652,9 +740,11 @@ fn run_prepared_capped(
     for (key, value) in env {
         command.env(key, value);
     }
+    flow_command.configure(&mut command);
     let started = std::time::Instant::now();
     let owned = operation_path(repo);
-    let (mut child, group) = crate::proc::spawn_prepared(&mut command).map_err(Error::GitMissing)?;
+    let (mut child, group) =
+        crate::proc::spawn_prepared(&mut command).map_err(Error::GitMissing)?;
     let pid = child.id();
     let key = repo_key(&owned);
     let is_read = READ_SCOPE.with(|slot| slot.get());
@@ -676,7 +766,10 @@ fn run_prepared_capped(
             let (output, truncated) = stream_output_capped(&mut child, limit);
             (output, truncated)
         } else if let Some(progress) = progress {
-            (stream_output(&mut child, progress, owned.display().to_string()), false)
+            (
+                stream_output(&mut child, progress, owned.display().to_string()),
+                false,
+            )
         } else {
             (child.wait_with_output().map_err(Error::GitMissing), false)
         };
@@ -685,9 +778,12 @@ fn run_prepared_capped(
             stop_process_tree(pid);
         }
         let write_result = writer.map(|handle| {
-            handle
-                .join()
-                .unwrap_or_else(|_| Err(std::io::Error::new(std::io::ErrorKind::Other, "git stdin writer panicked")))
+            handle.join().unwrap_or_else(|_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "git stdin writer panicked",
+                ))
+            })
         });
         (output, write_result, truncated)
     });
@@ -710,6 +806,7 @@ fn run_prepared_capped(
         }
     }
     untrack(pid);
+    flow_command.finish(output.status.success(), &output.stderr);
     if truncated {
         let note = failure_note(output.status.success(), true, &output.stderr);
         if let Some(hook) = TRACE.get() {
@@ -720,22 +817,34 @@ fn run_prepared_capped(
     }
     let note = failure_note(output.status.success(), allow_failure, &output.stderr);
     if let Some(hook) = TRACE.get() {
-        hook(args, started.elapsed(), output.status.success() || allow_failure, &note);
+        hook(
+            args,
+            started.elapsed(),
+            output.status.success() || allow_failure,
+            &note,
+        );
     }
     note_captured(&output.stdout, &output.stderr);
     if output.status.success() || allow_failure {
         return Ok((output, false));
     }
     let stderr = settle_stderr(&output.stderr);
-    Err(Error::Git(if stderr.is_empty() {
+    let detail = if stderr.is_empty() {
         format!("git {} failed", args.join(" "))
     } else {
         stderr
+    };
+    Err(Error::Git(match crate::locks::explain(repo, &detail) {
+        Some(message) => format!("{message}\n{detail}"),
+        None => detail,
     }))
 }
 
 /// Read stdout until `limit` bytes, then stop the child. Stderr is drained in parallel.
-fn stream_output_capped(child: &mut Child, limit: usize) -> (Result<std::process::Output, Error>, bool) {
+fn stream_output_capped(
+    child: &mut Child,
+    limit: usize,
+) -> (Result<std::process::Output, Error>, bool) {
     let stdout_pipe = child.stdout.take();
     let stderr_pipe = child.stderr.take();
     let stderr_task = std::thread::Builder::new()
@@ -770,21 +879,37 @@ fn stream_output_capped(child: &mut Child, limit: usize) -> (Result<std::process
         .ok()
         .and_then(|task| task.join().ok())
         .unwrap_or_default();
-    (Ok(std::process::Output { status, stdout, stderr }), truncated)
+    (
+        Ok(std::process::Output {
+            status,
+            stdout,
+            stderr,
+        }),
+        truncated,
+    )
 }
 
 fn drain(pipe: Option<impl Read>) -> Vec<u8> {
-    let Some(mut pipe) = pipe else { return Vec::new() };
+    let Some(mut pipe) = pipe else {
+        return Vec::new();
+    };
     let mut buf = Vec::new();
     let _ = pipe.read_to_end(&mut buf);
     buf
 }
 
 /// Read both pipes while `git` runs. Stderr is scanned for `45% (12/30)` lines.
-fn stream_output(child: &mut Child, progress: ProgressHook, repo: String) -> Result<std::process::Output, Error> {
+fn stream_output(
+    child: &mut Child,
+    progress: ProgressHook,
+    repo: String,
+) -> Result<std::process::Output, Error> {
     let stdout_pipe = child.stdout.take();
     let stderr_pipe = child.stderr.take();
-    let stderr_task = match std::thread::Builder::new().name("awegit-progress".into()).spawn(move || read_stderr(stderr_pipe, progress, repo)) {
+    let stderr_task = match std::thread::Builder::new()
+        .name("awegit-progress".into())
+        .spawn(move || read_stderr(stderr_pipe, progress, repo))
+    {
         Ok(task) => task,
         Err(source) => {
             stop_process_tree(child.id());
@@ -798,11 +923,17 @@ fn stream_output(child: &mut Child, progress: ProgressHook, repo: String) -> Res
     }
     let status = child.wait().map_err(Error::GitMissing)?;
     let stderr = stderr_task.join().unwrap_or_default();
-    Ok(std::process::Output { status, stdout, stderr })
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 fn read_stderr(pipe: Option<impl Read>, progress: ProgressHook, repo: String) -> Vec<u8> {
-    let Some(mut pipe) = pipe else { return Vec::new() };
+    let Some(mut pipe) = pipe else {
+        return Vec::new();
+    };
     let mut buf = Vec::new();
     let mut pending = Vec::new();
     let mut last = None;
@@ -823,9 +954,19 @@ fn read_stderr(pipe: Option<impl Read>, progress: ProgressHook, repo: String) ->
     buf
 }
 
-fn drain_progress(pending: &mut Vec<u8>, last: &mut Option<u8>, progress: &ProgressHook, repo: &str) {
+fn drain_progress(
+    pending: &mut Vec<u8>,
+    last: &mut Option<u8>,
+    progress: &ProgressHook,
+    repo: &str,
+) {
     loop {
-        let Some(index) = pending.iter().position(|byte| *byte == b'\r' || *byte == b'\n') else { break };
+        let Some(index) = pending
+            .iter()
+            .position(|byte| *byte == b'\r' || *byte == b'\n')
+        else {
+            break;
+        };
         let piece: Vec<u8> = pending.drain(..=index).collect();
         report_percent(&piece, last, progress, repo);
     }
@@ -833,7 +974,9 @@ fn drain_progress(pending: &mut Vec<u8>, last: &mut Option<u8>, progress: &Progr
 
 fn report_percent(piece: &[u8], last: &mut Option<u8>, progress: &ProgressHook, repo: &str) {
     let text = String::from_utf8_lossy(piece);
-    let Some(percent) = percent_in(text.trim()) else { return };
+    let Some(percent) = percent_in(text.trim()) else {
+        return;
+    };
     if *last == Some(percent) {
         return;
     }
@@ -860,7 +1003,9 @@ fn percent_in(text: &str) -> Option<u8> {
         if !after.starts_with('(') {
             continue;
         }
-        let Ok(percent) = text[start..index].parse::<u8>() else { continue };
+        let Ok(percent) = text[start..index].parse::<u8>() else {
+            continue;
+        };
         if percent <= 100 {
             found = Some(percent);
         }
@@ -889,8 +1034,17 @@ fn settle_stderr(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes)
         .split('\n')
         .filter_map(|line| {
-            let kept = line.trim_end_matches(['\r', ' ']).rsplit('\r').next().unwrap_or("").trim();
-            if kept.is_empty() { None } else { Some(kept.to_string()) }
+            let kept = line
+                .trim_end_matches(['\r', ' '])
+                .rsplit('\r')
+                .next()
+                .unwrap_or("")
+                .trim();
+            if kept.is_empty() {
+                None
+            } else {
+                Some(kept.to_string())
+            }
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -899,7 +1053,10 @@ fn settle_stderr(bytes: &[u8]) -> String {
 /// Insert `--progress` for commands that can report a transfer or checkout percent.
 fn progress_args(args: &[&str]) -> Vec<String> {
     let mut owned: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
-    if owned.iter().any(|arg| arg == "--progress" || arg == "--no-progress") {
+    if owned
+        .iter()
+        .any(|arg| arg == "--progress" || arg == "--no-progress")
+    {
         return owned;
     }
     let mut index = 0;
@@ -915,8 +1072,12 @@ fn progress_args(args: &[&str]) -> Vec<String> {
         break;
     }
     let insert_at = match owned.get(index).map(String::as_str) {
-        Some("fetch" | "pull" | "push" | "clone" | "checkout" | "switch" | "restore") => Some(index + 1),
-        Some("submodule") if owned.get(index + 1).map(String::as_str) == Some("update") => Some(index + 2),
+        Some("fetch" | "pull" | "push" | "clone" | "checkout" | "switch" | "restore") => {
+            Some(index + 1)
+        }
+        Some("submodule") if owned.get(index + 1).map(String::as_str) == Some("update") => {
+            Some(index + 2)
+        }
         _ => None,
     };
     if let Some(at) = insert_at {
@@ -964,13 +1125,17 @@ fn askpass_dir() -> Option<&'static std::path::Path> {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|elapsed| elapsed.as_nanos())
                 .unwrap_or(0);
-            let dir = root.join(format!("awegit-askpass-{}-{stamp}-{attempt}", std::process::id()));
+            let dir = root.join(format!(
+                "awegit-askpass-{}-{stamp}-{attempt}",
+                std::process::id()
+            ));
             match std::fs::create_dir(&dir) {
                 Ok(()) => {
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::PermissionsExt;
-                        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+                        let _ =
+                            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
                     }
                     return Some(dir);
                 }
@@ -987,11 +1152,17 @@ fn prune_askpass_dirs(root: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
-    let Some(cutoff) = std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(24 * 60 * 60)) else {
+    let Some(cutoff) =
+        std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(24 * 60 * 60))
+    else {
         return;
     };
     for entry in entries.flatten() {
-        if !entry.file_name().to_string_lossy().starts_with("awegit-askpass-") {
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("awegit-askpass-")
+        {
             continue;
         }
         let Ok(meta) = entry.metadata() else {
@@ -1019,7 +1190,11 @@ fn write_secret(path: &std::path::Path, value: &str) -> Option<()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let _guard = LOCK.lock().ok()?;
-    let tmp = path.with_file_name(format!(".secret-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+    let tmp = path.with_file_name(format!(
+        ".secret-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
     std::fs::write(&tmp, value).ok()?;
     #[cfg(unix)]
     {
@@ -1034,7 +1209,11 @@ fn write_secret(path: &std::path::Path, value: &str) -> Option<()> {
 }
 
 fn shell_quote(value: &str) -> String {
-    let escaped = value.replace('\\', "/").replace('$', "\\$").replace('`', "\\`").replace('"', "\\\"");
+    let escaped = value
+        .replace('\\', "/")
+        .replace('$', "\\$")
+        .replace('`', "\\`")
+        .replace('"', "\\\"");
     format!("\"{escaped}\"")
 }
 
@@ -1044,7 +1223,10 @@ fn needs_passphrase(args: &[&str]) -> bool {
     let mut index = 0;
     while index < args.len() {
         let arg = args[index];
-        if matches!(arg, "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env" | "--exec-path") {
+        if matches!(
+            arg,
+            "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env" | "--exec-path"
+        ) {
             index += 2;
             continue;
         }
@@ -1054,10 +1236,31 @@ fn needs_passphrase(args: &[&str]) -> bool {
         }
         return !matches!(
             arg,
-            "status" | "diff" | "log" | "show" | "blame" | "rev-parse" | "rev-list" | "cat-file"
-                | "ls-files" | "ls-tree" | "for-each-ref" | "merge-base" | "shortlog" | "describe"
-                | "grep" | "check-ignore" | "hash-object" | "symbolic-ref" | "count-objects" | "var"
-                | "version" | "help" | "show-ref" | "name-rev" | "config"
+            "status"
+                | "diff"
+                | "log"
+                | "show"
+                | "blame"
+                | "rev-parse"
+                | "rev-list"
+                | "cat-file"
+                | "ls-files"
+                | "ls-tree"
+                | "for-each-ref"
+                | "merge-base"
+                | "shortlog"
+                | "describe"
+                | "grep"
+                | "check-ignore"
+                | "hash-object"
+                | "symbolic-ref"
+                | "count-objects"
+                | "var"
+                | "version"
+                | "help"
+                | "show-ref"
+                | "name-rev"
+                | "config"
         );
     }
     true
@@ -1095,7 +1298,9 @@ pub fn check_rev(rev: &str) -> Result<&str, Error> {
         && !rev.starts_with('-')
         && !rev.contains("..")
         && !rev.contains([' ', '\n', '\r', '\\'])
-        && rev.chars().all(|c| name_char(c) || matches!(c, '~' | '^' | '@' | '{' | '}'));
+        && rev
+            .chars()
+            .all(|c| name_char(c) || matches!(c, '~' | '^' | '@' | '{' | '}'));
     if safe {
         Ok(rev)
     } else {
@@ -1106,7 +1311,11 @@ pub fn check_rev(rev: &str) -> Result<&str, Error> {
 /// Characters Git accepts in a ref name that cannot change how the command line is read.
 /// Any letter or digit is fine, so branch and tag names in other languages work.
 fn name_char(c: char) -> bool {
-    c.is_alphanumeric() || matches!(c, '/' | '_' | '.' | '-' | '+' | '#' | ',' | '=' | '%' | '!' | '&' | '(' | ')' | '@')
+    c.is_alphanumeric()
+        || matches!(
+            c,
+            '/' | '_' | '.' | '-' | '+' | '#' | ',' | '=' | '%' | '!' | '&' | '(' | ')' | '@'
+        )
 }
 
 /// Branch, tag, and remote names passed to `git`.
@@ -1152,37 +1361,74 @@ mod progress_tests {
 
     #[test]
     fn reads_the_latest_git_percent() {
-        assert_eq!(percent_in("Receiving objects:  45% (10/22), 1 KiB | 1 MiB/s"), Some(45));
-        assert_eq!(percent_in("remote: Counting objects: 100% (15/15), done."), Some(100));
-        assert_eq!(percent_in("Writing objects: 100% (11/11), done.\rReceiving objects: 3% (1/30)"), Some(3));
-        assert_eq!(percent_in("Downloading LFS objects:   0% (0/2), 0 B | 0 B/s"), Some(0));
+        assert_eq!(
+            percent_in("Receiving objects:  45% (10/22), 1 KiB | 1 MiB/s"),
+            Some(45)
+        );
+        assert_eq!(
+            percent_in("remote: Counting objects: 100% (15/15), done."),
+            Some(100)
+        );
+        assert_eq!(
+            percent_in("Writing objects: 100% (11/11), done.\rReceiving objects: 3% (1/30)"),
+            Some(3)
+        );
+        assert_eq!(
+            percent_in("Downloading LFS objects:   0% (0/2), 0 B | 0 B/s"),
+            Some(0)
+        );
         assert_eq!(percent_in("nothing to report"), None);
         assert_eq!(percent_in("already 100% complete"), None);
     }
 
     #[test]
     fn keeps_the_last_progress_line() {
-        let raw = b"Receiving objects:  10% (1/10)\rReceiving objects:  40% (4/10)\r\nfatal: early EOF\n";
-        assert_eq!(settle_stderr(raw), "Receiving objects:  40% (4/10)\nfatal: early EOF");
+        let raw =
+            b"Receiving objects:  10% (1/10)\rReceiving objects:  40% (4/10)\r\nfatal: early EOF\n";
+        assert_eq!(
+            settle_stderr(raw),
+            "Receiving objects:  40% (4/10)\nfatal: early EOF"
+        );
     }
 
     #[test]
     fn adds_progress_only_where_git_can_report_it() {
-        assert_eq!(progress_args(&["fetch", "--all"]), vec!["fetch", "--progress", "--all"]);
-        assert_eq!(progress_args(&["pull", "--rebase"]), vec!["pull", "--progress", "--rebase"]);
-        assert_eq!(progress_args(&["push", "--force-with-lease"]), vec!["push", "--progress", "--force-with-lease"]);
-        assert_eq!(progress_args(&["clone", "https://example.com/a.git", "a"]), vec!["clone", "--progress", "https://example.com/a.git", "a"]);
+        assert_eq!(
+            progress_args(&["fetch", "--all"]),
+            vec!["fetch", "--progress", "--all"]
+        );
+        assert_eq!(
+            progress_args(&["pull", "--rebase"]),
+            vec!["pull", "--progress", "--rebase"]
+        );
+        assert_eq!(
+            progress_args(&["push", "--force-with-lease"]),
+            vec!["push", "--progress", "--force-with-lease"]
+        );
+        assert_eq!(
+            progress_args(&["clone", "https://example.com/a.git", "a"]),
+            vec!["clone", "--progress", "https://example.com/a.git", "a"]
+        );
         assert_eq!(
             progress_args(&["submodule", "update", "--init", "--recursive"]),
             vec!["submodule", "update", "--progress", "--init", "--recursive"]
         );
-        assert_eq!(progress_args(&["submodule", "sync", "--", "path"]), vec!["submodule", "sync", "--", "path"]);
+        assert_eq!(
+            progress_args(&["submodule", "sync", "--", "path"]),
+            vec!["submodule", "sync", "--", "path"]
+        );
         assert_eq!(
             progress_args(&["-c", "commit.gpgsign=false", "commit", "-m", "hi"]),
             vec!["-c", "commit.gpgsign=false", "commit", "-m", "hi"]
         );
-        assert_eq!(progress_args(&["checkout", "--ours", "--", "file"]), vec!["checkout", "--progress", "--ours", "--", "file"]);
-        assert_eq!(progress_args(&["fetch", "--progress"]), vec!["fetch", "--progress"]);
+        assert_eq!(
+            progress_args(&["checkout", "--ours", "--", "file"]),
+            vec!["checkout", "--progress", "--ours", "--", "file"]
+        );
+        assert_eq!(
+            progress_args(&["fetch", "--progress"]),
+            vec!["fetch", "--progress"]
+        );
     }
 
     #[test]
@@ -1203,7 +1449,8 @@ mod launch_tests {
     use super::{bundled_launch, launch_beside};
 
     fn bundle(name: &str) -> PathBuf {
-        let root = std::env::temp_dir().join(format!("awegit-git-launch-{name}-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("awegit-git-launch-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("cmd")).unwrap();
         std::fs::create_dir_all(root.join("usr").join("bin")).unwrap();
@@ -1226,7 +1473,11 @@ mod launch_tests {
             let real = real_git(&root, arch);
             let launch = launch_beside(&root.join("cmd")).expect("real git");
             assert_eq!(Path::new(&launch.program), real);
-            let prefix = launch.path_prefix.expect("helper path").to_string_lossy().to_string();
+            let prefix = launch
+                .path_prefix
+                .expect("helper path")
+                .to_string_lossy()
+                .to_string();
             assert!(prefix.contains(arch));
             assert!(prefix.contains("usr"));
             let _ = std::fs::remove_dir_all(&root);
@@ -1269,11 +1520,22 @@ mod secret_tests {
     #[test]
     fn read_commands_do_not_get_the_signing_passphrase() {
         assert!(!needs_passphrase(&["status", "--porcelain"]));
-        assert!(!needs_passphrase(&["-c", "core.quotepath=false", "diff", "--cached"]));
+        assert!(!needs_passphrase(&[
+            "-c",
+            "core.quotepath=false",
+            "diff",
+            "--cached"
+        ]));
         assert!(!needs_passphrase(&["--no-pager", "log", "-5"]));
         assert!(needs_passphrase(&["commit", "-m", "message"]));
         assert!(needs_passphrase(&["push", "origin", "main"]));
-        assert!(needs_passphrase(&["-c", "commit.gpgsign=true", "tag", "-s", "v1"]));
+        assert!(needs_passphrase(&[
+            "-c",
+            "commit.gpgsign=true",
+            "tag",
+            "-s",
+            "v1"
+        ]));
     }
 
     #[test]
@@ -1287,7 +1549,10 @@ mod secret_tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(&secret).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(
+                std::fs::metadata(&secret).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
         }
         let _ = std::fs::remove_file(secret);
     }
@@ -1338,8 +1603,15 @@ mod cancel_tests {
         stop_generation(older_gen);
         let status = older.wait().unwrap();
         assert!(!status.success(), "{status}");
-        assert!(started.elapsed() < Duration::from_secs(5), "cancel took {:?}", started.elapsed());
-        assert!(newer.try_wait().unwrap().is_none(), "later command was killed");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "cancel took {:?}",
+            started.elapsed()
+        );
+        assert!(
+            newer.try_wait().unwrap().is_none(),
+            "later command was killed"
+        );
         stop_generation(newer_gen);
         let status = newer.wait().unwrap();
         assert!(!status.success(), "{status}");
@@ -1368,11 +1640,23 @@ mod cancel_tests {
         let dir = std::env::temp_dir().join(format!("awegit-cancel-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let init = Command::new("git").args(["init", "-b", "main"]).current_dir(&dir).output().unwrap();
-        assert!(init.status.success(), "{}", String::from_utf8_lossy(&init.stderr));
+        let init = Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert!(
+            init.status.success(),
+            "{}",
+            String::from_utf8_lossy(&init.stderr)
+        );
         let repo = dir.clone();
         let handle = std::thread::spawn(move || {
-            let hang = if cfg!(windows) { "!ping -n 30 127.0.0.1" } else { "!sleep 30" };
+            let hang = if cfg!(windows) {
+                "!ping -n 30 127.0.0.1"
+            } else {
+                "!sleep 30"
+            };
             let alias = format!("alias.hang={hang}");
             run(&repo, &["-c", &alias, "hang"])
         });
@@ -1394,7 +1678,11 @@ mod cancel_tests {
         let killed = Instant::now();
         cancel_repo(&dir);
         let result = handle.join().expect("hang thread");
-        assert!(killed.elapsed() < Duration::from_secs(5), "cancel took {:?}", killed.elapsed());
+        assert!(
+            killed.elapsed() < Duration::from_secs(5),
+            "cancel took {:?}",
+            killed.elapsed()
+        );
         assert!(result.is_err(), "hanging git should fail once cancelled");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1408,7 +1696,10 @@ mod version_tests {
     fn reads_supported_git_versions() {
         assert_eq!(parse_git_version("git version 2.39.1"), Some((2, 39)));
         assert_eq!(parse_git_version("git version 2.40.0"), Some((2, 40)));
-        assert_eq!(parse_git_version("git version 2.56.0.windows.1"), Some((2, 56)));
+        assert_eq!(
+            parse_git_version("git version 2.56.0.windows.1"),
+            Some((2, 56))
+        );
         assert_eq!(parse_git_version(""), None);
         assert_eq!(parse_git_version("git version"), None);
     }

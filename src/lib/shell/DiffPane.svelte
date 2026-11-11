@@ -52,6 +52,10 @@
     if (activeHunk != null && !hunkList.some((range) => range.index === activeHunk)) activeHunk = null;
   });
   const litHunk = $derived(hoveredHunk ?? activeHunk);
+  const litRange = $derived(hunkList.find((range) => range.index === litHunk) ?? null);
+  const litStart = $derived(litRange?.start ?? -1);
+  const litEnd = $derived(litRange == null ? -1 : litRange.end - 1);
+  const litOn = (at: number | null) => at != null && at >= litStart && at <= litEnd;
   const hoveredRange = $derived(hoveredHunk == null ? null : hunkList.find((range) => range.index === hoveredHunk) ?? null);
   const hoveredSelected = $derived(
     hoveredRange
@@ -299,10 +303,10 @@
                   <svg class="conflict-warn" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 1.4 14.8 13.4H1.2L8 1.4z"/><path d="M8 6.1v3.3" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.4" r=".75" fill="#fff"/></svg>
                   <strong>{shell.tr("chrome.mergeConflict")}</strong>
                 </div>
-                <p class="conflict-hint">{shell.tr("chrome.mergeConflictHint", { theirs: view.theirs.label, ours: view.ours.label })}</p>
+                <p class="conflict-hint">{shell.tr("chrome.mergeConflictHint")}</p>
                 <div class="conflict-file">
                   <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.2" d="M3.2 1.5h6L12.8 5v9.5H3.2z"/><path fill="none" stroke="currentColor" stroke-width="1.2" d="M9.1 1.6V5.1h3.6"/></svg>
-                  <span>{shell.fileName(shell.selectedPath)}</span>
+                  <span title={shell.selectedPath}>{shell.fileName(shell.selectedPath)}</span>
                 </div>
                 {#if batch}
                   <p class="conflict-selection" role="status">{shell.tr("chrome.conflictSelected", { count: String(conflictSelection.length) })}</p>
@@ -401,11 +405,11 @@
                   {@const index = shell.splitWindow.start + offset}
                   {@const leftAt = shell.splitLineAt(row, "left")}
                   {@const rightAt = shell.splitLineAt(row, "right")}
-                  {@const rowHunk = row.hunkIndex ?? (leftAt != null ? shell.hunkOf(leftAt) : rightAt != null ? shell.hunkOf(rightAt) : null)}
+                  {@const rowLit = litOn(leftAt) || litOn(rightAt)}
                   {#if row.meta}
-                    <div class="split-meta" class:hunk-hover={litHunk != null && rowHunk === litHunk} data-line={row.lineIndex}>{row.left}</div>
+                    <div class="split-meta" class:hunk-hover={rowLit} class:hunk-top={rowLit && (leftAt === litStart || rightAt === litStart)} class:hunk-bottom={rowLit && (leftAt === litEnd || rightAt === litEnd)} data-line={row.lineIndex}>{row.left}</div>
                   {:else}
-                    <div class="split-row" class:hunk-hover={litHunk != null && rowHunk === litHunk}>
+                    <div class="split-row" class:hunk-hover={rowLit} class:hunk-top={rowLit && (leftAt === litStart || rightAt === litStart)} class:hunk-bottom={rowLit && (leftAt === litEnd || rightAt === litEnd)}>
                       {@render splitCell(row, "left", shell.selectedPath ?? "", `l${index}`, leftAt)}
                       {@render splitCell(row, "right", shell.selectedPath ?? "", `r${index}`, rightAt)}
                     </div>
@@ -426,7 +430,7 @@
                     {@const at = shell.diffWindow.start + index}
                     <!-- svelte-ignore a11y_click_events_have_key_events -->
                     <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={litHunk != null && shell.hunkOf(at) === litHunk} data-line={at} style:top="{shell.diffWindow.tops[index] ?? 0}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
+                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={litOn(at)} class:hunk-top={at === litStart} class:hunk-bottom={at === litEnd} data-line={at} style:top="{shell.diffWindow.tops[index] ?? 0}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->
                       <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.oldNo ?? ""}</span>
                       <!-- svelte-ignore a11y_no_static_element_interactions -->

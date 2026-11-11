@@ -325,6 +325,38 @@
   margin: 0;
 }
 
+.update-silent {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--canvas);
+  cursor: pointer;
+}
+
+.update-silent input {
+  margin: 2px 0 0;
+  flex: none;
+  accent-color: var(--accent);
+}
+
+.update-silent-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.update-silent-label {
+  font-size: 12.5px;
+}
+
+.update-silent-copy .meta {
+  line-height: 1.4;
+}
+
 .update-actions {
   flex-wrap: wrap;
   align-items: center;

@@ -14,6 +14,7 @@ export type Shortcut =
   | "tabLeft"
   | "tabRight"
   | "settings"
+  | "switchLanguage"
   | "launch"
   | "back"
   | "forward"
@@ -57,6 +58,7 @@ const commandOnMac = new Set<Shortcut>([
   "newTab",
   "closeTab",
   "settings",
+  "switchLanguage",
   "launch",
   "fetch",
   "quickFetch",
@@ -99,6 +101,7 @@ const base: Array<[Shortcut, Chord[]]> = [
   ["tabLeft", [{ key: "Tab", ctrl: true, shift: true }]],
   ["tabRight", [{ key: "Tab", ctrl: true }]],
   ["settings", [{ key: ",", ctrl: true }]],
+  ["switchLanguage", [{ key: "l", ctrl: true, alt: true }]],
   ["launch", [{ key: "k", ctrl: true }]],
   ["back", [{ key: "ArrowLeft", alt: true }]],
   ["forward", [{ key: "ArrowRight", alt: true }]],

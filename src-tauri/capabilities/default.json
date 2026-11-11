@@ -4,6 +4,8 @@
   "description": "Capability for the main window, a second workspace, and the merge window",
   "windows": ["main", "desk", "merge"],
   "permissions": [
+    "allow-operation-flow",
+    "allow-operation-history",
     "core:default",
     {
       "identifier": "opener:allow-open-url",
@@ -45,6 +47,7 @@
     "allow-pick-directory",
     "allow-pick-file",
     "core:window:allow-set-title",
+    "core:window:allow-close",
     "core:window:allow-set-theme",
     "allow-suggest-commit-message",
     "allow-test-ai-endpoint",

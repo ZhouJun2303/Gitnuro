@@ -52,11 +52,7 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
     } else {
         settings.ai_model.trim().to_string()
     };
-    let language = if settings.ai_language.trim().is_empty() {
-        "English".to_string()
-    } else {
-        settings.ai_language.trim().to_string()
-    };
+    let language = commit_language(&settings.ai_language);
     let style = if settings.ai_prompt_style.trim().eq_ignore_ascii_case("long") {
         "long"
     } else {
@@ -66,7 +62,7 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
     let prompt = compose_prompt(
         style,
         settings.ai_prompt.trim(),
-        &language,
+        language,
         &files,
         &branch,
         &recent,
@@ -74,36 +70,76 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
         &types,
     );
     let xai = base.contains("api.x.ai");
-    let (url, mut body) = if xai {
-        let body = serde_json::json!({ "model": model, "input": prompt });
-        (format!("{base}/responses"), body)
-    } else {
-        let body = serde_json::json!({
-            "model": model,
-            "messages": [
-                { "role": "system", "content": format!("You write git commit messages. The first line must match type: description. type is {}. No scope. Reply with the message only.", types.join(", ")) },
-                { "role": "user", "content": prompt }
-            ]
-        });
-        (format!("{base}/chat/completions"), body)
+    let system = format!(
+        "You write git commit messages. Write in {language} only, never in another language. \
+The first line must match type: description. type is {}. No scope. Reply with the message only.",
+        types.join(", ")
+    );
+    let ask = |prompt: &str| -> Result<String, String> {
+        let (url, mut body) = if xai {
+            let body = serde_json::json!({ "model": model, "input": prompt });
+            (format!("{base}/responses"), body)
+        } else {
+            let body = serde_json::json!({
+                "model": model,
+                "messages": [
+                    { "role": "system", "content": system },
+                    { "role": "user", "content": prompt }
+                ]
+            });
+            (format!("{base}/chat/completions"), body)
+        };
+        if settings.ai_temperature > 0.0 {
+            body["temperature"] = serde_json::json!(settings.ai_temperature);
+        }
+        let payload = serde_json::to_string(&body).map_err(|error| error.to_string())?;
+        let text = post_json(&url, &key, &payload)?;
+        let value: serde_json::Value =
+            serde_json::from_str(&text).map_err(|_| text.clone())?;
+        if let Some(message) = value
+            .pointer("/error/message")
+            .and_then(|item| item.as_str())
+        {
+            return Err(message.to_string());
+        }
+        Ok(extract_text(&value))
     };
-    if settings.ai_temperature > 0.0 {
-        body["temperature"] = serde_json::json!(settings.ai_temperature);
-    }
-    let payload = serde_json::to_string(&body).map_err(|error| error.to_string())?;
-    let text = post_json(&url, &key, &payload)?;
-    let value: serde_json::Value = serde_json::from_str(&text).map_err(|_| text.clone())?;
-    if let Some(message) = value
-        .pointer("/error/message")
-        .and_then(|item| item.as_str())
-    {
-        return Err(message.to_string());
-    }
-    let answer = extract_text(&value);
+    let answer = ask(&prompt)?;
     if answer.trim().is_empty() {
         return Err("The model returned an empty message.".into());
     }
-    parse_suggestion(&answer, &types)
+    let mut suggestion = parse_suggestion(&answer, &types)?;
+    if !in_language(&suggestion, language) {
+        let retry = format!(
+            "{prompt}\n\nYour previous reply was not written in {language}:\n{}\n\nRewrite it in {language} only, keeping the same format.",
+            answer.trim()
+        );
+        let answer = ask(&retry)?;
+        suggestion = parse_suggestion(&answer, &types)?;
+        if !in_language(&suggestion, language) {
+            return Err(format!(
+                "The model did not reply in {language}. Try again or change the commit-message language in Preferences."
+            ));
+        }
+    }
+    Ok(suggestion)
+}
+
+/// Whether a reply is written in the configured language. Chinese needs a CJK character;
+/// English must not contain one.
+fn in_language(value: &Suggestion, language: &str) -> bool {
+    let written_in = |text: &str| {
+        let cjk = text.chars().any(|ch| {
+            matches!(ch as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF)
+        });
+        if language.eq_ignore_ascii_case("english") {
+            !cjk
+        } else {
+            cjk
+        }
+    };
+    written_in(&value.summary)
+        && (value.description.trim().is_empty() || written_in(&value.description))
 }
 
 /// Review the diff of `HEAD` against `base` with the same model as commit messages.
@@ -356,6 +392,17 @@ fn configured_types(settings: &Settings) -> Vec<String> {
     }
 }
 
+/// Commit messages use the language chosen in settings. Only Chinese and English are offered;
+/// anything else, including an empty legacy value, falls back to Chinese.
+fn commit_language(configured: &str) -> &'static str {
+    let configured = configured.trim();
+    if configured.eq_ignore_ascii_case("en") || configured.eq_ignore_ascii_case("english") {
+        "English"
+    } else {
+        "中文"
+    }
+}
+
 fn type_note(name: &str) -> Option<&'static str> {
     match name {
         "feat" => Some("新增功能"),
@@ -368,6 +415,22 @@ fn type_note(name: &str) -> Option<&'static str> {
         "chore" => Some("构建、工具、配置或流程"),
         "perf" => Some("性能"),
         "revert" => Some("回滚之前的提交"),
+        _ => None,
+    }
+}
+
+fn type_note_en(name: &str) -> Option<&'static str> {
+    match name {
+        "feat" => Some("a new feature"),
+        "fix" => Some("a bug fix"),
+        "docs" => Some("docs, comments, or descriptions only"),
+        "art" => Some("art assets"),
+        "style" => Some("formatting only, no logic change"),
+        "refactor" => Some("restructuring, not a feature and not a bug fix"),
+        "test" => Some("tests"),
+        "chore" => Some("build, tooling, config, or process"),
+        "perf" => Some("performance"),
+        "revert" => Some("revert an earlier commit"),
         _ => None,
     }
 }
@@ -398,21 +461,36 @@ fn compose_prompt(
         .map(|item| regex_escape(item))
         .collect::<Vec<_>>()
         .join("|");
+    let english = language.eq_ignore_ascii_case("english");
     let notes = types
         .iter()
-        .map(|name| match type_note(name) {
-            Some(note) => format!("{name} {note}"),
-            None => name.clone(),
+        .map(|name| {
+            let note = if english {
+                type_note_en(name)
+            } else {
+                type_note(name)
+            };
+            match note {
+                Some(note) => format!("{name} {note}"),
+                None => name.clone(),
+            }
         })
         .collect::<Vec<_>>()
         .join("; ");
     let example = types.first().map(String::as_str).unwrap_or("feat");
+    let example_text = if english {
+        "add idle reward settlement"
+    } else {
+        "新增挂机奖励结算逻辑"
+    };
     let convention = format!(
-        "Write in {language}. A commit-msg hook rejects any other first line. \
+        "Write the whole commit message in {language}, and in {language} only. \
+Never answer in another language, even if the diff, file names, branch, or recent subjects use one. \
+A commit-msg hook rejects any other first line. \
 It must match ^({pattern}):[[:space:]]*[^[:space:]].* \
 Types: {notes}. \
 The type is lowercase and is followed immediately by a colon. A space after the colon is optional. \
-Do not add a scope, issue id, quotes, or markdown. Example: {example}: 新增挂机奖励结算逻辑"
+Do not add a scope, issue id, quotes, or markdown. Example: {example}: {example_text}"
     );
     let custom = custom.trim();
     if custom.contains("{diff}") || custom.contains("${diff}") {
@@ -611,6 +689,54 @@ mod tests {
         assert!(prompt.contains("chore: old"));
         assert!(prompt.contains("diff-body"));
         assert!(prompt.contains("refactor 重构"));
+    }
+
+    #[test]
+    fn detects_the_configured_language() {
+        let chinese = Suggestion {
+            summary: "feat: 新增登录".into(),
+            description: String::new(),
+        };
+        let english = Suggestion {
+            summary: "feat: add login".into(),
+            description: String::new(),
+        };
+        assert!(in_language(&chinese, "中文"));
+        assert!(!in_language(&english, "中文"));
+        assert!(in_language(&english, "English"));
+        assert!(!in_language(&chinese, "English"));
+        let mixed = Suggestion {
+            summary: "feat: 新增登录".into(),
+            description: "Adds a login form.".into(),
+        };
+        assert!(!in_language(&mixed, "中文"));
+    }
+
+    #[test]
+    fn language_defaults_to_chinese_and_accepts_english() {
+        assert_eq!(commit_language(""), "中文");
+        assert_eq!(commit_language("zh"), "中文");
+        assert_eq!(commit_language("中文"), "中文");
+        assert_eq!(commit_language("en"), "English");
+        assert_eq!(commit_language(" English "), "English");
+    }
+
+    #[test]
+    fn english_prompt_uses_english_notes_and_example() {
+        let prompt = compose_prompt(
+            "short",
+            "",
+            "English",
+            "src/app.ts",
+            "main",
+            "",
+            "diff-body",
+            &builtin_types(),
+        );
+        assert!(prompt.contains("in English, and in English only"));
+        assert!(prompt.contains("refactor restructuring"));
+        assert!(prompt.contains("feat: add idle reward settlement"));
+        assert!(!prompt.contains("新增挂机"));
     }
 
     #[test]

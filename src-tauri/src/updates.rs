@@ -80,7 +80,7 @@ pub fn cancel() {
     CANCEL.store(true, AtomicOrdering::SeqCst);
 }
 
-pub fn download_and_open(url: &str, sha256: Option<&str>, mut progress: impl FnMut(UpdateProgress)) -> Result<(), String> {
+pub fn download_and_open(url: &str, sha256: Option<&str>, silent: bool, mut progress: impl FnMut(UpdateProgress)) -> Result<(), String> {
     let expected = normalize_sha256(sha256).ok_or_else(|| crate::http::coded("update", "update hash is missing"))?;
     let name = installer_name(url)?;
     if !installer_kind(&name) {
@@ -154,7 +154,7 @@ pub fn download_and_open(url: &str, sha256: Option<&str>, mut progress: impl FnM
     }
     replace_download(&partial, &dest)?;
     progress(UpdateProgress { phase: "done", percent: Some(100), received: got, total: total.max(got) });
-    open_installer(&dest)
+    open_installer(&dest, silent)
 }
 
 fn replace_download(from: &std::path::Path, to: &std::path::Path) -> Result<(), String> {
@@ -183,20 +183,48 @@ extern "system" {
     fn MoveFileExW(from: *const u16, to: *const u16, flags: u32) -> i32;
 }
 
-fn open_installer(dest: &std::path::Path) -> Result<(), String> {
+/// Launches the downloaded installer. `silent` skips the installer window on
+/// Windows; other systems keep their normal installer flow.
+fn open_installer(dest: &std::path::Path, silent: bool) -> Result<(), String> {
     let name = dest.file_name().and_then(|name| name.to_str()).unwrap_or("");
     let lower = name.to_ascii_lowercase();
     #[cfg(windows)]
     let result = if lower.ends_with(".msi") {
-        std::process::Command::new("msiexec").arg("/i").arg(dest).spawn()
+        let mut command = std::process::Command::new("msiexec");
+        command.arg("/i").arg(dest);
+        if silent {
+            command.args(silent_install_flags(&lower));
+        }
+        command.spawn()
     } else {
-        std::process::Command::new(dest).spawn()
+        let mut command = std::process::Command::new(dest);
+        if silent {
+            command.args(silent_install_flags(&lower));
+        }
+        command.spawn()
     };
     #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(dest).spawn();
+    let result = {
+        let _ = silent;
+        std::process::Command::new("open").arg(dest).spawn()
+    };
     #[cfg(not(any(windows, target_os = "macos")))]
-    let result = std::process::Command::new("xdg-open").arg(dest).spawn();
+    let result = {
+        let _ = silent;
+        std::process::Command::new("xdg-open").arg(dest).spawn()
+    };
     result.map(|_| ()).map_err(|error| crate::http::coded("update", &error.to_string()))
+}
+
+/// Tauri's NSIS installer accepts `/S` (silent), `/UPDATE` (skip the reinstall
+/// choice), and `/R` (reopen the app afterwards). MSI uses its quiet switches.
+#[cfg(windows)]
+fn silent_install_flags(lower_name: &str) -> &'static [&'static str] {
+    if lower_name.ends_with(".msi") {
+        &["/quiet", "/norestart"]
+    } else {
+        &["/S", "/UPDATE", "/R"]
+    }
 }
 
 fn percent_of(got: u64, total: u64) -> Option<u8> {
@@ -313,6 +341,8 @@ fn parse_version(text: &str) -> Option<[u64; 3]> {
 #[cfg(test)]
 mod tests {
     use super::{asset_at, installer_name, normalize_sha256, newer_than, percent_of, platform_download};
+    #[cfg(windows)]
+    use super::silent_install_flags;
 
     #[test]
     fn three_part_versions_compare_by_number() {
@@ -365,5 +395,12 @@ mod tests {
         assert_eq!(percent_of(50, 200), Some(25));
         assert_eq!(percent_of(200, 200), Some(100));
         assert_eq!(percent_of(250, 200), Some(100));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn silent_install_flags_match_the_installer_kind() {
+        assert_eq!(silent_install_flags("awegit_2.0.6_x64-setup.exe"), &["/S", "/UPDATE", "/R"]);
+        assert_eq!(silent_install_flags("awegit_2.0.6_x64_en-us.msi"), &["/quiet", "/norestart"]);
     }
 }

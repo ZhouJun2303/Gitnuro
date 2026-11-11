@@ -34,8 +34,10 @@
     void shell.flipStage(path, side);
   }
 
-  // A click on the folder name waits so a double-click can stage it without
-  // also folding. The twist folds immediately and never stages.
+  // A click on the folder name picks every file under it, so discard and
+  // stage act on the whole folder. The pick bar appears above the list, so the
+  // selection waits briefly: a double-click stages the folder without moving
+  // the row out from under the second click.
   let dirClickTimer = 0;
 
   function clearDirClick() {
@@ -49,12 +51,12 @@
     shell.toggleDir(path);
   }
 
-  function onDirClick(event: MouseEvent, path: string) {
+  function onDirClick(event: MouseEvent, path: string, side: Side) {
     if (event.button !== 0 || event.detail > 1) return;
     clearDirClick();
     dirClickTimer = window.setTimeout(() => {
       dirClickTimer = 0;
-      shell.toggleDir(path);
+      shell.selectFolder(path, side, event);
     }, 280);
   }
 
@@ -213,7 +215,7 @@
           onchange={shell.handleLayoutChange.bind(shell)}
         />
 
-        <form class="composer" style:height="{shell.composerHeight}px" onsubmit={(event) => { event.preventDefault(); void shell.submitCommit(false); }}>
+        <form class="composer" style:height="{shell.composerHeight}px" onsubmit={(event) => { event.preventDefault(); if (shell.progress) void shell.continueFlow(); else void shell.submitCommit(false); }}>
           <div class="summary-line">
             <div class="type-picker" class:open={typeOpen}>
               <button
@@ -268,25 +270,27 @@
               <span>{shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}</span>
             </button>
           </div>
-          {#if shell.summary.trim() && !shell.skipHooks && !shell.summaryFitsConvention}
+          {#if shell.progress}
+            <p class="convention-hint">{shell.tr("chrome.flowHint")}</p>
+          {:else if shell.summary.trim() && !shell.skipHooks && !shell.summaryFitsConvention}
             <p class="convention-hint">{shell.tr("chrome.commitConvention")}</p>
           {/if}
           <textarea class="guided composer-desc flex-fill" class:guide-only={shell.descriptionIsGuide} placeholder={shell.tr("chrome.description")} aria-label={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
           <div class="composer-row">
             <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
             <button class="text-button more" type="button" aria-label={shell.tr("chrome.more")} title={shell.tr("chrome.more")} onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>
-            <button class="commit" type="submit" disabled={!shell.canCommit || shell.mode !== "live"}>{shell.busy ? shell.tr("chrome.working") : shell.tr("chrome.commit")}</button>
+            <button class="commit" type="submit" disabled={shell.mode !== "live" || (shell.progress ? shell.busy || shell.conflicted : !shell.canCommit)}>{shell.busy ? shell.tr("chrome.working") : shell.progress ? shell.flowLabel() : shell.tr("chrome.commit")}</button>
           </div>
         </form>
       </div>
 
 {#snippet dirRow(path: string, side: Side, depth: number)}
       {@const open = !shell.collapsedDirs.includes(path)}
-      <div class="tree-row" style:padding-left="{8 + depth * 16}px" role="group" oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
+      <div class="tree-row dir-row" class:picked={side === "staged" ? shell.pickedStagedDirs.has(path) : shell.pickedUnstagedDirs.has(path)} style:padding-left="{8 + depth * 16}px" role="group" oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
         <button class="twist-btn" type="button" aria-expanded={open} aria-label={shell.fileName(path)} onclick={(event) => onTwistClick(event, path)}>
           {@render disclosure(open)}
         </button>
-        <button class="file-select" type="button" title={path} onclick={(event) => onDirClick(event, path)} ondblclick={(event) => flipDir(event, path, side)}>
+        <button class="file-select" type="button" title={path} onclick={(event) => onDirClick(event, path, side)} ondblclick={(event) => flipDir(event, path, side)}>
           {@render folderIcon()}
           <span class="name">{shell.fileName(path)}</span>
         </button>
@@ -444,7 +448,7 @@
         oncontextmenu={(event) => shell.openMenu(event, shell.fileMenu(file, side))}
         ondblclick={(event) => flipFile(event, file.path, side)}
       >
-        <button class="file-select" type="button" title={file.path} onclick={(event) => shell.selectFile(file.path, side, event)}>
+        <button class="file-select" type="button" title={file.path} onclick={(event) => { clearDirClick(); shell.selectFile(file.path, side, event); }}>
           {#if shell.fileLayout === "tree"}
             {@render treeLine(file.path, file.letter)}
           {:else}

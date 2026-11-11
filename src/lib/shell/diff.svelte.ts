@@ -793,9 +793,11 @@ export function filesInDir(shell: ShellState, dir: string, side: Side) {
       .map((file) => file.path);
   }
 
-export function stageFolder(shell: ShellState, dir: string, unstage: boolean) {
+export async function stageFolder(shell: ShellState, dir: string, unstage: boolean) {
     const files = shell.filesInDir(dir, unstage ? "staged" : "unstaged");
-    if (files.length > 0) void shell.mutate({ action: "stagePaths", files, unstage });
+    if (files.length === 0) return;
+    await shell.mutate({ action: "stagePaths", files, unstage });
+    shell.picked = shell.picked.filter((path) => !files.includes(path));
   }
 
 export function copyText(shell: ShellState, text: string) {
@@ -1064,6 +1066,36 @@ export function selectFile(shell: ShellState, path: string, side: Side, event?: 
     if (shell.mode === "live") void shell.loadDiff();
   }
 
+/** A folder click picks every file under it, so discard and stage act on the whole folder. */
+export function selectFolder(shell: ShellState, dir: string, side: Side, event?: MouseEvent) {
+    const files = shell.filesInDir(dir, side);
+    if (files.length === 0) return;
+    shell.clearTextSelection();
+    shell.conflictView = null;
+    if (files.includes(shell.mergeFile ?? "")) shell.textMerge = false;
+    if (event?.shiftKey || event?.ctrlKey || event?.metaKey) {
+      const every = files.every((path) => shell.picked.includes(path));
+      shell.picked = every
+        ? shell.picked.filter((path) => !files.includes(path))
+        : [...new Set([...shell.picked, ...files])];
+    } else {
+      shell.picked = files;
+    }
+    const first = files[0];
+    if (!first) return;
+    shell.selectedPath = first;
+    shell.selectedSide = side;
+    shell.blameLines = null;
+    shell.diffAnchor = 0;
+    shell.diffSelected = [];
+    shell.diffTop = 0;
+    if (shell.diffEl) shell.diffEl.scrollTop = 0;
+    const rows = side === "staged" ? shell.shownStaged : shell.shownUnstaged;
+    const at = rows.findIndex((row) => row.path === first);
+    if (at >= 0) shell.selectedIndex = at;
+    if (shell.mode === "live") void shell.loadDiff();
+  }
+
 export function toRow(shell: ShellState, file: StatusFile) {
     const mark = badge(file.kind);
     return { path: file.path, letter: mark.letter, tone: mark.tone };
@@ -1274,12 +1306,13 @@ export async function applyLineOps(shell: ShellState, action: "stageLine" | "dis
         return at == null ? [] : [{ text: shell.lineText(entry.line), addition: entry.line.kind === "add", at }];
       });
       if (lines.length === 0) return;
-      const value = await invoke<StatusSnapshot & { output?: string }>("mutate", {
+      const value = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", {
         path,
         request: action === "stageLine"
           ? { action: "stageLines", file, lines, unstage }
           : { action: "discardLines", file, lines },
       });
+      if (value.outcome === "failed") throw new Error(value.error || value.log);
       if (shell.viewing(path)) {
         shell.applySnapshot(value);
         await shell.loadDiff();

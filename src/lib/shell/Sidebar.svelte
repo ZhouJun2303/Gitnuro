@@ -224,11 +224,11 @@
             role="group"
             oncontextmenu={(event) => shell.openMenu(event, [
               ...(!row.current ? [
-                { label: shell.tr("menu.checkout"), run: () => shell.requestCheckout(row.name) },
+                { label: shell.tr("menu.checkout"), disabled: !!shell.progress, run: () => shell.requestCheckout(row.name) },
                 { label: shell.tr("menu.compareBranches"), disabled: !shell.compareWith || shell.compareWith === row.name, run: () => { shell.drops = [shell.compareWith, row.name]; void shell.compareDrops(); } },
                 { label: shell.tr("menu.pushAs"), run: () => { shell.draft = row.name; shell.draftExtra = shell.refs?.remotes[0]?.name ?? "origin"; shell.draftUser = row.name; shell.dialog = "pushAs"; } },
-                { label: shell.tr("menu.merge"), run: () => { shell.draft = row.name; shell.draftExtra = shell.settings.mergeNoFf ? "no-ff" : "ff"; shell.dialog = "merge"; } },
-                { label: shell.tr("menu.rebaseOnto"), run: () => shell.mutate({ action: "rebase", onto: row.name, autostash: true }) },
+                { label: shell.tr("menu.merge"), disabled: !!shell.progress, run: () => { shell.draft = row.name; shell.draftExtra = shell.settings.mergeNoFf ? "no-ff" : "ff"; shell.dialog = "merge"; } },
+                { label: shell.tr("menu.rebaseOnto"), disabled: !!shell.progress, run: () => shell.mutate({ action: "rebase", onto: row.name, autostash: true }) },
                 { label: shell.tr("menu.delete"), run: () => shell.removeBranch(row.name) },
                 { label: shell.tr("menu.forceDelete"), run: () => shell.ask(shell.tr("menu.forceDelete"), row.name, () => void shell.mutate({ action: "deleteBranch", name: row.name, force: true })) },
               ] : []),
@@ -360,7 +360,7 @@
           role="group"
           oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.checkout"), disabled: true },
-            { label: shell.tr("menu.merge"), run: () => { shell.draft = shell.branchLabel; shell.draftExtra = "ff"; shell.dialog = "merge"; } },
+            { label: shell.tr("menu.merge"), disabled: !!shell.progress, run: () => { shell.draft = shell.branchLabel; shell.draftExtra = "ff"; shell.dialog = "merge"; } },
             { label: shell.tr("menu.rebaseOnto"), disabled: true },
             { label: shell.tr("menu.rename"), run: () => { shell.draft = shell.branchLabel; shell.draftExtra = shell.branchLabel; shell.dialog = "rename"; } },
             { label: shell.tr("menu.delete"), run: () => shell.ask(shell.tr("dialog.deleteBranch"), shell.tr("dialog.deleteBranchBody", { name: shell.branchLabel }), () => {}) },

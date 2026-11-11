@@ -236,6 +236,9 @@ export type Settings = {
   pushOnCommit: boolean;
   compactBranchLabels: boolean;
   errorLogDays: number;
+  flowHistoryDays: number;
+  flowAutoOpen: boolean;
+  flowAutoClose: boolean;
   messageLow: number;
   messageHigh: number;
   spellChecking: string;
@@ -288,6 +291,8 @@ export type Settings = {
   commitTypes: CommitTypeRecord[];
   /** Update banner stays hidden for this version until a newer one is published. */
   dismissedUpdate: string;
+  /** Install updates without showing the installer window. */
+  silentInstall: boolean;
   /** `pending` on a brand-new install, otherwise `seen`. */
   featuresIntro: string;
   /** `recovered-backup` when the last load restored a damaged settings file. */

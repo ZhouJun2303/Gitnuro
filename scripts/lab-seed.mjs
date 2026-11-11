@@ -386,6 +386,17 @@ function seedCherryRepo() {
   diverge(path, "cherry");
 }
 
+function seedOperationRepo() {
+  const path = join(repos, "operation");
+  wipe(path); initWork(path);
+  commit(path, "note.txt", "base\n", "base"); git(path, ["branch", "incoming"]);
+  commit(path, "note.txt", "local one\n", "first local");
+  commit(path, "clean.txt", "clean\n", "between conflicts");
+  commit(path, "note.txt", "local two\n", "second local");
+  git(path, ["checkout", "incoming"]); commit(path, "note.txt", "remote\n", "incoming change");
+  git(path, ["checkout", "main"]); write(path, "note.txt", "uncommitted work\n");
+}
+
 function seedRevertRepo() {
   const path = join(repos, "revert");
   wipe(path);
@@ -404,6 +415,7 @@ function seedBisectRepo() {
 }
 
 const restore = {
+  operation: seedOperationRepo,
   conflict: seedConflictRepo,
   merge: seedMergeRepo,
   rebase: seedRebaseRepo,
@@ -600,6 +612,7 @@ write(pushbox, "note.txt", "lab push note\n");
 seedConflictRepo();
 seedMergeRepo();
 seedRebaseRepo();
+seedOperationRepo();
 seedCherryRepo();
 seedRevertRepo();
 

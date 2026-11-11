@@ -9,7 +9,9 @@ import { commits, diffs, sampleConflictViews, sampleImages, sampleNotices, sampl
 import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, remoteNameFromUrl, repoNameFromUrl, safeFolderName } from "../clonePath";
 import { featuresPageUrl } from "../featuresPage";
+import { fileAccessReport } from "../fileAccess";
 import { resolveLocale, translate } from "../i18n";
+import { broadcastLocale, onLocaleChange } from "../i18n/sync";
 import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
@@ -43,7 +45,7 @@ import {
     workspaceTabWidth,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
-import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
+import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, selectFolder, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
@@ -109,6 +111,27 @@ function sameStatusFiles(left: readonly StatusFile[], right: readonly StatusFile
     if (!sameStatusFile(left[index]!, right[index]!)) return false;
   }
   return true;
+}
+
+/** Directories whose every visible file is picked, keyed by the same `/`-joined path the tree uses. */
+function fullyPickedDirs(files: readonly Row[], picked: readonly string[]) {
+  const pickedSet = new Set(picked);
+  const totals = new Map<string, number>();
+  const hits = new Map<string, number>();
+  for (const file of files) {
+    const parts = file.path.split(/[/\\]/);
+    let acc = "";
+    for (let index = 0; index < parts.length - 1; index += 1) {
+      acc = acc ? `${acc}/${parts[index]}` : (parts[index] ?? "");
+      totals.set(acc, (totals.get(acc) ?? 0) + 1);
+      if (pickedSet.has(file.path)) hits.set(acc, (hits.get(acc) ?? 0) + 1);
+    }
+  }
+  const dirs = new Set<string>();
+  for (const [dir, total] of totals) {
+    if (total > 0 && hits.get(dir) === total) dirs.add(dir);
+  }
+  return dirs;
 }
 
 function sameSnapshot(left: StatusSnapshot | null, right: StatusSnapshot | null): boolean {
@@ -191,7 +214,7 @@ export class ShellState {
     signOffFormat: "Signed-off-by: %user <%email>",
     forceWithLease: true,
     aiEnabled: true,
-    aiLanguage: "",
+    aiLanguage: "zh",
     aiMaxChars: 12000,
     aiPrompt: "",
     aiPromptStyle: "short",
@@ -226,6 +249,9 @@ export class ShellState {
     pushOnCommit: false,
     compactBranchLabels: false,
     errorLogDays: 7,
+    flowHistoryDays: 3,
+    flowAutoOpen: true,
+    flowAutoClose: false,
     messageLow: 50,
     messageHigh: 70,
     spellChecking: "disable",
@@ -275,6 +301,7 @@ export class ShellState {
     commitType: "feat",
     commitTypes: [],
     dismissedUpdate: "",
+    silentInstall: true,
     featuresIntro: "seen",
     recoveryNotice: "",
   };
@@ -584,6 +611,18 @@ export class ShellState {
   mergeState = $state<MergeState | null>(null);
 
 
+  /** True when the conflict dialog explains an autostash that could not return cleanly. */
+  mergeConflictRestore = $state(false);
+
+
+  /** Commit being replayed while a rebase is paused, shown in the continue dialog. */
+  continueDetail = $state<{ author: string; summary: string } | null>(null);
+
+
+  /** The continue dialog hides its message field until the user asks to edit it. */
+  editContinue = $state(false);
+
+
   mergeProgressAutoSummary = $state("");
 
 
@@ -798,7 +837,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.5");
+  appVersion = $state("2.0.6");
 
 
   passphrase = $state("");
@@ -1044,6 +1083,7 @@ export class ShellState {
 
 
   rebaseConflictFiles = $state<string[]>([]);
+  rebaseConflictKnown = $state(false);
 
 
   updateRefs = $state(false);
@@ -1303,6 +1343,12 @@ export class ShellState {
   writing = $derived(this.userWrites > 0);
 
 
+  syncDisabled(kind: "fetch" | "pull" | "push") {
+    return this.busy || this.writing || this.mode !== "live" || !this.snapshot
+      || (kind !== "fetch" && (!!this.progress || this.conflicted));
+  }
+
+
   busyLabel = $derived(this.currentJob?.label ?? "");
 
 
@@ -1386,6 +1432,7 @@ export class ShellState {
       });
     }
     if (this.actionError) {
+      const accessReport = fileAccessReport(this.actionError);
       const actions: StatusNoticeAction[] = [];
       if (this.stashRetry) actions.push({ id: "stash", label: this.tr("chrome.stashAndRetry"), disabled: this.busy });
       actions.push({ id: "close", label: this.tr("chrome.close") });
@@ -1393,8 +1440,8 @@ export class ShellState {
         id: "error",
         priority: 3,
         tone: "error",
-        title: this.actionError,
-        detail: "",
+        title: accessReport ? this.tr("chrome.fileAccessError") : this.actionError,
+        detail: accessReport ? this.actionError : "",
         dataLayer: "error",
         floor: true,
         actions,
@@ -1461,6 +1508,7 @@ export class ShellState {
       !this.summaryTooLong &&
       !this.busy &&
       !this.conflicted &&
+      !this.progress &&
       (this.mode !== "live" || this.staged.length > 0 || this.amend),
   );
 
@@ -1793,6 +1841,12 @@ export class ShellState {
 
 
   shownStaged = $derived(this.staged.filter((file) => this.matchesQuery(file.path, this.fileQuery) && (!this.conflictsOnly || file.letter === "C")));
+
+
+  pickedUnstagedDirs = $derived(fullyPickedDirs(this.shownUnstaged, this.picked));
+
+
+  pickedStagedDirs = $derived(fullyPickedDirs(this.shownStaged, this.picked));
 
 
   combinedRows = $derived.by(() => [
@@ -2944,10 +2998,8 @@ export class ShellState {
       if (action === "abort") void this.mutate({ action: "abort" });
       else if (action === "skip") void this.mutate({ action: "skip" });
       else if (action === "continue") {
-        if (this.progress === "rebase") {
-          this.draft = "";
-          this.dialog = "continue";
-        } else void this.mutate({ action: "continue" });
+        if (this.progress === "rebase") void this.openContinue();
+        else void this.mutate({ action: "continue" });
       }
       return;
     }
@@ -3026,10 +3078,21 @@ export class ShellState {
 
 
 
-  async mutate(request: Record<string, unknown>, source: "user" | "background" = "user") {
+  async mutate(request: Record<string, unknown>, source: "user" | "background" = "user", retryStash = false) {
     const path = this.repoPath();
     if (!this.backend() || !path) return;
     const background = source === "background";
+    const action = String(request.action ?? "");
+    // Menus and shortcuts obey the same restrictions as the sync toolbar.
+    if (["fetch", "pull", "pullRef", "push", "pushRef"].includes(action)) {
+      const kind = action === "pullRef" ? "pull" : action === "pushRef" ? "push" : action as "fetch" | "pull" | "push";
+      if (this.syncDisabled(kind)) return;
+    }
+    if (!background && this.progress && this.startsFlow(action)) {
+      // A paused rebase, merge, cherry-pick, or revert owns HEAD until it ends.
+      this.actionError = this.tr("chrome.finishFlowFirst");
+      return;
+    }
     if (!background) {
       if (this.userWrites > 0) return;
       this.userWrites += 1;
@@ -3043,8 +3106,8 @@ export class ShellState {
       }
       if (!background) this.actionError = null;
       if (!background) this.stashRetry = null;
+      if (!background) this.mergeConflictRestore = false;
       const described = this.describeRequest(request);
-      const action = String(request.action ?? "");
       const dialogBefore = this.dialog;
       const refreshContext = this.needsContext(action);
       const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
@@ -3053,7 +3116,7 @@ export class ShellState {
         started = true;
       }
       try {
-        const value = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request });
+        const value = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash });
         const output = value.output ?? "";
         // A foreground write started while this was running will paint the later status itself.
         const superseded = background && this.busy;
@@ -3062,15 +3125,25 @@ export class ShellState {
           if (refreshContext) await this.loadContext();
           if (!background && this.viewing(path)) await this.loadDiff();
         }
+        if (value.outcome === "failed" || value.outcome === "conflict") throw new Error(value.error || value.log || "Git conflict");
         if (followSubmodules) {
-          const follow = await invoke<StatusSnapshot & { output?: string; log?: string }>("mutate", { path, request: { action: "submoduleUpdate" } });
+          const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } });
+          if (follow.outcome === "failed") throw new Error(follow.error || follow.log);
           if (this.viewing(path)) this.applySnapshot(follow);
           this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
         }
         this.noteActivity(`${action}${output ? " output" : " ok"}`);
         this.recordCommand(action, described, value.log || output, true, source);
+        const restoreConflict = !background && this.viewing(path) && !superseded && this.conflictCount > 0 && this.flowConflictAction(action);
         if (!background && this.viewing(path) && this.dialog === dialogBefore) {
-          if (dialogBefore === "prefs") {
+          if (restoreConflict) {
+            // The operation finished, but the local changes it kept conflict with the result.
+            this.mergeConflictRestore = true;
+            this.commandOutput = (value.log ?? "").trim();
+            this.dialog = "mergeConflict";
+            this.actionError = null;
+            this.stashRetry = null;
+          } else if (dialogBefore === "prefs") {
             // Preferences stay open for LFS/author actions; the operation is recorded below.
           } else if (output) {
             this.commandOutput = output;
@@ -3079,6 +3152,7 @@ export class ShellState {
             this.dialog = null;
           }
         }
+        return "completed" as const;
       } catch (error) {
         const text = this.message(error);
         this.noteActivity(`${String(request.action ?? "")} failed`);
@@ -3091,6 +3165,7 @@ export class ShellState {
             /* keep the action error */
           }
           if (this.shouldShowMergeConflict(action, text)) {
+            this.mergeConflictRestore = false;
             this.commandOutput = text.trim();
             this.dialog = "mergeConflict";
             this.actionError = null;
@@ -3101,6 +3176,7 @@ export class ShellState {
             if (action === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
           }
         }
+        return this.conflictCount > 0 ? "conflict" as const : "failed" as const;
       } finally {
         if (started) this.stopWork(path);
       }
@@ -3148,9 +3224,7 @@ export class ShellState {
       const stash = (this.refs?.stashes ?? []).find((item) => item.name === name);
       if (stash?.id) request.name = stash.id;
     }
-    await this.mutate({ action: "stash", message: this.tr("chrome.stashBlockedMessage"), includeUntracked: true });
-    if (this.actionError) return;
-    await this.mutate(request, pending.source);
+    await this.mutate(request, pending.source, true);
   }
 
 
@@ -3174,13 +3248,62 @@ export class ShellState {
 
   /** Pull/merge-style writes that leave unmerged paths get Fork-style conflict dialog. */
   shouldShowMergeConflict(action: string, text: string) {
-    const ops = new Set(["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashPop", "stashApply", "continue"]);
+    const ops = new Set(["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashPop", "stashApply", "continue", "skip", "gitFlowFinish"]);
     if (!ops.has(action)) return false;
     if (this.conflictCount > 0) return true;
     const lower = text.toLowerCase();
     return /conflict|fix conflicts|merge failed|could not apply|needs merge|unmerged (paths|files)|merging is not possible|自动合并失败/.test(lower);
   }
 
+
+  /** Label for the composer button while an operation is paused. */
+  flowLabel() {
+    if (this.progress === "rebase") return this.tr("chrome.continueRebase");
+    if (this.progress === "merge") return this.tr("chrome.finishMerge");
+    if (this.progress === "cherryPick") return this.tr("chrome.continueCherryPick");
+    if (this.progress === "revert") return this.tr("chrome.continueRevert");
+    return this.tr("chrome.commit");
+  }
+
+
+  /** Continue the paused operation instead of creating a separate commit. */
+  continueFlow() {
+    if (!this.progress) return;
+    if (this.progress === "rebase") return this.openContinue();
+    return this.mutate({ action: "continue" });
+  }
+
+
+  /** Show which commit the paused rebase is replaying before asking for a message. */
+  async openContinue() {
+    this.draft = "";
+    this.editContinue = false;
+    this.continueDetail = null;
+    this.dialog = "continue";
+    if (this.mode !== "live") return;
+    const path = this.repoPath();
+    if (!path) return;
+    try {
+      const detail = await invoke<CommitDetail>("commit_detail", { path, id: "REBASE_HEAD" });
+      if (this.dialog === "continue" && this.viewing(path)) {
+        this.continueDetail = { author: detail.author, summary: detail.summary };
+      }
+    } catch {
+      /* a rebase without REBASE_HEAD has no commit to show */
+    }
+  }
+
+
+  /** Writes that start a new flow; a paused flow owns HEAD until it ends. */
+  startsFlow(action: string) {
+    return ["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "checkout", "checkoutRemote", "reset", "reword", "squash", "stashBranch", "gitFlowStart", "gitFlowFinish"].includes(action);
+  }
+
+
+  /** Writes whose autostash can conflict after the operation itself finished. */
+  flowConflictAction(action: string) {
+    return ["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "checkout", "checkoutRemote", "cherryPick", "revert", "continue", "skip", "abort", "squash", "gitFlowFinish"].includes(action);
+  }
 
 
   doPush() {
@@ -3198,8 +3321,9 @@ export class ShellState {
 
 
   async applyStash(name: string) {
-    await this.mutate({ action: "stashApply", name });
-    if (!this.actionError && this.settings.applyStashDelete) await this.mutate({ action: "stashDrop", name });
+    const pinned = this.refs?.stashes.find((stash) => stash.name === name || stash.id === name)?.id ?? name;
+    // Git pop drops only after a successful apply; a conflicted entry stays intact.
+    return this.mutate({ action: this.settings.applyStashDelete ? "stashPop" : "stashApply", name: pinned });
   }
 
 
@@ -3262,6 +3386,10 @@ export class ShellState {
     if (recovered) this.settings = { ...this.settings, recoveryNotice: "" };
     if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
     if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
+    if (this.settings.aiLanguage !== "zh" && this.settings.aiLanguage !== "en") {
+      const legacy = this.settings.aiLanguage.trim();
+      this.settings = { ...this.settings, aiLanguage: /^(en|english)$/i.test(legacy) ? "en" : "zh" };
+    }
     if (this.settings.aiPromptStyle !== "long") this.settings = { ...this.settings, aiPromptStyle: "short" };
     if (!isCommitType(this.settings.commitType)) this.settings = { ...this.settings, commitType: this.preferredCommitType() };
     if (!this.settings.errorLogDays) this.settings = { ...this.settings, errorLogDays: 7 };
@@ -3386,7 +3514,7 @@ export class ShellState {
     this.updateCancelRequested = false;
     this.updateMessage = this.tr("chrome.updateDownloading");
     try {
-      await invoke("download_update", { url: notice.downloadUrl, sha256: notice.sha256 ?? "" });
+      await invoke("download_update", { url: notice.downloadUrl, sha256: notice.sha256 ?? "", silent: this.settings.silentInstall !== false });
       this.updatePhase = "ready";
       this.updatePercent = 100;
       this.updateMessage = this.tr("chrome.updateStarted");
@@ -3781,6 +3909,7 @@ export class ShellState {
 
 
   confirmSync(kind: "fetch" | "pull" | "push") {
+    if (this.syncDisabled(kind)) return;
     return confirmSync(this, kind);
   }
 
@@ -4429,6 +4558,12 @@ export class ShellState {
 
   async savePrefs(close = true) {
     return savePrefs(this, close);
+  }
+
+  switchLanguage() {
+    this.settings.locale = this.activeLocale === "zh" ? "en" : "zh";
+    broadcastLocale(this.settings.locale);
+    void this.savePrefs(false);
   }
 
 
@@ -5309,6 +5444,12 @@ export class ShellState {
 
 
 
+  selectFolder(dir: string, side: Side, event?: MouseEvent) {
+    return selectFolder(this, dir, side, event);
+  }
+
+
+
   removeBranch(name: string) {
     return removeBranch(this, name);
   }
@@ -5921,6 +6062,12 @@ export class ShellState {
 
   onShortcut(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
+    const action = shortcut(event);
+    if (action === "switchLanguage") {
+      event.preventDefault();
+      if (!event.repeat && !event.isComposing) this.switchLanguage();
+      return;
+    }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c") {
       if (typing(event) || this.dialog || this.launchOpen) return;
       if (this.heldText) {
@@ -5946,7 +6093,6 @@ export class ShellState {
     }
     if (this.activateLayer(event)) return;
     if (this.dialog || this.textMerge || this.confirmAsk) return;
-    const action = shortcut(event);
     if (!action) return;
     // Command log, repository picker, menus, quick launch and forge are modal enough
     // that shortcuts must not write behind them. Escape still closes the top layer.
@@ -6256,6 +6402,7 @@ export class ShellState {
     this.goBack();
     };
     const onShortcut = this.onShortcut.bind(this);
+    const stopLocale = onLocaleChange((locale) => { this.settings.locale = locale; });
     const onRememberPointer = this.rememberPointer.bind(this);
     window.addEventListener("keydown", onShortcut);
     window.addEventListener("mousedown", onMouseNav);
@@ -6265,6 +6412,7 @@ export class ShellState {
     const historyTimer = window.setTimeout(addHistoryEntry, 0);
     window.addEventListener("popstate", onPop);
     const detachNav = () => {
+    stopLocale();
     window.clearTimeout(historyTimer);
     window.removeEventListener("keydown", onShortcut);
     window.removeEventListener("mousedown", onMouseNav);

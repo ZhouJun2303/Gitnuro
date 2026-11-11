@@ -146,6 +146,16 @@
       <p class="empty update-note">{shell.tr("chrome.updateNoInstaller")}</p>
     {/if}
 
+    {#if notice.installable && (phase === "available" || phase === "cancelled" || phase === "error")}
+      <label class="update-silent">
+        <input type="checkbox" bind:checked={shell.settings.silentInstall} onchange={() => void shell.savePrefs(false)} />
+        <span class="update-silent-copy">
+          <span class="update-silent-label">{shell.tr("chrome.updateSilentInstall")}</span>
+          <span class="meta">{shell.tr("chrome.updateSilentInstallHint")}</span>
+        </span>
+      </label>
+    {/if}
+
     <div class="composer-row actions update-actions">
       {#if notice.installable && releaseUrl}
         <button class="text-button" type="button" onclick={() => openRelease(releaseUrl)}>{shell.tr("chrome.updateOpenRelease")}</button>

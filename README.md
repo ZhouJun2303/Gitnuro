@@ -86,7 +86,7 @@ pnpm start
 
 调试程序是 `target\debug\awegit.exe`，它加载 http://127.0.0.1:1420 。单独双击它之前要先有开发服务，否则窗口里无法连接。`pnpm start` 会自己拉起页面服务和窗口。
 
-1420 上已经有页面服务时，再执行 `pnpm start` 会沿用它并打开窗口。这个端口被占用后再另起一个开发服务会失败。
+1420 上已经有页面服务时，`pnpm start` 会沿用并持续监测它；服务停止后自动接管，自己启动的 Vite 意外退出时也会重启。启动、退出原因和 Vite 输出保存在 `.lab/logs/dev-server.log`。
 
 设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令只留在当前进程里，HTTPS 密码交给 Git 的凭据存储。API key、代理密码和各平台 token 放在系统凭据库（Windows 凭据管理器、macOS 钥匙串），配置文件里这些字段是空的。
 
@@ -101,11 +101,53 @@ pnpm test
 
 `pnpm check` 查界面类型。`pnpm test` 跑状态、差异、提交、变基、贮藏这些 Git 行为，以及设置、更新和凭据这些桌面单元测试。仓库都建在临时目录里。测试不打开窗口，也不要拿当前这个 AweGit 仓库去做暂存或提交实验。
 
-只跑一个测试：
+每次验证只运行本次修改相关的测试，UI 不跑全量场景。改动界面时补对应的试验台场景，用测试文件和 `--grep` 选择相关用例：
+
+```powershell
+pnpm test:ui -- e2e/sync-toolbar.spec.ts
+pnpm test:ui -- e2e/operation-flow.spec.ts --grep "observer automatic opening"
+pnpm test:ui -- --reuse e2e/operation-flow.spec.ts --grep "observer automatic closing|observer follows conflicts"
+pnpm test:ui -- --reuse e2e/conflict-pane.spec.ts --grep "conflict pane"
+pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|preferences backdrop|appearance menu"
+pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"
+pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"
+pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "tab context menu copies"
+pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "file access errors"
+```
+
+`--` 后的参数会传给 Playwright。已有 `.lab` 仓库且本次无需重建时，加 `--reuse` 可复用数据，避免重建整套试验台和清理正在使用的开发日志：`pnpm test:ui -- --reuse e2e/sync-toolbar.spec.ts`。需要恢复的仓库可先单独执行 `node scripts/lab-seed.mjs rebase conflict`。
+
+窗口位置持久化与冲突自动打开的相关 Rust 校验：
+
+```powershell
+pnpm test:app flow_window::tests
+pnpm test:app flows::tests
+pnpm test:app operation_observer_auto_close
+```
+
+只跑一个 Git 测试：
 
 ```powershell
 cargo test -p awegit-git squash_replays_commits_after_the_range -- --test-threads=1
 ```
+
+## 文件占用提示
+
+Git 无法替换或写入工作区文件时，命令日志会逐个列出文件和原因。Windows 能识别占用程序时显示程序名与 PID，并提示保存工作、关闭文件或退出程序、在任务管理器核对残留进程，再刷新仓库状态并继续或重试操作。无法识别程序时，提示排查占用、只读属性和写权限，避免把所有访问失败都认定为占用。说明适用于各类文件及共用 Git 执行器的操作，原始 Git 错误仍完整保留并可复制。
+
+这类重要提示在日志中使用红色边框、16px 粗体标题和 14px 正文，文件、原因及程序/PID 加粗，窄窗口中自动换行且可以滚动查看解除步骤。从顶部“文件占用 / 访问受限”提示或错误列表打开，都能看到完整说明。试验台场景：`commands-file-access`、`commands-file-access-unknown`。相关验证：`pnpm test:git locks::tests` 和上方的 `file access errors` UI 用例；Windows 程序识别测试需要可访问 Restart Manager 的正常系统权限。
+
+## 操作与冲突流程窗口
+
+“操作与冲突流程”仅在本次操作实际出现待解决冲突时自动打开，包括整合提交和恢复本地修改时的冲突；正常操作、普通失败、预测冲突，以及冲突已解决但尚待继续的状态都不会触发自动打开。重新打开仓库时仍有待解决冲突，会恢复对应流程窗口。偏好设置中的“操作遇到待解决冲突时自动打开流程窗口”可关闭此行为，操作历史仍可从仓库菜单手动查看。相关验证：`pnpm test:app flows::tests` 与 `pnpm test:ui -- --reuse e2e/operation-flow.spec.ts --grep "observer automatic opening"`。
+
+“操作与冲突流程”窗口关闭时保存位置、大小和最大化状态，手动关闭和流程完成后的自动关闭都适用。下次自动弹出或查看历史时恢复，重启应用后也保留；多个仓库共享最后关闭的窗口布局。窗口布局单独存放在设置文件同目录的 `flow-window.json`，原来的显示器断开时会回到可见屏幕。
+
+偏好设置 → 常规中的“解决所有冲突后自动关闭流程窗口”默认不勾选，旧设置文件也默认不自动关闭。启用后，等待所有冲突解决、后续操作与本地修改恢复全部完成，再于 1.5 秒后关闭；等待继续或仍有待恢复贮藏时保持打开，手动查看历史也保持打开。已打开的流程窗口在重新获得焦点时读取最新开关，关闭前再次核对设置。试验台场景：`prefs-flow`、`operation-flow-completed`；相关验证命令见上方的自动关闭用例。
+
+获取、拉取、推送按当前仓库的实际状态启用：前台操作执行中全部禁用；合并、变基等流程未完成或仍有冲突时，获取可用，拉取和推送禁用；处理完成后恢复。工具栏、仓库菜单、右键菜单和快捷键遵循同一规则。单纯查看历史流程不会禁用这些操作。
+
+主窗口的冲突面板会随差异区域宽度调整：窄面板中每个版本与自己的勾选框对齐，较窄时提交号另起一行，操作按钮填满可用宽度并允许换行；高度不足时可滚动访问标题和操作。试验台场景为 `conflict-compact`，相关 UI 用例覆盖 240、300、500 和 760 像素宽度及较低的面板高度。
 
 ## 打包
 
@@ -115,10 +157,10 @@ Windows：
 pnpm package:windows
 ```
 
-脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build`。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。版本号以 `src-tauri/Cargo.toml` 为准，`node scripts/check-versions.mjs` 会核对安装包、清单和关于页。当前版本是 2.0.5：
+脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build`。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。版本号以 `src-tauri/Cargo.toml` 为准，`node scripts/check-versions.mjs` 会核对安装包、清单和关于页。当前版本是 2.0.6：
 
-- `target\release\bundle\nsis\AweGit_2.0.5_x64-setup.exe`
-- `target\release\bundle\msi\AweGit_2.0.5_x64_en-US.msi`
+- `target\release\bundle\nsis\AweGit_2.0.6_x64-setup.exe`
+- `target\release\bundle\msi\AweGit_2.0.6_x64_en-US.msi`
 
 发布到 GitHub 时，在仓库根目录双击或运行 `publish.bat`。第 1 项会把修订号加一（2.0.0 变成 2.0.1），然后打包并上传。也可以选次版本、主版本、指定版本、不改版本，或只打包不上传。
 
@@ -169,10 +211,23 @@ pnpm package:mac
 | 搜索提交 | `Ctrl+F` |
 | 后退 / 前进 | `Alt+Left` / `Alt+Right` |
 | 设置 | `Ctrl+,` |
+| 切换中英文 | `Ctrl+Alt+L` |
 | 在文件管理器中显示 | `Ctrl+Alt+O` |
 | 放大 / 缩小 | `Ctrl+=` / `Ctrl+-` |
 
 终端从仓库菜单打开，没有单独的快捷键。
+
+语言快捷键在首选项和输入框中也可使用，从当前显示语言切换到另一种语言并保存；也可在“外观”菜单中选择“切换语言”。首选项点击面板外空白处保持打开，通过右上角关闭按钮、“完成”或 `Escape` 关闭。试验台场景：`prefs-language`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|preferences backdrop|appearance menu"`。
+
+首选项左侧按「常规 / 工作流 / 系统」分组导航，共 11 个页签：通用、工作区、差异、提交、AI、Git、集成、命令、网络、账户、高级；每个页签内按功能卡片分区。试验台按页签提供 `prefs-language`、`prefs-workspace`、`prefs-diff`、`prefs-commit`、`prefs-ai`、`prefs-git`、`prefs-integration`、`prefs-commands`、`prefs-network`、`prefs-accounts`、`prefs-advanced`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts`。
+
+切换语言会立即同步到已打开的独立历史、文件内容、合并和操作流程窗口；也可在独立窗口按相同快捷键切换，其他窗口同步更新。同步只更新语言，保留各窗口正在查看的内容和编辑草稿。验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"`。
+
+项目标签右键菜单提供“拷贝项目路径”，复制该标签对应仓库的完整路径；未选中的标签和自定义名称的标签同样适用。试验台场景：`tab-copy-path`；验证：`pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "tab context menu copies"`。
+
+点击生成提交说明时，若 AI 未启用、接口地址未填写，或后端报告未配置密钥，会打开偏好设置的 AI 页签并滚动、聚焦到对应配置项；已通过环境变量配置密钥时仍可正常生成。试验台场景：`suggest-unconfigured`、`suggest-no-url`、`suggest-disabled`；验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "generation button"`。
+
+文件夹右键菜单在文件夹内文件全部被选中时，按整个选择范围显示数量，丢弃、删除和贮藏都作用于全部所选文件；只选中文件夹本身时仍只作用于该文件夹。验证：`pnpm test:ui -- --reuse e2e/lab.spec.ts --grep "folder menu counts"`。
 
 ## 下载
 

@@ -81,8 +81,26 @@ async function showCommitBySummary(shell: ShellState, summary: string) {
 }
 
 async function fillSurface(shell: ShellState, id: string) {
+  if (id === "sync-busy") {
+    const path = shell.repoPath() ?? "";
+    shell.jobs = { ...shell.jobs, [shell.jobKey(path)]: { label: "pull", percent: 42, depth: 1 } };
+    return;
+  }
+  if (id === "sync-stash-conflict") {
+    // Stash restoration can leave conflicts after Git's merge/rebase has ended.
+    shell.progress = null;
+    return;
+  }
   if (id === "changes") {
     shell.section = "changes";
+    return;
+  }
+  if (id.startsWith("suggest-")) {
+    shell.section = "changes";
+    shell.prefTab = "ai";
+    shell.settings.aiEnabled = id !== "suggest-disabled";
+    shell.settings.aiBaseUrl = id === "suggest-no-url" ? "" : "https://example.invalid/v1";
+    shell.settings.aiApiKey = "";
     return;
   }
   if (id === "changes-combined") {
@@ -146,6 +164,13 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.settings = { ...shell.settings, verticalTabs: true };
     return;
   }
+  if (id === "tab-copy-path") {
+    const layout = await invoke<{ full: string; even: string }>("lab_layout");
+    shell.settings.verticalTabs = false;
+    shell.repos = [layout.full, layout.even];
+    shell.settings.tabLabels = shell.pairSetting(shell.settings.tabLabels, layout.even, "MyTest");
+    return;
+  }
   if (id === "picker") {
     await shell.toggleRepoPicker();
     return;
@@ -175,6 +200,31 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.unseenErrors = 1;
     shell.commandPick = 1;
     shell.openCommandLog();
+    return;
+  }
+  if (id === "commands-file-access" || id === "commands-file-access-unknown") {
+    const unknown = id.endsWith("-unknown");
+    const output = [
+      "Git operation failed: the following files could not be updated.",
+      "",
+      "File: art/角色 source.psd",
+      "Cause: File is in use (locked by another process).",
+      "In use by: Image Editor (PID 123)",
+      ...(unknown ? ["", "File: data/cache.db", "Cause: Possible file lock, read-only attribute, or insufficient permissions; no holding process was identified."] : []),
+      "",
+      "How to release access:",
+      "1. Save your work and close the affected files in the programs using them. If a lock remains, fully quit those programs.",
+      "2. If a listed program remains running, check its PID in Task Manager > Details. End only that process, after saving your work.",
+      ...(unknown ? ["3. To find an unidentified holder, open Resource Monitor > CPU > Associated Handles and search for the file name. Also check the file's read-only attribute and your write permissions."] : []),
+      `${unknown ? 4 : 3}. After releasing access, refresh the repository status. If a Git operation is still in progress, continue that operation; otherwise retry the failed action.`,
+      "error: unable to unlink old 'art/角色 source.psd': Invalid argument",
+      ...(unknown ? ["error: unable to create file data/cache.db: Permission denied"] : []),
+    ].join("\n");
+    shell.commandLog = [];
+    shell.errorLog = [];
+    shell.recordCommand("merge", { title: "Merge branch", command: "git merge --ff-only other" }, output, false, "user");
+    shell.actionError = output;
+    shell.openCommandLog("errors");
     return;
   }
   if (id === "notes") {
@@ -221,6 +271,14 @@ async function fillSurface(shell: ShellState, id: string) {
     return;
   }
   if (id === "conflict") return showChange(shell, "src/both-sides.ts", "unstaged");
+  if (id === "conflict-compact") {
+    shell.sidebarCollapsed = false;
+    shell.sidebarWidth = 280;
+    shell.changesWidth = 650;
+    shell.settings.verticalTabs = false;
+    shell.settings.mergeTools = mergeFixtures();
+    return showChange(shell, "data/sheet.xlsx", "unstaged");
+  }
   if (id === "conflict-batch") {
     shell.section = "changes";
     shell.picked = [];
@@ -446,8 +504,23 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.editorPicked = [];
       shell.editorDetecting = false;
       break;
-    case "prefs":
-      shell.prefTab = sceneId.startsWith("prefs-integration") ? "integration" : sceneId === "prefs-git" ? "git" : sceneId === "prefs-commit" ? "commit" : "general";
+    case "prefs": {
+      const prefTabs: Record<string, "general" | "workspace" | "diff" | "commit" | "ai" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
+        "prefs-workspace": "workspace",
+        "prefs-diff": "diff",
+        "prefs-commit": "commit",
+        "prefs-ai": "ai",
+        "prefs-git": "git",
+        "prefs-integration": "integration",
+        "prefs-integration-merge": "integration",
+        "prefs-integration-editor": "integration",
+        "prefs-commands": "commands",
+        "prefs-network": "network",
+        "prefs-accounts": "accounts",
+        "prefs-advanced": "advanced",
+      };
+      if (sceneId === "prefs-language") shell.settings.locale = "zh";
+      shell.prefTab = prefTabs[sceneId] ?? "general";
       fillSourceRoots(shell);
       fillLabTools(shell);
       if (sceneId === "prefs-commit") shell.resetCommitTypes();
@@ -460,6 +533,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
         shell.toolPick = "lab-editor-cursor";
       }
       break;
+    }
     case "update":
       shell.updateReleaseUrl = "https://github.com/ZhouJun2303/Gitnuro/releases/latest";
       if (sceneId === "update-current") {
@@ -601,6 +675,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draftUser = "AweGit Lab <lab@example.com>";
       break;
     case "continue":
+      shell.editContinue = true;
       shell.draft = "继续变基并保留说明";
       break;
     case "gitignore":

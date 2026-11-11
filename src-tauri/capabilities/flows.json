@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "flows",
+  "description": "Read-only operation observer; cannot mutate Git or open an editor",
+  "windows": ["flow-*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "allow-operation-flow",
+    "allow-operation-history",
+    "allow-load-settings",
+    "allow-save-settings",
+    "allow-log-client"
+  ]
+}

@@ -1,5 +1,7 @@
 .diff-body {
   position: relative;
+  --hunk-edge: color-mix(in srgb, var(--accent) 70%, transparent);
+  --hunk-wash: color-mix(in srgb, var(--accent) 13%, transparent);
 }
 
 .diff-load {
@@ -27,19 +29,59 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Outline the hovered hunk as one box: side edges on every row, horizontal edges only on its outer rows. */
+.diff-body .split-row > span,
+.diff-body .split-meta {
+  position: relative;
+}
+
+.diff-body .virtual-row.hunk-hover::after,
+.diff-body .split-row.hunk-hover > span::after,
+.diff-body .split-meta.hunk-hover::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: solid var(--hunk-edge);
+  border-width: var(--hunk-edge-t, 0) var(--hunk-edge-r, 0) var(--hunk-edge-b, 0) var(--hunk-edge-l, 0);
+  pointer-events: none;
+}
+
 .diff-body .virtual-row.hunk-hover,
-.diff-body .split-row.hunk-hover > span {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+.diff-body .split-meta.hunk-hover {
+  --hunk-edge-l: 1px;
+  --hunk-edge-r: 1px;
+}
+
+.diff-body .split-row.hunk-hover > span:first-child { --hunk-edge-l: 1px; }
+
+.diff-body .split-row.hunk-hover > span:last-child { --hunk-edge-r: 1px; }
+
+.diff-body .virtual-row.hunk-hover.hunk-top,
+.diff-body .split-meta.hunk-hover.hunk-top,
+.diff-body .split-row.hunk-hover.hunk-top > span {
+  --hunk-edge-t: 1px;
+}
+
+.diff-body .virtual-row.hunk-hover.hunk-bottom,
+.diff-body .split-meta.hunk-hover.hunk-bottom,
+.diff-body .split-row.hunk-hover.hunk-bottom > span {
+  --hunk-edge-b: 1px;
+}
+
+.diff-body .virtual-row.hunk-hover,
+.diff-body .split-row.hunk-hover > span,
+.diff-body .split-meta.hunk-hover {
+  background-image: linear-gradient(var(--hunk-wash), var(--hunk-wash));
 }
 
 .diff-body .virtual-row.hunk-hover.add,
 .diff-body .split-row.hunk-hover > span.add {
-  background: color-mix(in srgb, var(--diff-add) 78%, var(--elevated));
+  background-color: color-mix(in srgb, var(--diff-add) 78%, var(--elevated));
 }
 
 .diff-body .virtual-row.hunk-hover.del,
 .diff-body .split-row.hunk-hover > span.del {
-  background: color-mix(in srgb, var(--diff-del) 78%, var(--elevated));
+  background-color: color-mix(in srgb, var(--diff-del) 78%, var(--elevated));
 }
 
 .diff-viewport {
@@ -226,11 +268,13 @@ section.diff > .diff-viewport {
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: safe center;
     gap: 6px;
     padding: 28px 20px 64px;
     text-align: center;
   }
+
+.conflict-pane > * { flex-shrink: 0; }
 
 .conflict-title {
     display: flex;
@@ -480,28 +524,100 @@ section.diff > .diff-viewport {
     border-bottom-left-radius: 0;
   }
 
-/* Narrow diff panes would truncate both branch names to a couple of letters. */
+/* Stack each version beside its own checkbox when the diff pane is narrow. */
 @container (max-width: 520px) {
-  .conflict-row {
-    display: flex;
-    flex-direction: column;
+  .conflict-pane {
     align-items: stretch;
-    gap: 6px;
+    justify-content: flex-start;
+    gap: 12px;
+    padding: 20px 16px;
+    text-align: left;
   }
 
-  .conflict-bridge {
-    width: auto;
-    justify-content: center;
+  .conflict-title { gap: 6px; font-size: 16px; }
+
+  .conflict-hint { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+
+  .conflict-file { margin-bottom: 0; }
+
+  .conflict-selection { margin: 0; }
+
+  .conflict-cluster { align-items: stretch; gap: 14px; }
+
+  .conflict-row {
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 8px;
   }
 
-  .conflict-link {
-    display: none;
+  .conflict-bridge { display: contents; }
+
+  .conflict-bridge input {
+    grid-column: 1;
+    width: 18px;
+    height: 18px;
   }
+
+  .conflict-bridge input:first-of-type { grid-row: 1; margin: 0; }
+
+  .conflict-bridge input:last-of-type { grid-row: 2; margin: 0; }
+
+  .conflict-link { display: none; }
 
   .conflict-end.left,
   .conflict-end.right {
+    grid-column: 2;
     justify-content: stretch;
   }
+
+  .conflict-end.left { grid-row: 1; }
+
+  .conflict-end.right { grid-row: 2; }
+
+  .conflict-card { gap: 6px; }
+
+  .conflict-card .name { flex: 1; }
+
+  .conflict-actions { align-items: stretch; margin-top: 0; }
+
+  .conflict-merge,
+  .conflict-tool {
+    min-width: 0;
+    min-height: 32px;
+    height: auto;
+    padding: 6px 10px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    justify-content: center;
+  }
+
+  .conflict-tool-group { min-width: 0; width: 100%; }
+
+  .conflict-tool-group .conflict-tool:first-child { flex: 1; }
+
+  .conflict-tool-group .conflict-caret { flex: none; width: 32px; }
+
+  .conflict-note { margin-top: 0; overflow-wrap: anywhere; }
+}
+
+@container (max-width: 360px) {
+  .conflict-pane { gap: 10px; padding: 16px 12px; }
+
+  .conflict-card {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+    gap: 4px 6px;
+    height: auto;
+    min-height: 44px;
+    padding: 8px;
+  }
+
+  .conflict-card .branch { grid-column: 1; grid-row: 1; }
+
+  .conflict-card .name { grid-column: 2; grid-row: 1; }
+
+  .conflict-card .conflict-pill { grid-column: 3; grid-row: 1; }
+
+  .conflict-card .conflict-commit { grid-column: 2 / -1; grid-row: 2; justify-self: start; }
 }
 
 .split-gap { grid-column: 1 / -1; }

@@ -101,6 +101,25 @@ test("dialog close button dismisses the dialog", async ({ page }) => {
   await expect(page.locator('[data-dialog="prefs"]')).toHaveCount(0);
 });
 
+test("tab context menu copies the clicked project's full path", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const layout = await lab("lab_layout") as { full: string; even: string };
+  await openLabScene(page, "tab-copy-path", ".chrome-tabs .tab");
+  const active = page.locator(".chrome-tabs .tab.active");
+  await active.click({ button: "right" });
+  await page.locator('[data-layer="menu"] button', { hasText: /拷贝项目路径|Copy project path/ }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(layout.full);
+
+  const other = page.locator(".chrome-tabs .tab", { hasText: "MyTest" });
+  await expect(other).not.toHaveClass(/active/);
+  await other.click({ button: "right" });
+  await page.locator('[data-layer="menu"] button', { hasText: /拷贝项目路径|Copy project path/ }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(layout.even);
+  await expect(active).toHaveCount(1);
+  await expect(other).not.toHaveClass(/active/);
+  await expect(page.locator('[data-layer="menu"]')).toHaveCount(0);
+});
+
 test("tab color can be set and cleared", async ({ page }) => {
   await openLabScene(page, "dialog-colorTab", '[data-dialog="colorTab"]');
   const dialog = page.locator('[data-dialog="colorTab"]');
@@ -207,6 +226,21 @@ test("rebase rows start checked and can be excluded", async ({ page }) => {
   const total = await boxes.count();
   expect(total).toBeGreaterThan(0);
   await expect(page.locator(".dialog-scroll input[type=checkbox]:checked")).toHaveCount(total);
+});
+
+test("a paused rebase turns the composer into continue", async ({ page }) => {
+  await openLabScene(page, "rebase-progress", '.identity-floor[data-layer="progress"]');
+  const button = page.locator(".composer button.commit");
+  await expect(button).toContainText(/Continue Rebase|继续变基/);
+  await expect(page.locator(".composer .convention-hint")).toContainText(/continue here|点这里继续/);
+  await expect(page.locator('.tool-btn[title="Pull"], .tool-btn[title="拉取"]')).toBeDisabled();
+  await button.click();
+  const dialog = page.locator('[data-dialog="continue"]');
+  await expect(dialog).toBeVisible();
+  const message = dialog.locator('input:not([type="checkbox"])');
+  await expect(message).toHaveCount(0);
+  await dialog.locator('input[type="checkbox"]').check();
+  await expect(message).toBeVisible();
 });
 
 test("menu rows keep their full height", async ({ page }) => {
@@ -397,6 +431,52 @@ test("command log opens on the newest row even when a stale id matches an old er
   expect(state.index).toBe(0);
 });
 
+test("file access errors highlight the cause and recovery steps and copy the full log", async ({ page, context }) => {
+  test.setTimeout(60_000);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  for (const width of [1440, 900]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const id of ["commands-file-access", "commands-file-access-unknown"]) {
+      await openLabScene(page, id, ".file-access-notice");
+      const notice = page.locator(".file-access-notice");
+      await expect(notice).toContainText("Cause: File is in use (locked by another process).");
+      await expect(notice).toContainText("Image Editor (PID 123)");
+      await expect(notice).toContainText("Save your work");
+      await expect(notice).toContainText("Task Manager > Details");
+      const heading = notice.locator(".file-access-heading").first();
+      await expect(heading).toBeInViewport();
+      const style = await heading.evaluate((node) => ({ size: parseFloat(getComputedStyle(node).fontSize), weight: Number(getComputedStyle(node).fontWeight) }));
+      expect(style.size).toBeGreaterThanOrEqual(16);
+      expect(style.weight).toBeGreaterThanOrEqual(700);
+      expect(await notice.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+      if (id.endsWith("-unknown")) {
+        await expect(notice).toContainText("no holding process was identified");
+        await expect(notice).toContainText("Resource Monitor > CPU > Associated Handles");
+      } else {
+        await expect(notice).not.toContainText("Possible file lock");
+      }
+      const lastStep = notice.locator("span").filter({ hasText: /^\d+\. After releasing access,/ });
+      await lastStep.scrollIntoViewIfNeeded();
+      await expect(lastStep).toBeInViewport();
+      await expect(page.locator(".command-detail pre")).toContainText("error: unable to unlink old 'art/角色 source.psd': Invalid argument");
+      await page.locator(".command-detail header button").click();
+      const copied = await page.evaluate(() => navigator.clipboard.readText());
+      expect(copied).toContain("In use by: Image Editor (PID 123)");
+      expect(copied).toContain("otherwise retry the failed action.");
+      expect(copied).toContain("error: unable to unlink old 'art/角色 source.psd': Invalid argument");
+      await page.keyboard.press("Escape");
+      const banner = page.locator('.identity-floor[data-layer="error"] .identity-copy');
+      await expect(banner).toContainText(/File in use \/ access denied|文件占用 \/ 访问受限/);
+      await banner.click();
+      await expect(notice).toBeVisible();
+      await expect(notice).toContainText("Image Editor (PID 123)");
+      await expect(page.locator(".command-detail pre")).toContainText("error: unable to unlink old 'art/角色 source.psd': Invalid argument");
+      if (width === 900) await page.evaluate(() => document.documentElement.dataset.theme = "dark");
+      await page.screenshot({ path: `.lab/file-access-${width}${id.endsWith("-unknown") ? "-unknown" : ""}.png` });
+    }
+  }
+});
+
 test("submenu opens and closes with the arrow keys", async ({ page }) => {
   await openLabScene(page, "menu", '[data-layer="menu"]');
   await page.keyboard.press("ArrowDown");
@@ -578,7 +658,7 @@ test("horizontal splitter arrows do not move history selection", async ({ page }
   await openLabScene(page, "history", ".history .commit-row");
   const selected = () => page.evaluate(() => [...document.querySelectorAll(".history .commit-row")].findIndex((node) => node.classList.contains("selected")));
   const before = await selected();
-  const handle = page.locator(".split-handle.horizontal");
+  const handle = page.locator(".split-handle.horizontal").first();
   await handle.focus();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
@@ -756,8 +836,8 @@ test("merge panel opens as a standalone page", async ({ page }) => {
 });
 
 test("unified diff keeps row nodes while scrolling", async ({ page }) => {
-  await openLabScene(page, "prefs-git", '[data-dialog="prefs"]');
-  const style = page.locator('[data-dialog="prefs"] label', { hasText: "Diff view" }).locator("select");
+  await openLabScene(page, "prefs-diff", '[data-dialog="prefs"]');
+  const style = page.locator('[data-dialog="prefs"] [data-pref="diff-style"]');
   await style.selectOption("unified");
   await page.locator('[data-dialog="prefs"] .commit').click();
   await page.waitForTimeout(500);
@@ -786,7 +866,7 @@ test("unified diff keeps row nodes while scrolling", async ({ page }) => {
   expect(result ?? 0).toBeLessThan(80);
 });
 
-test("a folder double-click stages it and the twist only folds", async ({ page }) => {
+test("a folder click selects its files, double-click stages it, the twist only folds", async ({ page }) => {
   test.setTimeout(60_000);
   await openLabScene(page, "changes", ".file-list");
   await page.locator(".unstaged-pane .pane-more").click();
@@ -812,8 +892,23 @@ test("a folder double-click stages it and the twist only folds", async ({ page }
   await expect(child).toHaveCount(0);
   await expect(staged.locator('button.file-select[title="pending"]')).toHaveCount(0);
 
+  // Clicking a folded folder picks every file under it without unfolding it.
   await folder.click();
+  await expect(child).toHaveCount(0);
+  await expect(page.locator(".unstaged-pane .pick-count")).toContainText("24");
+  await expect(unstaged.locator(".dir-row.picked")).toHaveCount(1);
+
+  // Delete with the folder selected targets the whole folder, not one file.
+  await page.keyboard.press("Delete");
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText(/共 24 个文件|24 files/);
+  await expect(confirm).toContainText("pending/file-01.txt");
+  await page.keyboard.press("Escape");
+  await expect(confirm).toHaveCount(0);
+
+  await twist.click();
   await expect(child).toHaveCount(1);
+  await expect(page.locator(".unstaged-pane .file.selected")).toHaveCount(1);
 
   await folder.locator(".name").dblclick();
   await expect(child).toHaveCount(0);
@@ -830,4 +925,25 @@ test("a folder double-click stages it and the twist only folds", async ({ page }
   await expect(child).toHaveCount(0);
   await twist.click();
   await expect(child).toHaveCount(1);
+});
+
+test("a folder menu counts every picked file, not just the folder's", async ({ page }) => {
+  test.setTimeout(60_000);
+  await openLabScene(page, "changes", ".file-list");
+  await page.locator(".unstaged-pane .pane-more").click();
+  await page.locator('[data-layer="menu"] button', { hasText: /View as Tree|按树查看/ }).click();
+
+  const unstaged = page.locator(".unstaged-pane");
+  const folder = unstaged.locator('button.file-select[title="pending"]');
+  await folder.click();
+  await expect(unstaged.locator(".dir-row.picked")).toHaveCount(1);
+
+  await page.keyboard.press("Control+a");
+  const pickedText = await unstaged.locator(".pick-count").textContent();
+  const total = Number(pickedText?.match(/\d+/)?.[0] ?? 0);
+  expect(total).toBeGreaterThan(24);
+
+  await folder.click({ button: "right" });
+  const menu = page.locator('[data-layer="menu"]');
+  await expect(menu.locator("button", { hasText: /Discard changes in|丢弃所选/ }).first()).toContainText(String(total));
 });

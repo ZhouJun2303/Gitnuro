@@ -110,7 +110,7 @@
 </script>
 
 {#if shell.dialog}
-    <div class="scrim" role="presentation" onclick={() => { if (shell.busy) return; if (shell.dialog === "prefs") void shell.savePrefs(true); else if (shell.dialog === "editorImport") shell.closeEditorImport(); else shell.dialog = null; }}>
+    <div class="scrim" role="presentation" onclick={() => { if (shell.busy || shell.dialog === "prefs") return; closeDialog(); }}>
       <div class="dialog {dialogSize(shell.dialog ?? "")}" class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} data-dialog={shell.dialog} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={trapTab}>
       <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={closeDialog}>×</button>
       <form
@@ -180,7 +180,7 @@
           else if (shell.dialog === "reword") void shell.mutate({ action: "reword", rev: shell.draftExtra || "HEAD", summary: shell.draft });
           else if (shell.dialog === "rebase" && shell.selectedCommit) void shell.mutate({ action: "rebaseInteractive", onto: shell.selectedCommit, drop: [], steps: buildRebaseSteps(shell.rebaseSteps, shell.rebasePicked), autostash: true, updateRefs: shell.updateRefs });
           else if (shell.dialog === "merge") void shell.mutate({ action: "merge", name: shell.draft, squash: shell.draftExtra === "squash", noFf: shell.draftExtra === "no-ff", autostash: true, summary: shell.mergeSummary, description: shell.mergeBody });
-          else if (shell.dialog === "continue") void shell.mutate({ action: "continue", message: shell.draft });
+          else if (shell.dialog === "continue") void shell.mutate({ action: "continue", message: shell.editContinue ? shell.draft : "" });
           else if (shell.dialog === "repo") {
             try {
               await invoke("set_repo_author", { path: shell.repoPath(), name: shell.draft, email: shell.draftExtra });
@@ -539,7 +539,7 @@
           </div>
         {:else if shell.dialog === "rebase"}
           <h2>{shell.tr("dialog.rebase")}</h2>
-          <p class="empty">{shell.rebaseConflictFiles.length === 0 ? shell.tr("dialog.conflictNone") : shell.tr("dialog.conflictSome", { name: shell.rebaseConflictFiles.join(", ") })}</p>
+          <p class="empty">{!shell.rebaseConflictKnown ? shell.tr("flow.preview-unavailable") : shell.rebaseConflictFiles.length === 0 ? shell.tr("dialog.conflictNone") : shell.tr("dialog.conflictSome", { name: shell.rebaseConflictFiles.join(", ") })}</p>
           <p class="empty">{shell.tr("dialog.rebaseInclude")}</p>
           <label class="check"><input type="checkbox" bind:checked={shell.updateRefs} /> {shell.tr("dialog.updateRefs")}</label>
           <div class="dialog-scroll">
@@ -688,8 +688,12 @@
           </div>
         {:else if shell.dialog === "continue"}
           <h2>{shell.tr("dialog.continueRebase")}</h2>
+          {#if shell.continueDetail}
+            <p class="empty">{shell.tr("dialog.continueCurrent", { author: shell.continueDetail.author, summary: shell.continueDetail.summary })}</p>
+          {/if}
           <p class="empty">{shell.tr("dialog.continueHint")}</p>
-          <label>{shell.tr("dialog.continueMessage")}<input bind:value={shell.draft} /></label>
+          <label class="check"><input type="checkbox" bind:checked={shell.editContinue} /> {shell.tr("dialog.continueEdit")}</label>
+          {#if shell.editContinue}<label>{shell.tr("dialog.continueMessage")}<input bind:value={shell.draft} /></label>{/if}
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.continueAction")}</button>
@@ -722,11 +726,11 @@
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
           </div>
         {:else if shell.dialog === "mergeConflict"}
-          <h2>{shell.tr("dialog.mergeConflictTitle")}</h2>
-          <p class="empty">{shell.tr("dialog.mergeConflictBody")}</p>
+          <h2>{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictTitle" : "dialog.mergeConflictTitle")}</h2>
+          <p class="empty">{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictBody" : shell.progress ? "dialog.mergeConflictBodyFlow" : "dialog.mergeConflictBody", { action: shell.flowLabel() })}</p>
           <pre class="diff-body merge-conflict-log" data-layer="merge-conflict">{shell.commandOutput}</pre>
           <div class="composer-row actions">
-            <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
+            <button class="text-button" type="button" onclick={() => { shell.mergeConflictRestore = false; shell.dialog = null; }}>{shell.tr("chrome.close")}</button>
           </div>
         {:else if shell.dialog === "remote"}
           <h2>{shell.tr("chrome.groupRemote")}</h2>
