@@ -2,7 +2,11 @@ import type { Messages } from "./types";
 
 export const zh: Messages = {
   flow: {
-    observer: "只读观察", observerHint: "仅观察与记录 · 在主窗口处理操作 · 自动跟随当前进度", autoOpen: "自动打开操作与冲突观察面板",
+    observer: "只读观察", observerHint: "在主窗口处理冲突 · 此处按顺序展示完整流程", autoOpen: "自动打开操作与冲突观察面板",
+    overview: "完整流水线", pipelineHint: "从左到右依次执行 · 点击阶段查看步骤", progress: "已完成 {done} / {total} 步", executionDetails: "执行命令与记录",
+    "phase-saved": "保存本地修改", "phase-fetch": "获取远程提交", "phase-integration": "整合提交", "phase-restore": "恢复本地修改", "phase-finished": "结束",
+    "fetch-inferred": "已进入提交整合阶段；未记录单独的获取命令。",
+    "not-run": "未执行（流程已结束）",
     leftLane: "当前分支 / 累积结果", rightLane: "传入提交 / 本地修改", timeAxis: "时间轴", observing: "正在观察",
     recordStart: "步骤开始", recordResult: "步骤状态", notExecuted: "尚未执行", recorded: "执行结果已记录", localChanges: "本地修改 / 贮藏", repeatedRound: "再次冲突 · 前一轮：{n}", filePage: "文件页",
     title: "操作与冲突流程", history: "最近操作", historyDays: "操作流程保留天数（1–90）", empty: "暂无操作记录",

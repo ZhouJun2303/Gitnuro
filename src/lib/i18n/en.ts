@@ -2,7 +2,11 @@ import type { Messages } from "./types";
 
 export const en: Messages = {
   flow: {
-    observer: "Read-only observer", observerHint: "Observe and record · Use the main window for actions · Follow current progress", autoOpen: "Automatically open the operation and conflict observer",
+    observer: "Read-only observer", observerHint: "Resolve conflicts in the main window · Follow the complete pipeline here", autoOpen: "Automatically open the operation and conflict observer",
+    overview: "Complete pipeline", pipelineHint: "Runs from left to right · Select a phase to view its steps", progress: "Completed {done} / {total} steps", executionDetails: "Commands and observations",
+    "phase-saved": "Save local changes", "phase-fetch": "Fetch remote commits", "phase-integration": "Integrate commits", "phase-restore": "Restore local changes", "phase-finished": "Finish",
+    "fetch-inferred": "Commit integration has started; no separate fetch command was recorded.",
+    "not-run": "Not run (workflow ended)",
     leftLane: "Current branch / accumulated result", rightLane: "Incoming commit / local changes", timeAxis: "Timeline", observing: "Observing",
     recordStart: "Step started", recordResult: "Step status", notExecuted: "Not started", recorded: "Result recorded", localChanges: "Local changes / stash", repeatedRound: "Repeated conflict · earlier round: {n}", filePage: "File page",
     title: "Operations & conflicts", history: "Recent operations", historyDays: "Keep operation history for days (1–90)", empty: "No recorded operations",

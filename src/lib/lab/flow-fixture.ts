@@ -24,7 +24,7 @@ export function flowFixture(scene: string): FlowSnapshot {
     node("later", "replay", "conditional", { source: commit("77", "feat: remember recent workspace"), detail: "preview-conditional" }),
   ];
   const details = scene === "operation-flow-details";
-  if (details) nodes[0].detail = [
+  if (details) nodes[5].detail = [
     "From https://github.com/example/workspace",
     " * branch            main       -> FETCH_HEAD",
     ...Array.from({ length: 12 }, (_, index) => `Auto-merging src/section-${index + 1}.ts`),
@@ -37,6 +37,17 @@ export function flowFixture(scene: string): FlowSnapshot {
     'hint: Disable this message with "git config set advice.mergeConflict false"',
     "Could not apply 63eee33... # chore: test1",
   ].join("\n");
+  if (scene === "operation-flow-pipeline") {
+    nodes.unshift(node("action-0", "pullRef", "waiting", { detail: "requested", target: before }));
+    nodes.splice(2, 0, node("command-stash", "stash-push", "completed", { command: "git stash push --include-untracked" }));
+    nodes.splice(5, 0, node("command-rebase", "rebase", "failed", { command: "git rebase", detail: "git-child" }));
+    const current = nodes.find((item) => item.key === "second")!;
+    nodes.splice(5, 0, node("preview-second", "replay", "conflict", { source: current.source, detail: "preview-conflict" }));
+    nodes.push(node("action-resolve", "resolve", "completed", { detail: "requested" }),
+      node("command-add", "add", "completed", { command: "git add src/workspace.ts" }),
+      node("git-message", "error", "paused", { detail: "Resolve all conflicts, then continue." }));
+  }
+  nodes.forEach((item, index) => { item.createdAt = at + index * 1000; item.at = item.createdAt; });
   if (scene === "operation-flow-long") {
     const completed = Array.from({ length: 1200 }, (_, index) => node(`step-${index}`, "replay", "completed", { source: commit(String(index.toString(16)), `feat: workspace change ${index + 1}`), createdAt: at + index }));
     nodes.splice(3, 0, ...completed);
@@ -49,7 +60,7 @@ export function flowFixture(scene: string): FlowSnapshot {
   }
   return { summary: {
     id: "1700000000000-1-1", repo: "D:/Projects/workspace", kind: "pull", state: history ? "completed" : "conflict", sequence: 20,
-    startedAt: at, endedAt: history ? Date.now() : null, activeStep: history ? "finished" : details ? "pull" : scene === "operation-flow-stash" ? "saved" : "second", canAutoClose: history,
+    startedAt: at, endedAt: history ? Date.now() : null, activeStep: history ? "finished" : "second", canAutoClose: history,
     branch: "feat/workspace", before, after: remote, progress: history ? null : "rebase", pendingStash: history ? "" : saved.id, recordingError: "", previous: "",
   }, nodes };
 }

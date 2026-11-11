@@ -4,12 +4,12 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { invoke } from "./perf";
   import { translate, resolveLocale, type Locale } from "./i18n";
-  import { stateSymbol, type FlowCommit, type FlowDelta, type FlowNode, type FlowSnapshot, type FlowSummary } from "./operation-flow";
+  import { buildFlowPipeline, isFutureStep, stateSymbol, type FlowCommit, type FlowDelta, type FlowNode, type FlowSnapshot, type FlowSummary } from "./operation-flow";
   import type { Settings } from "./status";
   import "./FlowWindow.css";
 
-  const ROW = 344;
-  const EXPANDED_ROW = ROW + 260;
+  const ROW = 156;
+  const EXPANDED_ROW = ROW + 280;
   let repo = $state("");
   let selectedId = $state("");
   let live = $state(false);
@@ -36,26 +36,22 @@
   const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   const tr = (key: string, vars: Record<string, string> = {}) => translate(locale, `flow.${key}`, vars);
   const label = (key: string) => { const text = tr(key); return text.startsWith("flow.") ? key : text; };
-  const title = (node: FlowNode) => node.kind === "conflict" ? tr("round", { n: String(node.round) })
+  const title = (node: FlowNode) => node.kind === "finished" && node.state !== "completed" ? tr("phase-finished") : node.kind === "conflict" ? tr("round", { n: String(node.round) })
     : label(({ "local-saved": "saved", "local-restore": "restore" } as Record<string, string>)[node.kind] ?? node.kind);
   const short = (id: string) => id.slice(0, 10);
   const date = (at: number) => new Date(at).toLocaleString(locale === "zh" ? "zh-CN" : "en-US", { hour12: false });
-  const future = (node: FlowNode) => ["planned", "predicted", "conditional"].includes(node.state);
-  const graph = $derived.by(() => {
-    const actual: FlowNode[] = [], upcoming: FlowNode[] = [];
-    for (const node of nodes) (future(node) ? upcoming : actual).push(node);
-    actual.sort((a, b) => (a.kind === "local-restore" ? a.at : a.createdAt) - (b.kind === "local-restore" ? b.at : b.createdAt));
-    upcoming.sort((a, b) => Number(a.kind === "local-restore") - Number(b.kind === "local-restore"));
-    return [...actual, ...upcoming];
-  });
+  const future = isFutureStep;
+  const pipeline = $derived(buildFlowPipeline(summary, nodes));
+  const graph = $derived(pipeline.steps);
+  const activeKey = $derived(pipeline.activeKey);
   const layout = $derived.by(() => {
     let top = 0;
     let heldStash = "";
     const rows = graph.map((node, index) => {
       const height = expanded[node.key] ? EXPANDED_ROW : ROW;
-      const saved = node.kind === "local-saved" && node.stash && ["completed", "processed"].includes(node.state);
+      const saved = node.phase === "saved" && node.stash && ["completed", "processed"].includes(node.state);
       if (saved) heldStash = node.stash;
-      const restoring = node.kind === "local-restore" && heldStash === node.stash && !["failed", "skipped", "aborted", "superseded"].includes(node.state);
+      const restoring = node.phase === "restore" && heldStash === node.stash && !["failed", "skipped", "aborted", "superseded"].includes(node.state);
       const stashRoute = heldStash ? saved ? "out" : restoring ? "in" : "held" : "";
       const row = { node, index, top, height, stashRoute, stash: heldStash };
       if (restoring) heldStash = "";
@@ -75,17 +71,9 @@
     return Math.max(0, low - 2);
   });
   const visible = $derived(layout.rows.slice(from, from + Math.ceil(height / ROW) + 5));
-  const counts = $derived.by(() => {
-    let done = 0, pending = 0, conflicts = 0;
-    for (const node of nodes) {
-      if (node.state === "completed" || node.state === "processed") done++;
-      if (future(node)) pending++;
-      if (node.kind === "conflict") conflicts++;
-    }
-    return { done, pending, conflicts };
-  });
-  const current = $derived(nodes.find((node) => node.key === summary?.activeStep));
-  const currentIndex = $derived(graph.findIndex((node) => node.key === summary?.activeStep));
+  const completed = $derived(graph.reduce((done, node) => done + Number(node.state === "completed" || node.state === "processed"), 0));
+  const current = $derived(graph.find((node) => node.key === activeKey));
+  const currentIndex = $derived(graph.findIndex((node) => node.key === activeKey));
 
   function replace(value: FlowSnapshot | null) {
     if (!value) { summary = null; nodes = []; return; }
@@ -130,7 +118,8 @@
     if (top == null) return;
     await tick();
     if (!viewport || disposed) return;
-    viewport.scrollTo({ top: Math.max(0, top - 12), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+    const rowHeight = expanded[key] ? EXPANDED_ROW : ROW;
+    viewport.scrollTo({ top: Math.max(0, top - Math.max(12, (viewport.clientHeight - rowHeight) / 2)), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
   }
 
   function scrolled() {
@@ -139,8 +128,8 @@
   }
 
   $effect(() => {
-    const active = summary ? `${summary.id}:${summary.activeStep}` : "";
-    if (active && ready && active !== lastActive) { lastActive = active; untrack(() => void locate(summary!.activeStep)); }
+    const active = summary ? `${summary.id}:${activeKey}` : "";
+    if (active && ready && active !== lastActive) { lastActive = active; untrack(() => void locate(activeKey)); }
   });
 
   $effect(() => {
@@ -220,47 +209,45 @@
     </select></label>
     <span class="flow-badge" data-state={summary?.state}>{stateSymbol(summary?.state ?? "planned")} {label(summary?.state ?? "planned")}</span>
   </header>
-  <div class="flow-meta"><span>{tr("observerHint")}</span><span>✓ {counts.done} <span>·</span> ○ {counts.pending} <span>·</span> ! {counts.conflicts}</span></div>
+  <div class="flow-meta"><span>{tr("observerHint")}</span><span>{tr("progress", { done: String(completed), total: String(graph.length) })}</span></div>
   {#if error}<div class="flow-error" role="alert">{error}</div>{/if}
   {#if summary?.recordingError}<div class="flow-error" role="alert">{tr("recording", { error: summary.recordingError })}</div>{/if}
   <section class="flow-graph-pane" aria-label={tr("title")}>
-    <div class="flow-legend"><span class="flow-legend-key" data-state="completed">✓ {tr("completed")}</span><span class="flow-legend-key" data-state="current">◉ {tr("currentStep")}</span><span class="flow-legend-key" data-state="conflict">! {tr("conflict")}</span><span class="flow-legend-key" data-state="planned">○ {tr("planned")}</span><span class="flow-legend-key" data-state="stash">↗ {tr("stashLane")}</span><span class="flow-follow" aria-live="polite">{current ? `${tr("currentStep")} · ${currentIndex + 1} / ${graph.length} · ${title(current)}` : tr("scope")}</span></div>
-    <div class="flow-lanes"><span>{tr("leftLane")}</span><span>{tr("timeAxis")} ↓</span><span>{tr("rightLane")}</span></div>
+    {#if summary}
+      <nav class="flow-overview" aria-label={tr("overview")}>
+        <div class="flow-overview-heading"><strong>{label(summary.kind)} · {tr("overview")}</strong><span>{tr("pipelineHint")}</span></div>
+        <ol>{#each pipeline.phases as phase}<li data-phase={phase.phase} data-state={phase.state} class:active={phase.active}>
+          <a href={`#${phase.key}`} aria-current={phase.active ? "step" : undefined} onclick={(event) => { event.preventDefault(); void locate(phase.key); }}><span class="flow-phase-symbol">{stateSymbol(phase.state)}</span><span><strong>{phase.phase === "operation" ? label(summary.kind) : tr(`phase-${phase.phase}`)}</strong><small>{label(phase.state)}</small></span></a>
+        </li>{/each}</ol>
+      </nav>
+    {/if}
+    <div class="flow-legend"><span class="flow-legend-key" data-state="completed">✓ {tr("completed")}</span><span class="flow-legend-key" data-state="current">◉ {tr("currentStep")}</span><span class="flow-legend-key" data-state="planned">○ {tr("planned")}</span><span class="flow-legend-key" data-state="stash">↗ {tr("stashLane")}</span><span class="flow-follow" aria-live="polite">{current ? `${tr("currentStep")} · ${currentIndex + 1} / ${graph.length} · ${title(current)}` : summary?.endedAt != null ? label(summary.state) : tr("scope")}</span></div>
     <div class="flow-scroll" bind:this={viewport} bind:clientHeight={height} onscroll={scrolled}>
       {#if !ready}<p class="flow-empty">{tr("loading")}</p>{:else if !summary}<p class="flow-empty">{tr("empty")}</p>{/if}
       <div class="flow-track" style:height={`${layout.height}px`}>
         {#each visible as row (row.node.key)}
           {@const node = row.node}
-          <article class="flow-row" class:active={summary?.activeStep === node.key} class:past={row.index < currentIndex} class:has-stash={!!row.stashRoute} style:top={`${row.top}px`} style:height={`${row.height}px`} data-state={node.state} data-node={node.key} data-stash-route={row.stashRoute || undefined} data-stash={row.stash || undefined} aria-current={summary?.activeStep === node.key ? "step" : undefined} aria-label={`${row.index + 1} / ${graph.length} · ${title(node)} · ${label(node.state)}`}>
+          <article id={node.key} class="flow-row" class:active={activeKey === node.key} class:past={row.index < currentIndex} class:has-stash={!!row.stashRoute} style:top={`${row.top}px`} style:height={`${row.height}px`} data-state={node.state} data-phase={node.phase} data-node={node.key} data-stash-route={row.stashRoute || undefined} data-stash={row.stash || undefined} aria-current={activeKey === node.key ? "step" : undefined} aria-label={`${row.index + 1} / ${graph.length} · ${title(node)} · ${label(node.state)}`}>
             <svg class="flow-roads" viewBox={`0 0 1000 ${row.height}`} preserveAspectRatio="none" aria-hidden="true">
-              <path class="flow-axis" d={`M500 0V${row.height}`} />
-              {#if node.source && node.kind !== "local-saved" && node.kind !== "local-restore"}<path class="flow-road flow-road-right" d="M770 136 C770 180 580 150 500 194" />{/if}
+              <path class="flow-axis" d={`M100 0V${row.height}`} />
               {#if row.stashRoute === "out"}
-                <path class="flow-stash-road" d={`M500 194 C740 194 980 180 980 260 V${row.height}`} />
+                <path class="flow-stash-road" d={`M100 30 C100 64 32 64 32 96 V${row.height}`} />
               {:else if row.stashRoute === "in"}
-                <path class="flow-stash-road" class:predicted={future(node)} d="M980 0 V120 C980 180 650 194 500 194" />
+                <path class="flow-stash-road" class:predicted={future(node)} d="M32 0 V8 C32 30 78 30 100 30" />
               {:else if row.stashRoute === "held"}
-                <path class="flow-stash-road" d={`M980 0V${row.height}`} />
+                <path class="flow-stash-road" d={`M32 0V${row.height}`} />
               {/if}
-              {#if row.stashRoute}<path class="flow-stash-direction" class:predicted={row.stashRoute === "in" && future(node)} d={row.stashRoute === "in" ? "m515 184 -15 10 15 5" : `M975 ${row.height - 8}l5 6 5-6`} />{/if}
-              <path class="flow-direction" d={`m490 182 10 12 10-12 M495 ${row.height - 8}l5 6 5-6`} />
+              {#if row.stashRoute}<path class="flow-stash-direction" class:predicted={row.stashRoute === "in" && future(node)} d={row.stashRoute === "in" ? "m90 24 10 6 -10 6" : `M27 ${row.height - 8}l5 6 5-6`} />{/if}
+              <path class="flow-direction" d={`M95 ${row.height - 8}l5 6 5-6`} />
             </svg>
             {#if row.stashRoute}<span class="flow-stash-label" title={row.stash}>{tr(row.stashRoute === "out" ? "stashDiverge" : row.stashRoute === "in" ? "stashRejoin" : "stashHeld")}</span>{/if}
-            <div class="flow-side flow-left">
-              {#if node.target}{@render commitCard(node.target, tr("target"))}
-              {:else}<small class="flow-caption">{tr("recordStart")}</small><strong>{title(node)}</strong><time>{date(node.createdAt)}</time>{/if}
-              {#if node.base}<span class="flow-side-foot">{tr("base")} <code title={node.base.id}>{short(node.base.id)}</code><span title={node.base.summary}>{node.base.summary}</span></span>
-              {:else if node.command}<code class="flow-command" title={node.command}>{node.command}</code>{/if}
-            </div>
-            <div class="flow-side flow-right">
-              {#if node.source}{@render commitCard(node.source, node.stash ? tr("localChanges") : tr("source"))}
-              {:else}<small class="flow-caption">{tr("recordResult")}</small><strong>{label(node.state)}</strong><span>{future(node) ? tr("notExecuted") : date(node.at)}</span>{/if}
-              {#if node.stash}<span class="flow-side-foot">{tr("stash")} <code title={node.stash}>{short(node.stash)}</code></span>
-              {:else if node.files.length}<span class="flow-side-foot">{tr("files", { n: String(node.files.length) })}<code title={node.files[0].path}>{node.files[0].path}</code></span>{/if}
-            </div>
             <span class="flow-junction" aria-hidden="true">{stateSymbol(node.state)}</span>
-            <section class="flow-node" class:active={summary?.activeStep === node.key} class:expanded={expanded[node.key]}>
-              <div class="flow-node-heading"><span class="flow-step-number">{row.index + 1} / {graph.length}</span><h2>{title(node)}</h2>{#if summary?.activeStep === node.key}<span class="flow-current">{tr("currentStep")}</span>{/if}<span class="flow-badge" data-state={node.state}>{stateSymbol(node.state)} {label(node.state)}</span><time>{future(node) ? tr("notExecuted") : date(node.at)}</time></div>
+            <section class="flow-node" class:active={activeKey === node.key} class:expanded={expanded[node.key]}>
+              <div class="flow-node-heading"><span class="flow-step-number">{row.index + 1} / {graph.length}</span><h2>{title(node)}</h2>{#if activeKey === node.key}<span class="flow-current">{tr("currentStep")}</span>{/if}<span class="flow-badge" data-state={node.state}>{stateSymbol(node.state)} {future(node) && node.state !== "not-run" ? tr("planned") : label(node.state)}</span><time>{future(node) ? tr("notExecuted") : date(node.at)}</time></div>
+              {#if node.source || node.target}<div class="flow-commits">
+                {#if node.target}<div class="flow-side flow-left">{@render commitCard(node.target, tr("target"))}</div>{/if}
+                {#if node.source}<div class="flow-side flow-right">{@render commitCard(node.source, node.stash ? tr("localChanges") : tr("source"))}</div>{/if}
+              </div>{/if}
               <p class="flow-node-note" title={label(node.detail)}>{label(node.detail) || (future(node) ? tr("preview-conditional") : tr("recorded"))}</p>
               <details class="flow-evidence" open={expanded[node.key] ?? false} ontoggle={(event) => expanded[node.key] = event.currentTarget.open}>
                 <summary>{node.files.length ? tr("files", { n: String(node.files.length) }) : tr("details")}{#if node.repeatOf}<span class="flow-repeat">↻ {tr("repeatedRound", { n: String(nodes.find((item) => item.key === node.repeatOf)?.round ?? "") })}</span>{/if}</summary>
@@ -269,6 +256,7 @@
                 {#if node.base}<p>{tr("base")}: <code>{node.base.id}</code> · {node.base.summary}</p>{/if}
                 {#if node.stash}<p>{tr("stash")}: <code>{node.stash}</code></p>{/if}
                 {#if node.detail}<p>{label(node.detail)}</p>{/if}
+                {#if node.evidence.length > 1}<div class="flow-journal"><p>{tr("executionDetails")}</p>{#each node.evidence as entry (entry.key)}{#if entry.key !== node.key}<div><time>{date(entry.at)}</time><strong>{label(entry.kind)}</strong><span>{label(entry.state)}</span>{#if entry.command}<pre>{entry.command}</pre>{/if}{#if entry.detail}<pre>{label(entry.detail)}</pre>{/if}</div>{/if}{/each}</div>{/if}
                 {#if node.files.length > 100}<label class="flow-file-page">{tr("filePage")}<select aria-label={tr("filePage")} value={filePages[node.key] ?? 0} onchange={(event) => filePages[node.key] = Number(event.currentTarget.value)}>{#each Array.from({ length: Math.ceil(node.files.length / 100) }, (_, page) => page) as page}<option value={page}>{page + 1}</option>{/each}</select></label>{/if}
                 {#each node.files.slice((filePages[node.key] ?? 0) * 100, ((filePages[node.key] ?? 0) + 1) * 100) as file (file.path)}
                   <div class="flow-file" data-resolved={file.resolved}><code>{file.path}</code><small>{future(node) ? tr("predicted") : ["skipped", "aborted"].includes(node.state) ? label(node.state) : file.resolved ? `✓ ${tr("resolved")}` : node.kind === "conflict" ? `! ${tr("unresolved")}` : ""}</small>
