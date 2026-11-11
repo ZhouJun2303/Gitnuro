@@ -2,11 +2,16 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getShell } from "./context";
   import BinaryDiff from "./BinaryDiff.svelte";
-  import { onVirtualScroll, windowSlice, gravatarUrl } from "../view";
+  import { onVirtualScroll, windowSlice, gravatarUrl, splitDiff, virtualSplit, type SplitRow } from "../view";
 
   const shell = getShell();
   const rowHeight = 56;
+  const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
+  let diffHeight = $state(0);
   const diffRow = $derived(shell.diffRowHeight);
+  const splitRows = $derived(shell.settings.diffStyle === "split" && shell.historyDiff?.lines.length ? splitDiff(shell.historyDiff.lines) : []);
+  const splitColumns = $derived(shell.splitColumnsOf(splitRows));
+  const splitWindow = $derived(virtualSplit(splitRows, shell.historyDiffTop, shell.splitRowHeight, diffHeight, shell.settings.diffWordWrap));
   let listTop = $state(0);
   const onListScroll = onVirtualScroll((top) => (listTop = top));
   const onDiffScroll = onVirtualScroll((top) => (shell.historyDiffTop = top));
@@ -121,6 +126,7 @@
     <section
       class="history-diff"
       role="group"
+      bind:clientHeight={diffHeight}
       onscroll={onDiffScroll}
       oncontextmenu={(event) => {
         const commit = shell.commitsLive.find((item) => item.id === shell.selectedCommit);
@@ -133,6 +139,22 @@
         <BinaryDiff path={shell.historyFile ?? ""} oldBytes={shell.historyDiff.oldBytes} newBytes={shell.historyDiff.newBytes} compact />
       {:else if shell.historyDiff.lines.length === 0}
         <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
+      {:else if shell.settings.diffStyle === "split"}
+        <div class="diff-body split" class:virtual={!shell.settings.diffWordWrap} style:--split-row="{shell.splitRowHeight}px" role="presentation" use:splitScroller={splitColumns}>
+          {#if splitWindow.beforePx > 0}<div class="split-gap" style:height="{splitWindow.beforePx}px"></div>{/if}
+          {#each splitWindow.rows as row, offset (splitWindow.start + offset)}
+            {#if row.meta}
+              <div class="split-meta">{row.left}</div>
+            {:else}
+              <div class="split-row">
+                {@render splitCell(row, "left")}
+                {@render splitCell(row, "right")}
+              </div>
+            {/if}
+          {/each}
+          {#if splitWindow.afterPx > 0}<div class="split-gap" style:height="{splitWindow.afterPx}px"></div>{/if}
+          {@render splitBar()}
+        </div>
       {:else}
         <div class="diff-body" class:wrap-window={shell.settings.diffWordWrap}>
           <div class="commit-window" class:wrap-window={shell.settings.diffWordWrap} style:height="{shell.historyDiffWindow.height}px">
@@ -146,6 +168,23 @@
     </section>
   </div>
 </div>
+
+{#snippet splitCell(row: SplitRow, side: "left" | "right")}
+  {@const kind = side === "left" ? row.leftKind : row.rightKind}
+  {@const mark = side === "left" ? "delete" : "add"}
+  {@const text = side === "left" ? row.left : row.right}
+  {@const other = side === "left" ? row.right : row.left}
+  {@const paired = Boolean(row.left && row.right && row.left !== row.right && (row.leftKind === "delete" || row.rightKind === "add"))}
+  <span class="split-no" class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}>{(side === "left" ? row.leftNo : row.rightNo) ?? ""}</span>
+  <span class="split-code" data-side={side} class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}><span class="split-text">{#if shell.settings.showDiffMarks && kind === mark}{side === "left" ? "-" : "+"}{/if}{#each shell.markedLine(text, paired ? other : "", shell.historyDiff?.path ?? "") as token, tokenIndex (`${side}-${tokenIndex}`)}<span class={token.cls} class:intra={token.hot}>{token.text}</span>{/each}</span></span>
+{/snippet}
+
+{#snippet splitBar()}
+  <span class="split-bar-pad"></span>
+  <div class="split-bar" data-bar="left"><div></div></div>
+  <span class="split-bar-pad"></span>
+  <div class="split-bar" data-bar="right"><div></div></div>
+{/snippet}
 
 <style>
   .file-history {
@@ -351,7 +390,9 @@
     overflow: auto;
   }
 
-  .history-diff .diff-body { overflow: visible; height: auto; }
+  .history-diff .diff-body:not(.split) { overflow: visible; height: auto; }
+
+  .history-diff .diff-body.split { overflow: visible; }
 
   .history-diff .virtual-row {
     position: absolute;
