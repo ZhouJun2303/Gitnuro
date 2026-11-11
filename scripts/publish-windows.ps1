@@ -100,7 +100,7 @@ function Get-InstallerAssets([string]$version, [string]$nsis) {
         $msi = Get-ChildItem -Path $msiDir -Filter "AweGit_${version}_x64*.msi" | Select-Object -First 1
         if ($msi) { $assets += $msi.FullName }
     }
-    return ,$assets
+    return $assets
 }
 
 function Sync-ReleaseAssets([string]$tag, [string[]]$assets) {
