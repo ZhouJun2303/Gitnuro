@@ -2,7 +2,7 @@ import type { Messages } from "./types";
 
 export const zh: Messages = {
   flow: {
-    observer: "只读观察", observerHint: "在主窗口处理冲突 · 此处按顺序展示完整流程", autoOpen: "自动打开操作与冲突观察面板",
+    observer: "只读观察", observerHint: "在主窗口处理冲突 · 此处按顺序展示完整流程", autoOpen: "操作遇到待解决冲突时自动打开流程窗口",
     overview: "完整流水线", pipelineHint: "从左到右依次执行 · 点击阶段查看步骤", progress: "已完成 {done} / {total} 步", executionDetails: "执行命令与记录",
     "phase-saved": "保存本地修改", "phase-fetch": "获取远程提交", "phase-integration": "整合提交", "phase-restore": "恢复本地修改", "phase-finished": "结束",
     "fetch-inferred": "已进入提交整合阶段；未记录单独的获取命令。",

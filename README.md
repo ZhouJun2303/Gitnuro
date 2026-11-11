@@ -110,10 +110,11 @@ pnpm test:ui -- e2e/operation-flow.spec.ts --grep "observer automatic opening"
 
 `--` 后的参数会传给 Playwright。已有 `.lab` 仓库且本次无需重建时，加 `--reuse` 可复用数据，避免重建整套试验台和清理正在使用的开发日志：`pnpm test:ui -- --reuse e2e/sync-toolbar.spec.ts`。需要恢复的仓库可先单独执行 `node scripts/lab-seed.mjs rebase conflict`。
 
-窗口位置持久化的相关 Rust 校验：
+窗口位置持久化与冲突自动打开的相关 Rust 校验：
 
 ```powershell
 pnpm test:app flow_window::tests
+pnpm test:app flows::tests
 ```
 
 只跑一个 Git 测试：
@@ -123,6 +124,8 @@ cargo test -p awegit-git squash_replays_commits_after_the_range -- --test-thread
 ```
 
 ## 操作与冲突流程窗口
+
+“操作与冲突流程”仅在本次操作实际出现待解决冲突时自动打开，包括整合提交和恢复本地修改时的冲突；正常操作、普通失败、预测冲突，以及冲突已解决但尚待继续的状态都不会触发自动打开。重新打开仓库时仍有待解决冲突，会恢复对应流程窗口。偏好设置中的“操作遇到待解决冲突时自动打开流程窗口”可关闭此行为，操作历史仍可从仓库菜单手动查看。相关验证：`pnpm test:app flows::tests` 与 `pnpm test:ui -- --reuse e2e/operation-flow.spec.ts --grep "observer automatic opening"`。
 
 “操作与冲突流程”窗口关闭时保存位置、大小和最大化状态，手动关闭和流程完成后的自动关闭都适用。下次自动弹出或查看历史时恢复，重启应用后也保留；多个仓库共享最后关闭的窗口布局。窗口布局单独存放在设置文件同目录的 `flow-window.json`，原来的显示器断开时会回到可见屏幕。
 

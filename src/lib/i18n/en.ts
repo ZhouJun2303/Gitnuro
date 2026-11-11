@@ -2,7 +2,7 @@ import type { Messages } from "./types";
 
 export const en: Messages = {
   flow: {
-    observer: "Read-only observer", observerHint: "Resolve conflicts in the main window · Follow the complete pipeline here", autoOpen: "Automatically open the operation and conflict observer",
+    observer: "Read-only observer", observerHint: "Resolve conflicts in the main window · Follow the complete pipeline here", autoOpen: "Automatically open the flow window when an operation has unresolved conflicts",
     overview: "Complete pipeline", pipelineHint: "Runs from left to right · Select a phase to view its steps", progress: "Completed {done} / {total} steps", executionDetails: "Commands and observations",
     "phase-saved": "Save local changes", "phase-fetch": "Fetch remote commits", "phase-integration": "Integrate commits", "phase-restore": "Restore local changes", "phase-finished": "Finish",
     "fetch-inferred": "Commit integration has started; no separate fetch command was recorded.",

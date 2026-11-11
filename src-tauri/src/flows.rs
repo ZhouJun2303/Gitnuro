@@ -114,7 +114,10 @@ fn broadcast(delta: &Delta) {
 
 #[cfg(not(test))]
 fn open(repo: &Path, id: &str) {
-    if !super::settings::load().map(|settings| settings.flow_auto_open).unwrap_or(true) {
+    if !super::settings::load()
+        .map(|settings| settings.flow_auto_open)
+        .unwrap_or(true)
+    {
         return;
     }
     let Some(app) = APP.get() else { return };
@@ -123,7 +126,10 @@ fn open(repo: &Path, id: &str) {
     let id = id.to_string();
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
-        if !super::settings::load().map(|settings| settings.flow_auto_open).unwrap_or(true) {
+        if !super::settings::load()
+            .map(|settings| settings.flow_auto_open)
+            .unwrap_or(true)
+        {
             return;
         }
         if let Err(error) = super::open_window(
@@ -141,7 +147,12 @@ fn open(repo: &Path, id: &str) {
 }
 
 #[cfg(test)]
-fn open(_repo: &Path, _id: &str) {}
+fn open(repo: &Path, id: &str) {
+    tests::OPENED
+        .lock()
+        .unwrap()
+        .push((repo.to_path_buf(), id.into()));
+}
 
 impl Session {
     fn publish(&self, data: &mut Data, node: Option<Node>) {
@@ -1012,11 +1023,6 @@ pub fn begin_kind(repo: &Path, kind: &str, request: Option<&Mutation>) -> Option
                 ..Default::default()
             },
         );
-        let id = data.snapshot.summary.id.clone();
-        // A successful push is also visible briefly: a remote may advance after our last fetch.
-        if tracked(kind) && !matches!(kind, "fetch" | "stash" | "stashPaths" | "stashDrop") {
-            open(repo, &id);
-        }
     }
     let preview = request.and_then(|request| match request {
         Mutation::Merge { name, .. } => Some((name.clone(), false, Vec::new())),
@@ -1062,7 +1068,7 @@ pub fn resume(repo: &Path) {
             .data
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        if matches!(data.snapshot.summary.state.as_str(), "conflict" | "waiting") {
+        if data.snapshot.summary.state == "conflict" {
             open(repo, &data.snapshot.summary.id);
         }
     }
@@ -1232,6 +1238,8 @@ mod tests {
     use super::*;
     use std::process::Command;
 
+    pub(super) static OPENED: Mutex<Vec<(PathBuf, String)>> = Mutex::new(Vec::new());
+
     struct Repo(PathBuf);
     impl Repo {
         fn new() -> Self {
@@ -1306,14 +1314,61 @@ mod tests {
         fn snapshot(&self) -> Snapshot {
             snapshot(&self.0, None).unwrap().unwrap()
         }
+        fn opened(&self) -> Vec<String> {
+            OPENED
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(repo, _)| repo == &self.0)
+                .map(|(_, id)| id.clone())
+                .collect()
+        }
     }
     impl Drop for Repo {
         fn drop(&mut self) {
             if let Ok(directory) = directory(&self.0) {
                 sessions().lock().unwrap().remove(&directory);
             }
+            OPENED.lock().unwrap().retain(|(repo, _)| repo != &self.0);
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn clean_operations_and_failures_without_conflicts_do_not_open_the_observer() {
+        let repo = Repo::new();
+        let request = Mutation::Reset {
+            rev: "HEAD".into(),
+            mode: awegit_git::ResetMode::Soft,
+        };
+        let session = begin(&repo.0, &request).unwrap();
+        assert!(
+            repo.opened().is_empty(),
+            "starting an operation must not open a window"
+        );
+        let result = flow::observe(session.observer(), || awegit_git::perform(&repo.0, request));
+        let completed = session.finish(
+            result.map(|_| ()).map_err(|error| error.to_string()),
+            "reset",
+        );
+        assert_eq!(completed.state, "completed");
+        resume(&repo.0);
+        assert!(repo.opened().is_empty());
+
+        let failed = repo.run(Mutation::Push {
+            remote: None,
+            set_upstream: false,
+            tags: false,
+            force_with_lease: false,
+            force: false,
+        });
+        assert_eq!(failed.state, "failed");
+        resume(&repo.0);
+        assert!(
+            repo.opened().is_empty(),
+            "an ordinary Git failure has no conflicts to resolve"
+        );
+        assert_eq!(history(&repo.0, 0, 10).unwrap().len(), 2);
     }
 
     #[test]
@@ -1335,6 +1390,7 @@ mod tests {
             autostash: true,
         });
         assert_eq!(started.state, "conflict");
+        assert_eq!(repo.opened(), vec![started.id.clone()]);
         assert!(!started.can_auto_close);
         let saved = started.pending_stash.clone();
         assert!(!saved.is_empty());
@@ -1354,11 +1410,18 @@ mod tests {
         let staged = repo.resolve("resolved first\n");
         assert_eq!(staged.state, "waiting");
         assert!(!staged.can_auto_close);
+        resume(&repo.0);
+        assert_eq!(
+            repo.opened().len(),
+            1,
+            "resolved conflicts waiting for continue must not reopen the window"
+        );
         let continued = repo.run(Mutation::Continue {
             message: String::new(),
         });
         assert_eq!(continued.id, started.id);
         assert_eq!(continued.state, "conflict");
+        assert_eq!(repo.opened(), vec![started.id.clone(); 2]);
         let snapshot = repo.snapshot();
         let rounds: Vec<_> = snapshot
             .nodes
@@ -1383,6 +1446,7 @@ mod tests {
         });
         assert!(restoring.progress.is_none());
         assert_eq!(restoring.state, "conflict");
+        assert_eq!(repo.opened(), vec![started.id.clone(); 3]);
         assert!(!restoring.can_auto_close);
         let snapshot = repo.snapshot();
         let rounds: Vec<_> = snapshot
@@ -1404,6 +1468,8 @@ mod tests {
         assert_eq!(finished.state, "completed");
         assert!(finished.can_auto_close);
         assert!(finished.pending_stash.is_empty());
+        resume(&repo.0);
+        assert_eq!(repo.opened().len(), 3);
         assert_eq!(
             repo.git(&["rev-parse", "refs/stash"]),
             saved,
@@ -1445,6 +1511,12 @@ mod tests {
         sessions().lock().unwrap().remove(&directory);
         let restored = repo.snapshot();
         assert_eq!(restored.summary.id, started.id);
+        resume(&repo.0);
+        assert_eq!(
+            repo.opened(),
+            vec![started.id.clone(); 2],
+            "recovered unresolved conflicts still open the observer"
+        );
         let finished = repo.resolve("resolved\n");
         assert!(finished.can_auto_close);
         let disk = read_snapshot(&directory, &started.id).unwrap();
