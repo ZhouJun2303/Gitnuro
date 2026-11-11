@@ -1,5 +1,6 @@
 mod ai;
 mod forge;
+mod flow_window;
 mod flows;
 mod http;
 mod lab;
@@ -2056,8 +2057,13 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
         .inner_size(width.clamp(480.0, 4000.0), height.clamp(360.0, 4000.0))
         .theme(saved_window_theme())
         .resizable(true)
+        .visible(view_name != "flow")
         .build()
         .map_err(|error| error.to_string())?;
+    if view_name == "flow" {
+        flow_window::restore_and_track(&window);
+        window.show().map_err(|error| error.to_string())?;
+    }
     show_devtools(&window);
     Ok(())
 }

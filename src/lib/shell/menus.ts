@@ -191,9 +191,9 @@ export function appearanceItems(shell: ShellState) {
 export function repositoryItems(shell: ShellState) {
     const locked = shell.mode !== "live";
     return [
-      { label: shell.tr("chrome.fetch"), disabled: locked || shell.busy, run: () => shell.confirmSync("fetch") },
-      { label: shell.tr("chrome.pull"), disabled: locked || shell.busy, run: () => shell.confirmSync("pull") },
-      { label: shell.tr("chrome.push"), disabled: locked || shell.busy, run: () => shell.confirmSync("push") },
+      { label: shell.tr("chrome.fetch"), disabled: shell.syncDisabled("fetch"), run: () => shell.confirmSync("fetch") },
+      { label: shell.tr("chrome.pull"), disabled: shell.syncDisabled("pull"), run: () => shell.confirmSync("pull") },
+      { label: shell.tr("chrome.push"), disabled: shell.syncDisabled("push"), run: () => shell.confirmSync("push") },
       { label: shell.tr("chrome.stash"), disabled: locked || shell.busy, run: () => shell.openStash([]) },
       { label: shell.tr("chrome.bisect"), disabled: locked || shell.busy, run: () => void shell.mutate({ action: "bisect", verb: shell.facts?.bisectActive ? "reset" : "start", rev: "" }).then(() => shell.loadFacts(true)) },
       { label: shell.tr("dialog.gitignore"), disabled: locked, run: () => { shell.draft = "node_modules/\ntarget/\n"; shell.dialog = "gitignore"; } },
@@ -206,7 +206,7 @@ export function repositoryItems(shell: ShellState) {
       { label: shell.tr("chrome.stale"), disabled: locked, run: () => void invoke<string[]>("merged_branches", { path: shell.repoPath() }).then((names) => { shell.staleNames = names; shell.stalePicked = []; shell.dialog = "stale"; }) },
       { label: shell.tr("chrome.mailmap"), disabled: locked, run: () => void invoke<{ text?: string }>("blob_view", { path: shell.repoPath(), rev: "HEAD", file: ".mailmap" }).then((view) => { shell.draft = view.text ?? ""; shell.dialog = "mailmap"; }).catch(() => { shell.draft = ""; shell.dialog = "mailmap"; }) },
       { label: shell.tr("chrome.review"), disabled: locked, run: () => void invoke<string>("review_branch", { path: shell.repoPath(), base: shell.snapshot?.branch ?? "HEAD~1" }).then((text) => { shell.commandOutput = text; shell.dialog = "output"; }).catch((error) => (shell.actionError = shell.message(error))) },
-      { label: shell.tr("menu.bareForce"), disabled: locked || shell.busy, run: () => shell.ask(shell.tr("menu.bareForce"), shell.tr("dialog.forcePushBody"), () => void shell.mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: false, force: true })) },
+      { label: shell.tr("menu.bareForce"), disabled: shell.syncDisabled("push"), run: () => shell.ask(shell.tr("menu.bareForce"), shell.tr("dialog.forcePushBody"), () => void shell.mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: false, force: true })) },
       { sep: true, label: "" },
       { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = ""; shell.dialog = "branch"; } },
       { label: shell.tr("menu.createTag"), run: () => { shell.draft = ""; shell.draftExtra = "HEAD"; shell.draftUser = ""; shell.dialog = "tag"; } },

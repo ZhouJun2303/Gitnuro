@@ -1339,6 +1339,12 @@ export class ShellState {
   writing = $derived(this.userWrites > 0);
 
 
+  syncDisabled(kind: "fetch" | "pull" | "push") {
+    return this.busy || this.writing || this.mode !== "live" || !this.snapshot
+      || (kind !== "fetch" && (!!this.progress || this.conflicted));
+  }
+
+
   busyLabel = $derived(this.currentJob?.label ?? "");
 
 
@@ -3072,6 +3078,11 @@ export class ShellState {
     if (!this.backend() || !path) return;
     const background = source === "background";
     const action = String(request.action ?? "");
+    // Menus and shortcuts obey the same restrictions as the sync toolbar.
+    if (["fetch", "pull", "pullRef", "push", "pushRef"].includes(action)) {
+      const kind = action === "pullRef" ? "pull" : action === "pushRef" ? "push" : action as "fetch" | "pull" | "push";
+      if (this.syncDisabled(kind)) return;
+    }
     if (!background && this.progress && this.startsFlow(action)) {
       // A paused rebase, merge, cherry-pick, or revert owns HEAD until it ends.
       this.actionError = this.tr("chrome.finishFlowFirst");
@@ -3893,6 +3904,7 @@ export class ShellState {
 
 
   confirmSync(kind: "fetch" | "pull" | "push") {
+    if (this.syncDisabled(kind)) return;
     return confirmSync(this, kind);
   }
 

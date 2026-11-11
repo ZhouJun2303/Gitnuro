@@ -101,11 +101,32 @@ pnpm test
 
 `pnpm check` 查界面类型。`pnpm test` 跑状态、差异、提交、变基、贮藏这些 Git 行为，以及设置、更新和凭据这些桌面单元测试。仓库都建在临时目录里。测试不打开窗口，也不要拿当前这个 AweGit 仓库去做暂存或提交实验。
 
-只跑一个测试：
+每次验证只运行本次修改相关的测试，UI 不跑全量场景。改动界面时补对应的试验台场景，用测试文件和 `--grep` 选择相关用例：
+
+```powershell
+pnpm test:ui -- e2e/sync-toolbar.spec.ts
+pnpm test:ui -- e2e/operation-flow.spec.ts --grep "observer automatic opening"
+```
+
+`--` 后的参数会传给 Playwright。已有 `.lab` 仓库且本次无需重建时，加 `--reuse` 可复用数据，避免重建整套试验台和清理正在使用的开发日志：`pnpm test:ui -- --reuse e2e/sync-toolbar.spec.ts`。需要恢复的仓库可先单独执行 `node scripts/lab-seed.mjs rebase conflict`。
+
+窗口位置持久化的相关 Rust 校验：
+
+```powershell
+pnpm test:app flow_window::tests
+```
+
+只跑一个 Git 测试：
 
 ```powershell
 cargo test -p awegit-git squash_replays_commits_after_the_range -- --test-threads=1
 ```
+
+## 操作与冲突流程窗口
+
+“操作与冲突流程”窗口关闭时保存位置、大小和最大化状态，手动关闭和流程完成后的自动关闭都适用。下次自动弹出或查看历史时恢复，重启应用后也保留；多个仓库共享最后关闭的窗口布局。窗口布局单独存放在设置文件同目录的 `flow-window.json`，原来的显示器断开时会回到可见屏幕。
+
+获取、拉取、推送按当前仓库的实际状态启用：前台操作执行中全部禁用；合并、变基等流程未完成或仍有冲突时，获取可用，拉取和推送禁用；处理完成后恢复。工具栏、仓库菜单、右键菜单和快捷键遵循同一规则。单纯查看历史流程不会禁用这些操作。
 
 ## 打包
 

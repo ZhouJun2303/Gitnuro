@@ -40,7 +40,7 @@
 浏览器看界面用 `pnpm dev`，自动化用 `pnpm test:ui`。桌面仍是 `pnpm start`。
 
 - `.lab/` 不提交。种子脚本 `scripts/lab-seed.mjs` 和场景清单要提交
-- 改了界面、弹窗或仓库状态后，补场景并跑 `pnpm test:ui`
+- 改了界面、弹窗或仓库状态后，补相关场景，只验证本次改动涉及的 UI，不跑全量场景。用 `pnpm test:ui -- <测试文件> --grep <用例名称>` 精确选择；验证方式同步到相关文档和 Markdown
 - 新弹窗必须记入 `src/lib/lab/scenes.ts`。缺一项时 `pnpm check` 会失败
 - 不拿 AweGit 自身仓库做暂存、提交或推送实验。试验只写 `.lab`
 

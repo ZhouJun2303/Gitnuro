@@ -81,6 +81,16 @@ async function showCommitBySummary(shell: ShellState, summary: string) {
 }
 
 async function fillSurface(shell: ShellState, id: string) {
+  if (id === "sync-busy") {
+    const path = shell.repoPath() ?? "";
+    shell.jobs = { ...shell.jobs, [shell.jobKey(path)]: { label: "pull", percent: 42, depth: 1 } };
+    return;
+  }
+  if (id === "sync-stash-conflict") {
+    // Stash restoration can leave conflicts after Git's merge/rebase has ended.
+    shell.progress = null;
+    return;
+  }
   if (id === "changes") {
     shell.section = "changes";
     return;

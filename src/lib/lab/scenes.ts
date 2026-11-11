@@ -135,6 +135,8 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "launch-files", group: "主界面", title: "启动器文件", repo: "full", ready: "[data-layer=\"launch\"]" }),
   scene({ id: "perf", group: "主界面", title: "性能", repo: "full", ready: "[data-layer=\"perf\"]" }),
   scene({ id: "clean", group: "仓库状态", title: "干净仓库", repo: "even", ready: ".file-list .empty" }),
+  scene({ id: "sync-busy", group: "仓库状态", title: "同步按钮 · 操作执行中", repo: "even", ready: ".identity-floor.tone-busy" }),
+  scene({ id: "sync-stash-conflict", group: "仓库状态", title: "同步按钮 · 恢复本地修改冲突", repo: "conflict", ready: ".identity-floor[data-layer=\"conflicts\"]" }),
   scene({ id: "conflict", group: "仓库状态", title: "文本冲突", repo: "conflict", ready: ".conflict-pane" }),
   scene({ id: "conflict-batch", group: "仓库状态", title: "批量解决冲突", repo: "conflict", ready: ".file-list .file" }),
   scene({ id: "conflict-banner", group: "仓库状态", title: "冲突横幅", repo: "conflict", ready: ".identity-floor[data-layer=\"conflicts\"]" }),
