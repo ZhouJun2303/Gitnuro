@@ -1,6 +1,6 @@
 [package]
 name = "awegit"
-version = "2.0.5"
+version = "2.0.6"
 description = "AweGit desktop shell"
 edition = "2021"
 # Two bins exist (`awegit` shell, `awegit-lab` harness). `tauri dev` runs a
