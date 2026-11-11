@@ -47,6 +47,10 @@ function Find-GccBin {
         $bin = Join-Path $root "WinLibs\mingw64\bin"
         if (Test-Path (Join-Path $bin "gcc.exe")) { return $bin }
     }
+    foreach ($entry in ($env:PATH -split ';')) {
+        $bin = $entry.Trim().Trim('"')
+        if ($bin -and (Test-Path -LiteralPath (Join-Path $bin "gcc.exe") -PathType Leaf)) { return $bin }
+    }
     return $null
 }
 

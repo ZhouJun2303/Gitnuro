@@ -43,7 +43,7 @@ notes/
 
 ## 环境准备
 
-每个新终端先装好依赖。`pnpm start`、`pnpm test`、`pnpm tauri` 和 `pnpm package:windows` 会自己把 WinLibs 和 `%USERPROFILE%\.cargo\bin` 排到 PATH 前面。`pnpm check` 不编译 Rust。
+每个新终端先装好依赖。`pnpm start`、`pnpm test`、`pnpm tauri` 和 `pnpm package:windows` 会自己把 GCC 和 `%USERPROFILE%\.cargo\bin` 排到 PATH 前面。GCC 按 `AWE_GCC`（目录或可执行文件）、WinLibs 安装目录、已有 PATH 的顺序查找。`pnpm check` 不编译 Rust。
 
 ```powershell
 pnpm install
@@ -86,11 +86,13 @@ pnpm start
 
 调试程序是 `target\debug\awegit.exe`，它加载 http://127.0.0.1:1420 。单独双击它之前要先有开发服务，否则窗口里无法连接。`pnpm start` 会自己拉起页面服务和窗口。
 
-1420 上已经有页面服务时，`pnpm start` 会沿用并持续监测它；服务停止后自动接管，自己启动的 Vite 意外退出时也会重启。启动、退出原因和 Vite 输出保存在 `.lab/logs/dev-server.log`。
+1420 上已经有页面服务时，`pnpm start` 和 `pnpm dev` 都会沿用并持续监测它；服务停止后自动接管，自己启动的 Vite 意外退出时也会重启。退出试验台时只停止自己启动的进程，沿用的页面服务继续运行。启动、退出原因和 Vite 输出保存在 `.lab/logs/dev-server.log`。
 
 设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令只留在当前进程里，HTTPS 密码交给 Git 的凭据存储。API key、代理密码和各平台 token 放在系统凭据库（Windows 凭据管理器、macOS 钥匙串），配置文件里这些字段是空的。
 
 重新链接桌面程序前先关掉 `awegit.exe`。它占着 `WebView2Loader.dll` 时，`cargo build -p awegit` 会失败。Vite 可以留着。
+
+`pnpm dev` 还会编译并启动浏览器试验台后端 `awegit-lab.exe`。Windows 上，如果旧试验台仍在运行，Cargo 替换 `target\debug\awegit-lab.exe` 时会报“拒绝访问（os error 5）”；先在旧终端按 Ctrl+C，残留进程可用 `Get-Process awegit-lab` 查到 PID 后再停止。`pnpm start` 启动的是 `awegit.exe`，因此试验台文件被占用时桌面仍可能正常启动。
 
 ## 测试
 
@@ -100,6 +102,8 @@ pnpm test
 ```
 
 `pnpm check` 查界面类型。`pnpm test` 跑状态、差异、提交、变基、贮藏这些 Git 行为，以及设置、更新和凭据这些桌面单元测试。仓库都建在临时目录里。测试不打开窗口，也不要拿当前这个 AweGit 仓库去做暂存或提交实验。
+
+页面服务的端口复用、自动接管、重启与退出清理可单独运行 `node --test scripts/dev-server.test.mjs scripts/lab-dev.test.mjs`；这些测试在 `.lab` 中使用临时端口和模拟后端，不启动桌面程序。
 
 每次验证只运行本次修改相关的测试，UI 不跑全量场景。改动界面时补对应的试验台场景，用测试文件和 `--grep` 选择相关用例：
 
