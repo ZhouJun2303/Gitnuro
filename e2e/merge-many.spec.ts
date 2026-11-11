@@ -1,11 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function openLabScene(page: Page, id: string, ready: string) {
-  await page.goto(`/?scene=${id}`, { waitUntil: "domcontentloaded" });
-  await page.locator(`[data-lab-scene="${id}"]`).waitFor({ state: "visible", timeout: 90_000 });
-  await page.locator(ready).first().waitFor({ state: "visible", timeout: 30_000 });
-  await page.waitForTimeout(400);
-}
+import { openLabScene } from "./helpers";
 
 async function manyHunkTotal(page: Page) {
   const text = (await page.locator(".merge-count").innerText()).trim();
@@ -29,7 +24,7 @@ test("merge panel keeps empty sides and blank lines inside a hunk", async ({ pag
   expect(await page.locator(".merge-side.left .merge-cell.hunk pre.empty").count()).toBeGreaterThan(0);
   expect(await page.locator(".merge-side.right .merge-cell.hunk pre.empty").count()).toBeGreaterThan(0);
   const blank = await page.locator(".merge-side.left .merge-cell.hunk pre").evaluateAll((nodes) =>
-    nodes.some((node) => (node.textContent ?? "").includes("\n\n")),
+    nodes.some((node) => (node.textContent ?? "").replace(/\r\n/g, "\n").includes("\n\n")),
   );
   expect(blank).toBe(true);
 });

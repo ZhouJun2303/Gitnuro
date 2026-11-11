@@ -180,7 +180,8 @@
       try {
         const settings = await invoke<Settings>("load_settings");
         autoClose = settings.flowAutoClose === true;
-        locale = scene ? "zh" : resolveLocale(settings.locale);
+        locale = scene ? params.get("locale") === "en" ? "en" : "zh" : resolveLocale(settings.locale);
+        if (scene && ["light", "dark"].includes(params.get("theme") ?? "")) settings.theme = params.get("theme")!;
         document.documentElement.dataset.theme = settings.theme === "dark" || (settings.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
         if (scene.startsWith("operation-flow") && !repo) {
           const { flowFixture } = await import("./lab/flow-fixture");

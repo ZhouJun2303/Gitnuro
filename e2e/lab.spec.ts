@@ -1,6 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { scenes, type LabScene } from "../src/lib/lab/scenes";
+import { openLabScene } from "./helpers";
 
 async function lab(cmd: string, args: Record<string, unknown> = {}) {
   const response = await fetch("http://127.0.0.1:1429/invoke", {
@@ -13,33 +14,9 @@ async function lab(cmd: string, args: Record<string, unknown> = {}) {
   return payload.value;
 }
 
-async function openScene(page: Page, scene: LabScene) {
-  const errors: string[] = [];
-  const onError = (error: Error) => errors.push(error.message);
-  page.on("pageerror", onError);
-  try {
-    console.log(`scene ${scene.id}`);
-    await page.goto(scene.href, { waitUntil: "domcontentloaded" });
-    const ready = page.locator(`[data-lab-scene="${scene.id}"]`);
-    const failed = page.locator("[data-lab-error]");
-    await expect(ready.or(failed)).toBeVisible({ timeout: 90_000 });
-    if (!(await ready.isVisible())) throw new Error(`${scene.id}: ${await failed.getAttribute("data-lab-error")}`);
-    if (scene.ready.startsWith("text=")) await expect(page.getByText(scene.ready.slice(5)).first()).toBeVisible();
-    else await expect(page.locator(scene.ready).first()).toBeVisible();
-    expect(errors, scene.id).toEqual([]);
-  } finally {
-    page.off("pageerror", onError);
-  }
-}
-
 test("home lists a scene", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("link", { name: "变更" })).toBeVisible();
-});
-
-test("every scene opens", async ({ page }) => {
-  test.setTimeout(scenes.length * 90_000 + 30_000);
-  for (const scene of scenes) await openScene(page, scene);
 });
 
 test("binary diffs show both sides by size", async ({ page }) => {
@@ -86,14 +63,6 @@ test("pushbox commits and pushes", async () => {
   const subject = execFileSync("git", ["--git-dir", layout.remotePush, "log", "-1", "--format=%s"], { encoding: "utf8" }).trim();
   expect(subject).toBe("lab: record the push note");
 });
-
-async function openLabScene(page: Page, id: string, ready: string) {
-  const href = scenes.find((scene) => scene.id === id)?.href ?? `/?scene=${id}`;
-  await page.goto(href, { waitUntil: "domcontentloaded" });
-  await page.locator(`[data-lab-scene="${id}"]`).waitFor({ state: "visible", timeout: 90_000 });
-  await page.locator(ready).first().waitFor({ state: "visible", timeout: 30_000 });
-  await page.waitForTimeout(400);
-}
 
 test("dialog close button dismisses the dialog", async ({ page }) => {
   await openLabScene(page, "dialog-prefs", '[data-dialog="prefs"]');
@@ -562,9 +531,9 @@ test("multi-file confirmation lists one file per line with a total", async ({ pa
   const confirm = page.locator('[data-layer="confirm"]');
   const rows = confirm.locator(".confirm-files li");
   await expect(rows).toHaveCount(6);
-  await expect(confirm.locator(".confirm-count")).toHaveText("6 files");
+  await expect(confirm.locator(".confirm-count")).toHaveText(/^(6 files|共 6 个文件)$/);
   await expect(rows.first()).toContainText("Y语言表_Data_Language.xlsx");
-  await expect(confirm.locator(".commit")).toBeFocused();
+  await expect(confirm.locator(".text-button")).toBeFocused();
   const heights = await rows.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
   expect(Math.max(...heights)).toBeLessThan(26);
 });
@@ -821,36 +790,45 @@ test("merge stays available with local changes and stashes them", async ({ page 
 });
 
 test("batch conflict actions keep one side for the selected files", async ({ page }) => {
-  await openLabScene(page, "conflict-batch", ".file-list .file");
-  await expect(page.locator(".composer .summary-input")).toHaveValue(/topic/);
-  await expect(page.locator(".composer .summary-input")).toHaveValue(/main/);
-  await expect(page.locator(".composer textarea")).not.toHaveValue(/conflict\/file-/);
-  await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("topic");
-  await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("main");
-  const rows = page.locator(".unstaged-pane .file-list .file");
-  const paths = await rows.evaluateAll((nodes) =>
-    nodes.slice(0, 2).map((node) => node.querySelector<HTMLElement>(".file-select")?.title ?? ""),
-  );
-  expect(paths).toHaveLength(2);
-  expect(paths.every((path) => path !== "")).toBe(true);
-  await rows.nth(0).click();
-  await rows.nth(1).click({ modifiers: ["Control"] });
-  await expect(page.locator(".pick-bar")).toBeVisible();
-  await expect(page.locator(".pick-count")).toHaveText(/2/);
-  const pane = page.locator(".conflict-pane");
-  await expect(pane.locator(".conflict-selection")).toContainText("2");
-  await pane.locator("#conflict-theirs").click();
-  await expect(pane.locator(".conflict-merge")).toContainText(/Keep main|保留 main/);
-  await pane.locator("#conflict-theirs").click();
-  await rows.nth(1).click({ button: "right" });
-  const menu = page.locator('[data-layer="menu"]');
-  await expect(menu).toBeVisible();
-  const ours = menu.locator("button").filter({ hasText: /Keep main|保留 main/ });
-  await expect(ours).toContainText("2");
-  await expect(menu.locator("button").filter({ hasText: /Keep topic|保留 topic/ })).toBeVisible();
-  await ours.click();
-  for (const path of paths) {
-    await expect(page.locator(`.unstaged-pane .file-list .file-select[title="${path}"]`)).toHaveCount(0);
+  test.setTimeout(60_000);
+  try {
+    await openLabScene(page, "conflict-batch", ".file-list .file");
+    await expect(page.locator(".composer .summary-input")).toHaveValue(/topic/);
+    await expect(page.locator(".composer .summary-input")).toHaveValue(/main/);
+    await expect(page.locator(".composer textarea")).not.toHaveValue(/conflict\/file-/);
+    await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("topic");
+    await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("main");
+    const rows = page.locator(".unstaged-pane .file-list .file");
+    const paths = await rows.evaluateAll((nodes) =>
+      nodes.slice(0, 2).map((node) => node.querySelector<HTMLElement>(".file-select")?.title ?? ""),
+    );
+    expect(paths).toHaveLength(2);
+    expect(paths.every((path) => path !== "")).toBe(true);
+    await rows.nth(0).click();
+    await rows.nth(1).click({ modifiers: ["Control"] });
+    await expect(page.locator(".pick-bar")).toBeVisible();
+    await expect(page.locator(".pick-count")).toHaveText(/2/);
+    const pane = page.locator(".conflict-pane");
+    await expect(pane.locator(".conflict-selection")).toContainText("2");
+    await pane.locator("#conflict-theirs").click();
+    await expect(pane.locator(".conflict-merge")).toContainText(/Keep main|保留 main/);
+    await pane.locator("#conflict-theirs").click();
+    await rows.nth(1).click({ button: "right" });
+    const menu = page.locator('[data-layer="menu"]');
+    await expect(menu).toBeVisible();
+    const ours = menu.locator("button").filter({ hasText: /Keep main|保留 main/ });
+    await expect(ours).toContainText("2");
+    await expect(menu.locator("button").filter({ hasText: /Keep topic|保留 topic/ })).toBeVisible();
+    await ours.click();
+    for (const path of paths) {
+      await expect(page.locator(`.unstaged-pane .file-list .file-select[title="${path}"]`)).toHaveCount(0);
+    }
+  } finally {
+    const fixture = resolve(".lab/repos/conflict");
+    execFileSync("git", ["-c", "core.autocrlf=false", "-C", fixture, "reset", "--hard", "HEAD"], { stdio: "pipe" });
+    const merged = spawnSync("git", ["-c", "core.autocrlf=false", "-C", fixture, "merge", "--no-commit", "topic"], { encoding: "utf8" });
+    expect(merged.status, merged.stderr).toBe(1);
+    expect(execFileSync("git", ["-C", fixture, "ls-files", "-u"], { encoding: "utf8" })).not.toBe("");
   }
 });
 

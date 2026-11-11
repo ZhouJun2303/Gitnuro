@@ -13,7 +13,8 @@ export type LabScene = {
 };
 
 function scene(item: Omit<LabScene, "href"> & { href?: string }): LabScene {
-  return { ...item, href: item.href ?? `/?scene=${item.id}` };
+  const merge = ["text-merge", "text-merge-window", "text-merge-many", "conflict-large-asset", "file-merge"].includes(item.id);
+  return { ...item, href: item.href ?? `/?scene=${item.id}${merge ? "&view=merge" : ""}` };
 }
 
 function dialog(name: LabDialog, title: string, repo = "full", group = "弹窗"): LabScene {
@@ -46,7 +47,6 @@ export const dialogScenes = {
   stash: dialog("stash", "贮藏"),
   rename: dialog("rename", "重命名分支"),
   upstream: dialog("upstream", "上游"),
-  resolve: dialog("resolve", "解决冲突", "conflict"),
   rebase: dialog("rebase", "交互式变基"),
   patch: dialog("patch", "应用补丁", "full", "叠层"),
   about: dialog("about", "关于"),

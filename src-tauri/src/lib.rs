@@ -2029,6 +2029,8 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
         _ => "desk",
     };
     if let Some(window) = app.get_webview_window(label) {
+        let _ = window.unminimize();
+        let _ = window.show();
         let _ = window.set_focus();
         if label == "history" || label == "blob" || label == "merge" || view_name == "flow" {
             let _ = app.emit(
@@ -2063,11 +2065,14 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
         .inner_size(width.clamp(480.0, 4000.0), height.clamp(360.0, 4000.0))
         .theme(saved_window_theme())
         .resizable(true)
-        .visible(view_name != "flow")
+        .visible(view_name != "flow" && label != "merge")
         .build()
         .map_err(|error| error.to_string())?;
-    if view_name == "flow" {
-        flow_window::restore_and_track(&window);
+    if view_name == "flow" || label == "merge" {
+        flow_window::restore_and_track(
+            &window,
+            if label == "merge" { "merge-window.json" } else { "flow-window.json" },
+        );
         window.show().map_err(|error| error.to_string())?;
     }
     show_devtools(&window);

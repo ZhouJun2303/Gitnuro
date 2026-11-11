@@ -165,9 +165,8 @@ export function chosenHunkText(piece: Extract<MergePiece, { kind: "hunk" }>, emp
     const right = hunkIncludes(piece.pick, "ours");
     if (!left && !right) return emptyMark;
     const parts: string[] = [];
-    if (left && piece.theirs.length > 0) parts.push(piece.theirs);
-    if (right && piece.ours.length > 0) parts.push(piece.ours);
-    if (parts.length === 0) return emptyMark;
+    if (left && (piece.theirs.length > 0 || piece.theirsLines === 1)) parts.push(piece.theirs);
+    if (right && (piece.ours.length > 0 || piece.oursLines === 1)) parts.push(piece.ours);
     return parts.join("\n");
   }
 
@@ -195,7 +194,7 @@ export function splitConflicts(shell: ShellState, working: string) {
         continue;
       }
       if (mode === "theirs" && line.startsWith(">>>>>>>")) {
-        pieces.push({ kind: "hunk", ours: ours.join("\n"), theirs: theirs.join("\n"), pick: "none" });
+        pieces.push({ kind: "hunk", ours: ours.join("\n"), theirs: theirs.join("\n"), oursLines: ours.length, theirsLines: theirs.length, pick: "none" });
         mode = "text";
         continue;
       }
@@ -209,14 +208,18 @@ export function splitConflicts(shell: ShellState, working: string) {
 
 export function joinedPieces(shell: ShellState, pieces: MergePiece[]) {
     return pieces
-      .map((piece) => {
-        if (piece.kind === "text") return piece.text;
-        return chosenHunkText(piece);
+      .flatMap((piece) => {
+        if (piece.kind === "text") return [piece.text];
+        const text = chosenHunkText(piece);
+        const blankLine = (hunkIncludes(piece.pick, "ours") && piece.oursLines === 1)
+          || (hunkIncludes(piece.pick, "theirs") && piece.theirsLines === 1);
+        return piece.pick !== "none" && text === "" && !blankLine ? [] : [text];
       })
       .join("\n");
   }
 
 export function pickHunk(shell: ShellState, index: number, pick: MergePick) {
+    shell.mergeDirty = true;
     shell.mergePieces = shell.mergePieces.map((piece, at) => (piece.kind === "hunk" && at === index ? { ...piece, pick } : piece));
   }
 
@@ -231,6 +234,7 @@ export function toggleMergeSide(shell: ShellState, index: number, side: "ours" |
 
 /** Set or clear one side across every hunk (header checkboxes). */
 export function takeMergeSide(shell: ShellState, side: "ours" | "theirs", on: boolean) {
+    shell.mergeDirty = true;
     shell.mergePieces = shell.mergePieces.map((piece) => {
       if (piece.kind !== "hunk") return piece;
       const theirs = side === "theirs" ? on : hunkIncludes(piece.pick, "theirs");
@@ -280,6 +284,7 @@ function sidesNeedLoad(sides: { ours: string; theirs: string; working: string })
 
 function showFileMerge(shell: ShellState, file: string) {
     shell.mergeFile = file;
+    shell.mergeSource = [];
     shell.mergeKind = "file";
     shell.mergeLarge = false;
     shell.mergePieces = [];
@@ -291,28 +296,59 @@ function showFileMerge(shell: ShellState, file: string) {
 /** Build the merge view once the user asks for a file too large to draw on open. */
 export async function loadTextMerge(shell: ShellState) {
     const file = shell.mergeFile;
-    if (!file || shell.busy) return;
+    const generation = shell.mergeGeneration;
+    if (!file || shell.busy || shell.mergeLoading) return;
+    shell.mergeLoading = true;
+    shell.mergeError = "";
     try {
       const sides = shell.mode === "sample" ? sampleConflictText[file] : await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
+      if (!shell.textMerge || shell.mergeFile !== file || shell.mergeGeneration !== generation) return;
       if (!sides || sidesTooBig(sides)) {
         showFileMerge(shell, file);
         return;
       }
       shell.conflict = sides;
       shell.mergePieces = piecesFromSides(shell, sides);
+      shell.mergeSource = shell.mergePieces;
       shell.mergeResult = shell.joinedPieces(shell.mergePieces);
       shell.mergeLarge = false;
     } catch (error) {
-      shell.actionError = shell.message(error);
+      if (shell.mergeGeneration === generation) shell.mergeError = shell.message(error);
+    } finally {
+      if (shell.mergeGeneration === generation) shell.mergeLoading = false;
     }
   }
 
 export async function openTextMerge(shell: ShellState, file: string) {
+    if (shell.inApp() && shell.standalone !== "merge") {
+      try {
+        let size: { width?: number; height?: number } = {};
+        try { size = JSON.parse(localStorage.getItem("awegit.mergeWindowSize") ?? "{}"); } catch { /* native defaults */ }
+        await invoke("open_window", { view: "merge", repo: shell.repoPath(), file,
+          width: Number.isFinite(size?.width) ? size.width : null,
+          height: Number.isFinite(size?.height) ? size.height : null });
+      } catch (error) { shell.actionError = shell.message(error); }
+      return;
+    }
+    if (shell.textMerge && shell.mergeFile === file) return;
+    shell.standalone = "merge";
+    const generation = ++shell.mergeGeneration;
+    shell.mergeLoading = true;
+    try { await readTextMerge(shell, file, generation); }
+    finally { if (generation === shell.mergeGeneration) shell.mergeLoading = false; }
+  }
+
+async function readTextMerge(shell: ShellState, file: string, generation: number) {
+    shell.mergeFile = file;
+    shell.mergeDirty = false;
+    shell.mergeEdited = false;
+    shell.mergeEditing = false;
+    shell.mergeError = "";
     shell.section = "changes";
     const already = shell.selectedPath === file;
     shell.selectedPath = file;
     const path = shell.repoPath();
-    const stillOpen = () => shell.mode !== "live" || (shell.viewing(path) && shell.selectedPath === file);
+    const stillOpen = () => generation === shell.mergeGeneration && (shell.mode !== "live" || (shell.viewing(path) && shell.selectedPath === file));
     let view = shell.mode === "sample" ? sampleConflictViews[file] : already ? shell.activeConflict : null;
     if (shell.mode === "live" && !view) {
       try {
@@ -320,7 +356,7 @@ export async function openTextMerge(shell: ShellState, file: string) {
         if (!stillOpen()) return;
         shell.conflictView = view;
       } catch (error) {
-        shell.actionError = shell.message(error);
+        if (stillOpen()) shell.mergeError = shell.message(error);
         return;
       }
     }
@@ -343,16 +379,24 @@ export async function openTextMerge(shell: ShellState, file: string) {
       shell.mergeKind = "text";
       shell.mergeLarge = sidesNeedLoad(sides);
       shell.mergePieces = shell.mergeLarge ? [] : piecesFromSides(shell, sides);
+      shell.mergeSource = shell.mergePieces;
       shell.mergeResult = shell.mergeLarge ? "" : shell.joinedPieces(shell.mergePieces);
       shell.textMerge = true;
     } catch (error) {
-      shell.actionError = shell.message(error);
+      if (stillOpen()) shell.mergeError = shell.message(error);
     }
   }
 
 export function closeTextMerge(shell: ShellState) {
-    shell.textMerge = false;
-    shell.mergeLarge = false;
+    if (shell.mergeApplying) return;
+    shell.guardMerge(() => {
+      shell.mergeGeneration++;
+      shell.textMerge = false;
+      shell.mergeLarge = false;
+      shell.mergeLoading = false;
+      if (shell.inApp() && shell.standalone === "merge") void getCurrentWindow().close();
+      else shell.standalone = "";
+    });
   }
 
 export type RebaseStep = { verb: string; rev: string; summary: string; message: string };
@@ -365,54 +409,40 @@ export function buildRebaseSteps(steps: RebaseStep[], picked: string[]): RebaseS
       .map((step) => ({ ...step, message: step.verb === "reword" || step.verb === "squash" || step.verb === "exec" ? step.message : "" }));
   }
 
-export async function applyTextMerge(shell: ShellState, text?: string) {
+export async function applyTextMerge(shell: ShellState, text?: string): Promise<boolean> {
     const file = shell.mergeFile;
-    if (!file) return;
-    if (shell.mode !== "live") {
-      shell.textMerge = false;
-      return;
-    }
-    if (shell.busy) return;
-    if (shell.mergeLarge || shell.mergePieces.length === 0) return;
-    if (shell.mergePieces.some((piece) => piece.kind === "hunk" && piece.pick === "none")) return;
-    await shell.mutate({ action: "resolve", file, side: "text", text: text ?? shell.mergeResult });
-    shell.textMerge = false;
+    if (!file || shell.busy || shell.mergeLarge || shell.mergePieces.length === 0) return false;
+    if (shell.mergePieces.some((piece) => piece.kind === "hunk" && piece.pick === "none")) return false;
+    return applyMerge(shell, { action: "resolve", file, side: "text", text: text ?? shell.mergeResult });
   }
 
-export async function applyFileMerge(shell: ShellState, side: "ours" | "theirs") {
-    const file = shell.mergeFile;
-    if (!file) return;
-    if (shell.mode !== "live") {
-      shell.textMerge = false;
-      return;
+export async function applyFileMerge(shell: ShellState, side: "ours" | "theirs"): Promise<boolean> {
+    if (!shell.mergeFile || shell.busy) return false;
+    return applyMerge(shell, { action: "resolve", file: shell.mergeFile, side, text: "" });
+  }
+
+async function applyMerge(shell: ShellState, request: Record<string, unknown>): Promise<boolean> {
+    shell.mergeError = "";
+    shell.mergeApplying = true;
+    try {
+      const outcome = shell.mode === "live" ? await shell.mutate(request) : "completed";
+      if (outcome !== "completed") {
+        shell.mergeError = shell.actionError || shell.tr("dialog.mergeApplyFailed");
+        return false;
+      }
+    } catch (error) {
+      shell.mergeError = shell.message(error);
+      return false;
+    } finally {
+      shell.mergeApplying = false;
     }
-    if (shell.busy) return;
-    await shell.mutate({ action: "resolve", file, side, text: "" });
-    shell.textMerge = false;
+    shell.mergeDirty = false;
+    shell.closeTextMerge();
+    return true;
   }
 
 export async function openResolve(shell: ShellState, file: string) {
     await openTextMerge(shell, file);
-  }
-
-export async function fillResolveDialog(shell: ShellState, file: string) {
-    shell.draft = file;
-    shell.draftExtra = "text";
-    try {
-      const sides = await invoke<ConflictSides>("conflict_sides", { path: shell.repoPath(), file });
-      shell.conflict = sides;
-      if (!sides || textTooBig(sides.working) || textTooBig(sides.ours) || textTooBig(sides.theirs)) {
-        shell.mergePieces = [];
-        shell.mergeResult = sides?.working ?? "";
-        return;
-      }
-      shell.mergePieces = piecesFromSides(shell, sides);
-      shell.mergeResult = shell.joinedPieces(shell.mergePieces);
-    } catch {
-      shell.conflict = null;
-      shell.mergePieces = [];
-      shell.mergeResult = "";
-    }
   }
 
 export function bisectMark(shell: ShellState, id: string) {

@@ -990,6 +990,14 @@ export class ShellState {
 
 
   mergeFile = $state("");
+  mergeSource = $state.raw<MergePiece[]>([]);
+  mergeDirty = $state(false);
+  mergeEdited = $state(false);
+  mergeEditing = $state(false);
+  mergeError = $state("");
+  mergeLoading = $state(false);
+  mergeApplying = $state(false);
+  mergeGeneration = 0;
 
 
   mergeLeft = $state("");
@@ -2291,9 +2299,17 @@ export class ShellState {
     }
     if (nav.view === "merge") {
       if (label && label !== "merge") return;
-      this.standalone = "merge";
-      if (nav.repo && nav.repo !== this.repoPath()) await this.openRepo(nav.repo);
-      if (nav.file) await this.openTextMerge(nav.file);
+      if (this.textMerge && nav.file === this.mergeFile && (!nav.repo || this.pathsMatch(nav.repo, this.repoPath() ?? ""))) return;
+      if (this.busy) return;
+      this.guardMerge(() => { void (async () => {
+        this.textMerge = false;
+        this.standalone = "merge";
+        if (nav.repo && !this.pathsMatch(nav.repo, this.repoPath() ?? "")) {
+          await this.openRepo(nav.repo);
+          if (!this.pathsMatch(nav.repo, this.repoPath() ?? "")) return;
+        }
+        if (nav.file) await this.openTextMerge(nav.file);
+      })().catch((error) => { this.mergeError = this.message(error); }); });
     }
   }
 
@@ -2466,6 +2482,8 @@ export class ShellState {
       });
       this.adoptSettings({
         ...settings,
+        locale: params.get("locale") === "en" ? "en" : params.get("locale") === "zh" ? "zh" : settings.locale,
+        theme: params.get("theme") === "dark" ? "dark" : params.get("theme") === "light" ? "light" : settings.theme,
         authorName: settings.authorName || "AweGit Lab",
         authorEmail: settings.authorEmail || "lab@example.com",
         recent,
@@ -2520,6 +2538,7 @@ export class ShellState {
       const runtime = await invoke<GitRuntime>("git_runtime").catch(() => null);
       if (runtime) this.gitRuntime = runtime;
       await applyLabScene(this, item);
+      if (params.get("locale") === "en") this.settings.locale = "en";
       this.labSceneId = item.id;
     } catch (error) {
       const text = this.message(error);
@@ -5417,6 +5436,16 @@ export class ShellState {
   }
 
 
+  guardMerge(run: () => void) {
+    if (this.mergeApplying) return;
+    if (!this.mergeDirty) { run(); return; }
+    if (this.confirmAsk) return;
+    this.ask(this.tr("dialog.mergeDiscardTitle"), this.tr("dialog.mergeDiscardBody"), () => {
+      this.mergeDirty = false;
+      run();
+    }, [], { danger: true });
+  }
+
   closeTextMerge() {
     return closeTextMerge(this);
   }
@@ -6334,6 +6363,10 @@ export class ShellState {
     });
     $effect(() => {
     const parts: string[] = [];
+    if (this.standalone === "merge") {
+      parts.push(this.tr("dialog.mergeTitle"));
+      if (this.mergeFile) parts.push(`${this.mergeDirty ? "* " : ""}${this.mergeFile}`);
+    }
     if (this.settings.workspaceShowTitle && this.currentWorkspace) parts.push(this.workspaceName(this.currentWorkspace));
     if (this.snapshot?.path) parts.push(this.folderName(this.snapshot.path));
     parts.push("AweGit");

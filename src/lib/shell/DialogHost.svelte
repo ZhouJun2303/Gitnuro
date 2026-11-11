@@ -27,7 +27,7 @@
   }
   let primedDialog = "";
   let lastFocus: HTMLElement | null = null;
-  const largeDialogs = new Set(["prefs", "resolve", "stats", "rebase", "accounts", "output", "mergeConflict"]);
+  const largeDialogs = new Set(["prefs", "stats", "rebase", "accounts", "output", "mergeConflict"]);
   const smallDialogs = new Set(["reset", "branch", "tag", "rename", "upstream", "reword", "remote", "submodule", "worktree", "continue", "about", "features", "checkoutNotice", "stashRename", "stashBranch", "renameTab", "colorTab", "groupRename", "askInput", "workspace", "credential"]);
   function dialogSize(kind: string) {
     if (largeDialogs.has(kind)) return "lg";
@@ -198,7 +198,6 @@
               await shell.createWorkspace(shell.draft);
             }
           }
-          else if (shell.dialog === "resolve") void shell.mutate({ action: "resolve", file: shell.draft, side: shell.draftExtra || "text", text: shell.mergeResult });
           else if (shell.dialog === "gitignore") void shell.mutate({ action: "writeGitignore", text: shell.draft });
           else if (shell.dialog === "stashRename") void shell.mutate({ action: "stashRename", name: shell.draftExtra, message: shell.draft });
           else if (shell.dialog === "stashBranch") void shell.mutate({ action: "stashBranch", name: shell.draftExtra, branch: shell.draft });
@@ -639,39 +638,6 @@
             <label class="grow">{shell.tr("chrome.workspaceName")}<input bind:value={shell.draft} /></label>
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("chrome.workspaceCreate")}</button>
-          </div>
-        {:else if shell.dialog === "resolve"}
-          <h2>{shell.tr("dialog.mergeResolve")}</h2>
-          <div class="dialog-subject" title={shell.draft}>{shell.draft}</div>
-          <div class="merge-grid">
-            <label>{shell.tr("dialog.useOurs")}<textarea rows="8" readonly value={shell.conflict?.ours ?? ""}></textarea></label>
-            <label>{shell.tr("dialog.useTheirs")}<textarea rows="8" readonly value={shell.conflict?.theirs ?? ""}></textarea></label>
-            <label>{shell.tr("dialog.result")}<textarea rows="8" bind:value={shell.mergeResult}></textarea></label>
-          </div>
-          <div class="hunk-marks">
-            {#each shell.mergePieces as piece, index (index)}
-              {#if piece.kind === "hunk"}<button type="button" aria-label={shell.tr("dialog.result")} style:left="{(index + 1) / Math.max(shell.mergePieces.length, 1) * 100}%" onclick={() => { const area = document.querySelector<HTMLTextAreaElement>(".merge-grid textarea:last-of-type"); if (area) area.scrollTop = (index / Math.max(shell.mergePieces.length, 1)) * area.scrollHeight; }}></button>{/if}
-            {/each}
-          </div>
-          {#each shell.mergePieces as piece, index (index)}
-            {#if piece.kind === "hunk"}
-              <div class="composer-row">
-                <span class="meta">{shell.tr("dialog.result")} {index + 1}</span>
-                <button class="text-button" type="button" class:on={piece.pick === "ours"} onclick={() => shell.pickHunk(index, "ours")}>{shell.tr("dialog.useOurs")}</button>
-                <button class="text-button" type="button" class:on={piece.pick === "theirs"} onclick={() => shell.pickHunk(index, "theirs")}>{shell.tr("dialog.useTheirs")}</button>
-                <button class="text-button" type="button" class:on={piece.pick === "both"} onclick={() => shell.pickHunk(index, "both")}>{shell.tr("dialog.useBoth")}</button>
-              </div>
-            {/if}
-          {/each}
-          <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => (shell.draftExtra = "ours")}>{shell.tr("dialog.useOurs")}</button>
-            <button class="text-button" type="button" onclick={() => (shell.draftExtra = "theirs")}>{shell.tr("dialog.useTheirs")}</button>
-            <button class="text-button" type="button" onclick={() => (shell.draftExtra = "both")}>{shell.tr("dialog.useBoth")}</button>
-            <button class="text-button" type="button" onclick={() => (shell.draftExtra = "text")}>{shell.tr("dialog.result")}</button>
-          </div>
-          <div class="composer-row actions">
-            <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.applyNow")}</button>
           </div>
         {:else if shell.dialog === "merge"}
           {@const into = shell.mergeInto || shell.snapshot?.branch || "HEAD"}

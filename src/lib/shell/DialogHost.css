@@ -108,31 +108,6 @@
     border-radius: 50%;
   }
 
-.merge-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 8px;
-  }
-
-.merge-grid textarea { width: 100%; }
-
-.hunk-marks {
-    position: relative;
-    height: 8px;
-    margin: 6px 0;
-    background: var(--line);
-  }
-
-.hunk-marks button {
-    position: absolute;
-    top: 0;
-    width: 6px;
-    height: 8px;
-    border: 0;
-    padding: 0;
-    background: var(--accent);
-  }
-
 .treemap { display: flex; flex-wrap: wrap; gap: 4px; min-height: 72px; }
 
 .treemap span { flex: 1 1 88px; min-width: 72px; padding: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 6px; font-size: 11px; }

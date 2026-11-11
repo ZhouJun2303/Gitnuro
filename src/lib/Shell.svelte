@@ -973,7 +973,7 @@
   {#if shell.confirmAsk}
     {@const ask = shell.confirmAsk}
     <div class="scrim confirm-scrim" role="presentation">
-      <div class="dialog sm confirm" class:danger={ask.danger} data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={ask.body ? "confirm-body" : undefined} tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ".commit" }}>
+      <div class="dialog sm confirm" class:danger={ask.danger} data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={ask.body ? "confirm-body" : undefined} tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ask.danger ? ".text-button" : ".commit" }}>
         <h2 id="confirm-title">
           {#if ask.danger}<span class="confirm-mark" aria-hidden="true">!</span>{/if}
           <span class="confirm-title-text">{ask.title}</span>
@@ -1025,7 +1025,6 @@
     </div>
   {/if}
   <DialogHost />
-  {#if shell.standalone !== "merge"}<MergePanel />{/if}
   {#if shell.launchOpen}
     <div class="palette-scrim" role="presentation" onclick={() => shell.closeLaunch()}>
       <div class="palette" data-layer="launch" role="dialog" aria-modal="true" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} use:overlayFocus={{ close: () => shell.closeLaunch(), focus: ".palette-input" }} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>

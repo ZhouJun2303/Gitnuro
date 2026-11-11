@@ -22,7 +22,6 @@ export type Dialog =
     | "stash"
     | "rename"
     | "upstream"
-    | "resolve"
     | "rebase"
     | "patch"
     | "about"
@@ -61,7 +60,7 @@ export type MergePick = "ours" | "theirs" | "both" | "none";
 
 export type MergePiece =
     | { kind: "text"; text: string }
-    | { kind: "hunk"; ours: string; theirs: string; pick: MergePick };
+    | { kind: "hunk"; ours: string; theirs: string; pick: MergePick; oursLines?: number; theirsLines?: number };
 
 export type RepoFacts = {
     ignored: string[];

@@ -1,7 +1,6 @@
 import { invoke } from "../perf";
 import type { CommandRecord, ToolRecord } from "../status";
 import type { ShellState } from "../shell/state.svelte";
-import { fillResolveDialog } from "../shell/dialogs.svelte";
 import type { LabDialog, LabScene } from "./scenes";
 
 const FILL = 24;
@@ -516,6 +515,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       break;
     case "prefs": {
       const prefTabs: Record<string, "general" | "workspace" | "diff" | "commit" | "ai" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
+        "prefs-flow": "advanced",
         "prefs-workspace": "workspace",
         "prefs-diff": "diff",
         "prefs-commit": "commit",
@@ -623,9 +623,6 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
     case "upstream":
       shell.draft = "main";
       shell.draftExtra = "origin/main";
-      break;
-    case "resolve":
-      await fillResolveDialog(shell, "src/both-sides.ts");
       break;
     case "rebase": {
       const onto = shell.commitsLive[shell.commitsLive.length - 1];

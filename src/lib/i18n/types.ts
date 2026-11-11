@@ -697,7 +697,9 @@ export type Messages = {
     mergeTime: string;
     mergeOverwriteEdits: string;
     mergeOverwriteEditsBody: string;
-    mergePopOut: string;
+    mergeDiscardTitle: string;
+    mergeDiscardBody: string;
+    mergeApplyFailed: string;
     result: string;
     verticalTabs: string;
     showSpace: string;
