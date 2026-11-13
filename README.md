@@ -35,7 +35,7 @@ AweGit 是 Windows 和 macOS 上的 Git 客户端。界面用 Tauri 2 和 Svelte
 
 ### 快速开始
 
-需要 Node.js、pnpm 和 Rust 工具链。Windows 的 PATH、WinLibs 和工具链细节见 [开发与发布](docs/development.md)。
+需要 Node.js、pnpm 和 Rust 工具链。Windows 的 PATH、WinLibs 和工具链细节见 [开发与发布](dev-docs/development.md)。
 
 ```powershell
 pnpm install
@@ -69,7 +69,7 @@ UI 用例只跑本次修改涉及的场景，不跑全量。新弹窗要记入 `
 ### 更多文档
 
 - [功能介绍页](docs/index.html)（[在线版](https://zhoujun2303.github.io/Gitnuro/)）：带截图的功能介绍，支持中英文切换。
-- [开发与发布](docs/development.md)：环境准备、测试、试验台、打包、发布流程和完整快捷键表。
+- [开发与发布](dev-docs/development.md)：环境准备、测试、试验台、打包、发布流程和完整快捷键表。
 - 快捷键：在功能介绍页的[快捷键](https://zhoujun2303.github.io/Gitnuro/#shortcuts)一节，或开发文档的“窗口快捷键”。
 
 ### 许可证
@@ -105,7 +105,7 @@ Settings live at `%APPDATA%\AweGit\settings.json` on Windows and `~/Library/Appl
 
 ### Quick start
 
-Node.js, pnpm, and a Rust toolchain are required. Windows PATH, WinLibs, and toolchain details are in [Development and release](docs/development.md) (Chinese).
+Node.js, pnpm, and a Rust toolchain are required. Windows PATH, WinLibs, and toolchain details are in [Development and release](dev-docs/development.md) (Chinese).
 
 ```powershell
 pnpm install
@@ -139,7 +139,7 @@ Subjects read `type: description`, with types `feat`, `fix`, `docs`, `art`, `sty
 ### More documentation
 
 - [Feature guide](docs/index.html) ([online](https://zhoujun2303.github.io/Gitnuro/)): screenshots and feature notes, with a Chinese/English switch.
-- [Development and release](docs/development.md): environment, tests, lab, packaging, publishing, and the full shortcut table (Chinese).
+- [Development and release](dev-docs/development.md): environment, tests, lab, packaging, publishing, and the full shortcut table (Chinese).
 - Shortcuts: the [shortcuts section](https://zhoujun2303.github.io/Gitnuro/#shortcuts) of the feature guide, or "窗口快捷键" in the development doc.
 
 ### License

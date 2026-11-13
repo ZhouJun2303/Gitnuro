@@ -1,6 +1,6 @@
 # AweGit 开发与发布
 
-本文件面向在本仓库开发、测试和发版的人。用户功能、下载与快捷键见 [README](../README.md)；功能介绍页是 [docs/index.html](index.html)，在线版在 <https://zhoujun2303.github.io/Gitnuro/>。
+本文件面向在本仓库开发、测试和发版的人。用户功能、下载与快捷键见 [README](../README.md)；功能介绍页是 [功能介绍页](../docs/index.html)，在线版在 <https://zhoujun2303.github.io/Gitnuro/>。
 
 ## 分支与协作
 
