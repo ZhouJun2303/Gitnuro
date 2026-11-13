@@ -1017,13 +1017,8 @@ fn git_text(repo: &Path, args: &[&str]) -> Option<String> {
 }
 
 fn git_file(repo: &Path, name: &str) -> Option<String> {
-    let rel = git_text(repo, &["rev-parse", "--git-path", name])?;
-    let path = PathBuf::from(&rel);
-    let path = if path.is_absolute() {
-        path
-    } else {
-        repo.join(path)
-    };
+    // These merge/rebase files belong to this worktree, including linked worktrees.
+    let path = crate::model::absolute_git_dir(repo).ok()?.join(name);
     let text = std::fs::read_to_string(path).ok()?;
     let text = text.trim().to_string();
     if text.is_empty() {

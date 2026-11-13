@@ -71,6 +71,23 @@ for (const kind of ["text", "file"]) test(`failed ${kind} merge keeps the draft 
   if (kind === "text") expect(requests[0].text).toBe("preserve this manual draft\n");
 });
 
+test("resolving one file while other conflicts remain closes the panel", async ({ page }) => {
+  await page.route("**/__lab/invoke", async (route) => {
+    const { cmd, args } = route.request().postDataJSON();
+    if (cmd !== "mutate") return route.continue();
+    // The backend reports "conflict" whenever the worktree still has unmerged paths,
+    // even though resolving this file succeeded.
+    const response = await page.request.post("/__lab/invoke", { data: { cmd: "workspace_status", args: { path: args.path } } });
+    const snapshot = await response.json();
+    return route.fulfill({ json: { ok: true, value: { ...snapshot.value, outcome: "conflict", error: "" } } });
+  });
+  await openLabScene(page, "text-merge", ".merge-panel");
+  await page.locator(".merge-party input").first().check();
+  await page.locator(".merge-panel .commit").click();
+  await expect(page.locator(".merge-panel")).toHaveCount(0);
+  await expect(page.locator(".merge-error")).toHaveCount(0);
+});
+
 test("merge navigation reuses the same file and guards changing files or repositories", async ({ page }) => {
   await openLabScene(page, "text-merge", ".merge-panel");
   const result = await page.evaluate(async () => {

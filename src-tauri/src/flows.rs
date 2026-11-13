@@ -600,12 +600,15 @@ impl Session {
     }
 
     pub fn refresh(&self) {
-        let writing = self
-            .data
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .writing;
-        if writing {
+        let needs_refresh = {
+            let data = self.data.lock().unwrap_or_else(|error| error.into_inner());
+            !data.writing
+                && matches!(
+                    data.snapshot.summary.state.as_str(),
+                    "conflict" | "waiting" | "running"
+                )
+        };
+        if !needs_refresh {
             return;
         }
         if let Ok(checkpoint) = flow::checkpoint(&self.repo) {
@@ -1240,6 +1243,24 @@ mod tests {
 
     pub(super) static OPENED: Mutex<Vec<(PathBuf, String)>> = Mutex::new(Vec::new());
 
+    thread_local! {
+        static GIT_CALLS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    }
+
+    fn count_git_calls<T>(action: impl FnOnce() -> T) -> (T, usize) {
+        awegit_git::set_trace(|_, _, _, _| {
+            GIT_CALLS.with(|slot| {
+                if let Some(count) = slot.get() {
+                    slot.set(Some(count + 1));
+                }
+            });
+        });
+        GIT_CALLS.with(|slot| slot.set(Some(0)));
+        let result = action();
+        let count = GIT_CALLS.with(|slot| slot.replace(None).unwrap());
+        (result, count)
+    }
+
     struct Repo(PathBuf);
     impl Repo {
         fn new() -> Self {
@@ -1670,5 +1691,130 @@ mod tests {
         prune(&directory, 3, 4 * 86_400_000);
         assert!(!directory.join(format!("{}.jsonl", ended.id)).exists());
         assert!(directory.join("100-1-2.json").exists());
+    }
+
+    #[test]
+    #[ignore = "manual backend benchmark; run with --ignored --nocapture"]
+    fn backend_read_timings() {
+        fn measure(label: &str, iterations: usize, mut action: impl FnMut()) {
+            let started = std::time::Instant::now();
+            let (_, calls) = count_git_calls(|| {
+                for _ in 0..iterations {
+                    action();
+                }
+            });
+            println!(
+                "{label}: {:.3}ms/read, {calls} Git processes / {iterations} reads",
+                started.elapsed().as_secs_f64() * 1000.0 / iterations as f64
+            );
+        }
+
+        let repo = Repo::new();
+        repo.run(Mutation::Reset {
+            rev: "HEAD".into(),
+            mode: awegit_git::ResetMode::Soft,
+        });
+        measure("git directory (warm)", 20, || {
+            std::hint::black_box(flow::git_dir(&repo.0).unwrap());
+        });
+        measure("clean checkpoint", 10, || {
+            std::hint::black_box(flow::checkpoint(&repo.0).unwrap());
+        });
+        measure("completed operation_flow", 10, || {
+            std::hint::black_box(repo.snapshot());
+        });
+        measure("workspace_status after completion", 10, || {
+            std::hint::black_box(
+                super::super::workspace_status(Some(repo.0.display().to_string())).unwrap(),
+            );
+        });
+
+        repo.git(&["branch", "incoming"]);
+        repo.save("note", "local\n", "local");
+        repo.git(&["checkout", "incoming"]);
+        repo.save("note", "incoming\n", "incoming");
+        repo.git(&["checkout", "main"]);
+        assert!(awegit_git::perform(
+            &repo.0,
+            Mutation::Merge {
+                name: "incoming".into(),
+                squash: false,
+                no_ff: false,
+                autostash: false,
+                summary: String::new(),
+                description: String::new(),
+            },
+        )
+        .is_err());
+        measure("merge conflict checkpoint", 10, || {
+            std::hint::black_box(flow::checkpoint(&repo.0).unwrap());
+        });
+        measure("merge conflict_view", 10, || {
+            std::hint::black_box(awegit_git::conflict_view(&repo.0, "note").unwrap());
+        });
+        awegit_git::perform(&repo.0, Mutation::Abort).unwrap();
+        assert!(awegit_git::perform(
+            &repo.0,
+            Mutation::Rebase {
+                onto: "incoming".into(),
+                autostash: false,
+            },
+        )
+        .is_err());
+        measure("rebase conflict_view", 10, || {
+            std::hint::black_box(awegit_git::conflict_view(&repo.0, "note").unwrap());
+        });
+    }
+
+    #[test]
+    fn finished_flow_reads_do_not_spawn_git() {
+        let repo = Repo::new();
+        let summary = repo.run(Mutation::Reset {
+            rev: "HEAD".into(),
+            mode: awegit_git::ResetMode::Soft,
+        });
+        let session = active(&repo.0).unwrap();
+        for state in ["completed", "failed", "aborted"] {
+            session.data.lock().unwrap().snapshot.summary.state = state.into();
+            let (snapshot, calls) = count_git_calls(|| {
+                reconcile(&repo.0);
+                repo.snapshot()
+            });
+            assert_eq!(snapshot.summary.state, state);
+            assert_eq!(snapshot.summary.sequence, summary.sequence);
+            assert_eq!(calls, 0, "finished {state} flow must not read live Git state");
+        }
+    }
+
+    #[test]
+    fn git_directory_cache_is_shared_and_worktree_specific() {
+        let repo = Repo::new();
+        let linked = repo.0.join("linked");
+        repo.git(&["worktree", "add", "-b", "linked", linked.to_str().unwrap()]);
+        let main_dir = flow::git_dir(&repo.0).unwrap();
+        let linked_dir = flow::git_dir(&linked).unwrap();
+        assert_ne!(main_dir, linked_dir);
+        assert_eq!(
+            main_dir.canonicalize().unwrap(),
+            repo.0.join(".git").canonicalize().unwrap()
+        );
+        let expected = repo.git(&[
+            "-C",
+            linked.to_str().unwrap(),
+            "rev-parse",
+            "--absolute-git-dir",
+        ]);
+        assert_eq!(
+            linked_dir.canonicalize().unwrap(),
+            Path::new(&expected).canonicalize().unwrap()
+        );
+        let (_, calls) = count_git_calls(|| {
+            for (path, expected) in [(&repo.0, &main_dir), (&linked, &linked_dir)] {
+                assert_eq!(flow::git_dir(path).unwrap(), *expected);
+                assert_eq!(awegit_git::in_progress(path).unwrap(), None);
+                assert_eq!(flow::git_dir(path).unwrap(), *expected);
+            }
+        });
+        assert_eq!(calls, 0, "directory reads must share the same cache");
     }
 }

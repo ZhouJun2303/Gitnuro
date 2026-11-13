@@ -636,8 +636,9 @@ fn write_local(path: &Path, text: &str) -> Result<(), Error> {
     })
 }
 
-/// The work tree's own git directory. Remembered per path; a directory that disappeared is looked up again.
-fn absolute_git_dir(repo: &Path) -> Result<PathBuf, Error> {
+/// The work tree's own git directory, shared by history, flows, and conflict readers.
+/// Remembered per path; a directory that disappeared is looked up again.
+pub(crate) fn absolute_git_dir(repo: &Path) -> Result<PathBuf, Error> {
     if let Some(dir) = GIT_DIRS
         .lock()
         .ok()

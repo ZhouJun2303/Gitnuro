@@ -3155,7 +3155,9 @@ export class ShellState {
           if (refreshContext) await this.loadContext();
           if (!background && this.viewing(path)) await this.loadDiff();
         }
-        if (value.outcome === "failed" || value.outcome === "conflict") throw new Error(value.error || value.log || "Git conflict");
+        // Any write made while other paths stay unmerged reports "conflict" even when it
+        // succeeded; only a Git error from this action failed it.
+        if (value.outcome === "failed" || (value.outcome === "conflict" && value.error)) throw new Error(value.error || value.log || "Git conflict");
         if (followSubmodules) {
           const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } });
           if (follow.outcome === "failed") throw new Error(follow.error || follow.log);

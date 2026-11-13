@@ -2042,6 +2042,38 @@ fn merge_conflict_names_both_branches() {
     assert!(removed.ours.bytes > 0);
 }
 
+#[test]
+fn linked_worktree_rebase_reads_its_own_conflict_metadata() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["branch", "topic"]);
+    commit_file(&repo, "a.txt", "main\n", "main-edit");
+    let linked = repo.path.join("linked");
+    repo.git(&["worktree", "add", linked.to_str().unwrap(), "topic"]);
+    fs::write(linked.join("a.txt"), "topic\n").unwrap();
+    git_at(&linked, &["add", "--", "a.txt"]);
+    git_at(&linked, &["commit", "-m", "topic-edit"]);
+    assert!(perform(
+        &linked,
+        Mutation::Rebase {
+            onto: "main".into(),
+            autostash: false,
+        },
+    )
+    .is_err());
+    assert_eq!(in_progress(&repo.path).unwrap(), None);
+    assert_eq!(in_progress(&linked).unwrap(), Some(InProgress::Rebase));
+    let view = conflict_view(&linked, "a.txt").unwrap();
+    assert_eq!(view.ours.label, "main");
+    assert_eq!(view.theirs.label, "topic");
+    assert_eq!(view.ours.commit.unwrap().subject, "main-edit");
+    assert_eq!(view.theirs.commit.unwrap().subject, "topic-edit");
+    let point = awegit_git::flow::checkpoint(&linked).unwrap();
+    assert_eq!(point.replay.unwrap().summary, "topic-edit");
+    assert_eq!(point.base.unwrap().summary, "base");
+    perform(&linked, Mutation::Abort).unwrap();
+}
+
 fn binary_merge_conflict() -> common::TempRepo {
     let repo = repo();
     fs::write(repo.path.join("sheet.xlsx"), b"PK\x03\x04base").unwrap();
