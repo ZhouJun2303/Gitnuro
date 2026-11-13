@@ -160,7 +160,7 @@ fn report_path(given: Option<String>, repo: &Path) -> PathBuf {
 /// Settings keep their call order. Writes run together, and each repository keeps its own order.
 fn dispatch(command: &str, job: Job) {
     let lane = match command {
-        "load_settings" | "save_settings" | "settings_path" | "import_fork_settings" | "watch_repository" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
+        "load_settings" | "save_settings" | "save_window_bounds" | "settings_path" | "import_fork_settings" | "watch_repository" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
         | "log_client" => Some((&SETTINGS_LANE, "awegit-settings")),
         _ => None,
     };
@@ -168,7 +168,14 @@ fn dispatch(command: &str, job: Job) {
         tauri::async_runtime::spawn_blocking(job);
         return;
     };
-    let sender = slot.get_or_init(|| {
+    let sender = settings_sender(slot, name);
+    if let Err(mpsc::SendError(job)) = sender.send(job) {
+        tauri::async_runtime::spawn_blocking(job);
+    }
+}
+
+fn settings_sender(slot: &'static OnceLock<Sender<Job>>, name: &'static str) -> &'static Sender<Job> {
+    slot.get_or_init(|| {
         let (sender, receiver) = mpsc::channel::<Job>();
         let _ = std::thread::Builder::new().name(name.into()).spawn(move || {
             for job in receiver {
@@ -176,10 +183,22 @@ fn dispatch(command: &str, job: Job) {
             }
         });
         sender
+    })
+}
+
+/// Run a job after the settings already queued, then wait for its result.
+///
+/// The sync finds credentials slowly and must not hold up every settings write
+/// meanwhile; it saves through this only once it knows what it found.
+fn on_settings_lane<T: Send + 'static>(job: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+    let (sender, receiver) = mpsc::channel();
+    let run: Job = Box::new(move || {
+        let _ = sender.send(job());
     });
-    if let Err(mpsc::SendError(job)) = sender.send(job) {
-        tauri::async_runtime::spawn_blocking(job);
+    if let Err(mpsc::SendError(run)) = settings_sender(&SETTINGS_LANE, "awegit-settings").send(run) {
+        run();
     }
+    receiver.recv().map_err(|_| "设置队列已停止".to_string())
 }
 
 fn git_cmd(dir: &Path) -> Option<PathBuf> {
@@ -766,6 +785,11 @@ fn save_settings(mut values: settings::Settings) -> Result<settings::Settings, S
     remember_fakeignore(values.fake_ignore);
     std::thread::spawn(flows::cleanup_known);
     Ok(values)
+}
+
+#[tauri::command]
+fn save_window_bounds(width: u32, height: u32, x: i32, y: i32) -> Result<(), String> {
+    settings::save_window_bounds(width, height, x, y)
 }
 
 #[tauri::command]
@@ -1963,12 +1987,20 @@ fn account_services() -> Vec<accounts::ServiceInfo> {
 }
 
 #[tauri::command]
-fn sync_accounts() -> Result<accounts::SyncReport, String> {
+fn sync_accounts() -> Result<settings::Settings, String> {
     if lab::lab_guarded() {
-        return Ok(accounts::SyncReport::quiet());
+        return settings::load();
     }
     let values = settings::load()?;
-    Ok(http::with_net(http::NetOptions::from_settings(&values), || accounts::sync_report(&values)))
+    let report = http::with_net(http::NetOptions::from_settings(&values), || accounts::sync_report(&values));
+    // Discovery is slow. Save what it found on the settings queue so it lands
+    // after the writes already asked for and cannot overwrite a newer list.
+    on_settings_lane(move || {
+        let mut current = settings::load()?;
+        accounts::merge_report(&mut current, &report);
+        settings::save(&current)?;
+        Ok(current)
+    })?
 }
 
 #[tauri::command]
@@ -2443,6 +2475,7 @@ pub fn run() {
             blame_file,
             load_settings,
             save_settings,
+            save_window_bounds,
             settings_path,
             import_fork_settings,
             external_tools,

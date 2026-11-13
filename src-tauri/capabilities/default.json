@@ -35,6 +35,7 @@
     "allow-blame-file",
     "allow-load-settings",
     "allow-save-settings",
+    "allow-save-window-bounds",
     "allow-settings-path",
     "allow-import-fork-settings",
     "allow-external-tools",

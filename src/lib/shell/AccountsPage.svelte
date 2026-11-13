@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { invoke } from "../perf";
-  import type { Account } from "../status";
+  import type { Account, Settings } from "../status";
   import { getShell } from "./context";
   import "./AccountsPage.css";
 
@@ -11,7 +11,6 @@
   type ServiceInfo = { id: string; label: string; host: string; tokenUrl: string; browser: boolean; probe: string };
   type AccountProbe = { code: string; login: string; name: string; email: string; avatarUrl: string; message: string };
   type LoginResult = { ok: boolean; needsToken: boolean; tokenUrl: string; account: Account | null; message: string };
-  type SyncReport = { added: Account[]; profiles: Account[]; clearLegacy: boolean };
   type RemoteMatch = { remote: string; url: string; protocol: string; host: string; accountId: string; label: string; ssh: boolean; reason: string };
 
   const gitForges = new Set(["atomgit", "gitcode", "coding", "codeup", "cnb", "sourcehut", "generic"]);
@@ -157,41 +156,15 @@
     syncing = true;
     notice = "";
     try {
-      const report = await invoke<SyncReport>("sync_accounts");
-      const added = report.added ?? [];
-      const profiles = report.profiles ?? [];
-      let next = shell.settings.accounts.map((item) => ({ ...item }));
-      let changed = false;
-      for (const item of added) {
-        const row = blankAccount(item);
-        if (next.some((account) => account.id === row.id)) {
-          next = next.map((account) => (account.id === row.id ? { ...account, ...row, token: row.token || account.token } : account));
-        } else {
-          next = [...next, row];
-        }
-        changed = true;
-      }
-      for (const profile of profiles) {
-        next = next.map((account) => {
-          if (account.id !== profile.id) return account;
-          changed = true;
-          return applyProbe(account, {
-            code: "ok",
-            login: profile.login,
-            name: profile.name,
-            email: profile.email,
-            avatarUrl: profile.avatarUrl,
-            message: "",
-          });
-        });
-      }
-      if (report.clearLegacy) {
-        shell.settings = { ...shell.settings, accounts: next, githubToken: "", gitlabToken: "", bitbucketToken: "", azureToken: "" };
-        changed = true;
-      } else if (changed) {
-        shell.settings = { ...shell.settings, accounts: next };
-      }
-      if (changed) await shell.savePrefs(false);
+      const saved = await invoke<Settings>("sync_accounts");
+      shell.settings = {
+        ...shell.settings,
+        accounts: saved.accounts,
+        githubToken: saved.githubToken,
+        gitlabToken: saved.gitlabToken,
+        bitbucketToken: saved.bitbucketToken,
+        azureToken: saved.azureToken,
+      };
     } catch (error) {
       shell.actionError = shell.message(error);
     } finally {

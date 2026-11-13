@@ -683,6 +683,18 @@ pub fn save(settings: &Settings) -> Result<(), String> {
     save_at(&path()?, settings)
 }
 
+/// Patch only the window geometry. Window moves happen while a slow sync is
+/// running, and they must never write back an older copy of the other fields.
+pub fn save_window_bounds(width: u32, height: u32, x: i32, y: i32) -> Result<(), String> {
+    let path = path()?;
+    let mut values = load_at(&path)?;
+    values.window_width = width;
+    values.window_height = height;
+    values.window_x = x;
+    values.window_y = y;
+    save_at(&path, &values)
+}
+
 enum ReadIssue {
     Corrupt,
     Newer(u64),
@@ -1754,6 +1766,7 @@ mod tests {
         dir: std::path::PathBuf,
         path: std::path::PathBuf,
         previous_secrets: Option<std::ffi::OsString>,
+        previous_settings: Option<std::ffi::OsString>,
     }
 
     impl TempSettings {
@@ -1765,7 +1778,9 @@ mod tests {
             let previous_secrets = std::env::var_os("AWEGIT_SECRET_DIR");
             unsafe { std::env::set_var("AWEGIT_SECRET_DIR", &secrets) };
             let path = dir.join("settings.json");
-            Self { dir, path, previous_secrets }
+            let previous_settings = std::env::var_os("AWEGIT_SETTINGS");
+            unsafe { std::env::set_var("AWEGIT_SETTINGS", &path) };
+            Self { dir, path, previous_secrets, previous_settings }
         }
     }
 
@@ -1774,6 +1789,10 @@ mod tests {
             match self.previous_secrets.take() {
                 Some(value) => unsafe { std::env::set_var("AWEGIT_SECRET_DIR", value) },
                 None => unsafe { std::env::remove_var("AWEGIT_SECRET_DIR") },
+            }
+            match self.previous_settings.take() {
+                Some(value) => unsafe { std::env::set_var("AWEGIT_SETTINGS", value) },
+                None => unsafe { std::env::remove_var("AWEGIT_SETTINGS") },
             }
             let _ = std::fs::remove_dir_all(&self.dir);
         }
@@ -1809,6 +1828,36 @@ mod tests {
         assert_eq!(loaded.theme, "dark");
         assert_eq!(loaded.github_token, "secret");
         assert!(loaded.recovery_notice.is_empty());
+    }
+
+    #[test]
+    fn window_bounds_save_keeps_accounts_and_other_fields() {
+        let dir = TempSettings::new();
+        let mut settings = sample_settings();
+        settings.accounts.push(Account {
+            id: "acct-1".into(),
+            forge: "github".into(),
+            label: "work".into(),
+            token: "token-1".into(),
+            host: "github.com".into(),
+            client_id: String::new(),
+            login: "octo".into(),
+            name: "Octo".into(),
+            email: String::new(),
+            avatar_url: String::new(),
+            default_for_host: true,
+        });
+        save_at(&dir.path, &settings).unwrap();
+        save_window_bounds(1400, 900, 12, 34).unwrap();
+        let loaded = load_at(&dir.path).unwrap();
+        assert_eq!(loaded.window_width, 1400);
+        assert_eq!(loaded.window_height, 900);
+        assert_eq!(loaded.window_x, 12);
+        assert_eq!(loaded.window_y, 34);
+        assert_eq!(loaded.theme, "dark");
+        assert_eq!(loaded.accounts.len(), 1);
+        assert_eq!(loaded.accounts[0].id, "acct-1");
+        assert_eq!(loaded.accounts[0].token, "token-1");
     }
 
     #[test]

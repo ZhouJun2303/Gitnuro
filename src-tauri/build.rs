@@ -22,6 +22,7 @@ fn main() {
             "blame_file",
             "load_settings",
             "save_settings",
+            "save_window_bounds",
             "settings_path",
             "import_fork_settings",
             "external_tools",

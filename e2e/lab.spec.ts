@@ -387,6 +387,35 @@ test("long dialogs keep their title and first field in view", async ({ page }) =
   expect(area.start).toBe(0);
 });
 
+test("account sync adopts the settings the backend saved", async ({ page }) => {
+  test.setTimeout(90_000);
+  let saves = 0;
+  await page.route("**/__lab/invoke", async (route) => {
+    const raw = route.request().postData();
+    if (!raw) return route.continue();
+    let body: { cmd?: string };
+    try {
+      body = JSON.parse(raw) as { cmd?: string };
+    } catch {
+      return route.continue();
+    }
+    if (body.cmd === "save_settings") saves += 1;
+    if (body.cmd !== "sync_accounts") return route.continue();
+    const payload = await (await route.fetch()).json();
+    const settings = payload.value ?? {};
+    settings.accounts = [
+      ...(settings.accounts ?? []),
+      { id: "acct-sync", forge: "github", label: "Synced", token: "tok", host: "github.com", clientId: "", login: "synced", name: "Synced", email: "", avatarUrl: "", defaultForHost: false },
+    ];
+    return route.fulfill({ json: { ok: true, value: settings } });
+  });
+  await openLabScene(page, "prefs-accounts", '[data-dialog="prefs"] .account-card');
+  saves = 0;
+  await page.getByRole("button", { name: /同步本机已登录的账号|Sync accounts already signed in/ }).click();
+  await expect(page.locator('[data-account-card="acct-sync"]')).toBeVisible();
+  expect(saves).toBe(0);
+});
+
 test("push and pull dialogs start with a branch", async ({ page }) => {
   await openLabScene(page, "dialog-push", '[data-dialog="push"]');
   const push = await page.locator('[data-dialog="push"] select').first().inputValue();

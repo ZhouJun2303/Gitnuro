@@ -47,12 +47,6 @@ pub struct SyncReport {
     pub clear_legacy: bool,
 }
 
-impl SyncReport {
-    pub fn quiet() -> Self {
-        Self { added: Vec::new(), profiles: Vec::new(), clear_legacy: false }
-    }
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginResult {
@@ -716,24 +710,26 @@ pub fn sync_report(settings: &Settings) -> SyncReport {
     let mut added = folded;
     let mut known = settings.accounts.clone();
     known.extend(added.iter().cloned());
-    for (host, forge) in discover_targets(settings) {
-        if known.iter().any(|item| item.forge == forge && hosts_match(item, &host) && !item.token.trim().is_empty()) {
-            continue;
-        }
-        let found = if forge == "github" { gh_token(&host).map(|token| (String::new(), token)) } else { None };
-        let Some((login, token)) = found.or_else(|| credential_fill(&host)) else { continue };
+    let pending: Vec<(String, String)> = discover_targets(settings)
+        .into_iter()
+        .filter(|(host, forge)| {
+            !known.iter().any(|item| item.forge == *forge && hosts_match(item, host) && !item.token.trim().is_empty())
+        })
+        .collect();
+    for ((host, forge), found) in pending.iter().zip(probe_targets(&pending, probe_host)) {
+        let Some((login, token)) = found else { continue };
         if !accept_secret(&token) {
             continue;
         }
-        if known.iter().any(|item| hosts_match(item, &host) && item.token.trim() == token) {
+        if known.iter().any(|item| hosts_match(item, host) && item.token.trim() == token) {
             continue;
         }
-        if !login.is_empty() && known.iter().any(|item| hosts_match(item, &host) && item.login.eq_ignore_ascii_case(&login) && !item.token.trim().is_empty()) {
+        if !login.is_empty() && known.iter().any(|item| hosts_match(item, host) && item.login.eq_ignore_ascii_case(&login) && !item.token.trim().is_empty()) {
             continue;
         }
-        let mut account = blank_account(&fresh_id(), &forge, &host, &token);
+        let mut account = blank_account(&fresh_id(), forge, host, &token);
         account.login = login;
-        account.default_for_host = !known.iter().any(|item| hosts_match(item, &host) && item.default_for_host);
+        account.default_for_host = !known.iter().any(|item| hosts_match(item, host) && item.default_for_host);
         apply_profile(&mut account);
         known.push(account.clone());
         added.push(account);
@@ -750,6 +746,91 @@ pub fn sync_report(settings: &Settings) -> SyncReport {
         }
     }
     SyncReport { added, profiles, clear_legacy }
+}
+
+/// Copy what a sync found into the settings that are about to be written.
+///
+/// A sync can overlap another one, and both may report the same credential under
+/// different ids. Match on the token or login as well as the id so the list never
+/// gains a second copy.
+pub fn merge_report(settings: &mut Settings, report: &SyncReport) {
+    for added in &report.added {
+        let token = added.token.trim();
+        let duplicate = settings.accounts.iter().any(|item| {
+            if item.id == added.id {
+                return true;
+            }
+            if !hosts_match(item, &added.host) || item.token.trim().is_empty() {
+                return false;
+            }
+            item.token.trim() == token
+                || (!added.login.trim().is_empty() && item.login.eq_ignore_ascii_case(added.login.trim()))
+        });
+        if duplicate {
+            continue;
+        }
+        settings.accounts.push(added.clone());
+    }
+    for profile in &report.profiles {
+        let Some(account) = settings.accounts.iter_mut().find(|item| item.id == profile.id) else {
+            continue;
+        };
+        if !profile.login.trim().is_empty() {
+            account.login = profile.login.clone();
+        }
+        if !profile.name.trim().is_empty() {
+            account.name = profile.name.clone();
+        }
+        if !profile.email.trim().is_empty() {
+            account.email = profile.email.clone();
+        }
+        if !profile.avatar_url.trim().is_empty() {
+            account.avatar_url = profile.avatar_url.clone();
+        }
+    }
+    if report.clear_legacy {
+        settings.github_token.clear();
+        settings.gitlab_token.clear();
+        settings.bitbucket_token.clear();
+        settings.azure_token.clear();
+    }
+}
+
+/// Look credentials up four hosts at a time. Each host waits on a keyring or a
+/// cold credential manager, so the waits overlap instead of adding up.
+const PROBE_WIDTH: usize = 4;
+
+fn probe_targets<F>(targets: &[(String, String)], probe: F) -> Vec<Option<(String, String)>>
+where
+    F: Fn(&str, &str) -> Option<(String, String)> + Sync,
+{
+    let mut found: Vec<Option<(String, String)>> = vec![None; targets.len()];
+    for (chunk_index, chunk) in targets.chunks(PROBE_WIDTH).enumerate() {
+        let base = chunk_index * PROBE_WIDTH;
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = chunk
+                .iter()
+                .map(|(host, forge)| scope.spawn(|| probe(host.as_str(), forge.as_str())))
+                .collect();
+            for (index, handle) in handles.into_iter().enumerate() {
+                found[base + index] = handle.join().unwrap_or(None);
+            }
+        });
+    }
+    found
+}
+
+fn probe_host(host: &str, forge: &str) -> Option<(String, String)> {
+    if forge != "github" {
+        return credential_fill(host);
+    }
+    std::thread::scope(|scope| {
+        let gh = scope.spawn(|| gh_token(host));
+        let git = scope.spawn(|| credential_fill(host));
+        let gh = gh.join().ok().flatten().map(|token| (String::new(), token));
+        let git = git.join().ok().flatten();
+        gh.or(git)
+    })
 }
 
 fn discover_targets(settings: &Settings) -> Vec<(String, String)> {
@@ -1082,10 +1163,13 @@ fn run_captured(
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if started.elapsed() > timeout => {
-                let _ = child.kill();
+                let _ = awegit_git::stop_process_tree(pid);
                 let _ = child.wait();
-                let _ = out_thread.join();
-                let _ = err_thread.join();
+                // A helper's own children can keep the pipes open after the direct
+                // child dies. Leave the readers detached so a slow keyring cannot
+                // hold the whole sync past its timeout.
+                drop(out_thread);
+                drop(err_thread);
                 if track {
                     let _ = LOGIN_PID.compare_exchange(pid, 0, Ordering::SeqCst, Ordering::SeqCst);
                 }
@@ -1268,6 +1352,59 @@ mod tests {
         let creds = credentials_for(&settings, &[target("https://github.com/a/b.git")], &[]);
         assert_eq!(creds.len(), 1);
         assert_eq!(creds[0].secret, "legacy-secret");
+    }
+
+    #[test]
+    fn sync_merge_keeps_one_copy_of_each_credential() {
+        let mut settings = Settings::default();
+        settings.accounts.push(account("saved", "github", "github.com", "octo", "TOKEN-ONE", true));
+        let report = SyncReport {
+            added: vec![
+                account("fresh", "github", "github.com", "octo", "TOKEN-ONE", false),
+                account("new", "gitlab", "gitlab.com", "gl", "TOKEN-TWO", true),
+            ],
+            profiles: vec![],
+            clear_legacy: false,
+        };
+        merge_report(&mut settings, &report);
+        assert_eq!(settings.accounts.len(), 2);
+        assert_eq!(settings.accounts[0].id, "saved");
+        assert_eq!(settings.accounts[1].id, "new");
+    }
+
+    #[test]
+    fn sync_merge_fills_profile_fields_and_clears_legacy_tokens() {
+        let mut settings = Settings::default();
+        settings.github_token = "legacy".into();
+        settings.accounts.push(account("kept", "github", "github.com", "", "TOKEN", false));
+        let mut profile = settings.accounts[0].clone();
+        profile.login = "octo".into();
+        profile.name = "Octo Cat".into();
+        profile.email = "octo@example.com".into();
+        profile.avatar_url = "https://example.com/a.png".into();
+        profile.token.clear();
+        let report = SyncReport { added: vec![], profiles: vec![profile], clear_legacy: true };
+        merge_report(&mut settings, &report);
+        assert_eq!(settings.accounts.len(), 1);
+        assert_eq!(settings.accounts[0].login, "octo");
+        assert_eq!(settings.accounts[0].name, "Octo Cat");
+        assert_eq!(settings.accounts[0].email, "octo@example.com");
+        assert_eq!(settings.accounts[0].token, "TOKEN");
+        assert!(settings.github_token.is_empty());
+    }
+
+    #[test]
+    fn probe_targets_keep_the_target_order() {
+        let targets = vec![
+            ("second.example".to_string(), "gitlab".to_string()),
+            ("first.example".to_string(), "github".to_string()),
+            ("third.example".to_string(), "gitea".to_string()),
+        ];
+        let found = probe_targets(&targets, |host, forge| Some((forge.to_string(), format!("token-{host}"))));
+        assert_eq!(found.len(), 3);
+        assert_eq!(found[0].as_ref().unwrap().0, "gitlab");
+        assert_eq!(found[1].as_ref().unwrap().1, "token-first.example");
+        assert_eq!(found[2].as_ref().unwrap().0, "gitea");
     }
 
     #[test]

@@ -1811,9 +1811,15 @@ export async function saveWindow(shell: ShellState) {
     const factor = await win.scaleFactor();
     const size = await win.innerSize();
     const position = await win.outerPosition();
-    shell.settings.windowWidth = Math.round(size.width / factor);
-    shell.settings.windowHeight = Math.round(size.height / factor);
-    shell.settings.windowX = Math.round(position.x / factor);
-    shell.settings.windowY = Math.round(position.y / factor);
-    shell.settings = await invoke<Settings>("save_settings", { values: shell.settings });
+    const width = Math.round(size.width / factor);
+    const height = Math.round(size.height / factor);
+    const x = Math.round(position.x / factor);
+    const y = Math.round(position.y / factor);
+    shell.settings.windowWidth = width;
+    shell.settings.windowHeight = height;
+    shell.settings.windowX = x;
+    shell.settings.windowY = y;
+    // Send only the bounds. A whole-settings save here would write back the
+    // list from before a long account sync finished.
+    await invoke("save_window_bounds", { width, height, x, y }).catch(() => {});
   }
