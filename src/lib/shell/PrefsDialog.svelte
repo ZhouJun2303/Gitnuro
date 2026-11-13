@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getShell } from "./context";
   import "./PrefsDialog.css";
-  import { invoke } from "../perf";
+  import AccountsPage from "./AccountsPage.svelte";
   import type { MenuItem, PrefTab } from "./types";
 
   const shell = getShell();
@@ -863,73 +863,14 @@
         <section class="pref-card">
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecTokens")}</h3>
           <div class="pref-card-body">
-            <label class="pref-row wide">
-              <span class="pref-label">{shell.tr("dialog.githubToken")}</span>
-              <span class="pref-control"><input type="password" bind:value={shell.settings.githubToken} /></span>
-            </label>
-            <label class="pref-row wide">
-              <span class="pref-label">{shell.tr("dialog.gitlabToken")}</span>
-              <span class="pref-control"><input type="password" bind:value={shell.settings.gitlabToken} /></span>
-            </label>
-            <label class="pref-row wide">
-              <span class="pref-label">{shell.tr("dialog.gitlabHost")}</span>
-              <span class="pref-control"><input bind:value={shell.settings.gitlabHost} placeholder="gitlab.com" /></span>
-            </label>
+            <p class="empty">{shell.tr("dialog.tokensMoved")}</p>
+            <div class="pref-card-actions">
+              <button class="text-button" type="button" onclick={() => void shell.selectPrefTab("accounts")}>{shell.tr("dialog.accountsPage")}</button>
+            </div>
           </div>
         </section>
       {:else if shell.prefTab === "accounts"}
-        <section class="pref-card">
-          <h3 class="pref-card-title">{shell.tr("dialog.prefSecAuthor")}</h3>
-          <div class="pref-card-body">
-            <label class="pref-row wide">
-              <span class="pref-label">{shell.tr("dialog.authorName")}</span>
-              <span class="pref-control"><input bind:value={shell.settings.authorName} placeholder={shell.tr("dialog.authorPlaceholder")} /></span>
-            </label>
-            <label class="pref-row wide">
-              <span class="pref-label">{shell.tr("dialog.authorEmail")}</span>
-              <span class="pref-control"><input bind:value={shell.settings.authorEmail} placeholder={shell.tr("dialog.authorPlaceholder")} /></span>
-            </label>
-            <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.gravatar} />
-              <span class="pref-label">{shell.tr("dialog.gravatar")}</span>
-            </label>
-            <div class="pref-card-actions">
-              <button class="text-button" type="button" onclick={() => invoke("set_repo_author", { path: shell.repoPath(), name: shell.settings.authorName, email: shell.settings.authorEmail }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("dialog.saveAuthorRepo")}</button>
-            </div>
-            <p class="empty">{shell.tr("dialog.repoLocalHint")}</p>
-          </div>
-        </section>
-
-        <section class="pref-card">
-          <h3 class="pref-card-title">{shell.tr("dialog.prefSecCredentials")}</h3>
-          <div class="pref-card-body">
-            <label class="pref-row wide">
-              <span class="pref-label">{shell.tr("dialog.signingPassphrase")}</span>
-              <span class="pref-control"><input type="password" bind:value={shell.passphrase} /></span>
-            </label>
-            <div class="pref-card-actions">
-              <button class="text-button" type="button" onclick={() => shell.keepPassphrase()}>{shell.tr("dialog.usePassphrase")}</button>
-            </div>
-            <label class="pref-row wide">
-              <span class="pref-label">{shell.tr("dialog.askpassUser")}</span>
-              <span class="pref-control"><input bind:value={shell.passUser} /></span>
-            </label>
-            <div class="pref-card-actions">
-              <button class="text-button" type="button" onclick={() => { shell.draft = "https"; shell.draftExtra = ""; shell.draftUser = ""; shell.draftSecret = ""; shell.dialog = "credential"; }}>{shell.tr("dialog.httpsLogin")}</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="pref-card">
-          <h3 class="pref-card-title">{shell.tr("dialog.prefSecKeys")}</h3>
-          <div class="pref-card-body">
-            <div class="pref-card-actions">
-              <button class="text-button" type="button" onclick={() => (shell.dialog = "accounts")}>{shell.tr("chrome.accounts")}</button>
-              <button class="text-button" type="button" onclick={() => void invoke<string>("read_ssh_config").then((text) => { shell.draft = text; shell.dialog = "ssh"; }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("chrome.sshConfig")}</button>
-              <button class="text-button" type="button" onclick={() => void invoke<string>("generate_ssh_key").then((key) => { shell.commandOutput = key; shell.dialog = "output"; }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("dialog.sshKey")}</button>
-            </div>
-          </div>
-        </section>
+        <AccountsPage />
       {:else if shell.prefTab === "advanced"}
         <section class="pref-card">
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecFlow")}</h3>

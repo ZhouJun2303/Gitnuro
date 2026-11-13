@@ -398,6 +398,13 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "pick_history" => done_result(super::pick_history(req(args, "path")?, req(args, "file")?, req(args, "text")?)),
         "activity_log" => done(crate::perf::activity()),
         "create_hosted_repo" => done("https://example.com/lab/hosted.git".to_string()),
+        "account_services" => done(crate::accounts::services()),
+        "sync_accounts" => done(crate::accounts::SyncReport::quiet()),
+        "test_account" => done(crate::accounts::lab_probe()),
+        "browser_login" => done(crate::accounts::lab_login()),
+        "cancel_browser_login" => Ok(Value::Null),
+        "remote_matches" => done(vec![crate::accounts::lab_remote()]),
+        "save_remote_account" => done_result(super::save_remote_account(req(args, "path")?, req(args, "remote")?, req(args, "accountId")?)),
         "device_start" => done(crate::forge::DeviceStart {
             verification_uri: "https://example.com/lab/device".into(),
             user_code: "LAB-CODE".into(),

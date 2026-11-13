@@ -44,7 +44,6 @@ export type Dialog =
     | "checkoutNotice"
     | "activity"
     | "mailmap"
-    | "accounts"
     | "ssh"
     | "stale"
     | "pushAs"

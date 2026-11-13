@@ -887,6 +887,39 @@ pub fn repo_sign_off_format(repo: &Path) -> String {
     value_key(repo, "signoff", "format")
 }
 
+/// `remote<TAB>account` pairs from `.git/awegit`. Empty when this repository has not chosen any.
+pub fn remote_account_overrides(repo: &Path) -> Vec<(String, String)> {
+    values_in(&local_text(repo), "awegit", "remoteAccount")
+        .into_iter()
+        .filter_map(|value| {
+            let (name, id) = value.split_once('\t')?;
+            let name = name.trim();
+            let id = id.trim();
+            if name.is_empty() || id.is_empty() {
+                None
+            } else {
+                Some((name.to_string(), id.to_string()))
+            }
+        })
+        .collect()
+}
+
+/// Remember which account serves one remote. An empty account id clears that remote.
+pub fn write_remote_account(repo: &Path, remote: &str, account_id: &str) -> Result<(), Error> {
+    let remote = remote.trim();
+    let account_id = account_id.trim();
+    if remote.is_empty() || remote.contains(['\n', '\r', '\0', '\t']) || account_id.contains(['\n', '\r', '\0', '\t']) {
+        return Err(Error::Rev("remote account".into()));
+    }
+    let mut pairs = remote_account_overrides(repo);
+    pairs.retain(|(name, _)| name != remote);
+    if !account_id.is_empty() {
+        pairs.push((remote.to_string(), account_id.to_string()));
+    }
+    let lines: Vec<String> = pairs.iter().map(|(name, id)| format!("{name}\t{id}")).collect();
+    rewrite_local_key(repo, "awegit", "remoteAccount", &lines)
+}
+
 pub fn write_sign_off(repo: &Path, enabled: bool, format: &str) -> Result<(), Error> {
     if format.contains(['\n', '\r', '\0']) {
         return Err(Error::Rev(format.to_string()));

@@ -315,6 +315,11 @@ export type Account = {
   token: string;
   host: string;
   clientId: string;
+  login: string;
+  name: string;
+  email: string;
+  avatarUrl: string;
+  defaultForHost: boolean;
 };
 
 export type WorkspaceRecord = {

@@ -396,7 +396,7 @@ pub struct CommandRecord {
 #[serde(rename_all = "camelCase")]
 pub struct Account {
     pub id: String,
-    /// `github`, `gitlab`, `bitbucket`, or `azure`.
+    /// `github`, `gitlab`, `bitbucket`, `azure`, `gitee`, `gitea`, or another forge id.
     pub forge: String,
     #[serde(default)]
     pub label: String,
@@ -406,6 +406,18 @@ pub struct Account {
     pub host: String,
     #[serde(default)]
     pub client_id: String,
+    /// Profile login. Empty until a connectivity test or a silent sync fills it.
+    #[serde(default)]
+    pub login: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub avatar_url: String,
+    /// The account HTTPS uses when a remote on this host has no username and no per-repo override.
+    #[serde(default)]
+    pub default_for_host: bool,
 }
 
 fn theme_default() -> String {
@@ -1886,6 +1898,11 @@ mod tests {
             token: "acct-secret".into(),
             host: String::new(),
             client_id: String::new(),
+            login: String::new(),
+            name: String::new(),
+            email: String::new(),
+            avatar_url: String::new(),
+            default_for_host: false,
         });
         save_at(&dir.path, &settings).unwrap();
         let disk = std::fs::read_to_string(&dir.path).unwrap();

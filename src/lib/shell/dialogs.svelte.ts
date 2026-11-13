@@ -20,6 +20,7 @@ import {
     type FilePreview,
     type InProgress,
     type RefSnapshot,
+    type Account,
     type Settings,
     type StatusFile,
     type StatusSnapshot,
@@ -1598,7 +1599,20 @@ export function removeCommand(shell: ShellState, id: string) {
   }
 
 export function saveAccount(shell: ShellState) {
-    const account = { id: shell.editingAccount || `acct-${Date.now()}`, forge: shell.hostForge, label: shell.draft || shell.hostForge, token: shell.draftUser, host: shell.draftExtra, clientId: shell.settings.oauthClientId };
+    const previous = shell.settings.accounts.find((item) => item.id === shell.editingAccount);
+    const account: Account = {
+      id: shell.editingAccount || `acct-${Date.now()}`,
+      forge: shell.hostForge,
+      label: shell.draft || shell.hostForge,
+      token: shell.draftUser,
+      host: shell.draftExtra,
+      clientId: shell.settings.oauthClientId,
+      login: previous?.login ?? "",
+      name: previous?.name ?? "",
+      email: previous?.email ?? "",
+      avatarUrl: previous?.avatarUrl ?? "",
+      defaultForHost: previous?.defaultForHost ?? false,
+    };
     const accounts = shell.editingAccount ? shell.settings.accounts.map((item) => (item.id === shell.editingAccount ? account : item)) : [...shell.settings.accounts, account];
     shell.settings = { ...shell.settings, accounts };
     shell.editingAccount = account.id;

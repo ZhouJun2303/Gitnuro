@@ -26,6 +26,10 @@
 
   const shell = new ShellState();
   setShell(shell);
+  const signedIn = $derived(
+    Boolean(shell.settings.githubToken || shell.settings.gitlabToken || shell.settings.bitbucketToken || shell.settings.azureToken)
+    || shell.settings.accounts.some((account) => account.token.trim().length > 0),
+  );
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const focusWhen = (node: HTMLInputElement, on: boolean) => shell.focusWhen(node, on);
   const fitMenu = (node: HTMLElement, spot: { x: number; y: number; anchorTop?: number }) => shell.fitMenu(node, spot);
@@ -1089,7 +1093,7 @@
         <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={() => (shell.forgeOpen = null)}>×</button>
         <h2 id="forge-title">{shell.forgeOpen === "notes" ? shell.tr("chrome.notifications") : shell.tr("chrome.pulls")}</h2>
         {#if shell.forgeOpen === "notes"}
-          {#if shell.notices.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noNotifications") : shell.tr("dialog.noToken")}</p>{/if}
+          {#if shell.notices.length === 0}<p class="empty">{signedIn || shell.mode !== "live" ? shell.tr("dialog.noNotifications") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.notices as notice (notice.id)}
             <div class="composer-row"><span>{notice.title}</span><span class="grow"></span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => { if (shell.mode === "live") void invoke("mark_notification", { id: notice.id }).then(() => (shell.notices = shell.notices.filter((item) => item.id !== notice.id))); else shell.notices = shell.notices.filter((item) => item.id !== notice.id); }}>{shell.tr("dialog.markRead")}</button></div>
           {/each}
@@ -1099,7 +1103,7 @@
             </div>
           {/if}
         {:else}
-          {#if shell.pulls.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noPulls") : shell.tr("dialog.noToken")}</p>{/if}
+          {#if shell.pulls.length === 0}<p class="empty">{signedIn || shell.mode !== "live" ? shell.tr("dialog.noPulls") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.pulls as pull (pull.url)}
             <div class="composer-row"><span>{pull.title}</span><span class="meta">{pull.author}</span><span class="grow"></span><button class="text-button" type="button" disabled={shell.mode !== "live"} onclick={() => shell.mutate({ action: "checkout", name: pull.branch })}>{shell.tr("dialog.checkoutBranch")}</button></div>
           {/each}

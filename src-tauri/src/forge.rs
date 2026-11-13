@@ -318,7 +318,7 @@ fn json_url(text: &str, keys: &[&str]) -> Result<String, String> {
     Err("the host did not return a repository".into())
 }
 
-fn basic_token(token: &str) -> String {
+pub(crate) fn basic_token(token: &str) -> String {
     let raw = format!(":{token}");
     base64_encode(raw.as_bytes())
 }

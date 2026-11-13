@@ -1,3 +1,4 @@
+mod accounts;
 mod ai;
 mod changes;
 mod forge;
@@ -491,6 +492,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
     };
     let _turn = repo_turn(&next);
     apply_session();
+    let _https = accounts::install_https(&repo, &request);
     record_action(&request);
     let action_name = action_label(&request);
     let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
@@ -1748,23 +1750,15 @@ fn launch_tool(path: Option<String>, kind: String, file: String, tool: Option<St
 }
 
 #[tauri::command]
-fn account_token(values: &settings::Settings, forge_name: &str, fallback: &str) -> String {
-    if !fallback.trim().is_empty() {
-        return fallback.to_string();
-    }
-    values
-        .accounts
-        .iter()
-        .find(|item| item.forge == forge_name && !item.token.trim().is_empty())
-        .map(|item| item.token.clone())
-        .unwrap_or_default()
+fn account_token(values: &settings::Settings, forge_name: &str, host: &str) -> String {
+    accounts::token_for(values, forge_name, host)
 }
 
 #[tauri::command]
 fn forge_notifications() -> Result<Vec<forge::Notice>, String> {
     let values = settings::load()?;
     http::with_net(http::NetOptions::from_settings(&values), || {
-        forge::notifications(&account_token(&values, "github", &values.github_token))
+        forge::notifications(&account_token(&values, "github", "github.com"))
     })
 }
 
@@ -1773,12 +1767,14 @@ fn forge_pulls(path: Option<String>) -> Result<Vec<forge::PullRequest>, String> 
     let repo = repo_from(path)?;
     let values = settings::load()?;
     let url = awegit_git::origin_url(&repo);
+    let host = accounts::parse_remote(&url).host;
+    let gitlab_host = if host.trim().is_empty() { values.gitlab_host.clone() } else { host.clone() };
     http::with_net(http::NetOptions::from_settings(&values), || {
         forge::pulls(
             &url,
-            &account_token(&values, "github", &values.github_token),
-            &account_token(&values, "gitlab", &values.gitlab_token),
-            &values.gitlab_host,
+            &account_token(&values, "github", &host),
+            &account_token(&values, "gitlab", &host),
+            &gitlab_host,
         )
     })
 }
@@ -1853,7 +1849,7 @@ fn scan_repositories(root: String, depth: Option<u32>) -> Result<awegit_git::Sca
 fn mark_notification(id: String) -> Result<(), String> {
     let values = settings::load()?;
     http::with_net(http::NetOptions::from_settings(&values), || {
-        forge::mark_read(&account_token(&values, "github", &values.github_token), &id)
+        forge::mark_read(&account_token(&values, "github", "github.com"), &id)
     })
 }
 
@@ -1861,7 +1857,7 @@ fn mark_notification(id: String) -> Result<(), String> {
 fn create_github_repo(name: String, private_repo: bool) -> Result<String, String> {
     let values = settings::load()?;
     http::with_net(http::NetOptions::from_settings(&values), || {
-        forge::create_repo(&account_token(&values, "github", &values.github_token), &name, private_repo)
+        forge::create_repo(&account_token(&values, "github", "github.com"), &name, private_repo)
     })
 }
 
@@ -1955,16 +1951,91 @@ fn activity_log() -> Vec<String> {
 #[tauri::command]
 fn create_hosted_repo(forge_name: String, name: String, private_repo: bool, host: String, org: String) -> Result<String, String> {
     let values = settings::load()?;
-    let fallback = match forge_name.as_str() {
-        "gitlab" => values.gitlab_token.clone(),
-        "bitbucket" => values.bitbucket_token.clone(),
-        "azure" => values.azure_token.clone(),
-        _ => values.github_token.clone(),
-    };
-    let token = account_token(&values, &forge_name, &fallback);
+    let token = account_token(&values, &forge_name, &host);
     http::with_net(http::NetOptions::from_settings(&values), || {
         forge::create_hosted(&forge_name, &token, &host, &name, private_repo, &org)
     })
+}
+
+#[tauri::command]
+fn account_services() -> Vec<accounts::ServiceInfo> {
+    accounts::services()
+}
+
+#[tauri::command]
+fn sync_accounts() -> Result<accounts::SyncReport, String> {
+    if lab::lab_guarded() {
+        return Ok(accounts::SyncReport::quiet());
+    }
+    let values = settings::load()?;
+    Ok(http::with_net(http::NetOptions::from_settings(&values), || accounts::sync_report(&values)))
+}
+
+#[tauri::command]
+fn test_account(
+    id: String,
+    forge_name: String,
+    label: String,
+    token: String,
+    host: String,
+    client_id: String,
+    login: String,
+    name: String,
+    email: String,
+    avatar_url: String,
+    default_for_host: bool,
+    probe_url: Option<String>,
+) -> Result<accounts::AccountProbe, String> {
+    if lab::lab_guarded() {
+        return Ok(accounts::lab_probe());
+    }
+    let account = settings::Account {
+        id,
+        forge: forge_name,
+        label,
+        token,
+        host,
+        client_id,
+        login,
+        name,
+        email,
+        avatar_url,
+        default_for_host,
+    };
+    let values = settings::load().unwrap_or_default();
+    Ok(http::with_net(http::NetOptions::from_settings(&values), || accounts::test_account(&account, probe_url.as_deref().unwrap_or(""))))
+}
+
+#[tauri::command]
+fn browser_login(forge_name: String, host: String) -> Result<accounts::LoginResult, String> {
+    if lab::lab_guarded() {
+        return Ok(accounts::lab_login());
+    }
+    let values = settings::load()?;
+    Ok(http::with_net(http::NetOptions::from_settings(&values), || accounts::browser_login(&values, &forge_name, &host)))
+}
+
+#[tauri::command]
+fn cancel_browser_login() {
+    accounts::cancel_browser_login();
+}
+
+#[tauri::command]
+fn remote_matches(path: Option<String>) -> Result<Vec<accounts::RemoteMatch>, String> {
+    if lab::lab_guarded() {
+        return Ok(vec![accounts::lab_remote()]);
+    }
+    let repo = repo_from(path)?;
+    let values = settings::load()?;
+    let remotes = awegit_git::remote_list(&repo);
+    let overrides = awegit_git::remote_account_overrides(&repo);
+    Ok(accounts::explain_remotes(&values, &remotes, &overrides))
+}
+
+#[tauri::command]
+fn save_remote_account(path: Option<String>, remote: String, account_id: String) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    awegit_git::write_remote_account(&repo, &remote, &account_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2430,6 +2501,13 @@ pub fn run() {
             pick_history,
             activity_log,
             create_hosted_repo,
+            account_services,
+            sync_accounts,
+            test_account,
+            browser_login,
+            cancel_browser_login,
+            remote_matches,
+            save_remote_account,
             device_start,
             device_poll,
             review_branch,

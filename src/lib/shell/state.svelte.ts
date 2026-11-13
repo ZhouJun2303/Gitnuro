@@ -2467,13 +2467,19 @@ export class ShellState {
       });
       const accounts = Array.from({ length: 24 }, (_, index) => {
         const n = String(index + 1).padStart(2, "0");
+        const github = index % 2 === 0;
         return {
           id: `lab-acct-${n}`,
-          forge: index % 2 === 0 ? "github" : "gitlab",
+          forge: github ? "github" : "gitlab",
           label: `lab-${n}`,
           token: `lab-token-${n}`,
-          host: index % 2 === 0 ? "github.com" : "gitlab.com",
+          host: github ? "github.com" : "gitlab.com",
           clientId: `lab-client-${n}`,
+          login: `lab-${n}`,
+          name: `Lab ${n}`,
+          email: `lab${n}@example.com`,
+          avatarUrl: "",
+          defaultForHost: index < 2,
         };
       });
       const workspaces = Array.from({ length: 24 }, (_, index) => {
@@ -3476,7 +3482,14 @@ export class ShellState {
       })),
       commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })),
       expandedGroups: value.expandedGroups ?? [],
-      accounts: value.accounts ?? [],
+      accounts: (value.accounts ?? []).map((item) => ({
+        ...item,
+        login: item.login ?? "",
+        name: item.name ?? "",
+        email: item.email ?? "",
+        avatarUrl: item.avatarUrl ?? "",
+        defaultForHost: item.defaultForHost ?? false,
+      })),
       tabLabels: value.tabLabels ?? [],
       tabColors: value.tabColors ?? [],
       pinnedRefs: value.pinnedRefs ?? [],

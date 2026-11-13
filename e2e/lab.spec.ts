@@ -345,10 +345,10 @@ test("open dialog keeps every source row readable", async ({ page }) => {
 });
 
 test("long dialogs keep their title and first field in view", async ({ page }) => {
-  await openLabScene(page, "dialog-accounts", '[data-dialog="accounts"]');
-  await expect(page.locator('[data-dialog="accounts"] h2')).toBeInViewport();
-  const scrolled = await page.locator('[data-dialog="accounts"] form').evaluate((node) => node.scrollTop);
-  expect(scrolled).toBe(0);
+  await openLabScene(page, "prefs-accounts", '[data-dialog="prefs"] .account-card');
+  await expect(page.locator('[data-dialog="prefs"] .account-card').first()).toBeInViewport();
+  const accountScroll = await page.locator('[data-dialog="prefs"] .pref-page').evaluate((node) => node.scrollTop);
+  expect(accountScroll).toBe(0);
   await openLabScene(page, "prefs-git", '[data-dialog="prefs"]');
   const prefScroll = await page.locator('[data-dialog="prefs"] .pref-page').evaluate((node) => node.scrollTop);
   expect(prefScroll).toBe(0);

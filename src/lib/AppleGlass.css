@@ -179,6 +179,7 @@
 :root[data-theme="apple"] .image-toolbar button.on { background: rgba(255, 255, 255, 0.95); box-shadow: 0 1px 4px rgba(52, 38, 48, 0.1); }
 :root[data-theme="apple"] :is(.image-box, .update-notes, .update-silent, .confirm-files, .merge-conflict-log) { border-color: var(--glass-edge); box-shadow: inset 0 1px 0 #fff; }
 :root[data-theme="apple"] :is(.account-list, .workspace-list, .editor-candidates, .branch-pick-list, .merge-route) { border-color: var(--glass-edge); background: rgba(255, 255, 255, 0.4); }
+:root[data-theme="apple"] :is(.account-card, .service-tile) { border-color: var(--glass-edge); background: rgba(255, 255, 255, 0.62); }
 :root[data-theme="apple"] .lab-grid a { border-color: var(--glass-edge); background: var(--glass); box-shadow: var(--glass-shadow); }
 
 /* Standalone windows receive their own backdrop and stable glass surfaces. */

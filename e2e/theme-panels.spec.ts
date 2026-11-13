@@ -57,7 +57,7 @@ const pages: PanelPage[] = [
   { name: "preferences integration editor", scene: "prefs-integration-editor", tab: "integration", tool: "editor", panels: [".pref-page", ".tool-tabs", ".tool-fields"] },
   { name: "preferences commands", scene: "prefs-commands", tab: "commands", panels: [".pref-page", ".pref-card"] },
   { name: "preferences network", scene: "prefs-network", tab: "network", panels: [".pref-page", ".pref-card"] },
-  { name: "preferences accounts", scene: "prefs-accounts", tab: "accounts", panels: [".pref-page", ".pref-card"] },
+  { name: "preferences accounts", scene: "prefs-accounts", tab: "accounts", panels: [".pref-page", ".account-card", "[data-account-test]", "[data-remote-match]"] },
   { name: "preferences advanced", scene: "prefs-advanced", tab: "advanced", panels: [".pref-page", ".pref-card"] },
 ];
 
@@ -117,9 +117,28 @@ for (const theme of themes) {
         if (item.history) await expectHistoryWeights(page, theme.name);
         if (item.remote) await expectRemoteSubject(page);
         if (item.merge) await expectMergeFrame(page, theme.name);
+        if (item.scene === "prefs-accounts") await expectAccountActions(page, theme.locale);
       });
     }
   });
+}
+
+async function expectAccountActions(page: Page, locale: "zh" | "en") {
+  const connected = locale === "zh" ? "已连通" : "Connected";
+  const paste = locale === "zh"
+    ? "这台电脑没有可用的浏览器登录。请创建令牌后粘贴到下面。"
+    : "This machine has no browser sign-in for this forge. Create a token and paste it below.";
+  const card = page.locator('[data-account-card="lab-github"]');
+  await card.locator("[data-account-test]").click();
+  await expect(card.locator(".account-status")).toHaveText(connected);
+  await expect(page.locator('[data-remote-match="origin"] select')).toHaveValue("lab-github");
+  const browser = page.getByRole("button", { name: locale === "zh" ? "用浏览器登录" : "Sign in with the browser" });
+  await expect(browser).toBeEnabled({ timeout: 15_000 });
+  await browser.click();
+  await expect(page.locator(".account-sync-line")).toContainText(paste);
+  const add = page.locator("section.pref-card").filter({ hasText: locale === "zh" ? "添加账号" : "Add an account" });
+  await add.getByRole("button", { name: locale === "zh" ? "测试连通" : "Test connection" }).click();
+  await expect(add.locator(".account-note").filter({ hasText: connected })).toBeVisible();
 }
 
 async function weight(node: ReturnType<Page["locator"]>) {

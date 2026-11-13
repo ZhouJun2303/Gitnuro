@@ -27,7 +27,7 @@
   }
   let primedDialog = "";
   let lastFocus: HTMLElement | null = null;
-  const largeDialogs = new Set(["prefs", "stats", "rebase", "accounts", "output", "mergeConflict"]);
+  const largeDialogs = new Set(["prefs", "stats", "rebase", "output", "mergeConflict"]);
   const smallDialogs = new Set(["reset", "branch", "tag", "rename", "upstream", "reword", "remote", "submodule", "worktree", "continue", "about", "features", "checkoutNotice", "stashRename", "stashBranch", "renameTab", "colorTab", "groupRename", "askInput", "workspace", "credential"]);
   function dialogSize(kind: string) {
     if (largeDialogs.has(kind)) return "lg";
@@ -783,35 +783,6 @@
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.save")}</button>
-          </div>
-        {:else if shell.dialog === "accounts"}
-          <h2>{shell.tr("chrome.accounts")}</h2>
-          <div class="account-list">
-            {#each shell.settings.accounts as account (account.id)}
-              <div class="composer-row">
-                <button class="text-button" type="button" onclick={() => { shell.editingAccount = account.id; shell.hostForge = account.forge; shell.draft = account.label; shell.draftExtra = account.host; shell.draftUser = account.token; shell.settings.oauthClientId = account.clientId; }}>{account.forge} {account.label}</button>
-                <span class="grow"></span>
-                <button class="text-button danger" type="button" onclick={() => shell.ask(shell.tr("menu.delete"), shell.tr("dialog.deleteAccountBody"), () => { shell.settings = { ...shell.settings, accounts: shell.settings.accounts.filter((item) => item.id !== account.id) }; if (shell.editingAccount === account.id) shell.editingAccount = ""; void shell.savePrefs(false); }, [], { subject: `${account.forge} · ${account.label}`, danger: true })}>{shell.tr("menu.delete")}</button>
-              </div>
-            {/each}
-          </div>
-          <select aria-label={shell.tr("dialog.forge")} bind:value={shell.hostForge}>
-            <option value="github">GitHub</option>
-            <option value="gitlab">GitLab</option>
-            <option value="bitbucket">Bitbucket</option>
-            <option value="azure">Azure</option>
-          </select>
-          <label>{shell.tr("dialog.name")}<input bind:value={shell.draft} /></label>
-          <label>{shell.tr("dialog.host")}<input bind:value={shell.draftExtra} /></label>
-          <label>{shell.tr("dialog.token")}<input type="password" bind:value={shell.draftUser} /></label>
-          <label>{shell.tr("dialog.clientId")}<input bind:value={shell.settings.oauthClientId} /></label>
-          <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => void invoke<{ verificationUri: string; userCode: string }>("device_start", { forgeName: shell.hostForge, clientId: shell.settings.oauthClientId, host: shell.draftExtra }).then((value) => { shell.commandOutput = `${value.userCode}\n${value.verificationUri}`; shell.dialog = "output"; if (value.verificationUri) void openUrl(value.verificationUri); }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("dialog.deviceLogin")}</button>
-            <button class="text-button" type="button" onclick={() => void invoke<string>("device_poll").then((token) => { if (token === "pending") { shell.actionError = shell.tr("dialog.pending"); return; } shell.draftUser = token; }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("dialog.pending")}</button>
-          </div>
-          <div class="composer-row actions">
-            <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="button" onclick={shell.saveAccount.bind(shell)}>{shell.editingAccount ? shell.tr("menu.update") : shell.tr("dialog.save")}</button>
           </div>
         {:else if shell.dialog === "ssh"}
           <h2>{shell.tr("chrome.sshConfig")}</h2>

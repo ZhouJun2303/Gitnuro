@@ -561,6 +561,45 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
         shell.toolKind = "editor";
         shell.toolPick = "lab-editor-cursor";
       }
+      if (sceneId === "prefs-accounts") {
+        shell.settings = {
+          ...shell.settings,
+          authorName: "Lab User",
+          authorEmail: "lab@example.com",
+          githubToken: "",
+          gitlabToken: "",
+          bitbucketToken: "",
+          azureToken: "",
+          accounts: [
+            {
+              id: "lab-github",
+              forge: "github",
+              label: "Lab GitHub",
+              token: "",
+              host: "github.com",
+              clientId: "",
+              login: "lab",
+              name: "Lab User",
+              email: "lab@example.com",
+              avatarUrl: "",
+              defaultForHost: true,
+            },
+            {
+              id: "lab-gitlab",
+              forge: "gitlab",
+              label: "Lab GitLab",
+              token: "",
+              host: "gitlab.com",
+              clientId: "",
+              login: "lab",
+              name: "Lab User",
+              email: "lab@example.com",
+              avatarUrl: "",
+              defaultForHost: true,
+            },
+          ],
+        };
+      }
       break;
     }
     case "update":
@@ -744,26 +783,6 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
         const n = pad(index + 1);
         return `Lab Author ${n} <lab${n}@example.com> <alias${n}@example.com>`;
       }).join("\n") + "\n";
-      break;
-    case "accounts":
-      shell.settings = {
-        ...shell.settings,
-        accounts: Array.from({ length: FILL }, (_, index) => {
-          const n = pad(index + 1);
-          return {
-            id: `lab-acct-${n}`,
-            forge: index % 2 === 0 ? "github" : "gitlab",
-            label: `lab-${n}`,
-            token: `lab-token-${n}`,
-            host: index % 2 === 0 ? "github.com" : "gitlab.com",
-            clientId: `lab-client-${n}`,
-          };
-        }),
-      };
-      shell.hostForge = "github";
-      shell.draft = "lab-01";
-      shell.draftExtra = "github.com";
-      shell.draftUser = "lab-token-01";
       break;
     case "ssh":
       shell.draft = Array.from({ length: FILL }, (_, index) => {

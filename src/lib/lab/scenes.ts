@@ -69,7 +69,6 @@ export const dialogScenes = {
   checkoutNotice: dialog("checkoutNotice", "检出后的贮藏"),
   activity: dialog("activity", "活动"),
   mailmap: dialog("mailmap", "mailmap"),
-  accounts: dialog("accounts", "账户", "full", "叠层"),
   ssh: dialog("ssh", "SSH 配置", "full", "叠层"),
   stale: dialog("stale", "已合并分支"),
   pushAs: dialog("pushAs", "推送到指定分支", "ahead"),
