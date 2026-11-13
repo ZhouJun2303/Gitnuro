@@ -48,6 +48,7 @@
     "allow-pick-file",
     "core:window:allow-set-title",
     "core:window:allow-close",
+    "core:window:allow-destroy",
     "core:window:allow-set-theme",
     "allow-suggest-commit-message",
     "allow-test-ai-endpoint",
