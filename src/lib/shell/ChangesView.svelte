@@ -103,6 +103,8 @@
     }
   }
 
+  // The menu renders outside the right pane: the Apple theme's backdrop-filter there
+  // would otherwise become the containing block for the fixed-position menu.
   function placeTypeMenu(node: HTMLElement) {
     const place = () => {
       const chip = document.querySelector<HTMLElement>(".composer .type-chip");
@@ -112,7 +114,7 @@
       const gap = 6;
       const spaceBelow = window.innerHeight - rect.bottom - gap - 8;
       const spaceAbove = rect.top - gap - 8;
-      const openUp = spaceBelow < 220 && spaceAbove > spaceBelow;
+      const openUp = spaceAbove >= 220 || spaceAbove >= spaceBelow;
       node.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
       node.style.width = `${width}px`;
       node.style.maxHeight = `${Math.max(120, Math.min(320, openUp ? spaceAbove : spaceBelow))}px`;
@@ -234,26 +236,6 @@
                 <span class="type-name">{shell.commitType}</span>
                 <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
-              {#if typeOpen}
-                <button class="type-dismiss" type="button" tabindex="-1" aria-label={shell.tr("chrome.close")} onclick={() => (typeOpen = false)}></button>
-                <div class="type-menu" role="listbox" aria-label={shell.tr("chrome.commitType")} use:placeTypeMenu>
-                  {#each shell.commitTypeList() as type (type.name)}
-                    <button
-                      class="type-option"
-                      class:selected={type.name === shell.commitType}
-                      type="button"
-                      role="option"
-                      aria-selected={type.name === shell.commitType}
-                      style:--type-color={type.color}
-                      onclick={() => pickType(type.name)}
-                    >
-                      <span class="type-swatch" aria-hidden="true"></span>
-                      <span class="type-name">{type.name}</span>
-                      <span class="type-detail">{shell.commitTypeLabel(type.name)}</span>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
             </div>
             <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} aria-label={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength={shell.summaryRoom} aria-invalid={shell.summaryTooLong || (!shell.skipHooks && shell.summary.trim().length > 0 && !shell.summaryFitsConvention)} spellcheck={shell.settings.spellChecking === "enable"} oninput={() => shell.normalizeSummary()} />
             <button
@@ -283,6 +265,27 @@
           </div>
         </form>
       </div>
+
+{#if typeOpen}
+  <button class="type-dismiss" type="button" tabindex="-1" aria-label={shell.tr("chrome.close")} onclick={() => (typeOpen = false)}></button>
+  <div class="type-menu" role="listbox" aria-label={shell.tr("chrome.commitType")} use:placeTypeMenu>
+    {#each shell.commitTypeList() as type (type.name)}
+      <button
+        class="type-option"
+        class:selected={type.name === shell.commitType}
+        type="button"
+        role="option"
+        aria-selected={type.name === shell.commitType}
+        style:--type-color={type.color}
+        onclick={() => pickType(type.name)}
+      >
+        <span class="type-swatch" aria-hidden="true"></span>
+        <span class="type-name">{type.name}</span>
+        <span class="type-detail">{shell.commitTypeLabel(type.name)}</span>
+      </button>
+    {/each}
+  </div>
+{/if}
 
 {#snippet dirRow(path: string, side: Side, depth: number)}
       {@const open = !shell.collapsedDirs.includes(path)}
