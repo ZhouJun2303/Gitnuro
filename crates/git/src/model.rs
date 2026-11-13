@@ -116,6 +116,8 @@ pub struct WorktreeRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefSnapshot {
+    #[serde(default)]
+    pub revision: u64,
     /// Commit HEAD points at, so the UI can tell which history row is rewordable.
     #[serde(default)]
     pub head: Option<String>,
@@ -497,8 +499,10 @@ pub fn commit_detail(repo: &Path, id: &str) -> Result<CommitDetail, Error> {
         run(
             repo,
             &[
-                "show",
-                "-s",
+                "log",
+                "-1",
+                "--no-walk",
+                "--no-patch",
                 "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%P%x1f%s%x1e%b",
                 id,
             ],
@@ -550,13 +554,14 @@ pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .filter(|id| !id.is_empty());
     std::thread::scope(|scope| {
-        let branches = scope.spawn(|| local_branches(repo));
-        let remotes = scope.spawn(|| remotes(repo));
-        let tags = scope.spawn(|| tags(repo));
-        let stashes = scope.spawn(|| stashes(repo));
-        let submodules = scope.spawn(|| submodules(repo));
+        let branches = scope.spawn(crate::timing::inherit(|| local_branches(repo)));
+        let remotes = scope.spawn(crate::timing::inherit(|| remotes(repo)));
+        let tags = scope.spawn(crate::timing::inherit(|| tags(repo)));
+        let stashes = scope.spawn(crate::timing::inherit(|| stashes(repo)));
+        let submodules = scope.spawn(crate::timing::inherit(|| submodules(repo)));
         let worktrees = worktrees(repo);
         Ok(RefSnapshot {
+            revision: 0,
             head,
             branches: joined(branches)?,
             remotes: joined(remotes)?,
@@ -1616,6 +1621,11 @@ pub fn ignored_paths(repo: &Path, paths: &[String]) -> Vec<String> {
     if paths.is_empty() {
         return Vec::new();
     }
+    // Fresh stacks see index and all ignore-rule changes without a long-lived cache.
+    // Keep porcelain as a fallback for repositories gitoxide cannot read.
+    if let Some(ignored) = ignored_paths_native(repo, paths) {
+        return ignored;
+    }
     let mut input = Vec::new();
     for path in paths {
         input.extend_from_slice(path.as_bytes());
@@ -1630,6 +1640,29 @@ pub fn ignored_paths(repo: &Path, paths: &[String]) -> Vec<String> {
         .filter(|path| !path.is_empty())
         .map(|path| String::from_utf8_lossy(path).into_owned())
         .collect()
+}
+
+fn ignored_paths_native(path: &Path, paths: &[String]) -> Option<Vec<String>> {
+    let repo = crate::open_repo(path).ok()?;
+    // gitoxide 0.73 builds info/exclude from git_dir rather than common_dir.
+    if repo.git_dir() != repo.common_dir() { return None; }
+    let index = repo.index_or_empty().ok()?;
+    let ignore_case = repo.config_snapshot().boolean("core.ignorecase").unwrap_or(false);
+    let mut icase = None;
+    let mut excludes = repo.excludes(&index, None, Default::default()).ok()?;
+    let mut ignored = Vec::new();
+    for path in paths {
+        if index.entry_by_path(gix::bstr::BStr::new(path.as_bytes())).is_some() {
+            continue;
+        }
+        let mode = std::fs::symlink_metadata(repo.workdir().unwrap_or_else(|| repo.git_dir()).join(path)).is_ok_and(|meta| meta.is_dir())
+            .then_some(gix::index::entry::Mode::DIR);
+        if excludes.at_path(path, mode).ok()?.is_excluded() {
+            if ignore_case && index.entry_by_path_icase(gix::bstr::BStr::new(path.as_bytes()), true, icase.get_or_insert_with(|| index.prepare_icase_backing())).is_some() { continue; }
+            ignored.push(path.clone());
+        }
+    }
+    Some(ignored)
 }
 
 /// Gitlinks named in `.gitmodules`. `git submodule status` also describes each commit, which costs

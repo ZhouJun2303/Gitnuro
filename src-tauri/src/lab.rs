@@ -438,6 +438,8 @@ pub fn lab_invoke(command: &str, args: Value) -> Result<Value, String> {
 pub fn run_lab() {
     isolate_lab_secrets();
     crate::perf::init();
+    awegit_git::set_trace(crate::perf::git);
+    awegit_git::set_timing_trace(crate::perf::stage);
     let listener = TcpListener::bind("127.0.0.1:1429").unwrap_or_else(|error| {
         eprintln!("awegit-lab could not listen on 127.0.0.1:1429: {error}");
         std::process::exit(1);
@@ -503,6 +505,8 @@ fn serve(stream: &mut TcpStream) -> Result<(), String> {
     let request: Value = serde_json::from_slice(&body).map_err(|error| error.to_string())?;
     let command = request.get("cmd").and_then(Value::as_str).unwrap_or("").to_string();
     let args = request.get("args").cloned().unwrap_or_else(|| json!({}));
+    let _span = (!matches!(command.as_str(), "log_client" | "perf_snapshot"))
+        .then(|| super::perf::command_with_id(&command, args.get("__perf").and_then(Value::as_str)));
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lab_invoke(&command, args)));
     let payload = match outcome {
         Ok(Ok(value)) => json!({ "ok": true, "value": value }),

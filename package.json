@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "node ./scripts/lab-dev.mjs",
     "lab:seed": "node ./scripts/lab-seed.mjs",
+    "perf:seed": "node ./scripts/lab-seed.mjs --performance",
+    "perf:backend": "node ./scripts/perf-bench.mjs",
     "test:ui": "node ./scripts/lab-test.mjs",
     "start": "node ./scripts/with-rust-path.mjs tauri dev",
     "build": "vite build",

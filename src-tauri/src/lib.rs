@@ -1,10 +1,12 @@
 mod ai;
+mod changes;
 mod forge;
 mod flow_window;
 mod flows;
 mod http;
 mod lab;
 mod perf;
+mod reads;
 mod secrets;
 mod settings;
 mod tools;
@@ -75,6 +77,7 @@ struct RepoWatch(Mutex<HashMap<PathBuf, Arc<WatchSlot>>>);
 struct RepoChange {
     refs: bool,
     path: String,
+    revision: u64,
 }
 
 /// Transfer percent for one repository. The shell shows it only while that repository is open.
@@ -97,10 +100,12 @@ struct RepoTicket {
 
 struct RepoTurn {
     gate: Arc<RepoGate>,
+    repo: PathBuf,
 }
 
 impl Drop for RepoTurn {
     fn drop(&mut self) {
+        changes::changed(&self.repo);
         let mut guard = self.gate.inner.lock().unwrap_or_else(|err| err.into_inner());
         guard.serving = guard.serving.saturating_add(1);
         self.gate.cv.notify_all();
@@ -108,6 +113,7 @@ impl Drop for RepoTurn {
 }
 
 fn repo_turn(repo: &Path) -> RepoTurn {
+    let _phase = perf::phase("write-queue");
     let key = awegit_git::repo_key(repo);
     let gate = {
         let mut map = repo_gates().lock().unwrap_or_else(|err| err.into_inner());
@@ -138,7 +144,8 @@ fn repo_turn(repo: &Path) -> RepoTurn {
         guard = gate.cv.wait(guard).unwrap_or_else(|err| err.into_inner());
     }
     drop(guard);
-    RepoTurn { gate }
+    changes::changed(repo);
+    RepoTurn { gate, repo: repo.to_path_buf() }
 }
 
 fn report_path(given: Option<String>, repo: &Path) -> PathBuf {
@@ -207,11 +214,16 @@ fn repo_from(path: Option<String>) -> Result<PathBuf, String> {
     let found = awegit_git::discover(&start).unwrap_or_else(|| start.clone());
     lab::ensure_lab_path(&start)?;
     lab::ensure_lab_path(&found)?;
+    awegit_git::timing_repository(&found);
     Ok(found)
 }
 
 fn read_status(repo: &Path) -> Result<awegit_git::StatusSnapshot, String> {
-    awegit_git::status_with(repo, use_fakeignore()).map_err(|error| error.to_string())
+    let _phase = perf::phase("status");
+    let revision = changes::revision(repo);
+    let mut status = awegit_git::status_with(repo, use_fakeignore()).map_err(|error| error.to_string())?;
+    status.revision = revision;
+    Ok(status)
 }
 
 fn use_fakeignore() -> bool {
@@ -269,7 +281,8 @@ fn write_kind_then_status(path: Option<String>, kind: &str, write: impl FnOnce(&
 #[tauri::command]
 fn workspace_status(path: Option<String>) -> Result<awegit_git::StatusSnapshot, String> {
     let repo = repo_from(path)?;
-    let status = read_status(&repo)?;
+    let revision = changes::revision(&repo);
+    let status = reads::shared(format!("status:{}:{revision}:{}", awegit_git::repo_key(&repo), use_fakeignore()), || read_status(&repo))?;
     flows::reconcile(&repo);
     Ok(status)
 }
@@ -374,6 +387,8 @@ fn commit_log(
     let repo = repo_from(path)?;
     let limit = limit.unwrap_or(500);
     let topo = order.as_deref() == Some("topo");
+    let key = format!("log:{}:{}:{limit}:{topo}:{all:?}:{revs:?}", awegit_git::repo_key(&repo), changes::revision(&repo));
+    reads::shared(key, || {
     if let Some(revs) = revs.as_ref().filter(|items| !items.is_empty()) {
         return awegit_git::commits_from(&repo, limit, revs, topo).map_err(|error| error.to_string());
     }
@@ -383,6 +398,7 @@ fn commit_log(
         awegit_git::branch_commits_sorted(&repo, limit, topo)
     };
     rows.map_err(|error| error.to_string())
+    })
 }
 
 #[tauri::command]
@@ -401,7 +417,12 @@ fn locate_ref(path: Option<String>, name: String, order: Option<String>) -> Resu
 #[tauri::command]
 fn repository_refs(path: Option<String>) -> Result<awegit_git::RefSnapshot, String> {
     let repo = repo_from(path)?;
-    awegit_git::repository_refs(&repo).map_err(|error| error.to_string())
+    let revision = changes::revision(&repo);
+    reads::shared(format!("refs:{}:{revision}", awegit_git::repo_key(&repo)), || {
+        let mut refs = awegit_git::repository_refs(&repo).map_err(|error| error.to_string())?;
+        refs.revision = revision;
+        Ok(refs)
+    })
 }
 
 #[tauri::command]
@@ -469,9 +490,10 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
     apply_session();
     record_action(&request);
     let action_name = action_label(&request);
-    let flow = flows::begin(&repo, &request);
+    let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
     let report = report_path(given, &repo);
     let action = || awegit_git::capture_output(|| awegit_git::with_operation_repo(&report, || {
+        let _phase = perf::phase("perform");
         let output = if retry_stash.unwrap_or(false) { awegit_git::perform_stashed(&repo, request)? } else { awegit_git::perform(&repo, request)? };
         if matches!(action_name, "resolve" | "resolvePaths" | "stagePaths" | "stageHunk" | "stageLine" | "stageLines") {
             awegit_git::flow::restore_pending(&repo)?;
@@ -479,7 +501,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         Ok::<_, awegit_git::Error>(output)
     }));
     let (result, log) = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
-    let flow = flow.map(|flow| flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name));
+    let flow = flow.map(|flow| { let _phase = perf::phase("flow-finish"); flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name) });
     let status = read_status(&next)?;
     let conflicted = status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict);
     let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
@@ -802,10 +824,21 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
             }
         }
     }
-    let (sender, receiver) = mpsc::channel::<Vec<PathBuf>>();
+    let (sender, receiver) = mpsc::channel::<(u64, Vec<PathBuf>)>();
+    let event_repo = repo.clone();
     let mut watcher = notify::recommended_watcher(move |result: Result<Event, notify::Error>| {
-        if let Ok(event) = result {
-            let _ = sender.send(event.paths);
+        match result {
+            Ok(event) if !matches!(event.kind, notify::EventKind::Access(_)) => {
+                if event.paths.iter().any(|path| watch_relevant(&event_repo, path)) || event.need_rescan() {
+                    let revision = changes::changed(&event_repo);
+                    let _ = sender.send((revision, if event.need_rescan() { vec![event_repo.join(".git/HEAD")] } else { event.paths }));
+                }
+            }
+            Err(_) => {
+                let revision = changes::changed(&event_repo);
+                let _ = sender.send((revision, vec![event_repo.join(".git/HEAD")]));
+            }
+            _ => {}
         }
     })
     .map_err(|error| error.to_string())?;
@@ -815,19 +848,10 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
     watch_one(&mut watcher, &repo, RecursiveMode::NonRecursive, &mut watched)?;
     if let Some(git) = &git_dir {
         watch_git_metadata(&mut watcher, git, &mut watched);
+        let common = common_metadata_dir(git);
+        if common != *git { watch_git_metadata(&mut watcher, &common, &mut watched); }
     }
-    let tracked = awegit_git::tracked_directories(&repo, 4_000);
-    if tracked.capped {
-        perf::write("WARN", "watch", "tracked directories capped at 4000");
-    }
-    for dir in tracked.paths {
-        if skipped_path(&dir) {
-            continue;
-        }
-        if let Err(error) = watch_one(&mut watcher, &dir, RecursiveMode::NonRecursive, &mut watched) {
-            perf::write("WARN", "watch", &error);
-        }
-    }
+    watch_tracked_directories(&mut watcher, &repo, &mut watched);
     perf::write(
         "INFO",
         "watch",
@@ -844,6 +868,7 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
         RepoChange {
             refs: true,
             path: repo.display().to_string(),
+            revision: changes::changed(&repo),
         },
     );
     let shared = Arc::new(WatchSlot {
@@ -858,6 +883,19 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
         .map_err(|error| error.to_string())?;
     slots.insert(key, shared);
     Ok(())
+}
+
+fn watch_tracked_directories(watcher: &mut RecommendedWatcher, repo: &Path, watched: &mut WatchSet) {
+    let tracked = awegit_git::tracked_directories(repo, 4_000);
+    if tracked.capped {
+        perf::write("WARN", "watch", "tracked directories capped at 4000");
+    }
+    for dir in tracked.paths {
+        if !dir.is_dir() { continue; }
+        if let Err(error) = watch_one(watcher, &dir, RecursiveMode::NonRecursive, watched) {
+            perf::write("WARN", "watch", &error);
+        }
+    }
 }
 
 /// Directories that are huge or rewrite themselves. A recursive watch of the work tree
@@ -1100,26 +1138,33 @@ fn settle_changes(
     app: &tauri::AppHandle,
     repo: &Path,
     git_dir: Option<PathBuf>,
-    receiver: Receiver<Vec<PathBuf>>,
+    receiver: Receiver<(u64, Vec<PathBuf>)>,
     mut watched: WatchSet,
     slot: Arc<WatchSlot>,
 ) {
-    'watch: while let Ok(mut paths) = receiver.recv() {
+    'watch: while let Ok((mut revision, paths)) = receiver.recv() {
+        let mut unique: HashSet<PathBuf> = paths.into_iter().collect();
         let started = Instant::now();
         let mut overflow = false;
         while started.elapsed() < WATCH_MAX_WAIT {
-            if paths.len() >= WATCH_BATCH {
+            if unique.len() >= WATCH_BATCH {
                 overflow = true;
-                while receiver.try_recv().is_ok() {}
+                while let Ok((next, _)) = receiver.try_recv() { revision = revision.max(next); }
                 break;
             }
             match receiver.recv_timeout(WATCH_QUIET) {
-                Ok(more) => paths.extend(more),
+                Ok((next, more)) => { revision = revision.max(next); unique.extend(more); }
                 Err(RecvTimeoutError::Timeout) => break,
                 Err(RecvTimeoutError::Disconnected) => break 'watch,
             }
         }
+        let paths: Vec<_> = unique.into_iter().collect();
         attach_new_dirs(repo, git_dir.as_deref(), &paths, &mut watched, &slot);
+        if overflow || paths.iter().any(|path| watched_relative(repo, path).is_some_and(|path| path == ".git/index" || path == ".git")) {
+            if let Ok(mut guard) = slot.watcher.lock() {
+                if let Some(watcher) = guard.as_mut() { watch_tracked_directories(watcher, repo, &mut watched); }
+            }
+        }
         if overflow {
             // The dropped events may have included refs; a full refresh is the safe answer.
             let recoveries = WATCH_RECOVERIES.fetch_add(1, Ordering::Relaxed) + 1;
@@ -1129,11 +1174,14 @@ fn settle_changes(
                 RepoChange {
                     refs: true,
                     path: repo.display().to_string(),
+                    revision,
                 },
             );
             continue;
         }
-        let Some(change) = classify_changes(repo, &paths) else { continue };
+        let Some(mut change) = classify_changes(repo, &paths) else { continue };
+        change.revision = revision;
+        flows::reconcile(repo);
         perf::write("INFO", "watch", &format!("repo-changed refs={} paths={}", change.refs, paths.len()));
         let _ = app.emit("repo-changed", change);
     }
@@ -1145,24 +1193,24 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
     let mut status = false;
     let mut files = Vec::new();
     for path in paths {
-        let Ok(relative) = path.strip_prefix(repo) else { continue };
-        let relative = relative.to_string_lossy().replace('\\', "/");
-        if relative.is_empty() || relative.ends_with(".lock") {
+        let Some(relative) = watched_relative(repo, path) else { continue };
+        if relative.is_empty() {
             continue;
         }
+        if relative == ".git" {
+            return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo) });
+        }
         if let Some(inner) = relative.strip_prefix(".git/") {
+            if inner.ends_with(".lock") { continue; }
             match inner.split('/').next().unwrap_or("") {
                 "index" => status = true,
-                "objects" | "modules" | "lfs" | "logs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit" | "gitnuro" | "fsmonitor--daemon"
+                "objects" | "modules" | "lfs" | "logs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit" | "awegit-flow" | "gitnuro" | "fsmonitor--daemon"
                     if inner != "logs/refs/stash" => {}
-                _ => return Some(RepoChange { refs: true, path: repo.display().to_string() }),
+                _ => return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo) }),
             }
             continue;
         }
-        let skip = relative.split('/').any(heavy_dir);
-        if !skip {
-            files.push(relative);
-        }
+        files.push(relative);
     }
     if !status && !files.is_empty() {
         files.sort();
@@ -1170,7 +1218,42 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
         let ignored: HashSet<String> = awegit_git::ignored_paths(repo, &files).into_iter().collect();
         status = files.iter().any(|file| !ignored.contains(file));
     }
-    status.then_some(RepoChange { refs: false, path: repo.display().to_string() })
+    status.then_some(RepoChange { refs: false, path: repo.display().to_string(), revision: changes::revision(repo) })
+}
+
+fn watched_relative(repo: &Path, path: &Path) -> Option<String> {
+    let path = normalize_watch_path(path);
+    if let Ok(relative) = path.strip_prefix(normalize_watch_path(repo)) {
+        return Some(relative.to_string_lossy().replace('\\', "/"));
+    }
+    let git = git_metadata_dir(repo)?;
+    for root in [git.clone(), common_metadata_dir(&git)] {
+        if let Ok(relative) = path.strip_prefix(normalize_watch_path(&root)) {
+            return Some(format!(".git/{}", relative.to_string_lossy().replace('\\', "/")));
+        }
+    }
+    None
+}
+
+fn common_metadata_dir(git: &Path) -> PathBuf {
+    std::fs::read_to_string(git.join("commondir")).ok()
+        .and_then(|path| git.join(path.trim()).canonicalize().ok())
+        .unwrap_or_else(|| git.to_path_buf())
+}
+
+fn watch_relevant(repo: &Path, path: &Path) -> bool {
+    let Some(relative) = watched_relative(repo, path) else { return false };
+    if let Some(inner) = relative.strip_prefix(".git/") {
+        if inner.ends_with(".lock") { return false; }
+        return match inner.split('/').next().unwrap_or("") {
+            "objects" | "modules" | "lfs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit-flow" | "fsmonitor--daemon" => false,
+            "logs" => inner == "logs/refs/stash",
+            _ => true,
+        };
+    }
+    // Heavy directories are never watched recursively. A directly watched tracked
+    // parent must still report its files, even under build/ or node_modules/.
+    true
 }
 
 #[tauri::command]
@@ -1556,7 +1639,10 @@ fn conflict_sides(path: Option<String>, file: String) -> Result<awegit_git::Conf
 #[tauri::command]
 fn conflict_view(path: Option<String>, file: String) -> Result<awegit_git::ConflictView, String> {
     let repo = repo_from(path)?;
-    awegit_git::conflict_view(&repo, &file).map_err(|error| error.to_string())
+    let stamp = flows::checkpoint_stamp(&repo);
+    let worktree = std::fs::metadata(repo.join(&file)).ok().map(|meta| (meta.len(), meta.modified().ok()));
+    let key = format!("conflict:{}:{}:{stamp:?}:{worktree:?}:{file}", awegit_git::repo_key(&repo), changes::revision(&repo));
+    reads::shared(key, || awegit_git::conflict_view(&repo, &file).map_err(|error| error.to_string()))
 }
 
 #[tauri::command]
@@ -2246,6 +2332,7 @@ fn open_log_folder() -> Result<(), String> {
 pub fn run() {
     perf::init();
     awegit_git::set_trace(perf::git);
+    awegit_git::set_timing_trace(perf::stage);
     prefer_bundled_git();
     let handler: std::sync::Arc<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = std::sync::Arc::new(tauri::generate_handler![
             workspace_status,
@@ -2374,10 +2461,14 @@ pub fn run() {
         })
         .invoke_handler(move |invoke| {
             let name = invoke.message.command().to_string();
+            let trace = match invoke.message.payload() {
+                tauri::ipc::InvokeBody::Json(value) => value.get("__perf").and_then(serde_json::Value::as_str).map(str::to_string),
+                _ => None,
+            };
             let handler = handler.clone();
             let resolver = invoke.resolver.clone();
             dispatch(&name.clone(), Box::new(move || {
-                let _span = (!matches!(name.as_str(), "log_client" | "perf_snapshot")).then(|| perf::command(&name));
+                let _span = (!matches!(name.as_str(), "log_client" | "perf_snapshot")).then(|| perf::command_with_id(&name, trace.as_deref()));
                 match std::panic::catch_unwind(AssertUnwindSafe(|| handler(invoke))) {
                     Ok(true) => {}
                     Ok(false) => resolver.reject(format!("Command {name} not found")),
@@ -2409,6 +2500,57 @@ mod watch_plan_tests {
         assert!(heavy_dir("target"));
         assert!(!heavy_dir("src"));
         assert!(!heavy_dir("crates"));
+    }
+
+    #[test]
+    fn watch_classification_keeps_worktree_locks_and_linked_metadata() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
+            .join(".lab/watch-tests").join(format!("{nanos}"));
+        let worktree = root.join("linked");
+        let common = root.join("common");
+        let git = common.join("worktrees/linked");
+        fs::create_dir_all(&worktree).unwrap();
+        fs::create_dir_all(&git).unwrap();
+        fs::write(worktree.join(".git"), format!("gitdir: {}\n", git.display())).unwrap();
+        fs::write(git.join("commondir"), "../..\n").unwrap();
+        assert!(super::watch_relevant(&worktree, &worktree.join("package.lock")));
+        assert!(!super::watch_relevant(&worktree, &git.join("index.lock")));
+        assert!(!super::watch_relevant(&worktree, &git.join("awegit-flow/flow.json")));
+        assert!(!super::watch_relevant(&worktree, &common.join("objects/ab/cd")));
+        assert!(super::classify_changes(&worktree, &[git.join("index")]).is_some_and(|change| !change.refs));
+        assert!(super::classify_changes(&worktree, &[common.join("refs/heads/main")]).is_some_and(|change| change.refs));
+        assert!(super::classify_changes(&worktree, &[worktree.join(".git")]).is_some_and(|change| change.refs));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn watch_filters_keep_tracked_files_inside_ignored_build_directories() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
+            .join(".lab/watch-tests").join(format!("tracked-{nanos}"));
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(root.join("global-config"), "").unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git").current_dir(&root).args(args)
+                .env("GIT_CONFIG_GLOBAL", root.join("global-config")).env("GIT_CONFIG_NOSYSTEM", "1").output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        };
+        git(&["init", "-b", "main"]);
+        fs::write(root.join(".gitignore"), "build/\n").unwrap();
+        fs::write(root.join("build/tracked.txt"), "tracked\n").unwrap();
+        fs::write(root.join("build/ignored.txt"), "ignored\n").unwrap();
+        git(&["add", "-f", "build/tracked.txt"]);
+        assert!(super::watch_relevant(&root, &root.join("build/tracked.txt")));
+        assert!(super::classify_changes(&root, &[root.join("build/tracked.txt")]).is_some_and(|change| !change.refs));
+        assert!(super::classify_changes(&root, &[root.join("build/ignored.txt")]).is_none());
+        assert!(awegit_git::tracked_directories(&root, 10).paths.contains(&root.join("build")));
+        let mut watcher = notify::recommended_watcher(|_: Result<notify::Event, notify::Error>| {}).unwrap();
+        let mut watched = super::WatchSet::default();
+        super::watch_tracked_directories(&mut watcher, &root, &mut watched);
+        assert!(watched.covers(&root.join("build")));
+        drop(watcher);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

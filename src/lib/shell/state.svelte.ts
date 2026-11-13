@@ -1,6 +1,6 @@
 import { onMount, tick } from "svelte";
 import { pushState } from "$app/navigation";
-import { invoke } from "../perf";
+import { invoke, traceOperation } from "../perf";
 import { listen } from "@tauri-apps/api/event";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -423,6 +423,9 @@ export class ShellState {
 
   /** A watcher event that arrived while a write was running. */
   watchQueued: "status" | "full" | null = null;
+  watchRevision = 0;
+  statusRevision = 0;
+  contextRevision = 0;
 
 
   refs = $state<RefSnapshot | null>(null);
@@ -2659,6 +2662,12 @@ export class ShellState {
 
 
   applySnapshot(value: StatusSnapshot) {
+    if (this.snapshot?.path !== value.path) {
+      this.contextRevision = 0;
+      this.watchQueued = null;
+      this.watchRevision = 0;
+    }
+    this.statusRevision = value.revision ?? 0;
     this.statusGen += 1;
     if (!sameSnapshot(this.snapshot, value)) this.snapshot = value;
     this.mode = "live";
@@ -2703,14 +2712,33 @@ export class ShellState {
 
 
 
-  async loadCommits(path: string | undefined) {
-    return loadCommits(this, path);
+  async loadCommits(path: string | undefined, operation?: string) {
+    return loadCommits(this, path, operation);
   }
 
 
 
-  async loadContext() {
-    return loadContext(this);
+  async loadContext(operation?: string) {
+    return loadContext(this, operation);
+  }
+
+  watchCovered(scope: "status" | "full", revision: number) {
+    return revision > 0 && revision <= this.statusRevision && (scope === "status" || revision <= this.contextRevision);
+  }
+
+  queueWatch(scope: "status" | "full", revision: number) {
+    // An unversioned event cannot be proved covered by a later snapshot.
+    this.watchRevision = this.watchQueued === null ? revision :
+      this.watchRevision > 0 && revision > 0 ? Math.max(this.watchRevision, revision) : 0;
+    if (this.watchQueued !== "full") this.watchQueued = scope;
+  }
+
+  replayWatch() {
+    if (this.busy || this.refreshing || this.backgroundFetch.has(this.jobKey(this.repoPath())) || !this.watchQueued) return;
+    const scope = this.watchQueued, revision = this.watchRevision;
+    this.watchQueued = null;
+    this.watchRevision = 0;
+    if (!this.watchCovered(scope, revision)) void this.refresh(scope, true);
   }
 
 
@@ -2745,6 +2773,7 @@ export class ShellState {
       const next = this.refreshQueued;
       this.refreshQueued = null;
       if (next && this.viewing(path)) await this.refresh(next, silent);
+      else if (this.viewing(path)) this.replayWatch();
     }
   }
 
@@ -3109,6 +3138,7 @@ export class ShellState {
 
 
   async mutate(request: Record<string, unknown>, source: "user" | "background" = "user", retryStash = false) {
+    const operation = traceOperation();
     const path = this.repoPath();
     if (!this.backend() || !path) return;
     const background = source === "background";
@@ -3146,20 +3176,20 @@ export class ShellState {
         started = true;
       }
       try {
-        const value = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash });
+        const value = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash }, undefined, operation);
         const output = value.output ?? "";
         // A foreground write started while this was running will paint the later status itself.
         const superseded = background && this.busy;
         if (this.viewing(path) && !superseded) {
           this.applySnapshot(value);
-          if (refreshContext) await this.loadContext();
+          if (refreshContext) await this.loadContext(operation);
           if (!background && this.viewing(path)) await this.loadDiff();
         }
         // Any write made while other paths stay unmerged reports "conflict" even when it
         // succeeded; only a Git error from this action failed it.
         if (value.outcome === "failed" || (value.outcome === "conflict" && value.error)) throw new Error(value.error || value.log || "Git conflict");
         if (followSubmodules) {
-          const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } });
+          const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } }, undefined, operation);
           if (follow.outcome === "failed") throw new Error(follow.error || follow.log);
           if (this.viewing(path)) this.applySnapshot(follow);
           this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
@@ -3191,8 +3221,8 @@ export class ShellState {
         this.recordCommand(String(request.action ?? ""), described, text, false, source);
         if (this.viewing(path) && !(background && this.busy)) {
           try {
-            this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
-            if (refreshContext) await this.loadContext();
+            this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }, undefined, operation));
+            if (refreshContext) await this.loadContext(operation);
           } catch {
             /* keep the action error */
           }
@@ -3265,10 +3295,14 @@ export class ShellState {
     const remote = this.settings.fetchAllRemotes ? null : this.refs?.remotes[0]?.name ?? null;
     const request = { action: "fetch", remote, prune: this.settings.fetchPrune, tags: this.settings.fetchTags };
     if (source !== "background") return this.mutate(request, source);
-    const key = this.jobKey(this.repoPath());
+    const path = this.repoPath();
+    const key = this.jobKey(path);
     if (!key || this.backgroundFetch.has(key)) return;
     this.backgroundFetch.add(key);
-    return this.mutate(request, source).finally(() => this.backgroundFetch.delete(key));
+    return this.mutate(request, source).finally(() => {
+      this.backgroundFetch.delete(key);
+      if (this.viewing(path)) this.replayWatch();
+    });
   }
 
 
@@ -6301,10 +6335,8 @@ export class ShellState {
       if (!this.diff && !this.diffError && !this.conflictView) void this.loadDiff();
     });
     $effect(() => {
-      if (this.busy || !this.watchQueued) return;
-      const scope = this.watchQueued;
-      this.watchQueued = null;
-      void this.refresh(scope, true);
+      if (this.busy) return;
+      this.replayWatch();
     });
     $effect(() => {
       const visible = this.section === "history" || this.standalone === "history";
@@ -6525,13 +6557,15 @@ export class ShellState {
     }
     }
     try {
-    unlisten = await listen<{ refs?: boolean; path?: string } | null>("repo-changed", (event) => {
+    unlisten = await listen<{ refs?: boolean; path?: string; revision?: number } | null>("repo-changed", (event) => {
       const path = event.payload?.path;
       if (path && !this.viewing(path)) return;
       const scope = event.payload?.refs === false ? "status" : "full";
-      if (this.busy) {
+      const revision = event.payload?.revision ?? 0;
+      if (this.watchCovered(scope, revision)) return;
+      if (this.busy || this.refreshing || this.backgroundFetch.has(this.jobKey(this.repoPath()))) {
         // A write ignores refreshes for its whole duration; replay the newest event when it ends.
-        if (this.watchQueued !== "full") this.watchQueued = scope;
+        this.queueWatch(scope, revision);
         return;
       }
       void this.refresh(scope, true);

@@ -2043,6 +2043,41 @@ fn merge_conflict_names_both_branches() {
 }
 
 #[test]
+fn conflict_blob_probe_keeps_the_prefix_boundary_and_large_object_policy() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let repo = repo();
+    commit_file(&repo, "note", "base\n", "base");
+    for (size, nul, binary) in [
+        (32, None, false), (8193, Some(8191), true),
+        (8193, Some(8192), false), (7_999_999, None, false),
+        (8_000_001, None, true),
+    ] {
+        let mut blob = vec![b'x'; size];
+        if let Some(index) = nul { blob[index] = 0; }
+        fs::write(repo.path.join("probe"), &blob).unwrap();
+        let oid = repo.output(&["hash-object", "-w", "probe"]).trim().to_string();
+        let mut child = Command::new("git").current_dir(&repo.path)
+            .args(["update-index", "--index-info"]).stdin(Stdio::piped())
+            .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        let mut input = child.stdin.take().unwrap();
+        writeln!(input, "0 {}\tprobe", "0".repeat(40)).unwrap();
+        for stage in 1..=3 { writeln!(input, "100644 {oid} {stage}\tprobe").unwrap(); }
+        drop(input);
+        assert!(child.wait_with_output().unwrap().status.success());
+        // Ensure detection comes from the staged objects, not the working file.
+        fs::write(repo.path.join("probe"), "resolved text\n").unwrap();
+        for _ in 0..3 {
+            let view = conflict_view(&repo.path, "probe").unwrap();
+            assert_eq!(view.binary, binary, "size={size}, nul={nul:?}");
+            assert_eq!(view.ours.bytes, size as u64);
+            assert_eq!(view.theirs.bytes, size as u64);
+        }
+        repo.git(&["update-index", "--force-remove", "probe"]);
+    }
+}
+
+#[test]
 fn linked_worktree_rebase_reads_its_own_conflict_metadata() {
     let repo = repo();
     commit_file(&repo, "a.txt", "base\n", "base");

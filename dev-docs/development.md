@@ -96,7 +96,7 @@ pnpm start
 
 ## 测试
 
-Rust 后端的性能分析、复测基准和针对性回归命令见 [后端性能检查](backend-performance.md)。
+项目性能工作的实施记录、测量结果与限制见 [项目性能优化计划](performance-plan.md)；上一轮检查保存在 [后端性能检查](backend-performance.md)。性能复测命令见下方“性能复测”。
 
 ```powershell
 pnpm check
@@ -147,6 +147,49 @@ pnpm test:app operation_observer_auto_close
 
 ```powershell
 cargo test -p awegit-git squash_replays_commits_after_the_range -- --test-threads=1
+```
+
+## 性能复测
+
+可复用种子与手动基准只写 `.lab/performance/`，每次种子使用独立目录，不覆盖已有仓库。默认基准每项预热后 30 个样本，输出样本数、平均值、p50、p95、最大值及 Git 进程数；JSON 保存在该目录，普通回归不设置绝对耗时断言。
+
+```powershell
+pnpm perf:seed --tracked=1000 --untracked=1000 --history=10000 --conflicts=10,100,1000
+pnpm perf:backend --release --writes --manifest=.lab/performance/run-实际目录/manifest.json
+```
+
+使用种子命令最后输出的 manifest 路径。`perf:seed` 也可通过 `node scripts/lab-seed.mjs --performance` 调用，参数相同。默认优先使用项目自带 Git 2.56；系统 Git 2.38 不支持已有预览需要的 `merge-tree --merge-base`。对照系统 Git 可加 `--system-git`，但不得把不同 Git 版本的时间混作前后对照。
+
+种子生成时隔离全局配置，测量时沿用当前 Git 读取的配置，与客户端一致；不写全局配置。对照时同时保留配置条件，尤其不要在一组结果中混入关闭 `core.fscache` 的样本，大仓库下会明显改变 Git 自身的耗时。
+
+`--writes` 仅在生成的仓库测量本地远端拉取：每次在计时外恢复相同基线，分别测量干净、少量混合改动、大量未跟踪文件，并核对 HEAD、暂存/未暂存内容、未跟踪文件和贮藏恢复。此计时覆盖核心 Git 操作，不包含桌面日志、流程记录和界面刷新。
+
+10 万文件的数据集可显式减少样本，结果中保留实际样本数：
+
+```powershell
+pnpm perf:seed --tracked=100000 --untracked=10000 --history=1000 --conflicts=10
+pnpm perf:backend --release --seed-only --samples=5 --writes --manifest=.lab/performance/run-实际目录/manifest.json
+```
+
+不带 `--release` 是 debug；不带 `--manifest` 仅运行小仓库读取基准；`--seed-only` 只运行种子场景；`--samples=1..1000` 调整采样次数，少量样本的 p95 不作稳定长尾估计。原读取微基准也可单独调用：
+
+```powershell
+node scripts/with-rust-path.mjs cargo test -p awegit --lib flows::tests::backend_read_timings --offline -- --ignored --nocapture --test-threads=1
+```
+
+后端优化完成后运行上方“测试”部分的类型检查与完整功能回归。
+
+当前 Windows 环境中，原有 `locks::tests::writes_name_the_process_and_explain_how_to_release_the_file` 无法稳定识别占用进程或遇到 Git unlink 返回异常；原始代码在沙箱内外也已复现。保留失败记录后，可显式跳过它补查其他测试，不能据此宣称全量通过：
+
+```powershell
+node scripts/with-rust-path.mjs cargo test -p awegit-git --offline --no-fail-fast -- --test-threads=1 --skip writes_name_the_process_and_explain_how_to_release_the_file
+node scripts/with-rust-path.mjs cargo test -p awegit --lib --offline -- --test-threads=1
+```
+
+单独运行 Git 测试时，在当前 PowerShell 会话优先使用打包 Git：`$env:PATH = (Join-Path (Get-Location) 'src-tauri/resources/git/cmd') + [IO.Path]::PathSeparator + $env:PATH`。性能变更的 UI 回归精确选择以下 11 个用例，覆盖刷新去重、外部变化、后台获取、切换仓库、多轮冲突、自动关闭、工具栏和大合并窗口：
+
+```powershell
+pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.ts e2e/sync-toolbar.spec.ts e2e/merge-window.spec.ts --grep 'covered write events|context reads|observer follows conflicts|observer automatic closing keeps completed|sync toolbar|one huge merge hunk|late response'
 ```
 
 ## 文件占用提示

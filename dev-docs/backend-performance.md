@@ -1,6 +1,8 @@
-# 后端性能检查（2026-11-13）
+# 后端性能检查（2026-11-13，对照 ba6fd6d8）
 
 本轮重点检查 Rust 的状态刷新、操作流程、冲突详情和 Git 进程启动。对照提交为 `ba6fd6d8`。最明确的开销是刷新路径反复启动 Git，以及已结束流程仍然读取实时检查点；本轮已消除这些重复读取。
+
+本文件保留第一轮检查与微基准记录，修复提交为 `599049a5`。随后 PERF-00—10 的实现、正式包日志口径复核和新增 debug/release 结果见 [项目性能优化计划](performance-plan.md) 第 8 节；下文“后续优先项”是第一轮结束时的发现，不代表当前仍未处理。
 
 ## 现有日志证据
 
@@ -39,22 +41,13 @@ Windows，同机 debug 构建，系统 Git 2.38.1，使用 `.lab/flow-tests` 中
 
 表中修改后数字来自单独复测；更早一次复测中，无冲突检查点为 120.450ms，合并详情为 353.204ms。进程数变化比小样本耗时更稳定；本轮收益主要来自已完成流程的重复轮询、状态刷新和变基元数据读取。合并详情的进程数未减少，不能据其小幅耗时变化认定这条路径已得到优化。
 
-复测命令：
-
-```powershell
-node scripts/with-rust-path.mjs cargo test -p awegit --lib flows::tests::backend_read_timings --offline -- --ignored --nocapture --test-threads=1
-```
+复测命令统一见 [开发与发布：性能复测](development.md#性能复测)。
 
 这个基准默认忽略，不给普通测试增加计时负担，也不设易受机器负载影响的耗时断言。普通回归测试断言的是已结束流程不启动 Git、目录缓存复用、工作树隔离，以及真实冲突元数据的正确性。
 
 ## 回归验证
 
-```powershell
-pnpm check
-node scripts/with-rust-path.mjs cargo test -p awegit --lib --offline -- --test-threads=1
-node scripts/with-rust-path.mjs cargo test -p awegit-git --offline --no-fail-fast -- --test-threads=1
-pnpm test:ui -- --reuse e2e/operation-flow.spec.ts --grep 'observer follows conflicts|observer automatic closing keeps completed'
-```
+回归命令统一见 [开发与发布：性能复测](development.md#性能复测)，下列数量仅描述第一轮结果，最新结果在性能计划第 8 节。
 
 Git 行为测试使用项目自带的 Git 2.56；可仅在当前 PowerShell 会话把 `src-tauri/resources/git/cmd` 的绝对路径加到 PATH 前面。终端默认的 Git 2.38 不支持变基预览使用的 `merge-tree --merge-base`，会导致现有预览用例失败。
 
@@ -62,7 +55,7 @@ Git 行为测试使用项目自带的 Git 2.56；可仅在当前 PowerShell 会�
 
 全量 `pnpm test` 还会被原有的 `locks::tests::writes_name_the_process_and_explain_how_to_release_the_file` 阻断：当前 Windows 环境无法稳定识别文件占用进程，或 checkout 输出 unlink 错误却返回成功。该用例在沙箱内外都失败，并在 `.lab` 下用原始提交的独立包重新编译复现；本轮没有修改文件占用实现。复核其余 Git 用例时可显式加 `--skip writes_name_the_process_and_explain_how_to_release_the_file`，这不等于全量测试通过。
 
-## 后续优先项
+## 第一轮发现的后续优先项
 
 以下来自调用链和数据读取方式，尚未做大规模基准；不把它们算作本轮已解决的问题。
 

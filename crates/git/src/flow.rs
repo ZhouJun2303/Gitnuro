@@ -2,6 +2,7 @@
 //! Observers are scoped to a write, so background reads never become flow steps.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -219,7 +220,7 @@ impl Trace {
         command.env("GIT_TRACE2_EVENT", &path);
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
-        let worker = std::thread::spawn(move || {
+        let worker = std::thread::spawn(crate::timing::inherit(move || {
             use std::io::Read;
             let mut file = file;
             let mut buffer = Vec::new();
@@ -289,7 +290,7 @@ impl Trace {
                 event.state = "interrupted".into();
                 observer(event);
             }
-        });
+        }));
         Some(Self {
             stop,
             worker: Some(worker),
@@ -339,7 +340,9 @@ fn text(repo: &Path, args: &[&str]) -> Result<String, Error> {
 
 pub fn commit(repo: &Path, revision: &str) -> Option<Commit> {
     let revision = check_rev(revision).ok()?;
-    let value = text(repo, &["show", "-s", "--format=%H%x00%s%x00%an", revision]).ok()?;
+    // `show -s` still computes combined merge diffs (notably stash commits).
+    // A metadata read must never walk trees, including in partial clones.
+    let value = text(repo, &["log", "-1", "--no-walk", "--no-patch", "--format=%H%x00%s%x00%an", revision]).ok()?;
     let mut parts = value.split('\0');
     Some(Commit {
         id: parts.next()?.into(),
@@ -418,6 +421,7 @@ pub fn checkpoint(repo: &Path) -> Result<Checkpoint, Error> {
         }
     });
     let mut files: Vec<File> = Vec::new();
+    let mut positions = HashMap::new();
     let output = run(repo, &["ls-files", "--unmerged", "-z"])?;
     for entry in output
         .stdout
@@ -433,10 +437,7 @@ pub fn checkpoint(repo: &Path) -> Result<Checkpoint, Error> {
         if fields.len() != 3 {
             continue;
         }
-        let index = files
-            .iter()
-            .position(|file| file.path == path)
-            .unwrap_or_else(|| {
+        let index = *positions.entry(path.clone()).or_insert_with(|| {
                 files.push(File {
                     path,
                     ..File::default()
@@ -560,6 +561,18 @@ pub fn preview_at(
     rebase: bool,
     instructions: &[crate::RebaseStep],
 ) -> Result<Preview, Error> {
+    preview_at_cancellable(repo, onto, head, rebase, instructions, &|| false)
+}
+
+pub fn preview_at_cancellable(
+    repo: &Path,
+    onto: &str,
+    head: &str,
+    rebase: bool,
+    instructions: &[crate::RebaseStep],
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Preview, Error> {
+    if cancelled() { return Ok(Preview { detail: "preview-cancelled".into(), ..Default::default() }); }
     let onto = check_rev(onto)?;
     let source = commit(repo, onto).ok_or_else(|| Error::Rev(onto.into()))?;
     let target = commit(repo, head).ok_or_else(|| Error::Rev(head.into()))?;
@@ -578,6 +591,7 @@ pub fn preview_at(
         preview.detail = "custom-merge-driver".into();
         return Ok(preview);
     }
+    if cancelled() { preview.detail = "preview-cancelled".into(); return Ok(preview); }
     let sandbox = sandbox(repo)?;
     let started = Instant::now();
     let commits = if !rebase {
@@ -600,6 +614,7 @@ pub fn preview_at(
     };
     let mut conditional = false;
     for (index, (original, verb)) in commits.into_iter().enumerate() {
+        if cancelled() { preview.detail = "preview-cancelled".into(); return Ok(preview); }
         let mut step = PreviewStep {
             commit: original.clone(),
             state: "conditional".into(),
@@ -633,6 +648,7 @@ pub fn preview_at(
             }
         })?;
         run(&sandbox.0, &["read-tree", &current])?;
+        if cancelled() { preview.detail = "preview-cancelled".into(); return Ok(preview); }
         if rebase {
             // A replay is a three-way application of this commit against its original parent,
             // not a merge of the two final branch trees.

@@ -33,6 +33,7 @@ static STALLS: AtomicU64 = AtomicU64::new(0);
 static STALL_MAX: AtomicU64 = AtomicU64::new(0);
 static STALL_TOTAL: AtomicU64 = AtomicU64::new(0);
 static ACTIVITY: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+static TRACE_IDS: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,6 +70,10 @@ pub struct ClientEntry {
     pub ms: Option<f64>,
     #[serde(default)]
     pub detail: Option<String>,
+    #[serde(default)]
+    pub at: Option<u64>,
+    #[serde(default)]
+    pub trace: Option<String>,
 }
 
 pub fn dir() -> PathBuf {
@@ -199,16 +204,50 @@ pub struct Span {
     name: String,
     start: Instant,
     main: bool,
+    _context: awegit_git::TimingScope,
 }
 
-pub fn command(name: &str) -> Span {
+pub fn command_with_id(name: &str, id: Option<&str>) -> Span {
     let main = on_main_thread();
     if main {
         if let Ok(mut slot) = ON_MAIN.lock() {
             *slot = Some((name.to_string(), Instant::now()));
         }
     }
-    Span { name: name.to_string(), start: Instant::now(), main }
+    let id = id.filter(|id| !id.is_empty() && id.len() <= 96 && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_')))
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("backend-{}", TRACE_IDS.fetch_add(1, Ordering::Relaxed)));
+    let context = awegit_git::enter_timing(Some(awegit_git::TimingContext { id, phase: name.into(), ..Default::default() }));
+    Span { name: name.to_string(), start: Instant::now(), main, _context: context }
+}
+
+fn timing_suffix(elapsed: Duration) -> String {
+    let Some(context) = awegit_git::timing_context() else { return String::new() };
+    let end = uptime().as_micros();
+    let repository = context.repository.map(|id| format!(" repo={id:016x}")).unwrap_or_default();
+    format!(" trace={} phase={} start_us={} end_us={end}{repository}", context.id, context.phase, end.saturating_sub(elapsed.as_micros()))
+}
+
+pub struct Phase {
+    name: &'static str,
+    start: Instant,
+    _context: awegit_git::TimingScope,
+}
+
+pub fn phase(name: &'static str) -> Phase {
+    let context = awegit_git::timing_context().map(|mut context| { context.phase = name.into(); context });
+    Phase { name, start: Instant::now(), _context: awegit_git::enter_timing(context) }
+}
+
+impl Drop for Phase {
+    fn drop(&mut self) {
+        stage(self.name, self.start.elapsed());
+    }
+}
+
+pub fn stage(name: &str, elapsed: Duration) {
+    if awegit_git::timing_context().is_none() { return; }
+    write("INFO", "phase", &format!("{name} {}us{}", elapsed.as_micros(), timing_suffix(elapsed)));
 }
 
 impl Drop for Span {
@@ -222,7 +261,7 @@ impl Drop for Span {
         record(&format!("cmd {}", self.name), ms, self.main, true);
         let level = if ms >= SLOW_MS { "SLOW" } else { "INFO" };
         let thread = if self.main { "main" } else { "worker" };
-        write(level, "cmd", &format!("{} {ms}ms thread={thread}", self.name));
+        write(level, "cmd", &format!("{} {ms}ms thread={thread}{}", self.name, timing_suffix(self.start.elapsed())));
     }
 }
 
@@ -258,7 +297,23 @@ pub fn git(args: &[&str], elapsed: Duration, ok: bool, note: &str) {
     let status = if ok { "" } else { " failed" };
     let detail = flatten_note(note);
     let extra = if detail.is_empty() { String::new() } else { format!(" {detail}") };
-    write(level, "git", &format!("{sub} {} {ms}ms{status}{extra}", flags.join(" ")));
+    let failure = if !ok && matches!(sub, "fetch" | "pull" | "push" | "clone") {
+        let kind = network_failure(note);
+        if let Some(kind) = kind { record(&format!("network {kind}"), ms, false, false); }
+        format!(" failure={}", kind.unwrap_or("operation-or-unknown"))
+    } else { String::new() };
+    write(level, "git", &format!("{sub} {} {ms}ms{status}{extra}{failure}{}", flags.join(" "), timing_suffix(elapsed)));
+}
+
+fn network_failure(note: &str) -> Option<&'static str> {
+    let note = note.to_ascii_lowercase();
+    if note.contains("tls") || note.contains("ssl") || note.contains("certificate") { Some("tls") }
+    else if note.contains("timed out") || note.contains("timeout") { Some("timeout") }
+    else if note.contains("authentication") || note.contains("permission denied (publickey") || note.contains("could not read username") || note.contains("401") || note.contains("403") { Some("authentication") }
+    else if note.contains("proxy") { Some("proxy") }
+    else if note.contains("resolve host") || note.contains("resolve hostname") { Some("dns") }
+    else if note.contains("couldn't connect") || note.contains("failed to connect") || note.contains("connection reset") || note.contains("connection refused") { Some("transport") }
+    else { None }
 }
 
 pub fn client(entries: Vec<ClientEntry>) {
@@ -279,7 +334,9 @@ pub fn client(entries: Vec<ClientEntry>) {
             .detail
             .map(|text| format!(" {}", text.replace(['\n', '\r', '\t', '\0'], " ").chars().take(400).collect::<String>()))
             .unwrap_or_default();
-        write(level, "web", &format!("{} {}{ms}{detail}", entry.kind, entry.name));
+        let timing = entry.at.map(|at| format!(" occurred_at={at}")).unwrap_or_default();
+        let trace = entry.trace.map(|id| format!(" trace={}", id.chars().filter(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')).take(96).collect::<String>())).unwrap_or_default();
+        write(level, "web", &format!("{} {}{ms}{detail}{timing}{trace}", entry.kind, entry.name));
     }
 }
 
@@ -712,6 +769,35 @@ mod tests {
     use super::{client, issue_log_name, issue_tail, perf_log_name, read_tail, redact, routes_to_issue, snapshot, ClientEntry};
 
     #[test]
+    fn network_failures_are_separate_from_local_operation_times() {
+        for (message, expected) in [
+            ("SSL certificate problem", Some("tls")), ("TLS connection failed", Some("tls")),
+            ("Connection timed out", Some("timeout")), ("Authentication failed", Some("authentication")),
+            ("Could not resolve proxy", Some("proxy")), ("Could not resolve host: example.invalid", Some("dns")),
+            ("Connection refused", Some("transport")), ("Permission denied (publickey).", Some("authentication")),
+            ("Not possible to fast-forward, aborting.", None), ("cannot open FETCH_HEAD: Permission denied", None),
+        ] { assert_eq!(super::network_failure(message), expected); }
+    }
+
+    #[test]
+    fn command_and_nested_phase_share_a_validated_trace_and_restore_context() {
+        let previous = awegit_git::timing_context();
+        {
+            let _command = super::command_with_id("test-command", Some("web-test-17"));
+            {
+                let _phase = super::phase("queue");
+                let suffix = super::timing_suffix(std::time::Duration::from_millis(2));
+                assert!(suffix.contains("trace=web-test-17 phase=queue start_us="));
+                assert!(suffix.contains("end_us="));
+            }
+            assert_eq!(awegit_git::timing_context().unwrap().phase, "test-command");
+        }
+        assert_eq!(awegit_git::timing_context(), previous);
+        let _command = super::command_with_id("test-command", Some("bad\ntrace=other"));
+        assert!(awegit_git::timing_context().unwrap().id.starts_with("backend-"));
+    }
+
+    #[test]
     fn log_names_follow_the_build() {
         assert_eq!(perf_log_name(true), "awegit-debug.log");
         assert_eq!(perf_log_name(false), "awegit-release.log");
@@ -779,6 +865,8 @@ mod tests {
             name: name.clone(),
             ms: Some(3.0),
             detail: Some("push failed".into()),
+            at: Some(123),
+            trace: Some("test-1".into()),
         }]);
         let snap = snapshot();
         let stat = snap.items.iter().find(|item| item.name == format!("cmd {name}")).expect("stat");

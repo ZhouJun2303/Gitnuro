@@ -1,6 +1,7 @@
 //! Stage, unstage, and commit through the `git` command.
 
 use std::fs::File;
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -770,20 +771,22 @@ pub fn conflict_view(repo: &Path, path: &str) -> Result<ConflictView, Error> {
     }
     let base = stages[1].as_deref();
     let (their_label, their_rev) = theirs_party(repo, path, stages[3].as_deref());
+    let sizes = conflict_sizes(repo, &stages);
+    let (ours_commit, theirs_commit) = conflict_commits(repo, their_rev.as_deref());
     Ok(ConflictView {
         ours: ConflictParty {
             label: ours_label(repo),
             state: side_state(base, stages[2].as_deref()).into(),
-            bytes: oid_size(repo, stages[2].as_deref()),
-            commit: commit_info(repo, "HEAD"),
+            bytes: stages[2].as_ref().and_then(|oid| sizes.get(oid)).copied().unwrap_or(0),
+            commit: ours_commit,
         },
         theirs: ConflictParty {
             label: their_label,
             state: side_state(base, stages[3].as_deref()).into(),
-            bytes: oid_size(repo, stages[3].as_deref()),
-            commit: their_rev.as_deref().and_then(|rev| commit_info(repo, rev)),
+            bytes: stages[3].as_ref().and_then(|oid| sizes.get(oid)).copied().unwrap_or(0),
+            commit: theirs_commit,
         },
-        binary: conflict_is_binary(repo, path, &stages),
+        binary: file_has_nul(repo, path) || stages.iter().flatten().any(|oid| blob_has_nul_with_size(repo, oid, sizes.get(oid).copied())),
     })
 }
 
@@ -797,6 +800,10 @@ fn commit_info(repo: &Path, rev: &str) -> Option<ConflictCommit> {
             rev,
         ],
     )?;
+    parse_conflict_commit(&text)
+}
+
+fn parse_conflict_commit(text: &str) -> Option<ConflictCommit> {
     let mut fields = text.split('\x1f');
     let id = fields.next()?.trim().to_string();
     let short = fields.next()?.trim().to_string();
@@ -815,6 +822,31 @@ fn commit_info(repo: &Path, rev: &str) -> Option<ConflictCommit> {
         email,
         at,
     })
+}
+
+fn conflict_commits(repo: &Path, theirs: Option<&str>) -> (Option<ConflictCommit>, Option<ConflictCommit>) {
+    let Some(theirs) = theirs else { return (commit_info(repo, "HEAD"), None) };
+    let args = ["log", "--no-walk=unsorted", "--format=%H%x1f%h%x1f%s%x1f%an%x1f%ae%x1f%at%x1e", "HEAD", theirs];
+    if let Some(text) = git_text(repo, &args) {
+        let mut commits = text.split('\x1e').filter_map(|text| parse_conflict_commit(text.trim()));
+        if let Some(ours) = commits.next() {
+            let theirs = commits.next().unwrap_or_else(|| ours.clone());
+            return (Some(ours), Some(theirs));
+        }
+    }
+    (commit_info(repo, "HEAD"), commit_info(repo, theirs))
+}
+
+fn conflict_sizes(repo: &Path, stages: &[Option<String>; 4]) -> HashMap<String, u64> {
+    let mut oids: Vec<_> = stages.iter().flatten().cloned().collect();
+    oids.sort();
+    oids.dedup();
+    let body = format!("{}\n", oids.join("\n"));
+    let Ok(output) = run_stdin(repo, &["cat-file", "--batch-check=%(objectname) %(objectsize)"], body.as_bytes()) else { return HashMap::new() };
+    String::from_utf8_lossy(&output.stdout).lines().filter_map(|line| {
+        let (oid, size) = line.split_once(' ')?;
+        Some((oid.to_string(), size.parse().ok()?))
+    }).collect()
 }
 
 fn stage_oids(repo: &Path, path: &str) -> Result<[Option<String>; 4], Error> {
@@ -841,13 +873,6 @@ fn stage_oids(repo: &Path, path: &str) -> Result<[Option<String>; 4], Error> {
         }
     }
     Ok(stages)
-}
-
-fn oid_size(repo: &Path, oid: Option<&str>) -> u64 {
-    let Some(oid) = oid else { return 0 };
-    git_text(repo, &["cat-file", "-s", oid])
-        .and_then(|text| text.parse().ok())
-        .unwrap_or(0)
 }
 
 fn side_state(base: Option<&str>, side: Option<&str>) -> &'static str {
@@ -1028,13 +1053,6 @@ fn git_file(repo: &Path, name: &str) -> Option<String> {
     }
 }
 
-fn conflict_is_binary(repo: &Path, path: &str, stages: &[Option<String>; 4]) -> bool {
-    if file_has_nul(repo, path) {
-        return true;
-    }
-    stages.iter().flatten().any(|oid| blob_has_nul(repo, oid))
-}
-
 fn file_has_nul(repo: &Path, path: &str) -> bool {
     let mut file = match File::open(repo.join(path)) {
         Ok(file) => file,
@@ -1045,12 +1063,12 @@ fn file_has_nul(repo: &Path, path: &str) -> bool {
     buf[..read].contains(&0)
 }
 
-fn blob_has_nul(repo: &Path, oid: &str) -> bool {
-    if matches!(spec_size(repo, oid), Some(size) if size > MAX_BLOB_READ_BYTES) {
+fn blob_has_nul_with_size(repo: &Path, oid: &str, size: Option<u64>) -> bool {
+    if matches!(size, Some(size) if size > MAX_BLOB_READ_BYTES) {
         return true;
     }
-    run(repo, &["cat-file", "blob", oid])
-        .map(|output| output.stdout.iter().take(8192).any(|byte| *byte == 0))
+    run_capped(repo, &["cat-file", "blob", oid], 8192)
+        .map(|(output, _)| output.stdout.contains(&0))
         .unwrap_or(false)
 }
 

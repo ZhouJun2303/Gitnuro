@@ -3087,25 +3087,28 @@ pub struct TrackedDirs {
 }
 
 pub fn tracked_directories(repo: &Path, limit: usize) -> TrackedDirs {
+    if let Ok(repository) = crate::open_repo(repo) {
+        if let Ok(index) = repository.index_or_empty() {
+            return directories_from_paths(repo, limit, index.entries().iter().filter_map(|entry| std::str::from_utf8(entry.path(&index)).ok()));
+        }
+    }
+    let Ok(output) = crate::cli::run(repo, &["ls-files", "-z"]) else {
+        return TrackedDirs { paths: vec![repo.to_path_buf()], capped: false };
+    };
+    directories_from_paths(repo, limit, output.stdout.split(|byte| *byte == 0).filter_map(|path| std::str::from_utf8(path).ok()))
+}
+
+fn directories_from_paths<'a>(repo: &Path, limit: usize, entries: impl Iterator<Item = &'a str>) -> TrackedDirs {
     let mut paths = Vec::new();
     let mut seen = HashSet::new();
     let root = repo.to_path_buf();
     seen.insert(root.clone());
     paths.push(root);
-    let Ok(output) = crate::cli::run(repo, &["ls-files", "-z"]) else {
-        return TrackedDirs {
-            paths,
-            capped: false,
-        };
-    };
     let mut capped = false;
-    for part in output.stdout.split(|byte| *byte == 0) {
-        if part.is_empty() {
+    for text in entries {
+        if text.is_empty() {
             continue;
         }
-        let Ok(text) = std::str::from_utf8(part) else {
-            continue;
-        };
         let Some(parent) = repo.join(text).parent().map(Path::to_path_buf) else {
             continue;
         };

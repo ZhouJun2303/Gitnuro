@@ -7,6 +7,11 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+if (process.argv.includes("--performance")) {
+  await import("./perf-seed.mjs");
+  process.exit(0);
+}
+
 const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const lab = join(root, ".lab");
 const repos = join(lab, "repos");

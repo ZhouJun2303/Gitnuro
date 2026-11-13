@@ -1,13 +1,15 @@
 # TODO：项目问题与优化清单
 
-> 最近更新：2026-11-12。原先列出的 3 个问题已由后续提交修复，目前没有已知的待处理项。新发现的问题按顺序补在下面。
+> 最近更新：2026-11-13。性能工作的统一记录见 [项目性能优化计划](dev-docs/performance-plan.md)，包含日志复核、PERF-00—10 的实现、回归结果及 release 测量。
 
 ## 待处理
 
-（暂无）
+- [ ] 发布后的真实性能观测：用新的关联计时核对安装包从点击到刷新完成的等待、实际远端网络长尾和系统峰值内存。当前 release 基准为独立本地种子，不能宣称历史 TLS 失败已消失或得到完整桌面提速比例，见 [性能计划第 8 节](dev-docs/performance-plan.md)。
 
 ## 已处理
 
+- [x] PERF-00—10：关联计时、写后刷新与并发读取去重、活动检查点缓存、原生忽略判断与跟踪目录监听、安全的原生自动贮藏检查、纯提交元数据读取、批量冲突元数据、8KB blob 探测、线性冲突匹配、历史分页缓存、预览限额/取消和网络失败分类均已实现。修复：本次工作区改动，拟提交 `perf: 减少后端重复读取并限制后台流程开销`；回归：`commit_metadata_does_not_walk_merge_trees`、`concurrent_reads_share_work_but_the_next_read_runs_again`、`native_ignore_checks_match_git_and_reload_rules_and_the_index`、`watch_filters_keep_tracked_files_inside_ignored_build_directories`、`conflict_blob_probe_keeps_the_prefix_boundary_and_large_object_policy`、`checkpoints_group_a_thousand_conflicts_and_preserve_each_stage`、`history_pages_reuse_summaries_and_detect_external_replacement`、`preview_lane_runs_one_job_and_keeps_only_the_latest_pending_job` 及 `e2e/performance-refresh.spec.ts`。完整测量与验证限制见 [性能计划](dev-docs/performance-plan.md)。
+- [x] 流程与冲突元数据复用 Git 目录缓存，已结束流程不再读取实时检查点。提交：`599049a5`；第一轮结果见 [后端性能检查](dev-docs/backend-performance.md)，后续优化见性能计划。
 - [x] 冲突后继续 rebase 时，自己的提交显示成别人的名字。现在保留原作者，只更换提交者。修复：`331b306b`；回归测试：`rebase_continue_keeps_the_original_author`。
 - [x] pull 冲突时，本地原有的 `.fakeignore` 被收进自动贮藏。现在工作区根目录的 `.fakeignore` 会留在原地，不进入贮藏；已被跟踪的 `.fakeignore` 仍按普通文件处理。修复：`331b306b` 的 `crates/git/src/autostash.rs`；回归测试：`autostash_leaves_untracked_fakeignore_alone`。
 - [x] 选中文件夹按 Delete 时，丢弃修改的范围不正确。现在丢弃、删除和贮藏覆盖所选文件夹内的全部文件；全选文件夹后右键按整个选择范围统计并操作。修复：`ccca0f50`、`efaa48d8`；UI 用例：`folder menu counts`。

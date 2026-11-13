@@ -33,6 +33,7 @@
   let lastActive = "";
   let disposed = false;
   let loading = false;
+  let historyLoading = false;
   let generation = 0;
   let scrollFrame = 0;
   let viewport: HTMLDivElement;
@@ -99,12 +100,14 @@
   }
 
   async function loadHistory() {
-    if (fixture || !repo) return;
+    if (fixture || !repo || disposed || historyLoading) return;
+    historyLoading = true;
     const token = generation;
     try {
       const value = await invoke<FlowSummary[]>("operation_history", { path: repo, offset: 0, limit: 100 });
       if (token === generation && !disposed) history = value;
     } catch (cause) { error = String(cause); }
+    finally { historyLoading = false; }
   }
 
   async function navigate(id: string, automatic = false) {
@@ -223,14 +226,29 @@
     };
     void boot();
     const refreshAutoClose = () => {
+      void refresh();
       void invoke<Settings>("load_settings").then((settings) => {
         if (!disposed) autoClose = settings.flowAutoClose === true;
       }).catch((cause) => { if (!disposed) error = String(cause); });
     };
     window.addEventListener("focus", refreshAutoClose);
-    const poll = setInterval(() => { if (!document.hidden) void refresh(); }, 1000);
-    const historyPoll = setInterval(() => { if (!document.hidden) void loadHistory(); }, 10_000);
-    return () => { disposed = true; generation++; stopLocale(); stopAppearance(); media.removeEventListener("change", paint); window.removeEventListener("keydown", onLanguageShortcut); clearInterval(poll); clearInterval(historyPoll); cancelAnimationFrame(scrollFrame); window.removeEventListener("focus", refreshAutoClose); unlisten.forEach((off) => off()); };
+    let poll = 0, historyPoll = 0;
+    const pollNext = async () => {
+      if (disposed) return;
+      if (!document.hidden) await refresh();
+      if (!disposed) poll = window.setTimeout(pollNext, desktop ? 10_000 : 1000);
+    };
+    const pollHistory = async () => {
+      if (disposed) return;
+      if (!document.hidden) await loadHistory();
+      if (!disposed) historyPoll = window.setTimeout(pollHistory, 10_000);
+    };
+    poll = window.setTimeout(pollNext, desktop ? 10_000 : 1000);
+    historyPoll = window.setTimeout(pollHistory, 10_000);
+    if (desktop) void listen<{ path?: string }>("repo-changed", ({ payload }) => {
+      if (!payload?.path || payload.path === repo) void refresh();
+    }).then((off) => { if (disposed) off(); else unlisten.push(off); }).catch(() => {});
+    return () => { disposed = true; generation++; stopLocale(); stopAppearance(); media.removeEventListener("change", paint); window.removeEventListener("keydown", onLanguageShortcut); clearTimeout(poll); clearTimeout(historyPoll); cancelAnimationFrame(scrollFrame); window.removeEventListener("focus", refreshAutoClose); unlisten.forEach((off) => off()); };
   });
 </script>
 

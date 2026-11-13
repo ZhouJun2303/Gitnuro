@@ -11,8 +11,11 @@ mod locks;
 mod model;
 mod ops;
 mod proc;
+mod timing;
 
 use std::path::{Path, PathBuf};
+
+pub use timing::{enter_timing, set_timing_trace, timing_context, timing_phase, timing_repository, TimingContext, TimingPhase, TimingScope};
 
 pub use change::{
     blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line,
@@ -73,6 +76,8 @@ pub enum ChangeKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusSnapshot {
+    #[serde(default)]
+    pub revision: u64,
     pub path: String,
     pub branch: Option<String>,
     pub staged: Vec<FileChange>,
@@ -155,6 +160,7 @@ pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSna
         fakeignore::conceal(worktree.as_path(), &repo, &mut staged, &mut unstaged);
     }
     Ok(StatusSnapshot {
+        revision: 0,
         path: worktree.display().to_string(),
         branch,
         staged,
