@@ -415,6 +415,10 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.confirmApplyStash(stash?.name ?? "stash@{0}", stash?.summary ?? "WIP before the palette");
     return;
   }
+  if (id === "stash-apply-long-confirm") {
+    shell.confirmApplyStash("stash@{0}", "On develop: AweGit autostash: checkout origin/Dev/KingEquipDev_2026_09_14 (12 files: .gitignore, Assets/Editor/Build/ExportSetting.asset, Assets/Editor/Protobuf/ProtobufSetting.asset, +9)");
+    return;
+  }
   if (id === "revert-confirm") {
     const commit = shell.commitsLive[0];
     shell.confirmRevert(commit?.id ?? "f2c87af", commit?.summary ?? "feat: 英雄词条和技能翻译修复");

@@ -3,6 +3,7 @@
   import "./DialogHost.css";
   import PrefsDialog from "./PrefsDialog.svelte";
   import UpdatePanel from "./UpdatePanel.svelte";
+  import BrandMark from "./BrandMark.svelte";
   import { flushClientLog, invoke } from "../perf";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { cloneTarget, cloneUrl } from "../clonePath";
@@ -692,15 +693,27 @@
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.continueAction")}</button>
           </div>
         {:else if shell.dialog === "features"}
-          <h2>{shell.tr("dialog.featuresTitle")}</h2>
-          <p class="empty">{shell.tr("dialog.featuresBody")}</p>
+          <div class="dialog-lead">
+            <span class="dialog-lead-icon" aria-hidden="true">
+              <svg class="line-icon" viewBox="0 0 24 24"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18.5 15.5 19.4 18l2.6.9-2.6.9-.9 2.6-.9-2.6L15 19l2.6-.9z"/></svg>
+            </span>
+            <div class="dialog-lead-copy">
+              <h2>{shell.tr("dialog.featuresTitle")}</h2>
+              <p class="empty">{shell.tr("dialog.featuresBody")}</p>
+            </div>
+          </div>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("dialog.featuresLater")}</button>
             <button class="commit" type="button" onclick={() => { shell.openFeaturesPage(); shell.dialog = null; }}>{shell.tr("dialog.featuresOpen")}</button>
           </div>
         {:else if shell.dialog === "about"}
-          <h2>{shell.tr("dialog.about")} {shell.appVersion}</h2>
-          <p class="empty">{shell.tr("dialog.aboutBody")}</p>
+          <div class="dialog-lead">
+            <span class="dialog-lead-brand" aria-hidden="true"><BrandMark /></span>
+            <div class="dialog-lead-copy">
+              <h2>{shell.tr("dialog.about")} {shell.appVersion}</h2>
+              <p class="empty">{shell.tr("dialog.aboutBody")}</p>
+            </div>
+          </div>
           {#if shell.gitRuntime?.version}
             <p class="empty">{shell.tr("chrome.gitSummary", { version: shell.gitRuntime.version, program: shell.gitRuntime.program })}</p>
             {#if !shell.gitRuntime.lfs}<p class="empty">{shell.tr("chrome.gitNoLfs")}</p>{/if}
@@ -719,8 +732,15 @@
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
           </div>
         {:else if shell.dialog === "mergeConflict"}
-          <h2>{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictTitle" : "dialog.mergeConflictTitle")}</h2>
-          <p class="empty">{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictBody" : shell.progress ? "dialog.mergeConflictBodyFlow" : "dialog.mergeConflictBody", { action: shell.flowLabel() })}</p>
+          <div class="dialog-lead">
+            <span class="dialog-lead-icon danger" aria-hidden="true">
+              <svg class="line-icon" viewBox="0 0 24 24"><path d="M10.3 4.2 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z"/><path d="M12 9.4v4.3"/><path d="M12 17.3h.01"/></svg>
+            </span>
+            <div class="dialog-lead-copy">
+              <h2>{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictTitle" : "dialog.mergeConflictTitle")}</h2>
+              <p class="empty">{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictBody" : shell.progress ? "dialog.mergeConflictBodyFlow" : "dialog.mergeConflictBody", { action: shell.flowLabel() })}</p>
+            </div>
+          </div>
           <pre class="diff-body merge-conflict-log" data-layer="merge-conflict">{shell.commandOutput}</pre>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={() => { shell.mergeConflictRestore = false; shell.dialog = null; }}>{shell.tr("chrome.close")}</button>
@@ -744,8 +764,15 @@
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.squash")}</button>
           </div>
         {:else if shell.dialog === "checkoutNotice"}
-          <h2>{shell.tr("menu.checkout")}</h2>
-          <p class="empty">{shell.tr("dialog.checkoutStashed", { name: shell.pendingCheckout })}</p>
+          <div class="dialog-lead">
+            <span class="dialog-lead-icon" aria-hidden="true">
+              <svg class="line-icon" viewBox="0 0 24 24"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
+            </span>
+            <div class="dialog-lead-copy">
+              <h2>{shell.tr("menu.checkout")}</h2>
+              <p class="empty">{shell.tr("dialog.checkoutStashed", { name: shell.pendingCheckout })}</p>
+            </div>
+          </div>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
             <button class="commit" type="button" onclick={() => { shell.dialog = null; void shell.mutate({ action: "stashPop", name: "stash@{0}" }); }}>{shell.tr("dialog.applyStash")}</button>

@@ -528,11 +528,27 @@ test("branch confirmation keeps the branch name on one line", async ({ page }) =
   await expect(confirm).toContainText("Force delete branch");
   const subject = confirm.locator(".confirm-subject");
   await expect(subject).toHaveText("rewrite/tauri");
-  await expect(subject).toHaveCSS("white-space", "nowrap");
   const box = await subject.boundingBox();
   expect(box).not.toBeNull();
   expect(box!.height).toBeLessThan(40);
   await expect(confirm.locator(".commit")).toHaveClass(/danger/);
+});
+
+test("a long stash summary stays readable inside the confirmation", async ({ page }) => {
+  await openLabScene(page, "stash-apply-long-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  const subject = confirm.locator(".confirm-subject");
+  await expect(subject).toContainText("KingEquipDev_2026_09_14");
+  const box = await subject.evaluate((node) => ({
+    whiteSpace: getComputedStyle(node).whiteSpace,
+    height: node.getBoundingClientRect().height,
+    width: node.getBoundingClientRect().width,
+    clipped: node.scrollHeight - node.clientHeight,
+  }));
+  expect(box.whiteSpace).toBe("pre-wrap");
+  expect(box.height).toBeGreaterThan(40);
+  expect(box.width).toBeLessThan(420);
+  expect(box.clipped).toBeLessThanOrEqual(0);
 });
 
 test("multi-file confirmation lists one file per line with a total", async ({ page }) => {

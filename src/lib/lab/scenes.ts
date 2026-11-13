@@ -179,6 +179,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "force-delete-confirm", group: "叠层", title: "强制删除分支确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "discard-many-confirm", group: "叠层", title: "多文件丢弃确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "stash-apply-confirm", group: "叠层", title: "应用贮藏确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
+  scene({ id: "stash-apply-long-confirm", group: "叠层", title: "应用贮藏确认 · 长说明", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "revert-confirm", group: "叠层", title: "还原确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "stash-pop-confirm", group: "叠层", title: "弹出贮藏确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "reset-confirm", group: "叠层", title: "重置确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),

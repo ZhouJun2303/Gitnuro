@@ -254,71 +254,146 @@
   }
 
 .dialog.confirm {
-    gap: 10px;
-    padding: 20px 22px 16px;
+    width: min(460px, calc(100vw - 32px));
+    gap: 14px;
+    padding: 24px 24px 18px;
   }
 
-.dialog.confirm h2 {
+.confirm-head {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 15px;
-  }
-
-.confirm-title-text {
+    align-items: flex-start;
+    gap: 12px;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
-.confirm-mark {
-    width: 22px;
-    height: 22px;
+.confirm-icon {
+    width: 30px;
+    height: 30px;
     flex: none;
     display: grid;
     place-items: center;
-    border-radius: 50%;
-    background: color-mix(in srgb, var(--deleted) 16%, transparent);
+    margin-top: 1px;
+    border-radius: calc(var(--radius) + 2px);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+  }
+
+.confirm-icon.danger {
+    background: color-mix(in srgb, var(--deleted) 13%, transparent);
     color: var(--deleted);
-    font-size: 13px;
-    font-weight: 700;
-    line-height: 1;
+  }
+
+.confirm-icon svg {
+    width: 17px;
+    height: 17px;
+  }
+
+.confirm-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
+  }
+
+.dialog.confirm h2 {
+    position: static;
+    padding: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 650;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+  }
+
+.confirm-title-text {
+    display: block;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
 .confirm-subject {
     min-width: 0;
     max-width: 100%;
-    padding: 7px 10px;
-    border: 1px solid transparent;
+    max-height: 9.5em;
+    padding: 9px 12px;
+    border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: var(--field);
+    background: var(--canvas);
+    color: var(--text);
     font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-    font-size: 12.5px;
-    line-height: 1.4;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow: auto;
+    overflow-wrap: anywhere;
     user-select: text;
   }
 
 .dialog.confirm.danger .confirm-subject {
-    border-color: color-mix(in srgb, var(--deleted) 22%, transparent);
-    background: color-mix(in srgb, var(--deleted) 6%, var(--field));
+    border-color: color-mix(in srgb, var(--deleted) 24%, transparent);
+    background: color-mix(in srgb, var(--deleted) 5%, var(--canvas));
   }
 
 .dialog.confirm .confirm-body {
+    margin: 0;
     font-size: 13px;
     line-height: 1.55;
     color: var(--text-secondary);
   }
 
 .dialog.confirm .confirm-detail {
+    padding: 9px 12px;
+    border-left: 2px solid color-mix(in srgb, var(--accent) 38%, transparent);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: var(--field);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.55;
     max-height: 20vh;
     overflow: auto;
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--text-secondary);
+    white-space: pre-wrap;
+  }
+
+.dialog.confirm.danger .confirm-detail {
+    border-left-color: color-mix(in srgb, var(--deleted) 45%, transparent);
+  }
+
+.confirm-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 2px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+
+.confirm-actions .text-button,
+  .confirm-actions .commit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    margin-left: 0;
+  }
+
+.confirm-actions .text-button {
+    min-width: 78px;
+    padding: 0 14px;
+    border: 1px solid var(--line);
+    background: var(--elevated);
+  }
+
+.confirm-actions .text-button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--text-secondary) 35%, transparent);
+    background: var(--hover);
+  }
+
+.confirm-actions .commit {
+    min-width: 88px;
+    padding: 0 16px;
   }
 
 .dialog .commit.danger {
@@ -973,14 +1048,22 @@
   {#if shell.confirmAsk}
     {@const ask = shell.confirmAsk}
     <div class="scrim confirm-scrim" role="presentation">
-      <div class="dialog sm confirm" class:danger={ask.danger} data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={ask.body ? "confirm-body" : undefined} tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ask.danger ? ".text-button" : ".commit" }}>
-        <h2 id="confirm-title">
-          {#if ask.danger}<span class="confirm-mark" aria-hidden="true">!</span>{/if}
-          <span class="confirm-title-text">{ask.title}</span>
-        </h2>
+      <div class="dialog sm confirm" class:danger={ask.danger} data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={[ask.body ? "confirm-body" : "", ask.detail ? "confirm-detail" : ""].filter(Boolean).join(" ") || undefined} tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ask.danger ? ".text-button" : ".commit" }}>
+        <div class="confirm-head">
+          <span class="confirm-icon" class:danger={ask.danger} aria-hidden="true">
+            {#if ask.danger}
+              <svg class="line-icon" viewBox="0 0 24 24"><path d="M10.3 4.2 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z"/><path d="M12 9.4v4.3"/><path d="M12 17.3h.01"/></svg>
+            {:else}
+              <svg class="line-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.3 2.4c-.62.24-.9.72-.9 1.34v.36"/><path d="M12 16.6h.01"/></svg>
+            {/if}
+          </span>
+          <div class="confirm-copy">
+            <h2 id="confirm-title"><span class="confirm-title-text">{ask.title}</span></h2>
+            {#if ask.body}<p class="confirm-body" id="confirm-body">{ask.body}</p>{/if}
+          </div>
+        </div>
         {#if ask.subject}<div class="confirm-subject" data-confirm-subject title={ask.subject}>{ask.subject}</div>{/if}
-        {#if ask.body}<p class="confirm-body" id="confirm-body">{ask.body}</p>{/if}
-        {#if ask.detail}<p class="confirm-detail">{ask.detail}</p>{/if}
+        {#if ask.detail}<p class="confirm-detail" id="confirm-detail">{ask.detail}</p>{/if}
         {#if ask.files?.length}
           <div class="confirm-files" data-confirm-files>
             <div class="confirm-count">{shell.tr("dialog.fileCount", { count: String(ask.files.length) })}</div>
@@ -992,7 +1075,7 @@
             </ol>
           </div>
         {/if}
-        <div class="composer-row actions">
+        <div class="confirm-actions">
           <button class="text-button" type="button" onclick={() => (shell.confirmAsk = null)}>{shell.tr("dialog.cancel")}</button>
           <button class="commit" class:danger={ask.danger} type="button" onclick={() => { const run = shell.confirmAsk?.run; shell.confirmAsk = null; run?.(); }}>{ask.confirmLabel ?? shell.tr("dialog.confirm")}</button>
         </div>
