@@ -29,6 +29,26 @@ if (-not (Test-Path (Join-Path $dest "cmd\git.exe"))) {
     throw "MinGit did not contain cmd\git.exe"
 }
 
+# MinGit's etc/gitconfig includes Git for Windows' system config. That config
+# can name `manager-core`, which MinGit does not ship, so every network command
+# prints "not a git command" before another helper succeeds. Reset inherited
+# helpers and keep the credential manager bundled with MinGit.
+$gitconfig = Join-Path $dest "etc\gitconfig"
+if (Test-Path -LiteralPath $gitconfig) {
+    $text = Get-Content -LiteralPath $gitconfig -Raw
+    if ($text -notmatch [regex]::Escape("AweGit: reset inherited credential helpers")) {
+        $addition = @"
+
+# AweGit: reset inherited credential helpers. Git for Windows may name
+# manager-core, which MinGit does not ship; use the bundled credential manager.
+[credential]
+	helper =
+	helper = manager
+"@
+        Add-Content -LiteralPath $gitconfig -Value $addition -Encoding ascii
+    }
+}
+
 function Find-GccBin {
     if ($env:AWE_GCC) {
         if (Test-Path (Join-Path $env:AWE_GCC "gcc.exe")) { return $env:AWE_GCC }
