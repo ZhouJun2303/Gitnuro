@@ -59,6 +59,28 @@ fn preview_replays_commits_even_when_final_tree_hides_a_conflict() {
 }
 
 #[test]
+fn preview_replays_a_linear_history_without_rewriting_the_work_tree() {
+    let repo = repo();
+    save(&repo, "note", "base\n", "base");
+    let root = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+    for index in 1..=6 {
+        save(&repo, "note", &format!("v{index}\n"), &format!("v{index}"));
+    }
+    let head = repo.output(&["rev-parse", "HEAD"]);
+    let status = repo.output(&["status", "--porcelain=v1"]);
+    let preview = flow::preview(&repo.path, &root, true, &[]).unwrap();
+    assert_eq!(preview.steps.len(), 6);
+    assert!(
+        preview.steps.iter().all(|step| step.state == "clean"),
+        "{preview:?}"
+    );
+    assert!(preview.detail.is_empty(), "{}", preview.detail);
+    assert_eq!(repo.output(&["rev-parse", "HEAD"]), head);
+    assert_eq!(repo.output(&["status", "--porcelain=v1"]), status);
+    assert_eq!(repo.output(&["stash", "list"]), "");
+}
+
+#[test]
 fn frozen_preview_keeps_the_original_head_after_the_branch_moves() {
     let repo = repo();
     save(&repo, "note", "base\n", "base");

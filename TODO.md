@@ -1,43 +1,33 @@
 # TODO：项目问题与优化清单
 
-> 最近更新：2026-11-11。以下三个问题保留为待处理，冲突观察面板的完成不代表这些问题已修复。
+> 最近更新：2026-11-13。性能工作的统一记录见 [项目性能优化计划](dev-docs/performance-plan.md)，包含日志复核、PERF-00—10 的实现、回归结果及 release 测量。
 
-## 当前验证基线
+## 待处理
 
-- 本次仅验证窗口布局记忆和同步按钮：`pnpm check` 通过；`cargo test -p awegit --lib flow_window::tests -- --test-threads=1` 的 2 项测试通过；`pnpm test:ui -- --reuse e2e/sync-toolbar.spec.ts` 的 4 项 UI 用例通过。
-- 以后每次只验证修改涉及的 UI，补对应场景并按文件或 `--grep` 运行，不再全量验证。入口和数据复用方式见 `README.md` 的“测试”部分及 `AGENTS.md` 的“试验台”规则。
-- 原生窗口的位置、大小持久化和屏幕坐标回退已通过单元测试；未在正在运行的旧版桌面进程中复验原生窗口。
-
-## 历史验证基线（本次未重跑）
-
-- `pnpm check`：通过，0 errors、0 warnings。
-- `pnpm build`：通过。
-- Rust 测试：`awegit-git` 137 个测试通过，另有 1 个 Windows 文件锁占用进程识别测试因当前环境权限限制未通过完整验证；`awegit --lib` 69 个测试通过。统一入口仍为 `pnpm test`（`node scripts/test-all.mjs`），本轮不能标记为全绿。
-- `pnpm test:ui`：Playwright 74 个测试全部通过；测试结束后手动停止了未退出的测试服务。覆盖所有场景打开、观察面板只读、连续冲突自动定位、贮藏恢复后自动关闭、设置开关保存和长流程虚拟渲染。
-- 浏览器预览：1440、800、480 像素宽度检查通过，左右信息保持分列，无页面横向溢出。试验台入口：`http://localhost:1420/?scene=operation-flow&view=flow&file=live`。
-
-## P1：先修复的 bug 与可靠性问题
-
-- [ ] 冲突后继续 rebase 时，自己的提交显示成了别人的名字。核对作者与提交者的保留规则，并参考 Fork 的展示方式。
-- [ ] pull 冲突时，本地原有的 `.fakeignore` 没有包含在自动贮藏中。检查忽略文件、未跟踪文件的保存和恢复策略。
-- [ ] 选中文件夹按 Delete 时，丢弃修改的范围不正确。应覆盖所选文件夹内全部文件，并核对多选和嵌套目录的行为。
-
-## 交付顺序建议
-
-1. 先复现并修复 rebase 作者信息和自动贮藏遗漏，使用隔离测试仓库验证提交信息与本地文件不丢失。
-2. 再修复文件夹 Delete 的选择范围，补多选、嵌套目录和确认框的界面回归。
-3. 在具备所需权限的 Windows 环境补验文件锁占用进程识别测试，恢复统一测试入口全绿。
+- [ ] 发布后的真实性能观测：用新的关联计时核对安装包从点击到刷新完成的等待、实际远端网络长尾和系统峰值内存。当前 release 基准为独立本地种子，不能宣称历史 TLS 失败已消失或得到完整桌面提速比例，见 [性能计划第 8 节](dev-docs/performance-plan.md)。
 
 ## 已处理
 
-- [x] 操作与冲突流程窗口记住关闭时的位置、大小和最大化状态，自动弹出及查看历史共用布局，并在重启后恢复。
-- [x] 同步按钮按仓库状态禁用：前台操作执行中全部禁用；流程未完成或仍有冲突时，获取可用，拉取和推送禁用。仓库菜单、右键菜单和快捷键使用相同限制。
-- [x] 增加独立的“操作与冲突流程”观察窗口。左侧显示当前分支或累积结果，右侧显示传入提交或本地修改，两侧沿曲线汇入中央时间轴，整体从上到下展示。
-- [x] 面板采用只读观察模式，移除继续、跳过、中止、解决冲突及打开编辑器等操作按钮；独立窗口权限只允许读取流程、历史和设置。
-- [x] 实时刷新并自动定位当前步骤，通过颜色、图标、虚线和动画区分已完成、正在进行、冲突及尚未执行的步骤；长流程仅渲染可见节点。
-- [x] 偏好设置的“常规”页支持配置是否自动打开观察面板，默认开启。关闭自动打开后仍保留记录；整条流程完成且本地贮藏恢复结束后自动关闭，手动查看历史时保持打开。
-- [x] 记录 push、pull、fetch、merge、rebase、cherry-pick、revert、reset 及本地贮藏保存和恢复的操作阶段，保留各轮冲突涉及的提交、基线、文件、blob、命令与时间，并关联重复冲突和前序操作。
-- [x] 流程日志持久化在仓库实际 Git 目录中，支持中断恢复和不完整日志尾部修复；默认保留 3 天，可配置为 1–90 天。
-- [x] 提供隔离的逐提交冲突预测。尚未执行及依赖人工解决结果的步骤单独标记；预测随实际 Git 结果更新，不将预测当成执行结果。
-- [x] 补充实时冲突、历史和长流程试验台场景，以及 Git、后端和界面回归测试。
+- [x] 分栏差异的左右两列横向滚动条保持同步：拖动任一侧，另一侧跟随；两边内容宽度不同时，跟随侧停在自己的最右端，拖回范围内再继续跟随。变更、提交详情和文件历史三个分栏面板共用同一实现。修复：`46a6c3b9`；回归：`e2e/lab.spec.ts` 的 `split view scrolls both columns together`，以及 `e2e/theme-panels.spec.ts` 的 `theme panel diff text`、`theme panel commit detail`、`theme panel file history`（Apple、经典白色、VS Code 黑色）。
+- [x] 账户页同步账号慢，且同步结果在下次启动时丢失。现在本机凭据按批并发探测，超时后结束整个子进程树；同步结果由后端在设置队列里合并保存，窗口位置改为只写几何字段，不再用旧快照覆盖账号。修复：`76eb62d8`；回归：`sync_merge_keeps_one_copy_of_each_credential`、`sync_merge_fills_profile_fields_and_clears_legacy_tokens`、`probe_targets_keep_the_target_order`、`window_bounds_save_keeps_accounts_and_other_fields`，以及 `e2e/lab.spec.ts` 的 `account sync adopts the settings the backend saved`。
+- [x] 远程弹窗按地址显示协议、主机、仓库，并自动匹配已经同步的账号。多个账号时可改选。修复：`1127c87f`；回归：`e2e/lab.spec.ts` 的 `remote dialog shows the synced account for the URL`。
+- [x] 打开账户页不再自动同步本机账号。只有点击「同步本机已登录的账号」才读取本机已登录账号，其中包含 codeup.aliyun.com。阿里云登录打开 https://account.aliyun.com/ ，Git 主机仍是 codeup.aliyun.com。修复：`5f313cee`；回归：`recognizes_common_hosts_and_ssh_forms`，以及 `e2e/theme-panels.spec.ts` 的 `theme panel preferences accounts`，打开后同步行不出现「正在同步」，同步按钮可点。
+- [x] 首选项账户页按远程选用已登录账号。网页登录和测试连通走试验台桩，不打开浏览器、不访问网络。修复：`846cc1d5`；回归：`recognizes_common_hosts_and_ssh_forms`、`match_order_prefers_override_then_login_then_default`、`a_token_is_not_offered_to_another_host`、`legacy_token_is_not_duplicated`、`failure_text_does_not_contain_the_token`、`helper_args_leave_the_token_in_the_script`、`an_unpreferred_account_does_not_answer_an_empty_username`、`status_does_not_install_an_https_helper`，以及 `e2e/theme-panels.spec.ts` 的 `theme panel preferences accounts`、`e2e/lab.spec.ts` 的 `long dialogs keep their title and first field in view`。
+- [x] Git for Windows 在文件被占用时，`checkout` 可能以退出码 0 切走分支，工作区文件仍是旧内容。现在这类命令返回占用说明，不把分支切回去。失败信息只写在 stdout 时（例如 `nothing to commit`），详情改用这段输出，最多 500 字。修复：`6a2d7f6c`；回归：`writes_name_the_process_and_explain_how_to_release_the_file`、`empty_commit_failure_includes_the_stdout_explanation`。
+- [x] 变基冲突预览一次读取父提交和树，并用 `merge-tree --stdin` 批量重放，不再对每步 `read-tree` 和 `commit-tree`。冲突或结果树对不上之后的步骤仍是 conditional。5 秒和 200 步上限保持不变。修复：`6a2d7f6c`；回归：`preview_replays_a_linear_history_without_rewriting_the_work_tree`、`preview_replays_commits_even_when_final_tree_hides_a_conflict`、`frozen_preview_keeps_the_original_head_after_the_branch_moves`、`custom_merge_driver_is_never_executed_by_a_preview`、`reads_a_clean_record_and_a_conflict_record`、`merge_tree_names_the_conflict`。
+- [x] 同一次打开变更时，路径、侧和全文标记都相同的重叠差异读取合并为一次 `conflict_view`。修复：`6a2d7f6c`；回归：`theme panel conflict`（Apple、经典白色、VS Code 黑色）。
+- [x] 试验台用例在页面内固定语言和差异样式，不改写 `.lab/settings.json`。pushbox 每次写入唯一提交说明，`--reuse` 不用重新播种。回归：`e2e/lab.spec.ts` 里原先失败的 16 项；本次连同三套主题的冲突面板共 19 项通过。
+- [x] 界面改动在 Apple、经典白色、VS Code 黑色下都测到相关面板。回归：`e2e/theme-panels.spec.ts` 的 `theme panel`，以及 `pushed commits are bold`、`merge panel opens as a standalone page`。
+- [x] PERF-00—10：关联计时、写后刷新与并发读取去重、活动检查点缓存、原生忽略判断与跟踪目录监听、安全的原生自动贮藏检查、纯提交元数据读取、批量冲突元数据、8KB blob 探测、线性冲突匹配、历史分页缓存、预览限额/取消和网络失败分类均已实现。修复：本次工作区改动，拟提交 `perf: 减少后端重复读取并限制后台流程开销`；回归：`commit_metadata_does_not_walk_merge_trees`、`concurrent_reads_share_work_but_the_next_read_runs_again`、`native_ignore_checks_match_git_and_reload_rules_and_the_index`、`watch_filters_keep_tracked_files_inside_ignored_build_directories`、`conflict_blob_probe_keeps_the_prefix_boundary_and_large_object_policy`、`checkpoints_group_a_thousand_conflicts_and_preserve_each_stage`、`history_pages_reuse_summaries_and_detect_external_replacement`、`preview_lane_runs_one_job_and_keeps_only_the_latest_pending_job` 及 `e2e/performance-refresh.spec.ts`。完整测量与验证限制见 [性能计划](dev-docs/performance-plan.md)。
+- [x] 流程与冲突元数据复用 Git 目录缓存，已结束流程不再读取实时检查点。提交：`599049a5`；第一轮结果见 [后端性能检查](dev-docs/backend-performance.md)，后续优化见性能计划。
+- [x] 冲突后继续 rebase 时，自己的提交显示成别人的名字。现在保留原作者，只更换提交者。修复：`331b306b`；回归测试：`rebase_continue_keeps_the_original_author`。
+- [x] pull 冲突时，本地原有的 `.fakeignore` 被收进自动贮藏。现在工作区根目录的 `.fakeignore` 会留在原地，不进入贮藏；已被跟踪的 `.fakeignore` 仍按普通文件处理。修复：`331b306b` 的 `crates/git/src/autostash.rs`；回归测试：`autostash_leaves_untracked_fakeignore_alone`。
+- [x] 选中文件夹按 Delete 时，丢弃修改的范围不正确。现在丢弃、删除和贮藏覆盖所选文件夹内的全部文件；全选文件夹后右键按整个选择范围统计并操作。修复：`ccca0f50`、`efaa48d8`；UI 用例：`folder menu counts`。
+- [x] 操作与冲突流程窗口、同步按钮状态、文件占用提示和冲突面板窄宽布局已完成，细节和验证命令见 [开发与发布](dev-docs/development.md)。
 
+## 维护约定
+
+- 每次只验证本次修改涉及的 UI，不跑全量场景。改到的页面要在 Apple、经典白色、VS Code 黑色下都测到受影响的面板。入口、面板名和数据复用方式见 [开发与发布](dev-docs/development.md) 的“测试”部分及 `AGENTS.md` 的“试验台”规则。
+- 关闭一项时写明修复提交和回归测试名，便于以后复查。
+
+# 测试

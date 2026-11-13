@@ -314,18 +314,6 @@ fn parse_endpoint(status: u16, body: &str) -> Result<serde_json::Value, String> 
     Ok(value)
 }
 
-fn split_status(text: String) -> (u16, String) {
-    let Some((body, code)) = text.rsplit_once('\n') else {
-        return (0, text);
-    };
-    let code = code.trim();
-    if code.len() == 3 && code.chars().all(|ch| ch.is_ascii_digit()) {
-        (code.parse().unwrap_or(0), body.to_string())
-    } else {
-        (0, text)
-    }
-}
-
 fn http_get(url: &str, key: &str) -> Result<(u16, String), String> {
     let mut headers = vec![("Accept", "application/json")];
     let auth;
@@ -813,9 +801,7 @@ mod tests {
         let error = parse_endpoint(401, r#"{"error":{"message":"bad key"}}"#).unwrap_err();
         assert!(error.contains("401"));
         assert!(error.contains("bad key"));
-        let (status, body) = split_status("{\"data\":[]}\n200".into());
-        assert_eq!(status, 200);
-        assert!(parse_endpoint(status, &body).is_ok());
+        assert!(parse_endpoint(200, r#"{"data":[]}"#).is_ok());
     }
 
     #[test]

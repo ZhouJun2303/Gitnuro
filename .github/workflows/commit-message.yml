@@ -1,0 +1,43 @@
+# GitHub 本身没有“提交信息格式”的配置项，这个 workflow 是唯一能在服务端检查的地方。
+# 在 Settings → Rules → Rulesets 里把它设为必需检查，才会挡住不合规的合并。
+
+name: Commit message
+
+on:
+  pull_request:
+  push:
+    branches: [feat/dev]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const TYPES = ['feat', 'fix', 'docs', 'art', 'style', 'refactor', 'test', 'chore', 'perf', 'revert'];
+            const allowed = new RegExp(`^(${TYPES.join('|')})(\\([^()]+\\))?!?: .+`);
+            const skipped = /^(Merge |Revert "|fixup! |squash! )/;
+
+            const commits = context.eventName === 'pull_request'
+              ? await github.paginate(github.rest.pulls.listCommits, {
+                  ...context.repo,
+                  pull_number: context.payload.pull_request.number,
+                  per_page: 100,
+                })
+              : (context.payload.commits ?? []).map((c) => ({ sha: c.id, message: c.message }));
+
+            const subjectOf = (c) => (c.commit?.message ?? c.message).split('\n')[0];
+            const bad = commits.filter((c) => !skipped.test(subjectOf(c)) && !allowed.test(subjectOf(c)));
+
+            for (const c of bad) {
+              core.error(`不符合 "type: 描述"：${subjectOf(c)}`, { title: c.sha.slice(0, 7) });
+            }
+
+            if (bad.length > 0) {
+              core.setFailed(`${bad.length} 个提交信息不符合约定，类型限 ${TYPES.join(' / ')}`);
+            }

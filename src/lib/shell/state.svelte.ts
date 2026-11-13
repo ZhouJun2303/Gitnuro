@@ -1,6 +1,6 @@
 import { onMount, tick } from "svelte";
 import { pushState } from "$app/navigation";
-import { invoke } from "../perf";
+import { invoke, traceOperation } from "../perf";
 import { listen } from "@tauri-apps/api/event";
 import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -12,6 +12,7 @@ import { featuresPageUrl } from "../featuresPage";
 import { fileAccessReport } from "../fileAccess";
 import { resolveLocale, translate } from "../i18n";
 import { broadcastLocale, onLocaleChange } from "../i18n/sync";
+import { isAppearance, onAppearanceChange, resolveAppearance, type Appearance } from "../appearance";
 import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
@@ -174,7 +175,7 @@ export class ShellState {
 
 
   defaultSettings: Settings = {
-    theme: "system",
+    theme: "apple",
     pullRebase: false,
     fetchPrune: true,
     diffStyle: "split",
@@ -422,6 +423,9 @@ export class ShellState {
 
   /** A watcher event that arrived while a write was running. */
   watchQueued: "status" | "full" | null = null;
+  watchRevision = 0;
+  statusRevision = 0;
+  contextRevision = 0;
 
 
   refs = $state<RefSnapshot | null>(null);
@@ -503,6 +507,9 @@ export class ShellState {
           groupNames: ["D:\\work" + "\t" + "工作", "D:\\personal" + "\t" + "个人"],
         },
   );
+
+
+  appliedTheme = $state<Appearance>("apple");
 
 
   repos = $state<string[]>([]);
@@ -837,7 +844,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.7");
+  appVersion = $state("2.0.8");
 
 
   passphrase = $state("");
@@ -990,6 +997,14 @@ export class ShellState {
 
 
   mergeFile = $state("");
+  mergeSource = $state.raw<MergePiece[]>([]);
+  mergeDirty = $state(false);
+  mergeEdited = $state(false);
+  mergeEditing = $state(false);
+  mergeError = $state("");
+  mergeLoading = $state(false);
+  mergeApplying = $state(false);
+  mergeGeneration = 0;
 
 
   mergeLeft = $state("");
@@ -2291,9 +2306,17 @@ export class ShellState {
     }
     if (nav.view === "merge") {
       if (label && label !== "merge") return;
-      this.standalone = "merge";
-      if (nav.repo && nav.repo !== this.repoPath()) await this.openRepo(nav.repo);
-      if (nav.file) await this.openTextMerge(nav.file);
+      if (this.textMerge && nav.file === this.mergeFile && (!nav.repo || this.pathsMatch(nav.repo, this.repoPath() ?? ""))) return;
+      if (this.busy) return;
+      this.guardMerge(() => { void (async () => {
+        this.textMerge = false;
+        this.standalone = "merge";
+        if (nav.repo && !this.pathsMatch(nav.repo, this.repoPath() ?? "")) {
+          await this.openRepo(nav.repo);
+          if (!this.pathsMatch(nav.repo, this.repoPath() ?? "")) return;
+        }
+        if (nav.file) await this.openTextMerge(nav.file);
+      })().catch((error) => { this.mergeError = this.message(error); }); });
     }
   }
 
@@ -2444,13 +2467,19 @@ export class ShellState {
       });
       const accounts = Array.from({ length: 24 }, (_, index) => {
         const n = String(index + 1).padStart(2, "0");
+        const github = index % 2 === 0;
         return {
           id: `lab-acct-${n}`,
-          forge: index % 2 === 0 ? "github" : "gitlab",
+          forge: github ? "github" : "gitlab",
           label: `lab-${n}`,
           token: `lab-token-${n}`,
-          host: index % 2 === 0 ? "github.com" : "gitlab.com",
+          host: github ? "github.com" : "gitlab.com",
           clientId: `lab-client-${n}`,
+          login: `lab-${n}`,
+          name: `Lab ${n}`,
+          email: `lab${n}@example.com`,
+          avatarUrl: "",
+          defaultForHost: index < 2,
         };
       });
       const workspaces = Array.from({ length: 24 }, (_, index) => {
@@ -2466,6 +2495,8 @@ export class ShellState {
       });
       this.adoptSettings({
         ...settings,
+        locale: params.get("locale") === "en" ? "en" : params.get("locale") === "zh" ? "zh" : settings.locale,
+        theme: isAppearance(params.get("theme")) ? params.get("theme")! : settings.theme,
         authorName: settings.authorName || "AweGit Lab",
         authorEmail: settings.authorEmail || "lab@example.com",
         recent,
@@ -2520,6 +2551,7 @@ export class ShellState {
       const runtime = await invoke<GitRuntime>("git_runtime").catch(() => null);
       if (runtime) this.gitRuntime = runtime;
       await applyLabScene(this, item);
+      if (params.get("locale") === "en") this.settings.locale = "en";
       this.labSceneId = item.id;
     } catch (error) {
       const text = this.message(error);
@@ -2639,6 +2671,12 @@ export class ShellState {
 
 
   applySnapshot(value: StatusSnapshot) {
+    if (this.snapshot?.path !== value.path) {
+      this.contextRevision = 0;
+      this.watchQueued = null;
+      this.watchRevision = 0;
+    }
+    this.statusRevision = value.revision ?? 0;
     this.statusGen += 1;
     if (!sameSnapshot(this.snapshot, value)) this.snapshot = value;
     this.mode = "live";
@@ -2683,14 +2721,33 @@ export class ShellState {
 
 
 
-  async loadCommits(path: string | undefined) {
-    return loadCommits(this, path);
+  async loadCommits(path: string | undefined, operation?: string) {
+    return loadCommits(this, path, operation);
   }
 
 
 
-  async loadContext() {
-    return loadContext(this);
+  async loadContext(operation?: string) {
+    return loadContext(this, operation);
+  }
+
+  watchCovered(scope: "status" | "full", revision: number) {
+    return revision > 0 && revision <= this.statusRevision && (scope === "status" || revision <= this.contextRevision);
+  }
+
+  queueWatch(scope: "status" | "full", revision: number) {
+    // An unversioned event cannot be proved covered by a later snapshot.
+    this.watchRevision = this.watchQueued === null ? revision :
+      this.watchRevision > 0 && revision > 0 ? Math.max(this.watchRevision, revision) : 0;
+    if (this.watchQueued !== "full") this.watchQueued = scope;
+  }
+
+  replayWatch() {
+    if (this.busy || this.refreshing || this.backgroundFetch.has(this.jobKey(this.repoPath())) || !this.watchQueued) return;
+    const scope = this.watchQueued, revision = this.watchRevision;
+    this.watchQueued = null;
+    this.watchRevision = 0;
+    if (!this.watchCovered(scope, revision)) void this.refresh(scope, true);
   }
 
 
@@ -2725,6 +2782,7 @@ export class ShellState {
       const next = this.refreshQueued;
       this.refreshQueued = null;
       if (next && this.viewing(path)) await this.refresh(next, silent);
+      else if (this.viewing(path)) this.replayWatch();
     }
   }
 
@@ -3089,6 +3147,7 @@ export class ShellState {
 
 
   async mutate(request: Record<string, unknown>, source: "user" | "background" = "user", retryStash = false) {
+    const operation = traceOperation();
     const path = this.repoPath();
     if (!this.backend() || !path) return;
     const background = source === "background";
@@ -3125,19 +3184,23 @@ export class ShellState {
         this.startWork(described.title, path);
         started = true;
       }
+      let report: (StatusSnapshot & import("../operation-flow").MutationResult) | null = null;
       try {
-        const value = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash });
+        report = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash }, undefined, operation);
+        const value = report;
         const output = value.output ?? "";
         // A foreground write started while this was running will paint the later status itself.
         const superseded = background && this.busy;
         if (this.viewing(path) && !superseded) {
           this.applySnapshot(value);
-          if (refreshContext) await this.loadContext();
+          if (refreshContext) await this.loadContext(operation);
           if (!background && this.viewing(path)) await this.loadDiff();
         }
-        if (value.outcome === "failed" || value.outcome === "conflict") throw new Error(value.error || value.log || "Git conflict");
+        // Any write made while other paths stay unmerged reports "conflict" even when it
+        // succeeded; only a Git error from this action failed it.
+        if (value.outcome === "failed" || (value.outcome === "conflict" && value.error)) throw new Error(value.error || value.log || "Git conflict");
         if (followSubmodules) {
-          const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } });
+          const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } }, undefined, operation);
           if (follow.outcome === "failed") throw new Error(follow.error || follow.log);
           if (this.viewing(path)) this.applySnapshot(follow);
           this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
@@ -3169,12 +3232,29 @@ export class ShellState {
         this.recordCommand(String(request.action ?? ""), described, text, false, source);
         if (this.viewing(path) && !(background && this.busy)) {
           try {
-            this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
-            if (refreshContext) await this.loadContext();
+            this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }, undefined, operation));
+            if (refreshContext) await this.loadContext(operation);
           } catch {
             /* keep the action error */
           }
-          if (this.shouldShowMergeConflict(action, text)) {
+          if (report?.staleLock) {
+            // A killed Git process left index.lock; offer to remove it and retry.
+            const lock = report.staleLock;
+            this.actionError = null;
+            this.stashRetry = null;
+            this.ask(
+              this.tr("dialog.staleLockBlocked"),
+              this.tr("dialog.staleLockBlockedBody"),
+              () => void this.removeStaleLock(path, lock.path, request, source, retryStash),
+              [],
+              {
+                subject: lock.path,
+                detail: this.tr("dialog.staleLockAge", { seconds: String(lock.ageSecs) }),
+                danger: true,
+                confirmLabel: this.tr("dialog.removeLockAndRetry"),
+              },
+            );
+          } else if (this.shouldShowMergeConflict(action, text)) {
             this.mergeConflictRestore = false;
             this.commandOutput = text.trim();
             this.dialog = "mergeConflict";
@@ -3239,14 +3319,31 @@ export class ShellState {
 
 
 
+  /** Remove the index.lock a killed Git command left, then run the blocked write again. */
+  async removeStaleLock(path: string, lock: string, request: Record<string, unknown>, source: "user" | "background", retryStash: boolean) {
+    try {
+      await invoke("remove_stale_lock", { path, lock });
+    } catch (error) {
+      this.actionError = this.message(error);
+      return;
+    }
+    await this.mutate(request, source, retryStash);
+  }
+
+
+
   doFetch(source: "user" | "background" = "user") {
     const remote = this.settings.fetchAllRemotes ? null : this.refs?.remotes[0]?.name ?? null;
     const request = { action: "fetch", remote, prune: this.settings.fetchPrune, tags: this.settings.fetchTags };
     if (source !== "background") return this.mutate(request, source);
-    const key = this.jobKey(this.repoPath());
+    const path = this.repoPath();
+    const key = this.jobKey(path);
     if (!key || this.backgroundFetch.has(key)) return;
     this.backgroundFetch.add(key);
-    return this.mutate(request, source).finally(() => this.backgroundFetch.delete(key));
+    return this.mutate(request, source).finally(() => {
+      this.backgroundFetch.delete(key);
+      if (this.viewing(path)) this.replayWatch();
+    });
   }
 
 
@@ -3341,7 +3438,7 @@ export class ShellState {
     const note = this.settings.applyStashDelete
       ? this.tr("dialog.applyStashDeleteNote")
       : this.tr("dialog.applyStashKeepNote");
-    this.ask(this.tr("dialog.applyStash"), `${this.tr("dialog.applyStashBody", { summary })} ${note}`, () => void this.applyStash(name));
+    this.ask(this.tr("dialog.applyStash"), this.tr("dialog.applyStashBody"), () => void this.applyStash(name), [], { subject: summary, detail: note });
   }
 
 
@@ -3352,7 +3449,7 @@ export class ShellState {
       return;
     }
     const summary = stash?.summary || name || "";
-    this.ask(this.tr("dialog.popStash"), this.tr("dialog.popStashBody", { summary }), () => void this.mutate({ action: "stashPop", name: name ?? stash?.name }));
+    this.ask(this.tr("dialog.popStash"), this.tr("dialog.popStashBody"), () => void this.mutate({ action: "stashPop", name: name ?? stash?.name }), [], { subject: summary });
   }
 
 
@@ -3360,14 +3457,15 @@ export class ShellState {
     const short = rev.slice(0, 7);
     const target = summary ? `${short} "${summary}"` : short;
     const title = this.tr(mode === "soft" ? "dialog.softReset" : "dialog.mixedReset");
-    const body = this.tr(mode === "soft" ? "dialog.softResetBody" : "dialog.mixedResetBody", { target });
-    this.ask(title, body, () => void this.mutate({ action: "reset", rev, mode }));
+    const body = this.tr(mode === "soft" ? "dialog.softResetBody" : "dialog.mixedResetBody");
+    this.ask(title, body, () => void this.mutate({ action: "reset", rev, mode }), [], { subject: target });
   }
 
 
 
   confirmRevert(id: string, summary: string) {
-    this.ask(this.tr("dialog.revert"), this.tr("dialog.revertBody", { short: id.slice(0, 7), summary }), () => void this.mutate({ action: "revert", rev: id }));
+    const subject = `${id.slice(0, 7)} ${summary}`.trim();
+    this.ask(this.tr("dialog.revert"), this.tr("dialog.revertBody"), () => void this.mutate({ action: "revert", rev: id }), [], { subject });
   }
 
 
@@ -3384,7 +3482,14 @@ export class ShellState {
       })),
       commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })),
       expandedGroups: value.expandedGroups ?? [],
-      accounts: value.accounts ?? [],
+      accounts: (value.accounts ?? []).map((item) => ({
+        ...item,
+        login: item.login ?? "",
+        name: item.name ?? "",
+        email: item.email ?? "",
+        avatarUrl: item.avatarUrl ?? "",
+        defaultForHost: item.defaultForHost ?? false,
+      })),
       tabLabels: value.tabLabels ?? [],
       tabColors: value.tabColors ?? [],
       pinnedRefs: value.pinnedRefs ?? [],
@@ -4117,8 +4222,8 @@ export class ShellState {
 
 
 
-  ask(title: string, body: string, run: () => void, files: string[] = []) {
-    return ask(this, title, body, run, files);
+  ask(title: string, body: string, run: () => void, files: string[] = [], extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "confirmLabel"> = {}) {
+    return ask(this, title, body, run, files, extras);
   }
 
 
@@ -5416,6 +5521,16 @@ export class ShellState {
   }
 
 
+  guardMerge(run: () => void) {
+    if (this.mergeApplying) return;
+    if (!this.mergeDirty) { run(); return; }
+    if (this.confirmAsk) return;
+    this.ask(this.tr("dialog.mergeDiscardTitle"), this.tr("dialog.mergeDiscardBody"), () => {
+      this.mergeDirty = false;
+      run();
+    }, [], { danger: true });
+  }
+
   closeTextMerge() {
     return closeTextMerge(this);
   }
@@ -6268,10 +6383,8 @@ export class ShellState {
       if (!this.diff && !this.diffError && !this.conflictView) void this.loadDiff();
     });
     $effect(() => {
-      if (this.busy || !this.watchQueued) return;
-      const scope = this.watchQueued;
-      this.watchQueued = null;
-      void this.refresh(scope, true);
+      if (this.busy) return;
+      this.replayWatch();
     });
     $effect(() => {
       const visible = this.section === "history" || this.standalone === "history";
@@ -6333,6 +6446,10 @@ export class ShellState {
     });
     $effect(() => {
     const parts: string[] = [];
+    if (this.standalone === "merge") {
+      parts.push(this.tr("dialog.mergeTitle"));
+      if (this.mergeFile) parts.push(`${this.mergeDirty ? "* " : ""}${this.mergeFile}`);
+    }
     if (this.settings.workspaceShowTitle && this.currentWorkspace) parts.push(this.workspaceName(this.currentWorkspace));
     if (this.snapshot?.path) parts.push(this.folderName(this.snapshot.path));
     parts.push("AweGit");
@@ -6344,12 +6461,13 @@ export class ShellState {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
     const media = typeof window === "undefined" ? null : window.matchMedia("(prefers-color-scheme: dark)");
-    const resolved = () => (this.settings.theme === "dark" || (this.settings.theme !== "light" && (media?.matches ?? false)) ? "dark" : "light");
+    const resolved = () => resolveAppearance(this.settings.theme, media?.matches ?? false);
     const paint = () => {
     const theme = resolved();
+    this.appliedTheme = theme;
     root.setAttribute("data-theme", theme);
     root.lang = this.activeLocale === "zh" ? "zh-CN" : "en";
-    if (this.inApp()) void getCurrentWindow().setTheme(theme).catch(() => {});
+    if (this.inApp()) void getCurrentWindow().setTheme(theme === "dark" ? "dark" : "light").catch(() => {});
     };
     paint();
     media?.addEventListener("change", paint);
@@ -6413,6 +6531,7 @@ export class ShellState {
     };
     const onShortcut = this.onShortcut.bind(this);
     const stopLocale = onLocaleChange((locale) => { this.settings.locale = locale; });
+    const stopAppearance = onAppearanceChange((theme) => { this.settings.theme = theme; });
     const onRememberPointer = this.rememberPointer.bind(this);
     window.addEventListener("keydown", onShortcut);
     window.addEventListener("mousedown", onMouseNav);
@@ -6423,6 +6542,7 @@ export class ShellState {
     window.addEventListener("popstate", onPop);
     const detachNav = () => {
     stopLocale();
+    stopAppearance();
     window.clearTimeout(historyTimer);
     window.removeEventListener("keydown", onShortcut);
     window.removeEventListener("mousedown", onMouseNav);
@@ -6486,13 +6606,15 @@ export class ShellState {
     }
     }
     try {
-    unlisten = await listen<{ refs?: boolean; path?: string } | null>("repo-changed", (event) => {
+    unlisten = await listen<{ refs?: boolean; path?: string; revision?: number } | null>("repo-changed", (event) => {
       const path = event.payload?.path;
       if (path && !this.viewing(path)) return;
       const scope = event.payload?.refs === false ? "status" : "full";
-      if (this.busy) {
+      const revision = event.payload?.revision ?? 0;
+      if (this.watchCovered(scope, revision)) return;
+      if (this.busy || this.refreshing || this.backgroundFetch.has(this.jobKey(this.repoPath()))) {
         // A write ignores refreshes for its whole duration; replay the newest event when it ends.
-        if (this.watchQueued !== "full") this.watchQueued = scope;
+        this.queueWatch(scope, revision);
         return;
       }
       void this.refresh(scope, true);

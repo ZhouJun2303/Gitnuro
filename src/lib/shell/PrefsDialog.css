@@ -54,7 +54,7 @@
   min-height: 30px;
   padding: 4px 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text-secondary);
   font: inherit;
@@ -83,7 +83,8 @@
 .pref-nav-item.on {
   background: var(--selection);
   color: var(--accent);
-  font-weight: 500;
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .pref-nav-item.on svg { opacity: 1; }
@@ -101,8 +102,10 @@
 
 .pref-head-title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
   color: var(--text);
 }
 
@@ -130,8 +133,8 @@
 .pref-card {
   flex: none;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--canvas) 55%, transparent);
+  border-radius: var(--radius-lg);
+  background: var(--canvas);
   overflow: hidden;
 }
 
@@ -139,7 +142,7 @@
   margin: 0;
   padding: 10px 14px 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
-  background: color-mix(in srgb, var(--field) 45%, transparent);
+  background: var(--panel-head);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -189,6 +192,59 @@
 .pref-control > input { width: 200px; }
 
 .pref-control > input[type="number"] { width: 92px; }
+
+.theme-styles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+}
+
+.theme-style {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--elevated);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.theme-style:hover { border-color: var(--text-secondary); }
+.theme-style.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.theme-style:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.theme-style-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 600; }
+.theme-style-check { width: 14px; flex: none; text-align: center; }
+.theme-style-hint { color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+.theme-preview { display: block; height: 82px; overflow: hidden; border: 1px solid rgba(127, 127, 127, 0.2); }
+.theme-preview.code { color: #939393; background: #1e1e1e; border-radius: 2px; }
+.theme-preview.apple { color: #a5a5a9; background: #fff; border-radius: 8px; }
+.theme-preview.classic { color: #8a8a94; background: #fafafa; border-radius: 6px; }
+.classic .theme-preview-bar, .classic .theme-preview-side { background: #f4f4f5; }
+.classic .theme-preview-side i:first-child { color: #5b5bd6; }
+.theme-preview-bar { display: flex; align-items: center; gap: 3px; height: 14px; padding: 0 6px; border-bottom: 1px solid rgba(127, 127, 127, 0.15); }
+.code .theme-preview-bar { background: #252525; }
+.apple .theme-preview-bar { background: #f5f5f7; }
+.theme-preview-bar i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.6; }
+.theme-preview-body { display: flex; height: calc(100% - 14px); }
+.theme-preview-side { display: flex; flex-direction: column; gap: 6px; width: 28%; padding: 10px 6px; border-right: 1px solid rgba(127, 127, 127, 0.12); }
+.code .theme-preview-side { background: #181818; }
+.apple .theme-preview-side { background: #f0f0f2; }
+.theme-preview-content { flex: 1; display: flex; flex-direction: column; gap: 7px; padding: 11px 10px; }
+.theme-preview-body i { display: block; height: 3px; background: currentColor; opacity: 0.25; }
+.theme-preview-side i:first-child { opacity: 0.65; }
+.theme-preview-content i:nth-child(even) { width: 65%; }
+.apple .theme-preview-content i { border-radius: 3px; }
+
+@media (max-width: 580px) {
+  .theme-styles { grid-template-columns: 1fr; }
+}
 
 .dialog .pref-row.wide .pref-control {
   flex: 1;
@@ -402,7 +458,7 @@
 
 .tool-rank { flex: none; min-width: 16px; height: 16px; border-radius: 4px; background: var(--field); color: var(--text-secondary); font-size: 10px; font-style: normal; line-height: 16px; text-align: center; }
 
-.tool-list button.on .tool-rank { background: var(--accent); color: #fff; }
+.tool-list button.on .tool-rank { background: var(--accent); color: var(--on-accent); }
 
 .tool-default { margin-left: auto; flex: none; padding: 0 5px; border-radius: 4px; background: var(--field); color: var(--text-secondary); font-size: 10px; font-style: normal; line-height: 15px; }
 

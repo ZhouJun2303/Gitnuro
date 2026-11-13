@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-remote-matches"
+description = "Enables the remote_matches command without any pre-configured scope."
+commands.allow = ["remote_matches"]
+
+[[permission]]
+identifier = "deny-remote-matches"
+description = "Denies the remote_matches command without any pre-configured scope."
+commands.deny = ["remote_matches"]

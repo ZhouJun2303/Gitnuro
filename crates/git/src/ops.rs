@@ -727,15 +727,13 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             run(repo, &["checkout", check_rev(&name)?]).map(|_| ())
         }),
         Mutation::CreateBranch { name, start } => create_branch(repo, &name, start.as_deref()),
-        Mutation::DeleteBranch { name, force } => run(
-            repo,
-            &[
-                "branch",
-                if force { "-D" } else { "-d" },
-                check_name(&name)?,
-            ],
-        )
-        .map(|_| ()),
+        Mutation::DeleteBranch { name, force } => {
+            if force {
+                run(repo, &["branch", "-D", check_name(&name)?]).map(|_| ())
+            } else {
+                delete_branch(repo, &name)
+            }
+        }
         Mutation::Merge {
             name,
             squash,
@@ -1327,6 +1325,41 @@ fn has_untracked(repo: &Path, files: &[String]) -> bool {
         .unwrap_or(false)
 }
 
+/// `git branch -d` also refuses a branch that is not merged into its upstream,
+/// even when HEAD already contains every commit. Deleting the local branch is
+/// safe whenever all its commits are in HEAD or in its upstream; only a branch
+/// with commits nowhere else stays an error and asks the UI for confirmation.
+fn delete_branch(repo: &Path, name: &str) -> Result<(), Error> {
+    let name = check_name(name)?;
+    let error = match run(repo, &["branch", "-d", name]) {
+        Ok(_) => return Ok(()),
+        Err(error) => error,
+    };
+    let Some(tip) = revision(repo, &format!("refs/heads/{name}")) else {
+        return Err(error);
+    };
+    let upstream = revision(repo, &format!("{name}@{{upstream}}"));
+    let safe = is_ancestor(repo, &tip, "HEAD")
+        || upstream
+            .as_deref()
+            .is_some_and(|upstream| is_ancestor(repo, &tip, upstream));
+    if safe {
+        return run(repo, &["branch", "-D", name]).map(|_| ());
+    }
+    Err(Error::Git(format!("branch is not fully merged\n{error}")))
+}
+
+fn revision(repo: &Path, rev: &str) -> Option<String> {
+    let output = run(repo, &["rev-parse", "--verify", "--quiet", rev]).ok()?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+/// A non-zero exit means "not an ancestor"; any failure here is treated as unsafe.
+fn is_ancestor(repo: &Path, ancestor: &str, descendant: &str) -> bool {
+    run(repo, &["merge-base", "--is-ancestor", ancestor, descendant]).is_ok()
+}
+
 fn create_branch(repo: &Path, name: &str, start: Option<&str>) -> Result<(), Error> {
     let name = check_name(name)?;
     if let Some(start) = start {
@@ -1593,7 +1626,11 @@ pub fn approve_credential(
 
 fn continue_with(repo: &Path, message: &str) -> Result<(), Error> {
     let message = message.replace("\r\n", "\n");
-    if message.trim().is_empty() || !matches!(in_progress(repo)?, Some(InProgress::Rebase)) {
+    let rebase = matches!(in_progress(repo)?, Some(InProgress::Rebase));
+    if rebase {
+        restore_rebase_message(repo);
+    }
+    if message.trim().is_empty() || !rebase {
         return flow(repo, "continue");
     }
     if message.contains('\0') {
@@ -1606,6 +1643,40 @@ fn continue_with(repo: &Path, message: &str) -> Result<(), Error> {
         &[("GIT_EDITOR", editor.editor.as_str())],
     )
     .map(|_| ())
+}
+
+/// A killed rebase can leave the pick applied but drop `.git/rebase-merge/message`.
+/// Rebuild it from the commit `done` names so `--continue` commits the same text.
+fn restore_rebase_message(repo: &Path) {
+    let Ok(dir) = crate::flow::git_dir(repo) else {
+        return;
+    };
+    let dir = dir.join("rebase-merge");
+    let message = dir.join("message");
+    if message.exists() {
+        return;
+    }
+    let Ok(done) = std::fs::read_to_string(dir.join("done")) else {
+        return;
+    };
+    let commit = done.lines().rev().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        if !matches!(parts.next()?, "pick" | "p" | "reword" | "r" | "edit" | "e") {
+            return None;
+        }
+        parts.next().map(str::to_string)
+    });
+    let Some(commit) = commit else {
+        return;
+    };
+    let Ok(output) = run(repo, &["log", "-1", "--format=%B", &commit]) else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    if text.trim().is_empty() {
+        return;
+    }
+    let _ = std::fs::write(message, text.as_bytes());
 }
 
 fn abort(repo: &Path) -> Result<(), Error> {
@@ -3054,25 +3125,28 @@ pub struct TrackedDirs {
 }
 
 pub fn tracked_directories(repo: &Path, limit: usize) -> TrackedDirs {
+    if let Ok(repository) = crate::open_repo(repo) {
+        if let Ok(index) = repository.index_or_empty() {
+            return directories_from_paths(repo, limit, index.entries().iter().filter_map(|entry| std::str::from_utf8(entry.path(&index)).ok()));
+        }
+    }
+    let Ok(output) = crate::cli::run(repo, &["ls-files", "-z"]) else {
+        return TrackedDirs { paths: vec![repo.to_path_buf()], capped: false };
+    };
+    directories_from_paths(repo, limit, output.stdout.split(|byte| *byte == 0).filter_map(|path| std::str::from_utf8(path).ok()))
+}
+
+fn directories_from_paths<'a>(repo: &Path, limit: usize, entries: impl Iterator<Item = &'a str>) -> TrackedDirs {
     let mut paths = Vec::new();
     let mut seen = HashSet::new();
     let root = repo.to_path_buf();
     seen.insert(root.clone());
     paths.push(root);
-    let Ok(output) = crate::cli::run(repo, &["ls-files", "-z"]) else {
-        return TrackedDirs {
-            paths,
-            capped: false,
-        };
-    };
     let mut capped = false;
-    for part in output.stdout.split(|byte| *byte == 0) {
-        if part.is_empty() {
+    for text in entries {
+        if text.is_empty() {
             continue;
         }
-        let Ok(text) = std::str::from_utf8(part) else {
-            continue;
-        };
         let Some(parent) = repo.join(text).parent().map(Path::to_path_buf) else {
             continue;
         };

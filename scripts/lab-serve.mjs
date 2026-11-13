@@ -31,8 +31,9 @@ export function startLab() {
   });
 }
 
-export function startVite(port) {
-  return spawn(process.execPath, ["node_modules/vite/bin/vite.js", "dev"], {
+export function startVite(port, { reuse = false } = {}) {
+  const args = reuse ? ["scripts/dev-server.mjs"] : ["node_modules/vite/bin/vite.js", "dev"];
+  return spawn(process.execPath, args, {
     cwd: root,
     env: labEnv({ AWEGIT_VITE_PORT: String(port) }),
     stdio: "inherit",

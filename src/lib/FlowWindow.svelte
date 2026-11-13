@@ -5,6 +5,7 @@
   import { invoke } from "./perf";
   import { translate, resolveLocale, type Locale } from "./i18n";
   import { broadcastLocale, onLocaleChange } from "./i18n/sync";
+  import { isAppearance, onAppearanceChange, resolveAppearance } from "./appearance";
   import { shortcut } from "./keys";
   import { buildFlowPipeline, isFutureStep, stateSymbol, type FlowCommit, type FlowDelta, type FlowNode, type FlowSnapshot, type FlowSummary } from "./operation-flow";
   import type { Settings } from "./status";
@@ -24,6 +25,7 @@
   let filePages = $state<Record<string, number>>({});
   let expanded = $state<Record<string, boolean>>({});
   let locale = $state<Locale>("zh");
+  let appearance = $state("apple");
   let error = $state("");
   let ready = $state(false);
   let scene = $state("");
@@ -31,6 +33,7 @@
   let lastActive = "";
   let disposed = false;
   let loading = false;
+  let historyLoading = false;
   let generation = 0;
   let scrollFrame = 0;
   let viewport: HTMLDivElement;
@@ -97,12 +100,14 @@
   }
 
   async function loadHistory() {
-    if (fixture || !repo) return;
+    if (fixture || !repo || disposed || historyLoading) return;
+    historyLoading = true;
     const token = generation;
     try {
       const value = await invoke<FlowSummary[]>("operation_history", { path: repo, offset: 0, limit: 100 });
       if (token === generation && !disposed) history = value;
     } catch (cause) { error = String(cause); }
+    finally { historyLoading = false; }
   }
 
   async function navigate(id: string, automatic = false) {
@@ -160,6 +165,14 @@
 
   onMount(() => {
     const stopLocale = onLocaleChange((setting) => { locale = resolveLocale(setting); });
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const paint = () => {
+      const theme = resolveAppearance(appearance, media.matches);
+      document.documentElement.dataset.theme = theme;
+      if (desktop) void getCurrentWindow().setTheme(theme === "dark" ? "dark" : "light").catch(() => {});
+    };
+    const stopAppearance = onAppearanceChange((setting) => { appearance = setting; paint(); });
+    media.addEventListener("change", paint);
     const onLanguageShortcut = (event: KeyboardEvent) => {
       if (event.defaultPrevented || shortcut(event) !== "switchLanguage") return;
       event.preventDefault();
@@ -180,8 +193,9 @@
       try {
         const settings = await invoke<Settings>("load_settings");
         autoClose = settings.flowAutoClose === true;
-        locale = scene ? "zh" : resolveLocale(settings.locale);
-        document.documentElement.dataset.theme = settings.theme === "dark" || (settings.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "light";
+        locale = scene ? params.get("locale") === "en" ? "en" : "zh" : resolveLocale(settings.locale);
+        appearance = scene && isAppearance(params.get("theme")) ? params.get("theme")! : settings.theme;
+        paint();
         if (scene.startsWith("operation-flow") && !repo) {
           const { flowFixture } = await import("./lab/flow-fixture");
           fixture = true; const sample = flowFixture(scene); repo = sample.summary.repo; replace(sample); history = [sample.summary];
@@ -212,14 +226,29 @@
     };
     void boot();
     const refreshAutoClose = () => {
+      void refresh();
       void invoke<Settings>("load_settings").then((settings) => {
         if (!disposed) autoClose = settings.flowAutoClose === true;
       }).catch((cause) => { if (!disposed) error = String(cause); });
     };
     window.addEventListener("focus", refreshAutoClose);
-    const poll = setInterval(() => { if (!document.hidden) void refresh(); }, 1000);
-    const historyPoll = setInterval(() => { if (!document.hidden) void loadHistory(); }, 10_000);
-    return () => { disposed = true; generation++; stopLocale(); window.removeEventListener("keydown", onLanguageShortcut); clearInterval(poll); clearInterval(historyPoll); cancelAnimationFrame(scrollFrame); window.removeEventListener("focus", refreshAutoClose); unlisten.forEach((off) => off()); };
+    let poll = 0, historyPoll = 0;
+    const pollNext = async () => {
+      if (disposed) return;
+      if (!document.hidden) await refresh();
+      if (!disposed) poll = window.setTimeout(pollNext, desktop ? 10_000 : 1000);
+    };
+    const pollHistory = async () => {
+      if (disposed) return;
+      if (!document.hidden) await loadHistory();
+      if (!disposed) historyPoll = window.setTimeout(pollHistory, 10_000);
+    };
+    poll = window.setTimeout(pollNext, desktop ? 10_000 : 1000);
+    historyPoll = window.setTimeout(pollHistory, 10_000);
+    if (desktop) void listen<{ path?: string }>("repo-changed", ({ payload }) => {
+      if (!payload?.path || payload.path === repo) void refresh();
+    }).then((off) => { if (disposed) off(); else unlisten.push(off); }).catch(() => {});
+    return () => { disposed = true; generation++; stopLocale(); stopAppearance(); media.removeEventListener("change", paint); window.removeEventListener("keydown", onLanguageShortcut); clearTimeout(poll); clearTimeout(historyPoll); cancelAnimationFrame(scrollFrame); window.removeEventListener("focus", refreshAutoClose); unlisten.forEach((off) => off()); };
   });
 </script>
 

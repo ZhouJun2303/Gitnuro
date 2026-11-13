@@ -13,9 +13,17 @@
 
 客户端在仓库根目录。Tauri 2 + SvelteKit / Svelte 5 + TypeScript，Rust 后端。
 
-- `src`：界面
+- `src`：界面。组件、状态、样式，试验台场景在 `src/lib/lab`
 - `src-tauri`：窗口、命令、设置
-- `crates/git`：状态用 gitoxide，差异文本、历史和写操作走 `git` porcelain
+- `crates/git`：状态用 gitoxide，差异文本、历史和写操作走 `git` porcelain；测试在 `crates/git/tests`
+- `e2e`：试验台 UI 用例，按场景文件放在这里
+- `scripts`：测试、种子、开发和打包脚本
+- `docs`：发布到 GitHub Pages 的功能介绍页和截图
+- `dev-docs`：开发文档、专题记录和计划，不发布
+- `static`：前端静态资源
+- `.github`：Issue 模板和 CI 工作流
+- `.lab`：本地试验数据，不提交
+- `build`、`.svelte-kit`、`target`、`src-tauri/target`、`test-results`、`node_modules`：生成目录，不提交
 
 约定：
 
@@ -35,12 +43,27 @@
 - macOS 打包：`pnpm package:mac`
 - 不提交 `target/`、`node_modules/`、`src-tauri/target/`，也不提交打包进来的 MinGit
 
+## 文档
+
+`docs/` 只放发布到 GitHub Pages 的功能介绍页和截图，不放 Markdown。开发、性能、审计等内部文档一律放 `dev-docs/`。根目录只放 `README.md`、`AGENTS.md`、`TODO.md`。
+
+- `README.md`：面向用户。功能、下载安装、常用命令、分支与发布；中文、英文两节同步改
+- `AGENTS.md`：面向代理和协作者的仓库规则。只写约定，不写进度
+- `TODO.md`：当前问题和优化清单。新任务写进“待处理”，关闭时写明修复提交和回归测试名
+- `docs/index.html`：功能介绍页，中英文同步改；截图放 `docs/screenshots/`，引用用相对路径
+- `dev-docs/development.md`：开发环境、测试、试验台、打包、发布和快捷键
+- `dev-docs/*.md`：专题文档，文件名写主题，如 `performance-plan.md`。一次性的检查、审计、测量记录在标题写明日期和对照提交
+- 新增 `dev-docs/*.md` 时在 `README.md` 或 `TODO.md` 加链接，不留孤儿文档
+- 不要往 `docs/`、`src/`、`src-tauri/`、`crates/`、`scripts/`、`e2e/` 里加 Markdown
+- 临时笔记、方案和进度不新建 Markdown：计划写进 `TODO.md` 或对应专题文档，实验数据写 `.lab/`
+- 命令、约定和说明只维护一份，其他文档链接过去，不在多处重复
+
 ## 试验台
 
 浏览器看界面用 `pnpm dev`，自动化用 `pnpm test:ui`。桌面仍是 `pnpm start`。
 
 - `.lab/` 不提交。种子脚本 `scripts/lab-seed.mjs` 和场景清单要提交
-- 改了界面、弹窗或仓库状态后，补相关场景，只验证本次改动涉及的 UI，不跑全量场景。用 `pnpm test:ui -- <测试文件> --grep <用例名称>` 精确选择；验证方式同步到相关文档和 Markdown
+- 改了界面、弹窗或仓库状态后，补相关场景，只验证本次改动涉及的 UI，不跑全量场景。相关页面要在 Apple、经典白色、VS Code 黑色下都测到受影响的面板。命令和面板名见 `dev-docs/development.md`
 - 新弹窗必须记入 `src/lib/lab/scenes.ts`。缺一项时 `pnpm check` 会失败
 - 不拿 AweGit 自身仓库做暂存、提交或推送实验。试验只写 `.lab`
 

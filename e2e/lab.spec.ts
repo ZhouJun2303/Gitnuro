@@ -1,6 +1,9 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { scenes, type LabScene } from "../src/lib/lab/scenes";
+import { scenes } from "../src/lib/lab/scenes";
+import { openLabScene, openScene } from "./helpers";
 
 async function lab(cmd: string, args: Record<string, unknown> = {}) {
   const response = await fetch("http://127.0.0.1:1429/invoke", {
@@ -13,33 +16,9 @@ async function lab(cmd: string, args: Record<string, unknown> = {}) {
   return payload.value;
 }
 
-async function openScene(page: Page, scene: LabScene) {
-  const errors: string[] = [];
-  const onError = (error: Error) => errors.push(error.message);
-  page.on("pageerror", onError);
-  try {
-    console.log(`scene ${scene.id}`);
-    await page.goto(scene.href, { waitUntil: "domcontentloaded" });
-    const ready = page.locator(`[data-lab-scene="${scene.id}"]`);
-    const failed = page.locator("[data-lab-error]");
-    await expect(ready.or(failed)).toBeVisible({ timeout: 90_000 });
-    if (!(await ready.isVisible())) throw new Error(`${scene.id}: ${await failed.getAttribute("data-lab-error")}`);
-    if (scene.ready.startsWith("text=")) await expect(page.getByText(scene.ready.slice(5)).first()).toBeVisible();
-    else await expect(page.locator(scene.ready).first()).toBeVisible();
-    expect(errors, scene.id).toEqual([]);
-  } finally {
-    page.off("pageerror", onError);
-  }
-}
-
 test("home lists a scene", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("link", { name: "变更" })).toBeVisible();
-});
-
-test("every scene opens", async ({ page }) => {
-  test.setTimeout(scenes.length * 90_000 + 30_000);
-  for (const scene of scenes) await openScene(page, scene);
 });
 
 test("binary diffs show both sides by size", async ({ page }) => {
@@ -70,10 +49,12 @@ test("large text assets load their diff on demand", async ({ page }) => {
 
 test("pushbox commits and pushes", async () => {
   const layout = (await lab("lab_layout")) as { pushbox: string; remotePush: string };
+  const summary = `lab: record the push note ${Date.now()}`;
+  appendFileSync(resolve(layout.pushbox, "note.txt"), `${summary}\n`);
   await lab("stage_path", { path: layout.pushbox, file: "note.txt" });
   await lab("commit_changes", {
     path: layout.pushbox,
-    summary: "lab: record the push note",
+    summary,
     description: "",
     amend: false,
     signOff: false,
@@ -84,16 +65,8 @@ test("pushbox commits and pushes", async () => {
     request: { action: "push", remote: "origin", setUpstream: true, tags: false, forceWithLease: false },
   });
   const subject = execFileSync("git", ["--git-dir", layout.remotePush, "log", "-1", "--format=%s"], { encoding: "utf8" }).trim();
-  expect(subject).toBe("lab: record the push note");
+  expect(subject).toBe(summary);
 });
-
-async function openLabScene(page: Page, id: string, ready: string) {
-  const href = scenes.find((scene) => scene.id === id)?.href ?? `/?scene=${id}`;
-  await page.goto(href, { waitUntil: "domcontentloaded" });
-  await page.locator(`[data-lab-scene="${id}"]`).waitFor({ state: "visible", timeout: 90_000 });
-  await page.locator(ready).first().waitFor({ state: "visible", timeout: 30_000 });
-  await page.waitForTimeout(400);
-}
 
 test("dialog close button dismisses the dialog", async ({ page }) => {
   await openLabScene(page, "dialog-prefs", '[data-dialog="prefs"]');
@@ -306,7 +279,7 @@ test("floating hunk actions stay inside the pane while scrolling", async ({ page
 });
 
 test("dragging lines selects rows beneath the floating hunk actions", async ({ page }) => {
-  await openLabScene(page, "diff-long", ".diff-body .split-code");
+  await openLabScene(page, "diff-long", ".diff-body .split-code", { diffStyle: "split" });
   const body = page.locator("section.diff .diff-body");
   await body.locator(".split-code").nth(20).hover();
   const actions = page.locator(".diff-hunk-actions");
@@ -333,13 +306,59 @@ test("dragging lines selects rows beneath the floating hunk actions", async ({ p
   expect(Math.min(...picked)).toBe(firstCode);
 });
 
+test("split view scrolls both columns together", async ({ page }) => {
+  await openLabScene(page, "diff-large-asset", ".diff-load", { diffStyle: "split" });
+  await page.locator(".diff-load .pane-chip").click();
+  await expect(page.locator("section.diff .diff-body.split .split-code").first()).toBeVisible({ timeout: 30_000 });
+  const readBars = () =>
+    page.evaluate(() => {
+      const read = (side: string) => {
+        const node = document.querySelector<HTMLElement>(`section.diff .split-bar[data-bar="${side}"]`);
+        if (!node) return null;
+        return { at: Math.round(node.scrollLeft), max: Math.round(node.scrollWidth - node.clientWidth) };
+      };
+      const body = document.querySelector<HTMLElement>("section.diff .diff-body");
+      return {
+        left: read("left"),
+        right: read("right"),
+        styles: {
+          left: body?.style.getPropertyValue("--sx-left") ?? "",
+          right: body?.style.getPropertyValue("--sx-right") ?? "",
+        },
+      };
+    });
+  const drag = (side: "left" | "right", value: number) =>
+    page.evaluate(
+      ({ side, value }) => {
+        const node = document.querySelector<HTMLElement>(`section.diff .split-bar[data-bar="${side}"]`)!;
+        node.scrollLeft = value;
+        node.dispatchEvent(new Event("scroll"));
+      },
+      { side, value },
+    );
+
+  const start = await readBars();
+  expect(start.left, "left bar").not.toBeNull();
+  expect(start.right, "right bar").not.toBeNull();
+  expect(Math.min(start.left!.max, start.right!.max)).toBeGreaterThan(60);
+
+  await drag("left", 40);
+  const expectedRight = Math.min(40, start.right!.max);
+  await expect.poll(async () => (await readBars()).right!.at).toBe(expectedRight);
+  expect((await readBars()).styles.right).toBe(`${expectedRight}px`);
+
+  await drag("right", 12);
+  await expect.poll(async () => (await readBars()).left!.at).toBe(12);
+  expect((await readBars()).styles.left).toBe("12px");
+});
+
 test("wrapped hunk actions anchor to the hunk under the pointer", async ({ page }) => {
   const scenes: Array<[string, string]> = [
     ["diff-wrap", ".split-meta"],
     ["diff-wrap-unified", ".virtual-row.hunk"],
   ];
   for (const [scene, selector] of scenes) {
-    await openLabScene(page, scene, selector);
+    await openLabScene(page, scene, selector, { diffStyle: "split" });
     const body = page.locator("section.diff .diff-body");
     const header = body.locator(selector, { hasText: "@@" }).nth(1);
     await header.scrollIntoViewIfNeeded();
@@ -372,11 +391,36 @@ test("open dialog keeps every source row readable", async ({ page }) => {
   expect(height).toBeGreaterThanOrEqual(28);
 });
 
+test("remote dialog shows the synced account for the URL", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openLabScene(page, "dialog-remote", '[data-dialog="remote"] [data-remote-account]');
+  const card = page.locator('[data-dialog="remote"] [data-remote-account]');
+  await expect(card).toContainText("HTTPS");
+  await expect(card).toContainText("github.com");
+  await expect(card).toContainText("lab/example");
+  await expect(card).toContainText("Lab 01");
+  await expect(card).toContainText("@lab-01");
+  await page.locator('[data-dialog="remote"] input').first().fill("git@gitlab.com:lab/example.git");
+  await expect(card).toContainText("SSH");
+  await expect(card).toContainText("gitlab.com");
+  await expect(card).toContainText("Lab 02");
+  await expect(card).toContainText("@lab-02");
+  for (const theme of ["apple", "light", "dark"] as const) {
+    const scene = scenes.find((item) => item.id === "dialog-remote");
+    if (!scene) throw new Error("dialog-remote");
+    await openScene(page, scene, `&theme=${theme}`);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    const box = await page.locator("[data-remote-account]").boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThan(8);
+    expect(box?.height ?? 0).toBeGreaterThan(8);
+  }
+});
+
 test("long dialogs keep their title and first field in view", async ({ page }) => {
-  await openLabScene(page, "dialog-accounts", '[data-dialog="accounts"]');
-  await expect(page.locator('[data-dialog="accounts"] h2')).toBeInViewport();
-  const scrolled = await page.locator('[data-dialog="accounts"] form').evaluate((node) => node.scrollTop);
-  expect(scrolled).toBe(0);
+  await openLabScene(page, "prefs-accounts", '[data-dialog="prefs"] .account-card');
+  await expect(page.locator('[data-dialog="prefs"] .account-card').first()).toBeInViewport();
+  const accountScroll = await page.locator('[data-dialog="prefs"] .pref-page').evaluate((node) => node.scrollTop);
+  expect(accountScroll).toBe(0);
   await openLabScene(page, "prefs-git", '[data-dialog="prefs"]');
   const prefScroll = await page.locator('[data-dialog="prefs"] .pref-page').evaluate((node) => node.scrollTop);
   expect(prefScroll).toBe(0);
@@ -387,6 +431,35 @@ test("long dialogs keep their title and first field in view", async ({ page }) =
   });
   expect(area.top).toBe(0);
   expect(area.start).toBe(0);
+});
+
+test("account sync adopts the settings the backend saved", async ({ page }) => {
+  test.setTimeout(90_000);
+  let saves = 0;
+  await page.route("**/__lab/invoke", async (route) => {
+    const raw = route.request().postData();
+    if (!raw) return route.continue();
+    let body: { cmd?: string };
+    try {
+      body = JSON.parse(raw) as { cmd?: string };
+    } catch {
+      return route.continue();
+    }
+    if (body.cmd === "save_settings") saves += 1;
+    if (body.cmd !== "sync_accounts") return route.continue();
+    const payload = await (await route.fetch()).json();
+    const settings = payload.value ?? {};
+    settings.accounts = [
+      ...(settings.accounts ?? []),
+      { id: "acct-sync", forge: "github", label: "Synced", token: "tok", host: "github.com", clientId: "", login: "synced", name: "Synced", email: "", avatarUrl: "", defaultForHost: false },
+    ];
+    return route.fulfill({ json: { ok: true, value: settings } });
+  });
+  await openLabScene(page, "prefs-accounts", '[data-dialog="prefs"] .account-card');
+  saves = 0;
+  await page.getByRole("button", { name: /同步本机已登录的账号|Sync accounts already signed in/ }).click();
+  await expect(page.locator('[data-account-card="acct-sync"]')).toBeVisible();
+  expect(saves).toBe(0);
 });
 
 test("push and pull dialogs start with a branch", async ({ page }) => {
@@ -402,10 +475,10 @@ test("push and pull dialogs start with a branch", async ({ page }) => {
   await openLabScene(page, "dialog-pull", '[data-dialog="pull"]');
   const pullSelect = page.locator('[data-dialog="pull"] .remote-target-body select').first();
   expect(await pullSelect.inputValue()).not.toBe("");
-  const pullTabs = page.locator('[data-dialog="pull"] .remote-tabs [role="tab"]');
-  await expect(pullTabs.filter({ hasText: "origin" })).toHaveAttribute("aria-selected", "true");
-  await pullTabs.filter({ hasText: "mirror-01" }).click();
-  await expect(pullTabs.filter({ hasText: "mirror-01" })).toHaveAttribute("aria-selected", "true");
+  // Many remotes use a select instead of a wrapping tab strip.
+  await expect(page.locator('[data-dialog="pull"] .remote-tabs')).toHaveCount(0);
+  await pullSelect.selectOption("mirror-01");
+  await expect(pullSelect).toHaveValue("mirror-01");
   expect(await page.locator('[data-dialog="pull"] .remote-target-body').locator("select, input").first().inputValue()).not.toBe("");
 });
 
@@ -501,19 +574,19 @@ test("submenu stays open while the pointer moves through its items", async ({ pa
 });
 
 test("a write blocked by local changes offers stash and retry", async ({ page }) => {
-  await openLabScene(page, "action-error-retry", '.identity-floor[data-layer="error"]');
+  await openLabScene(page, "action-error-retry", '.identity-floor[data-layer="error"]', { locale: "en" });
   await expect(page.locator('.identity-floor[data-layer="error"]')).toContainText("Stash and retry");
 });
 
 test("applying a stash asks before it touches the work tree", async ({ page }) => {
-  await openLabScene(page, "stash-apply-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "stash-apply-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("working tree");
   await expect(confirm.locator(".commit")).toBeEnabled();
 });
 
 test("reverting a commit asks before it runs", async ({ page }) => {
-  await openLabScene(page, "revert-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "revert-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("Revert commit");
   await expect(confirm).toContainText("new revert commit");
@@ -521,7 +594,7 @@ test("reverting a commit asks before it runs", async ({ page }) => {
 });
 
 test("popping a stash asks before it runs", async ({ page }) => {
-  await openLabScene(page, "stash-pop-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "stash-pop-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("Pop stash");
   await expect(confirm).toContainText("remove it from the stash list");
@@ -529,7 +602,7 @@ test("popping a stash asks before it runs", async ({ page }) => {
 });
 
 test("resetting a branch asks before it moves", async ({ page }) => {
-  await openLabScene(page, "reset-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "reset-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("Mixed reset");
   await expect(confirm).toContainText("unstaged");
@@ -537,11 +610,49 @@ test("resetting a branch asks before it moves", async ({ page }) => {
 });
 
 test("cherry-picking asks before it runs", async ({ page }) => {
-  await openLabScene(page, "cherry-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "cherry-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("Cherry-pick (note source commit)");
   await expect(confirm).toContainText("records the source commit");
   await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
+test("a stale index.lock offers removal and retry", async ({ page }) => {
+  await openLabScene(page, "stale-lock-confirm", '[data-layer="confirm"]', { locale: "en" });
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("index.lock");
+  await expect(confirm).toContainText("812 seconds");
+  await expect(confirm.locator(".commit")).toContainText("Remove and retry");
+  await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
+test("branch confirmation keeps the branch name on one line", async ({ page }) => {
+  await openLabScene(page, "force-delete-confirm", '[data-layer="confirm"]', { locale: "en" });
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("Force delete branch");
+  const subject = confirm.locator(".confirm-subject");
+  await expect(subject).toHaveText("rewrite/tauri");
+  const box = await subject.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.height).toBeLessThan(40);
+  await expect(confirm.locator(".commit")).toHaveClass(/danger/);
+});
+
+test("a long stash summary stays readable inside the confirmation", async ({ page }) => {
+  await openLabScene(page, "stash-apply-long-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  const subject = confirm.locator(".confirm-subject");
+  await expect(subject).toContainText("KingEquipDev_2026_09_14");
+  const box = await subject.evaluate((node) => ({
+    whiteSpace: getComputedStyle(node).whiteSpace,
+    height: node.getBoundingClientRect().height,
+    width: node.getBoundingClientRect().width,
+    clipped: node.scrollHeight - node.clientHeight,
+  }));
+  expect(box.whiteSpace).toBe("pre-wrap");
+  expect(box.height).toBeGreaterThan(40);
+  expect(box.width).toBeLessThan(420);
+  expect(box.clipped).toBeLessThanOrEqual(0);
 });
 
 test("multi-file confirmation lists one file per line with a total", async ({ page }) => {
@@ -549,15 +660,15 @@ test("multi-file confirmation lists one file per line with a total", async ({ pa
   const confirm = page.locator('[data-layer="confirm"]');
   const rows = confirm.locator(".confirm-files li");
   await expect(rows).toHaveCount(6);
-  await expect(confirm.locator(".confirm-count")).toHaveText("6 files");
+  await expect(confirm.locator(".confirm-count")).toHaveText(/^(6 files|共 6 个文件)$/);
   await expect(rows.first()).toContainText("Y语言表_Data_Language.xlsx");
-  await expect(confirm.locator(".commit")).toBeFocused();
+  await expect(confirm.locator(".text-button")).toBeFocused();
   const heights = await rows.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
   expect(Math.max(...heights)).toBeLessThan(26);
 });
 
 test("commit patch renders each hunk header once", async ({ page }) => {
-  await openLabScene(page, "commit", ".detail");
+  await openLabScene(page, "commit", ".detail", { diffStyle: "split" });
   await page.locator(".patch-toggle").first().click();
   const meta = page.locator(".detail .split-meta");
   await expect(meta.first()).toBeVisible();
@@ -610,17 +721,27 @@ test("history restores its scroll position after switching sections", async ({ p
 
 test("pushed commits are bold, local ones stay regular and readable", async ({ page }) => {
   await openLabScene(page, "history", ".history .commit-row.unpushed");
-  const local = page.locator(".history .commit-row.unpushed .subject").first();
-  expect(await local.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("400");
-  expect(await local.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+  const theme = await page.locator("html").getAttribute("data-theme");
+  const selected = page.locator(".history .commit-row.selected .subject").first();
+  expect(await selected.evaluate((node) => getComputedStyle(node).fontWeight)).toBe(theme === "apple" ? "500" : "600");
   await page.locator(".history").evaluate((node) => {
     node.scrollTop = node.scrollHeight;
     node.dispatchEvent(new Event("scroll"));
   });
   await page.waitForTimeout(400);
-  const pushed = page.locator(".history .commit-row.pushed .subject").first();
-  await expect(pushed).toBeVisible();
-  expect(await pushed.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("600");
+  const pushedRow = page.locator(".history .commit-row.pushed:not(.selected)").first();
+  await expect(pushedRow).toBeVisible();
+  expect(await pushedRow.locator(".subject").evaluate((node) => getComputedStyle(node).fontWeight)).toBe("600");
+  await pushedRow.click();
+  await page.locator(".history").evaluate((node) => {
+    node.scrollTop = 0;
+    node.dispatchEvent(new Event("scroll"));
+  });
+  await page.waitForTimeout(400);
+  const local = page.locator(".history .commit-row.unpushed").first();
+  await expect(local).not.toHaveClass(/selected/);
+  expect(await local.locator(".subject").evaluate((node) => getComputedStyle(node).fontWeight)).toBe("400");
+  expect(await local.locator(".subject").evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
 });
 
 test("remote-only commits stay dimmed and regular", async ({ page }) => {
@@ -743,7 +864,7 @@ test("damaged settings use the recovery banner", async ({ page }) => {
 });
 
 test("returning to changes reloads a diff cleared by a history refresh", async ({ page }) => {
-  await openLabScene(page, "changes", "section.diff .diff-body");
+  await openLabScene(page, "changes", "section.diff .diff-body", { locale: "en" });
   await page.locator('[data-section="history"]').click();
   await page.waitForTimeout(400);
   await page.locator(".menubar button", { hasText: "View" }).click();
@@ -767,7 +888,7 @@ test("switching repositories clears the previous commit detail", async ({ page }
 });
 
 test("interactive rebase from HEAD explains there is nothing newer", async ({ page }) => {
-  await openLabScene(page, "history", ".commit-row");
+  await openLabScene(page, "history", ".commit-row", { locale: "en" });
   await page.locator(".commit-row").first().click({ button: "right" });
   await page.locator('[data-layer="menu"] button', { hasText: /Interactive rebase/ }).click();
   await expect(page.locator('[data-dialog="rebase"]')).toHaveCount(0);
@@ -784,7 +905,7 @@ test("changing one rebase verb leaves the other rows alone", async ({ page }) =>
 });
 
 test("shortcuts do not open layers behind a menu or the forge dialog", async ({ page }) => {
-  await openLabScene(page, "history", ".commit-row");
+  await openLabScene(page, "history", ".commit-row", { locale: "en" });
   await page.locator(".menubar button", { hasText: "View" }).click();
   await page.keyboard.press("Control+,");
   await expect(page.locator('[data-dialog="prefs"]')).toHaveCount(0);
@@ -800,7 +921,7 @@ test("shortcuts do not open layers behind a menu or the forge dialog", async ({ 
 });
 
 test("merge stays available with local changes and stashes them", async ({ page }) => {
-  await openLabScene(page, "dialog-merge", '[data-dialog="merge"]');
+  await openLabScene(page, "dialog-merge", '[data-dialog="merge"]', { locale: "en" });
   const dialog = page.locator('[data-dialog="merge"]');
   await expect(dialog.locator(".commit")).toBeEnabled();
   await expect(dialog.locator(".dialog-error")).toHaveCount(0);
@@ -808,36 +929,45 @@ test("merge stays available with local changes and stashes them", async ({ page 
 });
 
 test("batch conflict actions keep one side for the selected files", async ({ page }) => {
-  await openLabScene(page, "conflict-batch", ".file-list .file");
-  await expect(page.locator(".composer .summary-input")).toHaveValue(/topic/);
-  await expect(page.locator(".composer .summary-input")).toHaveValue(/main/);
-  await expect(page.locator(".composer textarea")).not.toHaveValue(/conflict\/file-/);
-  await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("topic");
-  await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("main");
-  const rows = page.locator(".unstaged-pane .file-list .file");
-  const paths = await rows.evaluateAll((nodes) =>
-    nodes.slice(0, 2).map((node) => node.querySelector<HTMLElement>(".file-select")?.title ?? ""),
-  );
-  expect(paths).toHaveLength(2);
-  expect(paths.every((path) => path !== "")).toBe(true);
-  await rows.nth(0).click();
-  await rows.nth(1).click({ modifiers: ["Control"] });
-  await expect(page.locator(".pick-bar")).toBeVisible();
-  await expect(page.locator(".pick-count")).toHaveText(/2/);
-  const pane = page.locator(".conflict-pane");
-  await expect(pane.locator(".conflict-selection")).toContainText("2");
-  await pane.locator("#conflict-theirs").click();
-  await expect(pane.locator(".conflict-merge")).toContainText(/Keep main|保留 main/);
-  await pane.locator("#conflict-theirs").click();
-  await rows.nth(1).click({ button: "right" });
-  const menu = page.locator('[data-layer="menu"]');
-  await expect(menu).toBeVisible();
-  const ours = menu.locator("button").filter({ hasText: /Keep main|保留 main/ });
-  await expect(ours).toContainText("2");
-  await expect(menu.locator("button").filter({ hasText: /Keep topic|保留 topic/ })).toBeVisible();
-  await ours.click();
-  for (const path of paths) {
-    await expect(page.locator(`.unstaged-pane .file-list .file-select[title="${path}"]`)).toHaveCount(0);
+  test.setTimeout(60_000);
+  try {
+    await openLabScene(page, "conflict-batch", ".file-list .file");
+    await expect(page.locator(".composer .summary-input")).toHaveValue(/topic/);
+    await expect(page.locator(".composer .summary-input")).toHaveValue(/main/);
+    await expect(page.locator(".composer textarea")).not.toHaveValue(/conflict\/file-/);
+    await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("topic");
+    await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("main");
+    const rows = page.locator(".unstaged-pane .file-list .file");
+    const paths = await rows.evaluateAll((nodes) =>
+      nodes.slice(0, 2).map((node) => node.querySelector<HTMLElement>(".file-select")?.title ?? ""),
+    );
+    expect(paths).toHaveLength(2);
+    expect(paths.every((path) => path !== "")).toBe(true);
+    await rows.nth(0).click();
+    await rows.nth(1).click({ modifiers: ["Control"] });
+    await expect(page.locator(".pick-bar")).toBeVisible();
+    await expect(page.locator(".pick-count")).toHaveText(/2/);
+    const pane = page.locator(".conflict-pane");
+    await expect(pane.locator(".conflict-selection")).toContainText("2");
+    await pane.locator("#conflict-theirs").click();
+    await expect(pane.locator(".conflict-merge")).toContainText(/Keep main|保留 main/);
+    await pane.locator("#conflict-theirs").click();
+    await rows.nth(1).click({ button: "right" });
+    const menu = page.locator('[data-layer="menu"]');
+    await expect(menu).toBeVisible();
+    const ours = menu.locator("button").filter({ hasText: /Keep main|保留 main/ });
+    await expect(ours).toContainText("2");
+    await expect(menu.locator("button").filter({ hasText: /Keep topic|保留 topic/ })).toBeVisible();
+    await ours.click();
+    for (const path of paths) {
+      await expect(page.locator(`.unstaged-pane .file-list .file-select[title="${path}"]`)).toHaveCount(0);
+    }
+  } finally {
+    const fixture = resolve(".lab/repos/conflict");
+    execFileSync("git", ["-c", "core.autocrlf=false", "-C", fixture, "reset", "--hard", "HEAD"], { stdio: "pipe" });
+    const merged = spawnSync("git", ["-c", "core.autocrlf=false", "-C", fixture, "merge", "--no-commit", "topic"], { encoding: "utf8" });
+    expect(merged.status, merged.stderr).toBe(1);
+    expect(execFileSync("git", ["-C", fixture, "ls-files", "-u"], { encoding: "utf8" })).not.toBe("");
   }
 });
 
@@ -848,8 +978,9 @@ test("merge panel opens as a standalone page", async ({ page }) => {
   const viewport = page.viewportSize();
   expect(box).not.toBeNull();
   expect(viewport).not.toBeNull();
-  expect(Math.round(box!.width)).toBe(viewport!.width);
-  expect(Math.round(box!.height)).toBe(viewport!.height);
+  const inset = (await page.locator("html").getAttribute("data-theme")) === "apple" ? 20 : 0;
+  expect(Math.round(box!.width)).toBe(viewport!.width - inset);
+  expect(Math.round(box!.height)).toBe(viewport!.height - inset);
   await expect(page.locator(".merge-scrim")).toHaveCount(0);
 });
 

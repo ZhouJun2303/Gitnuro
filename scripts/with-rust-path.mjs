@@ -93,7 +93,12 @@ function findGccBin() {
     const bin = join(root, "WinLibs", "mingw64", "bin");
     if (isFile(join(bin, "gcc.exe"))) found.push(bin);
   }
-  return found[0] ?? null;
+  if (found.length > 0) return found[0];
+  for (const entry of (process.env.PATH ?? process.env.Path ?? "").split(delimiter)) {
+    const bin = entry.trim().replace(/^"|"$/g, "");
+    if (bin && isFile(join(bin, "gcc.exe"))) return bin;
+  }
+  return null;
 }
 
 function isFile(path) {

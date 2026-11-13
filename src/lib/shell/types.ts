@@ -22,7 +22,6 @@ export type Dialog =
     | "stash"
     | "rename"
     | "upstream"
-    | "resolve"
     | "rebase"
     | "patch"
     | "about"
@@ -45,7 +44,6 @@ export type Dialog =
     | "checkoutNotice"
     | "activity"
     | "mailmap"
-    | "accounts"
     | "ssh"
     | "stale"
     | "pushAs"
@@ -61,7 +59,7 @@ export type MergePick = "ours" | "theirs" | "both" | "none";
 
 export type MergePiece =
     | { kind: "text"; text: string }
-    | { kind: "hunk"; ours: string; theirs: string; pick: MergePick };
+    | { kind: "hunk"; ours: string; theirs: string; pick: MergePick; oursLines?: number; theirsLines?: number };
 
 export type RepoFacts = {
     ignored: string[];
@@ -79,7 +77,17 @@ export type MenuItem = { label: string; run?: () => void; disabled?: boolean; sh
 
 export type MenuItems = MenuItem[] | (() => MenuItem[]);
 
-export type ConfirmAsk = { title: string; body: string; files?: string[]; run: () => void };
+export type ConfirmAsk = {
+    title: string;
+    body: string;
+    /** The name, path, or summary the action targets. Shown on one line. */
+    subject?: string;
+    detail?: string;
+    danger?: boolean;
+    confirmLabel?: string;
+    files?: string[];
+    run: () => void;
+};
 
 export type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row; depth: number };
 

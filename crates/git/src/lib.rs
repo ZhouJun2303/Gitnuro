@@ -11,8 +11,11 @@ mod locks;
 mod model;
 mod ops;
 mod proc;
+mod timing;
 
 use std::path::{Path, PathBuf};
+
+pub use timing::{enter_timing, set_timing_trace, timing_context, timing_phase, timing_repository, TimingContext, TimingPhase, TimingScope};
 
 pub use change::{
     blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line,
@@ -24,19 +27,19 @@ pub use change::{
 };
 pub use cli::{
     cancel_reads, cancel_repo, cancel_running, capture_output, configure, git_program, git_runtime,
-    hide_console, origin_url, parse_git_version, repo_key, set_http_proxy, set_passphrase,
-    set_progress, set_trace, stop_process_tree, use_bundled_git, with_operation_repo, GitRuntime,
-    Session, Trace,
+    hide_console, ls_remote_head, origin_url, parse_git_version, remote_list, repo_key, set_http_proxy,
+    set_https_credentials, set_passphrase, set_progress, set_trace, stop_process_tree, use_bundled_git,
+    with_operation_repo, GitRuntime, HttpsCredential, Session, Trace,
 };
 pub use model::{
     blame_file, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log,
     commit_log_sorted, commit_tree, commits_from, compare_file, compare_files, file_history,
     ignored_paths, in_progress, index_lock_path, lfs_available, lfs_locks, locate_ref,
-    prompt_facts, rebase_conflicts, reflog, repo_sign_off_format, repository_refs,
-    repository_summary, search_log, show_commit_file, show_commit_file_with, write_expanded_groups,
-    write_hidden_refs, write_sign_off, BlameLine, BranchRow, CommitDetail, CommitRow, InProgress,
-    LfsLockRow, LocatedRef, RefSnapshot, ReflogRow, RemoteRow, RepoSummary, StashRow, SubmoduleRow,
-    TagRow, WorktreeRow,
+    prompt_facts, rebase_conflicts, reflog, remove_stale_index_lock, repo_sign_off_format,
+    repository_refs, repository_summary, search_log, show_commit_file, show_commit_file_with,
+    remote_account_overrides, stale_index_lock, write_expanded_groups, write_hidden_refs, write_remote_account, write_sign_off, BlameLine,
+    BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, LocatedRef, RefSnapshot,
+    ReflogRow, RemoteRow, RepoSummary, StaleIndexLock, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
 pub use ops::{
     approve_credential, cherry_preview, merge_preview, merge_state, merged_branches, perform, perform_stashed,
@@ -73,6 +76,8 @@ pub enum ChangeKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusSnapshot {
+    #[serde(default)]
+    pub revision: u64,
     pub path: String,
     pub branch: Option<String>,
     pub staged: Vec<FileChange>,
@@ -155,6 +160,7 @@ pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSna
         fakeignore::conceal(worktree.as_path(), &repo, &mut staged, &mut unstaged);
     }
     Ok(StatusSnapshot {
+        revision: 0,
         path: worktree.display().to_string(),
         branch,
         staged,

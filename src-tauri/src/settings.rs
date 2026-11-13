@@ -396,7 +396,7 @@ pub struct CommandRecord {
 #[serde(rename_all = "camelCase")]
 pub struct Account {
     pub id: String,
-    /// `github`, `gitlab`, `bitbucket`, or `azure`.
+    /// `github`, `gitlab`, `bitbucket`, `azure`, `gitee`, `gitea`, or another forge id.
     pub forge: String,
     #[serde(default)]
     pub label: String,
@@ -406,10 +406,22 @@ pub struct Account {
     pub host: String,
     #[serde(default)]
     pub client_id: String,
+    /// Profile login. Empty until a connectivity test or a silent sync fills it.
+    #[serde(default)]
+    pub login: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub avatar_url: String,
+    /// The account HTTPS uses when a remote on this host has no username and no per-repo override.
+    #[serde(default)]
+    pub default_for_host: bool,
 }
 
 fn theme_default() -> String {
-    "system".into()
+    "apple".into()
 }
 fn default_true() -> bool {
     true
@@ -669,6 +681,18 @@ pub fn load() -> Result<Settings, String> {
 
 pub fn save(settings: &Settings) -> Result<(), String> {
     save_at(&path()?, settings)
+}
+
+/// Patch only the window geometry. Window moves happen while a slow sync is
+/// running, and they must never write back an older copy of the other fields.
+pub fn save_window_bounds(width: u32, height: u32, x: i32, y: i32) -> Result<(), String> {
+    let path = path()?;
+    let mut values = load_at(&path)?;
+    values.window_width = width;
+    values.window_height = height;
+    values.window_x = x;
+    values.window_y = y;
+    save_at(&path, &values)
 }
 
 enum ReadIssue {
@@ -1742,6 +1766,7 @@ mod tests {
         dir: std::path::PathBuf,
         path: std::path::PathBuf,
         previous_secrets: Option<std::ffi::OsString>,
+        previous_settings: Option<std::ffi::OsString>,
     }
 
     impl TempSettings {
@@ -1753,7 +1778,9 @@ mod tests {
             let previous_secrets = std::env::var_os("AWEGIT_SECRET_DIR");
             unsafe { std::env::set_var("AWEGIT_SECRET_DIR", &secrets) };
             let path = dir.join("settings.json");
-            Self { dir, path, previous_secrets }
+            let previous_settings = std::env::var_os("AWEGIT_SETTINGS");
+            unsafe { std::env::set_var("AWEGIT_SETTINGS", &path) };
+            Self { dir, path, previous_secrets, previous_settings }
         }
     }
 
@@ -1762,6 +1789,10 @@ mod tests {
             match self.previous_secrets.take() {
                 Some(value) => unsafe { std::env::set_var("AWEGIT_SECRET_DIR", value) },
                 None => unsafe { std::env::remove_var("AWEGIT_SECRET_DIR") },
+            }
+            match self.previous_settings.take() {
+                Some(value) => unsafe { std::env::set_var("AWEGIT_SETTINGS", value) },
+                None => unsafe { std::env::remove_var("AWEGIT_SETTINGS") },
             }
             let _ = std::fs::remove_dir_all(&self.dir);
         }
@@ -1776,6 +1807,18 @@ mod tests {
     }
 
     #[test]
+    fn appearance_defaults_to_apple_and_preserves_saved_choices() {
+        let dir = TempSettings::new();
+        assert_eq!(load_at(&dir.path).unwrap().theme, "apple");
+        for theme in ["apple", "light", "dark", "system"] {
+            let mut settings = Settings::default();
+            settings.theme = theme.into();
+            save_at(&dir.path, &settings).unwrap();
+            assert_eq!(load_at(&dir.path).unwrap().theme, theme);
+        }
+    }
+
+    #[test]
     fn settings_interrupted_temp_write_keeps_the_last_good_file() {
         let dir = TempSettings::new();
         let settings = sample_settings();
@@ -1785,6 +1828,36 @@ mod tests {
         assert_eq!(loaded.theme, "dark");
         assert_eq!(loaded.github_token, "secret");
         assert!(loaded.recovery_notice.is_empty());
+    }
+
+    #[test]
+    fn window_bounds_save_keeps_accounts_and_other_fields() {
+        let dir = TempSettings::new();
+        let mut settings = sample_settings();
+        settings.accounts.push(Account {
+            id: "acct-1".into(),
+            forge: "github".into(),
+            label: "work".into(),
+            token: "token-1".into(),
+            host: "github.com".into(),
+            client_id: String::new(),
+            login: "octo".into(),
+            name: "Octo".into(),
+            email: String::new(),
+            avatar_url: String::new(),
+            default_for_host: true,
+        });
+        save_at(&dir.path, &settings).unwrap();
+        save_window_bounds(1400, 900, 12, 34).unwrap();
+        let loaded = load_at(&dir.path).unwrap();
+        assert_eq!(loaded.window_width, 1400);
+        assert_eq!(loaded.window_height, 900);
+        assert_eq!(loaded.window_x, 12);
+        assert_eq!(loaded.window_y, 34);
+        assert_eq!(loaded.theme, "dark");
+        assert_eq!(loaded.accounts.len(), 1);
+        assert_eq!(loaded.accounts[0].id, "acct-1");
+        assert_eq!(loaded.accounts[0].token, "token-1");
     }
 
     #[test]
@@ -1874,6 +1947,11 @@ mod tests {
             token: "acct-secret".into(),
             host: String::new(),
             client_id: String::new(),
+            login: String::new(),
+            name: String::new(),
+            email: String::new(),
+            avatar_url: String::new(),
+            default_for_host: false,
         });
         save_at(&dir.path, &settings).unwrap();
         let disk = std::fs::read_to_string(&dir.path).unwrap();

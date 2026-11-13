@@ -1,10 +1,13 @@
+mod accounts;
 mod ai;
+mod changes;
 mod forge;
 mod flow_window;
 mod flows;
 mod http;
 mod lab;
 mod perf;
+mod reads;
 mod secrets;
 mod settings;
 mod tools;
@@ -75,6 +78,7 @@ struct RepoWatch(Mutex<HashMap<PathBuf, Arc<WatchSlot>>>);
 struct RepoChange {
     refs: bool,
     path: String,
+    revision: u64,
 }
 
 /// Transfer percent for one repository. The shell shows it only while that repository is open.
@@ -97,10 +101,12 @@ struct RepoTicket {
 
 struct RepoTurn {
     gate: Arc<RepoGate>,
+    repo: PathBuf,
 }
 
 impl Drop for RepoTurn {
     fn drop(&mut self) {
+        changes::changed(&self.repo);
         let mut guard = self.gate.inner.lock().unwrap_or_else(|err| err.into_inner());
         guard.serving = guard.serving.saturating_add(1);
         self.gate.cv.notify_all();
@@ -108,6 +114,7 @@ impl Drop for RepoTurn {
 }
 
 fn repo_turn(repo: &Path) -> RepoTurn {
+    let _phase = perf::phase("write-queue");
     let key = awegit_git::repo_key(repo);
     let gate = {
         let mut map = repo_gates().lock().unwrap_or_else(|err| err.into_inner());
@@ -138,7 +145,8 @@ fn repo_turn(repo: &Path) -> RepoTurn {
         guard = gate.cv.wait(guard).unwrap_or_else(|err| err.into_inner());
     }
     drop(guard);
-    RepoTurn { gate }
+    changes::changed(repo);
+    RepoTurn { gate, repo: repo.to_path_buf() }
 }
 
 fn report_path(given: Option<String>, repo: &Path) -> PathBuf {
@@ -152,7 +160,7 @@ fn report_path(given: Option<String>, repo: &Path) -> PathBuf {
 /// Settings keep their call order. Writes run together, and each repository keeps its own order.
 fn dispatch(command: &str, job: Job) {
     let lane = match command {
-        "load_settings" | "save_settings" | "settings_path" | "import_fork_settings" | "watch_repository" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
+        "load_settings" | "save_settings" | "save_window_bounds" | "settings_path" | "import_fork_settings" | "watch_repository" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
         | "log_client" => Some((&SETTINGS_LANE, "awegit-settings")),
         _ => None,
     };
@@ -160,7 +168,14 @@ fn dispatch(command: &str, job: Job) {
         tauri::async_runtime::spawn_blocking(job);
         return;
     };
-    let sender = slot.get_or_init(|| {
+    let sender = settings_sender(slot, name);
+    if let Err(mpsc::SendError(job)) = sender.send(job) {
+        tauri::async_runtime::spawn_blocking(job);
+    }
+}
+
+fn settings_sender(slot: &'static OnceLock<Sender<Job>>, name: &'static str) -> &'static Sender<Job> {
+    slot.get_or_init(|| {
         let (sender, receiver) = mpsc::channel::<Job>();
         let _ = std::thread::Builder::new().name(name.into()).spawn(move || {
             for job in receiver {
@@ -168,10 +183,22 @@ fn dispatch(command: &str, job: Job) {
             }
         });
         sender
+    })
+}
+
+/// Run a job after the settings already queued, then wait for its result.
+///
+/// The sync finds credentials slowly and must not hold up every settings write
+/// meanwhile; it saves through this only once it knows what it found.
+fn on_settings_lane<T: Send + 'static>(job: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
+    let (sender, receiver) = mpsc::channel();
+    let run: Job = Box::new(move || {
+        let _ = sender.send(job());
     });
-    if let Err(mpsc::SendError(job)) = sender.send(job) {
-        tauri::async_runtime::spawn_blocking(job);
+    if let Err(mpsc::SendError(run)) = settings_sender(&SETTINGS_LANE, "awegit-settings").send(run) {
+        run();
     }
+    receiver.recv().map_err(|_| "设置队列已停止".to_string())
 }
 
 fn git_cmd(dir: &Path) -> Option<PathBuf> {
@@ -207,11 +234,16 @@ fn repo_from(path: Option<String>) -> Result<PathBuf, String> {
     let found = awegit_git::discover(&start).unwrap_or_else(|| start.clone());
     lab::ensure_lab_path(&start)?;
     lab::ensure_lab_path(&found)?;
+    awegit_git::timing_repository(&found);
     Ok(found)
 }
 
 fn read_status(repo: &Path) -> Result<awegit_git::StatusSnapshot, String> {
-    awegit_git::status_with(repo, use_fakeignore()).map_err(|error| error.to_string())
+    let _phase = perf::phase("status");
+    let revision = changes::revision(repo);
+    let mut status = awegit_git::status_with(repo, use_fakeignore()).map_err(|error| error.to_string())?;
+    status.revision = revision;
+    Ok(status)
 }
 
 fn use_fakeignore() -> bool {
@@ -269,7 +301,8 @@ fn write_kind_then_status(path: Option<String>, kind: &str, write: impl FnOnce(&
 #[tauri::command]
 fn workspace_status(path: Option<String>) -> Result<awegit_git::StatusSnapshot, String> {
     let repo = repo_from(path)?;
-    let status = read_status(&repo)?;
+    let revision = changes::revision(&repo);
+    let status = reads::shared(format!("status:{}:{revision}:{}", awegit_git::repo_key(&repo), use_fakeignore()), || read_status(&repo))?;
     flows::reconcile(&repo);
     Ok(status)
 }
@@ -374,6 +407,8 @@ fn commit_log(
     let repo = repo_from(path)?;
     let limit = limit.unwrap_or(500);
     let topo = order.as_deref() == Some("topo");
+    let key = format!("log:{}:{}:{limit}:{topo}:{all:?}:{revs:?}", awegit_git::repo_key(&repo), changes::revision(&repo));
+    reads::shared(key, || {
     if let Some(revs) = revs.as_ref().filter(|items| !items.is_empty()) {
         return awegit_git::commits_from(&repo, limit, revs, topo).map_err(|error| error.to_string());
     }
@@ -383,6 +418,7 @@ fn commit_log(
         awegit_git::branch_commits_sorted(&repo, limit, topo)
     };
     rows.map_err(|error| error.to_string())
+    })
 }
 
 #[tauri::command]
@@ -401,7 +437,12 @@ fn locate_ref(path: Option<String>, name: String, order: Option<String>) -> Resu
 #[tauri::command]
 fn repository_refs(path: Option<String>) -> Result<awegit_git::RefSnapshot, String> {
     let repo = repo_from(path)?;
-    awegit_git::repository_refs(&repo).map_err(|error| error.to_string())
+    let revision = changes::revision(&repo);
+    reads::shared(format!("refs:{}:{revision}", awegit_git::repo_key(&repo)), || {
+        let mut refs = awegit_git::repository_refs(&repo).map_err(|error| error.to_string())?;
+        refs.revision = revision;
+        Ok(refs)
+    })
 }
 
 #[tauri::command]
@@ -435,6 +476,7 @@ fn blame_file(path: Option<String>, file: String) -> Result<Vec<awegit_git::Blam
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct MutationReport {
     #[serde(flatten)]
     status: awegit_git::StatusSnapshot,
@@ -444,6 +486,8 @@ struct MutationReport {
     log: String,
     outcome: String,
     error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stale_lock: Option<awegit_git::StaleIndexLock>,
     flow: Option<flows::Summary>,
 }
 
@@ -467,11 +511,13 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
     };
     let _turn = repo_turn(&next);
     apply_session();
+    let _https = accounts::install_https(&repo, &request);
     record_action(&request);
     let action_name = action_label(&request);
-    let flow = flows::begin(&repo, &request);
+    let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
     let report = report_path(given, &repo);
     let action = || awegit_git::capture_output(|| awegit_git::with_operation_repo(&report, || {
+        let _phase = perf::phase("perform");
         let output = if retry_stash.unwrap_or(false) { awegit_git::perform_stashed(&repo, request)? } else { awegit_git::perform(&repo, request)? };
         if matches!(action_name, "resolve" | "resolvePaths" | "stagePaths" | "stageHunk" | "stageLine" | "stageLines") {
             awegit_git::flow::restore_pending(&repo)?;
@@ -479,7 +525,10 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         Ok::<_, awegit_git::Error>(output)
     }));
     let (result, log) = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
-    let flow = flow.map(|flow| flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name));
+    // A killed Git process can leave index.lock behind and make the write fail
+    // without a usable stderr. Report the file so the UI can offer to remove it.
+    let stale_lock = if result.is_err() { awegit_git::stale_index_lock(&next) } else { None };
+    let flow = flow.map(|flow| { let _phase = perf::phase("flow-finish"); flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name) });
     let status = read_status(&next)?;
     let conflicted = status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict);
     let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
@@ -491,6 +540,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         log,
         outcome,
         error,
+        stale_lock,
         flow,
     })
 }
@@ -738,6 +788,11 @@ fn save_settings(mut values: settings::Settings) -> Result<settings::Settings, S
 }
 
 #[tauri::command]
+fn save_window_bounds(width: u32, height: u32, x: i32, y: i32) -> Result<(), String> {
+    settings::save_window_bounds(width, height, x, y)
+}
+
+#[tauri::command]
 fn settings_path() -> Result<String, String> {
     Ok(settings::path()?.display().to_string())
 }
@@ -802,10 +857,21 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
             }
         }
     }
-    let (sender, receiver) = mpsc::channel::<Vec<PathBuf>>();
+    let (sender, receiver) = mpsc::channel::<(u64, Vec<PathBuf>)>();
+    let event_repo = repo.clone();
     let mut watcher = notify::recommended_watcher(move |result: Result<Event, notify::Error>| {
-        if let Ok(event) = result {
-            let _ = sender.send(event.paths);
+        match result {
+            Ok(event) if !matches!(event.kind, notify::EventKind::Access(_)) => {
+                if event.paths.iter().any(|path| watch_relevant(&event_repo, path)) || event.need_rescan() {
+                    let revision = changes::changed(&event_repo);
+                    let _ = sender.send((revision, if event.need_rescan() { vec![event_repo.join(".git/HEAD")] } else { event.paths }));
+                }
+            }
+            Err(_) => {
+                let revision = changes::changed(&event_repo);
+                let _ = sender.send((revision, vec![event_repo.join(".git/HEAD")]));
+            }
+            _ => {}
         }
     })
     .map_err(|error| error.to_string())?;
@@ -815,19 +881,10 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
     watch_one(&mut watcher, &repo, RecursiveMode::NonRecursive, &mut watched)?;
     if let Some(git) = &git_dir {
         watch_git_metadata(&mut watcher, git, &mut watched);
+        let common = common_metadata_dir(git);
+        if common != *git { watch_git_metadata(&mut watcher, &common, &mut watched); }
     }
-    let tracked = awegit_git::tracked_directories(&repo, 4_000);
-    if tracked.capped {
-        perf::write("WARN", "watch", "tracked directories capped at 4000");
-    }
-    for dir in tracked.paths {
-        if skipped_path(&dir) {
-            continue;
-        }
-        if let Err(error) = watch_one(&mut watcher, &dir, RecursiveMode::NonRecursive, &mut watched) {
-            perf::write("WARN", "watch", &error);
-        }
-    }
+    watch_tracked_directories(&mut watcher, &repo, &mut watched);
     perf::write(
         "INFO",
         "watch",
@@ -844,6 +901,7 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
         RepoChange {
             refs: true,
             path: repo.display().to_string(),
+            revision: changes::changed(&repo),
         },
     );
     let shared = Arc::new(WatchSlot {
@@ -858,6 +916,19 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
         .map_err(|error| error.to_string())?;
     slots.insert(key, shared);
     Ok(())
+}
+
+fn watch_tracked_directories(watcher: &mut RecommendedWatcher, repo: &Path, watched: &mut WatchSet) {
+    let tracked = awegit_git::tracked_directories(repo, 4_000);
+    if tracked.capped {
+        perf::write("WARN", "watch", "tracked directories capped at 4000");
+    }
+    for dir in tracked.paths {
+        if !dir.is_dir() { continue; }
+        if let Err(error) = watch_one(watcher, &dir, RecursiveMode::NonRecursive, watched) {
+            perf::write("WARN", "watch", &error);
+        }
+    }
 }
 
 /// Directories that are huge or rewrite themselves. A recursive watch of the work tree
@@ -1100,26 +1171,33 @@ fn settle_changes(
     app: &tauri::AppHandle,
     repo: &Path,
     git_dir: Option<PathBuf>,
-    receiver: Receiver<Vec<PathBuf>>,
+    receiver: Receiver<(u64, Vec<PathBuf>)>,
     mut watched: WatchSet,
     slot: Arc<WatchSlot>,
 ) {
-    'watch: while let Ok(mut paths) = receiver.recv() {
+    'watch: while let Ok((mut revision, paths)) = receiver.recv() {
+        let mut unique: HashSet<PathBuf> = paths.into_iter().collect();
         let started = Instant::now();
         let mut overflow = false;
         while started.elapsed() < WATCH_MAX_WAIT {
-            if paths.len() >= WATCH_BATCH {
+            if unique.len() >= WATCH_BATCH {
                 overflow = true;
-                while receiver.try_recv().is_ok() {}
+                while let Ok((next, _)) = receiver.try_recv() { revision = revision.max(next); }
                 break;
             }
             match receiver.recv_timeout(WATCH_QUIET) {
-                Ok(more) => paths.extend(more),
+                Ok((next, more)) => { revision = revision.max(next); unique.extend(more); }
                 Err(RecvTimeoutError::Timeout) => break,
                 Err(RecvTimeoutError::Disconnected) => break 'watch,
             }
         }
+        let paths: Vec<_> = unique.into_iter().collect();
         attach_new_dirs(repo, git_dir.as_deref(), &paths, &mut watched, &slot);
+        if overflow || paths.iter().any(|path| watched_relative(repo, path).is_some_and(|path| path == ".git/index" || path == ".git")) {
+            if let Ok(mut guard) = slot.watcher.lock() {
+                if let Some(watcher) = guard.as_mut() { watch_tracked_directories(watcher, repo, &mut watched); }
+            }
+        }
         if overflow {
             // The dropped events may have included refs; a full refresh is the safe answer.
             let recoveries = WATCH_RECOVERIES.fetch_add(1, Ordering::Relaxed) + 1;
@@ -1129,11 +1207,14 @@ fn settle_changes(
                 RepoChange {
                     refs: true,
                     path: repo.display().to_string(),
+                    revision,
                 },
             );
             continue;
         }
-        let Some(change) = classify_changes(repo, &paths) else { continue };
+        let Some(mut change) = classify_changes(repo, &paths) else { continue };
+        change.revision = revision;
+        flows::reconcile(repo);
         perf::write("INFO", "watch", &format!("repo-changed refs={} paths={}", change.refs, paths.len()));
         let _ = app.emit("repo-changed", change);
     }
@@ -1145,24 +1226,24 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
     let mut status = false;
     let mut files = Vec::new();
     for path in paths {
-        let Ok(relative) = path.strip_prefix(repo) else { continue };
-        let relative = relative.to_string_lossy().replace('\\', "/");
-        if relative.is_empty() || relative.ends_with(".lock") {
+        let Some(relative) = watched_relative(repo, path) else { continue };
+        if relative.is_empty() {
             continue;
         }
+        if relative == ".git" {
+            return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo) });
+        }
         if let Some(inner) = relative.strip_prefix(".git/") {
+            if inner.ends_with(".lock") { continue; }
             match inner.split('/').next().unwrap_or("") {
                 "index" => status = true,
-                "objects" | "modules" | "lfs" | "logs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit" | "gitnuro" | "fsmonitor--daemon"
+                "objects" | "modules" | "lfs" | "logs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit" | "awegit-flow" | "gitnuro" | "fsmonitor--daemon"
                     if inner != "logs/refs/stash" => {}
-                _ => return Some(RepoChange { refs: true, path: repo.display().to_string() }),
+                _ => return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo) }),
             }
             continue;
         }
-        let skip = relative.split('/').any(heavy_dir);
-        if !skip {
-            files.push(relative);
-        }
+        files.push(relative);
     }
     if !status && !files.is_empty() {
         files.sort();
@@ -1170,7 +1251,42 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
         let ignored: HashSet<String> = awegit_git::ignored_paths(repo, &files).into_iter().collect();
         status = files.iter().any(|file| !ignored.contains(file));
     }
-    status.then_some(RepoChange { refs: false, path: repo.display().to_string() })
+    status.then_some(RepoChange { refs: false, path: repo.display().to_string(), revision: changes::revision(repo) })
+}
+
+fn watched_relative(repo: &Path, path: &Path) -> Option<String> {
+    let path = normalize_watch_path(path);
+    if let Ok(relative) = path.strip_prefix(normalize_watch_path(repo)) {
+        return Some(relative.to_string_lossy().replace('\\', "/"));
+    }
+    let git = git_metadata_dir(repo)?;
+    for root in [git.clone(), common_metadata_dir(&git)] {
+        if let Ok(relative) = path.strip_prefix(normalize_watch_path(&root)) {
+            return Some(format!(".git/{}", relative.to_string_lossy().replace('\\', "/")));
+        }
+    }
+    None
+}
+
+fn common_metadata_dir(git: &Path) -> PathBuf {
+    std::fs::read_to_string(git.join("commondir")).ok()
+        .and_then(|path| git.join(path.trim()).canonicalize().ok())
+        .unwrap_or_else(|| git.to_path_buf())
+}
+
+fn watch_relevant(repo: &Path, path: &Path) -> bool {
+    let Some(relative) = watched_relative(repo, path) else { return false };
+    if let Some(inner) = relative.strip_prefix(".git/") {
+        if inner.ends_with(".lock") { return false; }
+        return match inner.split('/').next().unwrap_or("") {
+            "objects" | "modules" | "lfs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit-flow" | "fsmonitor--daemon" => false,
+            "logs" => inner == "logs/refs/stash",
+            _ => true,
+        };
+    }
+    // Heavy directories are never watched recursively. A directly watched tracked
+    // parent must still report its files, even under build/ or node_modules/.
+    true
 }
 
 #[tauri::command]
@@ -1464,6 +1580,15 @@ fn remove_index_lock(path: Option<String>) -> Result<bool, String> {
     }
 }
 
+/// Remove the `index.lock` a killed Git command left, after the user confirmed.
+/// The git crate re-checks its age so a lock a new command just took is kept.
+#[tauri::command]
+fn remove_stale_lock(path: Option<String>, lock: String) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let _turn = repo_turn(&repo);
+    awegit_git::remove_stale_index_lock(&repo, &lock).map_err(|error| error.to_string())
+}
+
 /// Stop history/diff/blame reads without touching a queued write.
 #[tauri::command]
 fn cancel_reads(path: Option<String>) -> Result<(), String> {
@@ -1556,7 +1681,10 @@ fn conflict_sides(path: Option<String>, file: String) -> Result<awegit_git::Conf
 #[tauri::command]
 fn conflict_view(path: Option<String>, file: String) -> Result<awegit_git::ConflictView, String> {
     let repo = repo_from(path)?;
-    awegit_git::conflict_view(&repo, &file).map_err(|error| error.to_string())
+    let stamp = flows::checkpoint_stamp(&repo);
+    let worktree = std::fs::metadata(repo.join(&file)).ok().map(|meta| (meta.len(), meta.modified().ok()));
+    let key = format!("conflict:{}:{}:{stamp:?}:{worktree:?}:{file}", awegit_git::repo_key(&repo), changes::revision(&repo));
+    reads::shared(key, || awegit_git::conflict_view(&repo, &file).map_err(|error| error.to_string()))
 }
 
 #[tauri::command]
@@ -1646,23 +1774,15 @@ fn launch_tool(path: Option<String>, kind: String, file: String, tool: Option<St
 }
 
 #[tauri::command]
-fn account_token(values: &settings::Settings, forge_name: &str, fallback: &str) -> String {
-    if !fallback.trim().is_empty() {
-        return fallback.to_string();
-    }
-    values
-        .accounts
-        .iter()
-        .find(|item| item.forge == forge_name && !item.token.trim().is_empty())
-        .map(|item| item.token.clone())
-        .unwrap_or_default()
+fn account_token(values: &settings::Settings, forge_name: &str, host: &str) -> String {
+    accounts::token_for(values, forge_name, host)
 }
 
 #[tauri::command]
 fn forge_notifications() -> Result<Vec<forge::Notice>, String> {
     let values = settings::load()?;
     http::with_net(http::NetOptions::from_settings(&values), || {
-        forge::notifications(&account_token(&values, "github", &values.github_token))
+        forge::notifications(&account_token(&values, "github", "github.com"))
     })
 }
 
@@ -1671,12 +1791,14 @@ fn forge_pulls(path: Option<String>) -> Result<Vec<forge::PullRequest>, String> 
     let repo = repo_from(path)?;
     let values = settings::load()?;
     let url = awegit_git::origin_url(&repo);
+    let host = accounts::parse_remote(&url).host;
+    let gitlab_host = if host.trim().is_empty() { values.gitlab_host.clone() } else { host.clone() };
     http::with_net(http::NetOptions::from_settings(&values), || {
         forge::pulls(
             &url,
-            &account_token(&values, "github", &values.github_token),
-            &account_token(&values, "gitlab", &values.gitlab_token),
-            &values.gitlab_host,
+            &account_token(&values, "github", &host),
+            &account_token(&values, "gitlab", &host),
+            &gitlab_host,
         )
     })
 }
@@ -1751,7 +1873,7 @@ fn scan_repositories(root: String, depth: Option<u32>) -> Result<awegit_git::Sca
 fn mark_notification(id: String) -> Result<(), String> {
     let values = settings::load()?;
     http::with_net(http::NetOptions::from_settings(&values), || {
-        forge::mark_read(&account_token(&values, "github", &values.github_token), &id)
+        forge::mark_read(&account_token(&values, "github", "github.com"), &id)
     })
 }
 
@@ -1759,7 +1881,7 @@ fn mark_notification(id: String) -> Result<(), String> {
 fn create_github_repo(name: String, private_repo: bool) -> Result<String, String> {
     let values = settings::load()?;
     http::with_net(http::NetOptions::from_settings(&values), || {
-        forge::create_repo(&account_token(&values, "github", &values.github_token), &name, private_repo)
+        forge::create_repo(&account_token(&values, "github", "github.com"), &name, private_repo)
     })
 }
 
@@ -1853,16 +1975,99 @@ fn activity_log() -> Vec<String> {
 #[tauri::command]
 fn create_hosted_repo(forge_name: String, name: String, private_repo: bool, host: String, org: String) -> Result<String, String> {
     let values = settings::load()?;
-    let fallback = match forge_name.as_str() {
-        "gitlab" => values.gitlab_token.clone(),
-        "bitbucket" => values.bitbucket_token.clone(),
-        "azure" => values.azure_token.clone(),
-        _ => values.github_token.clone(),
-    };
-    let token = account_token(&values, &forge_name, &fallback);
+    let token = account_token(&values, &forge_name, &host);
     http::with_net(http::NetOptions::from_settings(&values), || {
         forge::create_hosted(&forge_name, &token, &host, &name, private_repo, &org)
     })
+}
+
+#[tauri::command]
+fn account_services() -> Vec<accounts::ServiceInfo> {
+    accounts::services()
+}
+
+#[tauri::command]
+fn sync_accounts() -> Result<settings::Settings, String> {
+    if lab::lab_guarded() {
+        return settings::load();
+    }
+    let values = settings::load()?;
+    let report = http::with_net(http::NetOptions::from_settings(&values), || accounts::sync_report(&values));
+    // Discovery is slow. Save what it found on the settings queue so it lands
+    // after the writes already asked for and cannot overwrite a newer list.
+    on_settings_lane(move || {
+        let mut current = settings::load()?;
+        accounts::merge_report(&mut current, &report);
+        settings::save(&current)?;
+        Ok(current)
+    })?
+}
+
+#[tauri::command]
+fn test_account(
+    id: String,
+    forge_name: String,
+    label: String,
+    token: String,
+    host: String,
+    client_id: String,
+    login: String,
+    name: String,
+    email: String,
+    avatar_url: String,
+    default_for_host: bool,
+    probe_url: Option<String>,
+) -> Result<accounts::AccountProbe, String> {
+    if lab::lab_guarded() {
+        return Ok(accounts::lab_probe());
+    }
+    let account = settings::Account {
+        id,
+        forge: forge_name,
+        label,
+        token,
+        host,
+        client_id,
+        login,
+        name,
+        email,
+        avatar_url,
+        default_for_host,
+    };
+    let values = settings::load().unwrap_or_default();
+    Ok(http::with_net(http::NetOptions::from_settings(&values), || accounts::test_account(&account, probe_url.as_deref().unwrap_or(""))))
+}
+
+#[tauri::command]
+fn browser_login(forge_name: String, host: String) -> Result<accounts::LoginResult, String> {
+    if lab::lab_guarded() {
+        return Ok(accounts::lab_login());
+    }
+    let values = settings::load()?;
+    Ok(http::with_net(http::NetOptions::from_settings(&values), || accounts::browser_login(&values, &forge_name, &host)))
+}
+
+#[tauri::command]
+fn cancel_browser_login() {
+    accounts::cancel_browser_login();
+}
+
+#[tauri::command]
+fn remote_matches(path: Option<String>) -> Result<Vec<accounts::RemoteMatch>, String> {
+    if lab::lab_guarded() {
+        return Ok(vec![accounts::lab_remote()]);
+    }
+    let repo = repo_from(path)?;
+    let values = settings::load()?;
+    let remotes = awegit_git::remote_list(&repo);
+    let overrides = awegit_git::remote_account_overrides(&repo);
+    Ok(accounts::explain_remotes(&values, &remotes, &overrides))
+}
+
+#[tauri::command]
+fn save_remote_account(path: Option<String>, remote: String, account_id: String) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    awegit_git::write_remote_account(&repo, &remote, &account_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2003,7 +2208,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 fn saved_window_theme() -> Option<tauri::Theme> {
     match settings::load().ok()?.theme.as_str() {
         "dark" => Some(tauri::Theme::Dark),
-        "light" => Some(tauri::Theme::Light),
+        "light" | "apple" => Some(tauri::Theme::Light),
         _ => None,
     }
 }
@@ -2029,6 +2234,8 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
         _ => "desk",
     };
     if let Some(window) = app.get_webview_window(label) {
+        let _ = window.unminimize();
+        let _ = window.show();
         let _ = window.set_focus();
         if label == "history" || label == "blob" || label == "merge" || view_name == "flow" {
             let _ = app.emit(
@@ -2063,11 +2270,14 @@ fn open_window(app: tauri::AppHandle, view: Option<String>, repo: Option<String>
         .inner_size(width.clamp(480.0, 4000.0), height.clamp(360.0, 4000.0))
         .theme(saved_window_theme())
         .resizable(true)
-        .visible(view_name != "flow")
+        .visible(view_name != "flow" && label != "merge")
         .build()
         .map_err(|error| error.to_string())?;
-    if view_name == "flow" {
-        flow_window::restore_and_track(&window);
+    if view_name == "flow" || label == "merge" {
+        flow_window::restore_and_track(
+            &window,
+            if label == "merge" { "merge-window.json" } else { "flow-window.json" },
+        );
         window.show().map_err(|error| error.to_string())?;
     }
     show_devtools(&window);
@@ -2241,6 +2451,7 @@ fn open_log_folder() -> Result<(), String> {
 pub fn run() {
     perf::init();
     awegit_git::set_trace(perf::git);
+    awegit_git::set_timing_trace(perf::stage);
     prefer_bundled_git();
     let handler: std::sync::Arc<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = std::sync::Arc::new(tauri::generate_handler![
             workspace_status,
@@ -2264,6 +2475,7 @@ pub fn run() {
             blame_file,
             load_settings,
             save_settings,
+            save_window_bounds,
             settings_path,
             import_fork_settings,
             external_tools,
@@ -2282,6 +2494,7 @@ pub fn run() {
             cancel_operation,
             cancel_reads,
             remove_index_lock,
+            remove_stale_lock,
             save_hidden_refs,
             save_expanded_groups,
             save_sign_off,
@@ -2321,6 +2534,13 @@ pub fn run() {
             pick_history,
             activity_log,
             create_hosted_repo,
+            account_services,
+            sync_accounts,
+            test_account,
+            browser_login,
+            cancel_browser_login,
+            remote_matches,
+            save_remote_account,
             device_start,
             device_poll,
             review_branch,
@@ -2369,10 +2589,14 @@ pub fn run() {
         })
         .invoke_handler(move |invoke| {
             let name = invoke.message.command().to_string();
+            let trace = match invoke.message.payload() {
+                tauri::ipc::InvokeBody::Json(value) => value.get("__perf").and_then(serde_json::Value::as_str).map(str::to_string),
+                _ => None,
+            };
             let handler = handler.clone();
             let resolver = invoke.resolver.clone();
             dispatch(&name.clone(), Box::new(move || {
-                let _span = (!matches!(name.as_str(), "log_client" | "perf_snapshot")).then(|| perf::command(&name));
+                let _span = (!matches!(name.as_str(), "log_client" | "perf_snapshot")).then(|| perf::command_with_id(&name, trace.as_deref()));
                 match std::panic::catch_unwind(AssertUnwindSafe(|| handler(invoke))) {
                     Ok(true) => {}
                     Ok(false) => resolver.reject(format!("Command {name} not found")),
@@ -2404,6 +2628,57 @@ mod watch_plan_tests {
         assert!(heavy_dir("target"));
         assert!(!heavy_dir("src"));
         assert!(!heavy_dir("crates"));
+    }
+
+    #[test]
+    fn watch_classification_keeps_worktree_locks_and_linked_metadata() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
+            .join(".lab/watch-tests").join(format!("{nanos}"));
+        let worktree = root.join("linked");
+        let common = root.join("common");
+        let git = common.join("worktrees/linked");
+        fs::create_dir_all(&worktree).unwrap();
+        fs::create_dir_all(&git).unwrap();
+        fs::write(worktree.join(".git"), format!("gitdir: {}\n", git.display())).unwrap();
+        fs::write(git.join("commondir"), "../..\n").unwrap();
+        assert!(super::watch_relevant(&worktree, &worktree.join("package.lock")));
+        assert!(!super::watch_relevant(&worktree, &git.join("index.lock")));
+        assert!(!super::watch_relevant(&worktree, &git.join("awegit-flow/flow.json")));
+        assert!(!super::watch_relevant(&worktree, &common.join("objects/ab/cd")));
+        assert!(super::classify_changes(&worktree, &[git.join("index")]).is_some_and(|change| !change.refs));
+        assert!(super::classify_changes(&worktree, &[common.join("refs/heads/main")]).is_some_and(|change| change.refs));
+        assert!(super::classify_changes(&worktree, &[worktree.join(".git")]).is_some_and(|change| change.refs));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn watch_filters_keep_tracked_files_inside_ignored_build_directories() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
+            .join(".lab/watch-tests").join(format!("tracked-{nanos}"));
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(root.join("global-config"), "").unwrap();
+        let git = |args: &[&str]| {
+            let output = std::process::Command::new("git").current_dir(&root).args(args)
+                .env("GIT_CONFIG_GLOBAL", root.join("global-config")).env("GIT_CONFIG_NOSYSTEM", "1").output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        };
+        git(&["init", "-b", "main"]);
+        fs::write(root.join(".gitignore"), "build/\n").unwrap();
+        fs::write(root.join("build/tracked.txt"), "tracked\n").unwrap();
+        fs::write(root.join("build/ignored.txt"), "ignored\n").unwrap();
+        git(&["add", "-f", "build/tracked.txt"]);
+        assert!(super::watch_relevant(&root, &root.join("build/tracked.txt")));
+        assert!(super::classify_changes(&root, &[root.join("build/tracked.txt")]).is_some_and(|change| !change.refs));
+        assert!(super::classify_changes(&root, &[root.join("build/ignored.txt")]).is_none());
+        assert!(awegit_git::tracked_directories(&root, 10).paths.contains(&root.join("build")));
+        let mut watcher = notify::recommended_watcher(|_: Result<notify::Event, notify::Error>| {}).unwrap();
+        let mut watched = super::WatchSet::default();
+        super::watch_tracked_directories(&mut watcher, &root, &mut watched);
+        assert!(watched.covers(&root.join("build")));
+        drop(watcher);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -76,7 +76,7 @@ export function currentFilterRefs(shell: ShellState) {
     return names;
   }
 
-export async function loadCommits(shell: ShellState, path: string | undefined) {
+export async function loadCommits(shell: ShellState, path: string | undefined, operation?: string) {
     const order = shell.settings.commitSort === "topo" ? "topo" : "date";
     const query = shell.sideView === "search" ? shell.commitSearch.trim() : "";
     if (query && path) {
@@ -87,32 +87,50 @@ export async function loadCommits(shell: ShellState, path: string | undefined) {
         query,
         limit: shell.logLimit,
         order,
-      });
+      }, undefined, operation);
     }
-    if (shell.historyFilter) return invoke<CommitRow[]>("file_history", { path, file: shell.historyFilter, limit: 200 });
+    if (shell.historyFilter) return invoke<CommitRow[]>("file_history", { path, file: shell.historyFilter, limit: 200 }, undefined, operation);
     const revs = shell.exactRefs();
     if (!shell.allBranches && revs.length > 0) {
       try {
-        return await invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, order, revs });
+        return await invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, order, revs }, undefined, operation);
       } catch {
-        return invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, all: false, order });
+        return invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, all: false, order }, undefined, operation);
       }
     }
-    return invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, all: shell.allBranches || revs.length === 0, order });
+    return invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, all: shell.allBranches || revs.length === 0, order }, undefined, operation);
   }
 
-export async function loadContext(shell: ShellState) {
+const contextReads = new WeakMap<ShellState, { key: string; promise: Promise<void> }>();
+
+export function loadContext(shell: ShellState, operation?: string): Promise<void> {
+    // Only request parameters and a data generation, never serialize history/state.
+    const key = JSON.stringify([shell.repoPath(), shell.statusGen, shell.settings.commitSort, shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.logLimit, shell.allBranches, shell.exactRefs()]);
+    const current = contextReads.get(shell);
+    if (current?.key === key) return current.promise;
+    const promise = readContext(shell, operation).finally(() => {
+      if (contextReads.get(shell)?.promise === promise) contextReads.delete(shell);
+    });
+    contextReads.set(shell, { key, promise });
+    return promise;
+}
+
+async function readContext(shell: ShellState, operation?: string) {
     const path = shell.repoPath();
+    const statusGen = shell.statusGen;
+    const openGen = shell.openGen;
     const gen = ++shell.contextGen;
-    const nextRefs = await invoke<RefSnapshot>("repository_refs", { path });
-    if (gen !== shell.contextGen) return;
-    if (!shell.same(shell.refs, nextRefs)) shell.refs = nextRefs;
+    const nextRefs = await invoke<RefSnapshot>("repository_refs", { path }, undefined, operation);
+    if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
+    const { revision, ...visibleRefs } = nextRefs;
+    if (!shell.same(shell.refs, visibleRefs)) shell.refs = visibleRefs;
     const [rows, state, merge] = await Promise.all([
-      shell.loadCommits(path),
-      invoke<InProgress | null>("in_progress", { path }),
-      invoke<MergeState | null>("merge_state", { path }).catch(() => null),
+      shell.loadCommits(path, operation),
+      invoke<InProgress | null>("in_progress", { path }, undefined, operation),
+      invoke<MergeState | null>("merge_state", { path }, undefined, operation).catch(() => null),
     ]);
-    if (gen !== shell.contextGen) return;
+    if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
+    shell.contextRevision = revision ?? 0;
     if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
     shell.signOff = nextRefs.signOffSet ? !!nextRefs.signOff : shell.settings.signOff;
     shell.progress = state;
@@ -147,10 +165,9 @@ export async function previewCherry(shell: ShellState, rev: string, record: bool
     const preview = text.trim().replace(/^[0-9a-f]{40,64}\s*/i, "").trim();
     const target = summary ? `${rev.slice(0, 7)} "${summary}"` : rev.slice(0, 7);
     const note = record ? ` ${shell.tr("dialog.cherryPickRecordNote")}` : "";
-    const intro = `${shell.tr("dialog.cherryPickBody", { target })}${note}`;
-    const body = preview ? `${intro}\n\n${preview}` : intro;
+    const intro = `${shell.tr("dialog.cherryPickBody")}${note}`;
     const title = shell.tr(record ? "menu.cherryPickRecord" : "menu.cherryPick");
-    shell.ask(title, body, () => void shell.mutate({ action: "cherryPick", rev, record }));
+    shell.ask(title, intro, () => void shell.mutate({ action: "cherryPick", rev, record }), [], { subject: target, detail: preview });
   }
 
 export function toggleFold(shell: ShellState, id: string) {

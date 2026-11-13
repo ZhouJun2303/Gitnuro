@@ -131,6 +131,17 @@ pub fn encode_userinfo(value: &str) -> String {
 pub fn send(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<HttpResponse, String> {
     let net = current();
     let agent = build_agent(net.timeout_secs.max(1), false)?;
+    dispatch(&agent, method, url, headers, body)
+}
+
+/// One response, with redirects disabled, so a token cannot follow a hop to another host.
+pub fn send_once(method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<HttpResponse, String> {
+    let net = current();
+    let agent = build_agent_redirects(net.timeout_secs.max(1), true, 0)?;
+    dispatch(&agent, method, url, headers, body)
+}
+
+fn dispatch(agent: &ureq::Agent, method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<HttpResponse, String> {
     let mut request = agent.request(method, url);
     for (name, value) in headers {
         request = request.set(name, value);
@@ -167,10 +178,14 @@ pub fn agent(read_secs: u64, https_only: bool) -> Result<ureq::Agent, String> {
 }
 
 fn build_agent(read_secs: u64, https_only: bool) -> Result<ureq::Agent, String> {
+    build_agent_redirects(read_secs, https_only, if https_only { 10 } else { 5 })
+}
+
+fn build_agent_redirects(read_secs: u64, https_only: bool, redirects: u32) -> Result<ureq::Agent, String> {
     let net = current();
     let mut builder = ureq::AgentBuilder::new()
         .https_only(https_only)
-        .redirects(if https_only { 10 } else { 5 })
+        .redirects(redirects)
         .timeout_connect(Duration::from_secs(net.timeout_secs.clamp(1, 20)))
         .timeout_read(Duration::from_secs(read_secs.max(1)))
         .timeout_write(Duration::from_secs(20))

@@ -112,7 +112,7 @@
   height: 24px;
   padding: 0 10px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--elevated);
   color: var(--text);
   font: 12px var(--font);
@@ -147,7 +147,7 @@
 
 .image-toolbar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; }
 
-.image-toolbar button { border: 0; background: transparent; font: inherit; color: inherit; padding: 2px 8px; border-radius: 6px; }
+.image-toolbar button { border: 0; background: transparent; font: inherit; color: inherit; padding: 2px 8px; border-radius: var(--radius-sm); }
 
 .image-toolbar button.on { background: var(--selection); }
 
@@ -157,7 +157,7 @@
 
 .image-frame { margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 
-.image-frame figcaption { align-self: flex-start; padding: 1px 8px; border-radius: 6px; font-size: 12px; }
+.image-frame figcaption { align-self: flex-start; padding: 1px 8px; border-radius: var(--radius-sm); font-size: 12px; }
 
 .image-frame figcaption.del { background: var(--diff-del); }
 
@@ -234,7 +234,7 @@
     height: 22px;
     padding: 0;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: var(--elevated);
     color: var(--text-secondary);
     font: 15px/1 var(--font);
@@ -380,7 +380,7 @@ section.diff > .diff-viewport {
     margin: 0;
     padding: 0 10px;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--elevated);
     color: var(--text);
     cursor: pointer;
@@ -479,7 +479,7 @@ section.diff > .diff-viewport {
     height: 28px;
     padding: 0 14px;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: var(--elevated);
     color: var(--text);
     font: inherit;

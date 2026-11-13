@@ -1,6 +1,7 @@
 import { invoke } from "../perf";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { shortcut, shortcutLabel, typing } from "../keys";
+import { resolveAppearance } from "../appearance";
 import {
     badge,
     type BlameLine,
@@ -122,7 +123,7 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
         children: [
           { label: shell.tr("menu.soft"), disabled: locked || !!shell.progress, run: () => shell.confirmReset(commit.id, "soft", commit.summary) },
           { label: shell.tr("menu.mixed"), disabled: locked || !!shell.progress, run: () => shell.confirmReset(commit.id, "mixed", commit.summary) },
-          { label: shell.tr("menu.hard"), disabled: locked || !!shell.progress, run: () => shell.ask(shell.tr("dialog.hardReset"), shell.tr("dialog.hardResetBody"), () => void shell.mutate({ action: "reset", rev: commit.id, mode: "hard" })) },
+          { label: shell.tr("menu.hard"), disabled: locked || !!shell.progress, run: () => shell.ask(shell.tr("dialog.hardReset"), shell.tr("dialog.hardResetBody"), () => void shell.mutate({ action: "reset", rev: commit.id, mode: "hard" }), [], { danger: true }) },
         ],
       },
       { sep: true, label: "" },
@@ -174,13 +175,17 @@ export function stashItems(shell: ShellState) {
   }
 
 export function appearanceItems(shell: ShellState) {
-    const mark = (value: string) => ((shell.settings.theme || "system") === value ? "✓ " : "");
+    const mark = (value: string) => ((shell.settings.theme || "apple") === value ? "✓ " : "");
+    const systemTheme = resolveAppearance("system", window.matchMedia("(prefers-color-scheme: dark)").matches);
+    const systemLabel = shell.tr(systemTheme === "dark" ? "dialog.dark" : "dialog.light");
     const pick = (value: string) => () => {
       shell.settings.theme = value;
       void shell.savePrefs(false);
     };
     return [
-      { label: `${mark("system")}${shell.tr("dialog.system")}`, run: pick("system") },
+      { label: `${mark("system")}${shell.tr("dialog.followSystem")}`, shortcut: systemLabel, run: pick("system") },
+      { sep: true, label: "" },
+      { label: `${mark("apple")}${shell.tr("dialog.apple")}`, run: pick("apple") },
       { label: `${mark("light")}${shell.tr("dialog.light")}`, run: pick("light") },
       { label: `${mark("dark")}${shell.tr("dialog.dark")}`, run: pick("dark") },
       { sep: true, label: "" },
@@ -207,7 +212,7 @@ export function repositoryItems(shell: ShellState) {
       { label: shell.tr("chrome.stale"), disabled: locked, run: () => void invoke<string[]>("merged_branches", { path: shell.repoPath() }).then((names) => { shell.staleNames = names; shell.stalePicked = []; shell.dialog = "stale"; }) },
       { label: shell.tr("chrome.mailmap"), disabled: locked, run: () => void invoke<{ text?: string }>("blob_view", { path: shell.repoPath(), rev: "HEAD", file: ".mailmap" }).then((view) => { shell.draft = view.text ?? ""; shell.dialog = "mailmap"; }).catch(() => { shell.draft = ""; shell.dialog = "mailmap"; }) },
       { label: shell.tr("chrome.review"), disabled: locked, run: () => void invoke<string>("review_branch", { path: shell.repoPath(), base: shell.snapshot?.branch ?? "HEAD~1" }).then((text) => { shell.commandOutput = text; shell.dialog = "output"; }).catch((error) => (shell.actionError = shell.message(error))) },
-      { label: shell.tr("menu.bareForce"), disabled: shell.syncDisabled("push"), run: () => shell.ask(shell.tr("menu.bareForce"), shell.tr("dialog.forcePushBody"), () => void shell.mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: false, force: true })) },
+      { label: shell.tr("menu.bareForce"), disabled: shell.syncDisabled("push"), run: () => shell.ask(shell.tr("menu.bareForce"), shell.tr("dialog.forcePushBody"), () => void shell.mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: false, force: true }), [], { danger: true }) },
       { sep: true, label: "" },
       { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = ""; shell.dialog = "branch"; } },
       { label: shell.tr("menu.createTag"), run: () => { shell.draft = ""; shell.draftExtra = "HEAD"; shell.draftUser = ""; shell.dialog = "tag"; } },
@@ -311,7 +316,7 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
             void shell.applyLineOps("discardLine", discardable);
             return;
           }
-          shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(discardable.length) }), () => void shell.applyLineOps("discardLine", discardable));
+          shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(discardable.length) }), () => void shell.applyLineOps("discardLine", discardable), [], { danger: true });
         },
       });
     }
@@ -345,7 +350,7 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
       {
         label: shell.tr("menu.discard"),
         disabled: locked || !file,
-        run: () => shell.ask(shell.tr("menu.discard"), shell.tr("dialog.discardBody", { name: file ?? "" }), () => void shell.mutate({ action: "discard", file })),
+        run: () => shell.ask(shell.tr("menu.discard"), shell.tr("dialog.discardBody"), () => void shell.mutate({ action: "discard", file }), [], { subject: file ?? "", danger: true }),
       },
     );
     items.push({ sep: true, label: "" });
@@ -456,8 +461,8 @@ export function revisionFileMenu(shell: ShellState, file: string): MenuItem[] {
         label: shell.tr("menu.resetFileTo"),
         disabled: locked,
         children: [
-          { label: shell.tr("menu.stateAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.stateAtCommit"), shell.tr("dialog.restoreFileBody", { name: file }), () => void shell.mutate({ action: "restoreFile", rev, file })) },
-          { label: shell.tr("menu.stateBeforeCommit"), disabled: locked || !parent || added, run: () => shell.ask(shell.tr("menu.stateBeforeCommit"), shell.tr("dialog.restoreFileBody", { name: file }), () => void shell.mutate({ action: "restoreFile", rev: parent, file })) },
+          { label: shell.tr("menu.stateAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.stateAtCommit"), shell.tr("dialog.restoreFileBody"), () => void shell.mutate({ action: "restoreFile", rev, file }), [], { subject: file, danger: true }) },
+          { label: shell.tr("menu.stateBeforeCommit"), disabled: locked || !parent || added, run: () => shell.ask(shell.tr("menu.stateBeforeCommit"), shell.tr("dialog.restoreFileBody"), () => void shell.mutate({ action: "restoreFile", rev: parent, file }), [], { subject: file, danger: true }) },
         ],
       },
       { label: shell.tr("menu.blameTimeline"), disabled: locked, run: () => { shell.section = "changes"; shell.selectedPath = file; void shell.showBlame(file); } },
@@ -480,7 +485,7 @@ export function historyFileMenu(shell: ShellState, commit: CommitRow): MenuItem[
       { label: shell.tr("menu.open"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       { label: shell.tr("menu.externalDiff"), disabled: locked || !parent, children: revisionExternalItems(shell, file, parent, commit.id) },
-      { label: shell.tr("menu.resetAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.resetAtCommit"), shell.tr("dialog.restoreFileBody", { name: file }), () => void shell.mutate({ action: "restoreFile", rev: commit.id, file })) },
+      { label: shell.tr("menu.resetAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.resetAtCommit"), shell.tr("dialog.restoreFileBody"), () => void shell.mutate({ action: "restoreFile", rev: commit.id, file }), [], { subject: file, danger: true }) },
       { label: shell.tr("menu.saveAs"), disabled: locked, run: () => void invoke("save_revision", { path: shell.repoPath(), rev: commit.id, file }).catch((error) => (shell.actionError = shell.message(error))) },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },
       { label: shell.tr("menu.copyCommitInfo"), run: () => shell.copyText(info) },

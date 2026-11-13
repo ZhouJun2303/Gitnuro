@@ -3,13 +3,14 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, SystemTime};
 
 use awegit_git::{
     blob_view, commit, commit_log, commits_from, conflict_view, discard_lines, file_diff,
     file_diff_with, file_preview, in_progress, launch_merge_tool, merge_preview, perform,
-    repository_refs, search_commits, search_log, stage_all, stage_hunk, stage_line, stage_lines,
-    stage_paths, status, stop_process_tree, ChangeKind, CommitRequest, InProgress, LineEdit,
-    Mutation, RebaseStep, ResetMode,
+    remove_stale_index_lock, repository_refs, search_commits, search_log, stage_all, stage_hunk,
+    stage_line, stage_lines, stage_paths, stale_index_lock, status, stop_process_tree, ChangeKind,
+    CommitRequest, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
 };
 
 fn repo() -> common::TempRepo {
@@ -1761,6 +1762,58 @@ fn branch_and_tag_names_may_use_any_language() {
 }
 
 #[test]
+fn delete_branch_accepts_a_stale_upstream() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "b.txt", "two\n", "topic work");
+    // The tracking branch stayed at the fork point, so `git branch -d` refuses
+    // even though HEAD ends up with every commit.
+    repo.git(&["update-ref", "refs/remotes/origin/topic", "main"]);
+    repo.git(&["config", "branch.topic.remote", "origin"]);
+    repo.git(&["config", "branch.topic.merge", "refs/heads/topic"]);
+    repo.git(&["checkout", "main"]);
+    repo.git(&["merge", "--ff-only", "topic"]);
+    perform(
+        &repo.path,
+        Mutation::DeleteBranch {
+            name: "topic".into(),
+            force: false,
+        },
+    )
+    .unwrap();
+    assert!(git_at(&repo.path, &["branch", "--list", "topic"]).trim().is_empty());
+}
+
+#[test]
+fn delete_branch_reports_unmerged_work() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    commit_file(&repo, "b.txt", "two\n", "topic work");
+    repo.git(&["checkout", "main"]);
+    let error = perform(
+        &repo.path,
+        Mutation::DeleteBranch {
+            name: "topic".into(),
+            force: false,
+        },
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("branch is not fully merged"), "{error}");
+    assert!(!git_at(&repo.path, &["branch", "--list", "topic"]).trim().is_empty());
+    perform(
+        &repo.path,
+        Mutation::DeleteBranch {
+            name: "topic".into(),
+            force: true,
+        },
+    )
+    .unwrap();
+}
+
+#[test]
 fn search_commits_finds_added_text() {
     let repo = repo();
     commit_file(&repo, "a.txt", "needle-token\n", "base");
@@ -1988,6 +2041,73 @@ fn merge_conflict_names_both_branches() {
     assert_eq!(removed.theirs.state, "deleted");
     assert_eq!(removed.theirs.bytes, 0);
     assert!(removed.ours.bytes > 0);
+}
+
+#[test]
+fn conflict_blob_probe_keeps_the_prefix_boundary_and_large_object_policy() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let repo = repo();
+    commit_file(&repo, "note", "base\n", "base");
+    for (size, nul, binary) in [
+        (32, None, false), (8193, Some(8191), true),
+        (8193, Some(8192), false), (7_999_999, None, false),
+        (8_000_001, None, true),
+    ] {
+        let mut blob = vec![b'x'; size];
+        if let Some(index) = nul { blob[index] = 0; }
+        fs::write(repo.path.join("probe"), &blob).unwrap();
+        let oid = repo.output(&["hash-object", "-w", "probe"]).trim().to_string();
+        let mut child = Command::new("git").current_dir(&repo.path)
+            .args(["update-index", "--index-info"]).stdin(Stdio::piped())
+            .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        let mut input = child.stdin.take().unwrap();
+        writeln!(input, "0 {}\tprobe", "0".repeat(40)).unwrap();
+        for stage in 1..=3 { writeln!(input, "100644 {oid} {stage}\tprobe").unwrap(); }
+        drop(input);
+        assert!(child.wait_with_output().unwrap().status.success());
+        // Ensure detection comes from the staged objects, not the working file.
+        fs::write(repo.path.join("probe"), "resolved text\n").unwrap();
+        for _ in 0..3 {
+            let view = conflict_view(&repo.path, "probe").unwrap();
+            assert_eq!(view.binary, binary, "size={size}, nul={nul:?}");
+            assert_eq!(view.ours.bytes, size as u64);
+            assert_eq!(view.theirs.bytes, size as u64);
+        }
+        repo.git(&["update-index", "--force-remove", "probe"]);
+    }
+}
+
+#[test]
+fn linked_worktree_rebase_reads_its_own_conflict_metadata() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["branch", "topic"]);
+    commit_file(&repo, "a.txt", "main\n", "main-edit");
+    let linked = repo.path.join("linked");
+    repo.git(&["worktree", "add", linked.to_str().unwrap(), "topic"]);
+    fs::write(linked.join("a.txt"), "topic\n").unwrap();
+    git_at(&linked, &["add", "--", "a.txt"]);
+    git_at(&linked, &["commit", "-m", "topic-edit"]);
+    assert!(perform(
+        &linked,
+        Mutation::Rebase {
+            onto: "main".into(),
+            autostash: false,
+        },
+    )
+    .is_err());
+    assert_eq!(in_progress(&repo.path).unwrap(), None);
+    assert_eq!(in_progress(&linked).unwrap(), Some(InProgress::Rebase));
+    let view = conflict_view(&linked, "a.txt").unwrap();
+    assert_eq!(view.ours.label, "main");
+    assert_eq!(view.theirs.label, "topic");
+    assert_eq!(view.ours.commit.unwrap().subject, "main-edit");
+    assert_eq!(view.theirs.commit.unwrap().subject, "topic-edit");
+    let point = awegit_git::flow::checkpoint(&linked).unwrap();
+    assert_eq!(point.replay.unwrap().summary, "topic-edit");
+    assert_eq!(point.base.unwrap().summary, "base");
+    perform(&linked, Mutation::Abort).unwrap();
 }
 
 fn binary_merge_conflict() -> common::TempRepo {
@@ -2709,6 +2829,58 @@ fn rebase_continue_keeps_the_original_author() {
         "Test <test@example.com>|Bob <bob@example.com>",
         "a rebase must keep the author and only change the committer: {line}"
     );
+}
+
+#[test]
+fn continue_restores_a_missing_rebase_message() {
+    let repo = conflict_repo();
+    let rebase = perform(
+        &repo.path,
+        Mutation::Rebase {
+            onto: "main".into(),
+            autostash: false,
+        },
+    );
+    assert!(rebase.is_err(), "rebase should conflict");
+    let message = repo.path.join(".git/rebase-merge/message");
+    assert!(message.is_file(), "a paused pick writes its message");
+    fs::remove_file(&message).unwrap();
+    fs::write(repo.path.join("a.txt"), "resolved\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    perform(
+        &repo.path,
+        Mutation::Continue {
+            message: String::new(),
+        },
+    )
+    .unwrap();
+    let subject = git_at(&repo.path, &["log", "-1", "--format=%s"]);
+    assert_eq!(subject.trim(), "side");
+}
+
+#[test]
+fn stale_index_lock_is_offered_only_after_it_ages() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    let lock = repo.path.join(".git/index.lock");
+    fs::write(&lock, "").unwrap();
+    assert!(
+        stale_index_lock(&repo.path).is_none(),
+        "a fresh lock can belong to a live Git command"
+    );
+    let old = SystemTime::now() - Duration::from_secs(60);
+    fs::File::options()
+        .write(true)
+        .open(&lock)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    let stale = stale_index_lock(&repo.path).expect("an old lock is stale");
+    assert!(stale.age_secs >= 60, "age: {}", stale.age_secs);
+    remove_stale_index_lock(&repo.path, &stale.path).unwrap();
+    assert!(!lock.exists());
+    assert!(remove_stale_index_lock(&repo.path, &stale.path).is_err());
+    assert!(remove_stale_index_lock(&repo.path, "elsewhere.lock").is_err());
 }
 
 #[test]

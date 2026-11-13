@@ -63,7 +63,7 @@
   a {
     padding: 8px 12px;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--elevated);
     color: var(--text);
     text-decoration: none;

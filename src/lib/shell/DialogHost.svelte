@@ -7,9 +7,60 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { cloneTarget, cloneUrl } from "../clonePath";
   import { buildRebaseSteps } from "./dialogs.svelte";
-  import { recentWorkspaceId } from "../status";
+  import { recentWorkspaceId, type Account } from "../status";
+  import { resolveRemoteAccount } from "./remoteAccount";
 
   const shell = getShell();
+  let remoteAccountPick = $state("");
+  let remoteDialogKey = "";
+  let remoteLoadedOverride = "";
+  let remoteMatchWait: Promise<void> = Promise.resolve();
+  const remotePreview = $derived(resolveRemoteAccount(shell.settings.accounts, shell.draftExtra, remoteAccountPick));
+  const remotePickValue = $derived(remotePreview.choices.some((item) => item.id === remoteAccountPick) ? remoteAccountPick : "");
+
+  $effect(() => {
+    if (shell.dialog !== "remote") {
+      remoteDialogKey = "";
+      return;
+    }
+    const key = `${shell.remoteEdit}:${shell.draft}`;
+    if (remoteDialogKey === key) return;
+    remoteDialogKey = key;
+    remoteAccountPick = "";
+    remoteLoadedOverride = "";
+    if (!shell.remoteEdit) {
+      remoteMatchWait = Promise.resolve();
+      return;
+    }
+    const name = shell.draft;
+    const path = shell.repoPath();
+    if (!path) {
+      remoteMatchWait = Promise.resolve();
+      return;
+    }
+    remoteMatchWait = invoke<{ remote: string; accountId: string; reason: string }[]>("remote_matches", { path }).then((rows) => {
+      if (shell.dialog !== "remote" || shell.draft !== name) return;
+      const row = rows.find((item) => item.remote === name && item.reason === "override" && item.accountId);
+      if (!row) return;
+      remoteAccountPick = row.accountId;
+      remoteLoadedOverride = row.accountId;
+    }).catch(() => {});
+  });
+
+  function accountInitial(account: Account) {
+    const source = (account.name || account.login || account.label || account.forge).trim();
+    return source.slice(0, 1).toUpperCase() || "?";
+  }
+
+  function remoteReason(reason: string) {
+    switch (reason) {
+      case "login": return shell.tr("dialog.remoteAccountLogin");
+      case "default": return shell.tr("dialog.remoteAccountDefault");
+      case "only": return shell.tr("dialog.remoteAccountOnly");
+      case "override": return shell.tr("dialog.remoteAccountOverride");
+      default: return "";
+    }
+  }
   let diagnosticsCopied = $state(false);
 
   async function copyDiagnostics() {
@@ -27,7 +78,7 @@
   }
   let primedDialog = "";
   let lastFocus: HTMLElement | null = null;
-  const largeDialogs = new Set(["prefs", "resolve", "stats", "rebase", "accounts", "output", "mergeConflict"]);
+  const largeDialogs = new Set(["prefs", "stats", "rebase", "output", "mergeConflict"]);
   const smallDialogs = new Set(["reset", "branch", "tag", "rename", "upstream", "reword", "remote", "submodule", "worktree", "continue", "about", "features", "checkoutNotice", "stashRename", "stashBranch", "renameTab", "colorTab", "groupRename", "askInput", "workspace", "credential"]);
   function dialogSize(kind: string) {
     if (largeDialogs.has(kind)) return "lg";
@@ -136,8 +187,18 @@
             if (!shell.actionError && shell.settings.pushTagOnCreate) await shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease });
           }
           else if (shell.dialog === "remote") {
-            if (shell.remoteEdit) void shell.mutate({ action: "setRemoteUrl", name: shell.draft, url: shell.draftExtra });
-            else void shell.mutate({ action: "addRemote", name: shell.remoteName(), url: shell.draftExtra });
+            const name = shell.remoteEdit ? shell.draft.trim() : shell.remoteName();
+            const url = shell.draftExtra.trim();
+            const path = shell.repoPath();
+            await remoteMatchWait;
+            const accountId = remotePickValue;
+            const clearOverride = remoteLoadedOverride !== "" && !accountId;
+            const outcome = shell.remoteEdit
+              ? await shell.mutate({ action: "setRemoteUrl", name, url })
+              : await shell.mutate({ action: "addRemote", name, url });
+            if (outcome === "completed" && path && name && (accountId || clearOverride)) {
+              await invoke("save_remote_account", { path, remote: name, accountId }).catch((error) => (shell.actionError = shell.message(error)));
+            }
           }
           else if (shell.dialog === "fetch") {
             const remote = shell.syncAll ? null : shell.draft || null;
@@ -198,7 +259,6 @@
               await shell.createWorkspace(shell.draft);
             }
           }
-          else if (shell.dialog === "resolve") void shell.mutate({ action: "resolve", file: shell.draft, side: shell.draftExtra || "text", text: shell.mergeResult });
           else if (shell.dialog === "gitignore") void shell.mutate({ action: "writeGitignore", text: shell.draft });
           else if (shell.dialog === "stashRename") void shell.mutate({ action: "stashRename", name: shell.draftExtra, message: shell.draft });
           else if (shell.dialog === "stashBranch") void shell.mutate({ action: "stashBranch", name: shell.draftExtra, branch: shell.draft });
@@ -429,11 +489,23 @@
             <div class="sync-row remote-target">
               <span>{shell.tr("dialog.remoteName")}</span>
               <div class="remote-target-body">
-                <div class="remote-tabs" role="tablist" aria-label={shell.tr("dialog.remoteName")}>
-                  {#each shell.refs?.remotes ?? [] as remote (remote.name)}
-                    <button type="button" role="tab" title={remote.url ?? remote.name} class:on={shell.draft === remote.name} aria-selected={shell.draft === remote.name} onclick={() => { shell.draft = remote.name; shell.draftExtra = shell.pullBranchFor(remote.name); }}>{remote.name}</button>
-                  {/each}
-                </div>
+                {#if (shell.refs?.remotes ?? []).length > 6}
+                  <select
+                    aria-label={shell.tr("dialog.remoteName")}
+                    value={shell.draft}
+                    onchange={(event) => { shell.draft = event.currentTarget.value; shell.draftExtra = shell.pullBranchFor(shell.draft); }}
+                  >
+                    {#each shell.refs?.remotes ?? [] as remote (remote.name)}
+                      <option value={remote.name}>{remote.name}</option>
+                    {/each}
+                  </select>
+                {:else}
+                  <div class="remote-tabs" role="tablist" aria-label={shell.tr("dialog.remoteName")}>
+                    {#each shell.refs?.remotes ?? [] as remote (remote.name)}
+                      <button type="button" role="tab" title={remote.url ?? remote.name} class:on={shell.draft === remote.name} aria-selected={shell.draft === remote.name} onclick={() => { shell.draft = remote.name; shell.draftExtra = shell.pullBranchFor(remote.name); }}>{remote.name}</button>
+                    {/each}
+                  </div>
+                {/if}
                 {#if (shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches.length ?? 0) > 0}
                   <select bind:value={shell.draftExtra} aria-label={shell.tr("dialog.branch")}>
                     {#if shell.draftExtra && !(shell.refs?.remotes.find((remote) => remote.name === shell.draft)?.branches.includes(shell.draftExtra))}
@@ -485,11 +557,19 @@
             <span>{shell.tr("dialog.pushTo")}</span>
             <div class="remote-target-body">
               {#if (shell.refs?.remotes ?? []).length > 0}
-                <div class="remote-tabs" role="tablist" aria-label={shell.tr("dialog.pushTo")}>
-                  {#each shell.refs?.remotes ?? [] as remote (remote.name)}
-                    <button type="button" role="tab" title={remote.url ?? remote.name} class:on={shell.pushRemoteName() === remote.name} aria-selected={shell.pushRemoteName() === remote.name} onclick={() => shell.selectPushRemote(remote.name)}>{remote.name}</button>
-                  {/each}
-                </div>
+                {#if (shell.refs?.remotes ?? []).length > 6}
+                  <select aria-label={shell.tr("dialog.pushTo")} value={shell.pushRemoteName()} onchange={(event) => shell.selectPushRemote(event.currentTarget.value)}>
+                    {#each shell.refs?.remotes ?? [] as remote (remote.name)}
+                      <option value={remote.name}>{remote.name}</option>
+                    {/each}
+                  </select>
+                {:else}
+                  <div class="remote-tabs" role="tablist" aria-label={shell.tr("dialog.pushTo")}>
+                    {#each shell.refs?.remotes ?? [] as remote (remote.name)}
+                      <button type="button" role="tab" title={remote.url ?? remote.name} class:on={shell.pushRemoteName() === remote.name} aria-selected={shell.pushRemoteName() === remote.name} onclick={() => shell.selectPushRemote(remote.name)}>{remote.name}</button>
+                    {/each}
+                  </div>
+                {/if}
                 <select bind:value={shell.pushTo} aria-label={shell.tr("dialog.remoteBranch")}>
                   {#each shell.pushBranchOptions() as option (option.value)}
                     <option value={option.value}>{option.label}</option>
@@ -507,8 +587,13 @@
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("chrome.push")}</button>
           </div>
         {:else if shell.dialog === "stash"}
-          <h2>{shell.stashFiles.length > 1 ? shell.tr("dialog.stashFiles", { count: String(shell.stashFiles.length) }) : shell.stashFiles.length === 1 ? shell.tr("dialog.stashFile", { name: shell.stashFiles[0] }) : shell.tr("chrome.stash")}</h2>
-          {#if shell.stashFiles.length > 0}<pre class="diff-body stash-paths">{shell.stashFiles.join("\n")}</pre>{/if}
+          <h2>{shell.tr("chrome.stash")}</h2>
+          {#if shell.stashFiles.length === 1}
+            <div class="dialog-subject" title={shell.stashFiles[0]}>{shell.stashFiles[0]}</div>
+          {:else if shell.stashFiles.length > 1}
+            <div class="dialog-subject">{shell.tr("dialog.fileCount", { count: String(shell.stashFiles.length) })}</div>
+            <pre class="diff-body stash-paths">{shell.stashFiles.join("\n")}</pre>
+          {/if}
           <label>{shell.tr("dialog.message")}<input bind:value={shell.draft} /></label>
           <label class="check"><input type="checkbox" bind:checked={shell.includeUntracked} /> {shell.tr("dialog.includeUntracked")}</label>
           <div class="composer-row actions">
@@ -524,7 +609,8 @@
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.renameBranch")}</button>
           </div>
         {:else if shell.dialog === "upstream"}
-          <h2>{shell.tr("dialog.upstreamFor", { name: shell.draft })}</h2>
+          <h2>{shell.tr("menu.setUpstream")}</h2>
+          <div class="dialog-subject" title={shell.draft}>{shell.draft}</div>
           <label>{shell.tr("dialog.upstreamEmpty")}<input bind:value={shell.draftExtra} /></label>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
@@ -604,7 +690,7 @@
                 {/if}
                 <span class="workspace-count" title={shell.tr("chrome.manager")}>{item.repositories.length}</span>
                 {#if item.id !== recentWorkspaceId}
-                  <button class="text-button workspace-delete" type="button" onclick={() => shell.ask(shell.tr("dialog.deleteWorkspace"), shell.tr("dialog.deleteWorkspaceBody", { name: item.name }), () => void shell.deleteWorkspace(item.id))}>{shell.tr("menu.delete")}</button>
+                  <button class="text-button workspace-delete" type="button" onclick={() => shell.ask(shell.tr("dialog.deleteWorkspace"), shell.tr("dialog.deleteWorkspaceBody"), () => void shell.deleteWorkspace(item.id), [], { subject: item.name, danger: true })}>{shell.tr("menu.delete")}</button>
                 {/if}
               </div>
             {/each}
@@ -613,38 +699,6 @@
             <label class="grow">{shell.tr("chrome.workspaceName")}<input bind:value={shell.draft} /></label>
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("chrome.workspaceCreate")}</button>
-          </div>
-        {:else if shell.dialog === "resolve"}
-          <h2>{shell.tr("dialog.mergeResolve")} {shell.draft}</h2>
-          <div class="merge-grid">
-            <label>{shell.tr("dialog.useOurs")}<textarea rows="8" readonly value={shell.conflict?.ours ?? ""}></textarea></label>
-            <label>{shell.tr("dialog.useTheirs")}<textarea rows="8" readonly value={shell.conflict?.theirs ?? ""}></textarea></label>
-            <label>{shell.tr("dialog.result")}<textarea rows="8" bind:value={shell.mergeResult}></textarea></label>
-          </div>
-          <div class="hunk-marks">
-            {#each shell.mergePieces as piece, index (index)}
-              {#if piece.kind === "hunk"}<button type="button" aria-label={shell.tr("dialog.result")} style:left="{(index + 1) / Math.max(shell.mergePieces.length, 1) * 100}%" onclick={() => { const area = document.querySelector<HTMLTextAreaElement>(".merge-grid textarea:last-of-type"); if (area) area.scrollTop = (index / Math.max(shell.mergePieces.length, 1)) * area.scrollHeight; }}></button>{/if}
-            {/each}
-          </div>
-          {#each shell.mergePieces as piece, index (index)}
-            {#if piece.kind === "hunk"}
-              <div class="composer-row">
-                <span class="meta">{shell.tr("dialog.result")} {index + 1}</span>
-                <button class="text-button" type="button" class:on={piece.pick === "ours"} onclick={() => shell.pickHunk(index, "ours")}>{shell.tr("dialog.useOurs")}</button>
-                <button class="text-button" type="button" class:on={piece.pick === "theirs"} onclick={() => shell.pickHunk(index, "theirs")}>{shell.tr("dialog.useTheirs")}</button>
-                <button class="text-button" type="button" class:on={piece.pick === "both"} onclick={() => shell.pickHunk(index, "both")}>{shell.tr("dialog.useBoth")}</button>
-              </div>
-            {/if}
-          {/each}
-          <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => (shell.draftExtra = "ours")}>{shell.tr("dialog.useOurs")}</button>
-            <button class="text-button" type="button" onclick={() => (shell.draftExtra = "theirs")}>{shell.tr("dialog.useTheirs")}</button>
-            <button class="text-button" type="button" onclick={() => (shell.draftExtra = "both")}>{shell.tr("dialog.useBoth")}</button>
-            <button class="text-button" type="button" onclick={() => (shell.draftExtra = "text")}>{shell.tr("dialog.result")}</button>
-          </div>
-          <div class="composer-row actions">
-            <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.applyNow")}</button>
           </div>
         {:else if shell.dialog === "merge"}
           {@const into = shell.mergeInto || shell.snapshot?.branch || "HEAD"}
@@ -699,8 +753,15 @@
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.continueAction")}</button>
           </div>
         {:else if shell.dialog === "features"}
-          <h2>{shell.tr("dialog.featuresTitle")}</h2>
-          <p class="empty">{shell.tr("dialog.featuresBody")}</p>
+          <div class="dialog-lead">
+            <span class="dialog-lead-icon" aria-hidden="true">
+              <svg class="line-icon" viewBox="0 0 24 24"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M18.5 15.5 19.4 18l2.6.9-2.6.9-.9 2.6-.9-2.6L15 19l2.6-.9z"/></svg>
+            </span>
+            <div class="dialog-lead-copy">
+              <h2>{shell.tr("dialog.featuresTitle")}</h2>
+              <p class="empty">{shell.tr("dialog.featuresBody")}</p>
+            </div>
+          </div>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("dialog.featuresLater")}</button>
             <button class="commit" type="button" onclick={() => { shell.openFeaturesPage(); shell.dialog = null; }}>{shell.tr("dialog.featuresOpen")}</button>
@@ -726,8 +787,15 @@
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
           </div>
         {:else if shell.dialog === "mergeConflict"}
-          <h2>{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictTitle" : "dialog.mergeConflictTitle")}</h2>
-          <p class="empty">{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictBody" : shell.progress ? "dialog.mergeConflictBodyFlow" : "dialog.mergeConflictBody", { action: shell.flowLabel() })}</p>
+          <div class="dialog-lead">
+            <span class="dialog-lead-icon danger" aria-hidden="true">
+              <svg class="line-icon" viewBox="0 0 24 24"><path d="M10.3 4.2 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z"/><path d="M12 9.4v4.3"/><path d="M12 17.3h.01"/></svg>
+            </span>
+            <div class="dialog-lead-copy">
+              <h2>{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictTitle" : "dialog.mergeConflictTitle")}</h2>
+              <p class="empty">{shell.tr(shell.mergeConflictRestore ? "dialog.restoreConflictBody" : shell.progress ? "dialog.mergeConflictBodyFlow" : "dialog.mergeConflictBody", { action: shell.flowLabel() })}</p>
+            </div>
+          </div>
           <pre class="diff-body merge-conflict-log" data-layer="merge-conflict">{shell.commandOutput}</pre>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={() => { shell.mergeConflictRestore = false; shell.dialog = null; }}>{shell.tr("chrome.close")}</button>
@@ -737,6 +805,47 @@
           <label>{shell.tr("dialog.url")}<input placeholder="https://github.com/org/repo.git" bind:value={shell.draftExtra} /></label>
           {#if !shell.remoteEdit && shell.draftExtra.trim()}
             <p class="empty">{shell.tr("dialog.remoteNameAuto", { name: shell.remoteName() })}</p>
+          {/if}
+          {#if remotePreview.host}
+            {@const account = remotePreview.account}
+            <div class="remote-account" data-remote-account={remotePreview.reason}>
+              <p class="remote-account-title">{shell.tr("dialog.remoteAccountTitle")}</p>
+              <div class="remote-account-facts">
+                {#if remotePreview.protocol}<span>{remotePreview.protocol}</span>{/if}
+                <span>{remotePreview.host}</span>
+                {#if remotePreview.path}<span>{remotePreview.path}</span>{/if}
+                {#if remotePreview.username}<span>@{remotePreview.username}</span>{/if}
+              </div>
+              {#if account}
+                <div class="account-identity">
+                  {#if account.avatarUrl}
+                    <img class="account-avatar" alt="" src={account.avatarUrl} />
+                  {:else}
+                    <span class="account-avatar" aria-hidden="true">{accountInitial(account)}</span>
+                  {/if}
+                  <div class="account-copy">
+                    <div class="account-name">
+                      <span>{account.name || account.label || account.login || account.forge}</span>
+                      {#if account.defaultForHost}<em class="account-badge">{shell.tr("dialog.accountsDefault")}</em>{/if}
+                    </div>
+                    <div class="account-meta">{[account.login ? `@${account.login}` : "", account.email].filter(Boolean).join(" · ")}</div>
+                  </div>
+                </div>
+                <p class="account-note">{remoteReason(remotePreview.reason)}{remotePreview.ssh ? ` · ${shell.tr("dialog.accountsSshNote")}` : ` · ${shell.tr("dialog.accountsHttpsNote")}`}</p>
+              {:else}
+                <p class="empty">{shell.tr("dialog.remoteAccountNone", { host: remotePreview.host })}</p>
+              {/if}
+              {#if remotePreview.choices.length > 1}
+                <label>{shell.tr("dialog.remoteAccountPick")}
+                  <select aria-label={shell.tr("dialog.remoteAccountPick")} value={remotePickValue} onchange={(event) => (remoteAccountPick = (event.currentTarget as HTMLSelectElement).value)}>
+                    <option value="">{shell.tr("dialog.remoteAccountAuto")}</option>
+                    {#each remotePreview.choices as item (item.id)}
+                      <option value={item.id}>{item.name || item.login || item.label}</option>
+                    {/each}
+                  </select>
+                </label>
+              {/if}
+            </div>
           {/if}
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
@@ -751,8 +860,15 @@
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.squash")}</button>
           </div>
         {:else if shell.dialog === "checkoutNotice"}
-          <h2>{shell.tr("menu.checkout")}</h2>
-          <p class="empty">{shell.tr("dialog.checkoutStashed", { name: shell.pendingCheckout })}</p>
+          <div class="dialog-lead">
+            <span class="dialog-lead-icon" aria-hidden="true">
+              <svg class="line-icon" viewBox="0 0 24 24"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
+            </span>
+            <div class="dialog-lead-copy">
+              <h2>{shell.tr("menu.checkout")}</h2>
+              <p class="empty">{shell.tr("dialog.checkoutStashed", { name: shell.pendingCheckout })}</p>
+            </div>
+          </div>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
             <button class="commit" type="button" onclick={() => { shell.dialog = null; void shell.mutate({ action: "stashPop", name: "stash@{0}" }); }}>{shell.tr("dialog.applyStash")}</button>
@@ -770,35 +886,6 @@
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.save")}</button>
           </div>
-        {:else if shell.dialog === "accounts"}
-          <h2>{shell.tr("chrome.accounts")}</h2>
-          <div class="account-list">
-            {#each shell.settings.accounts as account (account.id)}
-              <div class="composer-row">
-                <button class="text-button" type="button" onclick={() => { shell.editingAccount = account.id; shell.hostForge = account.forge; shell.draft = account.label; shell.draftExtra = account.host; shell.draftUser = account.token; shell.settings.oauthClientId = account.clientId; }}>{account.forge} {account.label}</button>
-                <span class="grow"></span>
-                <button class="text-button danger" type="button" onclick={() => shell.ask(shell.tr("menu.delete"), `${account.forge} · ${account.label}`, () => { shell.settings = { ...shell.settings, accounts: shell.settings.accounts.filter((item) => item.id !== account.id) }; if (shell.editingAccount === account.id) shell.editingAccount = ""; void shell.savePrefs(false); })}>{shell.tr("menu.delete")}</button>
-              </div>
-            {/each}
-          </div>
-          <select aria-label={shell.tr("dialog.forge")} bind:value={shell.hostForge}>
-            <option value="github">GitHub</option>
-            <option value="gitlab">GitLab</option>
-            <option value="bitbucket">Bitbucket</option>
-            <option value="azure">Azure</option>
-          </select>
-          <label>{shell.tr("dialog.name")}<input bind:value={shell.draft} /></label>
-          <label>{shell.tr("dialog.host")}<input bind:value={shell.draftExtra} /></label>
-          <label>{shell.tr("dialog.token")}<input type="password" bind:value={shell.draftUser} /></label>
-          <label>{shell.tr("dialog.clientId")}<input bind:value={shell.settings.oauthClientId} /></label>
-          <div class="composer-row">
-            <button class="text-button" type="button" onclick={() => void invoke<{ verificationUri: string; userCode: string }>("device_start", { forgeName: shell.hostForge, clientId: shell.settings.oauthClientId, host: shell.draftExtra }).then((value) => { shell.commandOutput = `${value.userCode}\n${value.verificationUri}`; shell.dialog = "output"; if (value.verificationUri) void openUrl(value.verificationUri); }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("dialog.deviceLogin")}</button>
-            <button class="text-button" type="button" onclick={() => void invoke<string>("device_poll").then((token) => { if (token === "pending") { shell.actionError = shell.tr("dialog.pending"); return; } shell.draftUser = token; }).catch((error) => (shell.actionError = shell.message(error)))}>{shell.tr("dialog.pending")}</button>
-          </div>
-          <div class="composer-row actions">
-            <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="button" onclick={shell.saveAccount.bind(shell)}>{shell.editingAccount ? shell.tr("menu.update") : shell.tr("dialog.save")}</button>
-          </div>
         {:else if shell.dialog === "ssh"}
           <h2>{shell.tr("chrome.sshConfig")}</h2>
           <textarea rows="10" aria-label={shell.tr("chrome.sshConfig")} bind:value={shell.draft}></textarea>
@@ -808,12 +895,14 @@
           </div>
         {:else if shell.dialog === "stale"}
           <h2>{shell.tr("chrome.stale")}</h2>
-          {#each shell.staleNames as name (name)}
-            <label class="check"><input type="checkbox" checked={shell.stalePicked.includes(name)} onchange={() => { shell.stalePicked = shell.stalePicked.includes(name) ? shell.stalePicked.filter((item) => item !== name) : [...shell.stalePicked, name]; }} /> {name}</label>
-          {/each}
+          <div class="branch-pick-list">
+            {#each shell.staleNames as name (name)}
+              <label class="check"><input type="checkbox" checked={shell.stalePicked.includes(name)} onchange={() => { shell.stalePicked = shell.stalePicked.includes(name) ? shell.stalePicked.filter((item) => item !== name) : [...shell.stalePicked, name]; }} /> {name}</label>
+            {/each}
+          </div>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="button" disabled={shell.stalePicked.length === 0} onclick={() => { const names = [...shell.stalePicked]; shell.ask(shell.tr("menu.delete"), names.join(", "), () => { shell.dialog = null; void (async () => { for (const name of names) await shell.mutate({ action: "deleteBranch", name, force: false }); })(); }); }}>{shell.tr("menu.delete")}</button>
+            <button class="commit danger" type="button" disabled={shell.stalePicked.length === 0} onclick={() => { const names = [...shell.stalePicked]; shell.ask(shell.tr("dialog.deleteBranch"), shell.tr("dialog.deleteBranchBody"), () => { shell.dialog = null; void (async () => { for (const name of names) await shell.mutate({ action: "deleteBranch", name }); })(); }, [], { subject: names.join(", "), danger: true }); }}>{shell.tr("menu.delete")}</button>
           </div>
         {:else if shell.dialog === "pushAs"}
           <h2>{shell.tr("menu.pushAs")}</h2>

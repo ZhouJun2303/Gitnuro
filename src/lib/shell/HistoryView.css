@@ -9,6 +9,7 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    background: var(--elevated);
   }
 
 .history-head {
@@ -31,6 +32,7 @@
 
 .history .commit-row {
     gap: 0;
+    border-radius: 4px;
   }
 
 .history .commit-row::before {
@@ -90,6 +92,8 @@
 
 .commit-row .subject { font-weight: 400; flex: 1; min-width: 96px; }
 
+.history .commit-row.selected .subject { font-weight: 600; }
+
 .badges {
     display: flex;
     gap: 4px;
@@ -117,9 +121,9 @@
     max-width: 100%;
     height: 18px;
     padding: 0 6px;
-    border: 1px solid var(--lane);
+    border: 1px solid color-mix(in srgb, var(--lane) 45%, transparent);
     border-radius: 4px;
-    background: color-mix(in srgb, var(--lane) 10%, var(--elevated));
+    background: color-mix(in srgb, var(--lane) 8%, var(--elevated));
     color: var(--text);
     font-size: 12px;
     line-height: 16px;
@@ -290,6 +294,7 @@
 
 .commit-side .meta {
     line-height: 16px;
+    font-size: 11px;
   }
 
 .commit-side .sha {
@@ -300,6 +305,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: color-mix(in srgb, var(--text-secondary) 85%, var(--accent));
   }
 
 .commit-side .date {

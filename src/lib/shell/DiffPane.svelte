@@ -212,9 +212,9 @@
     const file = shell.selectedPath;
     if (!file || shell.busy || activeHunk == null || shell.selectedSide === "staged") return;
     const index = activeHunk;
-    shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody", { name: file }), () => {
+    shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody"), () => {
       void shell.mutate({ action: "discardHunk", file, index, ignoreSpace: shell.settings.ignoreSpace });
-    });
+    }, [], { subject: file, danger: true });
   }
 
   function stageHovered() {
@@ -246,13 +246,13 @@
         void shell.applyLineOps("discardLine", discardOps);
         return;
       }
-      shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(discardOps.length) }), () => void shell.applyLineOps("discardLine", discardOps));
+      shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(discardOps.length) }), () => void shell.applyLineOps("discardLine", discardOps), [], { danger: true });
       return;
     }
     if (index == null) return;
-    shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody", { name: file }), () => {
+    shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody"), () => {
       void shell.mutate({ action: "discardHunk", file, index, ignoreSpace: shell.settings.ignoreSpace });
-    });
+    }, [], { subject: file, danger: true });
   }
 
   function stageLabel() {
@@ -360,7 +360,7 @@
                 </div>
               {/if}
               {#if shell.discardableSelected.length > 1}
-                <button class="pane-chip danger" type="button" disabled={shell.busy} onclick={() => shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(shell.discardableSelected.length) }), () => void shell.applyLineOps("discardLine", shell.discardableSelected))}>{shell.tr("menu.discardLines")}</button>
+                <button class="pane-chip danger" type="button" disabled={shell.busy} onclick={() => shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(shell.discardableSelected.length) }), () => void shell.applyLineOps("discardLine", shell.discardableSelected), [], { danger: true })}>{shell.tr("menu.discardLines")}</button>
               {/if}
             </header>
             {#if shell.diff && shell.diff.lines.length > 0}

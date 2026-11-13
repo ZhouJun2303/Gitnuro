@@ -400,6 +400,58 @@ pub fn origin_url(repo: &Path) -> String {
         .unwrap_or_default()
 }
 
+/// Remote name and fetch URL. Push-only URLs are kept when that remote has no fetch URL.
+pub fn remote_list(repo: &Path) -> Vec<(String, String)> {
+    let Ok(output) = run_output(repo, &["remote", "-v"]) else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut seen: Vec<(String, String)> = Vec::new();
+    for line in text.lines() {
+        let mut parts = line.split_whitespace();
+        let Some(name) = parts.next() else { continue };
+        let Some(url) = parts.next() else { continue };
+        let kind = parts.next().unwrap_or("(fetch)");
+        if let Some(slot) = seen.iter_mut().find(|(item, _)| item == name) {
+            if kind.contains("fetch") {
+                slot.1 = url.to_string();
+            }
+            continue;
+        }
+        seen.push((name.to_string(), url.to_string()));
+    }
+    seen
+}
+
+/// Ask `git ls-remote` whether this HTTPS URL accepts the credentials already set.
+pub fn ls_remote_head(url: &str) -> Result<(), Error> {
+    if url.is_empty() || url.starts_with('-') || url.contains(['\n', '\r', '\0', ' ']) {
+        return Err(Error::Rev("remote url".into()));
+    }
+    run(&std::env::temp_dir(), &["ls-remote", url, "HEAD"]).map(|_| ())
+}
+
+/// One HTTPS password offered to `git` for a single host. It is not written to gitconfig.
+#[derive(Clone)]
+pub struct HttpsCredential {
+    pub host: String,
+    pub username: String,
+    pub secret: String,
+    pub preferred: bool,
+}
+
+thread_local! {
+    static HTTPS_CREDENTIALS: RefCell<Vec<HttpsCredential>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Replace the HTTPS accounts the next network command may use. Empty clears them.
+pub fn set_https_credentials(items: Vec<HttpsCredential>) {
+    HTTPS_CREDENTIALS.with(|slot| *slot.borrow_mut() = items);
+}
+
 /// Replace the session used by later `git` processes. The in-memory passphrase is kept.
 pub fn configure(session: Session) {
     if let Ok(mut guard) = PROCESS.lock() {
@@ -686,14 +738,19 @@ fn run_prepared_capped(
 ) -> Result<(std::process::Output, bool), Error> {
     let mut flow_command = crate::flow::CommandSpan::start(args);
     let progress = progress_hook();
+    let (credential_args, helper_dir) = https_prefix(args);
+    let _remove_helper = RemoveDir(helper_dir);
     let mut command = git_command();
     command.current_dir(repo).env("GIT_TERMINAL_PROMPT", "0");
-    if progress.is_some() && cap.is_none() {
+    let progressed = if progress.is_some() && cap.is_none() {
         command.env("GIT_LFS_FORCE_PROGRESS", "1");
-        command.args(progress_args(args));
+        progress_args(args)
     } else {
-        command.args(args);
-    }
+        args.iter().map(|arg| (*arg).to_string()).collect::<Vec<_>>()
+    };
+    let mut full = credential_args;
+    full.extend(progressed);
+    command.args(&full);
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -806,35 +863,37 @@ fn run_prepared_capped(
         }
     }
     untrack(pid);
-    flow_command.finish(output.status.success(), &output.stderr);
+    // A capped read is intentionally incomplete. Do not turn it into a lock error.
     if truncated {
-        let note = failure_note(output.status.success(), true, &output.stderr);
+        flow_command.finish(output.status.success(), &output.stderr);
+        let note = failure_note(output.status.success(), true, &output.stdout, &output.stderr);
         if let Some(hook) = TRACE.get() {
             hook(args, started.elapsed(), true, &note);
         }
         note_captured(&output.stdout, &output.stderr);
         return Ok((output, true));
     }
-    let note = failure_note(output.status.success(), allow_failure, &output.stderr);
+    let stderr_text = settle_stderr(&output.stderr);
+    // Git for Windows can exit 0 after `checkout` while leaving the locked file
+    // unchanged. The unlink message is still the failure the user has to see.
+    let locked = if !allow_failure && output.status.success() {
+        crate::locks::explain(repo, &stderr_text)
+    } else {
+        None
+    };
+    let succeeded = output.status.success() && locked.is_none();
+    flow_command.finish(succeeded, &output.stderr);
+    let note = failure_note(succeeded, allow_failure, &output.stdout, &output.stderr);
     if let Some(hook) = TRACE.get() {
-        hook(
-            args,
-            started.elapsed(),
-            output.status.success() || allow_failure,
-            &note,
-        );
+        hook(args, started.elapsed(), succeeded || allow_failure, &note);
     }
     note_captured(&output.stdout, &output.stderr);
-    if output.status.success() || allow_failure {
+    if succeeded || allow_failure {
         return Ok((output, false));
     }
-    let stderr = settle_stderr(&output.stderr);
-    let detail = if stderr.is_empty() {
-        format!("git {} failed", args.join(" "))
-    } else {
-        stderr
-    };
-    Err(Error::Git(match crate::locks::explain(repo, &detail) {
+    let detail = command_failure_detail(&output.stdout, &stderr_text, args);
+    let explained = locked.or_else(|| crate::locks::explain(repo, &detail));
+    Err(Error::Git(match explained {
         Some(message) => format!("{message}\n{detail}"),
         None => detail,
     }))
@@ -1013,12 +1072,36 @@ fn percent_in(text: &str) -> Option<u8> {
     found
 }
 
-/// Stderr tail for a failure the caller will surface. Expected non-zero exits stay empty.
-fn failure_note(success: bool, allow_failure: bool, stderr: &[u8]) -> String {
+/// Output tail for a failure the caller will surface. Expected non-zero exits stay empty.
+///
+/// Git often prints the useful sentence on stdout (`nothing to commit`) and leaves
+/// stderr empty. Prefer stderr when both exist.
+fn failure_note(success: bool, allow_failure: bool, stdout: &[u8], stderr: &[u8]) -> String {
     if success || allow_failure {
         return String::new();
     }
-    tail_text(&settle_stderr(stderr), 500)
+    tail_text(&command_failure_text(stdout, stderr), 500)
+}
+
+fn command_failure_detail(stdout: &[u8], stderr_text: &str, args: &[&str]) -> String {
+    if !stderr_text.is_empty() {
+        return stderr_text.to_string();
+    }
+    let stdout_text = settle_stderr(stdout);
+    if stdout_text.is_empty() {
+        format!("git {} failed", args.join(" "))
+    } else {
+        tail_text(&stdout_text, 500)
+    }
+}
+
+fn command_failure_text(stdout: &[u8], stderr: &[u8]) -> String {
+    let stderr_text = settle_stderr(stderr);
+    if !stderr_text.is_empty() {
+        stderr_text
+    } else {
+        settle_stderr(stdout)
+    }
 }
 
 fn tail_text(text: &str, max_chars: usize) -> String {
@@ -1090,6 +1173,156 @@ fn progress_args(args: &[&str]) -> Vec<String> {
 
 fn untrack(pid: u32) {
     lock_tracked().retain(|item| item.pid != pid);
+}
+
+struct RemoveDir(Option<PathBuf>);
+
+impl Drop for RemoveDir {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
+}
+
+fn command_verb<'a>(args: &'a [&'a str]) -> Option<&'a str> {
+    let mut index = 0;
+    while index < args.len() {
+        match args[index] {
+            "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env" | "--exec-path" => {
+                index += 2;
+            }
+            arg if arg.starts_with('-') => index += 1,
+            arg => return Some(arg),
+        }
+    }
+    None
+}
+
+fn wants_https_credentials(args: &[&str]) -> bool {
+    let Some(verb) = command_verb(args) else {
+        return false;
+    };
+    match verb {
+        "fetch" | "pull" | "push" | "clone" | "ls-remote" => true,
+        "submodule" => args.iter().any(|arg| *arg == "update" || *arg == "sync"),
+        "lfs" => args
+            .iter()
+            .any(|arg| matches!(*arg, "fetch" | "pull" | "push" | "clone")),
+        _ => false,
+    }
+}
+
+fn safe_credential_host(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() < 200
+        && host
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-'))
+        && !host.starts_with('-')
+        && !host.contains("..")
+}
+
+fn shell_single(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// `-c` arguments that answer HTTPS passwords for this command only.
+/// The token stays in the helper script, not in the argument list.
+fn https_prefix(args: &[&str]) -> (Vec<String>, Option<PathBuf>) {
+    if !wants_https_credentials(args) {
+        return (Vec::new(), None);
+    }
+    let creds = HTTPS_CREDENTIALS.with(|slot| slot.borrow().clone());
+    let creds: Vec<_> = creds
+        .into_iter()
+        .filter(|item| {
+            safe_credential_host(&item.host)
+                && !item.secret.is_empty()
+                && !item.secret.contains(['\n', '\r', '\0'])
+                && !item.username.contains(['\n', '\r', '\0', '\''])
+        })
+        .collect();
+    if creds.is_empty() {
+        return (Vec::new(), None);
+    }
+    let Some(dir) = https_helper_dir() else {
+        return (Vec::new(), None);
+    };
+    let script = dir.join("helper.sh");
+    let body = https_helper_script(&creds);
+    if write_private(&script, &body).is_none() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return (Vec::new(), None);
+    }
+    let path = script.display().to_string().replace('\\', "/");
+    let helper = format!("!sh {}", shell_single(&path));
+    let mut hosts = Vec::new();
+    for item in &creds {
+        if !hosts.iter().any(|host| host == &item.host) {
+            hosts.push(item.host.clone());
+        }
+    }
+    let mut prefix = Vec::new();
+    for host in hosts {
+        for scheme in ["https", "http"] {
+            prefix.push("-c".to_string());
+            prefix.push(format!("credential.{scheme}://{host}.helper={helper}"));
+        }
+    }
+    (prefix, Some(dir))
+}
+
+fn https_helper_dir() -> Option<PathBuf> {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    let dir = std::env::temp_dir().join(format!(
+        "awegit-https-{}-{stamp}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir(&dir).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    Some(dir)
+}
+
+fn https_helper_script(creds: &[HttpsCredential]) -> String {
+    let mut body = String::from(
+        "#!/bin/sh\nif [ \"$1\" != \"get\" ]; then\n  exit 0\nfi\nhost=\nuser=\nwhile IFS= read -r line; do\n  case \"$line\" in\n    host=*) host=${line#host=} ;;\n    username=*) user=${line#username=} ;;\n    \"\") break ;;\n  esac\ndone\nhost=${host%%/*}\nhost=${host%%:*}\n",
+    );
+    let mut hosts = Vec::new();
+    for item in creds {
+        if !hosts.iter().any(|host| host == &item.host) {
+            hosts.push(item.host.clone());
+        }
+    }
+    for host in hosts {
+        let matched: Vec<_> = creds.iter().filter(|item| item.host == host).collect();
+        let fallback = matched.iter().find(|item| item.preferred).copied();
+        body.push_str(&format!("if [ \"$host\" = {} ]; then\n", shell_single(&host)));
+        for item in &matched {
+            body.push_str(&format!("  if [ \"$user\" = {} ]; then\n", shell_single(&item.username)));
+            body.push_str(&format!("    printf 'username=%s\\n' {}\n", shell_single(&item.username)));
+            body.push_str(&format!("    printf 'password=%s\\n' {}\n", shell_single(&item.secret)));
+            body.push_str("    exit 0\n  fi\n");
+        }
+        if let Some(item) = fallback {
+            body.push_str("  if [ -z \"$user\" ]; then\n");
+            body.push_str(&format!("    printf 'username=%s\\n' {}\n", shell_single(&item.username)));
+            body.push_str(&format!("    printf 'password=%s\\n' {}\n", shell_single(&item.secret)));
+            body.push_str("    exit 0\n  fi\n");
+        }
+        body.push_str("fi\n");
+    }
+    body.push_str("exit 0\n");
+    body
 }
 
 /// `-c` arguments that keep commit signing on only when the session asked for it.
@@ -1434,11 +1667,46 @@ mod progress_tests {
     #[test]
     fn failure_note_keeps_stderr_only_for_real_errors() {
         let stderr = b"Receiving objects:  10% (1/10)\rReceiving objects:  40% (4/10)\r\nfatal: could not read Username\n";
-        assert_eq!(failure_note(true, false, stderr), "");
-        assert_eq!(failure_note(false, true, stderr), "");
-        let note = failure_note(false, false, stderr);
+        assert_eq!(failure_note(true, false, b"nothing to commit\n", stderr), "");
+        assert_eq!(failure_note(false, true, b"nothing to commit\n", stderr), "");
+        let note = failure_note(false, false, b"nothing to commit\n", stderr);
         assert!(note.contains("could not read Username"));
         assert!(note.contains("40%"));
+        assert!(!note.contains("nothing to commit"));
+        let stdout_note = failure_note(false, false, b"nothing to commit, working tree clean\n", b"");
+        assert!(stdout_note.contains("nothing to commit"));
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::run;
+
+    #[test]
+    fn empty_commit_failure_includes_the_stdout_explanation() {
+        let repo = std::env::temp_dir().join(format!(
+            "awegit-empty-commit-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&repo);
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            run(&repo, args).unwrap_or_else(|error| panic!("git {}: {error}", args.join(" ")));
+        };
+        git(&["init", "-q", "-b", "main", "--template="]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        git(&["config", "core.hooksPath", ".git/no-hooks"]);
+        let message = run(&repo, &["commit", "-m", "test: empty"])
+            .unwrap_err()
+            .to_string();
+        let lower = message.to_ascii_lowercase();
+        assert!(
+            lower.contains("nothing to commit") || lower.contains("working tree clean"),
+            "{message}"
+        );
+        let _ = std::fs::remove_dir_all(&repo);
     }
 }
 
@@ -1702,5 +1970,58 @@ mod version_tests {
         );
         assert_eq!(parse_git_version(""), None);
         assert_eq!(parse_git_version("git version"), None);
+    }
+}
+
+#[cfg(test)]
+mod https_credential_tests {
+    use super::{https_prefix, set_https_credentials, HttpsCredential};
+
+    fn cred(host: &str, username: &str, secret: &str, preferred: bool) -> HttpsCredential {
+        HttpsCredential {
+            host: host.into(),
+            username: username.into(),
+            secret: secret.into(),
+            preferred,
+        }
+    }
+
+    #[test]
+    fn helper_args_leave_the_token_in_the_script() {
+        let secret = "ghp_test_secret_value";
+        set_https_credentials(vec![cred("github.com", "octocat", secret, true)]);
+        let (args, dir) = https_prefix(&["fetch", "origin"]);
+        let joined = args.join("\n");
+        assert!(!joined.contains(secret), "{joined}");
+        assert!(joined.contains("credential.https://github.com.helper="), "{joined}");
+        assert!(joined.contains("credential.http://github.com.helper="), "{joined}");
+        let dir = dir.expect("helper dir");
+        let body = std::fs::read_to_string(dir.join("helper.sh")).unwrap();
+        assert!(body.contains(secret), "{body}");
+        assert!(body.contains("-z \"$user\""), "{body}");
+        set_https_credentials(Vec::new());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn an_unpreferred_account_does_not_answer_an_empty_username() {
+        set_https_credentials(vec![cred("github.com", "octocat", "ghp_other_secret", false)]);
+        let (args, dir) = https_prefix(&["push", "origin"]);
+        assert!(!args.join("\n").contains("ghp_other_secret"));
+        let dir = dir.expect("helper dir");
+        let body = std::fs::read_to_string(dir.join("helper.sh")).unwrap();
+        assert!(!body.contains("-z \"$user\""), "{body}");
+        assert!(body.contains("octocat"), "{body}");
+        set_https_credentials(Vec::new());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn status_does_not_install_an_https_helper() {
+        set_https_credentials(vec![cred("github.com", "octocat", "ghp_status_secret", true)]);
+        let (args, dir) = https_prefix(&["status", "--porcelain"]);
+        assert!(args.is_empty());
+        assert!(dir.is_none());
+        set_https_credentials(Vec::new());
     }
 }

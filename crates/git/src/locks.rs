@@ -341,6 +341,10 @@ mod tests {
             assert!(message.contains("unable to unlink"), "{message}");
         }
         drop(lock);
+        // Checkout can exit 0 and leave HEAD on `other` while the file stays behind.
+        // `reset --hard main` would rewind that branch. Switch back, then prove the
+        // same merge updates the file once nothing is holding it.
+        git(&["checkout", "-f", "main"]);
         git(&["merge", "--ff-only", "other"]);
         assert_eq!(std::fs::read_to_string(repo.join("held.txt")).unwrap(), "two");
         let _ = std::fs::remove_dir_all(&repo);

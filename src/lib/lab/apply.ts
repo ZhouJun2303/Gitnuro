@@ -1,7 +1,6 @@
 import { invoke } from "../perf";
 import type { CommandRecord, ToolRecord } from "../status";
 import type { ShellState } from "../shell/state.svelte";
-import { fillResolveDialog } from "../shell/dialogs.svelte";
 import type { LabDialog, LabScene } from "./scenes";
 
 const FILL = 24;
@@ -391,7 +390,11 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.draft = "feature/lab";
     shell.draftExtra = "main";
     shell.dialog = "branch";
-    shell.confirmAsk = { title: "删除分支", body: "确认删除 topic？", run: () => {} };
+    shell.confirmAsk = { title: shell.tr("dialog.deleteBranch"), body: shell.tr("dialog.deleteBranchBody"), subject: "rewrite/tauri", danger: true, confirmLabel: shell.tr("menu.delete"), run: () => {} };
+    return;
+  }
+  if (id === "force-delete-confirm") {
+    shell.confirmAsk = { title: shell.tr("dialog.forceDeleteBranch"), body: shell.tr("dialog.forceDeleteBranchBody"), subject: "rewrite/tauri", danger: true, confirmLabel: shell.tr("menu.forceDelete"), run: () => {} };
     return;
   }
   if (id === "discard-many-confirm") {
@@ -404,12 +407,16 @@ async function fillSurface(shell: ShellState, id: string) {
       "docs/release-notes.md",
     ];
     shell.discardChosen(names);
-    if (!shell.confirmAsk) shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => {}, names);
+    if (!shell.confirmAsk) shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => {}, names, { danger: true });
     return;
   }
   if (id === "stash-apply-confirm") {
     const stash = shell.refs?.stashes[0];
     shell.confirmApplyStash(stash?.name ?? "stash@{0}", stash?.summary ?? "WIP before the palette");
+    return;
+  }
+  if (id === "stash-apply-long-confirm") {
+    shell.confirmApplyStash("stash@{0}", "On develop: AweGit autostash: checkout origin/Dev/KingEquipDev_2026_09_14 (12 files: .gitignore, Assets/Editor/Build/ExportSetting.asset, Assets/Editor/Protobuf/ProtobufSetting.asset, +9)");
     return;
   }
   if (id === "revert-confirm") {
@@ -429,6 +436,21 @@ async function fillSurface(shell: ShellState, id: string) {
   if (id === "cherry-confirm") {
     const commit = shell.commitsLive[0];
     if (commit) await shell.previewCherry(commit.id, true, commit.summary);
+    return;
+  }
+  if (id === "stale-lock-confirm") {
+    shell.ask(
+      shell.tr("dialog.staleLockBlocked"),
+      shell.tr("dialog.staleLockBlockedBody"),
+      () => {},
+      [],
+      {
+        subject: ".git/index.lock",
+        detail: shell.tr("dialog.staleLockAge", { seconds: "812" }),
+        danger: true,
+        confirmLabel: shell.tr("dialog.removeLockAndRetry"),
+      },
+    );
     return;
   }
   if (id === "workspace-menu-busy") {
@@ -512,6 +534,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       break;
     case "prefs": {
       const prefTabs: Record<string, "general" | "workspace" | "diff" | "commit" | "ai" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
+        "prefs-flow": "advanced",
         "prefs-workspace": "workspace",
         "prefs-diff": "diff",
         "prefs-commit": "commit",
@@ -537,6 +560,45 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       if (sceneId === "prefs-integration-editor") {
         shell.toolKind = "editor";
         shell.toolPick = "lab-editor-cursor";
+      }
+      if (sceneId === "prefs-accounts") {
+        shell.settings = {
+          ...shell.settings,
+          authorName: "Lab User",
+          authorEmail: "lab@example.com",
+          githubToken: "",
+          gitlabToken: "",
+          bitbucketToken: "",
+          azureToken: "",
+          accounts: [
+            {
+              id: "lab-github",
+              forge: "github",
+              label: "Lab GitHub",
+              token: "",
+              host: "github.com",
+              clientId: "",
+              login: "lab",
+              name: "Lab User",
+              email: "lab@example.com",
+              avatarUrl: "",
+              defaultForHost: true,
+            },
+            {
+              id: "lab-gitlab",
+              forge: "gitlab",
+              label: "Lab GitLab",
+              token: "",
+              host: "gitlab.com",
+              clientId: "",
+              login: "lab",
+              name: "Lab User",
+              email: "lab@example.com",
+              avatarUrl: "",
+              defaultForHost: true,
+            },
+          ],
+        };
       }
       break;
     }
@@ -584,7 +646,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
     case "remote":
       shell.remoteEdit = false;
       shell.draft = "";
-      shell.draftExtra = "https://example.com/lab/repo.git";
+      shell.draftExtra = "https://github.com/lab/example.git";
       break;
     case "squash":
       if (shell.commitsLive[0]) shell.selectedCommit = shell.commitsLive[0].id;
@@ -619,9 +681,6 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
     case "upstream":
       shell.draft = "main";
       shell.draftExtra = "origin/main";
-      break;
-    case "resolve":
-      await fillResolveDialog(shell, "src/both-sides.ts");
       break;
     case "rebase": {
       const onto = shell.commitsLive[shell.commitsLive.length - 1];
@@ -724,26 +783,6 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
         const n = pad(index + 1);
         return `Lab Author ${n} <lab${n}@example.com> <alias${n}@example.com>`;
       }).join("\n") + "\n";
-      break;
-    case "accounts":
-      shell.settings = {
-        ...shell.settings,
-        accounts: Array.from({ length: FILL }, (_, index) => {
-          const n = pad(index + 1);
-          return {
-            id: `lab-acct-${n}`,
-            forge: index % 2 === 0 ? "github" : "gitlab",
-            label: `lab-${n}`,
-            token: `lab-token-${n}`,
-            host: index % 2 === 0 ? "github.com" : "gitlab.com",
-            clientId: `lab-client-${n}`,
-          };
-        }),
-      };
-      shell.hostForge = "github";
-      shell.draft = "lab-01";
-      shell.draftExtra = "github.com";
-      shell.draftUser = "lab-token-01";
       break;
     case "ssh":
       shell.draft = Array.from({ length: FILL }, (_, index) => {

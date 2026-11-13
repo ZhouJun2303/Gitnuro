@@ -3,7 +3,7 @@ import { invoke as rawInvoke } from "@tauri-apps/api/core";
 type Args = Parameters<typeof rawInvoke>[1];
 type Options = Parameters<typeof rawInvoke>[2];
 
-type Entry = { level: "info" | "slow" | "warn" | "error"; kind: string; name: string; ms?: number; detail?: string };
+type Entry = { level: "info" | "slow" | "warn" | "error"; kind: string; name: string; ms?: number; detail?: string; at?: number; trace?: string };
 
 export type ClientStat = { name: string; count: number; totalMs: number; maxMs: number; lastMs: number; failed: number };
 
@@ -13,11 +13,18 @@ const LONG_TASK_MS = 100;
 const live = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const queue: Entry[] = [];
 const stats = new Map<string, ClientStat>();
+const tracePrefix = `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+let traceSequence = 0;
 export const frame = { longTasks: 0, longTaskMs: 0, longTaskMax: 0 };
+
+/** Related invocations retain this prefix while each call has its own id. */
+export function traceOperation() {
+  return `${tracePrefix}-${++traceSequence}`;
+}
 
 function push(entry: Entry) {
   if (typeof window === "undefined") return;
-  queue.push(entry);
+  queue.push({ at: Date.now(), ...entry });
   if (queue.length > 500) queue.splice(0, queue.length - 500);
 }
 
@@ -62,18 +69,21 @@ async function call<T>(cmd: string, args?: Args, options?: Options): Promise<T> 
 }
 
 /** Desktop calls Tauri. The browser lab posts the same command to `/__lab`. */
-export async function invoke<T>(cmd: string, args?: Args, options?: Options): Promise<T> {
+export async function invoke<T>(cmd: string, args?: Args, options?: Options, operation?: string): Promise<T> {
   const start = performance.now();
+  const at = Date.now();
+  const trace = operation ? `${operation}-${++traceSequence}` : traceOperation();
+  const tracedArgs = { ...args, __perf: trace };
   try {
-    const value = await call<T>(cmd, args, options);
+    const value = await call<T>(cmd, tracedArgs, options);
     const ms = performance.now() - start;
     record(cmd, ms, true);
-    if (ms >= SLOW_INVOKE_MS) push({ level: "slow", kind: "invoke", name: cmd, ms });
+    if (ms >= SLOW_INVOKE_MS || ["mutate", "workspace_status", "repository_refs", "commit_log", "operation_flow", "conflict_view"].includes(cmd)) push({ level: ms >= SLOW_INVOKE_MS ? "slow" : "info", kind: "invoke", name: cmd, ms, at, trace });
     return value;
   } catch (error) {
     const ms = performance.now() - start;
     record(cmd, ms, false);
-    push({ level: "error", kind: "invoke", name: cmd, ms, detail: String(error) });
+    push({ level: "error", kind: "invoke", name: cmd, ms, detail: String(error), at, trace });
     throw error;
   }
 }

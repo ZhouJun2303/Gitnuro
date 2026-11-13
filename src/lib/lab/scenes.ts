@@ -13,7 +13,8 @@ export type LabScene = {
 };
 
 function scene(item: Omit<LabScene, "href"> & { href?: string }): LabScene {
-  return { ...item, href: item.href ?? `/?scene=${item.id}` };
+  const merge = ["text-merge", "text-merge-window", "text-merge-many", "conflict-large-asset", "file-merge"].includes(item.id);
+  return { ...item, href: item.href ?? `/?scene=${item.id}${merge ? "&view=merge" : ""}` };
 }
 
 function dialog(name: LabDialog, title: string, repo = "full", group = "弹窗"): LabScene {
@@ -46,7 +47,6 @@ export const dialogScenes = {
   stash: dialog("stash", "贮藏"),
   rename: dialog("rename", "重命名分支"),
   upstream: dialog("upstream", "上游"),
-  resolve: dialog("resolve", "解决冲突", "conflict"),
   rebase: dialog("rebase", "交互式变基"),
   patch: dialog("patch", "应用补丁", "full", "叠层"),
   about: dialog("about", "关于"),
@@ -69,7 +69,6 @@ export const dialogScenes = {
   checkoutNotice: dialog("checkoutNotice", "检出后的贮藏"),
   activity: dialog("activity", "活动"),
   mailmap: dialog("mailmap", "mailmap"),
-  accounts: dialog("accounts", "账户", "full", "叠层"),
   ssh: dialog("ssh", "SSH 配置", "full", "叠层"),
   stale: dialog("stale", "已合并分支"),
   pushAs: dialog("pushAs", "推送到指定分支", "ahead"),
@@ -176,16 +175,20 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "conflict-large-asset", group: "叠层", title: "大文本冲突", repo: "conflict", ready: ".merge-large" }),
   scene({ id: "file-merge", group: "叠层", title: "二进制合并", repo: "conflict", ready: "[data-layer=\"text-merge\"]" }),
   scene({ id: "confirm", group: "叠层", title: "确认框", repo: "full", ready: "[data-layer=\"confirm\"]" }),
+  scene({ id: "force-delete-confirm", group: "叠层", title: "强制删除分支确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "discard-many-confirm", group: "叠层", title: "多文件丢弃确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "stash-apply-confirm", group: "叠层", title: "应用贮藏确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
+  scene({ id: "stash-apply-long-confirm", group: "叠层", title: "应用贮藏确认 · 长说明", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "revert-confirm", group: "叠层", title: "还原确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "stash-pop-confirm", group: "叠层", title: "弹出贮藏确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "reset-confirm", group: "叠层", title: "重置确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "cherry-confirm", group: "叠层", title: "拣选确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
+  scene({ id: "stale-lock-confirm", group: "叠层", title: "残留 index.lock 确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "menu", group: "叠层", title: "菜单", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "external-tool-menu", group: "叠层", title: "外部工具子菜单", repo: "conflict", ready: "[data-layer=\"submenu\"]" }),
   scene({ id: "workspace-menu-busy", group: "叠层", title: "工作区菜单：刷新中", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "prefs-flow", group: "弹窗", title: "偏好设置 · 流程窗口自动打开与关闭", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-appearance", group: "弹窗", title: "偏好设置 · Apple Liquid Glass、经典白色与 VS Code 黑色", repo: "full", ready: ".theme-styles", dialog: "prefs" }),
   scene({ id: "prefs-language", group: "弹窗", title: "偏好设置 · 语言切换、窗口同步与空白点击", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-workspace", group: "弹窗", title: "偏好设置 · 工作区与扫描", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-diff", group: "弹窗", title: "偏好设置 · 差异", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),

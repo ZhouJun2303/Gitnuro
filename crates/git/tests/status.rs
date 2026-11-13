@@ -5,6 +5,68 @@ use std::fs;
 use awegit_git::{stage_all, status, status_with, unstage_fakeignored, ChangeKind, FileChange};
 
 #[test]
+fn native_ignore_checks_match_git_and_reload_rules_and_the_index() {
+    let repo = common::TempRepo::new();
+    repo.git(&["init", "-b", "main"]);
+    repo.git(&["config", "core.quotePath", "false"]);
+    fs::create_dir_all(repo.path.join("nested")).unwrap();
+    fs::create_dir_all(repo.path.join("cache")).unwrap();
+    fs::write(repo.path.join(".gitignore"), "*.tmp\ncache/\n!keep.tmp\n").unwrap();
+    fs::write(repo.path.join("nested/.gitignore"), "!keep.tmp\nonly.log\n").unwrap();
+    fs::write(repo.path.join(".git/info/exclude"), "private.txt\n").unwrap();
+    fs::write(repo.path.join("global-ignore"), "global.txt\n").unwrap();
+    repo.git(&["config", "core.excludesFile", &repo.path.join("global-ignore").display().to_string()]);
+    let paths: Vec<String> = ["tracked.tmp", "drop.tmp", "keep.tmp", "nested/drop.tmp", "nested/keep.tmp", "nested/only.log", "cache/hidden.txt", "private.txt", "global.txt", "正常.txt"]
+        .into_iter().map(str::to_string).collect();
+    for path in &paths { fs::write(repo.path.join(path), "content\n").unwrap(); }
+    repo.git(&["add", "-f", "tracked.tmp"]);
+    let verify = || {
+        let mut args = vec!["check-ignore", "--"];
+        args.extend(paths.iter().map(String::as_str));
+        let output = repo.raw(&args);
+        assert!(matches!(output.status.code(), Some(0 | 1)));
+        let expected: Vec<String> = String::from_utf8_lossy(&output.stdout).lines().map(str::to_string).collect();
+        assert_eq!(awegit_git::ignored_paths(&repo.path, &paths), expected);
+    };
+    verify();
+    fs::write(repo.path.join("nested/.gitignore"), "!drop.tmp\n!only.log\n").unwrap();
+    verify();
+    repo.git(&["add", "-f", "drop.tmp"]);
+    verify();
+    fs::write(repo.path.join("global-ignore"), "!global.txt\n").unwrap();
+    fs::write(repo.path.join(".git/info/exclude"), "!private.txt\n").unwrap();
+    fs::write(repo.path.join(".gitignore"), "cache/\n!keep.tmp\n").unwrap();
+    verify();
+}
+
+#[test]
+fn native_ignore_checks_respect_case_insensitive_tracked_paths() {
+    let repo = common::TempRepo::new();
+    repo.git(&["init", "-b", "main"]);
+    repo.git(&["config", "core.ignorecase", "true"]);
+    fs::write(repo.path.join(".gitignore"), "*.tmp\n").unwrap();
+    fs::write(repo.path.join("tracked.tmp"), "tracked\n").unwrap();
+    repo.git(&["add", "-f", "tracked.tmp"]);
+    let paths = vec!["TRACKED.TMP".into(), "DROP.TMP".into()];
+    assert_eq!(awegit_git::ignored_paths(&repo.path, &paths), vec!["DROP.TMP"]);
+}
+
+#[test]
+fn linked_worktree_ignore_checks_use_the_shared_exclude_file() {
+    let repo = common::TempRepo::new();
+    repo.git(&["init", "-b", "main"]);
+    fs::write(repo.path.join("note"), "base\n").unwrap();
+    repo.git(&["add", "note"]);
+    repo.git(&["commit", "-m", "base"]);
+    let worktree = repo.path.join("linked");
+    repo.git(&["worktree", "add", "-b", "linked", &worktree.display().to_string()]);
+    fs::write(repo.path.join(".git/info/exclude"), "shared-private.txt\n").unwrap();
+    fs::write(worktree.join("shared-private.txt"), "local\n").unwrap();
+    let paths = vec!["shared-private.txt".into(), "note".into()];
+    assert_eq!(awegit_git::ignored_paths(&worktree, &paths), vec!["shared-private.txt"]);
+}
+
+#[test]
 fn missing_path_and_plain_directory_are_not_repositories() {
     let repo = common::TempRepo::new();
     let missing = repo.path.join("gone");

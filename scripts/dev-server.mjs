@@ -1,4 +1,4 @@
-// Keep the desktop's frontend available even when a reused lab server stops.
+// Keep the shared desktop/lab frontend available even when a reused server stops.
 
 import { spawn } from "node:child_process";
 import { createWriteStream, mkdirSync } from "node:fs";

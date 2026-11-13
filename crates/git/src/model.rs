@@ -116,6 +116,8 @@ pub struct WorktreeRow {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RefSnapshot {
+    #[serde(default)]
+    pub revision: u64,
     /// Commit HEAD points at, so the UI can tell which history row is rewordable.
     #[serde(default)]
     pub head: Option<String>,
@@ -497,8 +499,10 @@ pub fn commit_detail(repo: &Path, id: &str) -> Result<CommitDetail, Error> {
         run(
             repo,
             &[
-                "show",
-                "-s",
+                "log",
+                "-1",
+                "--no-walk",
+                "--no-patch",
                 "--format=%H%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ce%x1f%ct%x1f%P%x1f%s%x1e%b",
                 id,
             ],
@@ -550,13 +554,14 @@ pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .filter(|id| !id.is_empty());
     std::thread::scope(|scope| {
-        let branches = scope.spawn(|| local_branches(repo));
-        let remotes = scope.spawn(|| remotes(repo));
-        let tags = scope.spawn(|| tags(repo));
-        let stashes = scope.spawn(|| stashes(repo));
-        let submodules = scope.spawn(|| submodules(repo));
+        let branches = scope.spawn(crate::timing::inherit(|| local_branches(repo)));
+        let remotes = scope.spawn(crate::timing::inherit(|| remotes(repo)));
+        let tags = scope.spawn(crate::timing::inherit(|| tags(repo)));
+        let stashes = scope.spawn(crate::timing::inherit(|| stashes(repo)));
+        let submodules = scope.spawn(crate::timing::inherit(|| submodules(repo)));
         let worktrees = worktrees(repo);
         Ok(RefSnapshot {
+            revision: 0,
             head,
             branches: joined(branches)?,
             remotes: joined(remotes)?,
@@ -613,6 +618,52 @@ pub fn index_lock_path(repo: &Path) -> Option<PathBuf> {
         .map(|dir| dir.join("index.lock"))
 }
 
+/// A Git command starts writing within milliseconds, so an older `index.lock`
+/// belongs to a process that stopped. A live command keeps the lock well under it.
+const STALE_LOCK_AGE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// An `index.lock` left behind by a killed Git process. Recent locks stay out:
+/// another Git command may be writing the index at this moment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StaleIndexLock {
+    pub path: String,
+    pub age_secs: u64,
+}
+
+pub fn stale_index_lock(repo: &Path) -> Option<StaleIndexLock> {
+    let lock = index_lock_path(repo)?;
+    let meta = std::fs::symlink_metadata(&lock).ok()?;
+    if !meta.file_type().is_file() {
+        return None;
+    }
+    let age = meta.modified().ok()?.elapsed().ok()?;
+    if age < STALE_LOCK_AGE {
+        return None;
+    }
+    let shown = lock.strip_prefix(repo).unwrap_or(&lock);
+    Some(StaleIndexLock {
+        path: shown.display().to_string(),
+        age_secs: age.as_secs(),
+    })
+}
+
+/// Remove the exact lock the user confirmed. Re-reading the age refuses a lock
+/// that a new Git process took after the prompt appeared.
+pub fn remove_stale_index_lock(repo: &Path, expected: &str) -> Result<(), Error> {
+    let lock = stale_index_lock(repo)
+        .ok_or_else(|| Error::Git("no stale index.lock to remove".into()))?;
+    if lock.path != expected {
+        return Err(Error::Git(
+            "the stale index.lock changed; retry the failed action".into(),
+        ));
+    }
+    let path = index_lock_path(repo).ok_or_else(|| Error::Git("repository is gone".into()))?;
+    std::fs::remove_file(&path).map_err(|source| {
+        Error::Git(format!("could not remove {}: {source}", path.display()))
+    })
+}
+
 fn read_local(path: &Path) -> Result<String, Error> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(text),
@@ -636,8 +687,9 @@ fn write_local(path: &Path, text: &str) -> Result<(), Error> {
     })
 }
 
-/// The work tree's own git directory. Remembered per path; a directory that disappeared is looked up again.
-fn absolute_git_dir(repo: &Path) -> Result<PathBuf, Error> {
+/// The work tree's own git directory, shared by history, flows, and conflict readers.
+/// Remembered per path; a directory that disappeared is looked up again.
+pub(crate) fn absolute_git_dir(repo: &Path) -> Result<PathBuf, Error> {
     if let Some(dir) = GIT_DIRS
         .lock()
         .ok()
@@ -833,6 +885,39 @@ pub fn write_expanded_groups(repo: &Path, names: &[String]) -> Result<(), Error>
 /// `signoff.format` from `.git/awegit`. Empty when this repository has not set one.
 pub fn repo_sign_off_format(repo: &Path) -> String {
     value_key(repo, "signoff", "format")
+}
+
+/// `remote<TAB>account` pairs from `.git/awegit`. Empty when this repository has not chosen any.
+pub fn remote_account_overrides(repo: &Path) -> Vec<(String, String)> {
+    values_in(&local_text(repo), "awegit", "remoteAccount")
+        .into_iter()
+        .filter_map(|value| {
+            let (name, id) = value.split_once('\t')?;
+            let name = name.trim();
+            let id = id.trim();
+            if name.is_empty() || id.is_empty() {
+                None
+            } else {
+                Some((name.to_string(), id.to_string()))
+            }
+        })
+        .collect()
+}
+
+/// Remember which account serves one remote. An empty account id clears that remote.
+pub fn write_remote_account(repo: &Path, remote: &str, account_id: &str) -> Result<(), Error> {
+    let remote = remote.trim();
+    let account_id = account_id.trim();
+    if remote.is_empty() || remote.contains(['\n', '\r', '\0', '\t']) || account_id.contains(['\n', '\r', '\0', '\t']) {
+        return Err(Error::Rev("remote account".into()));
+    }
+    let mut pairs = remote_account_overrides(repo);
+    pairs.retain(|(name, _)| name != remote);
+    if !account_id.is_empty() {
+        pairs.push((remote.to_string(), account_id.to_string()));
+    }
+    let lines: Vec<String> = pairs.iter().map(|(name, id)| format!("{name}\t{id}")).collect();
+    rewrite_local_key(repo, "awegit", "remoteAccount", &lines)
 }
 
 pub fn write_sign_off(repo: &Path, enabled: bool, format: &str) -> Result<(), Error> {
@@ -1615,6 +1700,11 @@ pub fn ignored_paths(repo: &Path, paths: &[String]) -> Vec<String> {
     if paths.is_empty() {
         return Vec::new();
     }
+    // Fresh stacks see index and all ignore-rule changes without a long-lived cache.
+    // Keep porcelain as a fallback for repositories gitoxide cannot read.
+    if let Some(ignored) = ignored_paths_native(repo, paths) {
+        return ignored;
+    }
     let mut input = Vec::new();
     for path in paths {
         input.extend_from_slice(path.as_bytes());
@@ -1629,6 +1719,29 @@ pub fn ignored_paths(repo: &Path, paths: &[String]) -> Vec<String> {
         .filter(|path| !path.is_empty())
         .map(|path| String::from_utf8_lossy(path).into_owned())
         .collect()
+}
+
+fn ignored_paths_native(path: &Path, paths: &[String]) -> Option<Vec<String>> {
+    let repo = crate::open_repo(path).ok()?;
+    // gitoxide 0.73 builds info/exclude from git_dir rather than common_dir.
+    if repo.git_dir() != repo.common_dir() { return None; }
+    let index = repo.index_or_empty().ok()?;
+    let ignore_case = repo.config_snapshot().boolean("core.ignorecase").unwrap_or(false);
+    let mut icase = None;
+    let mut excludes = repo.excludes(&index, None, Default::default()).ok()?;
+    let mut ignored = Vec::new();
+    for path in paths {
+        if index.entry_by_path(gix::bstr::BStr::new(path.as_bytes())).is_some() {
+            continue;
+        }
+        let mode = std::fs::symlink_metadata(repo.workdir().unwrap_or_else(|| repo.git_dir()).join(path)).is_ok_and(|meta| meta.is_dir())
+            .then_some(gix::index::entry::Mode::DIR);
+        if excludes.at_path(path, mode).ok()?.is_excluded() {
+            if ignore_case && index.entry_by_path_icase(gix::bstr::BStr::new(path.as_bytes()), true, icase.get_or_insert_with(|| index.prepare_icase_backing())).is_some() { continue; }
+            ignored.push(path.clone());
+        }
+    }
+    Some(ignored)
 }
 
 /// Gitlinks named in `.gitmodules`. `git submodule status` also describes each commit, which costs

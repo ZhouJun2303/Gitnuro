@@ -30,6 +30,74 @@
     padding-right: 26px;
   }
 
+.dialog-lead {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-width: 0;
+  }
+
+.dialog-lead-icon {
+    width: 30px;
+    height: 30px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    margin-top: 1px;
+    border-radius: calc(var(--radius) + 2px);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+  }
+
+.dialog-lead-icon svg {
+    width: 17px;
+    height: 17px;
+  }
+
+.dialog-lead-icon.danger {
+    background: color-mix(in srgb, var(--deleted) 13%, transparent);
+    color: var(--deleted);
+  }
+
+.dialog-lead-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
+  }
+
+.dialog-lead-copy h2 {
+    position: static;
+    padding: 0;
+    background: transparent;
+    font-size: 16px;
+    font-weight: 650;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+  }
+
+.dialog-lead-copy .empty {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+  }
+
+.dialog-subject {
+    min-width: 0;
+    max-width: 100%;
+    padding: 7px 10px;
+    border-radius: var(--radius);
+    background: var(--field);
+    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-size: 12.5px;
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    user-select: text;
+  }
+
 .dialog-error {
     margin: 0;
     padding: 8px 10px;
@@ -45,7 +113,7 @@
     width: 24px;
     height: 24px;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     padding: 0;
     transition: transform 120ms ease, box-shadow 120ms ease;
   }
@@ -93,34 +161,9 @@
     border-radius: 50%;
   }
 
-.merge-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 8px;
-  }
-
-.merge-grid textarea { width: 100%; }
-
-.hunk-marks {
-    position: relative;
-    height: 8px;
-    margin: 6px 0;
-    background: var(--line);
-  }
-
-.hunk-marks button {
-    position: absolute;
-    top: 0;
-    width: 6px;
-    height: 8px;
-    border: 0;
-    padding: 0;
-    background: var(--accent);
-  }
-
 .treemap { display: flex; flex-wrap: wrap; gap: 4px; min-height: 72px; }
 
-.treemap span { flex: 1 1 88px; min-width: 72px; padding: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 6px; font-size: 11px; }
+.treemap span { flex: 1 1 88px; min-width: 72px; padding: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: color-mix(in srgb, var(--accent) 25%, transparent); border-radius: var(--radius-sm); font-size: 11px; }
 
 .stats-row {
     display: flex;
@@ -136,9 +179,13 @@
   }
 
 .stash-paths {
-    max-height: 160px;
+    max-height: 180px;
     margin: 0;
     white-space: pre-wrap;
+  }
+
+.dialog pre.stash-paths {
+    max-height: 180px;
   }
 
 .merge-conflict-log {
@@ -147,7 +194,7 @@
     overflow: auto;
     padding: 10px 12px;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--canvas);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -195,9 +242,12 @@
 .account-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 2px;
     max-height: 220px;
     overflow: auto;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
   }
 
 .dialog .text-button.pick {
@@ -293,7 +343,7 @@
     flex-wrap: wrap;
     gap: 2px;
     padding: 3px;
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--field);
   }
 
@@ -305,7 +355,7 @@
     color: var(--text-secondary);
     font: inherit;
     padding: 3px 12px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     white-space: nowrap;
   }
 
@@ -359,6 +409,9 @@
     flex-direction: column;
     gap: 2px;
     flex: none;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
   }
 
 .workspace-row {
@@ -368,7 +421,7 @@
     gap: 8px;
     min-height: 34px;
     padding: 0 4px 0 8px;
-    border-radius: 8px;
+    border-radius: var(--radius);
   }
 
 .workspace-row.current { background: var(--selection); }
@@ -444,6 +497,14 @@
     overflow: auto;
 }
 
+.dialog-scroll .composer-row > span:not(.meta) {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .editor-candidates {
     display: flex;
     flex-direction: column;
@@ -455,6 +516,27 @@
     border-radius: var(--radius);
 }
 
+.branch-pick-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    max-height: min(360px, 52vh);
+    overflow: auto;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+
+.branch-pick-list label.check {
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+}
+
+.branch-pick-list label.check:hover {
+    background: var(--hover);
+}
+
 .editor-candidate { padding: 6px 8px; }
 
 .editor-candidate-name { flex: none; }
@@ -464,4 +546,86 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.remote-account {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--field);
+}
+
+.remote-account-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.remote-account-title {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.remote-account .account-identity {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.remote-account .account-avatar {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--elevated);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    object-fit: cover;
+}
+
+.remote-account .account-copy { min-width: 0; flex: 1; }
+
+.remote-account .account-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.remote-account .account-meta,
+.remote-account .account-note {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.remote-account .account-name span,
+.remote-account .account-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.remote-account .account-badge {
+    flex: none;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--elevated);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    font-style: normal;
 }

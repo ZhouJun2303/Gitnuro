@@ -1,4 +1,4 @@
-//! Native geometry shared by automatic and history operation windows.
+//! Native geometry for operation and merge windows, saved separately from preferences.
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -80,18 +80,34 @@ fn visible_position(x: i32, y: i32, areas: &[(i32, i32, u32, u32)]) -> bool {
     })
 }
 
-pub fn restore_and_track(window: &WebviewWindow) {
+fn fit_size(
+    width: f64,
+    height: f64,
+    screen_width: u32,
+    screen_height: u32,
+    scale: f64,
+) -> (f64, f64) {
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    (
+        width.min((f64::from(screen_width) / scale - 16.0).max(480.0)),
+        height.min((f64::from(screen_height) / scale - 48.0).max(360.0)),
+    )
+}
+
+pub fn restore_and_track(window: &WebviewWindow, file_name: &'static str) {
     let _ = window.set_min_size(Some(LogicalSize::new(480.0, 360.0)));
     // Keep native state separate from preferences so a stale settings form cannot erase it.
-    let Ok(path) = super::settings::path().map(|path| path.with_file_name("flow-window.json"))
-    else {
+    let Ok(path) = super::settings::path().map(|path| path.with_file_name(file_name)) else {
         return;
     };
     let saved = load(&path);
-    if let Some(geometry) = &saved {
-        let areas = window
-            .available_monitors()
-            .unwrap_or_default()
+    {
+        let monitors = window.available_monitors().unwrap_or_default();
+        let areas = monitors
             .iter()
             .map(|monitor| {
                 let area = monitor.work_area();
@@ -103,12 +119,54 @@ pub fn restore_and_track(window: &WebviewWindow) {
                 )
             })
             .collect::<Vec<_>>();
-        if visible_position(geometry.x, geometry.y, &areas) {
-            let _ = window.set_position(PhysicalPosition::new(geometry.x, geometry.y));
-        } else {
-            let _ = window.center();
+        let position = saved
+            .as_ref()
+            .filter(|g| visible_position(g.x, g.y, &areas));
+        let monitor = position
+            .and_then(|g| {
+                monitors.iter().find(|m| {
+                    let a = m.work_area();
+                    visible_position(
+                        g.x,
+                        g.y,
+                        &[(a.position.x, a.position.y, a.size.width, a.size.height)],
+                    )
+                })
+            })
+            .or_else(|| {
+                monitors
+                    .iter()
+                    .find(|m| m.position().x == 0 && m.position().y == 0)
+            })
+            .or(monitors.first());
+        let size = saved.as_ref().map(|g| (g.width, g.height)).or_else(|| {
+            Some(
+                window
+                    .inner_size()
+                    .ok()?
+                    .to_logical::<f64>(window.scale_factor().ok()?),
+            )
+            .map(|s| (s.width, s.height))
+        });
+        if let (Some(monitor), Some((width, height))) = (monitor, size) {
+            let area = monitor.work_area();
+            let scale = monitor.scale_factor();
+            let (width, height) = fit_size(width, height, area.size.width, area.size.height, scale);
+            let _ = window.set_size(LogicalSize::new(width, height));
+            if let Some(g) = position {
+                let right = i64::from(area.position.x) + i64::from(area.size.width)
+                    - (width * scale).ceil() as i64
+                    - 16;
+                let bottom = i64::from(area.position.y) + i64::from(area.size.height)
+                    - (height * scale).ceil() as i64
+                    - 48;
+                let x = i64::from(g.x).min(right).max(i64::from(area.position.x)) as i32;
+                let y = i64::from(g.y).min(bottom).max(i64::from(area.position.y)) as i32;
+                let _ = window.set_position(PhysicalPosition::new(x, y));
+            } else {
+                let _ = window.center();
+            }
         }
-        let _ = window.set_size(LogicalSize::new(geometry.width, geometry.height));
     }
     let initial = capture(window, saved.as_ref());
     if saved.as_ref().is_some_and(|geometry| geometry.maximized) {
@@ -139,7 +197,7 @@ pub fn restore_and_track(window: &WebviewWindow) {
         ) {
             if let Some(geometry) = current.as_ref() {
                 if let Err(error) = save(&path, geometry) {
-                    super::perf::write("WARN", "flow-window-geometry", &error);
+                    super::perf::write("WARN", file_name, &error);
                 }
             }
         }
@@ -149,6 +207,14 @@ pub fn restore_and_track(window: &WebviewWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn size_fits_the_monitor_after_a_dpi_or_screen_change() {
+        assert_eq!(fit_size(1280.0, 840.0, 1920, 1040, 1.0), (1280.0, 840.0));
+        assert_eq!(fit_size(2000.0, 1400.0, 1920, 1040, 2.0), (944.0, 472.0));
+        assert_eq!(fit_size(1280.0, 840.0, 800, 600, 1.0), (784.0, 552.0));
+        assert_eq!(fit_size(1280.0, 840.0, 800, 600, f64::NAN), (784.0, 552.0));
+    }
 
     #[test]
     fn closing_geometry_survives_a_reload_including_negative_monitor_coordinates() {
@@ -166,6 +232,12 @@ mod tests {
             maximized: true,
         };
         save(&path, &geometry).unwrap();
+        let merge_path = directory.join("merge-window.json");
+        let mut merge_geometry = geometry.clone();
+        merge_geometry.width = 1280.0;
+        save(&merge_path, &merge_geometry).unwrap();
+        assert_eq!(load(&merge_path).unwrap().width, 1280.0);
+        assert_eq!(load(&path).unwrap().width, 1040.0);
         let restored = load(&path).unwrap();
         assert_eq!(
             (

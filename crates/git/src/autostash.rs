@@ -5,7 +5,6 @@
 //! visible entry instead, records its commit id in `.git/awegit`, and puts it back
 //! when the operation settles.
 
-use std::collections::HashSet;
 use std::path::Path;
 
 use crate::cli::run;
@@ -30,11 +29,13 @@ pub(crate) enum Restored {
 /// Stash every work-tree change, including untracked files, except the root
 /// `.fakeignore` that only AweGit reads. `None` when the tree has nothing to stash.
 pub(crate) fn push(repo: &Path, label: &str) -> Result<Option<String>, Error> {
-    let paths = changed_paths(repo)?;
+    let (paths, exclude_fakeignore) = {
+        let _phase = crate::timing_phase("autostash-check");
+        changed_paths(repo)?
+    };
     if paths.is_empty() {
         return Ok(None);
     }
-    let exclude_fakeignore = fakeignore_is_untracked(repo);
     let listed: Vec<String> = if exclude_fakeignore {
         paths
             .iter()
@@ -48,7 +49,7 @@ pub(crate) fn push(repo: &Path, label: &str) -> Result<Option<String>, Error> {
         return Ok(None);
     }
     let message = stash_message("AweGit autostash", label, Some(describe_paths(&listed)));
-    let before = stash_hashes(repo);
+    let before = stash_tip(repo);
     let mut args = vec![
         "stash",
         "push",
@@ -59,12 +60,10 @@ pub(crate) fn push(repo: &Path, label: &str) -> Result<Option<String>, Error> {
     if exclude_fakeignore {
         args.extend(["--", ".", ":(exclude).fakeignore"]);
     }
-    run(repo, &args)?;
-    let output = run(repo, &["rev-parse", "--verify", "refs/stash"]).ok();
-    let oid = output
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .unwrap_or_default();
-    if oid.is_empty() || before.contains(&oid) {
+    { let _phase = crate::timing_phase("autostash-save"); run(repo, &args)?; }
+    let after = stash_tip(repo);
+    let oid = after.0.clone().unwrap_or_default();
+    if oid.is_empty() || before == after {
         return Ok(None);
     }
     if let Err(error) = set_pending_autostash(repo, Some(&oid)) {
@@ -109,7 +108,8 @@ pub(crate) fn finish_if_settled(repo: &Path) -> Result<Restored, Error> {
         base: crate::flow::commit(repo, &format!("{oid}^1")), ..Default::default()
     };
     crate::flow::emit(event.clone());
-    match run(repo, &["stash", "apply", "--index", &selector]) {
+    let applied = { let _phase = crate::timing_phase("autostash-restore"); run(repo, &["stash", "apply", "--index", &selector]) };
+    match applied {
         Ok(_) => {
             let dropped = run(repo, &["stash", "drop", &selector]).is_ok();
             set_pending_autostash(repo, None)?;
@@ -188,7 +188,8 @@ pub(crate) fn stash_message(prefix: &str, label: &str, files: Option<String>) ->
 }
 
 /// Work-tree paths from `status --porcelain -z`, in the order Git prints them.
-fn changed_paths(repo: &Path) -> Result<Vec<String>, Error> {
+fn changed_paths(repo: &Path) -> Result<(Vec<String>, bool), Error> {
+    if let Ok(changes) = changed_paths_native(repo) { return Ok(changes); }
     let output = run(
         repo,
         &["status", "--porcelain", "-z", "--untracked-files=normal"],
@@ -207,7 +208,29 @@ fn changed_paths(repo: &Path) -> Result<Vec<String>, Error> {
             entries.next();
         }
     }
-    Ok(paths)
+    Ok((paths, fakeignore_is_untracked(repo)))
+}
+
+fn changed_paths_native(path: &Path) -> Result<(Vec<String>, bool), Error> {
+    let repo = crate::open_repo(path)?;
+    if repo.git_dir() != repo.common_dir() { return Err(Error::Git("use porcelain for linked-worktree exclude rules".into())); }
+    let index = repo.index_or_empty().map_err(|error| Error::Git(error.to_string()))?;
+    let exclude_fakeignore = path.join(".fakeignore").is_file()
+        && index.entry_by_path(gix::bstr::BStr::new(b".fakeignore")).is_none();
+    let mut changes = Vec::new();
+    let iter = repo.status(gix::progress::Discard)?
+        .untracked_files(gix::status::UntrackedFiles::Collapsed)
+        .into_iter(Vec::<gix::bstr::BString>::new())?;
+    for item in iter {
+        match item? {
+            gix::status::Item::TreeIndex(change) => crate::push_staged(&mut changes, change),
+            gix::status::Item::IndexWorktree(change) => crate::push_unstaged(&mut changes, change),
+        }
+    }
+    let mut paths: Vec<_> = changes.into_iter().map(|change| change.path).collect();
+    paths.sort();
+    paths.dedup();
+    Ok((paths, exclude_fakeignore))
 }
 
 fn describe_paths(paths: &[String]) -> String {
@@ -233,17 +256,18 @@ fn fakeignore_is_untracked(repo: &Path) -> bool {
         && run(repo, &["ls-files", "--error-unmatch", "--", ".fakeignore"]).is_err()
 }
 
-fn stash_hashes(repo: &Path) -> HashSet<String> {
-    run(repo, &["stash", "list", "--format=%H"])
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+fn stash_tip(path: &Path) -> (Option<String>, Option<(u64, std::time::SystemTime)>) {
+    let repo = crate::open_repo(path).ok();
+    let native = repo.as_ref().and_then(|repo| match repo.try_find_reference("refs/stash") {
+        Ok(None) => Some(None),
+        Ok(Some(mut reference)) => reference.peel_to_id_in_place().ok().map(|id| Some(id.to_string())),
+        Err(_) => None,
+    });
+    let stamp = repo.as_ref().and_then(|repo| std::fs::metadata(repo.common_dir().join("logs/refs/stash")).ok())
+        .and_then(|meta| Some((meta.len(), meta.modified().ok()?)));
+    let oid = native.unwrap_or_else(|| run(path, &["rev-parse", "--verify", "--quiet", "refs/stash"]).ok()
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string()).filter(|oid| !oid.is_empty()));
+    (oid, stamp)
 }
 
 fn stash_index(repo: &Path, oid: &str) -> Option<usize> {

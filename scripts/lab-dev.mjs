@@ -9,7 +9,7 @@ if (!existsSync(join(root, ".lab", "repos", "full", ".git"))) {
 }
 
 const lab = startLab();
-const vite = startVite(process.env.AWEGIT_VITE_PORT || "1420");
+const vite = startVite(process.env.AWEGIT_VITE_PORT || "1420", { reuse: true });
 
 function shutdown() {
   stop(lab);

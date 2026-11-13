@@ -1,12 +1,13 @@
 //! Durable app-owned operation journals. A delta contains one changed node,
 //! never a copy of the whole graph. Git remains the authority for resolution.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::time::{Duration, Instant, SystemTime};
 
 use awegit_git::flow::{self, Checkpoint, Commit, Event, File, Observer};
 use awegit_git::{InProgress, Mutation};
@@ -17,6 +18,58 @@ static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 static SESSIONS: OnceLock<Mutex<HashMap<PathBuf, Arc<Session>>>> = OnceLock::new();
 static RECOVERY: Mutex<()> = Mutex::new(());
 static IDS: AtomicU64 = AtomicU64::new(1);
+
+struct PreviewJob {
+    session: Weak<Session>,
+    generation: u64,
+    epoch: u64,
+    onto: String,
+    rebase: bool,
+    instructions: Vec<awegit_git::RebaseStep>,
+    context: Option<awegit_git::TimingContext>,
+}
+
+#[derive(Default)]
+struct PreviewQueue {
+    pending: Option<PreviewJob>,
+    running: bool,
+}
+
+#[derive(Default)]
+struct PreviewLane {
+    queue: Mutex<PreviewQueue>,
+    epoch: AtomicU64,
+}
+
+impl PreviewLane {
+    fn submit(self: Arc<Self>, mut job: PreviewJob, run: impl Fn(&Self, PreviewJob) + Send + 'static) {
+        let mut queue = self.queue.lock().unwrap_or_else(|error| error.into_inner());
+        job.epoch = self.epoch.fetch_add(1, Ordering::AcqRel) + 1;
+        queue.pending = Some(job);
+        if queue.running { return; }
+        queue.running = true;
+        drop(queue);
+        std::thread::spawn(move || loop {
+            let job = {
+                let mut queue = self.queue.lock().unwrap_or_else(|error| error.into_inner());
+                let Some(job) = queue.pending.take() else { queue.running = false; return };
+                job
+            };
+            run(&self, job);
+        });
+    }
+}
+
+fn preview_lane(repo: &Path) -> Arc<PreviewLane> {
+    static LANES: OnceLock<Mutex<HashMap<String, Weak<PreviewLane>>>> = OnceLock::new();
+    let mut lanes = LANES.get_or_init(Default::default).lock().unwrap_or_else(|error| error.into_inner());
+    lanes.retain(|_, lane| lane.strong_count() != 0);
+    let entry = lanes.entry(awegit_git::repo_key(repo)).or_default();
+    if let Some(lane) = entry.upgrade() { return lane; }
+    let lane = Arc::new(PreviewLane::default());
+    *entry = Arc::downgrade(&lane);
+    lane
+}
 
 fn sessions() -> &'static Mutex<HashMap<PathBuf, Arc<Session>>> {
     SESSIONS.get_or_init(Default::default)
@@ -77,12 +130,36 @@ struct Data {
     failed: bool,
     request_key: String,
     last_checkpoint: Option<Checkpoint>,
+    checkpoint_stamp: Option<CheckpointStamp>,
+    checked_at: Option<Instant>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct CheckpointStamp {
+    revision: u64,
+    files: Vec<Option<(u64, SystemTime)>>,
+}
+
+pub(crate) fn checkpoint_stamp(repo: &Path) -> Option<CheckpointStamp> {
+    let git = flow::git_dir(repo).ok()?;
+    let mut paths: Vec<_> = ["HEAD", "index", "MERGE_HEAD", "REBASE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG", "awegit", "rebase-merge", "rebase-apply", "sequencer", "rebase-merge/done", "rebase-merge/git-rebase-todo", "rebase-merge/stopped-sha", "rebase-apply/next", "sequencer/todo"]
+        .into_iter().map(|path| git.join(path)).collect();
+    let common = super::common_metadata_dir(&git);
+    paths.push(common.join("packed-refs"));
+    if let Some(name) = fs::read_to_string(git.join("HEAD")).ok().and_then(|head| head.trim().strip_prefix("ref: ").map(str::to_string)) {
+        paths.push(common.join(name));
+    }
+    Some(CheckpointStamp {
+        revision: super::changes::revision(repo),
+        files: paths.into_iter().map(|path| fs::metadata(path).ok().and_then(|meta| Some((meta.len(), meta.modified().ok()?)))).collect(),
+    })
 }
 
 pub struct Session {
     repo: PathBuf,
     directory: PathBuf,
     data: Mutex<Data>,
+    refresh_lock: Mutex<()>,
 }
 
 pub fn install(app: tauri::AppHandle) {
@@ -92,12 +169,6 @@ pub fn install(app: tauri::AppHandle) {
         cleanup_known();
     });
     std::thread::spawn(cleanup_known);
-}
-
-fn days() -> u32 {
-    super::settings::load()
-        .map(|settings| settings.flow_history_days.clamp(1, 90))
-        .unwrap_or(3)
 }
 
 fn directory(repo: &Path) -> Result<PathBuf, String> {
@@ -184,6 +255,10 @@ impl Session {
             )
             .map_err(|error| error.to_string())?;
             fs::rename(&temporary, &index).map_err(|error| error.to_string())?;
+            let history = history_index(&self.directory);
+            let mut history = history.lock().unwrap_or_else(|error| error.into_inner());
+            history.paths.insert(index.clone());
+            history.summaries.insert(index.clone(), (file_stamp(&index), data.snapshot.summary.clone()));
             Ok(())
         })();
         if let Err(error) = result {
@@ -210,6 +285,7 @@ impl Session {
         let round = at
             .map(|index| data.snapshot.nodes[index].round)
             .unwrap_or(data.round);
+        let event_paths: HashSet<_> = event.files.iter().map(|file| file.path.as_str()).collect();
         let repeat_of = if let Some(index) = at {
             data.snapshot.nodes[index].repeat_of.clone()
         } else if event.kind == "conflict" {
@@ -224,7 +300,7 @@ impl Session {
                             .event
                             .files
                             .iter()
-                            .any(|old| event.files.iter().any(|file| old.path == file.path))
+                            .any(|old| event_paths.contains(old.path.as_str()))
                 })
                 .map(|node| node.event.key.clone())
                 .unwrap_or_default()
@@ -316,8 +392,11 @@ impl Session {
     }
 
     pub fn finish(&self, result: Result<(), String>, action: &str) -> Summary {
+        let stamp = checkpoint_stamp(&self.repo);
         let checkpoint = flow::checkpoint(&self.repo);
         let mut data = self.data.lock().unwrap_or_else(|error| error.into_inner());
+        data.checkpoint_stamp = stamp;
+        data.checked_at = Some(Instant::now());
         data.writing = false;
         if action == "abort" && result.is_ok() {
             data.aborted = true;
@@ -402,14 +481,10 @@ impl Session {
             } else {
                 // Stash apply has no sequencer HEAD. Stage identities preserve this round
                 // while files are resolved one at a time.
-                checkpoint.files.iter().all(|file| {
-                    event.files.iter().any(|old| {
-                        old.path == file.path
-                            && old.base == file.base
-                            && old.ours == file.ours
-                            && old.theirs == file.theirs
-                    })
-                })
+                let old_files: HashMap<_, _> = event.files.iter().map(|file| (file.path.as_str(), file)).collect();
+                checkpoint.files.iter().all(|file| old_files.get(file.path.as_str()).is_some_and(|old| {
+                    old.base == file.base && old.ours == file.ours && old.theirs == file.theirs
+                }))
             };
             for file in &mut event.files {
                 let resolved = !same_replay || !paths.contains(file.path.as_str());
@@ -600,24 +675,38 @@ impl Session {
     }
 
     pub fn refresh(&self) {
-        let writing = self
-            .data
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .writing;
-        if writing {
-            return;
+        let _reader = self.refresh_lock.lock().unwrap_or_else(|error| error.into_inner());
+        let generation = {
+            let data = self.data.lock().unwrap_or_else(|error| error.into_inner());
+            (!data.writing
+                && matches!(
+                    data.snapshot.summary.state.as_str(),
+                    "conflict" | "waiting" | "running"
+                )).then_some(data.generation)
+        };
+        let Some(generation) = generation else { return };
+        let stamp = checkpoint_stamp(&self.repo);
+        {
+            let data = self.data.lock().unwrap_or_else(|error| error.into_inner());
+            if stamp.is_some() && data.checkpoint_stamp == stamp
+                && data.checked_at.is_some_and(|checked| checked.elapsed() < Duration::from_secs(10)) {
+                return;
+            }
         }
         if let Ok(checkpoint) = flow::checkpoint(&self.repo) {
             let mut data = self.data.lock().unwrap_or_else(|error| error.into_inner());
             if !data.writing
-                && data.last_checkpoint.as_ref() != Some(&checkpoint)
+                && data.generation == generation
                 && matches!(
                     data.snapshot.summary.state.as_str(),
                     "conflict" | "waiting" | "running"
                 )
             {
-                self.reconcile_locked(&mut data, checkpoint, "refresh");
+                data.checkpoint_stamp = stamp;
+                data.checked_at = Some(Instant::now());
+                if data.last_checkpoint.as_ref() != Some(&checkpoint) {
+                    self.reconcile_locked(&mut data, checkpoint, "refresh");
+                }
             }
         }
     }
@@ -627,6 +716,30 @@ impl Session {
         onto: String,
         rebase: bool,
         instructions: Vec<awegit_git::RebaseStep>,
+    ) {
+        let generation = self.data.lock().unwrap_or_else(|error| error.into_inner()).generation;
+        let lane = preview_lane(&self.repo);
+        lane.submit(PreviewJob { session: Arc::downgrade(self), generation, epoch: 0, onto, rebase, instructions, context: awegit_git::timing_context() }, |lane, job| {
+            let Some(session) = job.session.upgrade() else { return };
+            let cancelled = || {
+                if lane.epoch.load(Ordering::Acquire) != job.epoch { return true; }
+                let data = session.data.lock().unwrap_or_else(|error| error.into_inner());
+                data.generation != job.generation || data.snapshot.summary.ended_at.is_some()
+            };
+            if cancelled() { return; }
+            let context = job.context.map(|mut context| { context.phase = "preview".into(); context });
+            let _timing = awegit_git::enter_timing(context);
+            session.preview_now(job.onto, job.rebase, job.instructions, job.generation, &cancelled);
+        });
+    }
+
+    fn preview_now(
+        self: &Arc<Self>,
+        onto: String,
+        rebase: bool,
+        instructions: Vec<awegit_git::RebaseStep>,
+        generation: u64,
+        cancelled: &dyn Fn() -> bool,
     ) {
         let Some(onto) = flow::commit(&self.repo, &onto) else {
             return;
@@ -650,8 +763,10 @@ impl Session {
                 .filter_map(|step| flow::commit(&self.repo, &step.rev))
                 .collect()
         };
+        if cancelled() { return; }
         {
             let mut data = self.data.lock().unwrap_or_else(|error| error.into_inner());
+            if data.generation != generation || data.snapshot.summary.ended_at.is_some() { return; }
             for commit in plan {
                 let key = format!("replay-{}", commit.id);
                 if data.snapshot.nodes.iter().any(|node| node.event.key == key) {
@@ -671,15 +786,11 @@ impl Session {
                 );
             }
         }
-        let session = self.clone();
-        let generation = self
-            .data
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .generation;
-        std::thread::spawn(move || {
+        let session = self;
+        {
             let preview =
-                flow::preview_at(&session.repo, &onto.id, &head.id, rebase, &instructions);
+                flow::preview_at_cancellable(&session.repo, &onto.id, &head.id, rebase, &instructions, cancelled);
+            if cancelled() { return; }
             let mut data = session
                 .data
                 .lock()
@@ -754,7 +865,7 @@ impl Session {
                     session.reconcile_locked(&mut data, checkpoint, "preview");
                 }
             }
-        });
+        }
     }
 }
 
@@ -832,6 +943,7 @@ fn active(repo: &Path) -> Option<Arc<Session>> {
     let session = Arc::new(Session {
         repo: repo.to_path_buf(),
         directory: directory.clone(),
+        refresh_lock: Mutex::new(()),
         data: Mutex::new(Data {
             snapshot,
             round,
@@ -842,6 +954,8 @@ fn active(repo: &Path) -> Option<Arc<Session>> {
             failed: interrupted,
             request_key: String::new(),
             last_checkpoint: None,
+            checkpoint_stamp: None,
+            checked_at: None,
         }),
     });
     if interrupted {
@@ -940,6 +1054,7 @@ pub fn begin_kind(repo: &Path, kind: &str, request: Option<&Mutation>) -> Option
         let session = Arc::new(Session {
             repo: repo.to_path_buf(),
             directory: directory.clone(),
+            refresh_lock: Mutex::new(()),
             data: Mutex::new(Data {
                 snapshot: Snapshot {
                     summary,
@@ -953,6 +1068,8 @@ pub fn begin_kind(repo: &Path, kind: &str, request: Option<&Mutation>) -> Option
                 failed: false,
                 request_key: String::new(),
                 last_checkpoint: None,
+                checkpoint_stamp: None,
+                checked_at: None,
             }),
         });
         sessions()
@@ -1154,26 +1271,67 @@ pub fn snapshot(repo: &Path, id: Option<String>) -> Result<Option<Snapshot>, Str
     id.map(|id| read_snapshot(&directory, &id)).transpose()
 }
 
+type FileStamp = Option<(u64, SystemTime)>;
+
+fn file_stamp(path: &Path) -> FileStamp {
+    fs::metadata(path).ok().and_then(|meta| Some((meta.len(), meta.modified().ok()?)))
+}
+
+#[derive(Default)]
+struct HistoryIndex {
+    paths: BTreeSet<PathBuf>,
+    summaries: HashMap<PathBuf, (FileStamp, Summary)>,
+    directory_stamp: FileStamp,
+    verified_at: Option<Instant>,
+    #[cfg(test)]
+    reads: usize,
+}
+
+fn history_indexes() -> &'static Mutex<HashMap<PathBuf, Arc<Mutex<HistoryIndex>>>> {
+    static HISTORY: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<HistoryIndex>>>>> = OnceLock::new();
+    HISTORY.get_or_init(Default::default)
+}
+
+fn history_index(directory: &Path) -> Arc<Mutex<HistoryIndex>> {
+    history_indexes().lock().unwrap_or_else(|error| error.into_inner())
+        .entry(directory.to_path_buf()).or_default().clone()
+}
+
 pub fn history(repo: &Path, offset: usize, limit: usize) -> Result<Vec<Summary>, String> {
     let directory = directory(repo)?;
-    prune(&directory, days(), flow::now());
-    let entries = match fs::read_dir(directory) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error.to_string()),
-    };
-    let mut paths: Vec<_> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
-        .collect();
-    paths.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
-    Ok(paths
-        .into_iter()
-        .skip(offset)
-        .take(limit.min(100))
-        .filter_map(|path| serde_json::from_slice::<Summary>(&fs::read(path).ok()?).ok())
-        .collect())
+    let index = history_index(&directory);
+    let mut index = index.lock().unwrap_or_else(|error| error.into_inner());
+    let stamp = file_stamp(&directory);
+    if index.verified_at.is_none_or(|at| at.elapsed() >= Duration::from_secs(30)) || index.directory_stamp != stamp {
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.to_string()),
+        };
+        index.paths = entries.filter_map(Result::ok).map(|entry| entry.path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "json")).collect();
+        let known = index.paths.clone();
+        index.summaries.retain(|path, _| known.contains(path));
+        index.directory_stamp = stamp;
+        index.verified_at = Some(Instant::now());
+    }
+    let paths: Vec<_> = index.paths.iter().rev().skip(offset).take(limit.min(100)).cloned().collect();
+    let mut summaries = Vec::with_capacity(paths.len());
+    for path in paths {
+        let stamp = file_stamp(&path);
+        if let Some((cached_stamp, summary)) = index.summaries.get(&path) {
+            if stamp.is_some() && *cached_stamp == stamp {
+                summaries.push(summary.clone());
+                continue;
+            }
+        }
+        #[cfg(test)] { index.reads += 1; }
+        if let Some(summary) = fs::read(&path).ok().and_then(|bytes| serde_json::from_slice::<Summary>(&bytes).ok()) {
+            summaries.push(summary.clone());
+            index.summaries.insert(path, (stamp, summary));
+        }
+    }
+    Ok(summaries)
 }
 
 fn prune(directory: &Path, days: u32, now: u64) {
@@ -1197,6 +1355,7 @@ fn prune(directory: &Path, days: u32, now: u64) {
             let _ = fs::remove_file(path);
         }
     }
+    history_indexes().lock().unwrap_or_else(|error| error.into_inner()).remove(directory);
 }
 
 pub fn cleanup_known() {
@@ -1239,6 +1398,34 @@ mod tests {
     use std::process::Command;
 
     pub(super) static OPENED: Mutex<Vec<(PathBuf, String)>> = Mutex::new(Vec::new());
+
+    thread_local! {
+        static GIT_CALLS: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+        static GIT_TIMES: std::cell::RefCell<Option<HashMap<String, Vec<f64>>>> = const { std::cell::RefCell::new(None) };
+    }
+
+    fn count_git_calls<T>(action: impl FnOnce() -> T) -> (T, usize) {
+        awegit_git::set_trace(|args, elapsed, _, _| {
+            GIT_CALLS.with(|slot| {
+                if let Some(count) = slot.get() {
+                    slot.set(Some(count + 1));
+                    GIT_TIMES.with(|times| {
+                        if let Some(times) = times.borrow_mut().as_mut() {
+                            let mut name = args.first().copied().unwrap_or("unknown").to_string();
+                            if name == "stash" {
+                                if let Some(verb) = args.get(1) { name.push(' '); name.push_str(verb); }
+                            }
+                            times.entry(name).or_default().push(elapsed.as_secs_f64() * 1000.0);
+                        }
+                    });
+                }
+            });
+        });
+        GIT_CALLS.with(|slot| slot.set(Some(0)));
+        let result = action();
+        let count = GIT_CALLS.with(|slot| slot.replace(None).unwrap());
+        (result, count)
+    }
 
     struct Repo(PathBuf);
     impl Repo {
@@ -1332,6 +1519,137 @@ mod tests {
             OPENED.lock().unwrap().retain(|(repo, _)| repo != &self.0);
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    fn merge_conflict() -> Repo {
+        let repo = Repo::new();
+        repo.git(&["branch", "incoming"]);
+        repo.save("note", "local\n", "local");
+        repo.git(&["checkout", "incoming"]);
+        repo.save("note", "incoming\n", "incoming");
+        repo.git(&["checkout", "main"]);
+        assert_eq!(repo.run(Mutation::Merge {
+            name: "incoming".into(), squash: false, no_ff: false, autostash: false,
+            summary: String::new(), description: String::new(),
+        }).state, "conflict");
+        repo
+    }
+
+    #[test]
+    fn commit_metadata_does_not_walk_merge_trees() {
+        let repo = Repo::new();
+        let parent = repo.git(&["rev-parse", "HEAD"]);
+        repo.save("note", "next\n", "next");
+        let head = repo.git(&["rev-parse", "HEAD"]);
+        // A partial clone can have a commit before its tree is available. Metadata
+        // must not calculate a combined merge diff or fetch the missing tree.
+        let body = format!("tree {}\nparent {parent}\nparent {head}\nauthor Metadata Author <metadata@example.invalid> 1 +0000\ncommitter Metadata Author <metadata@example.invalid> 1 +0000\n\nmetadata only\n", "f".repeat(40));
+        fs::write(repo.0.join("merge-object"), body).unwrap();
+        let oid = repo.git(&["hash-object", "-w", "-t", "commit", "merge-object"]);
+        let commit = flow::commit(&repo.0, &oid).expect("metadata must not require the merge tree");
+        assert_eq!(commit.id, oid);
+        assert_eq!(commit.summary, "metadata only");
+        assert_eq!(commit.author, "Metadata Author");
+        let detail = awegit_git::commit_detail(&repo.0, &oid).unwrap();
+        assert_eq!(detail.id, oid);
+        assert_eq!(detail.summary, "metadata only");
+        assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+    }
+
+    #[test]
+    fn unchanged_conflict_polling_skips_git_but_external_resolution_is_seen() {
+        let repo = merge_conflict();
+        let (_, calls) = count_git_calls(|| { for _ in 0..20 { assert_eq!(repo.snapshot().summary.state, "conflict"); } });
+        assert_eq!(calls, 0, "unchanged conflict polling must reuse the checkpoint");
+        fs::write(repo.0.join("note"), "external resolution\n").unwrap();
+        repo.git(&["add", "note"]);
+        let (snapshot, calls) = count_git_calls(|| repo.snapshot());
+        assert!(calls > 0, "a changed index must invalidate the checkpoint even without a watcher");
+        assert_eq!(snapshot.summary.state, "waiting");
+        assert!(!snapshot.summary.can_auto_close);
+        let (_, calls) = count_git_calls(|| repo.snapshot());
+        assert_eq!(calls, 0);
+        let session = active(&repo.0).unwrap();
+        session.data.lock().unwrap().checked_at = Some(Instant::now() - Duration::from_secs(11));
+        let (_, calls) = count_git_calls(|| repo.snapshot());
+        assert!(calls > 0, "a fallback must recover missed metadata events");
+    }
+
+    #[test]
+    fn history_pages_reuse_summaries_and_detect_external_replacement() {
+        let repo = Repo::new();
+        let summary = repo.run(Mutation::Reset { rev: "HEAD".into(), mode: awegit_git::ResetMode::Soft });
+        let directory = directory(&repo.0).unwrap();
+        history_indexes().lock().unwrap().remove(&directory);
+        assert_eq!(history(&repo.0, 0, 1).unwrap()[0].id, summary.id);
+        let cache = history_index(&directory);
+        let reads = cache.lock().unwrap().reads;
+        assert_eq!(history(&repo.0, 0, 1).unwrap()[0].id, summary.id);
+        assert_eq!(cache.lock().unwrap().reads, reads);
+        let mut replacement = summary.clone();
+        replacement.kind = "external-replacement".into();
+        fs::write(directory.join(format!("{}.json", summary.id)), serde_json::to_vec(&replacement).unwrap()).unwrap();
+        assert_eq!(history(&repo.0, 0, 1).unwrap()[0].kind, "external-replacement");
+        assert_eq!(cache.lock().unwrap().reads, reads + 1);
+        let mut older = replacement.clone();
+        older.id = "100-1-2".into();
+        fs::write(directory.join("100-1-2.json"), serde_json::to_vec(&older).unwrap()).unwrap();
+        assert_eq!(history(&repo.0, 1, 1).unwrap()[0].id, older.id);
+        assert!(history(&repo.0, 2, 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn checkpoints_group_a_thousand_conflicts_and_preserve_each_stage() {
+        use std::process::Stdio;
+        let repo = Repo::new();
+        let oid = repo.git(&["rev-parse", "HEAD:note"]);
+        let mut child = Command::new("git").current_dir(&repo.0)
+            .args(["update-index", "--index-info"]).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        let mut input = child.stdin.take().unwrap();
+        for index in 0..1000 { for stage in 1..=3 { writeln!(input, "100644 {oid} {stage}\tconflict-{index:04}").unwrap(); } }
+        drop(input);
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        let point = flow::checkpoint(&repo.0).unwrap();
+        assert_eq!(point.files.len(), 1000);
+        for (index, file) in point.files.iter().enumerate() {
+            assert_eq!(file.path, format!("conflict-{index:04}"));
+            assert_eq!((&file.base, &file.ours, &file.theirs), (&oid, &oid, &oid));
+        }
+    }
+
+    #[test]
+    fn cancelled_preview_never_initializes_a_sandbox_or_touches_the_index() {
+        let repo = Repo::new();
+        let index = fs::read(repo.0.join(".git/index")).unwrap();
+        let (preview, calls) = count_git_calls(|| flow::preview_at_cancellable(&repo.0, "HEAD", "HEAD", false, &[], &|| true).unwrap());
+        assert_eq!(preview.detail, "preview-cancelled");
+        assert_eq!(calls, 0);
+        assert_eq!(fs::read(repo.0.join(".git/index")).unwrap(), index);
+    }
+
+    #[test]
+    fn preview_lane_runs_one_job_and_keeps_only_the_latest_pending_job() {
+        let lane = Arc::new(PreviewLane::default());
+        let started = Arc::new(std::sync::Barrier::new(2));
+        let released = Arc::new(std::sync::Barrier::new(2));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let (done, completed) = std::sync::mpsc::channel();
+        let run = {
+            let (started, released, seen) = (started.clone(), released.clone(), seen.clone());
+            move |_: &PreviewLane, job: PreviewJob| {
+                seen.lock().unwrap().push(job.generation);
+                if job.generation == 0 { started.wait(); released.wait(); }
+                if job.generation == 100 { done.send(()).unwrap(); }
+            }
+        };
+        let job = |generation| PreviewJob { session: Weak::new(), generation, epoch: 0, onto: "HEAD".into(), rebase: false, instructions: Vec::new(), context: None };
+        lane.clone().submit(job(0), run.clone());
+        started.wait();
+        for generation in 1..=100 { lane.clone().submit(job(generation), run.clone()); }
+        released.wait();
+        completed.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(*seen.lock().unwrap(), [0, 100]);
     }
 
     #[test]
@@ -1670,5 +1988,241 @@ mod tests {
         prune(&directory, 3, 4 * 86_400_000);
         assert!(!directory.join(format!("{}.jsonl", ended.id)).exists());
         assert!(directory.join("100-1-2.json").exists());
+    }
+
+    fn benchmark_samples(default: usize) -> usize {
+        std::env::var("AWEGIT_PERF_SAMPLES").ok().map(|value| value.parse::<usize>().unwrap().clamp(1, 1000)).unwrap_or(default)
+    }
+
+    fn measure(label: &str, iterations: usize, mut action: impl FnMut()) {
+        let iterations = benchmark_samples(iterations);
+        action(); // Report warm reads separately from data preparation.
+        let mut times = Vec::with_capacity(iterations);
+        let (_, calls) = count_git_calls(|| {
+            for _ in 0..iterations {
+                let start = Instant::now();
+                action();
+                times.push(start.elapsed().as_secs_f64() * 1000.0);
+            }
+        });
+        times.sort_by(f64::total_cmp);
+        println!("PERF {}", serde_json::json!({
+            "label": label, "samples": iterations,
+            "meanMs": times.iter().sum::<f64>() / iterations as f64,
+            "p50Ms": times[(iterations - 1) / 2],
+            "p95Ms": times[(iterations * 95).div_ceil(100) - 1],
+            "maxMs": times[iterations - 1], "gitProcesses": calls,
+        }));
+    }
+
+    #[test]
+    #[ignore = "manual backend benchmark; run with --ignored --nocapture"]
+    fn backend_read_timings() {
+        let repo = Repo::new();
+        repo.run(Mutation::Reset {
+            rev: "HEAD".into(),
+            mode: awegit_git::ResetMode::Soft,
+        });
+        measure("git directory (warm)", 30, || {
+            std::hint::black_box(flow::git_dir(&repo.0).unwrap());
+        });
+        measure("clean checkpoint", 30, || {
+            std::hint::black_box(flow::checkpoint(&repo.0).unwrap());
+        });
+        measure("completed operation_flow", 30, || {
+            std::hint::black_box(repo.snapshot());
+        });
+        measure("workspace_status after completion", 30, || {
+            std::hint::black_box(
+                super::super::workspace_status(Some(repo.0.display().to_string())).unwrap(),
+            );
+        });
+
+        repo.git(&["branch", "incoming"]);
+        repo.save("note", "local\n", "local");
+        repo.git(&["checkout", "incoming"]);
+        repo.save("note", "incoming\n", "incoming");
+        repo.git(&["checkout", "main"]);
+        assert_eq!(repo.run(Mutation::Merge {
+                name: "incoming".into(),
+                squash: false,
+                no_ff: false,
+                autostash: false,
+                summary: String::new(),
+                description: String::new(),
+            }).state, "conflict");
+        measure("stable active operation_flow", 30, || {
+            std::hint::black_box(repo.snapshot());
+        });
+        measure("merge conflict checkpoint", 30, || {
+            std::hint::black_box(flow::checkpoint(&repo.0).unwrap());
+        });
+        measure("merge conflict_view", 30, || {
+            std::hint::black_box(awegit_git::conflict_view(&repo.0, "note").unwrap());
+        });
+        awegit_git::perform(&repo.0, Mutation::Abort).unwrap();
+        assert!(awegit_git::perform(
+            &repo.0,
+            Mutation::Rebase {
+                onto: "incoming".into(),
+                autostash: false,
+            },
+        )
+        .is_err());
+        measure("rebase conflict_view", 30, || {
+            std::hint::black_box(awegit_git::conflict_view(&repo.0, "note").unwrap());
+        });
+    }
+
+    #[test]
+    #[ignore = "optional large data benchmark; set AWEGIT_PERF_MANIFEST"]
+    fn seeded_performance_timings() {
+        thread_local! { static PHASES: std::cell::RefCell<HashMap<String, Vec<f64>>> = std::cell::RefCell::new(HashMap::new()); }
+        awegit_git::set_timing_trace(|name, elapsed| PHASES.with(|phases| phases.borrow_mut().entry(name.into()).or_default().push(elapsed.as_secs_f64()*1000.0)));
+        let Ok(manifest) = std::env::var("AWEGIT_PERF_MANIFEST") else { return };
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(manifest).unwrap()).unwrap();
+        let workspace = PathBuf::from(value["workspace"].as_str().unwrap());
+        let allowed = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join(".lab/performance").canonicalize().unwrap();
+        assert!(workspace.canonicalize().unwrap().starts_with(&allowed));
+        let repo = Repo(workspace.clone());
+        // This seed belongs to the user and must remain available after the benchmark.
+        let repo = std::mem::ManuallyDrop::new(repo);
+        measure("seed porcelain pre-operation scan", 30, || {
+            std::hint::black_box(repo.git(&["status", "--porcelain", "-z", "--untracked-files=normal"]));
+            // Repo::git runs the external executable directly, outside the library trace hook.
+            GIT_CALLS.with(|slot| { if let Some(n) = slot.get() { slot.set(Some(n+1)); } });
+        });
+        let count = value["untracked"].as_u64().unwrap() as usize;
+        let ignored: Vec<String> = (0..count).map(|index| format!("ignored/{index}.tmp")).collect();
+        fs::create_dir_all(workspace.join("ignored")).unwrap();
+        for path in &ignored { fs::write(workspace.join(path), "build output\n").unwrap(); }
+        measure("seed native ignore batch", 30, || {
+            assert_eq!(awegit_git::ignored_paths(&workspace, &ignored).len(), count);
+        });
+        measure("seed workspace status", 30, || { std::hint::black_box(awegit_git::status(&workspace).unwrap()); });
+        let directory = directory(&workspace).unwrap();
+        let start = Instant::now();
+        let first = history(&workspace, 0, 100).unwrap();
+        println!("PERF {}", serde_json::json!({"label": "seed history first page", "samples": 1, "ms": start.elapsed().as_secs_f64()*1000.0, "summariesRead": history_index(&directory).lock().unwrap().reads, "returned": first.len()}));
+        measure("seed history warm page", 30, || { std::hint::black_box(history(&workspace, 0, 100).unwrap()); });
+        println!("PERF {}", serde_json::json!({"label": "seed history parse count after polls", "summariesRead": history_index(&directory).lock().unwrap().reads}));
+        for scenario in value["conflicts"].as_array().unwrap() {
+            let path = PathBuf::from(scenario["repo"].as_str().unwrap());
+            let count = scenario["count"].as_u64().unwrap() as usize;
+            measure(&format!("seed {count} conflicts checkpoint"), 30, || { assert_eq!(flow::checkpoint(&path).unwrap().files.len(), count); });
+        }
+        let blob_repo = PathBuf::from(value["blobs"].as_str().unwrap());
+        for case in value["blobCases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            measure(&format!("seed blob {name}"), 30, || { std::hint::black_box(awegit_git::conflict_view(&blob_repo, name).unwrap()); });
+        }
+        if std::env::var_os("AWEGIT_PERF_WRITES").is_none() { return; }
+        let base = value["base"].as_str().unwrap();
+        for (label, untracked) in [("clean", 0), ("mixed", 3), ("untracked", count)] {
+            // Previous benchmark runs can have left our generated local files.
+            for index in 0..count.max(3) {
+                let path = workspace.join(format!("untracked/{index}.txt"));
+                if path.is_file() { fs::remove_file(path).unwrap(); }
+            }
+            PHASES.with(|phases| phases.borrow_mut().clear());
+            GIT_TIMES.with(|times| *times.borrow_mut() = Some(HashMap::new()));
+            let mut times = Vec::new();
+            let mut calls = 0;
+            let samples = benchmark_samples(30);
+            for _ in 0..samples {
+                // Restore the same local remote and index state outside the timed interval.
+                repo.git(&["reset", "--hard", base]);
+                if label != "clean" {
+                    fs::write(workspace.join("tracked/0/file-0.txt"), "staged\n").unwrap();
+                    repo.git(&["add", "tracked/0/file-0.txt"]);
+                    fs::write(workspace.join("tracked/0/file-0.txt"), "working\n").unwrap();
+                }
+                fs::create_dir_all(workspace.join("untracked")).unwrap();
+                for index in 0..untracked { fs::write(workspace.join(format!("untracked/{index}.txt")), "local\n").unwrap(); }
+                let start = Instant::now();
+                let (_, processes) = count_git_calls(|| {
+                    awegit_git::perform(&workspace, Mutation::Pull { rebase: true, autostash: true }).unwrap();
+                });
+                times.push(start.elapsed().as_secs_f64()*1000.0);
+                calls += processes;
+                if label != "clean" {
+                    assert_eq!(fs::read_to_string(workspace.join("tracked/0/file-0.txt")).unwrap(), "working\n");
+                    assert_eq!(repo.git(&["show", ":tracked/0/file-0.txt"]), "staged");
+                }
+                assert_eq!(repo.git(&["rev-parse", "HEAD"]), value["incoming"].as_str().unwrap());
+                for index in [0, untracked.saturating_sub(1)] {
+                    if untracked > 0 { assert_eq!(fs::read_to_string(workspace.join(format!("untracked/{index}.txt"))).unwrap(), "local\n"); }
+                }
+                assert!(repo.git(&["stash", "list"]).is_empty());
+            }
+            times.sort_by(f64::total_cmp);
+            println!("PERF {}", serde_json::json!({"label": format!("seed local pull {label}"), "samples": samples, "p50Ms": times[(samples-1)/2], "p95Ms": times[(samples*95).div_ceil(100)-1], "maxMs": times[samples-1], "gitProcesses": calls}));
+            GIT_TIMES.with(|times| {
+                for (name, mut times) in times.borrow_mut().take().unwrap_or_default() {
+                    times.sort_by(f64::total_cmp);
+                    let n = times.len();
+                    println!("PERF {}", serde_json::json!({"label": format!("seed local pull {label} git {name}"), "samples": n, "totalMs": times.iter().sum::<f64>(), "p50Ms": times[(n-1)/2], "p95Ms": times[(n*95).div_ceil(100)-1], "maxMs": times[n-1]}));
+                }
+            });
+            PHASES.with(|phases| {
+                for (name, mut times) in phases.take() {
+                    times.sort_by(f64::total_cmp);
+                    let n = times.len();
+                    println!("PERF {}", serde_json::json!({"label": format!("seed local pull {label} {name}"), "samples": n, "p50Ms": times[(n-1)/2], "p95Ms": times[(n*95).div_ceil(100)-1], "maxMs": times[n-1]}));
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn finished_flow_reads_do_not_spawn_git() {
+        let repo = Repo::new();
+        let summary = repo.run(Mutation::Reset {
+            rev: "HEAD".into(),
+            mode: awegit_git::ResetMode::Soft,
+        });
+        let session = active(&repo.0).unwrap();
+        for state in ["completed", "failed", "aborted"] {
+            session.data.lock().unwrap().snapshot.summary.state = state.into();
+            let (snapshot, calls) = count_git_calls(|| {
+                reconcile(&repo.0);
+                repo.snapshot()
+            });
+            assert_eq!(snapshot.summary.state, state);
+            assert_eq!(snapshot.summary.sequence, summary.sequence);
+            assert_eq!(calls, 0, "finished {state} flow must not read live Git state");
+        }
+    }
+
+    #[test]
+    fn git_directory_cache_is_shared_and_worktree_specific() {
+        let repo = Repo::new();
+        let linked = repo.0.join("linked");
+        repo.git(&["worktree", "add", "-b", "linked", linked.to_str().unwrap()]);
+        let main_dir = flow::git_dir(&repo.0).unwrap();
+        let linked_dir = flow::git_dir(&linked).unwrap();
+        assert_ne!(main_dir, linked_dir);
+        assert_eq!(
+            main_dir.canonicalize().unwrap(),
+            repo.0.join(".git").canonicalize().unwrap()
+        );
+        let expected = repo.git(&[
+            "-C",
+            linked.to_str().unwrap(),
+            "rev-parse",
+            "--absolute-git-dir",
+        ]);
+        assert_eq!(
+            linked_dir.canonicalize().unwrap(),
+            Path::new(&expected).canonicalize().unwrap()
+        );
+        let (_, calls) = count_git_calls(|| {
+            for (path, expected) in [(&repo.0, &main_dir), (&linked, &linked_dir)] {
+                assert_eq!(flow::git_dir(path).unwrap(), *expected);
+                assert_eq!(awegit_git::in_progress(path).unwrap(), None);
+                assert_eq!(flow::git_dir(path).unwrap(), *expected);
+            }
+        });
+        assert_eq!(calls, 0, "directory reads must share the same cache");
     }
 }

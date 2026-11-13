@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AweGit 功能介绍</title>
-  <meta name="description" content="AweGit 的功能介绍。fakeignore、多工作区、冲突合并、提交说明，以及历史、差异、远程和窗口里的其余能力。" />
+  <meta name="description" content="AweGit 的功能介绍。fakeignore、多工作区、冲突合并、提交说明、操作流程、偏好设置，以及历史、差异、远程和窗口里的其余能力。" />
   <style>
     :root {
       --canvas: #f4f4f5;
@@ -109,9 +109,21 @@
     article h3 { margin: 0 0 6px; font-size: 16px; }
     article p { margin: 0; color: var(--muted); font-size: 14px; }
     .kicker { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); margin: 0 0 6px; }
+    .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .shot { margin: 0; background: var(--elevated); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: var(--shadow); }
+    .shot.wide { grid-column: 1 / -1; }
+    .shot img { display: block; width: 100%; height: auto; }
+    .shot figcaption { padding: 10px 14px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); }
+    .keys { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--elevated); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+    .keys tr + tr td { border-top: 1px solid var(--line); }
+    .keys td { padding: 7px 12px; }
+    .keys td:last-child { text-align: right; white-space: nowrap; }
+    .kbd { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; background: #fafafa; white-space: nowrap; }
     footer { padding: 28px 0 48px; color: var(--muted); font-size: 14px; }
     @media (max-width: 860px) {
-      .hero, .feature, .feature.reverse, .grid, .split { grid-template-columns: 1fr; direction: ltr; }
+      .hero, .feature, .feature.reverse, .grid, .split, .shots { grid-template-columns: 1fr; direction: ltr; }
+      .shot.wide { grid-column: auto; }
+      .keys td:last-child { white-space: normal; }
       nav { display: none; }
     }
   </style>
@@ -133,8 +145,11 @@
         <a href="#fakeignore">fakeignore</a>
         <a href="#workspaces" data-zh>工作区</a><a href="#workspaces" data-en>Workspaces</a>
         <a href="#conflicts" data-zh>冲突</a><a href="#conflicts" data-en>Conflicts</a>
+        <a href="#flow" data-zh>操作流程</a><a href="#flow" data-en>Pipeline</a>
         <a href="#commit" data-zh>提交说明</a><a href="#commit" data-en>Messages</a>
         <a href="#history" data-zh>历史与差异</a><a href="#history" data-en>History</a>
+        <a href="#prefs" data-zh>偏好设置</a><a href="#prefs" data-en>Preferences</a>
+        <a href="#shortcuts" data-zh>快捷键</a><a href="#shortcuts" data-en>Shortcuts</a>
         <a href="#repos" data-zh>仓库与远程</a><a href="#repos" data-en>Remotes</a>
       </nav>
       <div class="lang" role="group" aria-label="Language">
@@ -156,6 +171,8 @@
           <span class="pill" data-zh>工作 / 个人</span><span class="pill" data-en>Work / personal</span>
           <span class="pill" data-zh>冲突合并</span><span class="pill" data-en>Conflict merge</span>
           <span class="pill" data-zh>提交说明</span><span class="pill" data-en>Commit messages</span>
+          <span class="pill" data-zh>操作流程</span><span class="pill" data-en>Pipeline</span>
+          <span class="pill" data-zh>11 个偏好页签</span><span class="pill" data-en>11 preference tabs</span>
         </div>
       </div>
       <div class="stage" aria-hidden="true">
@@ -173,6 +190,28 @@
         </svg>
       </div>
     </div>
+
+    <section id="shots">
+      <p class="kicker" data-zh>界面</p><p class="kicker" data-en>The window</p>
+      <h2 data-zh>真实界面</h2>
+      <h2 data-en>The real window</h2>
+      <p class="sub" data-zh>下面是在试验台里截的真实窗口，不是示意图。截图使用经典白色主题和中文界面；程序还提供默认的 Apple Liquid Glass 和 VS Code 黑色，也可以切换到英文。</p>
+      <p class="sub" data-en>These are real windows captured in the lab. The shots use Classic White and Chinese; the app also offers Apple Liquid Glass by default, VS Code Dark, and an English interface.</p>
+      <div class="shots">
+        <figure class="shot wide">
+          <img src="screenshots/history.png" alt="AweGit history view" loading="lazy" />
+          <figcaption><span data-zh>历史：提交图、提交详情和侧栏。未推送、领先落后和远程缺失的分支都有标记。</span><span data-en>History: graph, commit detail, and sidebar. Unpushed commits, ahead/behind, and branches missing on the remote are marked.</span></figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="screenshots/diff.png" alt="AweGit text diff" loading="lazy" />
+          <figcaption><span data-zh>文本差异：分栏、行内高亮、空白显示和按块暂存。</span><span data-en>Text diff: split view, inline marks, whitespace display, and hunk staging.</span></figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="screenshots/conflict.png" alt="AweGit conflict pane" loading="lazy" />
+          <figcaption><span data-zh>冲突：选择一侧、保留两边合并，或交给外部合并工具。</span><span data-en>Conflicts: keep one side, keep both, or hand the file to an external merge tool.</span></figcaption>
+        </figure>
+      </div>
+    </section>
 
     <section id="fakeignore">
       <div class="feature">
@@ -201,7 +240,7 @@
       <div class="feature reverse">
         <div>
           <p class="kicker" data-zh>工作区</p><p class="kicker" data-en>Workspaces</p>
-          <h2 data-zh>工作和个，各有自己的根目录</h2>
+          <h2 data-zh>工作和个人，各有自己的根目录</h2>
           <h2 data-en>Work and personal, each with its own root</h2>
           <p class="sub" data-zh>源代码文件夹可以各写一个别名，比如工作、个人，克隆和打开都从那一层开始。每个工作区再记住自己的仓库、打开的标签和当前标签。标签可以改名、上色，也能竖着排，关掉的还能重新打开。标题栏可以带上工作区的名字。</p>
           <p class="sub" data-en>Each source folder can have an alias, such as Work or Personal. Clone and open start from that root. A workspace then keeps its own repositories, open tabs, and selected tab. Tabs can be renamed, colored, turned vertical, and reopened after close. The title bar can show the workspace name.</p>
@@ -251,6 +290,34 @@ bonus = 1</pre>
       </div>
     </section>
 
+    <section id="flow">
+      <p class="kicker" data-zh>操作与冲突流程</p><p class="kicker" data-en>Operation pipeline</p>
+      <h2 data-zh>冲突停下时，整条流程仍然看得见</h2>
+      <h2 data-en>When a conflict stops the flow, the pipeline is still visible</h2>
+      <p class="sub" data-zh>拉取、合并、变基、拣选、还原或恢复本地修改遇到待解决的冲突时，AweGit 会自动打开只读的「操作与冲突流程」窗口。左侧是当前分支或累积结果，右侧是传入提交或本地修改，两侧沿曲线汇入中央时间轴；每个步骤标出已完成、当前、冲突和尚未执行，长流程只渲染窗口里的节点。窗口记录每一轮的冲突提交、基线、文件、blob、命令和时间，能关联重复冲突和前序操作，也会预测后续步骤，但预测不会被当成执行结果。</p>
+      <p class="sub" data-en>When a pull, merge, rebase, cherry-pick, revert, or restore of local edits hits unresolved conflicts, AweGit opens a read-only operation pipeline window. The current branch or accumulated result sits on one side, the incoming commit or local edits on the other, and both flow into a central timeline. Each step is marked done, current, conflicted, or not run yet, and a long flow renders only the visible nodes. The window records each round's commits, base, files, blobs, commands, and timing, links repeated conflicts to earlier operations, and predicts later steps without treating a prediction as a result.</p>
+      <p class="sub" data-zh>流程日志保存在仓库实际的 Git 目录里，默认保留 3 天，可在偏好设置改为 1–90 天；中断后可以恢复。窗口关闭时记住位置、大小和最大化状态。自动打开和「解决所有冲突后自动关闭」都能在偏好设置里关掉，操作历史仍可从仓库菜单查看。</p>
+      <p class="sub" data-en>The log lives in the repository's Git directory and is kept for 3 days by default, adjustable to 1–90 days; an interrupted flow can be recovered. The window remembers its position, size, and maximized state. Auto-open and "close after every conflict is resolved" can be turned off in preferences, and the history stays available from the repository menu.</p>
+      <figure class="shot wide">
+        <img src="screenshots/flow.png" alt="AweGit operation pipeline window" loading="lazy" />
+        <figcaption><span data-zh>一次拉取的完整流水线：保存本地修改、获取远程提交、整合提交、恢复本地修改和结束。</span><span data-en>A pull pipeline: save local edits, fetch remote commits, integrate, restore local edits, finish.</span></figcaption>
+      </figure>
+    </section>
+
+    <section id="prefs">
+      <p class="kicker" data-zh>偏好设置</p><p class="kicker" data-en>Preferences</p>
+      <h2 data-zh>11 个页签，修改即时生效</h2>
+      <h2 data-en>Eleven tabs, saved as you change them</h2>
+      <p class="sub" data-zh>左侧按「常规 / 工作流 / 系统」三组排列：通用、工作区、差异、提交、AI、Git、集成、命令、网络、账户、高级，每个页签里再按功能卡片分区。语言、主题、日期格式、差异显示、提交选项、AI 接口、代理、证书、账户和更新开关都在这里。点面板外空白不会关闭，用右上角关闭、完成或 Escape 退出。</p>
+      <p class="sub" data-en>The left column groups eleven tabs under General, Workflow, and System: General, Workspaces, Diff, Commit, AI, Git, Integrations, Commands, Network, Accounts, and Advanced. Each tab is split into cards for language, theme, date format, diff display, commit options, AI endpoint, proxies, certificates, accounts, and updates. Clicking outside does not close the panel; use the close button, Done, or Escape.</p>
+      <p class="sub" data-zh>Ctrl+Alt+L 在中文和英文之间切换，独立的历史、文件内容、合并和流程窗口会同步换语言，同时保留正在查看的内容和编辑草稿。AI 未启用、接口未填写或后端报告缺少密钥时，点「生成提交说明」会跳到 AI 页签并定位到对应配置项。更新面板可以下载并启动安装包，静默安装默认开启。</p>
+      <p class="sub" data-en>Ctrl+Alt+L switches between Chinese and English. Separate history, file, merge, and pipeline windows follow the change while keeping what they are viewing and any draft. If AI is off, the endpoint is empty, or the backend reports a missing key, Generate commit message opens the AI tab and focuses the setting that needs attention. The update panel downloads and launches the installer, with silent install on by default.</p>
+      <figure class="shot wide">
+        <img src="screenshots/preferences.png" alt="AweGit preferences" loading="lazy" />
+        <figcaption><span data-zh>通用页：语言、主题、日期与时间、界面。更改会自动保存。</span><span data-en>General: language, theme, dates and time, interface. Changes save automatically.</span></figcaption>
+      </figure>
+    </section>
+
     <section id="commit">
       <div class="feature reverse">
         <div>
@@ -297,6 +364,48 @@ bonus = 1</pre>
       </div>
     </section>
 
+    <section id="shortcuts">
+      <p class="kicker" data-zh>快捷键</p><p class="kicker" data-en>Shortcuts</p>
+      <h2 data-zh>键盘上能做完的事</h2>
+      <h2 data-en>Most things have a key</h2>
+      <p class="sub" data-zh>下面是 Windows 上的按键。macOS 上，除了切换标签的 Ctrl+Tab 和 Ctrl+Shift+Tab，其余带 Ctrl 的组合改为 Command；方向键仍是上、下。Escape 关闭当前对话框。终端从仓库菜单打开，没有单独的快捷键。</p>
+      <p class="sub" data-en>These are the Windows keys. On macOS, every Ctrl combination becomes Command except Ctrl+Tab and Ctrl+Shift+Tab for tab switching; the arrow keys stay the same. Escape closes the current dialog. The terminal opens from the repository menu and has no shortcut.</p>
+      <table class="keys">
+        <tbody>
+          <tr><td><span data-zh>刷新</span><span data-en>Refresh</span></td><td><span class="kbd">F5</span> / <span class="kbd">Ctrl+R</span></td></tr>
+          <tr><td><span data-zh>提交</span><span data-en>Commit</span></td><td><span class="kbd">Ctrl+Enter</span></td></tr>
+          <tr><td><span data-zh>提交并推送</span><span data-en>Commit and push</span></td><td><span class="kbd">Ctrl+Shift+Enter</span></td></tr>
+          <tr><td><span data-zh>暂存或取消暂存</span><span data-en>Stage or unstage</span></td><td><span class="kbd">Ctrl+Shift+S</span></td></tr>
+          <tr><td><span data-zh>全部暂存或全部取消暂存</span><span data-en>Stage all or unstage all</span></td><td><span class="kbd">Ctrl+Alt+Shift+S</span></td></tr>
+          <tr><td><span data-zh>丢弃修改</span><span data-en>Discard changes</span></td><td><span class="kbd">Delete</span> / <span class="kbd">Ctrl+Shift+D</span> / <span class="kbd">Backspace</span></td></tr>
+          <tr><td><span data-zh>全选当前列表或差异，再按一次取消</span><span data-en>Select the list or diff, press again to clear</span></td><td><span class="kbd">Ctrl+A</span></td></tr>
+          <tr><td><span data-zh>粘贴补丁</span><span data-en>Paste patch</span></td><td><span class="kbd">Ctrl+Shift+V</span></td></tr>
+          <tr><td><span data-zh>获取</span><span data-en>Fetch</span></td><td><span class="kbd">Ctrl+Shift+F</span> / <span class="kbd">Ctrl+Alt+Shift+F</span></td></tr>
+          <tr><td><span data-zh>拉取</span><span data-en>Pull</span></td><td><span class="kbd">Ctrl+Shift+L</span> / <span class="kbd">Ctrl+Alt+Shift+L</span></td></tr>
+          <tr><td><span data-zh>推送</span><span data-en>Push</span></td><td><span class="kbd">Ctrl+Shift+P</span> / <span class="kbd">Ctrl+Alt+Shift+P</span></td></tr>
+          <tr><td><span data-zh>贮藏</span><span data-en>Stash</span></td><td><span class="kbd">Ctrl+Shift+H</span></td></tr>
+          <tr><td><span data-zh>分支</span><span data-en>Branches</span></td><td><span class="kbd">Ctrl+Shift+B</span></td></tr>
+          <tr><td><span data-zh>标签</span><span data-en>Tags</span></td><td><span class="kbd">Ctrl+Alt+T</span></td></tr>
+          <tr><td><span data-zh>克隆</span><span data-en>Clone</span></td><td><span class="kbd">Ctrl+N</span></td></tr>
+          <tr><td><span data-zh>新建仓库</span><span data-en>New repository</span></td><td><span class="kbd">Ctrl+Shift+N</span></td></tr>
+          <tr><td><span data-zh>打开仓库</span><span data-en>Open repository</span></td><td><span class="kbd">Ctrl+O</span> / <span class="kbd">Ctrl+T</span></td></tr>
+          <tr><td><span data-zh>关闭标签页</span><span data-en>Close tab</span></td><td><span class="kbd">Ctrl+W</span></td></tr>
+          <tr><td><span data-zh>重新打开关闭的标签</span><span data-en>Reopen closed tab</span></td><td><span class="kbd">Ctrl+Shift+T</span></td></tr>
+          <tr><td><span data-zh>上一个 / 下一个标签</span><span data-en>Previous / next tab</span></td><td><span class="kbd">Ctrl+Shift+Tab</span> / <span class="kbd">Ctrl+Tab</span></td></tr>
+          <tr><td><span data-zh>变更 / 历史</span><span data-en>Changes / history</span></td><td><span class="kbd">Ctrl+1</span> / <span class="kbd">Ctrl+2</span></td></tr>
+          <tr><td><span data-zh>当前分支 / 所有分支</span><span data-en>Current / all branches</span></td><td><span class="kbd">Ctrl+Shift+A</span></td></tr>
+          <tr><td><span data-zh>定位当前分支</span><span data-en>Reveal current branch</span></td><td><span class="kbd">Ctrl+0</span></td></tr>
+          <tr><td><span data-zh>快速启动</span><span data-en>Quick launch</span></td><td><span class="kbd">Ctrl+K</span></td></tr>
+          <tr><td><span data-zh>搜索提交</span><span data-en>Search commits</span></td><td><span class="kbd">Ctrl+F</span></td></tr>
+          <tr><td><span data-zh>后退 / 前进</span><span data-en>Back / forward</span></td><td><span class="kbd">Alt+Left</span> / <span class="kbd">Alt+Right</span></td></tr>
+          <tr><td><span data-zh>设置</span><span data-en>Settings</span></td><td><span class="kbd">Ctrl+,</span></td></tr>
+          <tr><td><span data-zh>切换中英文</span><span data-en>Switch Chinese / English</span></td><td><span class="kbd">Ctrl+Alt+L</span></td></tr>
+          <tr><td><span data-zh>在文件管理器中显示</span><span data-en>Reveal in file manager</span></td><td><span class="kbd">Ctrl+Alt+O</span></td></tr>
+          <tr><td><span data-zh>放大 / 缩小</span><span data-en>Zoom in / out</span></td><td><span class="kbd">Ctrl+=</span> / <span class="kbd">Ctrl+-</span></td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <section id="repos">
       <p class="kicker" data-zh>仓库、远程、窗口</p><p class="kicker" data-en>Repositories, remotes, window</p>
       <h2 data-zh>从克隆到推送，中间那些事</h2>
@@ -319,8 +428,8 @@ bonus = 1</pre>
         </article>
         <article>
           <h3 data-zh>GitHub 和其他托管</h3><h3 data-en>GitHub and the other forges</h3>
-          <p data-zh>账号可以是 GitHub、GitLab、Bitbucket 或 Azure。通知和拉取请求在窗口里看。可以新建托管仓库。登录可以用粘贴的令牌，也可以走设备码。HTTP 和 SOCKS 代理、证书和 SSL 校验都在偏好里。</p>
-          <p data-en>Accounts cover GitHub, GitLab, Bitbucket, and Azure. Notifications and pull requests open in the window. A hosted repository can be created from here. Sign in with a pasted token or a device code. HTTP and SOCKS proxies, certificates, and SSL verification live in preferences.</p>
+          <p data-zh>账户在首选项里单独一页。GitHub、GitLab、Bitbucket、Azure、Gitee、Gitea 和自建主机都可以登录。已经登录的账号要点「同步本机已登录的账号」才会读入。阿里云代码托管的主机是 codeup.aliyun.com，登录打开阿里云账号中心。每个 HTTPS 远程按主机选用账号，也可以手动指定。添加或修改远程地址时，弹窗按地址显示将使用的已同步账号。登录走系统浏览器，或者打开创建令牌的页面再粘贴，然后测试连通。SSH 远程仍走密钥。通知和拉取请求在窗口里看。可以新建托管仓库。HTTP 和 SOCKS 代理、证书和 SSL 校验在网络页。</p>
+          <p data-en>Accounts have their own page in preferences. Sign in to GitHub, GitLab, Bitbucket, Azure, Gitee, Gitea, or a self-hosted server. Accounts already signed in on this machine are read only when you click the sync button. Alibaba Cloud git remotes use codeup.aliyun.com, and sign-in opens the Alibaba Cloud account center. Each HTTPS remote uses the account for its host, and you can override that. Adding or editing a remote address shows the synced account that URL will use. Sign in with the system browser, or open the token page, paste a token, and test the connection. SSH remotes still use keys. Notifications and pull requests open in the window. A hosted repository can be created from here. HTTP and SOCKS proxies, certificates, and SSL verification stay on the Network page.</p>
         </article>
         <article>
           <h3 data-zh>多窗口和命令记录</h3><h3 data-en>Windows and the command log</h3>
@@ -328,9 +437,43 @@ bonus = 1</pre>
           <p data-en>History, file contents, and merge can each have their own window. Quick launch searches commands and files. The command log separates your actions, background work, errors, and notices. About can copy diagnostics. A newer build can be downloaded and started. Fork settings can be imported.</p>
         </article>
         <article>
+          <h3 data-zh>文件占用与访问受限</h3><h3 data-en>Files in use</h3>
+          <p data-zh>Git 无法替换或写入文件时，命令日志逐个列出文件和原因。Windows 能识别占用程序时显示程序名与 PID，并提示保存、关闭、核对残留进程、刷新后重试；识别不到时提示检查占用、只读属性和写权限。原始 Git 错误完整保留，可以复制。</p>
+          <p data-en>When Git cannot replace or write a file, the command log lists each file and cause. On Windows an identified holder shows its process name and PID, with steps to save, close it, check for leftovers, refresh, and retry. Otherwise the hint covers locks, read-only attributes, and write permission. The original Git error is kept in full and can be copied.</p>
+        </article>
+        <article>
+          <h3 data-zh>标签与分支</h3><h3 data-en>Tags and branches</h3>
+          <p data-zh>侧栏标签按时间由近到远排列：附注标签用标签日期，轻量标签用提交日期；目录分组按组内最新标签排列，组内保持时间倒序。远程没有的本地分支、未推送提交和领先落后都有标记，常用分支可以固定。</p>
+          <p data-en>Sidebar tags run newest first: annotated tags use the tag date and lightweight tags use the commit date. Directory groups sort by their newest tag and stay in date order inside. Local branches missing on the remote, unpushed commits, and ahead/behind counts are marked, and frequent branches can be pinned.</p>
+        </article>
+        <article>
           <h3 data-zh>界面一直能点</h3><h3 data-en>The window stays usable</h3>
-          <p data-zh>长列表只画窗口里的行。写操作按仓库排队，后台慢的时候界面先保持可操作。语言可以中文、英文或跟随系统。主题可以浅色、深色或跟随系统。Windows 安装包自带 MinGit，macOS 使用系统 Git。</p>
-          <p data-en>A long list draws the rows in the window. Writes queue per repository, so a slow git leaves the window usable. Language is Chinese, English, or the system. Theme is light, dark, or the system. Windows builds include MinGit. macOS uses the system Git.</p>
+          <p data-zh>长列表只画窗口里的行。写操作按仓库排队，后台慢的时候界面先保持可操作。语言可以中文、英文或跟随系统。主题提供 Apple Liquid Glass（默认）、经典白色和 VS Code 黑色，也支持跟随系统。Windows 安装包自带 MinGit，macOS 使用系统 Git。</p>
+          <p data-en>A long list draws the rows in the window. Writes queue per repository, so a slow git leaves the window usable. Language is Chinese, English, or the system. Choose Apple Liquid Glass (default), Classic White, VS Code Dark, or follow the system. Windows builds include MinGit. macOS uses the system Git.</p>
+        </article>
+      </div>
+    </section>
+    <section id="install">
+      <p class="kicker" data-zh>下载与更新</p><p class="kicker" data-en>Download and update</p>
+      <h2 data-zh>安装包、更新和凭据</h2>
+      <h2 data-en>Packages, updates, and credentials</h2>
+      <p class="sub" data-zh>安装包发布在 <a href="https://github.com/ZhouJun2303/Gitnuro/releases">GitHub Releases</a>。版本清单是 <code>release</code> 分支根目录的 <code>latest.json</code>。</p>
+      <p class="sub" data-en>Packages are published on <a href="https://github.com/ZhouJun2303/Gitnuro/releases">GitHub Releases</a>. The version manifest is <code>latest.json</code> at the root of the <code>release</code> branch.</p>
+      <div class="grid">
+        <article>
+          <h3>Windows</h3>
+          <p data-zh>NSIS 的 <code>AweGit_&lt;版本&gt;_x64-setup.exe</code> 和 MSI 使用同一个版本号。安装包自带 MinGit 2.56.0，日常操作不需要另装 Git。当前版本是 2.0.7。</p>
+          <p data-en>The NSIS <code>AweGit_&lt;version&gt;_x64-setup.exe</code> and the MSI share one version number. The installer bundles MinGit 2.56.0, so no separate Git is needed. The current version is 2.0.7.</p>
+        </article>
+        <article>
+          <h3>macOS</h3>
+          <p data-zh>在 Mac 上运行 <code>pnpm package:mac</code>，或从 Releases 下载磁盘镜像，产物在 <code>target/release/bundle</code>。macOS 使用系统 Git，不打包 MinGit。没有 Developer ID 签名时安装包未签名、未公证，需要在系统设置中允许打开。</p>
+          <p data-en>Run <code>pnpm package:mac</code> on a Mac or download the disk image from Releases; the bundle is under <code>target/release/bundle</code>. macOS uses the system Git and does not bundle MinGit. Without a Developer ID the build is unsigned and not notarized, so macOS asks you to allow it in System Settings.</p>
+        </article>
+        <article>
+          <h3 data-zh>更新与凭据</h3><h3 data-en>Updates and credentials</h3>
+          <p data-zh>更新从 <code>latest.json</code> 读取版本，可以下载并启动安装程序，静默安装默认开启。设置在 Windows 的 <code>%APPDATA%\AweGit\settings.json</code>、macOS 的 <code>~/Library/Application Support/AweGit/settings.json</code>；API key、代理密码和 token 放在系统凭据库，配置文件里这些字段是空的。</p>
+          <p data-en>Updates read the version from <code>latest.json</code>, download and launch the installer, with silent install on by default. Settings live at <code>%APPDATA%\AweGit\settings.json</code> on Windows and <code>~/Library/Application Support/AweGit/settings.json</code> on macOS. API keys, proxy passwords, and tokens go to the OS credential store, leaving those fields empty in the file.</p>
         </article>
       </div>
     </section>

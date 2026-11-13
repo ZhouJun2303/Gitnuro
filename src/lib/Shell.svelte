@@ -26,6 +26,10 @@
 
   const shell = new ShellState();
   setShell(shell);
+  const signedIn = $derived(
+    Boolean(shell.settings.githubToken || shell.settings.gitlabToken || shell.settings.bitbucketToken || shell.settings.azureToken)
+    || shell.settings.accounts.some((account) => account.token.trim().length > 0),
+  );
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const focusWhen = (node: HTMLInputElement, on: boolean) => shell.focusWhen(node, on);
   const fitMenu = (node: HTMLElement, spot: { x: number; y: number; anchorTop?: number }) => shell.fitMenu(node, spot);
@@ -161,7 +165,7 @@
     padding: 4px;
     background: var(--elevated);
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     display: flex;
     flex-direction: column;
@@ -181,7 +185,7 @@
     color: inherit;
     font: inherit;
     text-align: left;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     transition: background 120ms ease, color 120ms ease;
   }
 
@@ -253,6 +257,158 @@
     font-size: 12px;
   }
 
+.dialog.confirm {
+    width: min(460px, calc(100vw - 32px));
+    gap: 14px;
+    padding: 24px 24px 18px;
+  }
+
+.confirm-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-width: 0;
+  }
+
+.confirm-icon {
+    width: 30px;
+    height: 30px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    margin-top: 1px;
+    border-radius: calc(var(--radius) + 2px);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+  }
+
+.confirm-icon.danger {
+    background: color-mix(in srgb, var(--deleted) 13%, transparent);
+    color: var(--deleted);
+  }
+
+.confirm-icon svg {
+    width: 17px;
+    height: 17px;
+  }
+
+.confirm-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
+  }
+
+.dialog.confirm h2 {
+    position: static;
+    padding: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 650;
+    line-height: 1.3;
+    letter-spacing: -0.015em;
+  }
+
+.confirm-title-text {
+    display: block;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+.confirm-subject {
+    min-width: 0;
+    max-width: 100%;
+    max-height: 9.5em;
+    padding: 9px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--canvas);
+    color: var(--text);
+    font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    user-select: text;
+  }
+
+.dialog.confirm.danger .confirm-subject {
+    border-color: color-mix(in srgb, var(--deleted) 24%, transparent);
+    background: color-mix(in srgb, var(--deleted) 5%, var(--canvas));
+  }
+
+.dialog.confirm .confirm-body {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+  }
+
+.dialog.confirm .confirm-detail {
+    padding: 9px 12px;
+    border-left: 2px solid color-mix(in srgb, var(--accent) 38%, transparent);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: var(--field);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.55;
+    max-height: 20vh;
+    overflow: auto;
+    white-space: pre-wrap;
+  }
+
+.dialog.confirm.danger .confirm-detail {
+    border-left-color: color-mix(in srgb, var(--deleted) 45%, transparent);
+  }
+
+.confirm-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 2px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+
+.confirm-actions .text-button,
+  .confirm-actions .commit {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 32px;
+    margin-left: 0;
+  }
+
+.confirm-actions .text-button {
+    min-width: 78px;
+    padding: 0 14px;
+    border: 1px solid var(--line);
+    background: var(--elevated);
+  }
+
+.confirm-actions .text-button:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--text-secondary) 35%, transparent);
+    background: var(--hover);
+  }
+
+.confirm-actions .commit {
+    min-width: 88px;
+    padding: 0 16px;
+  }
+
+.dialog .commit.danger {
+    background: var(--deleted);
+    color: var(--on-deleted);
+  }
+
+.dialog .commit.danger:focus-visible {
+    outline-color: var(--deleted);
+  }
+
 .shell {
     height: 100vh;
     display: flex;
@@ -272,7 +428,7 @@
     flex-direction: column;
     background: var(--elevated);
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     overflow: hidden;
   }
@@ -324,7 +480,7 @@
 
 .repo-row {
     padding: 4px 8px 4px 22px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
   }
 
 .repo-row.folder { padding-left: 6px; }
@@ -405,7 +561,7 @@
     grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
     background: var(--elevated);
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow);
     overflow: hidden;
   }
@@ -483,7 +639,7 @@
     width: 100%;
     padding: 8px 10px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: inherit;
     font: inherit;
@@ -566,7 +722,7 @@
     padding: 14px;
     border: 1px solid color-mix(in srgb, var(--deleted) 40%, transparent);
     border-left: 4px solid var(--deleted);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--deleted) 7%, var(--elevated));
     color: var(--text);
     font-size: 14px;
@@ -590,7 +746,7 @@
 .palette {
     width: 520px;
     max-width: calc(100vw - 32px);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     background: var(--elevated);
     border: 1px solid var(--line);
     box-shadow: var(--shadow);
@@ -625,7 +781,7 @@
     flex: none;
     height: 24px;
     padding: 0 8px;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     background: var(--field);
     color: var(--text-secondary);
     font-size: 12px;
@@ -646,7 +802,7 @@
     background: transparent;
     color: inherit;
     font: inherit;
-    border-radius: 8px;
+    border-radius: var(--radius);
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -894,24 +1050,38 @@
     <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => shell.dismissMenu()}></button>
   {/if}
   {#if shell.confirmAsk}
+    {@const ask = shell.confirmAsk}
     <div class="scrim confirm-scrim" role="presentation">
-      <div class="dialog sm" data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ".commit" }}>
-        <h2 id="confirm-title">{shell.confirmAsk.title}</h2>
-        {#if shell.confirmAsk.body}<p>{shell.confirmAsk.body}</p>{/if}
-        {#if shell.confirmAsk.files?.length}
+      <div class="dialog sm confirm" class:danger={ask.danger} data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={[ask.body ? "confirm-body" : "", ask.detail ? "confirm-detail" : ""].filter(Boolean).join(" ") || undefined} tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ask.danger ? ".text-button" : ".commit" }}>
+        <div class="confirm-head">
+          <span class="confirm-icon" class:danger={ask.danger} aria-hidden="true">
+            {#if ask.danger}
+              <svg class="line-icon" viewBox="0 0 24 24"><path d="M10.3 4.2 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z"/><path d="M12 9.4v4.3"/><path d="M12 17.3h.01"/></svg>
+            {:else}
+              <svg class="line-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.3 2.4c-.62.24-.9.72-.9 1.34v.36"/><path d="M12 16.6h.01"/></svg>
+            {/if}
+          </span>
+          <div class="confirm-copy">
+            <h2 id="confirm-title"><span class="confirm-title-text">{ask.title}</span></h2>
+            {#if ask.body}<p class="confirm-body" id="confirm-body">{ask.body}</p>{/if}
+          </div>
+        </div>
+        {#if ask.subject}<div class="confirm-subject" data-confirm-subject title={ask.subject}>{ask.subject}</div>{/if}
+        {#if ask.detail}<p class="confirm-detail" id="confirm-detail">{ask.detail}</p>{/if}
+        {#if ask.files?.length}
           <div class="confirm-files" data-confirm-files>
-            <div class="confirm-count">{shell.tr("dialog.fileCount", { count: String(shell.confirmAsk.files.length) })}</div>
+            <div class="confirm-count">{shell.tr("dialog.fileCount", { count: String(ask.files.length) })}</div>
             <ol>
-              {#each shell.confirmAsk.files as file (file)}
+              {#each ask.files as file (file)}
                 {@const cut = file.lastIndexOf("/")}
                 <li title={file}><span class="confirm-file-dir">{cut > 0 ? file.slice(0, cut + 1) : ""}</span><span class="confirm-file-name">{cut > 0 ? file.slice(cut + 1) : file}</span></li>
               {/each}
             </ol>
           </div>
         {/if}
-        <div class="composer-row actions">
+        <div class="confirm-actions">
           <button class="text-button" type="button" onclick={() => (shell.confirmAsk = null)}>{shell.tr("dialog.cancel")}</button>
-          <button class="commit" type="button" onclick={() => { const run = shell.confirmAsk?.run; shell.confirmAsk = null; run?.(); }}>{shell.tr("dialog.confirm")}</button>
+          <button class="commit" class:danger={ask.danger} type="button" onclick={() => { const run = shell.confirmAsk?.run; shell.confirmAsk = null; run?.(); }}>{ask.confirmLabel ?? shell.tr("dialog.confirm")}</button>
         </div>
       </div>
     </div>
@@ -923,7 +1093,7 @@
         <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={() => (shell.forgeOpen = null)}>×</button>
         <h2 id="forge-title">{shell.forgeOpen === "notes" ? shell.tr("chrome.notifications") : shell.tr("chrome.pulls")}</h2>
         {#if shell.forgeOpen === "notes"}
-          {#if shell.notices.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noNotifications") : shell.tr("dialog.noToken")}</p>{/if}
+          {#if shell.notices.length === 0}<p class="empty">{signedIn || shell.mode !== "live" ? shell.tr("dialog.noNotifications") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.notices as notice (notice.id)}
             <div class="composer-row"><span>{notice.title}</span><span class="grow"></span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => { if (shell.mode === "live") void invoke("mark_notification", { id: notice.id }).then(() => (shell.notices = shell.notices.filter((item) => item.id !== notice.id))); else shell.notices = shell.notices.filter((item) => item.id !== notice.id); }}>{shell.tr("dialog.markRead")}</button></div>
           {/each}
@@ -933,7 +1103,7 @@
             </div>
           {/if}
         {:else}
-          {#if shell.pulls.length === 0}<p class="empty">{shell.settings.githubToken || shell.settings.gitlabToken || shell.mode !== "live" ? shell.tr("dialog.noPulls") : shell.tr("dialog.noToken")}</p>{/if}
+          {#if shell.pulls.length === 0}<p class="empty">{signedIn || shell.mode !== "live" ? shell.tr("dialog.noPulls") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.pulls as pull (pull.url)}
             <div class="composer-row"><span>{pull.title}</span><span class="meta">{pull.author}</span><span class="grow"></span><button class="text-button" type="button" disabled={shell.mode !== "live"} onclick={() => shell.mutate({ action: "checkout", name: pull.branch })}>{shell.tr("dialog.checkoutBranch")}</button></div>
           {/each}
@@ -942,7 +1112,6 @@
     </div>
   {/if}
   <DialogHost />
-  {#if shell.standalone !== "merge"}<MergePanel />{/if}
   {#if shell.launchOpen}
     <div class="palette-scrim" role="presentation" onclick={() => shell.closeLaunch()}>
       <div class="palette" data-layer="launch" role="dialog" aria-modal="true" tabindex="-1" aria-label={shell.tr("chrome.quickLaunch")} use:overlayFocus={{ close: () => shell.closeLaunch(), focus: ".palette-input" }} onclick={(event) => event.stopPropagation()} onkeydown={() => {}}>

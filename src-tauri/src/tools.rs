@@ -221,7 +221,7 @@ fn editor_presets() -> Vec<EditorTool> {
             .unwrap_or_default()
     };
     let goto = "-g \"{file}:{line}\"";
-    vec![
+    let mut rows = vec![
         EditorTool {
             name: "Visual Studio Code".into(),
             path: local("Programs\\Microsoft VS Code", "Code.exe"),
@@ -327,7 +327,82 @@ fn editor_presets() -> Vec<EditorTool> {
             path: on_path("zed.exe"),
             args: "\"{file}:{line}\"".into(),
         },
-    ]
+    ];
+    rows.extend(rider_paths().into_iter().map(|path| EditorTool {
+        name: "Rider".into(),
+        path,
+        args: "--line {line} \"{file}\"".into(),
+    }));
+    rows
+}
+
+/// Rider lives under versioned folders, so its launcher is found by scanning.
+/// Toolbox-managed installs come first, then the standalone installer and PATH.
+fn rider_paths() -> Vec<String> {
+    let mut found: Vec<String> = Vec::new();
+    if let Some(base) = std::env::var("LOCALAPPDATA").ok().map(std::path::PathBuf::from) {
+        let toolbox = base.join("JetBrains").join("Toolbox");
+        found.extend(installed_under(&toolbox.join("apps").join("Rider"), "rider64.exe"));
+        found.extend(existing_file(base.join("Programs").join("Rider").join("bin").join("rider64.exe")));
+        found.extend(existing_file(toolbox.join("scripts").join("rider.cmd")));
+    }
+    for env in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(base) = std::env::var(env).ok().map(std::path::PathBuf::from) {
+            found.extend(installed_under(&base.join("JetBrains"), "rider64.exe"));
+        }
+    }
+    for launcher in ["rider64.exe", "rider.cmd"] {
+        found.extend(existing_file(std::path::PathBuf::from(on_path(launcher))));
+    }
+    let mut unique: Vec<String> = Vec::new();
+    for path in found {
+        if !unique.iter().any(|item| same_path(item, &path)) {
+            unique.push(path);
+        }
+    }
+    unique
+}
+
+fn existing_file(path: std::path::PathBuf) -> Option<String> {
+    path.is_file().then(|| path.display().to_string())
+}
+
+/// Launchers at `<root>\<folder>\bin\<file>` and, for Toolbox, one folder
+/// deeper at `<root>\<channel>\<version>\bin\<file>`. Newest folder first.
+fn installed_under(root: &Path, file: &str) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut hits: Vec<(Vec<u32>, String)> = Vec::new();
+    for entry in entries.flatten() {
+        let folder = entry.path();
+        if !folder.is_dir() {
+            continue;
+        }
+        let direct = folder.join("bin").join(file);
+        if direct.is_file() {
+            hits.push((version_key(&folder.file_name().unwrap_or_default().to_string_lossy()), direct.display().to_string()));
+            continue;
+        }
+        let Ok(versions) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for version in versions.flatten() {
+            let nested = version.path().join("bin").join(file);
+            if version.path().is_dir() && nested.is_file() {
+                hits.push((version_key(&version.file_name().to_string_lossy()), nested.display().to_string()));
+            }
+        }
+    }
+    hits.sort_by(|left, right| right.0.cmp(&left.0));
+    hits.into_iter().map(|(_, path)| path).collect()
+}
+
+/// `2024.3` outranks `2023.2`; a channel folder such as `ch-0` keeps its number.
+fn version_key(name: &str) -> Vec<u32> {
+    name.split(|value: char| !value.is_ascii_digit())
+        .filter_map(|part| part.parse::<u32>().ok())
+        .collect()
 }
 
 fn on_path(file: &str) -> String {
@@ -627,6 +702,34 @@ mod tests {
         assert_eq!(tools.diff.len(), 1);
         assert_eq!(tools.diff[0].name, "Beyond Compare");
         assert_eq!(tools.diff[0].args, "{left} {right}");
+    }
+
+    #[test]
+    fn newer_install_folders_sort_first() {
+        use super::version_key;
+        let mut keys = vec![version_key("JetBrains Rider 2023.3"), version_key("2024.2.5"), version_key("ch-0")];
+        keys.sort_by(|left, right| right.cmp(left));
+        assert_eq!(keys[0], vec![2024, 2, 5]);
+        assert_eq!(keys[1], vec![2023, 3]);
+        assert_eq!(keys[2], vec![0]);
+    }
+
+    #[test]
+    fn rider_launchers_are_found_in_both_install_layouts() {
+        use super::installed_under;
+        let root = std::env::temp_dir().join(format!("awegit-rider-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let direct = root.join("JetBrains Rider 2023.3").join("bin");
+        let nested = root.join("ch-0").join("2024.2").join("bin");
+        std::fs::create_dir_all(&direct).unwrap();
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(direct.join("rider64.exe"), "").unwrap();
+        std::fs::write(nested.join("rider64.exe"), "").unwrap();
+        let found = installed_under(&root, "rider64.exe");
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(found.len(), 2);
+        assert!(found[0].contains("2024.2"), "{found:?}");
+        assert!(found[1].contains("2023.3"), "{found:?}");
     }
 
     #[test]

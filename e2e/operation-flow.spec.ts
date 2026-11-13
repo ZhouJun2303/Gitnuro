@@ -277,15 +277,15 @@ test("observer automatic opening for unresolved conflicts can be disabled and sa
   const original = await lab<Settings>("load_settings");
   try {
     await lab("save_settings", { values: { ...original, flowAutoOpen: true } });
-    await page.goto("/?scene=dialog-prefs");
-    await expect(page.locator('[data-lab-scene="dialog-prefs"]')).toBeVisible();
+    await page.goto("/?scene=prefs-flow");
+    await expect(page.locator('[data-lab-scene="prefs-flow"]')).toBeVisible();
     const toggle = page.locator('[data-dialog="prefs"] label').filter({ hasText: /操作遇到待解决冲突时自动打开流程窗口|Automatically open the flow window when an operation has unresolved conflicts/ }).getByRole("checkbox");
     await expect(toggle).toBeChecked();
     await toggle.uncheck();
     await page.locator('[data-dialog="prefs"] .commit').click();
     await expect.poll(async () => (await lab<Settings>("load_settings")).flowAutoOpen).toBe(false);
-    await page.goto("/?scene=dialog-prefs");
-    await expect(page.locator('[data-lab-scene="dialog-prefs"]')).toBeVisible();
+    await page.goto("/?scene=prefs-flow");
+    await expect(page.locator('[data-lab-scene="prefs-flow"]')).toBeVisible();
     await expect(toggle).not.toBeChecked();
     await toggle.check();
     await page.locator('[data-dialog="prefs"] .commit').click();

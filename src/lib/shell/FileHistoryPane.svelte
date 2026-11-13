@@ -2,11 +2,16 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getShell } from "./context";
   import BinaryDiff from "./BinaryDiff.svelte";
-  import { onVirtualScroll, windowSlice } from "../view";
+  import { onVirtualScroll, windowSlice, gravatarUrl, splitDiff, virtualSplit, type SplitRow } from "../view";
 
   const shell = getShell();
-  const rowHeight = 48;
+  const rowHeight = 56;
+  const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
+  let diffHeight = $state(0);
   const diffRow = $derived(shell.diffRowHeight);
+  const splitRows = $derived(shell.settings.diffStyle === "split" && shell.historyDiff?.lines.length ? splitDiff(shell.historyDiff.lines) : []);
+  const splitColumns = $derived(shell.splitColumnsOf(splitRows));
+  const splitWindow = $derived(virtualSplit(splitRows, shell.historyDiffTop, shell.splitRowHeight, diffHeight, shell.settings.diffWordWrap));
   let listTop = $state(0);
   const onListScroll = onVirtualScroll((top) => (listTop = top));
   const onDiffScroll = onVirtualScroll((top) => (shell.historyDiffTop = top));
@@ -99,11 +104,20 @@
               oncontextmenu={(event) => shell.openMenu(event, shell.historyFileMenu(commit))}
             >
               <span class="history-meta">
-                <span>{commit.author}</span>
-                <span>{shell.whenLabel(commit)}</span>
-                <span class="sha">{commit.shortId}</span>
+                <span class="commit-author">
+                  {#if shell.settings.gravatar && commit.email}
+                    <img class="avatar" alt="" src={gravatarUrl(commit.email)} />
+                  {:else}
+                    <span class="avatar" style:background={shell.avatarColor(commit.author)} title={commit.author}>{(commit.author || "?").slice(0, 1).toUpperCase()}</span>
+                  {/if}
+                  <span class="author" title={commit.author}>{commit.author}</span>
+                </span>
+                <span class="commit-facts">
+                  <span class="date" title={commit.at ? shell.forkWhenFull(commit.at) : commit.when}>{shell.whenLabel(commit)}</span>
+                  <span class="sha" title={commit.shortId}>{commit.shortId}</span>
+                </span>
               </span>
-              <span class="subject">{commit.summary}</span>
+              <span class="subject" title={commit.summary}>{commit.summary}</span>
             </button>
           {/each}
         </div>
@@ -112,6 +126,7 @@
     <section
       class="history-diff"
       role="group"
+      bind:clientHeight={diffHeight}
       onscroll={onDiffScroll}
       oncontextmenu={(event) => {
         const commit = shell.commitsLive.find((item) => item.id === shell.selectedCommit);
@@ -124,6 +139,22 @@
         <BinaryDiff path={shell.historyFile ?? ""} oldBytes={shell.historyDiff.oldBytes} newBytes={shell.historyDiff.newBytes} compact />
       {:else if shell.historyDiff.lines.length === 0}
         <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
+      {:else if shell.settings.diffStyle === "split"}
+        <div class="diff-body split" class:virtual={!shell.settings.diffWordWrap} style:--split-row="{shell.splitRowHeight}px" role="presentation" use:splitScroller={splitColumns}>
+          {#if splitWindow.beforePx > 0}<div class="split-gap" style:height="{splitWindow.beforePx}px"></div>{/if}
+          {#each splitWindow.rows as row, offset (splitWindow.start + offset)}
+            {#if row.meta}
+              <div class="split-meta">{row.left}</div>
+            {:else}
+              <div class="split-row">
+                {@render splitCell(row, "left")}
+                {@render splitCell(row, "right")}
+              </div>
+            {/if}
+          {/each}
+          {#if splitWindow.afterPx > 0}<div class="split-gap" style:height="{splitWindow.afterPx}px"></div>{/if}
+          {@render splitBar()}
+        </div>
       {:else}
         <div class="diff-body" class:wrap-window={shell.settings.diffWordWrap}>
           <div class="commit-window" class:wrap-window={shell.settings.diffWordWrap} style:height="{shell.historyDiffWindow.height}px">
@@ -137,6 +168,23 @@
     </section>
   </div>
 </div>
+
+{#snippet splitCell(row: SplitRow, side: "left" | "right")}
+  {@const kind = side === "left" ? row.leftKind : row.rightKind}
+  {@const mark = side === "left" ? "delete" : "add"}
+  {@const text = side === "left" ? row.left : row.right}
+  {@const other = side === "left" ? row.right : row.left}
+  {@const paired = Boolean(row.left && row.right && row.left !== row.right && (row.leftKind === "delete" || row.rightKind === "add"))}
+  <span class="split-no" class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}>{(side === "left" ? row.leftNo : row.rightNo) ?? ""}</span>
+  <span class="split-code" data-side={side} class:del={kind === "delete"} class:add={kind === "add"} class:meta={kind === "meta"}><span class="split-text">{#if shell.settings.showDiffMarks && kind === mark}{side === "left" ? "-" : "+"}{/if}{#each shell.markedLine(text, paired ? other : "", shell.historyDiff?.path ?? "") as token, tokenIndex (`${side}-${tokenIndex}`)}<span class={token.cls} class:intra={token.hot}>{token.text}</span>{/each}</span></span>
+{/snippet}
+
+{#snippet splitBar()}
+  <span class="split-bar-pad"></span>
+  <div class="split-bar" data-bar="left"><div></div></div>
+  <span class="split-bar-pad"></span>
+  <div class="split-bar" data-bar="right"><div></div></div>
+{/snippet}
 
 <style>
   .file-history {
@@ -221,39 +269,119 @@
     position: absolute;
     left: 0;
     right: 0;
-    height: 48px;
+    height: 56px;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 2px;
-    padding: 0 12px;
+    gap: 4px;
+    padding: 0 12px 0 28px;
     border: 0;
     background: transparent;
     color: inherit;
     text-align: left;
     font: inherit;
+    transition: background 120ms ease;
   }
 
-  .history-commit.selected { background: var(--selection); }
+  .history-commit::before {
+    content: "";
+    position: absolute;
+    left: 11px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    pointer-events: none;
+  }
+
+  .history-commit::after {
+    content: "";
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    margin-top: -4px;
+    border-radius: 50%;
+    background: var(--accent);
+    pointer-events: none;
+  }
+
+  .history-commit:hover { background: var(--hover); }
+
+  .history-commit.selected,
+  .history-commit.selected:hover { background: var(--selection); }
 
   .history-meta {
     display: flex;
-    gap: 8px;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
     min-width: 0;
     color: var(--text-secondary);
-    font-size: 11px;
+    font-size: 12px;
   }
 
-  .history-meta span {
+  .commit-author {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  .commit-author .avatar {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    border-radius: 4px;
+    background: var(--field);
+    font-size: 10px;
+    line-height: 18px;
+    text-align: center;
+    color: white;
+  }
+
+  .commit-author .author {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .commit-facts {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    flex: none;
+    min-width: 0;
+  }
+
+  .commit-facts .date,
+  .commit-facts .sha {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .commit-facts .date { width: 116px; flex: none; text-align: right; }
+
+  .commit-facts .sha {
+    width: 56px;
+    flex: none;
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 11px;
   }
 
   .history-commit .subject {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--text);
   }
 
   .history-diff {
@@ -262,7 +390,9 @@
     overflow: auto;
   }
 
-  .history-diff .diff-body { overflow: visible; height: auto; }
+  .history-diff .diff-body:not(.split) { overflow: visible; height: auto; }
+
+  .history-diff .diff-body.split { overflow: visible; }
 
   .history-diff .virtual-row {
     position: absolute;
