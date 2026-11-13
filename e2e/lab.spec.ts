@@ -513,6 +513,15 @@ test("cherry-picking asks before it runs", async ({ page }) => {
   await expect(confirm.locator(".commit")).toBeEnabled();
 });
 
+test("a stale index.lock offers removal and retry", async ({ page }) => {
+  await openLabScene(page, "stale-lock-confirm", '[data-layer="confirm"]');
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toContainText("index.lock");
+  await expect(confirm).toContainText("812 seconds");
+  await expect(confirm.locator(".commit")).toContainText("Remove and retry");
+  await expect(confirm.locator(".commit")).toBeEnabled();
+});
+
 test("branch confirmation keeps the branch name on one line", async ({ page }) => {
   await openLabScene(page, "force-delete-confirm", '[data-layer="confirm"]');
   const confirm = page.locator('[data-layer="confirm"]');

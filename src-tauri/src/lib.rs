@@ -456,6 +456,7 @@ fn blame_file(path: Option<String>, file: String) -> Result<Vec<awegit_git::Blam
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct MutationReport {
     #[serde(flatten)]
     status: awegit_git::StatusSnapshot,
@@ -465,6 +466,8 @@ struct MutationReport {
     log: String,
     outcome: String,
     error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stale_lock: Option<awegit_git::StaleIndexLock>,
     flow: Option<flows::Summary>,
 }
 
@@ -501,6 +504,9 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         Ok::<_, awegit_git::Error>(output)
     }));
     let (result, log) = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
+    // A killed Git process can leave index.lock behind and make the write fail
+    // without a usable stderr. Report the file so the UI can offer to remove it.
+    let stale_lock = if result.is_err() { awegit_git::stale_index_lock(&next) } else { None };
     let flow = flow.map(|flow| { let _phase = perf::phase("flow-finish"); flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name) });
     let status = read_status(&next)?;
     let conflicted = status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict);
@@ -513,6 +519,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         log,
         outcome,
         error,
+        stale_lock,
         flow,
     })
 }
@@ -1547,6 +1554,15 @@ fn remove_index_lock(path: Option<String>) -> Result<bool, String> {
     }
 }
 
+/// Remove the `index.lock` a killed Git command left, after the user confirmed.
+/// The git crate re-checks its age so a lock a new command just took is kept.
+#[tauri::command]
+fn remove_stale_lock(path: Option<String>, lock: String) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    let _turn = repo_turn(&repo);
+    awegit_git::remove_stale_index_lock(&repo, &lock).map_err(|error| error.to_string())
+}
+
 /// Stop history/diff/blame reads without touching a queued write.
 #[tauri::command]
 fn cancel_reads(path: Option<String>) -> Result<(), String> {
@@ -2374,6 +2390,7 @@ pub fn run() {
             cancel_operation,
             cancel_reads,
             remove_index_lock,
+            remove_stale_lock,
             save_hidden_refs,
             save_expanded_groups,
             save_sign_off,

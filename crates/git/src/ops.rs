@@ -1626,7 +1626,11 @@ pub fn approve_credential(
 
 fn continue_with(repo: &Path, message: &str) -> Result<(), Error> {
     let message = message.replace("\r\n", "\n");
-    if message.trim().is_empty() || !matches!(in_progress(repo)?, Some(InProgress::Rebase)) {
+    let rebase = matches!(in_progress(repo)?, Some(InProgress::Rebase));
+    if rebase {
+        restore_rebase_message(repo);
+    }
+    if message.trim().is_empty() || !rebase {
         return flow(repo, "continue");
     }
     if message.contains('\0') {
@@ -1639,6 +1643,40 @@ fn continue_with(repo: &Path, message: &str) -> Result<(), Error> {
         &[("GIT_EDITOR", editor.editor.as_str())],
     )
     .map(|_| ())
+}
+
+/// A killed rebase can leave the pick applied but drop `.git/rebase-merge/message`.
+/// Rebuild it from the commit `done` names so `--continue` commits the same text.
+fn restore_rebase_message(repo: &Path) {
+    let Ok(dir) = crate::flow::git_dir(repo) else {
+        return;
+    };
+    let dir = dir.join("rebase-merge");
+    let message = dir.join("message");
+    if message.exists() {
+        return;
+    }
+    let Ok(done) = std::fs::read_to_string(dir.join("done")) else {
+        return;
+    };
+    let commit = done.lines().rev().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        if !matches!(parts.next()?, "pick" | "p" | "reword" | "r" | "edit" | "e") {
+            return None;
+        }
+        parts.next().map(str::to_string)
+    });
+    let Some(commit) = commit else {
+        return;
+    };
+    let Ok(output) = run(repo, &["log", "-1", "--format=%B", &commit]) else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    if text.trim().is_empty() {
+        return;
+    }
+    let _ = std::fs::write(message, text.as_bytes());
 }
 
 fn abort(repo: &Path) -> Result<(), Error> {

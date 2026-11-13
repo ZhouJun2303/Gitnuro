@@ -427,6 +427,10 @@ export type Messages = {
     hardResetBody: string;
     staleIndexLock: string;
     staleIndexLockBody: string;
+    staleLockBlocked: string;
+    staleLockBlockedBody: string;
+    staleLockAge: string;
+    removeLockAndRetry: string;
     softReset: string;
     softResetBody: string;
     mixedReset: string;

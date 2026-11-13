@@ -618,6 +618,52 @@ pub fn index_lock_path(repo: &Path) -> Option<PathBuf> {
         .map(|dir| dir.join("index.lock"))
 }
 
+/// A Git command starts writing within milliseconds, so an older `index.lock`
+/// belongs to a process that stopped. A live command keeps the lock well under it.
+const STALE_LOCK_AGE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// An `index.lock` left behind by a killed Git process. Recent locks stay out:
+/// another Git command may be writing the index at this moment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StaleIndexLock {
+    pub path: String,
+    pub age_secs: u64,
+}
+
+pub fn stale_index_lock(repo: &Path) -> Option<StaleIndexLock> {
+    let lock = index_lock_path(repo)?;
+    let meta = std::fs::symlink_metadata(&lock).ok()?;
+    if !meta.file_type().is_file() {
+        return None;
+    }
+    let age = meta.modified().ok()?.elapsed().ok()?;
+    if age < STALE_LOCK_AGE {
+        return None;
+    }
+    let shown = lock.strip_prefix(repo).unwrap_or(&lock);
+    Some(StaleIndexLock {
+        path: shown.display().to_string(),
+        age_secs: age.as_secs(),
+    })
+}
+
+/// Remove the exact lock the user confirmed. Re-reading the age refuses a lock
+/// that a new Git process took after the prompt appeared.
+pub fn remove_stale_index_lock(repo: &Path, expected: &str) -> Result<(), Error> {
+    let lock = stale_index_lock(repo)
+        .ok_or_else(|| Error::Git("no stale index.lock to remove".into()))?;
+    if lock.path != expected {
+        return Err(Error::Git(
+            "the stale index.lock changed; retry the failed action".into(),
+        ));
+    }
+    let path = index_lock_path(repo).ok_or_else(|| Error::Git("repository is gone".into()))?;
+    std::fs::remove_file(&path).map_err(|source| {
+        Error::Git(format!("could not remove {}: {source}", path.display()))
+    })
+}
+
 fn read_local(path: &Path) -> Result<String, Error> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(text),

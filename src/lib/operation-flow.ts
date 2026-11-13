@@ -15,7 +15,7 @@ export type FlowSummary = {
 };
 export type FlowSnapshot = { summary: FlowSummary; nodes: FlowNode[] };
 export type FlowDelta = { summary: FlowSummary; node: FlowNode | null };
-export type MutationResult = { outcome: "completed" | "conflict" | "failed"; error: string; output?: string; log?: string; flow?: FlowSummary | null };
+export type MutationResult = { outcome: "completed" | "conflict" | "failed"; error: string; output?: string; log?: string; staleLock?: { path: string; ageSecs: number }; flow?: FlowSummary | null };
 
 export type FlowPhase = "saved" | "fetch" | "integration" | "operation" | "restore" | "finished";
 export type PipelineStep = FlowNode & { phase: FlowPhase; evidence: FlowNode[] };

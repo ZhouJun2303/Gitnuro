@@ -3,13 +3,14 @@ mod common;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, SystemTime};
 
 use awegit_git::{
     blob_view, commit, commit_log, commits_from, conflict_view, discard_lines, file_diff,
     file_diff_with, file_preview, in_progress, launch_merge_tool, merge_preview, perform,
-    repository_refs, search_commits, search_log, stage_all, stage_hunk, stage_line, stage_lines,
-    stage_paths, status, stop_process_tree, ChangeKind, CommitRequest, InProgress, LineEdit,
-    Mutation, RebaseStep, ResetMode,
+    remove_stale_index_lock, repository_refs, search_commits, search_log, stage_all, stage_hunk,
+    stage_line, stage_lines, stage_paths, stale_index_lock, status, stop_process_tree, ChangeKind,
+    CommitRequest, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
 };
 
 fn repo() -> common::TempRepo {
@@ -2828,6 +2829,58 @@ fn rebase_continue_keeps_the_original_author() {
         "Test <test@example.com>|Bob <bob@example.com>",
         "a rebase must keep the author and only change the committer: {line}"
     );
+}
+
+#[test]
+fn continue_restores_a_missing_rebase_message() {
+    let repo = conflict_repo();
+    let rebase = perform(
+        &repo.path,
+        Mutation::Rebase {
+            onto: "main".into(),
+            autostash: false,
+        },
+    );
+    assert!(rebase.is_err(), "rebase should conflict");
+    let message = repo.path.join(".git/rebase-merge/message");
+    assert!(message.is_file(), "a paused pick writes its message");
+    fs::remove_file(&message).unwrap();
+    fs::write(repo.path.join("a.txt"), "resolved\n").unwrap();
+    repo.git(&["add", "a.txt"]);
+    perform(
+        &repo.path,
+        Mutation::Continue {
+            message: String::new(),
+        },
+    )
+    .unwrap();
+    let subject = git_at(&repo.path, &["log", "-1", "--format=%s"]);
+    assert_eq!(subject.trim(), "side");
+}
+
+#[test]
+fn stale_index_lock_is_offered_only_after_it_ages() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    let lock = repo.path.join(".git/index.lock");
+    fs::write(&lock, "").unwrap();
+    assert!(
+        stale_index_lock(&repo.path).is_none(),
+        "a fresh lock can belong to a live Git command"
+    );
+    let old = SystemTime::now() - Duration::from_secs(60);
+    fs::File::options()
+        .write(true)
+        .open(&lock)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    let stale = stale_index_lock(&repo.path).expect("an old lock is stale");
+    assert!(stale.age_secs >= 60, "age: {}", stale.age_secs);
+    remove_stale_index_lock(&repo.path, &stale.path).unwrap();
+    assert!(!lock.exists());
+    assert!(remove_stale_index_lock(&repo.path, &stale.path).is_err());
+    assert!(remove_stale_index_lock(&repo.path, "elsewhere.lock").is_err());
 }
 
 #[test]

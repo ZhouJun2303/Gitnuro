@@ -3175,8 +3175,10 @@ export class ShellState {
         this.startWork(described.title, path);
         started = true;
       }
+      let report: (StatusSnapshot & import("../operation-flow").MutationResult) | null = null;
       try {
-        const value = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash }, undefined, operation);
+        report = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash }, undefined, operation);
+        const value = report;
         const output = value.output ?? "";
         // A foreground write started while this was running will paint the later status itself.
         const superseded = background && this.busy;
@@ -3226,7 +3228,24 @@ export class ShellState {
           } catch {
             /* keep the action error */
           }
-          if (this.shouldShowMergeConflict(action, text)) {
+          if (report?.staleLock) {
+            // A killed Git process left index.lock; offer to remove it and retry.
+            const lock = report.staleLock;
+            this.actionError = null;
+            this.stashRetry = null;
+            this.ask(
+              this.tr("dialog.staleLockBlocked"),
+              this.tr("dialog.staleLockBlockedBody"),
+              () => void this.removeStaleLock(path, lock.path, request, source, retryStash),
+              [],
+              {
+                subject: lock.path,
+                detail: this.tr("dialog.staleLockAge", { seconds: String(lock.ageSecs) }),
+                danger: true,
+                confirmLabel: this.tr("dialog.removeLockAndRetry"),
+              },
+            );
+          } else if (this.shouldShowMergeConflict(action, text)) {
             this.mergeConflictRestore = false;
             this.commandOutput = text.trim();
             this.dialog = "mergeConflict";
@@ -3287,6 +3306,19 @@ export class ShellState {
       if (stash?.id) request.name = stash.id;
     }
     await this.mutate(request, pending.source, true);
+  }
+
+
+
+  /** Remove the index.lock a killed Git command left, then run the blocked write again. */
+  async removeStaleLock(path: string, lock: string, request: Record<string, unknown>, source: "user" | "background", retryStash: boolean) {
+    try {
+      await invoke("remove_stale_lock", { path, lock });
+    } catch (error) {
+      this.actionError = this.message(error);
+      return;
+    }
+    await this.mutate(request, source, retryStash);
   }
 
 

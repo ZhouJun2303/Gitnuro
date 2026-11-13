@@ -434,6 +434,21 @@ async function fillSurface(shell: ShellState, id: string) {
     if (commit) await shell.previewCherry(commit.id, true, commit.summary);
     return;
   }
+  if (id === "stale-lock-confirm") {
+    shell.ask(
+      shell.tr("dialog.staleLockBlocked"),
+      shell.tr("dialog.staleLockBlockedBody"),
+      () => {},
+      [],
+      {
+        subject: ".git/index.lock",
+        detail: shell.tr("dialog.staleLockAge", { seconds: "812" }),
+        danger: true,
+        confirmLabel: shell.tr("dialog.removeLockAndRetry"),
+      },
+    );
+    return;
+  }
   if (id === "workspace-menu-busy") {
     const key = shell.jobKey(shell.snapshot?.path);
     shell.jobs[key] = { label: "刷新中", percent: null, depth: 1 };

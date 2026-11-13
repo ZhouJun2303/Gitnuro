@@ -183,6 +183,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "stash-pop-confirm", group: "叠层", title: "弹出贮藏确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "reset-confirm", group: "叠层", title: "重置确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "cherry-confirm", group: "叠层", title: "拣选确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
+  scene({ id: "stale-lock-confirm", group: "叠层", title: "残留 index.lock 确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "menu", group: "叠层", title: "菜单", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "external-tool-menu", group: "叠层", title: "外部工具子菜单", repo: "conflict", ready: "[data-layer=\"submenu\"]" }),
   scene({ id: "workspace-menu-busy", group: "叠层", title: "工作区菜单：刷新中", repo: "full", ready: "[data-layer=\"menu\"]" }),
