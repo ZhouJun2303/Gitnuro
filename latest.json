@@ -1,12 +1,12 @@
 {
-    "appVersion": "2.0.9",
-    "notes":  "本次更新34项，主要是修复9项、文档9项。",
-    "appCode":  35,
-    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.8/AweGit_2.0.8_x64-setup.exe",
+    "appVersion":  "2.0.9",
+    "notes":  "本次更新4项，主要是修复3项、文档1项。",
+    "appCode":  36,
+    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.9/AweGit_2.0.9_x64-setup.exe",
     "downloads":  {
                       "windows":  {
-                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.8/AweGit_2.0.8_x64-setup.exe",
-                                      "sha256":  "7cca035ae22cd0d6a9b61ef395b077de58589e7ef08cdd43ee6e884568983413"
+                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.9/AweGit_2.0.9_x64-setup.exe",
+                                      "sha256":  "cc1a7e837f0545535fabc77983c7c2d33fc65d2cc244ca78cbdef357f4933e61"
                                   },
                       "macos":  ""
                   }
