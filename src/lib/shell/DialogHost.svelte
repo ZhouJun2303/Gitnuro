@@ -7,9 +7,60 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { cloneTarget, cloneUrl } from "../clonePath";
   import { buildRebaseSteps } from "./dialogs.svelte";
-  import { recentWorkspaceId } from "../status";
+  import { recentWorkspaceId, type Account } from "../status";
+  import { resolveRemoteAccount } from "./remoteAccount";
 
   const shell = getShell();
+  let remoteAccountPick = $state("");
+  let remoteDialogKey = "";
+  let remoteLoadedOverride = "";
+  let remoteMatchWait: Promise<void> = Promise.resolve();
+  const remotePreview = $derived(resolveRemoteAccount(shell.settings.accounts, shell.draftExtra, remoteAccountPick));
+  const remotePickValue = $derived(remotePreview.choices.some((item) => item.id === remoteAccountPick) ? remoteAccountPick : "");
+
+  $effect(() => {
+    if (shell.dialog !== "remote") {
+      remoteDialogKey = "";
+      return;
+    }
+    const key = `${shell.remoteEdit}:${shell.draft}`;
+    if (remoteDialogKey === key) return;
+    remoteDialogKey = key;
+    remoteAccountPick = "";
+    remoteLoadedOverride = "";
+    if (!shell.remoteEdit) {
+      remoteMatchWait = Promise.resolve();
+      return;
+    }
+    const name = shell.draft;
+    const path = shell.repoPath();
+    if (!path) {
+      remoteMatchWait = Promise.resolve();
+      return;
+    }
+    remoteMatchWait = invoke<{ remote: string; accountId: string; reason: string }[]>("remote_matches", { path }).then((rows) => {
+      if (shell.dialog !== "remote" || shell.draft !== name) return;
+      const row = rows.find((item) => item.remote === name && item.reason === "override" && item.accountId);
+      if (!row) return;
+      remoteAccountPick = row.accountId;
+      remoteLoadedOverride = row.accountId;
+    }).catch(() => {});
+  });
+
+  function accountInitial(account: Account) {
+    const source = (account.name || account.login || account.label || account.forge).trim();
+    return source.slice(0, 1).toUpperCase() || "?";
+  }
+
+  function remoteReason(reason: string) {
+    switch (reason) {
+      case "login": return shell.tr("dialog.remoteAccountLogin");
+      case "default": return shell.tr("dialog.remoteAccountDefault");
+      case "only": return shell.tr("dialog.remoteAccountOnly");
+      case "override": return shell.tr("dialog.remoteAccountOverride");
+      default: return "";
+    }
+  }
   let diagnosticsCopied = $state(false);
 
   async function copyDiagnostics() {
@@ -136,8 +187,18 @@
             if (!shell.actionError && shell.settings.pushTagOnCreate) await shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease });
           }
           else if (shell.dialog === "remote") {
-            if (shell.remoteEdit) void shell.mutate({ action: "setRemoteUrl", name: shell.draft, url: shell.draftExtra });
-            else void shell.mutate({ action: "addRemote", name: shell.remoteName(), url: shell.draftExtra });
+            const name = shell.remoteEdit ? shell.draft.trim() : shell.remoteName();
+            const url = shell.draftExtra.trim();
+            const path = shell.repoPath();
+            await remoteMatchWait;
+            const accountId = remotePickValue;
+            const clearOverride = remoteLoadedOverride !== "" && !accountId;
+            const outcome = shell.remoteEdit
+              ? await shell.mutate({ action: "setRemoteUrl", name, url })
+              : await shell.mutate({ action: "addRemote", name, url });
+            if (outcome === "completed" && path && name && (accountId || clearOverride)) {
+              await invoke("save_remote_account", { path, remote: name, accountId }).catch((error) => (shell.actionError = shell.message(error)));
+            }
           }
           else if (shell.dialog === "fetch") {
             const remote = shell.syncAll ? null : shell.draft || null;
@@ -744,6 +805,47 @@
           <label>{shell.tr("dialog.url")}<input placeholder="https://github.com/org/repo.git" bind:value={shell.draftExtra} /></label>
           {#if !shell.remoteEdit && shell.draftExtra.trim()}
             <p class="empty">{shell.tr("dialog.remoteNameAuto", { name: shell.remoteName() })}</p>
+          {/if}
+          {#if remotePreview.host}
+            {@const account = remotePreview.account}
+            <div class="remote-account" data-remote-account={remotePreview.reason}>
+              <p class="remote-account-title">{shell.tr("dialog.remoteAccountTitle")}</p>
+              <div class="remote-account-facts">
+                {#if remotePreview.protocol}<span>{remotePreview.protocol}</span>{/if}
+                <span>{remotePreview.host}</span>
+                {#if remotePreview.path}<span>{remotePreview.path}</span>{/if}
+                {#if remotePreview.username}<span>@{remotePreview.username}</span>{/if}
+              </div>
+              {#if account}
+                <div class="account-identity">
+                  {#if account.avatarUrl}
+                    <img class="account-avatar" alt="" src={account.avatarUrl} />
+                  {:else}
+                    <span class="account-avatar" aria-hidden="true">{accountInitial(account)}</span>
+                  {/if}
+                  <div class="account-copy">
+                    <div class="account-name">
+                      <span>{account.name || account.label || account.login || account.forge}</span>
+                      {#if account.defaultForHost}<em class="account-badge">{shell.tr("dialog.accountsDefault")}</em>{/if}
+                    </div>
+                    <div class="account-meta">{[account.login ? `@${account.login}` : "", account.email].filter(Boolean).join(" · ")}</div>
+                  </div>
+                </div>
+                <p class="account-note">{remoteReason(remotePreview.reason)}{remotePreview.ssh ? ` · ${shell.tr("dialog.accountsSshNote")}` : ` · ${shell.tr("dialog.accountsHttpsNote")}`}</p>
+              {:else}
+                <p class="empty">{shell.tr("dialog.remoteAccountNone", { host: remotePreview.host })}</p>
+              {/if}
+              {#if remotePreview.choices.length > 1}
+                <label>{shell.tr("dialog.remoteAccountPick")}
+                  <select aria-label={shell.tr("dialog.remoteAccountPick")} value={remotePickValue} onchange={(event) => (remoteAccountPick = (event.currentTarget as HTMLSelectElement).value)}>
+                    <option value="">{shell.tr("dialog.remoteAccountAuto")}</option>
+                    {#each remotePreview.choices as item (item.id)}
+                      <option value={item.id}>{item.name || item.login || item.label}</option>
+                    {/each}
+                  </select>
+                </label>
+              {/if}
+            </div>
           {/if}
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>

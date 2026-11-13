@@ -547,3 +547,85 @@
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+.remote-account {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 4px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--field);
+}
+
+.remote-account-facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.remote-account-title {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.remote-account .account-identity {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.remote-account .account-avatar {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--elevated);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    object-fit: cover;
+}
+
+.remote-account .account-copy { min-width: 0; flex: 1; }
+
+.remote-account .account-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.remote-account .account-meta,
+.remote-account .account-note {
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.remote-account .account-name span,
+.remote-account .account-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.remote-account .account-badge {
+    flex: none;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--elevated);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    font-style: normal;
+}

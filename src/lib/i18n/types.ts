@@ -822,6 +822,14 @@ export type Messages = {
     restoreConflictBody: string;
     setRemoteUrl: string;
     remoteNameAuto: string;
+    remoteAccountTitle: string;
+    remoteAccountNone: string;
+    remoteAccountLogin: string;
+    remoteAccountDefault: string;
+    remoteAccountOnly: string;
+    remoteAccountOverride: string;
+    remoteAccountAuto: string;
+    remoteAccountPick: string;
     squashHint: string;
     httpsLogin: string;
     httpsHint: string;

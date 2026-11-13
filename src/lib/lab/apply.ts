@@ -646,7 +646,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
     case "remote":
       shell.remoteEdit = false;
       shell.draft = "";
-      shell.draftExtra = "https://example.com/lab/repo.git";
+      shell.draftExtra = "https://github.com/lab/example.git";
       break;
     case "squash":
       if (shell.commitsLive[0]) shell.selectedCommit = shell.commitsLive[0].id;

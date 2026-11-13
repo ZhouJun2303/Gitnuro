@@ -2,7 +2,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
-import { openLabScene } from "./helpers";
+import { scenes } from "../src/lib/lab/scenes";
+import { openLabScene, openScene } from "./helpers";
 
 async function lab(cmd: string, args: Record<string, unknown> = {}) {
   const response = await fetch("http://127.0.0.1:1429/invoke", {
@@ -342,6 +343,31 @@ test("open dialog keeps every source row readable", async ({ page }) => {
   expect(await rows.count()).toBeGreaterThan(10);
   const height = await rows.first().evaluate((node) => node.getBoundingClientRect().height);
   expect(height).toBeGreaterThanOrEqual(28);
+});
+
+test("remote dialog shows the synced account for the URL", async ({ page }) => {
+  test.setTimeout(120_000);
+  await openLabScene(page, "dialog-remote", '[data-dialog="remote"] [data-remote-account]');
+  const card = page.locator('[data-dialog="remote"] [data-remote-account]');
+  await expect(card).toContainText("HTTPS");
+  await expect(card).toContainText("github.com");
+  await expect(card).toContainText("lab/example");
+  await expect(card).toContainText("Lab 01");
+  await expect(card).toContainText("@lab-01");
+  await page.locator('[data-dialog="remote"] input').first().fill("git@gitlab.com:lab/example.git");
+  await expect(card).toContainText("SSH");
+  await expect(card).toContainText("gitlab.com");
+  await expect(card).toContainText("Lab 02");
+  await expect(card).toContainText("@lab-02");
+  for (const theme of ["apple", "light", "dark"] as const) {
+    const scene = scenes.find((item) => item.id === "dialog-remote");
+    if (!scene) throw new Error("dialog-remote");
+    await openScene(page, scene, `&theme=${theme}`);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    const box = await page.locator("[data-remote-account]").boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThan(8);
+    expect(box?.height ?? 0).toBeGreaterThan(8);
+  }
 });
 
 test("long dialogs keep their title and first field in view", async ({ page }) => {
