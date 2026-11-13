@@ -232,10 +232,20 @@ async function refreshSearchedCommits(shell: ShellState, gen: number) {
   }
 
 export async function searchContent(shell: ShellState, kind: string, needle: string) {
-    shell.contentHits = await invoke<{ id: string; shortId: string; summary: string }[]>("search_commits", { path: shell.repoPath(), kind, needle }).catch((error) => {
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    const query = shell.commitQuery;
+    const gen = ++shell.contentSearchGen;
+    const current = () => gen === shell.contentSearchGen && openGen === shell.openGen
+      && shell.repoPath() === path && shell.commitQuery === query;
+    try {
+      const hits = await invoke<{ id: string; shortId: string; summary: string }[]>("search_commits", { path, kind, needle });
+      if (current()) shell.contentHits = hits;
+    } catch (error) {
+      if (!current()) return;
       shell.actionError = shell.message(error);
-      return [];
-    });
+      shell.contentHits = [];
+    }
   }
 
 /** `On <branch>: …` and `WIP on <branch>: …` split into a branch plate and a stash plate. */

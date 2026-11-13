@@ -108,3 +108,107 @@ test("history fold skips linear ancestors and reuses merge analysis when toggled
   });
   expect(result).toEqual({ linearWalks: 0, reused: true, closed: ["side"], open: [], owner: "merge" });
 });
+
+for (const kind of ["blame", "content"] as const) {
+  for (const change of ["repository", "reopened", "selection", "newer", "current"] as const) {
+    for (const fail of [false, true]) {
+      test(`async reads ${kind} ${fail ? "errors" : "results"} respect ${change} context`, async ({ page }) => {
+        const result = await page.evaluate(async ({ kind, change, fail }) => {
+          const path = kind === "blame" ? "/src/lib/shell/diff.svelte.ts" : "/src/lib/shell/history.svelte.ts";
+          const module = await import(/* @vite-ignore */ path);
+          const original = window.fetch;
+          const response = (value: unknown, error = false) => new Response(JSON.stringify(error ? { ok: false, error: "old error" } : { ok: true, value }));
+          let release!: () => void;
+          const pending = new Promise<Response>((resolve) => { release = () => resolve(response([{ id: "old" }], fail)); });
+          let first = true;
+          window.fetch = (input, init) => {
+            const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+            if (!body?.args?.path?.startsWith("D:/async-review/")) return original(input, init);
+            if (first) { first = false; return pending; }
+            return Promise.resolve(response([{ id: "new" }]));
+          };
+          const shell: any = {
+            path: "D:/async-review/old", repoPath() { return this.path; },
+            openGen: 0, blameGen: 0, contentSearchGen: 0, patchGen: 0,
+            selectedPath: "old.txt", selectedSide: "unstaged", section: "changes", selectedCommit: null, historyFile: null,
+            commitQuery: "S:old", blameLines: null, contentHits: null, actionError: null,
+            tr: String, message: (error: unknown) => error instanceof Error ? error.message : String(error),
+            withWork: (_label: string, body: () => Promise<void>) => body(),
+          };
+          const read = () => kind === "blame" ? module.showBlame(shell, "old.txt") : module.searchContent(shell, "S", "old");
+          try {
+            const task = read();
+            const field = kind === "blame" ? "blameLines" : "contentHits";
+            if (change !== "current") shell[field] = [{ id: "new" }];
+            if (change === "repository") { shell.path = "D:/async-review/new"; shell.openGen++; }
+            if (change === "reopened") shell.openGen++;
+            if (change === "selection") { shell.selectedPath = "new.txt"; shell.commitQuery = "S:new"; }
+            if (change === "newer") await read();
+            release();
+            await task;
+            return { value: shell[field], error: shell.actionError };
+          } finally { window.fetch = original; }
+        }, { kind, change, fail });
+        expect(result).toEqual(change !== "current" ? { value: [{ id: "new" }], error: null }
+          : fail ? { value: kind === "blame" ? null : [], error: "old error" }
+          : { value: [{ id: "old" }], error: null });
+      });
+    }
+  }
+}
+
+for (const stage of ["file_history", "commit_tree"] as const) {
+  for (const change of ["repository", "selection", "newer", "current"] as const) {
+    for (const fail of [false, true]) {
+      test(`navigation ${stage} ${fail ? "errors" : "results"} respect ${change} context`, async ({ page }) => {
+        const result = await page.evaluate(async ({ stage, change, fail }) => {
+          const path = "/src/lib/shell/state.svelte.ts";
+          const { ShellState } = await import(/* @vite-ignore */ path);
+          const original = window.fetch;
+          let release!: () => void;
+          const pending = new Promise<Response>((resolve) => {
+            release = () => resolve(new Response(JSON.stringify(fail ? { ok: false, error: "old error" }
+              : { ok: true, value: stage === "file_history" ? [{ id: "old" }] : ["old.txt"] })));
+          });
+          window.fetch = (input, init) => {
+            const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+            return body?.cmd === stage && body?.args?.path === "D:/navigation-review/old" ? pending : original(input, init);
+          };
+          const reads: string[] = [];
+          const shell: any = {
+            mode: "live", path: "D:/navigation-review/old", repoPath() { return this.path; },
+            navLock: 0, navGen: 0, openGen: 0, contextGen: 0,
+            section: "changes", selectedPath: null, selectedSide: "unstaged", selectedCommit: null,
+            historyFilter: "", treeOn: false, blameLines: null, actionError: null,
+            message: (error: unknown) => error instanceof Error ? error.message : String(error),
+            commitsLive: [{ id: "new" }], treePaths: ["new.txt"], lastPlace: null,
+            loadContext: async () => {},
+            selectCommit: async (id: string) => { reads.push(`${shell.path}:${id}`); },
+          };
+          shell.snapshotPlace = ShellState.prototype.snapshotPlace.bind(shell);
+          shell.restorePlace = ShellState.prototype.restorePlace.bind(shell);
+          const place = { section: "history", path: "old.txt", side: "unstaged", commit: "old-commit", blame: false,
+            tree: stage === "commit_tree", historyFilter: stage === "file_history" ? "old.txt" : "" };
+          try {
+            const task = shell.restorePlace(place);
+            if (change === "repository") { shell.path = "D:/navigation-review/new"; shell.openGen++; }
+            if (change === "selection") shell.selectedCommit = "new-commit";
+            if (change === "newer") await shell.restorePlace({ ...place, path: "new.txt", commit: "new-commit", tree: false, historyFilter: "" });
+            const readsBeforeRelease = reads.length;
+            release();
+            await task;
+            return { commits: shell.commitsLive, tree: shell.treePaths, error: shell.actionError, navLock: shell.navLock,
+              readsAfterRelease: reads.slice(readsBeforeRelease) };
+          } finally { window.fetch = original; }
+        }, { stage, change, fail });
+        expect(result).toEqual({
+          commits: change === "current" && !fail && stage === "file_history" ? [{ id: "old" }] : [{ id: "new" }],
+          tree: change === "current" && !fail && stage === "commit_tree" ? ["old.txt"] : ["new.txt"],
+          error: change === "current" && fail ? "old error" : null,
+          navLock: 0,
+          readsAfterRelease: change === "current" && !fail && stage === "file_history" ? ["D:/navigation-review/old:old-commit"] : [],
+        });
+      });
+    }
+  }
+}

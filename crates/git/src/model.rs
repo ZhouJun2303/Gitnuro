@@ -1092,7 +1092,7 @@ pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
     let (output, _) = with_read(|| match base {
         Some(ref base) => run_capped(
             repo,
-            &["diff", "--name-status", "-r", "-M", base, id],
+            &["diff", "--name-status", "-z", "-r", "-M", base, id],
             8_000_000,
         ),
         None => run_capped(
@@ -1101,6 +1101,7 @@ pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
                 "diff-tree",
                 "--no-commit-id",
                 "--name-status",
+                "-z",
                 "-r",
                 "-M",
                 "--root",
@@ -1109,39 +1110,45 @@ pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
             8_000_000,
         ),
     })?;
-    let text = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_name_status(&output.stdout))
+}
+
+// Only consume complete NUL-terminated records: a capped read can end inside a path.
+fn nul_records(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
+    bytes
+        .split_inclusive(|byte| *byte == 0)
+        .filter_map(|record| record.strip_suffix(&[0]))
+}
+
+fn parse_name_status(bytes: &[u8]) -> Vec<FileChange> {
+    let mut records = nul_records(bytes);
     let mut files = Vec::new();
-    for line in text.lines() {
-        let mut parts = line.split('\t');
-        let status = parts.next().unwrap_or("");
-        let first = parts.next().unwrap_or("");
+    while let Some(status) = records.next() {
+        let Some(first) = records.next() else { break };
         if first.is_empty() {
             continue;
         }
-        let (kind, path, previous) = if status.starts_with('R') {
-            (
-                ChangeKind::Renamed,
-                parts.next().unwrap_or(first),
-                Some(first.to_string()),
-            )
-        } else if status.starts_with('C') {
-            (ChangeKind::Added, parts.next().unwrap_or(first), None)
-        } else {
-            let kind = match status.chars().next().unwrap_or('M') {
-                'A' => ChangeKind::Added,
-                'D' => ChangeKind::Deleted,
-                'U' => ChangeKind::Conflict,
-                _ => ChangeKind::Modified,
-            };
-            (kind, first, None)
+        let (kind, path, previous) = match status.first() {
+            Some(b'R' | b'C') => {
+                let Some(path) = records.next() else { break };
+                if status[0] == b'R' {
+                    (ChangeKind::Renamed, path, Some(String::from_utf8_lossy(first).into_owned()))
+                } else {
+                    (ChangeKind::Added, path, None)
+                }
+            }
+            Some(b'A') => (ChangeKind::Added, first, None),
+            Some(b'D') => (ChangeKind::Deleted, first, None),
+            Some(b'U') => (ChangeKind::Conflict, first, None),
+            _ => (ChangeKind::Modified, first, None),
         };
         files.push(FileChange {
-            path: path.to_string(),
+            path: String::from_utf8_lossy(path).into_owned(),
             kind,
-            previous_path: previous.filter(|item| !item.is_empty()),
+            previous_path: previous,
         });
     }
-    Ok(files)
+    files
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1172,8 +1179,10 @@ pub fn blame_file(repo: &Path, path: &str) -> Result<Vec<BlameLine>, Error> {
     let mut summary = String::new();
     let mut author = String::new();
     let mut line_no = 0_u32;
+    let mut metadata = BTreeMap::<String, (String, String)>::new();
     for raw in text.lines() {
         if raw.starts_with('\t') {
+            metadata.entry(id.clone()).or_insert_with(|| (author.clone(), summary.clone()));
             let short_id = id.chars().take(7).collect();
             lines.push(BlameLine {
                 id: id.clone(),
@@ -1193,6 +1202,8 @@ pub fn blame_file(repo: &Path, path: &str) -> Result<Vec<BlameLine>, Error> {
         {
             let mut parts = raw.split_whitespace();
             id = parts.next().unwrap_or("").to_string();
+            // --porcelain omits author/summary once it has described this commit.
+            (author, summary) = metadata.get(&id).cloned().unwrap_or_default();
             let _original = parts.next();
             line_no = parts.next().unwrap_or("0").parse().unwrap_or(line_no);
             continue;
@@ -1280,36 +1291,11 @@ pub fn compare_files(repo: &Path, from: &str, to: &str) -> Result<Vec<FileChange
     let (output, _) = with_read(|| {
         run_capped(
             repo,
-            &["diff", "--name-status", "-r", "-M", from, to],
+            &["diff", "--name-status", "-z", "-r", "-M", from, to],
             8_000_000,
         )
     })?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut files = Vec::new();
-    for line in text.lines() {
-        let mut parts = line.split('\t');
-        let status = parts.next().unwrap_or("");
-        let first = parts.next().unwrap_or("");
-        if first.is_empty() {
-            continue;
-        }
-        let (kind, path) = if status.starts_with('R') || status.starts_with('C') {
-            (ChangeKind::Renamed, parts.next().unwrap_or(first))
-        } else {
-            let kind = match status.chars().next().unwrap_or('M') {
-                'A' => ChangeKind::Added,
-                'D' => ChangeKind::Deleted,
-                _ => ChangeKind::Modified,
-            };
-            (kind, first)
-        };
-        files.push(FileChange {
-            path: path.to_string(),
-            kind,
-            previous_path: None,
-        });
-    }
-    Ok(files)
+    Ok(parse_name_status(&output.stdout))
 }
 
 /// Diff of one path between two revisions.
@@ -1572,12 +1558,10 @@ pub fn reflog(repo: &Path, limit: usize) -> Result<Vec<ReflogRow>, Error> {
 pub fn commit_tree(repo: &Path, rev: &str) -> Result<Vec<String>, Error> {
     let rev = check_rev(rev)?;
     let (output, _) =
-        with_read(|| run_capped(repo, &["ls-tree", "-r", "--name-only", rev], 8_000_000))?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    Ok(text
-        .lines()
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
+        with_read(|| run_capped(repo, &["ls-tree", "-r", "--name-only", "-z", rev], 8_000_000))?;
+    Ok(nul_records(&output.stdout)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
         .collect())
 }
 

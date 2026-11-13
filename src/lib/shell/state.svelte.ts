@@ -490,6 +490,8 @@ export class ShellState {
 
   blameLines = $state.raw<BlameLine[] | null>(null);
 
+  blameGen = 0;
+
 
   settingsPath = $state("");
 
@@ -933,6 +935,8 @@ export class ShellState {
 
   contentHits = $state<{ id: string; shortId: string; summary: string }[] | null>(null);
 
+  contentSearchGen = 0;
+
 
   activityLines = $state<string[]>([]);
 
@@ -1065,6 +1069,8 @@ export class ShellState {
 
 
   pixelUrl = $state("");
+
+  pixelStatus = $state<"idle" | "working" | "too-large" | "error">("idle");
 
 
   reflogOn = $state(false);
@@ -2090,6 +2096,8 @@ export class ShellState {
 
   navLock = 0;
 
+  navGen = 0;
+
 
   lastPlace: Place | null = null;
 
@@ -2366,6 +2374,9 @@ export class ShellState {
 
 
   async restorePlace(place: Place) {
+    const path = this.repoPath();
+    const openGen = this.openGen;
+    const gen = ++this.navGen;
     this.navLock += 1;
     this.section = place.section;
     this.selectedSide = place.side;
@@ -2375,22 +2386,36 @@ export class ShellState {
     const filterChanged = this.historyFilter !== place.historyFilter;
     this.historyFilter = place.historyFilter;
     if (!place.blame) this.blameLines = null;
+    const current = () => gen === this.navGen && openGen === this.openGen && this.repoPath() === path
+      && this.section === place.section && this.selectedPath === place.path && this.selectedSide === place.side
+      && this.selectedCommit === place.commit && this.treeOn === place.tree && this.historyFilter === place.historyFilter;
     try {
       if (this.mode === "live" && filterChanged) {
         if (place.historyFilter) {
-          this.commitsLive = await invoke<CommitRow[]>("file_history", { path: this.repoPath(), file: place.historyFilter, limit: 200 });
+          const contextGen = ++this.contextGen;
+          const rows = await invoke<CommitRow[]>("file_history", { path, file: place.historyFilter, limit: 200 });
+          if (!current() || contextGen !== this.contextGen) return;
+          this.commitsLive = rows;
         } else {
           await this.loadContext();
         }
       }
+      if (!current()) return;
       if (this.mode === "live" && place.section === "history" && place.commit) await this.selectCommit(place.commit);
+      if (!current()) return;
       if (place.blame && place.path && this.mode === "live") await this.showBlame(place.path);
+      if (!current()) return;
       if (place.tree && place.commit && this.mode === "live") {
-        this.treePaths = await invoke<string[]>("commit_tree", { path: this.repoPath(), rev: place.commit });
+        const paths = await invoke<string[]>("commit_tree", { path, rev: place.commit });
+        if (!current()) return;
+        this.treePaths = paths;
       }
+      if (!current()) return;
       if (this.mode === "live" && place.section === "changes" && place.path) await this.loadDiff();
+    } catch (error) {
+      if (current()) this.actionError = this.message(error);
     } finally {
-      this.lastPlace = this.snapshotPlace();
+      if (current()) this.lastPlace = this.snapshotPlace();
       this.navLock -= 1;
     }
   }

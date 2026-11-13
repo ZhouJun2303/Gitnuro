@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { getShell } from "./context";
   import "./DiffPane.css";
   import { sampleImages } from "../sample";
   import { onVirtualScroll, wrapPrefix, type SplitRow } from "../view";
   import type { Row, Side } from "./types";
-  import { applyConflictChoice, mergeToolLabel, mergeToolMissing, openConflictTool } from "./diff.svelte";
+  import { applyConflictChoice, clearPixel, mergeToolLabel, mergeToolMissing, openConflictTool } from "./diff.svelte";
   import BinaryDiff from "./BinaryDiff.svelte";
   import { formatBytes } from "../format";
   import type { ConflictParty } from "../status";
@@ -29,7 +29,7 @@
   let pointerInside = false;
 
   $effect(() => {
-    const path = shell.selectedPath ?? "";
+    const path = `${shell.repoPath() ?? ""}\0${shell.selectedPath ?? ""}`;
     if (path === pickedPath) return;
     pickedPath = path;
     pickOurs = true;
@@ -37,10 +37,33 @@
     hoveredHunk = null;
     hoveredLine = null;
     activeHunk = null;
-    shell.pixelUrl = "";
     shell.imageMode = "side";
     shell.imagePos = 50;
   });
+
+  $effect(() => {
+    shell.repoPath();
+    shell.focusPath;
+    shell.section;
+    shell.selectedPath;
+    shell.selectedSide;
+    shell.selectedCommit;
+    shell.historyFile;
+    shell.imageOld;
+    shell.imageNew;
+    shell.preview;
+    untrack(() => {
+      clearPixel(shell);
+      shell.imageMode = "side";
+    });
+    return () => clearPixel(shell);
+  });
+
+  function pickImageMode(mode: typeof shell.imageMode, before: string | null, after: string | null) {
+    clearPixel(shell);
+    shell.imageMode = mode;
+    if (mode === "pixel" && before && after) void shell.paintPixel(before, after);
+  }
 
   const hunkList = $derived(shell.mode === "live" && shell.section === "changes" ? shell.hunkRanges() : []);
   const wrapLines = $derived(shell.settings.diffWordWrap && shell.settings.diffStyle !== "split" ? wrapPrefix(shell.diffLines) : null);
@@ -519,17 +542,23 @@
 
 {#snippet imageCompare(before: string | null, after: string | null)}
     <div class="image-toolbar">
-      <button type="button" class:on={shell.imageMode === "side"} aria-pressed={shell.imageMode === "side"} onclick={() => (shell.imageMode = "side")}>{shell.tr("dialog.imageSide")}</button>
-      <button type="button" class:on={shell.imageMode === "swipe"} aria-pressed={shell.imageMode === "swipe"} onclick={() => (shell.imageMode = "swipe")}>{shell.tr("dialog.imageSwipe")}</button>
-      <button type="button" class:on={shell.imageMode === "onion"} aria-pressed={shell.imageMode === "onion"} onclick={() => (shell.imageMode = "onion")}>{shell.tr("dialog.imageOnion")}</button>
-      <button type="button" class:on={shell.imageMode === "pixel"} aria-pressed={shell.imageMode === "pixel"} onclick={() => { shell.imageMode = "pixel"; if (before && after) void shell.paintPixel(before, after); }}>{shell.tr("dialog.imagePixel")}</button>
+      <button type="button" class:on={shell.imageMode === "side"} aria-pressed={shell.imageMode === "side"} onclick={() => pickImageMode("side", before, after)}>{shell.tr("dialog.imageSide")}</button>
+      <button type="button" class:on={shell.imageMode === "swipe"} aria-pressed={shell.imageMode === "swipe"} onclick={() => pickImageMode("swipe", before, after)}>{shell.tr("dialog.imageSwipe")}</button>
+      <button type="button" class:on={shell.imageMode === "onion"} aria-pressed={shell.imageMode === "onion"} onclick={() => pickImageMode("onion", before, after)}>{shell.tr("dialog.imageOnion")}</button>
+      <button type="button" class:on={shell.imageMode === "pixel"} aria-pressed={shell.imageMode === "pixel"} disabled={!before || !after} onclick={() => pickImageMode("pixel", before, after)}>{shell.tr("dialog.imagePixel")}</button>
       {#if shell.imageMode === "swipe" || shell.imageMode === "onion"}
         <input type="range" min="0" max="100" bind:value={shell.imagePos} aria-label={shell.imageMode} />
       {/if}
     </div>
     <div class="image-stage" class:pair={shell.imageMode === "side"}>
-      {#if shell.imageMode === "pixel" && shell.pixelUrl}
-        <figure class="image-frame"><div class="image-box"><img alt={shell.tr("dialog.imagePixel")} src={shell.pixelUrl} onload={shell.fitImage.bind(shell)} /></div></figure>
+      {#if shell.imageMode === "pixel"}
+        <figure class="image-frame"><div class="image-box">
+          {#if shell.pixelUrl}
+            <img alt={shell.tr("dialog.imagePixel")} src={shell.pixelUrl} onload={shell.fitImage.bind(shell)} />
+          {:else if shell.pixelStatus !== "idle"}
+            <p class="meta" role="status">{shell.tr(shell.pixelStatus === "working" ? "dialog.imageWorking" : shell.pixelStatus === "too-large" ? "dialog.imageTooLarge" : "dialog.imageFailed")}</p>
+          {/if}
+        </div></figure>
       {:else if shell.imageMode === "side"}
         <figure class="image-frame">
           <figcaption class="del">{shell.tr("dialog.imageBefore")}</figcaption>

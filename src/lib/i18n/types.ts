@@ -501,6 +501,9 @@ export type Messages = {
     imageSwipe: string;
     imageOnion: string;
     imagePixel: string;
+    imageWorking: string;
+    imageTooLarge: string;
+    imageFailed: string;
     imageBefore: string;
     imageAfter: string;
     noToken: string;
