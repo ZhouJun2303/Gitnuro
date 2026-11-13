@@ -8,6 +8,7 @@
 
 ## 已处理
 
+- [x] 账户页同步账号慢，且同步结果在下次启动时丢失。现在本机凭据按批并发探测，超时后结束整个子进程树；同步结果由后端在设置队列里合并保存，窗口位置改为只写几何字段，不再用旧快照覆盖账号。修复：`76eb62d8`；回归：`sync_merge_keeps_one_copy_of_each_credential`、`sync_merge_fills_profile_fields_and_clears_legacy_tokens`、`probe_targets_keep_the_target_order`、`window_bounds_save_keeps_accounts_and_other_fields`，以及 `e2e/lab.spec.ts` 的 `account sync adopts the settings the backend saved`。
 - [x] 远程弹窗按地址显示协议、主机、仓库，并自动匹配已经同步的账号。多个账号时可改选。修复：`1127c87f`；回归：`e2e/lab.spec.ts` 的 `remote dialog shows the synced account for the URL`。
 - [x] 打开账户页不再自动同步本机账号。只有点击「同步本机已登录的账号」才读取本机已登录账号，其中包含 codeup.aliyun.com。阿里云登录打开 https://account.aliyun.com/ ，Git 主机仍是 codeup.aliyun.com。修复：`5f313cee`；回归：`recognizes_common_hosts_and_ssh_forms`，以及 `e2e/theme-panels.spec.ts` 的 `theme panel preferences accounts`，打开后同步行不出现「正在同步」，同步按钮可点。
 - [x] 首选项账户页按远程选用已登录账号。网页登录和测试连通走试验台桩，不打开浏览器、不访问网络。修复：`846cc1d5`；回归：`recognizes_common_hosts_and_ssh_forms`、`match_order_prefers_override_then_login_then_default`、`a_token_is_not_offered_to_another_host`、`legacy_token_is_not_duplicated`、`failure_text_does_not_contain_the_token`、`helper_args_leave_the_token_in_the_script`、`an_unpreferred_account_does_not_answer_an_empty_username`、`status_does_not_install_an_https_helper`，以及 `e2e/theme-panels.spec.ts` 的 `theme panel preferences accounts`、`e2e/lab.spec.ts` 的 `long dialogs keep their title and first field in view`。
