@@ -208,6 +208,12 @@ pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.
 
 Git 无法替换或写入工作区文件时，命令日志会逐个列出文件和原因。Windows 能识别占用程序时显示程序名与 PID，并提示保存工作、关闭文件或退出程序、在任务管理器核对残留进程，再刷新仓库状态并继续或重试操作。无法识别程序时，提示排查占用、只读属性和写权限，避免把所有访问失败都认定为占用。说明适用于各类文件及共用 Git 执行器的操作，原始 Git 错误仍完整保留并可复制。
 
+Windows 文件删除、替换或重命名遇到短暂占用时，通过 Git for Windows 的 `GIT_ASK_YESNO` 接口，在当前命令内部最多额外重试 6 次，每次等待 500 毫秒；子命令共享次数，取消操作会结束重试进程。MinGit 未包含 `sleep` 时使用 Windows PowerShell 计时。持续占用仍显示上面的文件和进程说明，不强制结束编辑器，不重跑可能已部分写入的整条 pull、checkout 或 stash。
+
+自动贮藏保留本地删除和暂存/未暂存状态，包括“新增文件暂存后又从磁盘删除”。Git 对排除 `.fakeignore` 的空清理补丁报错时，只有核实新贮藏已生成且工作区清理完成才继续；这类文件的删除记录与待恢复贮藏一起写入 `.git/awegit`，中止或继续变基后也能恢复。远端修改与本地删除构成的真实冲突仍保留冲突和备份。回归：`pnpm test:git pull_`；界面场景：`pull-deleted`，验证 `pnpm test:ui -- --reuse e2e/pull.spec.ts`。
+
+参考：[Fork Windows 发布记录](https://git-fork.com/releasenoteswin)公开了拉取时贮藏并恢复、恢复暂存状态的行为；其记录中的 LFS 解锁和 Git 索引锁清理，与 Windows 编辑器持有的文件句柄不同。文件重试接口依据 [Git for Windows 的实现](https://github.com/git-for-windows/git/blob/main/compat/mingw.c)，不假定 Fork 会强制释放其他程序的句柄。
+
 这类重要提示在日志中使用红色边框、16px 粗体标题和 14px 正文，文件、原因及程序/PID 加粗，窄窗口中自动换行且可以滚动查看解除步骤。从顶部“文件占用 / 访问受限”提示或错误列表打开，都能看到完整说明。试验台场景：`commands-file-access`、`commands-file-access-unknown`。相关验证：`pnpm test:git locks::tests` 和上方的 `file access errors` UI 用例；Windows 程序识别测试需要可访问 Restart Manager 的正常系统权限。
 
 ## 操作与冲突流程窗口

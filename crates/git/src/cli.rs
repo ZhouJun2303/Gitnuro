@@ -797,6 +797,14 @@ fn run_prepared_capped(
     for (key, value) in env {
         command.env(key, value);
     }
+    // Retry the individual Windows filesystem operation inside Git. Re-running
+    // a whole pull/stash/checkout after a partial write can lose local work.
+    #[cfg(windows)]
+    let _file_retry = if needs_passphrase(args) {
+        crate::locks::FileRetry::configure(&mut command)
+    } else {
+        None
+    };
     flow_command.configure(&mut command);
     let started = std::time::Instant::now();
     let owned = operation_path(repo);

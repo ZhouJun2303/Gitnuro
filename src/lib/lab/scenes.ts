@@ -80,6 +80,7 @@ export const dialogScenes = {
 } satisfies Record<LabDialog, LabScene>;
 
 export const surfaceScenes: LabScene[] = [
+  scene({ id: "pull-deleted", group: "仓库状态", title: "拉取 · 本地删除和暂存后删除", repo: "pull-deleted", ready: ".file-list" }),
   scene({ id: "operation-flow", group: "仓库状态", title: "完整流水线 · 当前冲突", repo: "rebase", ready: ".flow-node.active", href: "/?scene=operation-flow&view=flow&file=live" }),
   scene({ id: "operation-flow-pipeline", group: "仓库状态", title: "完整流水线 · 命令与预测归并", repo: "even", ready: ".flow-node.active", href: "/?scene=operation-flow-pipeline&view=flow&file=live" }),
   scene({ id: "operation-flow-details", group: "仓库状态", title: "步骤详情 · 长日志", repo: "even", ready: ".flow-node.active", href: "/?scene=operation-flow-details&view=flow&file=live" }),

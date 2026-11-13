@@ -7,8 +7,8 @@
 
 use std::path::Path;
 
-use crate::cli::run;
-use crate::model::{in_progress, pending_autostash, set_pending_autostash};
+use crate::cli::{run, run_stdin};
+use crate::model::{in_progress, pending_autostash, pending_autostash_deletions, set_pending_autostash};
 use crate::Error;
 
 /// What happened to the stash a finished operation had kept.
@@ -29,7 +29,7 @@ pub(crate) enum Restored {
 /// Stash every work-tree change, including untracked files, except the root
 /// `.fakeignore` that only AweGit reads. `None` when the tree has nothing to stash.
 pub(crate) fn push(repo: &Path, label: &str) -> Result<Option<String>, Error> {
-    let (paths, exclude_fakeignore) = {
+    let Changes { paths, exclude_fakeignore, index_only } = {
         let _phase = crate::timing_phase("autostash-check");
         changed_paths(repo)?
     };
@@ -60,15 +60,30 @@ pub(crate) fn push(repo: &Path, label: &str) -> Result<Option<String>, Error> {
     if exclude_fakeignore {
         args.extend(["--", ".", ":(exclude).fakeignore"]);
     }
-    { let _phase = crate::timing_phase("autostash-save"); run(repo, &args)?; }
+    let saved = { let _phase = crate::timing_phase("autostash-save"); run(repo, &args) };
     let after = stash_tip(repo);
     let oid = after.0.clone().unwrap_or_default();
+    if let Err(error) = saved {
+        // With an exclusion pathspec, Git can save and clean an index-only
+        // change (for example a staged new file deleted from disk), then fail
+        // while applying its empty cleanup patch. Accept only that exact case,
+        // after proving a new stash exists and every included change is saved.
+        let empty_cleanup = error.to_string().contains("No valid patches in input")
+            && !oid.is_empty() && before != after
+            && changed_paths(repo).map(|changes| {
+                changes.paths.iter().all(|path| changes.exclude_fakeignore && path == ".fakeignore")
+            }).unwrap_or(false);
+        if !empty_cleanup {
+            return Err(error);
+        }
+    }
     if oid.is_empty() || before == after {
         return Ok(None);
     }
-    if let Err(error) = set_pending_autostash(repo, Some(&oid)) {
+    if let Err(error) = set_pending_autostash(repo, Some(&oid), &index_only) {
         // Do not leave the work tree empty behind an error the caller will report.
-        if run(repo, &["stash", "apply", "--index", "stash@{0}"]).is_ok() {
+        if run(repo, &["stash", "apply", "--index", "stash@{0}"])
+            .and_then(|_| restore_worktree_deletions(repo, &oid, &index_only)).is_ok() {
             let _ = run(repo, &["stash", "drop", "stash@{0}"]);
         }
         return Err(error);
@@ -94,7 +109,7 @@ pub(crate) fn finish_if_settled(repo: &Path) -> Result<Restored, Error> {
         return Ok(Restored::Kept);
     }
     let Some(index) = stash_index(repo, &oid) else {
-        set_pending_autostash(repo, None)?;
+        set_pending_autostash(repo, None, &[])?;
         crate::flow::emit(crate::flow::Event {
             key: format!("restore-{oid}"), kind: "local-restore".into(), state: "failed".into(),
             stash: oid, detail: "stash-missing".into(), ..Default::default()
@@ -102,24 +117,29 @@ pub(crate) fn finish_if_settled(repo: &Path) -> Result<Restored, Error> {
         return Ok(Restored::Missing);
     };
     let selector = format!("stash@{{{index}}}");
+    let index_only = pending_autostash_deletions(repo)?;
     let event = crate::flow::Event {
         key: format!("restore-{oid}"), kind: "local-restore".into(), state: "running".into(),
         stash: oid.clone(), source: crate::flow::commit(repo, &oid), target: crate::flow::commit(repo, "HEAD"),
         base: crate::flow::commit(repo, &format!("{oid}^1")), ..Default::default()
     };
     crate::flow::emit(event.clone());
-    let applied = { let _phase = crate::timing_phase("autostash-restore"); run(repo, &["stash", "apply", "--index", &selector]) };
+    let applied = {
+        let _phase = crate::timing_phase("autostash-restore");
+        run(repo, &["stash", "apply", "--index", &selector])
+            .and_then(|output| restore_worktree_deletions(repo, &oid, &index_only).map(|_| output))
+    };
     match applied {
         Ok(_) => {
             let dropped = run(repo, &["stash", "drop", &selector]).is_ok();
-            set_pending_autostash(repo, None)?;
+            set_pending_autostash(repo, None, &[])?;
             crate::flow::emit(crate::flow::Event {
                 state: "completed".into(), detail: if dropped { "stash-restored" } else { "stash-restored-kept" }.into(), ..event
             });
             Ok(Restored::Applied)
         }
         Err(error) => {
-            set_pending_autostash(repo, None)?;
+            set_pending_autostash(repo, None, &[])?;
             if has_unmerged(repo) {
                 crate::flow::emit(crate::flow::Event { state: "conflict".into(), detail: "stash-kept".into(), ..event });
                 Ok(Restored::Conflict)
@@ -129,6 +149,29 @@ pub(crate) fn finish_if_settled(repo: &Path) -> Result<Restored, Error> {
             }
         }
     }
+}
+
+/// `stash apply --index` checks newly staged files out even when they were
+/// deleted again before the stash. Reapply only those missing worktree entries;
+/// Git validates their saved contents before removing them and leaves the index
+/// alone. An error keeps the stash, including the original staged contents.
+fn restore_worktree_deletions(repo: &Path, oid: &str, paths: &[String]) -> Result<(), Error> {
+    let index = format!("{oid}^2");
+    let base = format!("{oid}^1");
+    for path in paths {
+        crate::cli::check_path(path)?;
+        match std::fs::symlink_metadata(repo.join(path)) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(source) => return Err(Error::Read { path: path.clone(), source }),
+            Ok(_) => {}
+        }
+        let patch = run(repo, &[
+            "--literal-pathspecs", "diff", "--binary", "--no-color", "--no-ext-diff", "--no-textconv",
+            "--no-renames", "--diff-filter=D", "--src-prefix=a/", "--dst-prefix=b/", &index, &base, "--", path,
+        ])?;
+        run_stdin(repo, &["apply", "--whitespace=nowarn", "-"], &patch.stdout)?;
+    }
+    Ok(())
 }
 
 /// Refuse to start an operation while an earlier one still has a stash to restore
@@ -187,8 +230,16 @@ pub(crate) fn stash_message(prefix: &str, label: &str, files: Option<String>) ->
     }
 }
 
+struct Changes {
+    paths: Vec<String>,
+    exclude_fakeignore: bool,
+    // Git's stash worktree tree can include these index-only additions. Keep
+    // their absence separately, including across an interrupted rebase.
+    index_only: Vec<String>,
+}
+
 /// Work-tree paths from `status --porcelain -z`, in the order Git prints them.
-fn changed_paths(repo: &Path) -> Result<(Vec<String>, bool), Error> {
+fn changed_paths(repo: &Path) -> Result<Changes, Error> {
     if let Ok(changes) = changed_paths_native(repo) { return Ok(changes); }
     let output = run(
         repo,
@@ -197,40 +248,50 @@ fn changed_paths(repo: &Path) -> Result<(Vec<String>, bool), Error> {
     let text = String::from_utf8_lossy(&output.stdout);
     let mut entries = text.split('\0');
     let mut paths = Vec::new();
+    let mut index_only = Vec::new();
     while let Some(entry) = entries.next() {
         if entry.len() < 4 {
             continue;
         }
         let status = &entry[..2];
         paths.push(entry[3..].to_string());
+        if matches!(status.as_bytes(), [b'A' | b'R' | b'C', b'D']) {
+            index_only.push(entry[3..].to_string());
+        }
         if status.contains(['R', 'C']) {
             // A rename or copy prints its source path as the next entry.
             entries.next();
         }
     }
-    Ok((paths, fakeignore_is_untracked(repo)))
+    Ok(Changes { paths, exclude_fakeignore: fakeignore_is_untracked(repo), index_only })
 }
 
-fn changed_paths_native(path: &Path) -> Result<(Vec<String>, bool), Error> {
+fn changed_paths_native(path: &Path) -> Result<Changes, Error> {
     let repo = crate::open_repo(path)?;
     if repo.git_dir() != repo.common_dir() { return Err(Error::Git("use porcelain for linked-worktree exclude rules".into())); }
     let index = repo.index_or_empty().map_err(|error| Error::Git(error.to_string()))?;
     let exclude_fakeignore = path.join(".fakeignore").is_file()
         && index.entry_by_path(gix::bstr::BStr::new(b".fakeignore")).is_none();
-    let mut changes = Vec::new();
+    let mut staged = Vec::new();
+    let mut unstaged = Vec::new();
     let iter = repo.status(gix::progress::Discard)?
         .untracked_files(gix::status::UntrackedFiles::Collapsed)
         .into_iter(Vec::<gix::bstr::BString>::new())?;
     for item in iter {
         match item? {
-            gix::status::Item::TreeIndex(change) => crate::push_staged(&mut changes, change),
-            gix::status::Item::IndexWorktree(change) => crate::push_unstaged(&mut changes, change),
+            gix::status::Item::TreeIndex(change) => crate::push_staged(&mut staged, change),
+            gix::status::Item::IndexWorktree(change) => crate::push_unstaged(&mut unstaged, change),
         }
     }
-    let mut paths: Vec<_> = changes.into_iter().map(|change| change.path).collect();
+    let deleted: std::collections::HashSet<_> = unstaged.iter()
+        .filter(|change| change.kind == crate::ChangeKind::Deleted).map(|change| &change.path).collect();
+    let index_only = staged.iter().filter(|change| {
+        matches!(change.kind, crate::ChangeKind::Added | crate::ChangeKind::Renamed) && deleted.contains(&change.path)
+    }).map(|change| change.path.clone()).collect();
+    let mut paths: Vec<_> = staged.into_iter().chain(unstaged).map(|change| change.path).collect();
     paths.sort();
     paths.dedup();
-    Ok((paths, exclude_fakeignore))
+    Ok(Changes { paths, exclude_fakeignore, index_only })
 }
 
 fn describe_paths(paths: &[String]) -> String {

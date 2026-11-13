@@ -402,6 +402,22 @@ function seedOperationRepo() {
   git(path, ["checkout", "main"]); write(path, "note.txt", "uncommitted work\n");
 }
 
+function seedPullDeletedRepo() {
+  const path = join(repos, "pull-deleted");
+  const upstream = join(repos, "pull-deleted-upstream");
+  wipe(path); wipe(upstream); initWork(upstream);
+  commit(upstream, "deleted.txt", "base\n", "base");
+  commit(upstream, "remote.txt", "base\n", "remote base");
+  cloneFrom(fileUrl(upstream), path);
+  commit(upstream, "remote.txt", "remote update\n", "remote update");
+  git(path, ["fetch", "origin"]);
+  rmSync(join(path, "deleted.txt"));
+  write(path, "new.txt", "staged new file\n");
+  git(path, ["add", "new.txt"]);
+  rmSync(join(path, "new.txt"));
+  write(path, ".fakeignore", "local-only\n");
+}
+
 function seedRevertRepo() {
   const path = join(repos, "revert");
   wipe(path);
@@ -436,6 +452,7 @@ function seedTagsRepo() {
 }
 
 const restore = {
+  "pull-deleted": seedPullDeletedRepo,
   tags: seedTagsRepo,
   operation: seedOperationRepo,
   conflict: seedConflictRepo,
@@ -637,6 +654,7 @@ seedConflictRepo();
 seedMergeRepo();
 seedRebaseRepo();
 seedOperationRepo();
+seedPullDeletedRepo();
 seedCherryRepo();
 seedRevertRepo();
 seedTagsRepo();

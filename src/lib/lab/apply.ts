@@ -90,7 +90,7 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.progress = null;
     return;
   }
-  if (id === "changes") {
+  if (id === "changes" || id === "pull-deleted") {
     shell.section = "changes";
     return;
   }

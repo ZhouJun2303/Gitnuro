@@ -187,6 +187,7 @@ fn layout() -> Result<Value, String> {
         "merge": text(repos.join("merge")),
         "rebase": text(repos.join("rebase")),
         "operation": text(repos.join("operation")),
+        "pull-deleted": text(repos.join("pull-deleted")),
         "cherry": text(repos.join("cherry")),
         "revert": text(repos.join("revert")),
         "detached": text(repos.join("detached")),

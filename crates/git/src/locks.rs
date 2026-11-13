@@ -6,6 +6,58 @@
 
 use std::path::Path;
 
+/// Git for Windows calls GIT_ASK_YESNO only after its short internal filesystem
+/// retries fail. Keep a shared, bounded retry budget for this command and all
+/// its children, while the normal process group still supports cancellation.
+#[cfg(windows)]
+pub(crate) struct FileRetry(std::path::PathBuf);
+
+#[cfg(windows)]
+impl FileRetry {
+    pub(crate) fn configure(command: &mut std::process::Command) -> Option<Self> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let powershell = std::path::PathBuf::from(std::env::var_os("SystemRoot")?)
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+        let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("awegit-file-retry-{}-{stamp}-{seq}", std::process::id()));
+        std::fs::create_dir(&dir).ok()?;
+        let guard = Self(dir);
+        let script = guard.0.join("retry.sh");
+        // Atomic mkdir tickets also bound parallel submodule children. Paths
+        // from Git are never interpreted as shell code or used for deletion.
+        std::fs::write(&script, r#"#!/bin/sh
+case "$1" in
+  "Unlink of file "*|"Deletion of directory "*|"Rename from "*) ;;
+  *) exit 1 ;;
+esac
+for attempt in 1 2 3 4 5 6; do
+  if mkdir "$0.retry-$attempt" 2>/dev/null; then
+    if command -v sleep >/dev/null 2>&1; then
+      sleep 0.5 || exit 1
+    else
+      "$AWEGIT_RETRY_POWERSHELL" -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command 'Start-Sleep -Milliseconds 500' || exit 1
+    fi
+    exit 0
+  fi
+done
+exit 1
+"#).ok()?;
+        command.env("GIT_ASK_YESNO", script);
+        // MinGit ships sh and mkdir, but omits sleep. Use the Windows timer in
+        // that case; do not depend on another Git installation being on PATH.
+        command.env("AWEGIT_RETRY_POWERSHELL", powershell);
+        Some(guard)
+    }
+}
+
+#[cfg(windows)]
+impl Drop for FileRetry {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// Lines Git prints when a work-tree file cannot be replaced or removed.
 const FILE_MARKERS: [&str; 5] = [
     "unable to unlink old ",
