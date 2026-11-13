@@ -1,6 +1,7 @@
 mod accounts;
 mod ai;
 mod changes;
+mod development;
 mod forge;
 mod flow_window;
 mod flows;
@@ -510,6 +511,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         _ => repo.clone(),
     };
     let _turn = repo_turn(&next);
+    development::check_delete(&repo, &request)?;
     apply_session();
     let _https = accounts::install_https(&repo, &request);
     record_action(&request);

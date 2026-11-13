@@ -88,6 +88,8 @@ pnpm start
 
 1420 上已经有页面服务时，`pnpm start` 和 `pnpm dev` 都会沿用并持续监测它；服务停止后自动接管，自己启动的 Vite 意外退出时也会重启。退出试验台时只停止自己启动的进程，沿用的页面服务继续运行。启动、退出原因和 Vite 输出保存在 `.lab/logs/dev-server.log`。
 
+开发版会拒绝在其编译时的源码工作副本中执行「删除」或「删除所选」，避免删掉 Vite 正在加载的模块和 Cargo 入口文件。需要删除该工作副本中的文件时，使用已安装的正式版；开发测试使用 `.lab` 中的独立仓库。恢复已删除文件可用「丢弃修改」。
+
 设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令只留在当前进程里，HTTPS 密码交给 Git 的凭据存储。API key、代理密码和各平台 token 放在系统凭据库（Windows 凭据管理器、macOS 钥匙串），配置文件里这些字段是空的。
 
 重新链接桌面程序前先关掉 `awegit.exe`。它占着 `WebView2Loader.dll` 时，`cargo build -p awegit` 会失败。Vite 可以留着。
