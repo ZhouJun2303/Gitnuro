@@ -8,7 +8,7 @@
 
 ## 已处理
 
-- [x] 远程弹窗按地址显示协议、主机、仓库，并自动匹配已经同步的账号。多个账号时可改选。回归：`e2e/lab.spec.ts` 的 `remote dialog shows the synced account for the URL`。
+- [x] 远程弹窗按地址显示协议、主机、仓库，并自动匹配已经同步的账号。多个账号时可改选。修复：`1127c87f`；回归：`e2e/lab.spec.ts` 的 `remote dialog shows the synced account for the URL`。
 - [x] 打开账户页不再自动同步本机账号。只有点击「同步本机已登录的账号」才读取本机已登录账号，其中包含 codeup.aliyun.com。阿里云登录打开 https://account.aliyun.com/ ，Git 主机仍是 codeup.aliyun.com。修复：`5f313cee`；回归：`recognizes_common_hosts_and_ssh_forms`，以及 `e2e/theme-panels.spec.ts` 的 `theme panel preferences accounts`，打开后同步行不出现「正在同步」，同步按钮可点。
 - [x] 首选项账户页按远程选用已登录账号。网页登录和测试连通走试验台桩，不打开浏览器、不访问网络。修复：`846cc1d5`；回归：`recognizes_common_hosts_and_ssh_forms`、`match_order_prefers_override_then_login_then_default`、`a_token_is_not_offered_to_another_host`、`legacy_token_is_not_duplicated`、`failure_text_does_not_contain_the_token`、`helper_args_leave_the_token_in_the_script`、`an_unpreferred_account_does_not_answer_an_empty_username`、`status_does_not_install_an_https_helper`，以及 `e2e/theme-panels.spec.ts` 的 `theme panel preferences accounts`、`e2e/lab.spec.ts` 的 `long dialogs keep their title and first field in view`。
 - [x] Git for Windows 在文件被占用时，`checkout` 可能以退出码 0 切走分支，工作区文件仍是旧内容。现在这类命令返回占用说明，不把分支切回去。失败信息只写在 stdout 时（例如 `nothing to commit`），详情改用这段输出，最多 500 字。修复：`6a2d7f6c`；回归：`writes_name_the_process_and_explain_how_to_release_the_file`、`empty_commit_failure_includes_the_stdout_explanation`。
