@@ -8,6 +8,7 @@
 
 ## 已处理
 
+- [x] 变化视图的提交类型菜单在 Apple 主题下跑到窗口右下角。毛玻璃面板的 `backdrop-filter` 成了 `position: fixed` 菜单的包含块；菜单现渲染在右侧面板之外，跟随类型按钮并在按钮上方展开。修复：`8a42f441`；回归：`e2e/theme-panels.spec.ts` 的 `theme panel changes`（Apple、经典白色、VS Code 黑色）。
 - [x] 文件历史、提交树和树内文件读取在写入页面前校验仓库与请求代次，迟到结果和错误不再覆盖新选择；提交图按完整历史查找父提交，修复分帧边界断线，并在历史或折叠关系变化后重新分帧构建；线性历史跳过祖先位集，合并展开/收起复用历史分析。修复：本条所在提交 `fix: 修复历史读取竞态和提交图断线并复用合并分析`；回归：`e2e/history-regressions.spec.ts` 的 `history rejects late`、`history graph frames match a complete build across merge boundaries`、`history fold skips linear ancestors and reuses merge analysis when toggled`，以及三套主题的 `theme panel history`、`theme panel file tree`、`theme panel file history`。
 - [x] 分栏差异的左右两列横向滚动条保持同步：拖动任一侧，另一侧跟随；两边内容宽度不同时，跟随侧停在自己的最右端，拖回范围内再继续跟随。变更、提交详情和文件历史三个分栏面板共用同一实现。修复：`46a6c3b9`；回归：`e2e/lab.spec.ts` 的 `split view scrolls both columns together`，以及 `e2e/theme-panels.spec.ts` 的 `theme panel diff text`、`theme panel commit detail`、`theme panel file history`（Apple、经典白色、VS Code 黑色）。
 - [x] 账户页同步账号慢，且同步结果在下次启动时丢失。现在本机凭据按批并发探测，超时后结束整个子进程树；同步结果由后端在设置队列里合并保存，窗口位置改为只写几何字段，不再用旧快照覆盖账号。修复：`76eb62d8`；回归：`sync_merge_keeps_one_copy_of_each_credential`、`sync_merge_fills_profile_fields_and_clears_legacy_tokens`、`probe_targets_keep_the_target_order`、`window_bounds_save_keeps_accounts_and_other_fields`，以及 `e2e/lab.spec.ts` 的 `account sync adopts the settings the backend saved`。
