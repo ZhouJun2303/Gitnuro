@@ -59,12 +59,6 @@
     color: var(--deleted);
   }
 
-.dialog-lead-brand {
-    width: 34px;
-    height: 34px;
-    flex: none;
-  }
-
 .dialog-lead-copy {
     display: flex;
     flex-direction: column;

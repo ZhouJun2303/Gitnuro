@@ -197,15 +197,12 @@
 .side-wordmark {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
     min-width: 0;
     font-family: var(--font-display);
     font-size: 15px;
     font-weight: 650;
     letter-spacing: -0.035em;
   }
-
-.side-logo { display: block; width: 23px; height: 23px; flex: none; }
 
 .side-brand .icon-btn {
     width: 28px;

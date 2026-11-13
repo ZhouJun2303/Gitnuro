@@ -268,7 +268,6 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 :root[data-theme="dark"] .vertical-tabs .tab.active::after { top: 4px; bottom: 4px; right: auto; height: auto; width: 1px; }
 :root[data-theme="dark"] .sidebar .side.selected { box-shadow: inset 2px 0 0 #a0a0a0; }
 :root[data-theme="dark"] .commit { box-shadow: none; }
-:root[data-theme="dark"] .welcome-logo { filter: none; }
 :root[data-theme="dark"] .welcome-btn:hover { transform: none; box-shadow: none; }
 :root[data-theme="dark"] :is(.repo-row.current, .command-item.current),
 :root[data-theme="dark"] :is(.repo-row.current, .command-item.current):hover { background: var(--selection); color: var(--text); box-shadow: inset 2px 0 0 #8a8a8a; }

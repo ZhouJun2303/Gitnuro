@@ -12,7 +12,7 @@ import { featuresPageUrl } from "../featuresPage";
 import { fileAccessReport } from "../fileAccess";
 import { resolveLocale, translate } from "../i18n";
 import { broadcastLocale, onLocaleChange } from "../i18n/sync";
-import { isAppearance, onAppearanceChange, resolveAppearance } from "../appearance";
+import { isAppearance, onAppearanceChange, resolveAppearance, type Appearance } from "../appearance";
 import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
 import { shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
@@ -507,6 +507,9 @@ export class ShellState {
           groupNames: ["D:\\work" + "\t" + "工作", "D:\\personal" + "\t" + "个人"],
         },
   );
+
+
+  appliedTheme = $state<Appearance>("apple");
 
 
   repos = $state<string[]>([]);
@@ -6448,6 +6451,7 @@ export class ShellState {
     const resolved = () => resolveAppearance(this.settings.theme, media?.matches ?? false);
     const paint = () => {
     const theme = resolved();
+    this.appliedTheme = theme;
     root.setAttribute("data-theme", theme);
     root.lang = this.activeLocale === "zh" ? "zh-CN" : "en";
     if (this.inApp()) void getCurrentWindow().setTheme(theme === "dark" ? "dark" : "light").catch(() => {});

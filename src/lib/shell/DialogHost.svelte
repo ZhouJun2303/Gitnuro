@@ -3,7 +3,6 @@
   import "./DialogHost.css";
   import PrefsDialog from "./PrefsDialog.svelte";
   import UpdatePanel from "./UpdatePanel.svelte";
-  import BrandMark from "./BrandMark.svelte";
   import { flushClientLog, invoke } from "../perf";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { cloneTarget, cloneUrl } from "../clonePath";
@@ -707,13 +706,8 @@
             <button class="commit" type="button" onclick={() => { shell.openFeaturesPage(); shell.dialog = null; }}>{shell.tr("dialog.featuresOpen")}</button>
           </div>
         {:else if shell.dialog === "about"}
-          <div class="dialog-lead">
-            <span class="dialog-lead-brand" aria-hidden="true"><BrandMark /></span>
-            <div class="dialog-lead-copy">
-              <h2>{shell.tr("dialog.about")} {shell.appVersion}</h2>
-              <p class="empty">{shell.tr("dialog.aboutBody")}</p>
-            </div>
-          </div>
+          <h2>{shell.tr("dialog.about")} {shell.appVersion}</h2>
+          <p class="empty">{shell.tr("dialog.aboutBody")}</p>
           {#if shell.gitRuntime?.version}
             <p class="empty">{shell.tr("chrome.gitSummary", { version: shell.gitRuntime.version, program: shell.gitRuntime.program })}</p>
             {#if !shell.gitRuntime.lfs}<p class="empty">{shell.tr("chrome.gitNoLfs")}</p>{/if}

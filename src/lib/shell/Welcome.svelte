@@ -1,7 +1,6 @@
 <script lang="ts">
   import { getShell } from "./context";
   import "./Welcome.css";
-  import BrandMark from "./BrandMark.svelte";
   import type { SearchKey } from "./types";
 
   const shell = getShell();
@@ -11,7 +10,6 @@
 <div class="welcome-view">
       <div class="welcome-card">
         <div class="welcome-brand">
-          <span class="welcome-logo"><BrandMark /></span>
           <div class="welcome-titles">
             <h1>AweGit</h1>
             <p>{shell.tr("chrome.welcomeTagline")}</p>

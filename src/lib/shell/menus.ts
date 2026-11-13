@@ -1,6 +1,7 @@
 import { invoke } from "../perf";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { shortcut, shortcutLabel, typing } from "../keys";
+import { resolveAppearance } from "../appearance";
 import {
     badge,
     type BlameLine,
@@ -175,13 +176,16 @@ export function stashItems(shell: ShellState) {
 
 export function appearanceItems(shell: ShellState) {
     const mark = (value: string) => ((shell.settings.theme || "apple") === value ? "✓ " : "");
+    const systemTheme = resolveAppearance("system", window.matchMedia("(prefers-color-scheme: dark)").matches);
+    const systemLabel = shell.tr(systemTheme === "dark" ? "dialog.dark" : "dialog.light");
     const pick = (value: string) => () => {
       shell.settings.theme = value;
       void shell.savePrefs(false);
     };
     return [
+      { label: `${mark("system")}${shell.tr("dialog.followSystem")}`, shortcut: systemLabel, run: pick("system") },
+      { sep: true, label: "" },
       { label: `${mark("apple")}${shell.tr("dialog.apple")}`, run: pick("apple") },
-      { label: `${mark("system")}${shell.tr("dialog.system")}`, run: pick("system") },
       { label: `${mark("light")}${shell.tr("dialog.light")}`, run: pick("light") },
       { label: `${mark("dark")}${shell.tr("dialog.dark")}`, run: pick("dark") },
       { sep: true, label: "" },

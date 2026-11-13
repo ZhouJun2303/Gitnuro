@@ -95,7 +95,6 @@
 :root[data-theme="apple"] .side-pin { padding: 12px 0 8px; background: transparent; border-bottom: 0; }
 :root[data-theme="apple"] .side-brand { height: 38px; padding: 0 12px 0 16px; margin-bottom: 6px; }
 :root[data-theme="apple"] .side-wordmark { font-size: 16px; letter-spacing: -0.035em; }
-:root[data-theme="apple"] .side-logo { width: 25px; height: 25px; }
 :root[data-theme="apple"] .side { width: calc(100% - 20px); margin: 0 10px; border-radius: 8px; }
 :root[data-theme="apple"] .sidebar .side.selected { background: rgba(255, 255, 255, 0.78); color: var(--text); box-shadow: inset 0 1px 0 #fff, 0 2px 5px rgba(60, 44, 60, 0.06); }
 :root[data-theme="apple"] .side.nav.selected .count { background: rgba(0, 0, 0, 0.055); color: var(--text-secondary); }
@@ -133,7 +132,6 @@
 
 :root[data-theme="apple"] .welcome-view { background: transparent; }
 :root[data-theme="apple"] .welcome-brand { flex-direction: column; gap: 16px; text-align: center; }
-:root[data-theme="apple"] .welcome-logo { width: 72px; height: 72px; filter: drop-shadow(0 8px 12px rgba(55, 35, 55, 0.14)); }
 :root[data-theme="apple"] .welcome-titles h1 { font-size: 42px; font-weight: 600; }
 :root[data-theme="apple"] .welcome-titles p { font-size: 14px; letter-spacing: 0; }
 :root[data-theme="apple"] :is(.welcome-btn, .welcome-recent) { background: rgba(255, 255, 255, 0.42); border-color: var(--glass-edge); backdrop-filter: blur(20px); box-shadow: var(--glass-shadow); }
@@ -225,7 +223,6 @@
 
 @media (max-width: 600px) {
   :root[data-theme="apple"] .welcome-brand { flex-direction: row; text-align: left; gap: 16px; }
-  :root[data-theme="apple"] .welcome-logo { width: 52px; height: 52px; }
   :root[data-theme="apple"] .welcome-titles h1 { font-size: 32px; }
   :root[data-theme="apple"] .welcome-btn { padding: 14px; }
 }

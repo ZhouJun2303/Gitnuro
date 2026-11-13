@@ -30,14 +30,6 @@
     padding: 0 4px 8px;
   }
 
-.welcome-logo {
-    display: block;
-    width: 62px;
-    height: 62px;
-    flex: none;
-    filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.15));
-  }
-
 .welcome-titles h1 {
     margin: 0;
     font-family: var(--font-display);
