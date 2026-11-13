@@ -8,6 +8,7 @@
 
 ## 已处理
 
+- [x] 分栏差异的左右两列横向滚动条保持同步：拖动任一侧，另一侧跟随；两边内容宽度不同时，跟随侧停在自己的最右端，拖回范围内再继续跟随。变更、提交详情和文件历史三个分栏面板共用同一实现。修复：`46a6c3b9`；回归：`e2e/lab.spec.ts` 的 `split view scrolls both columns together`，以及 `e2e/theme-panels.spec.ts` 的 `theme panel diff text`、`theme panel commit detail`、`theme panel file history`（Apple、经典白色、VS Code 黑色）。
 - [x] 账户页同步账号慢，且同步结果在下次启动时丢失。现在本机凭据按批并发探测，超时后结束整个子进程树；同步结果由后端在设置队列里合并保存，窗口位置改为只写几何字段，不再用旧快照覆盖账号。修复：`76eb62d8`；回归：`sync_merge_keeps_one_copy_of_each_credential`、`sync_merge_fills_profile_fields_and_clears_legacy_tokens`、`probe_targets_keep_the_target_order`、`window_bounds_save_keeps_accounts_and_other_fields`，以及 `e2e/lab.spec.ts` 的 `account sync adopts the settings the backend saved`。
 - [x] 远程弹窗按地址显示协议、主机、仓库，并自动匹配已经同步的账号。多个账号时可改选。修复：`1127c87f`；回归：`e2e/lab.spec.ts` 的 `remote dialog shows the synced account for the URL`。
 - [x] 打开账户页不再自动同步本机账号。只有点击「同步本机已登录的账号」才读取本机已登录账号，其中包含 codeup.aliyun.com。阿里云登录打开 https://account.aliyun.com/ ，Git 主机仍是 codeup.aliyun.com。修复：`5f313cee`；回归：`recognizes_common_hosts_and_ssh_forms`，以及 `e2e/theme-panels.spec.ts` 的 `theme panel preferences accounts`，打开后同步行不出现「正在同步」，同步按钮可点。
