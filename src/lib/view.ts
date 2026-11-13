@@ -58,13 +58,19 @@ export type GraphResume = {
   rows: GraphCell[][];
 };
 
-/** One row of the commit graph. Columns line up across the list. Pass the previous build when `commits` only grew at the end. */
-export function commitGraph(commits: { id: string; parents: string[] }[], resume?: GraphResume): GraphBuild {
+const graphIndices = new WeakMap<object, Map<string, number>>();
+
+/** Build up to `end` rows using the full history to keep parents across frame boundaries. */
+export function commitGraph(commits: { id: string; parents: string[] }[], resume?: GraphResume, end = commits.length): GraphBuild {
   const columns = resume ? resume.columns.slice() : [];
   const rows = resume ? resume.rows.slice() : [];
   const laneOf = new Map<string, number>();
-  const indexOf = new Map<string, number>();
-  for (let index = 0; index < commits.length; index += 1) indexOf.set(commits[index].id, index);
+  let indexOf = graphIndices.get(commits);
+  if (!indexOf) {
+    indexOf = new Map<string, number>();
+    for (let index = 0; index < commits.length; index += 1) indexOf.set(commits[index].id, index);
+    graphIndices.set(commits, indexOf);
+  }
   for (let index = 0; index < columns.length; index++) {
     const id = columns[index];
     if (id && !laneOf.has(id)) laneOf.set(id, index);
@@ -89,7 +95,7 @@ export function commitGraph(commits: { id: string; parents: string[] }[], resume
     }
   };
 
-  for (let i = resume?.count ?? 0; i < commits.length; i++) {
+  for (let i = resume?.count ?? 0; i < Math.min(end, commits.length); i++) {
     const commit = commits[i];
     let lane = laneOf.get(commit.id);
     const hasUp = lane !== undefined;
@@ -195,17 +201,20 @@ export type MergeFold = {
   owner: Map<string, string>;
 };
 
-/** Branches that left the first parent and were merged back. Collapsed merges keep only the first parent. */
-export function foldedMerges(commits: { id: string; parents?: string[] }[], expanded: readonly string[]): MergeFold {
-  const hidden = new Set<string>();
-  const straight = new Set<string>();
-  const owner = new Map<string, string>();
-  const n = commits.length;
-  if (n === 0) return { hidden, straight, owner };
-  // The ancestor bitsets cost O(n²/32) time and memory. Past this size the graph still
-  // draws every branch, but merges are no longer folded; the list stays interactive.
-  if (n > 25_000) return { hidden, straight, owner };
+type FoldCommit = { id: string; parents?: string[] };
+const mergeBubbleCache = new WeakMap<FoldCommit[], Array<string[] | undefined>>();
 
+/** Ancestors depend on history, never on which merges the user expanded. */
+function mergeBubbles(commits: FoldCommit[]): Array<string[] | undefined> {
+  const cached = mergeBubbleCache.get(commits);
+  if (cached) return cached;
+  const n = commits.length;
+  // Bound ancestor bitsets to O(n²/32); larger histories draw without folding.
+  if (n === 0 || n > 25_000 || !commits.some((commit) => (commit.parents?.length ?? 0) > 1)) {
+    const empty: Array<string[] | undefined> = [];
+    mergeBubbleCache.set(commits, empty);
+    return empty;
+  }
   // Ancestor bitsets, one per commit, freed once every child has been folded.
   // Walking each merge back to the root is quadratic and freezes a long history.
   const index = new Map<string, number>();
@@ -238,7 +247,7 @@ export function foldedMerges(commits: { id: string; parents?: string[] }[], expa
       if (indeg[child] === 0) queue.push(child);
     }
   }
-  if (oldestFirst.length !== n) return { hidden, straight, owner };
+  if (oldestFirst.length !== n) return [];
 
   const words = (n + 31) >>> 5;
   const rows: Array<Uint32Array | null> = new Array(n);
@@ -277,6 +286,18 @@ export function foldedMerges(commits: { id: string; parents?: string[] }[], expa
     }
   }
 
+  mergeBubbleCache.set(commits, bubbles);
+  return bubbles;
+}
+
+/** Branches that left the first parent and were merged back. Collapsed merges keep only the first parent. */
+export function foldedMerges(commits: FoldCommit[], expanded: readonly string[]): MergeFold {
+  const hidden = new Set<string>();
+  const straight = new Set<string>();
+  const owner = new Map<string, string>();
+  const bubbles = mergeBubbles(commits);
+  if (bubbles.length === 0) return { hidden, straight, owner };
+  const n = commits.length;
   const open = new Set(expanded);
   for (let id = 0; id < n; id += 1) {
     const side = bubbles[id];

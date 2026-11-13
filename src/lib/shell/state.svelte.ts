@@ -776,9 +776,6 @@ export class ShellState {
   patchSplits = new Map<string, { lines: DiffLine[]; rows: SplitRow[]; columns: { left: number; right: number } }>();
 
 
-  graphResume: { ids: string[]; columns: Array<string | null>; rows: GraphCell[][]; width: number } | null = null;
-
-
   /** Plain cache. The row arrays stay off `$state` so a long graph is not deeply proxied. */
   graphItems: CommitRow[] | null = null;
 
@@ -1930,7 +1927,7 @@ export class ShellState {
       return { rows: this.graphRows, width: this.graphWidth, columns: this.graphColumns };
     }
     const limit = items.length > GRAPH_SYNC_LIMIT ? Math.min(items.length, 400) : items.length;
-    const built = commitGraph(laneCommits(items.slice(0, limit), this.liveFold.straight));
+    const built = commitGraph(laneCommits(items, this.liveFold.straight), undefined, limit);
     return { rows: built.rows, width: built.width, columns: built.columns };
   });
 
@@ -6397,11 +6394,8 @@ export class ShellState {
         return;
       }
       const commits = laneCommits(items, straight);
-      const prev = this.graphResume;
-      const prefix = !!prev && prev.ids.length <= commits.length && prev.ids.every((id, index) => id === commits[index].id);
-      let count = prefix && prev ? prev.ids.length : 0;
-      let resume: { columns: Array<string | null>; count: number; rows: GraphCell[][] } | undefined =
-        prefix && prev ? { columns: prev.columns, count: prev.ids.length, rows: prev.rows } : undefined;
+      let count = 0;
+      let resume: { columns: Array<string | null>; count: number; rows: GraphCell[][] } | undefined;
       const publish = (rows: GraphCell[][], width: number, columns: Array<string | null>) => {
         this.graphRows = rows;
         this.graphWidth = width;
@@ -6409,20 +6403,15 @@ export class ShellState {
         this.graphItems = items;
         this.graphVersion = ++this.graphEpoch;
       };
-      if (count >= commits.length && prev) {
-        publish(prev.rows, prev.width, prev.columns);
-        return;
-      }
       let frame = 0;
       let first = true;
       const pump = () => {
         if (count >= commits.length) return;
         const next = Math.min(commits.length, count + (first ? 2000 : 5000));
         first = false;
-        const built = commitGraph(commits.slice(0, next), resume);
+        const built = commitGraph(commits, resume, next);
         count = next;
         resume = { columns: built.columns, count, rows: built.rows };
-        this.graphResume = { ids: commits.slice(0, count).map((commit) => commit.id), columns: built.columns, rows: built.rows, width: built.width };
         publish(built.rows, built.width, built.columns);
         if (count < commits.length) frame = requestAnimationFrame(pump);
       };
