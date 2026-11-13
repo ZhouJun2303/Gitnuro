@@ -9,6 +9,7 @@
 ## 已处理
 
 - [x] 历史文件、提交树和版本比较改用 NUL 分隔的 Git 路径，保留中文、特殊字符与重命名前路径；Blame 按提交 ID 缓存作者和摘要，修复同一提交间隔出现时串用元数据。修复：本条所在提交 `fix: 修复历史读取和路径解析并消除图片差分卡顿`；回归：`history_paths_round_trip_without_git_quoting`、`blame_preserves_metadata_when_a_commit_reappears`。
+- [x] Reset 面板按参考布局显示当前分支、目标提交与摘要，并以带颜色、说明和快捷键的下拉框选择 Soft / Mixed / Hard；每次打开默认 Soft，保留原有确认。修复：本条所在提交 `feat: 统一重置面板并默认使用 Soft`；回归：`e2e/reset.spec.ts` 的 `reset panel`、`e2e/lab.spec.ts` 的 `resetting a branch asks before it moves`，以及三套主题的 `scene dialog-reset`。
 - [x] 前进/后退在每次异步读取后校验仓库、打开代次、导航代次及当前选择；Blame 和内容搜索忽略旧结果与旧错误，关闭搜索结果时取消其后续回写。修复：本条所在提交 `fix: 修复历史读取和路径解析并消除图片差分卡顿`；回归：`e2e/history-regressions.spec.ts` 的 `navigation`、`async reads`，以及三套主题的历史、提交详情、文件树、文件历史、搜索和 Blame 场景。
 - [x] 像素差分的解码、分块计算和 PNG 编码移入 Worker，逐块像素缓冲上限为 512KiB，输出总像素上限为 4096×4096、单边上限为 16384；旧 WebView 使用按帧让出的分块兼容实现。切换图片/模式或刷新会取消旧计算并释放预览；刷新回到并排视图，超大图片和读取失败有提示并可重试。修复：本条所在提交 `fix: 修复历史读取和路径解析并消除图片差分卡顿`；回归：`e2e/image-diff.spec.ts` 的 `pixel comparison`、`image panel`（Apple、经典白色、VS Code 黑色），以及三套主题的 `theme panel diff image`。本地 Chromium 的 4K 探针没有记录到主线程长任务；缓冲上限不含图像、画布和编码器内存。
 - [x] 变化视图的提交类型菜单在 Apple 主题下跑到窗口右下角。毛玻璃面板的 `backdrop-filter` 成了 `position: fixed` 菜单的包含块；菜单现渲染在右侧面板之外，跟随类型按钮并在按钮上方展开。修复：`8a42f441`；回归：`e2e/theme-panels.spec.ts` 的 `theme panel changes`（Apple、经典白色、VS Code 黑色）。

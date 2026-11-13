@@ -627,7 +627,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.updateSpeed = sceneId === "update-downloading" ? 2_400_000 : null;
       break;
     case "reset":
-      shell.draft = head.slice(0, 7) || "HEAD";
+      shell.openReset(head, shell.commitsLive[0]?.summary ?? "");
       break;
     case "command":
       shell.settings = {

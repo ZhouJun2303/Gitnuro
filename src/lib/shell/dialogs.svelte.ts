@@ -1694,7 +1694,7 @@ export async function cancelOperation(shell: ShellState, path: string) {
   }
 
 export function hardReset(shell: ShellState) {
-    shell.ask(shell.tr("dialog.hardReset"), shell.tr("dialog.hardResetBody"), () => void shell.mutate({ action: "reset", rev: shell.draft || "HEAD", mode: "hard" }), [], { danger: true });
+    shell.confirmReset(shell.draft || "HEAD", "hard", shell.draftExtra);
   }
 
 export async function selectWorkspace(shell: ShellState) {

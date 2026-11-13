@@ -30,6 +30,15 @@
     padding-right: 26px;
   }
 
+.dialog.sm[data-dialog="reset"] {
+    width: min(680px, calc(100vw - 32px));
+    overflow: visible;
+  }
+
+.dialog[data-dialog="reset"] form {
+    overflow: visible;
+  }
+
 .dialog-lead {
     display: flex;
     align-items: flex-start;

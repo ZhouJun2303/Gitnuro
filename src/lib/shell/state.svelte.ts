@@ -598,6 +598,9 @@ export class ShellState {
   draftExtra = $state("");
 
 
+  resetMode = $state<"soft" | "mixed" | "hard">("soft");
+
+
   /** The remote dialog edits an existing remote's URL instead of adding one. */
   remoteEdit = $state(false);
 
@@ -3475,12 +3478,20 @@ export class ShellState {
   }
 
 
-  confirmReset(rev: string, mode: "soft" | "mixed", summary = "") {
+  openReset(rev: string, summary = "") {
+    this.draft = rev;
+    this.draftExtra = summary;
+    this.resetMode = "soft";
+    this.dialog = "reset";
+  }
+
+
+  confirmReset(rev: string, mode: "soft" | "mixed" | "hard", summary = "") {
     const short = rev.slice(0, 7);
     const target = summary ? `${short} "${summary}"` : short;
-    const title = this.tr(mode === "soft" ? "dialog.softReset" : "dialog.mixedReset");
-    const body = this.tr(mode === "soft" ? "dialog.softResetBody" : "dialog.mixedResetBody");
-    this.ask(title, body, () => void this.mutate({ action: "reset", rev, mode }), [], { subject: target });
+    const title = this.tr(`dialog.${mode}Reset`);
+    const body = this.tr(`dialog.${mode}ResetBody`);
+    this.ask(title, body, () => void this.mutate({ action: "reset", rev, mode }), [], { subject: target, danger: mode === "hard" });
   }
 
 

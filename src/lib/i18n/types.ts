@@ -501,6 +501,13 @@ export type Messages = {
     imageSwipe: string;
     imageOnion: string;
     imagePixel: string;
+    resetBranch: string;
+    resetBranchBody: string;
+    resetMoveTo: string;
+    resetType: string;
+    resetSoftHint: string;
+    resetMixedHint: string;
+    resetHardHint: string;
     imageWorking: string;
     imageTooLarge: string;
     imageFailed: string;
