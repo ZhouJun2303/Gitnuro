@@ -88,6 +88,8 @@ pnpm start
 
 1420 上已经有页面服务时，`pnpm start` 和 `pnpm dev` 都会沿用并持续监测它；服务停止后自动接管，自己启动的 Vite 意外退出时也会重启。退出试验台时只停止自己启动的进程，沿用的页面服务继续运行。启动、退出原因和 Vite 输出保存在 `.lab/logs/dev-server.log`。
 
+并行页面服务按实际端口分别使用 `node_modules/.vite/awegit/dev-<端口>` 的预打包缓存；临时端口和中间件实例各自使用独立目录，构建使用 `build` 子目录。客户端和 SSR 依赖一起隔离，避免试验台或临时校验重建缓存时让另一个开发窗口的模块失效。同一端口重启时继续使用已有缓存；显式传入 `cacheDir` 时沿用指定目录。
+
 开发版会拒绝在其编译时的源码工作副本中执行「删除」或「删除所选」，避免删掉 Vite 正在加载的模块和 Cargo 入口文件。需要删除该工作副本中的文件时，使用已安装的正式版；开发测试使用 `.lab` 中的独立仓库。恢复已删除文件可用「丢弃修改」。
 
 设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令只留在当前进程里，HTTPS 密码交给 Git 的凭据存储。API key、代理密码和各平台 token 放在系统凭据库（Windows 凭据管理器、macOS 钥匙串），配置文件里这些字段是空的。
@@ -107,7 +109,7 @@ pnpm test
 
 `pnpm check` 查界面类型。`pnpm test` 跑状态、差异、提交、变基、贮藏这些 Git 行为，以及设置、更新和凭据这些桌面单元测试。仓库都建在临时目录里。测试不打开窗口，也不要拿当前这个 AweGit 仓库去做暂存或提交实验。
 
-页面服务的端口复用、自动接管、重启与退出清理可单独运行 `node --test scripts/dev-server.test.mjs scripts/lab-dev.test.mjs`；这些测试在 `.lab` 中使用临时端口和模拟后端，不启动桌面程序。
+页面服务的端口复用、自动接管、重启、退出清理与并行缓存隔离可单独运行 `node --test scripts/dev-server.test.mjs scripts/lab-dev.test.mjs scripts/vite-cache.test.mjs`；这些测试在 `.lab` 中使用临时端口和模拟后端，不启动桌面程序。
 
 每次验证只运行本次修改相关的测试，UI 不跑全量场景。改动界面时补对应的试验台场景，用测试文件和 `--grep` 选择相关用例：
 

@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import { sveltekit } from "@sveltejs/kit/vite";
+import { isolatedViteCache } from "./scripts/vite-cache.mjs";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
 const host = process.env.TAURI_DEV_HOST;
@@ -7,7 +8,7 @@ const port = Number(process.env.AWEGIT_VITE_PORT || 1420);
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
-  plugins: [sveltekit()],
+  plugins: [isolatedViteCache(), sveltekit()],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
