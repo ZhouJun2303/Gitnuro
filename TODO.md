@@ -8,6 +8,10 @@
 
 ## 已处理
 
+- [x] Git for Windows 在文件被占用时，`checkout` 可能以退出码 0 切走分支，工作区文件仍是旧内容。现在这类命令返回占用说明，不把分支切回去。失败信息只写在 stdout 时（例如 `nothing to commit`），详情改用这段输出，最多 500 字。修复：`6a2d7f6c`；回归：`writes_name_the_process_and_explain_how_to_release_the_file`、`empty_commit_failure_includes_the_stdout_explanation`。
+- [x] 变基冲突预览一次读取父提交和树，并用 `merge-tree --stdin` 批量重放，不再对每步 `read-tree` 和 `commit-tree`。冲突或结果树对不上之后的步骤仍是 conditional。5 秒和 200 步上限保持不变。修复：`6a2d7f6c`；回归：`preview_replays_a_linear_history_without_rewriting_the_work_tree`、`preview_replays_commits_even_when_final_tree_hides_a_conflict`、`frozen_preview_keeps_the_original_head_after_the_branch_moves`、`custom_merge_driver_is_never_executed_by_a_preview`、`reads_a_clean_record_and_a_conflict_record`、`merge_tree_names_the_conflict`。
+- [x] 同一次打开变更时，路径、侧和全文标记都相同的重叠差异读取合并为一次 `conflict_view`。修复：`6a2d7f6c`；回归：`theme panel conflict`（Apple、经典白色、VS Code 黑色）。
+- [x] 试验台用例在页面内固定语言和差异样式，不改写 `.lab/settings.json`。pushbox 每次写入唯一提交说明，`--reuse` 不用重新播种。回归：`e2e/lab.spec.ts` 里原先失败的 16 项；本次连同三套主题的冲突面板共 19 项通过。
 - [x] 界面改动在 Apple、经典白色、VS Code 黑色下都测到相关面板。回归：`e2e/theme-panels.spec.ts` 的 `theme panel`，以及 `pushed commits are bold`、`merge panel opens as a standalone page`。
 - [x] PERF-00—10：关联计时、写后刷新与并发读取去重、活动检查点缓存、原生忽略判断与跟踪目录监听、安全的原生自动贮藏检查、纯提交元数据读取、批量冲突元数据、8KB blob 探测、线性冲突匹配、历史分页缓存、预览限额/取消和网络失败分类均已实现。修复：本次工作区改动，拟提交 `perf: 减少后端重复读取并限制后台流程开销`；回归：`commit_metadata_does_not_walk_merge_trees`、`concurrent_reads_share_work_but_the_next_read_runs_again`、`native_ignore_checks_match_git_and_reload_rules_and_the_index`、`watch_filters_keep_tracked_files_inside_ignored_build_directories`、`conflict_blob_probe_keeps_the_prefix_boundary_and_large_object_policy`、`checkpoints_group_a_thousand_conflicts_and_preserve_each_stage`、`history_pages_reuse_summaries_and_detect_external_replacement`、`preview_lane_runs_one_job_and_keeps_only_the_latest_pending_job` 及 `e2e/performance-refresh.spec.ts`。完整测量与验证限制见 [性能计划](dev-docs/performance-plan.md)。
 - [x] 流程与冲突元数据复用 Git 目录缓存，已结束流程不再读取实时检查点。提交：`599049a5`；第一轮结果见 [后端性能检查](dev-docs/backend-performance.md)，后续优化见性能计划。
