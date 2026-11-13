@@ -152,7 +152,7 @@ pub fn services() -> Vec<ServiceInfo> {
         service("atomgit", "AtomGit", "atomgit.com", "https://atomgit.com/", false, "git"),
         service("gitcode", "GitCode", "gitcode.com", "https://gitcode.com/", false, "git"),
         service("coding", "Coding", "", "https://coding.net/", false, "git"),
-        service("codeup", "Codeup", "codeup.aliyun.com", "https://codeup.aliyun.com/", false, "git"),
+        service("codeup", "Codeup", "codeup.aliyun.com", "https://account.aliyun.com/", false, "git"),
         service("cnb", "CNB", "cnb.cool", "https://cnb.cool/", false, "git"),
         service("gitea", "Codeberg", "codeberg.org", "https://codeberg.org/user/settings/applications", false, "api"),
         service("sourcehut", "SourceHut", "git.sr.ht", "https://meta.sr.ht/oauth2", false, "git"),
@@ -184,7 +184,7 @@ pub fn token_page(forge: &str, host: &str) -> String {
         "atomgit" => "https://atomgit.com/".into(),
         "gitcode" => "https://gitcode.com/".into(),
         "coding" => "https://coding.net/".into(),
-        "codeup" => "https://codeup.aliyun.com/".into(),
+        "codeup" => "https://account.aliyun.com/".into(),
         "cnb" => "https://cnb.cool/".into(),
         "sourcehut" => "https://meta.sr.ht/oauth2".into(),
         _ if host_safe(&host) => format!("https://{host}/"),
@@ -753,7 +753,7 @@ pub fn sync_report(settings: &Settings) -> SyncReport {
 }
 
 fn discover_targets(settings: &Settings) -> Vec<(String, String)> {
-    let mut targets: Vec<(String, String)> = ["github.com", "gitlab.com", "bitbucket.org", "dev.azure.com", "gitee.com", "codeberg.org"]
+    let mut targets: Vec<(String, String)> = ["github.com", "gitlab.com", "bitbucket.org", "dev.azure.com", "gitee.com", "codeberg.org", "codeup.aliyun.com"]
         .into_iter()
         .map(|host| (host.to_string(), forge_of_host(host).to_string()))
         .collect();
@@ -1188,6 +1188,9 @@ mod tests {
         assert_eq!(forge_of_host("dev.azure.com"), "azure");
         assert_eq!(forge_of_host("org.visualstudio.com"), "azure");
         assert_eq!(forge_of_host("team.coding.net"), "coding");
+        assert_eq!(forge_of_host("codeup.aliyun.com"), "codeup");
+        assert_eq!(parse_remote("git@codeup.aliyun.com:org/repo.git").host, "codeup.aliyun.com");
+        assert_eq!(token_page("codeup", "codeup.aliyun.com"), "https://account.aliyun.com/");
         assert_eq!(forge_of_host("github.example.com"), "generic");
         let github = account("gh", "github", "", "me", "t", true);
         assert!(hosts_match(&github, "www.github.com"));

@@ -34,6 +34,7 @@
   let draftHost = $state("github.com");
   let draftFamily = $state("github");
   let draftToken = $state("");
+  let draftLogin = $state("");
   let draftProbe = $state("");
   let draftClient = $state("");
   let draftStatus = $state("");
@@ -282,6 +283,10 @@
     draftHost = service.host;
     draftFamily = service.id === "generic" ? "github" : service.id;
     draftStatus = "";
+    if (service.id === "codeup") {
+      void openAccount("https://account.aliyun.com/");
+      return;
+    }
     if (service.browser && service.host) void startLogin(service.id, service.host);
   }
 
@@ -293,10 +298,15 @@
     draftStatus = "";
   }
 
+  async function openAccount(url: string) {
+    if (draftService === "codeup" || draftForge === "codeup") notice = shell.tr("dialog.accountsAliyunPaste");
+    if (url) await openUrl(url).catch((error) => (shell.actionError = shell.message(error)));
+  }
+
   async function openTokenPage() {
     const service = services.find((item) => item.id === draftService);
-    const url = service?.tokenUrl || "";
-    if (url) await openUrl(url).catch((error) => (shell.actionError = shell.message(error)));
+    const url = draftForge === "codeup" ? "https://account.aliyun.com/" : service?.tokenUrl || "";
+    await openAccount(url);
   }
 
   function draftAccount() {
@@ -305,7 +315,8 @@
       host: draftHost.trim(),
       token: draftToken,
       clientId: draftClient.trim(),
-      label: draftForge,
+      login: draftLogin.trim(),
+      label: draftLogin.trim() || draftForge,
     });
   }
 
@@ -406,7 +417,7 @@
 
   onMount(() => {
     void loadServices();
-    void syncOnce().finally(() => void loadRemotes());
+    void loadRemotes();
     return () => stopDevice();
   });
 </script>
@@ -428,7 +439,7 @@
           <button class="service-tile" type="button" onclick={() => chooseService(service)}>
             <span class="service-name">{service.label}</span>
             {#if service.host}<span class="service-host">{service.host}</span>{/if}
-            <span class="service-action">{service.browser ? shell.tr("dialog.accountsBrowser") : shell.tr("dialog.accountsPaste")}</span>
+            <span class="service-action">{service.id === "codeup" ? shell.tr("dialog.accountsAliyunOpen") : service.browser ? shell.tr("dialog.accountsBrowser") : shell.tr("dialog.accountsPaste")}</span>
           </button>
         {/each}
       </div>
@@ -508,6 +519,12 @@
         <span class="pref-control"><input placeholder="https://host/org/repo.git" bind:value={draftProbe} /></span>
       </label>
     {/if}
+    {#if draftForge === "codeup"}
+      <label class="pref-row wide">
+        <span class="pref-label">{shell.tr("dialog.accountsCloneUser")}</span>
+        <span class="pref-control"><input autocomplete="off" bind:value={draftLogin} /></span>
+      </label>
+    {/if}
     <label class="pref-row wide">
       <span class="pref-label">{shell.tr("dialog.accountsToken")}</span>
       <span class="pref-control"><input type="password" autocomplete="off" placeholder={shell.tr("dialog.accountsPaste")} bind:value={draftToken} /></span>
@@ -516,7 +533,7 @@
     {#if savedNote}<p class="account-note">{savedNote}</p>{/if}
     <div class="pref-card-actions">
       <button class="text-button" type="button" disabled={logging || !(selected?.browser)} onclick={() => void startLogin(draftForge, draftHost.trim())}>{logging ? shell.tr("dialog.accountsBrowserWait") : shell.tr("dialog.accountsBrowser")}</button>
-      <button class="text-button" type="button" onclick={() => void openTokenPage()}>{shell.tr("dialog.accountsCreateToken")}</button>
+      <button class="text-button" type="button" onclick={() => void openTokenPage()}>{draftForge === "codeup" ? shell.tr("dialog.accountsAliyunOpen") : shell.tr("dialog.accountsCreateToken")}</button>
       <button class="text-button" type="button" onclick={() => void testDraft()}>{shell.tr("dialog.accountsTest")}</button>
       <button class="text-button" type="button" disabled={!draftToken.trim()} onclick={() => void saveDraft()}>{shell.tr("dialog.accountsSave")}</button>
     </div>

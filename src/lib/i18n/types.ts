@@ -513,6 +513,9 @@ export type Messages = {
     accountsBrowser: string;
     accountsBrowserWait: string;
     accountsBrowserMissing: string;
+    accountsAliyunOpen: string;
+    accountsAliyunPaste: string;
+    accountsCloneUser: string;
     accountsPaste: string;
     accountsCreateToken: string;
     accountsTest: string;

@@ -61,10 +61,14 @@ const pages: PanelPage[] = [
   { name: "preferences advanced", scene: "prefs-advanced", tab: "advanced", panels: [".pref-page", ".pref-card"] },
 ];
 
+let accountSyncs = 0;
+
 test.beforeEach(async ({ context }) => {
+  accountSyncs = 0;
   let settings: Record<string, unknown> | undefined;
   await context.route("**/__lab/invoke", async (route) => {
     const body = route.request().postDataJSON() as { cmd?: string; args?: { values?: Record<string, unknown> } };
+    if (body.cmd === "sync_accounts") accountSyncs += 1;
     if (body.cmd === "load_settings") {
       if (!settings) {
         const response = await route.fetch();
@@ -125,6 +129,9 @@ for (const theme of themes) {
 
 async function expectAccountActions(page: Page, locale: "zh" | "en") {
   const connected = locale === "zh" ? "已连通" : "Connected";
+  await expect(page.locator(".account-sync-line")).not.toContainText(locale === "zh" ? "正在同步" : "Syncing");
+  await expect(page.getByRole("button", { name: locale === "zh" ? "同步本机已登录的账号" : "Sync accounts already signed in on this machine" })).toBeEnabled();
+  expect(accountSyncs).toBe(0);
   const paste = locale === "zh"
     ? "这台电脑没有可用的浏览器登录。请创建令牌后粘贴到下面。"
     : "This machine has no browser sign-in for this forge. Create a token and paste it below.";
