@@ -2,6 +2,7 @@ import type { Messages } from "./types";
 
 export const en: Messages = {
   flow: {
+    "revert-staged": "Revert leaves the inverse changes staged for a later commit and keeps the original history.",
     observer: "Read-only observer", observerHint: "Resolve conflicts in the main window · Follow the complete pipeline here", autoOpen: "Automatically open the flow window when an operation has unresolved conflicts",
     autoClose: "Automatically close the flow window after resolving all conflicts", staysOpen: "Workflow completed. This window stays open",
     overview: "Complete pipeline", pipelineHint: "Runs from left to right · Select a phase to view its steps", progress: "Completed {done} / {total} steps", executionDetails: "Commands and observations",
@@ -475,7 +476,11 @@ export const en: Messages = {
     mixedReset: "Mixed reset",
     mixedResetBody: "The changes stay in the working tree, unstaged.",
     revert: "Revert commit",
-    revertBody: "This creates a new revert commit. The original stays in history.",
+    revertBody: "Apply the inverse of this commit. The original stays in history.",
+    revertCommitChanges: "Commit the changes",
+    revertCommitNote: "Create a new revert commit with the message below.",
+    revertNoCommitNote: "Keep the inverse changes staged for a later commit, including after resolving conflicts.",
+    revertMessage: "Commit message",
     cherryPickBody: "Apply this commit's changes to the current branch?",
     cherryPickRecordNote: "The new commit message records the source commit.",
     deleteRemoteBody: "This deletes the branch on the remote for everyone.",

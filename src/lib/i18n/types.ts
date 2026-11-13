@@ -437,6 +437,10 @@ export type Messages = {
     mixedResetBody: string;
     revert: string;
     revertBody: string;
+    revertCommitChanges: string;
+    revertCommitNote: string;
+    revertNoCommitNote: string;
+    revertMessage: string;
     cherryPickBody: string;
     cherryPickRecordNote: string;
     deleteRemoteBody: string;

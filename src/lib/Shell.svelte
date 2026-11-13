@@ -374,6 +374,39 @@
     border-top: 1px solid var(--line);
   }
 
+.revert-options {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+
+.revert-note {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+.revert-options textarea {
+    width: 100%;
+    min-height: 108px;
+    max-height: 28vh;
+    padding: 9px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--canvas);
+    color: var(--text);
+    font-family: var(--mono, monospace);
+    font-size: 12px;
+    line-height: 1.55;
+    resize: vertical;
+  }
+
+.revert-options textarea:disabled {
+    color: var(--text-secondary);
+  }
+
 .confirm-actions .text-button,
   .confirm-actions .commit {
     display: inline-flex;
@@ -1068,6 +1101,13 @@
         </div>
         {#if ask.subject}<div class="confirm-subject" data-confirm-subject title={ask.subject}>{ask.subject}</div>{/if}
         {#if ask.detail}<p class="confirm-detail" id="confirm-detail">{ask.detail}</p>{/if}
+        {#if ask.revert}
+          <div class="revert-options">
+            <label class="check"><input type="checkbox" bind:checked={ask.revert.commit} aria-describedby="revert-note" />{shell.tr("dialog.revertCommitChanges")}</label>
+            <p class="revert-note" id="revert-note">{shell.tr(ask.revert.commit ? "dialog.revertCommitNote" : "dialog.revertNoCommitNote")}</p>
+            <label>{shell.tr("dialog.revertMessage")}<textarea rows="5" bind:value={ask.revert.message} disabled={!ask.revert.commit} spellcheck="false"></textarea></label>
+          </div>
+        {/if}
         {#if ask.files?.length}
           <div class="confirm-files" data-confirm-files>
             <div class="confirm-count">{shell.tr("dialog.fileCount", { count: String(ask.files.length) })}</div>
@@ -1081,7 +1121,7 @@
         {/if}
         <div class="confirm-actions">
           <button class="text-button" type="button" onclick={() => (shell.confirmAsk = null)}>{shell.tr("dialog.cancel")}</button>
-          <button class="commit" class:danger={ask.danger} type="button" onclick={() => { const run = shell.confirmAsk?.run; shell.confirmAsk = null; run?.(); }}>{ask.confirmLabel ?? shell.tr("dialog.confirm")}</button>
+          <button class="commit" class:danger={ask.danger} type="button" disabled={!!ask.revert?.commit && !ask.revert.message.trim()} onclick={() => { const run = shell.confirmAsk?.run; shell.confirmAsk = null; run?.(); }}>{ask.confirmLabel ?? shell.tr("dialog.confirm")}</button>
         </div>
       </div>
     </div>

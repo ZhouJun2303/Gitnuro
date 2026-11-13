@@ -1100,7 +1100,7 @@ pub fn begin_kind(repo: &Path, kind: &str, request: Option<&Mutation>) -> Option
                 flow::commit(repo, if name.is_empty() { "refs/stash" } else { name })
             }
             Mutation::CherryPick { rev, .. }
-            | Mutation::Revert { rev }
+            | Mutation::Revert { rev, .. }
             | Mutation::Reset { rev, .. } => flow::commit(repo, rev),
             Mutation::Merge { name, .. } => flow::commit(repo, name),
             Mutation::Rebase { onto, .. } | Mutation::RebaseInteractive { onto, .. } => {
@@ -1129,6 +1129,9 @@ pub fn begin_kind(repo: &Path, kind: &str, request: Option<&Mutation>) -> Option
                 state: "running".into(),
                 detail: match kind {
                     "reset" => "reset-baseline",
+                    "revert" if matches!(request, Some(Mutation::Revert { no_commit: true, .. })) => {
+                        "revert-staged"
+                    }
                     "revert" => "revert-new-commit",
                     _ => "requested",
                 }
@@ -1849,6 +1852,35 @@ mod tests {
     }
 
     #[test]
+    fn revert_without_commit_finishes_the_flow_with_the_inverse_staged() {
+        for conflict in [false, true] {
+            let repo = Repo::new();
+            repo.save("note", "changed\n", "feat: change note");
+            let original = repo.git(&["rev-parse", "HEAD"]);
+            if conflict {
+                repo.save("note", "later\n", "fix: later edit");
+            }
+            let head = repo.git(&["rev-parse", "HEAD"]);
+            let started = repo.run(Mutation::Revert {
+                rev: original,
+                no_commit: true,
+                message: String::new(),
+            });
+            assert_eq!(started.state, if conflict { "conflict" } else { "completed" });
+            assert!(repo.snapshot().nodes.iter().any(|node| node.event.detail == "revert-staged"));
+            if conflict {
+                repo.resolve("base\n");
+                let finished = repo.run(Mutation::Continue { message: String::new() });
+                assert_eq!(finished.state, "completed");
+            }
+            assert_eq!(repo.git(&["rev-parse", "HEAD"]), head);
+            assert_eq!(awegit_git::in_progress(&repo.0).unwrap(), None);
+            assert!(awegit_git::status(&repo.0).unwrap().staged.iter().any(|file| file.path == "note"));
+            assert_eq!(fs::read_to_string(repo.0.join("note")).unwrap(), "base\n");
+        }
+    }
+
+    #[test]
     fn revert_conflict_records_the_original_postimage_as_its_base() {
         let repo = Repo::new();
         repo.save("note", "original change\n", "original");
@@ -1857,6 +1889,8 @@ mod tests {
         let target = repo.git(&["rev-parse", "HEAD"]);
         let started = repo.run(Mutation::Revert {
             rev: original.clone(),
+            no_commit: false,
+            message: String::new(),
         });
         assert_eq!(started.state, "conflict");
         let snapshot = repo.snapshot();

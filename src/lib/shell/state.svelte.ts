@@ -2924,6 +2924,8 @@ export class ShellState {
         return { title: `${this.tr("menu.checkout")} ${text("name")}`, command: this.gitLine(["checkout", text("name")]) };
       case "merge":
         return { title: `${this.tr("menu.merge")} ${text("name")}`, command: this.gitLine(["merge", request.squash ? "--squash" : "", request.noFf ? "--no-ff" : "", text("summary") ? "-m" : "", text("summary"), text("name")]) };
+      case "revert":
+        return { title: this.tr("dialog.revert"), command: this.gitLine(["revert", request.noCommit ? "--no-commit" : "", text("rev")]) };
       case "discard":
         return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--", text("file")]) };
       case "discardPaths": {
@@ -3498,7 +3500,10 @@ export class ShellState {
 
   confirmRevert(id: string, summary: string) {
     const subject = `${id.slice(0, 7)} ${summary}`.trim();
-    this.ask(this.tr("dialog.revert"), this.tr("dialog.revertBody"), () => void this.mutate({ action: "revert", rev: id }), [], { subject });
+    const options = $state({ commit: true, message: `revert: ${summary}\n\nThis reverts commit ${id}.` });
+    this.ask(this.tr("dialog.revert"), this.tr("dialog.revertBody"), () => void this.mutate({
+      action: "revert", rev: id, noCommit: !options.commit, message: options.message,
+    }), [], { subject, revert: options, confirmLabel: this.tr("menu.revert") });
   }
 
 
@@ -4255,7 +4260,7 @@ export class ShellState {
 
 
 
-  ask(title: string, body: string, run: () => void, files: string[] = [], extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "confirmLabel"> = {}) {
+  ask(title: string, body: string, run: () => void, files: string[] = [], extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "confirmLabel" | "revert"> = {}) {
     return ask(this, title, body, run, files, extras);
   }
 
@@ -6185,6 +6190,7 @@ export class ShellState {
       const target = event.target;
       if (target instanceof Element && target.closest("[data-confirm]")) return false;
       event.preventDefault();
+      if (this.confirmAsk.revert?.commit && !this.confirmAsk.revert.message.trim()) return true;
       const run = this.confirmAsk.run;
       this.confirmAsk = null;
       run();

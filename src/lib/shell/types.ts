@@ -85,6 +85,7 @@ export type ConfirmAsk = {
     detail?: string;
     danger?: boolean;
     confirmLabel?: string;
+    revert?: { commit: boolean; message: string };
     files?: string[];
     run: () => void;
 };

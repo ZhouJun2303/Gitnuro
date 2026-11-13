@@ -562,7 +562,7 @@ export function ask(
     body: string,
     run: () => void,
     files: string[] = [],
-    extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "confirmLabel"> = {},
+    extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "confirmLabel" | "revert"> = {},
   ) {
     shell.confirmAsk = { title, body, files, ...extras, run };
   }

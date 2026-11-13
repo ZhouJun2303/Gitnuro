@@ -2,6 +2,7 @@ import type { Messages } from "./types";
 
 export const zh: Messages = {
   flow: {
+    "revert-staged": "revert 将反向改动保留在暂存区，稍后手动提交，原提交仍在历史中。",
     observer: "只读观察", observerHint: "在主窗口处理冲突 · 此处按顺序展示完整流程", autoOpen: "操作遇到待解决冲突时自动打开流程窗口",
     autoClose: "解决所有冲突后自动关闭流程窗口", staysOpen: "流程已完成，窗口保持打开",
     overview: "完整流水线", pipelineHint: "从左到右依次执行 · 点击阶段查看步骤", progress: "已完成 {done} / {total} 步", executionDetails: "执行命令与记录",
@@ -475,7 +476,11 @@ export const zh: Messages = {
     mixedReset: "混合重置",
     mixedResetBody: "改动会保留在工作区，但不暂存。",
     revert: "还原提交",
-    revertBody: "这会生成一个新的还原提交，原提交保留在历史里。",
+    revertBody: "反向应用这条提交的改动，原提交保留在历史里。",
+    revertCommitChanges: "提交更改",
+    revertCommitNote: "使用下方说明生成一个新的还原提交。",
+    revertNoCommitNote: "还原的改动保留在暂存区，稍后手动提交；解决冲突后继续也不会自动提交。",
+    revertMessage: "提交说明",
     cherryPickBody: "把这条提交的改动拣选到当前分支？",
     cherryPickRecordNote: "新提交的说明里会注明来源提交。",
     deleteRemoteBody: "远程分支会被永久删除，其他协作者也会失去它。",

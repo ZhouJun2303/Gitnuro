@@ -508,11 +508,120 @@ fn resets_cherry_pick_and_revert() {
     .unwrap();
     assert!(repo.output(&["log", "--format=%s"]).contains("from-side"));
     assert!(repo.path.join("c.txt").exists());
-    perform(&repo.path, Mutation::Revert { rev: "HEAD".into() }).unwrap();
+    perform(&repo.path, Mutation::Revert { rev: "HEAD".into(), no_commit: false, message: String::new() }).unwrap();
     assert!(!repo.path.join("c.txt").exists());
     assert!(repo
         .output(&["log", "-1", "--format=%s"])
-        .contains("Revert"));
+        .contains("revert: from-side"));
+}
+
+#[test]
+fn revert_commits_the_displayed_message_once_and_preserves_local_changes() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    commit_file(&repo, "local.txt", "base\n", "local base");
+    commit_file(&repo, "a.txt", "two\n", "feat: change a");
+    let before = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+    fs::write(repo.path.join("local.txt"), "staged\n").unwrap();
+    repo.git(&["add", "local.txt"]);
+    fs::write(repo.path.join("local.txt"), "unstaged\n").unwrap();
+    fs::write(repo.path.join("untracked.txt"), "keep\n").unwrap();
+    let staged = repo.output(&["diff", "--cached"]);
+    let unstaged = repo.output(&["diff"]);
+    let message = format!("revert: restore a\n\nReason for reverting.\n\nThis reverts commit {before}.");
+    repo.git(&["config", "core.hooksPath", ".git/hooks"]);
+    let hook = repo.path.join(".git/hooks/commit-msg");
+    fs::write(&hook, "#!/bin/sh\ncase \"$(head -n 1 \"$1\")\" in\n  'revert: '*) ;;\n  *) exit 1 ;;\nesac\ncat \"$1\" >> .git/revert-hook-message\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    perform(&repo.path, Mutation::Revert { rev: before.clone(), no_commit: false, message: message.clone() }).unwrap();
+    assert_eq!(repo.output(&["log", "-1", "--format=%B"]).trim(), message);
+    assert_eq!(repo.output(&["rev-parse", "HEAD^1"]).trim(), before);
+    assert_eq!(fs::read_to_string(repo.path.join(".git/revert-hook-message")).unwrap().trim(), message);
+    assert_eq!(repo.output(&["diff", "--cached"]), staged);
+    assert_eq!(repo.output(&["diff"]), unstaged);
+    assert_eq!(fs::read_to_string(repo.path.join("untracked.txt")).unwrap(), "keep\n");
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "one\n");
+    assert_eq!(in_progress(&repo.path).unwrap(), None);
+    assert!(repo.output(&["stash", "list"]).trim().is_empty());
+}
+
+#[test]
+fn revert_without_commit_keeps_head_and_preserves_staged_and_unstaged_changes() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    commit_file(&repo, "local.txt", "base\n", "local base");
+    commit_file(&repo, "a.txt", "two\n", "feat: change a");
+    let before = repo.output(&["rev-parse", "HEAD"]);
+    fs::write(repo.path.join("local.txt"), "staged\n").unwrap();
+    repo.git(&["add", "local.txt"]);
+    fs::write(repo.path.join("local.txt"), "unstaged\n").unwrap();
+    fs::write(repo.path.join("untracked.txt"), "keep\n").unwrap();
+    let local_staged = repo.output(&["diff", "--cached", "--", "local.txt"]);
+    let local_unstaged = repo.output(&["diff", "--", "local.txt"]);
+    perform(&repo.path, Mutation::Revert { rev: "HEAD".into(), no_commit: true, message: String::new() }).unwrap();
+    assert_eq!(repo.output(&["rev-parse", "HEAD"]), before);
+    assert_eq!(in_progress(&repo.path).unwrap(), None);
+    let snap = status(&repo.path).unwrap();
+    assert!(snap.staged.iter().any(|file| file.path == "a.txt"), "{snap:?}");
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "one\n");
+    assert_eq!(repo.output(&["diff", "--cached", "--", "local.txt"]), local_staged);
+    assert_eq!(repo.output(&["diff", "--", "local.txt"]), local_unstaged);
+    assert_eq!(fs::read_to_string(repo.path.join("untracked.txt")).unwrap(), "keep\n");
+    assert!(repo.output(&["stash", "list"]).trim().is_empty());
+}
+
+#[test]
+fn revert_conflict_continue_respects_the_commit_choice_and_message() {
+    for no_commit in [false, true] {
+        let repo = repo();
+        commit_file(&repo, "a.txt", "one\n", "base");
+        commit_file(&repo, "a.txt", "two\n", "feat: change a");
+        let original = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+        commit_file(&repo, "a.txt", "three\n", "later");
+        let before = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+        let message = format!("revert: restore a\n\nA detailed reason.\n\nThis reverts commit {original}.");
+        assert!(perform(&repo.path, Mutation::Revert { rev: original, no_commit, message: message.clone() }).is_err());
+        assert_eq!(in_progress(&repo.path).unwrap(), Some(InProgress::Revert));
+        assert!(perform(&repo.path, Mutation::Continue { message: String::new() }).is_err());
+        assert_eq!(repo.output(&["rev-parse", "HEAD"]).trim(), before);
+        perform(&repo.path, Mutation::Resolve { file: "a.txt".into(), side: "text".into(), text: "one\n".into() }).unwrap();
+        perform(&repo.path, Mutation::Continue { message: String::new() }).unwrap();
+        assert_eq!(in_progress(&repo.path).unwrap(), None);
+        if no_commit {
+            assert_eq!(repo.output(&["rev-parse", "HEAD"]).trim(), before);
+            assert!(status(&repo.path).unwrap().staged.iter().any(|file| file.path == "a.txt"));
+            assert!(perform(&repo.path, Mutation::Continue { message: String::new() }).is_err());
+        } else {
+            assert_eq!(repo.output(&["rev-parse", "HEAD^1"]).trim(), before);
+            assert_eq!(repo.output(&["log", "-1", "--format=%B"]).trim(), message);
+            assert!(status(&repo.path).unwrap().staged.is_empty());
+        }
+        assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "one\n");
+    }
+}
+
+#[test]
+fn revert_without_commit_abort_clears_the_choice_before_the_next_revert() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "one\n", "base");
+    commit_file(&repo, "a.txt", "two\n", "feat: change a");
+    let original = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+    commit_file(&repo, "a.txt", "three\n", "later");
+    let before = repo.output(&["rev-parse", "HEAD"]);
+    assert!(perform(&repo.path, Mutation::Revert { rev: original.clone(), no_commit: true, message: String::new() }).is_err());
+    perform(&repo.path, Mutation::Abort).unwrap();
+    assert_eq!(repo.output(&["rev-parse", "HEAD"]), before);
+    assert_eq!(in_progress(&repo.path).unwrap(), None);
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "three\n");
+    assert!(perform(&repo.path, Mutation::Revert { rev: original.clone(), no_commit: false, message: String::new() }).is_err());
+    perform(&repo.path, Mutation::Resolve { file: "a.txt".into(), side: "text".into(), text: "one\n".into() }).unwrap();
+    perform(&repo.path, Mutation::Continue { message: String::new() }).unwrap();
+    assert_eq!(repo.output(&["log", "-1", "--format=%B"]).trim(), format!("revert: feat: change a\n\nThis reverts commit {original}."));
+    assert_eq!(repo.output(&["rev-parse", "HEAD^1"]), before);
 }
 
 #[test]

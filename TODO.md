@@ -8,6 +8,7 @@
 
 ## 已处理
 
+- [x] Revert 面板增加默认勾选的「提交更改」，展示并允许编辑以小写 `revert:` 开头的完整提交说明；不提交时保留暂存改动，冲突解决后继续也不生成提交。修复：本条所在提交 `feat: 为还原增加提交选项和说明预览`；回归：`revert_commits_the_displayed_message_once_and_preserves_local_changes`、`revert_without_commit_keeps_head_and_preserves_staged_and_unstaged_changes`、`revert_conflict_continue_respects_the_commit_choice_and_message`、`revert_without_commit_abort_clears_the_choice_before_the_next_revert`、`revert_without_commit_finishes_the_flow_with_the_inverse_staged`，以及三套主题的 `e2e/revert.spec.ts`、`scene revert-confirm`、`scene revert-no-commit`。
 - [x] 历史文件、提交树和版本比较改用 NUL 分隔的 Git 路径，保留中文、特殊字符与重命名前路径；Blame 按提交 ID 缓存作者和摘要，修复同一提交间隔出现时串用元数据。修复：本条所在提交 `fix: 修复历史读取和路径解析并消除图片差分卡顿`；回归：`history_paths_round_trip_without_git_quoting`、`blame_preserves_metadata_when_a_commit_reappears`。
 - [x] Reset 面板按参考布局显示当前分支、目标提交与摘要，并以带颜色、说明和快捷键的下拉框选择 Soft / Mixed / Hard；每次打开默认 Soft，保留原有确认。修复：本条所在提交 `feat: 统一重置面板并默认使用 Soft`；回归：`e2e/reset.spec.ts` 的 `reset panel`、`e2e/lab.spec.ts` 的 `resetting a branch asks before it moves`，以及三套主题的 `scene dialog-reset`。
 - [x] 前进/后退在每次异步读取后校验仓库、打开代次、导航代次及当前选择；Blame 和内容搜索忽略旧结果与旧错误，关闭搜索结果时取消其后续回写。修复：本条所在提交 `fix: 修复历史读取和路径解析并消除图片差分卡顿`；回归：`e2e/history-regressions.spec.ts` 的 `navigation`、`async reads`，以及三套主题的历史、提交详情、文件树、文件历史、搜索和 Blame 场景。

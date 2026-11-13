@@ -164,6 +164,10 @@ pub enum Mutation {
     },
     Revert {
         rev: String,
+        #[serde(default)]
+        no_commit: bool,
+        #[serde(default)]
+        message: String,
     },
     Reword {
         rev: String,
@@ -514,6 +518,9 @@ fn conflict_label(mutation: &Mutation) -> Option<String> {
         Mutation::RebaseInteractive {
             onto, autostash, ..
         } if !*autostash => Some(format!("rebase onto {}", short_rev(onto))),
+        Mutation::Revert { rev, no_commit: true, .. } => {
+            Some(format!("revert {}", short_rev(rev)))
+        }
         _ => None,
     }
 }
@@ -566,6 +573,7 @@ fn with_autostash(
 /// create a stash; they put the one it kept back when the flow is over.
 fn settle_after_flow(repo: &Path, action: impl FnOnce() -> Result<(), Error>) -> Result<(), Error> {
     let result = action();
+    clear_settled_revert(repo)?;
     match (result, autostash::finish_if_settled(repo)) {
         (Ok(()), Ok(_)) => Ok(()),
         (Ok(()), Err(error)) => Err(error),
@@ -793,10 +801,21 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
                 }
             })
         }
-        Mutation::Revert { rev } => {
-            with_autostash(repo, &format!("revert {}", short_rev(&rev)), || {
-                with_editor_committer_only(repo, &["revert", "--no-edit", check_rev(&rev)?])
-            })
+        Mutation::Revert {
+            rev,
+            no_commit,
+            message,
+        } => {
+            if no_commit {
+                // Applying with --no-commit preserves unrelated local/index changes.
+                // Restoring an autostash with --index would overwrite this staged result.
+                autostash::settle_before(repo)?;
+                revert(repo, &rev, true, &message)
+            } else {
+                with_autostash(repo, &format!("revert {}", short_rev(&rev)), || {
+                    revert(repo, &rev, false, &message)
+                })
+            }
         }
         Mutation::Reword { rev, summary } => {
             with_autostash(repo, &format!("reword {}", short_rev(&rev)), || {
@@ -1692,6 +1711,19 @@ fn abort(repo: &Path) -> Result<(), Error> {
 }
 
 fn flow(repo: &Path, verb: &str) -> Result<(), Error> {
+    if verb == "continue" && in_progress(repo)? == Some(InProgress::Revert) {
+        let source = rev_parse(repo, "REVERT_HEAD")?;
+        if crate::model::revert_no_commit(repo).as_deref() == Some(source.as_str()) {
+            if autostash::has_unmerged(repo) {
+                return Err(Error::Git(
+                    "resolve and stage all conflicts before continuing the revert".into(),
+                ));
+            }
+            // Git's single-commit --continue commits even after --no-commit.
+            // Quit only the operation metadata and retain the resolved index.
+            return run(repo, &["revert", "--quit"]).map(|_| ());
+        }
+    }
     if verb == "skip" && matches!(in_progress(repo)?, Some(InProgress::Merge) | None) {
         return Err(Error::Git(
             "skip is only available during rebase, cherry-pick, or revert".into(),
@@ -1706,6 +1738,52 @@ fn flow(repo: &Path, verb: &str) -> Result<(), Error> {
     };
     let flag = format!("--{verb}");
     with_editor_mode(repo, &[command, &flag], mode)
+}
+
+fn revert(repo: &Path, rev: &str, no_commit: bool, message: &str) -> Result<(), Error> {
+    let rev = check_rev(rev)?;
+    let output = run(repo, &["rev-parse", "--verify", &format!("{rev}^{{commit}}")])?;
+    let rev = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let message = if message.trim().is_empty() {
+        format!(
+            "revert: {}\n\nThis reverts commit {rev}.\n",
+            commit_subject(repo, &rev)?
+        )
+    } else {
+        message.replace("\r\n", "\n").trim().to_string()
+    };
+    if message.contains('\0') {
+        return Err(Error::Git("revert message contains a null".into()));
+    }
+    crate::model::set_revert_no_commit(repo, no_commit.then_some(rev.as_str()))?;
+    // Stage the inverse first so the intended message reaches hooks on the first
+    // commit attempt. Never create Git's default "Revert" commit and amend it.
+    let applied = run(repo, &["revert", "--no-commit", &rev]).map(|_| ());
+    if in_progress(repo)? != Some(InProgress::Revert) {
+        clear_settled_revert(repo)?;
+        return applied;
+    }
+    let path = crate::flow::git_dir(repo)?.join("MERGE_MSG");
+    std::fs::write(&path, &message).map_err(|source| Error::Read {
+        path: path.display().to_string(),
+        source,
+    })?;
+    let result = applied.and_then(|_| {
+        if no_commit {
+            run(repo, &["revert", "--quit"]).map(|_| ())
+        } else {
+            commit_from_file(repo, &path)
+        }
+    });
+    clear_settled_revert(repo)?;
+    result
+}
+
+fn clear_settled_revert(repo: &Path) -> Result<(), Error> {
+    if crate::model::revert_no_commit(repo).is_some() && in_progress(repo)? != Some(InProgress::Revert) {
+        crate::model::set_revert_no_commit(repo, None)?;
+    }
+    Ok(())
 }
 
 fn reset(repo: &Path, rev: &str, mode: ResetMode) -> Result<(), Error> {

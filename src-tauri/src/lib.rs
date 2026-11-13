@@ -686,7 +686,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         }
         Mutation::Reset { rev, mode } => join([scrub(rev), format!("{mode:?}")]),
         Mutation::CherryPick { rev, record } => join([scrub(rev), flag("record", *record)]),
-        Mutation::Revert { rev } => scrub(rev),
+        Mutation::Revert { rev, no_commit, message } => join([scrub(rev), flag("noCommit", *no_commit), bytes("message", message)]),
         Mutation::Reword { rev, summary } => join([scrub(rev), bytes("summary", summary)]),
         Mutation::Tag { name, rev, message } => join([scrub(name), scrub(rev), bytes("message", message)]),
         Mutation::DeleteTag { name } | Mutation::RemoveRemote { name } => scrub(name),
