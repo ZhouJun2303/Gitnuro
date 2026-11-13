@@ -20,12 +20,13 @@ type PanelPage = {
   remote?: boolean;
   merge?: boolean;
   sidebar?: boolean;
+  typeMenu?: boolean;
 };
 
 // One entry per panel surface. Grep the panel name so Apple, light, and dark run together.
 const pages: PanelPage[] = [
   { name: "welcome", scene: "welcome", panels: [".welcome-view", ".welcome-titles", ".welcome-actions"] },
-  { name: "changes", scene: "changes", sidebar: true, panels: [".chrome", ".chrome-tabs", ".sidebar", ".changes-column", ".unstaged-pane", ".staged-pane", ".composer"] },
+  { name: "changes", scene: "changes", sidebar: true, typeMenu: true, panels: [".chrome", ".chrome-tabs", ".sidebar", ".changes-column", ".unstaged-pane", ".staged-pane", ".composer"] },
   { name: "diff text", scene: "diff-text", panels: ["section.diff", ".diff-body"] },
   { name: "diff image", scene: "diff-image", panels: [".image-stage"] },
   { name: "diff binary", scene: "diff-binary", panels: [".binary-diff"] },
@@ -118,6 +119,7 @@ for (const theme of themes) {
           expect(radius).toBe(theme.name === "apple" ? 24 : theme.name === "light" ? 14 : 8);
         }
         if (item.tool) await expect(page.locator(".tool-tabs")).toHaveAttribute("data-tool-kind", item.tool);
+        if (item.typeMenu) await expectComposerTypeMenu(page);
         if (item.history) await expectHistoryWeights(page, theme.name);
         if (item.remote) await expectRemoteSubject(page);
         if (item.merge) await expectMergeFrame(page, theme.name);
@@ -195,4 +197,26 @@ async function expectMergeFrame(page: Page, theme: ThemeName) {
   const radius = await panel.evaluate((node) => parseFloat(getComputedStyle(node).borderRadius));
   expect(radius).toBe(theme === "apple" ? 16 : 0);
   await expect(page.locator(".merge-scrim")).toHaveCount(0);
+}
+
+// The menu is fixed-positioned outside the right pane, whose glass backdrop-filter
+// would otherwise become its containing block and push it to the window corner.
+async function expectComposerTypeMenu(page: Page) {
+  const chip = page.locator(".composer .type-chip");
+  const menu = page.locator(".type-menu");
+  await chip.click();
+  await expect(menu).toBeVisible();
+  const chipBox = await chip.boundingBox();
+  const menuBox = await menu.boundingBox();
+  const viewport = page.viewportSize();
+  expect(chipBox).not.toBeNull();
+  expect(menuBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(chipBox!.y);
+  expect(Math.abs(menuBox!.x - chipBox!.x)).toBeLessThanOrEqual(1);
+  expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+  expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport!.width);
+  await expect(menu.locator(".type-option.selected")).toHaveCount(1);
+  await menu.locator(".type-option.selected").click();
+  await expect(menu).toHaveCount(0);
 }

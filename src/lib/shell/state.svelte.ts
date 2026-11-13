@@ -490,6 +490,8 @@ export class ShellState {
 
   blameLines = $state.raw<BlameLine[] | null>(null);
 
+  blameGen = 0;
+
 
   settingsPath = $state("");
 
@@ -776,9 +778,6 @@ export class ShellState {
   patchSplits = new Map<string, { lines: DiffLine[]; rows: SplitRow[]; columns: { left: number; right: number } }>();
 
 
-  graphResume: { ids: string[]; columns: Array<string | null>; rows: GraphCell[][]; width: number } | null = null;
-
-
   /** Plain cache. The row arrays stay off `$state` so a long graph is not deeply proxied. */
   graphItems: CommitRow[] | null = null;
 
@@ -844,7 +843,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.8");
+  appVersion = $state("2.0.9");
 
 
   passphrase = $state("");
@@ -935,6 +934,8 @@ export class ShellState {
 
 
   contentHits = $state<{ id: string; shortId: string; summary: string }[] | null>(null);
+
+  contentSearchGen = 0;
 
 
   activityLines = $state<string[]>([]);
@@ -1068,6 +1069,8 @@ export class ShellState {
 
 
   pixelUrl = $state("");
+
+  pixelStatus = $state<"idle" | "working" | "too-large" | "error">("idle");
 
 
   reflogOn = $state(false);
@@ -1930,7 +1933,7 @@ export class ShellState {
       return { rows: this.graphRows, width: this.graphWidth, columns: this.graphColumns };
     }
     const limit = items.length > GRAPH_SYNC_LIMIT ? Math.min(items.length, 400) : items.length;
-    const built = commitGraph(laneCommits(items.slice(0, limit), this.liveFold.straight));
+    const built = commitGraph(laneCommits(items, this.liveFold.straight), undefined, limit);
     return { rows: built.rows, width: built.width, columns: built.columns };
   });
 
@@ -2092,6 +2095,8 @@ export class ShellState {
 
 
   navLock = 0;
+
+  navGen = 0;
 
 
   lastPlace: Place | null = null;
@@ -2369,6 +2374,9 @@ export class ShellState {
 
 
   async restorePlace(place: Place) {
+    const path = this.repoPath();
+    const openGen = this.openGen;
+    const gen = ++this.navGen;
     this.navLock += 1;
     this.section = place.section;
     this.selectedSide = place.side;
@@ -2378,22 +2386,36 @@ export class ShellState {
     const filterChanged = this.historyFilter !== place.historyFilter;
     this.historyFilter = place.historyFilter;
     if (!place.blame) this.blameLines = null;
+    const current = () => gen === this.navGen && openGen === this.openGen && this.repoPath() === path
+      && this.section === place.section && this.selectedPath === place.path && this.selectedSide === place.side
+      && this.selectedCommit === place.commit && this.treeOn === place.tree && this.historyFilter === place.historyFilter;
     try {
       if (this.mode === "live" && filterChanged) {
         if (place.historyFilter) {
-          this.commitsLive = await invoke<CommitRow[]>("file_history", { path: this.repoPath(), file: place.historyFilter, limit: 200 });
+          const contextGen = ++this.contextGen;
+          const rows = await invoke<CommitRow[]>("file_history", { path, file: place.historyFilter, limit: 200 });
+          if (!current() || contextGen !== this.contextGen) return;
+          this.commitsLive = rows;
         } else {
           await this.loadContext();
         }
       }
+      if (!current()) return;
       if (this.mode === "live" && place.section === "history" && place.commit) await this.selectCommit(place.commit);
+      if (!current()) return;
       if (place.blame && place.path && this.mode === "live") await this.showBlame(place.path);
+      if (!current()) return;
       if (place.tree && place.commit && this.mode === "live") {
-        this.treePaths = await invoke<string[]>("commit_tree", { path: this.repoPath(), rev: place.commit });
+        const paths = await invoke<string[]>("commit_tree", { path, rev: place.commit });
+        if (!current()) return;
+        this.treePaths = paths;
       }
+      if (!current()) return;
       if (this.mode === "live" && place.section === "changes" && place.path) await this.loadDiff();
+    } catch (error) {
+      if (current()) this.actionError = this.message(error);
     } finally {
-      this.lastPlace = this.snapshotPlace();
+      if (current()) this.lastPlace = this.snapshotPlace();
       this.navLock -= 1;
     }
   }
@@ -6397,11 +6419,8 @@ export class ShellState {
         return;
       }
       const commits = laneCommits(items, straight);
-      const prev = this.graphResume;
-      const prefix = !!prev && prev.ids.length <= commits.length && prev.ids.every((id, index) => id === commits[index].id);
-      let count = prefix && prev ? prev.ids.length : 0;
-      let resume: { columns: Array<string | null>; count: number; rows: GraphCell[][] } | undefined =
-        prefix && prev ? { columns: prev.columns, count: prev.ids.length, rows: prev.rows } : undefined;
+      let count = 0;
+      let resume: { columns: Array<string | null>; count: number; rows: GraphCell[][] } | undefined;
       const publish = (rows: GraphCell[][], width: number, columns: Array<string | null>) => {
         this.graphRows = rows;
         this.graphWidth = width;
@@ -6409,20 +6428,15 @@ export class ShellState {
         this.graphItems = items;
         this.graphVersion = ++this.graphEpoch;
       };
-      if (count >= commits.length && prev) {
-        publish(prev.rows, prev.width, prev.columns);
-        return;
-      }
       let frame = 0;
       let first = true;
       const pump = () => {
         if (count >= commits.length) return;
         const next = Math.min(commits.length, count + (first ? 2000 : 5000));
         first = false;
-        const built = commitGraph(commits.slice(0, next), resume);
+        const built = commitGraph(commits, resume, next);
         count = next;
         resume = { columns: built.columns, count, rows: built.rows };
-        this.graphResume = { ids: commits.slice(0, count).map((commit) => commit.id), columns: built.columns, rows: built.rows, width: built.width };
         publish(built.rows, built.width, built.columns);
         if (count < commits.length) frame = requestAnimationFrame(pump);
       };

@@ -232,10 +232,20 @@ async function refreshSearchedCommits(shell: ShellState, gen: number) {
   }
 
 export async function searchContent(shell: ShellState, kind: string, needle: string) {
-    shell.contentHits = await invoke<{ id: string; shortId: string; summary: string }[]>("search_commits", { path: shell.repoPath(), kind, needle }).catch((error) => {
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    const query = shell.commitQuery;
+    const gen = ++shell.contentSearchGen;
+    const current = () => gen === shell.contentSearchGen && openGen === shell.openGen
+      && shell.repoPath() === path && shell.commitQuery === query;
+    try {
+      const hits = await invoke<{ id: string; shortId: string; summary: string }[]>("search_commits", { path, kind, needle });
+      if (current()) shell.contentHits = hits;
+    } catch (error) {
+      if (!current()) return;
       shell.actionError = shell.message(error);
-      return [];
-    });
+      shell.contentHits = [];
+    }
   }
 
 /** `On <branch>: …` and `WIP on <branch>: …` split into a branch plate and a stash plate. */
@@ -355,20 +365,29 @@ export async function showReflog(shell: ShellState) {
 
 export async function openTreeFile(shell: ShellState, file: string) {
     if (!shell.selectedCommit) return;
+    const path = shell.repoPath();
+    const rev = shell.selectedCommit;
+    const gen = shell.patchGen;
+    const openGen = shell.openGen;
     shell.historyFile = file;
     shell.blobTop = 0;
-    const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null; truncated?: boolean }>("blob_view", { path: shell.repoPath(), rev: shell.selectedCommit, file });
-    if (shell.historyFile !== file) return;
-    shell.treeBinary = view.binary && !view.preview && !view.text;
-    shell.treeTruncated = view.truncated === true;
-    if (view.preview) {
-      shell.imageOld = null;
-      shell.imageNew = view.preview.dataUrl;
-      shell.preview = view.preview;
-      shell.treeText = "";
-    } else {
-      shell.treeText = view.text;
-      shell.preview = null;
+    const current = () => shell.historyFile === file && shell.selectedCommit === rev && shell.patchGen === gen && shell.openGen === openGen && shell.viewing(path);
+    try {
+      const view = await invoke<{ binary: boolean; text: string; preview: FilePreview | null; truncated?: boolean }>("blob_view", { path, rev, file });
+      if (!current()) return;
+      shell.treeBinary = view.binary && !view.preview && !view.text;
+      shell.treeTruncated = view.truncated === true;
+      if (view.preview) {
+        shell.imageOld = null;
+        shell.imageNew = view.preview.dataUrl;
+        shell.preview = view.preview;
+        shell.treeText = "";
+      } else {
+        shell.treeText = view.text;
+        shell.preview = null;
+      }
+    } catch (error) {
+      if (current()) shell.actionError = shell.message(error);
     }
   }
 
@@ -537,22 +556,27 @@ export async function toggleAllPatches(shell: ShellState) {
   }
 
 export async function showFileHistory(shell: ShellState, file: string) {
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    const gen = ++shell.contextGen;
     shell.historyFilter = file;
     shell.section = "history";
+    const current = () => gen === shell.contextGen && openGen === shell.openGen && shell.historyFilter === file && shell.viewing(path);
     try {
-      const rows = await invoke<CommitRow[]>("file_history", { path: shell.repoPath(), file, limit: 200 });
+      const rows = await invoke<CommitRow[]>("file_history", { path, file, limit: 200 });
+      if (!current()) return;
       shell.commitsLive = rows;
       shell.historyTop = 0;
       const first = rows[0];
       if (first) {
         await shell.selectCommit(first.id);
-        if (shell.historyFilter === file) await shell.pickCommitFile(file);
+        if (current() && shell.selectedCommit === first.id) await shell.pickCommitFile(file);
       } else {
         shell.selectedCommit = null;
         shell.historyDiff = null;
       }
     } catch (error) {
-      shell.actionError = shell.message(error);
+      if (current()) shell.actionError = shell.message(error);
     }
   }
 
@@ -691,13 +715,18 @@ export async function openHistoryTab(shell: ShellState, tab: "commit" | "changes
     if (tab !== "tree") return;
     if (shell.mode === "live" && shell.treePaths.length === 0) {
       const rev = shell.selectedCommit;
+      const path = shell.repoPath();
+      const gen = shell.patchGen;
+      const openGen = shell.openGen;
+      const current = () => shell.selectedCommit === rev && shell.patchGen === gen && shell.openGen === openGen && shell.viewing(path);
       try {
-        shell.treePaths = await invoke<string[]>("commit_tree", { path: shell.repoPath(), rev });
+        const paths = await invoke<string[]>("commit_tree", { path, rev });
+        if (!current()) return;
+        shell.treePaths = paths;
       } catch (error) {
-        shell.actionError = shell.message(error);
+        if (current()) shell.actionError = shell.message(error);
         return;
       }
-      if (shell.selectedCommit !== rev) return;
     }
     const paths = shell.mode === "live" ? shell.treePaths : shell.sampleTree;
     if (shell.treePrepared !== shell.selectedCommit) {

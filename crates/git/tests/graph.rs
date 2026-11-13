@@ -3,7 +3,8 @@ mod common;
 use std::fs;
 
 use awegit_git::{
-    blame_file, branch_commits, commit_detail, commit_files, commit_log, commits_from, locate_ref, repository_refs, ChangeKind,
+    blame_file, branch_commits, commit_detail, commit_files, commit_log, commit_tree, commits_from,
+    compare_files, locate_ref, repository_refs, show_commit_file, ChangeKind,
 };
 
 fn repo() -> common::TempRepo {
@@ -102,6 +103,72 @@ fn stash_commit_lists_its_changes() {
     assert_eq!(files[0].path, "a.txt");
     let diff = awegit_git::show_commit_file(&repo.path, &stash.id, "a.txt").unwrap();
     assert!(diff.lines.iter().any(|line| line.text.contains("two")), "{diff:?}");
+}
+
+#[test]
+fn history_paths_round_trip_without_git_quoting() {
+    let repo = repo();
+    let mut paths = vec!["café.txt", "中文 文件.txt"];
+    if cfg!(unix) {
+        paths.extend(["tab\tname.txt", "line\nbreak.txt", "quote\"slash\\name.txt"]);
+    }
+    for path in &paths {
+        fs::write(repo.path.join(path), "original content\n").unwrap();
+    }
+    repo.git(&["add", "-A"]);
+    repo.git(&["commit", "-m", "unicode paths"]);
+    for quote in ["true", "false"] {
+        repo.git(&["config", "core.quotePath", quote]);
+        let files = commit_files(&repo.path, "HEAD").unwrap();
+        let tree = commit_tree(&repo.path, "HEAD").unwrap();
+        assert_eq!(files.len(), paths.len(), "{files:?}");
+        assert_eq!(tree.len(), paths.len(), "{tree:?}");
+        for path in &paths {
+            assert!(files.iter().any(|file| file.path == *path), "{files:?}");
+            assert!(tree.iter().any(|entry| entry == path), "{tree:?}");
+            if path.contains('\n') {
+                // Lists preserve the name; commands retain their existing newline-path policy.
+                assert!(show_commit_file(&repo.path, "HEAD", path).is_err());
+                continue;
+            }
+            let diff = show_commit_file(&repo.path, "HEAD", path).unwrap();
+            assert!(diff.lines.iter().any(|line| line.text.contains("original content")), "{diff:?}");
+        }
+    }
+    repo.git(&["config", "core.quotePath", "true"]);
+    let renamed = "重命名 café.txt";
+    fs::rename(repo.path.join(paths[1]), repo.path.join(renamed)).unwrap();
+    fs::write(repo.path.join(paths[0]), "changed content\n").unwrap();
+    repo.git(&["add", "-A"]);
+    repo.git(&["commit", "-m", "rename unicode path"]);
+    for files in [
+        commit_files(&repo.path, "HEAD").unwrap(),
+        compare_files(&repo.path, "HEAD^", "HEAD").unwrap(),
+    ] {
+        let file = files.iter().find(|file| file.path == renamed).expect("unquoted rename");
+        assert_eq!(file.kind, ChangeKind::Renamed);
+        assert_eq!(file.previous_path.as_deref(), Some(paths[1]));
+        assert!(files.iter().any(|file| file.path == paths[0] && file.kind == ChangeKind::Modified), "{files:?}");
+    }
+}
+
+#[test]
+fn blame_preserves_metadata_when_a_commit_reappears() {
+    let repo = repo();
+    fs::write(repo.path.join("blame.txt"), "first\nmiddle\nlast\n").unwrap();
+    repo.git(&["add", "blame.txt"]);
+    repo.git(&["commit", "--author", "First <first@example.com>", "-m", "first summary"]);
+    let first = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+    fs::write(repo.path.join("blame.txt"), "first\nsecond author\nlast\n").unwrap();
+    repo.git(&["add", "blame.txt"]);
+    repo.git(&["commit", "--author", "Second <second@example.com>", "-m", "second summary"]);
+    let blame = blame_file(&repo.path, "blame.txt").unwrap();
+    assert_eq!(blame.len(), 3, "{blame:?}");
+    assert_eq!(blame.iter().map(|line| line.author.as_str()).collect::<Vec<_>>(), ["First", "Second", "First"]);
+    assert_eq!(blame.iter().map(|line| line.summary.as_str()).collect::<Vec<_>>(), ["first summary", "second summary", "first summary"]);
+    assert_eq!(blame.iter().map(|line| line.line).collect::<Vec<_>>(), [1, 2, 3]);
+    assert_eq!(blame[0].id, first);
+    assert_eq!(blame[2].id, first);
 }
 
 #[test]

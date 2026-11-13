@@ -1,6 +1,7 @@
 import { invoke } from "../perf";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
+import { comparePixels, PixelDiffLimitError } from "../pixel-diff";
 import { branchGroup, changedRanges, commitGraph, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
@@ -404,41 +405,44 @@ export function fitImage(shell: ShellState, event: Event) {
     image.style.imageRendering = scale > 1 ? "pixelated" : "";
   }
 
+const pixelJobs = new WeakMap<ShellState, AbortController>();
+
+export function clearPixel(shell: ShellState) {
+    pixelJobs.get(shell)?.abort();
+    pixelJobs.delete(shell);
+    if (shell.pixelUrl.startsWith("blob:")) URL.revokeObjectURL(shell.pixelUrl);
+    shell.pixelUrl = "";
+    shell.pixelStatus = "idle";
+}
+
 export async function paintPixel(shell: ShellState, left: string, right: string) {
-    const load = (src: string) =>
-      new Promise<HTMLImageElement>((resolve, reject) => {
-        const image = new Image();
-        image.onload = () => resolve(image);
-        image.onerror = () => reject(new Error("image"));
-        image.src = src;
-      });
+    clearPixel(shell);
+    const controller = new AbortController();
+    pixelJobs.set(shell, controller);
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    const file = shell.selectedPath;
+    const side = shell.selectedSide;
+    const commit = shell.selectedCommit;
+    const historyFile = shell.historyFile;
+    const section = shell.section;
+    const old = shell.imageOld;
+    const next = shell.imageNew;
+    const current = () => pixelJobs.get(shell) === controller && openGen === shell.openGen && shell.repoPath() === path
+      && shell.selectedPath === file && shell.selectedSide === side && shell.selectedCommit === commit && shell.historyFile === historyFile
+      && shell.section === section && shell.imageOld === old && shell.imageNew === next && shell.imageMode === "pixel";
+    shell.pixelStatus = "working";
     try {
-      const [before, after] = await Promise.all([load(left), load(right)]);
-      const width = Math.max(before.width, after.width);
-      const height = Math.max(before.height, after.height);
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const context = canvas.getContext("2d");
-      if (!context) return;
-      context.drawImage(before, 0, 0);
-      const leftData = context.getImageData(0, 0, width, height);
-      context.clearRect(0, 0, width, height);
-      context.drawImage(after, 0, 0);
-      const rightData = context.getImageData(0, 0, width, height);
-      const out = context.createImageData(width, height);
-      for (let index = 0; index < out.data.length; index += 4) {
-        out.data[index] = Math.abs(leftData.data[index] - rightData.data[index]);
-        out.data[index + 1] = Math.abs(leftData.data[index + 1] - rightData.data[index + 1]);
-        out.data[index + 2] = Math.abs(leftData.data[index + 2] - rightData.data[index + 2]);
-        out.data[index + 3] = 255;
-      }
-      context.putImageData(out, 0, 0);
-      shell.pixelUrl = canvas.toDataURL();
-    } catch {
-      shell.pixelUrl = "";
+      const blob = await comparePixels(left, right, controller.signal);
+      if (!current()) return;
+      shell.pixelUrl = URL.createObjectURL(blob);
+      shell.pixelStatus = "idle";
+    } catch (error) {
+      if (current()) shell.pixelStatus = error instanceof PixelDiffLimitError ? "too-large" : "error";
+    } finally {
+      if (pixelJobs.get(shell) === controller) pixelJobs.delete(shell);
     }
-  }
+}
 
 export function selectChangeFile(shell: ShellState, path: string) {
     if (!path) return;
@@ -460,12 +464,25 @@ export function selectTreeFile(shell: ShellState, path: string) {
   }
 
 export async function showBlame(shell: ShellState, file: string) {
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    const gen = ++shell.blameGen;
+    const selection = shell.selectedPath;
+    const side = shell.selectedSide;
+    const section = shell.section;
+    const patchGen = shell.patchGen;
+    const commit = shell.selectedCommit;
+    const historyFile = shell.historyFile;
+    const current = () => gen === shell.blameGen && openGen === shell.openGen && shell.repoPath() === path
+      && shell.selectedPath === selection && shell.selectedSide === side && shell.section === section
+      && shell.patchGen === patchGen && shell.selectedCommit === commit && shell.historyFile === historyFile;
     shell.blameLines = null;
     await shell.withWork(shell.tr("chrome.readingFile"), async () => {
       try {
-        shell.blameLines = await invoke<BlameLine[]>("blame_file", { path: shell.repoPath(), file });
+        const lines = await invoke<BlameLine[]>("blame_file", { path, file });
+        if (current()) shell.blameLines = lines;
       } catch (error) {
-        shell.actionError = shell.message(error);
+        if (current()) shell.actionError = shell.message(error);
       }
     });
   }
@@ -1080,6 +1097,7 @@ export function fullPath(shell: ShellState, file: string) {
   }
 
 export function selectFile(shell: ShellState, path: string, side: Side, event?: MouseEvent) {
+    shell.blameGen += 1;
     shell.clearTextSelection();
     shell.conflictView = null;
     if (path !== shell.mergeFile) shell.textMerge = false;
@@ -1105,6 +1123,7 @@ export function selectFile(shell: ShellState, path: string, side: Side, event?: 
 export function selectFolder(shell: ShellState, dir: string, side: Side, event?: MouseEvent) {
     const files = shell.filesInDir(dir, side);
     if (files.length === 0) return;
+    shell.blameGen += 1;
     shell.clearTextSelection();
     shell.conflictView = null;
     if (files.includes(shell.mergeFile ?? "")) shell.textMerge = false;
