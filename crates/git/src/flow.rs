@@ -328,8 +328,7 @@ pub fn redact(text: &str) -> String {
 }
 
 pub fn git_dir(repo: &Path) -> Result<PathBuf, Error> {
-    let text = text(repo, &["rev-parse", "--absolute-git-dir"])?;
-    Ok(PathBuf::from(text.trim()))
+    crate::model::absolute_git_dir(repo)
 }
 
 fn text(repo: &Path, args: &[&str]) -> Result<String, Error> {

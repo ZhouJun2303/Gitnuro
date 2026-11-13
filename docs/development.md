@@ -96,6 +96,8 @@ pnpm start
 
 ## 测试
 
+Rust 后端的性能分析、复测基准和针对性回归命令见 [后端性能检查](backend-performance.md)。
+
 ```powershell
 pnpm check
 pnpm test
