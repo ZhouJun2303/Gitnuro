@@ -844,7 +844,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.7");
+  appVersion = $state("2.0.8");
 
 
   passphrase = $state("");

@@ -28,7 +28,7 @@ AweGit 是 Windows 和 macOS 上的 Git 客户端。界面用 Tauri 2 和 Svelte
 
 安装包发布在 [GitHub Releases](https://github.com/ZhouJun2303/Gitnuro/releases)。版本清单是 `release` 分支根目录的 `latest.json`。
 
-- **Windows**：NSIS 的 `AweGit_<版本>_x64-setup.exe` 和 MSI。安装包自带 MinGit 2.56.0，日常操作不需要另装 Git。当前版本是 2.0.7，安装包文件名是 `AweGit_2.0.7_x64-setup.exe` 和 `AweGit_2.0.7_x64_en-US.msi`。
+- **Windows**：NSIS 的 `AweGit_<版本>_x64-setup.exe` 和 MSI。安装包自带 MinGit 2.56.0，日常操作不需要另装 Git。当前版本是 2.0.8，安装包文件名是 `AweGit_2.0.8_x64-setup.exe` 和 `AweGit_2.0.8_x64_en-US.msi`。
 - **macOS**：磁盘镜像在 `target/release/bundle` 或 Releases。使用系统 Git，不打包 MinGit；没有 Developer ID 签名时安装包未签名、未公证，需要在系统设置中允许打开。
 
 设置保存在 Windows 的 `%APPDATA%\AweGit\settings.json`、macOS 的 `~/Library/Application Support/AweGit/settings.json`。API key、代理密码和各平台 token 放在系统凭据库，配置文件里这些字段是空的。
