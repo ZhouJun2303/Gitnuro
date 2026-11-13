@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onDestroy, onMount, tick } from "svelte";
   import { getShell } from "./context";
   import "./ChangesView.css";
   import SplitHandle from "../SplitHandle.svelte";
@@ -44,6 +44,7 @@
     window.clearTimeout(dirClickTimer);
     dirClickTimer = 0;
   }
+  onDestroy(clearDirClick);
 
   function onTwistClick(event: MouseEvent, path: string) {
     clearDirClick();
@@ -54,9 +55,11 @@
   function onDirClick(event: MouseEvent, path: string, side: Side) {
     if (event.button !== 0 || event.detail > 1) return;
     clearDirClick();
+    const repo = shell.repoPath();
+    const gen = shell.openGen;
     dirClickTimer = window.setTimeout(() => {
       dirClickTimer = 0;
-      shell.selectFolder(path, side, event);
+      if (gen === shell.openGen && shell.repoPath() === repo) shell.selectFolder(path, side, event);
     }, 280);
   }
 

@@ -2,6 +2,8 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { getShell } from "./context";
   import BinaryDiff from "./BinaryDiff.svelte";
+  import WrappedRows from "../WrappedRows.svelte";
+  import type { DiffLine } from "../status";
   import { onVirtualScroll, windowSlice, gravatarUrl, splitDiff, virtualSplit, type SplitRow } from "../view";
 
   const shell = getShell();
@@ -141,33 +143,50 @@
         <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
       {:else if shell.settings.diffStyle === "split"}
         <div class="diff-body split" class:virtual={!shell.settings.diffWordWrap} style:--split-row="{shell.splitRowHeight}px" role="presentation" use:splitScroller={splitColumns}>
+          {#if shell.settings.diffWordWrap}
+            <WrappedRows items={splitRows} rowHeight={diffRow} split>
+              {#snippet children(row)}{@render historySplitRow(row)}{/snippet}
+            </WrappedRows>
+          {:else}
           {#if splitWindow.beforePx > 0}<div class="split-gap" style:height="{splitWindow.beforePx}px"></div>{/if}
           {#each splitWindow.rows as row, offset (splitWindow.start + offset)}
-            {#if row.meta}
-              <div class="split-meta">{row.left}</div>
-            {:else}
-              <div class="split-row">
-                {@render splitCell(row, "left")}
-                {@render splitCell(row, "right")}
-              </div>
-            {/if}
+            {@render historySplitRow(row)}
           {/each}
           {#if splitWindow.afterPx > 0}<div class="split-gap" style:height="{splitWindow.afterPx}px"></div>{/if}
+          {/if}
           {@render splitBar()}
         </div>
       {:else}
-        <div class="diff-body" class:wrap-window={shell.settings.diffWordWrap}>
-          <div class="commit-window" class:wrap-window={shell.settings.diffWordWrap} style:height="{shell.historyDiffWindow.height}px">
+        <div class="diff-body">
+          {#if shell.settings.diffWordWrap}
+            <WrappedRows items={shell.historyDiff.lines} rowHeight={diffRow}>
+              {#snippet children(line, at)}{@render historyUnifiedRow(line, at)}{/snippet}
+            </WrappedRows>
+          {:else}
+          <div class="commit-window" style:height="{shell.historyDiffWindow.height}px">
             {#each shell.historyDiffWindow.rows as line, index (`h-${shell.historyDiffWindow.start + index}`)}
               {@const at = shell.historyDiffWindow.start + index}
-              <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{shell.historyDiffWindow.tops[index] ?? 0}px" style:height={shell.settings.diffWordWrap ? "auto" : `${diffRow}px`} style:line-height={shell.settings.diffWordWrap ? "1.45" : `${diffRow}px`}>{line.text}</span>
+              {@render historyUnifiedRow(line, at)}
             {/each}
           </div>
+          {/if}
         </div>
       {/if}
     </section>
   </div>
 </div>
+
+{#snippet historySplitRow(row: SplitRow)}
+  {#if row.meta}
+    <div class="split-meta">{row.left}</div>
+  {:else}
+    <div class="split-row">{@render splitCell(row, "left")}{@render splitCell(row, "right")}</div>
+  {/if}
+{/snippet}
+
+{#snippet historyUnifiedRow(line: DiffLine, at: number)}
+  <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} style:top="{at * diffRow}px" style:height={shell.settings.diffWordWrap ? "auto" : `${diffRow}px`} style:line-height={shell.settings.diffWordWrap ? "1.45" : `${diffRow}px`}><span class="diff-line-text">{line.text}</span></span>
+{/snippet}
 
 {#snippet splitCell(row: SplitRow, side: "left" | "right")}
   {@const kind = side === "left" ? row.leftKind : row.rightKind}

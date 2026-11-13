@@ -357,10 +357,19 @@ export function isCommitUnpushed(shell: ShellState, commit: { unpushed?: boolean
   }
 
 export async function showReflog(shell: ShellState) {
+    const gen = ++shell.reflogGen;
     shell.reflogOn = !shell.reflogOn;
     shell.treeOn = false;
     if (!shell.reflogOn || shell.mode !== "live") return;
-    shell.reflogRows = await invoke("reflog", { path: shell.repoPath(), limit: 200 });
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    const current = () => gen === shell.reflogGen && shell.reflogOn && openGen === shell.openGen && shell.viewing(path);
+    try {
+      const rows = await invoke<typeof shell.reflogRows>("reflog", { path, limit: 200 });
+      if (current()) shell.reflogRows = rows;
+    } catch (error) {
+      if (current()) shell.actionError = shell.message(error);
+    }
   }
 
 export async function openTreeFile(shell: ShellState, file: string) {
@@ -393,18 +402,23 @@ export async function openTreeFile(shell: ShellState, file: string) {
 
 export async function compareDrops(shell: ShellState) {
     if (shell.drops.length !== 2) return;
-    shell.comparePair = [shell.drops[0], shell.drops[1]];
+    const [from, to] = shell.drops;
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    shell.comparePair = [from, to];
     shell.resetCommitView();
     const gen = shell.patchGen;
+    const current = () => gen === shell.patchGen && openGen === shell.openGen && shell.viewing(path);
     await shell.withWork(shell.tr("chrome.readingCommit"), async () => {
       try {
-        shell.commitFiles = await invoke<StatusFile[]>("compare_files", { path: shell.repoPath(), from: shell.drops[0], to: shell.drops[1] });
-        if (gen !== shell.patchGen) return;
-        shell.selectedCommit = shell.drops[1];
-        shell.historyFile = shell.commitFiles[0]?.path ?? null;
+        const files = await invoke<StatusFile[]>("compare_files", { path, from, to });
+        if (!current()) return;
+        shell.commitFiles = files;
+        shell.selectedCommit = to;
+        shell.historyFile = files[0]?.path ?? null;
         if (shell.historyFile) await shell.pickCommitFile(shell.historyFile);
       } catch (error) {
-        if (gen === shell.patchGen) shell.actionError = shell.message(error);
+        if (current()) shell.actionError = shell.message(error);
       }
     });
   }
@@ -428,6 +442,9 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
     shell.resetCommitView();
     const gen = shell.patchGen;
     const row = shell.commitsLive.find((commit) => commit.id === id);
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    const current = () => gen === shell.patchGen && shell.selectedCommit === id && openGen === shell.openGen && shell.viewing(path);
     await shell.withWork(shell.tr("chrome.readingCommit"), async () => {
     shell.commitDetail = {
       id,
@@ -442,16 +459,16 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
       parents: row?.parents ?? [],
     };
     try {
-      const detailTask = invoke<CommitDetail>("commit_detail", { path: shell.repoPath(), id })
+      const detailTask = invoke<CommitDetail>("commit_detail", { path, id })
         .then((detail) => {
-          if (gen !== shell.patchGen || shell.selectedCommit !== id) return;
+          if (!current()) return;
           shell.commitDetail = detail;
         })
         .catch((error) => {
-          if (gen === shell.patchGen && shell.selectedCommit === id) shell.actionError = shell.message(error);
+          if (current()) shell.actionError = shell.message(error);
         });
-      const files = await invoke<StatusFile[]>("commit_files", { path: shell.repoPath(), id });
-      if (gen !== shell.patchGen || shell.selectedCommit !== id) {
+      const files = await invoke<StatusFile[]>("commit_files", { path, id });
+      if (!current()) {
         await detailTask;
         return;
       }
@@ -460,13 +477,13 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
       shell.historyFile = file;
       const diff = file
         ? await invoke<FileDiff>("show_commit_file", {
-            path: shell.repoPath(),
+            path,
             id,
             file,
             unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
           })
         : null;
-      if (gen !== shell.patchGen || shell.selectedCommit !== id || shell.historyFile !== file) {
+      if (!current() || shell.historyFile !== file) {
         await detailTask;
         return;
       }
@@ -479,58 +496,61 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
       }
       await detailTask;
     } catch (error) {
-      if (gen === shell.patchGen && shell.selectedCommit === id) shell.actionError = shell.message(error);
+      if (current()) shell.actionError = shell.message(error);
     }
     });
   }
 
-export async function pickCommitFile(shell: ShellState, file: string) {
+export async function pickCommitFile(shell: ShellState, file: string, select = true) {
     const gen = shell.patchGen;
-    shell.historyFile = file;
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    const id = shell.selectedCommit;
+    const pair = shell.comparePair;
+    const current = () => gen === shell.patchGen && openGen === shell.openGen && shell.viewing(path);
+    if (select) shell.historyFile = file;
     const cached = shell.patchCache[file];
     if (cached) {
-      shell.historyDiff = cached;
+      if (select) shell.historyDiff = cached;
       return;
     }
-    shell.historyDiff = null;
-    if (!shell.comparePair && !shell.selectedCommit) return;
+    if (select) shell.historyDiff = null;
+    if (!pair && !id) return;
     await shell.withWork(shell.tr("chrome.readingFile"), async () => {
       try {
-        const diff = shell.comparePair
+        const diff = pair
           ? await invoke<FileDiff>("compare_file", {
-              path: shell.repoPath(),
-              from: shell.comparePair[0],
-              to: shell.comparePair[1],
+              path,
+              from: pair[0],
+              to: pair[1],
               file,
               unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
             })
           : await invoke<FileDiff>("show_commit_file", {
-              path: shell.repoPath(),
-              id: shell.selectedCommit ?? "",
+              path,
+              id: id ?? "",
               file,
               unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
             });
-        if (gen !== shell.patchGen) return;
+        if (!current()) return;
         cachePatch(shell, file, diff);
         shell.patchVersion += 1;
-        if (shell.historyFile === file) {
-          shell.historyDiff = diff;
-          // The placeholder height must not clip the loaded patch.
-          if (shell.patchHeights[file] !== undefined) {
-            const heights = { ...shell.patchHeights };
-            delete heights[file];
-            shell.patchHeights = heights;
-          }
+        if (shell.historyFile === file) shell.historyDiff = diff;
+        // Every loaded patch must replace its measured placeholder, including background reads.
+        if (shell.patchHeights[file] !== undefined) {
+          const heights = { ...shell.patchHeights };
+          delete heights[file];
+          shell.patchHeights = heights;
         }
       } catch (error) {
-        if (gen === shell.patchGen && shell.historyFile === file) shell.actionError = shell.message(error);
+        if (current() && (shell.historyFile === file || shell.openPatchSet.has(file))) shell.actionError = shell.message(error);
       }
     });
   }
 
 export async function ensurePatch(shell: ShellState, file: string) {
     if (shell.mode !== "live" || shell.patchCache[file] || (!shell.selectedCommit && !shell.comparePair)) return;
-    await shell.pickCommitFile(file);
+    await pickCommitFile(shell, file, false);
   }
 
 export function togglePatch(shell: ShellState, path: string) {
@@ -786,6 +806,11 @@ export async function locateRef(shell: ShellState, name: string) {
     if (shell.mode !== "live") return;
     // A double click fires two clicks, then checkout. Only the newest locate keeps going.
     const seq = ++shell.locateSeq;
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    const selectionGen = shell.patchGen;
+    const current = () => seq === shell.locateSeq && openGen === shell.openGen && shell.viewing(path);
+    const waiting = () => current() && selectionGen === shell.patchGen;
     shell.openHistory();
     if (shell.commitQuery.trim()) shell.commitQuery = "";
     if (shell.historyFilter) shell.historyFilter = "";
@@ -802,21 +827,22 @@ export async function locateRef(shell: ShellState, name: string) {
       await shell.withWork(shell.tr("chrome.locating", { name }), async () => {
         try {
           const rows = await invoke<CommitRow[]>("commit_log", {
-            path: shell.repoPath(),
+            path,
             limit: shell.logLimit,
             order: shell.settings.commitSort === "topo" ? "topo" : "date",
             revs: shell.exactRefs(),
           });
-          if (seq !== shell.locateSeq) return;
+          if (!waiting()) return;
           if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
           await tick();
+          if (!waiting()) return;
           const tip = rows.find((commit) => commit.refs.includes(name)) ?? rows[0];
           if (!tip) return;
           await shell.selectCommit(tip.id);
           await tick();
-          shell.scrollToCommit(tip.id);
+          if (current() && shell.selectedCommit === tip.id) shell.scrollToCommit(tip.id);
         } catch (error) {
-          if (seq !== shell.locateSeq) return;
+          if (!waiting()) return;
           shell.actionError = shell.message(error);
         }
       });
@@ -825,19 +851,20 @@ export async function locateRef(shell: ShellState, name: string) {
     await shell.withWork(shell.tr("chrome.locating", { name }), async () => {
       try {
         const found = await invoke<{ id: string; commits: CommitRow[] }>("locate_ref", {
-          path: shell.repoPath(),
+          path,
           name,
           order: shell.settings.commitSort === "topo" ? "topo" : "date",
         });
-        if (seq !== shell.locateSeq) return;
+        if (!waiting()) return;
         shell.logLimit = Math.min(20_000, Math.max(shell.logLimit, found.commits.length));
         if (!sameHistory(shell.commitsLive, found.commits)) shell.commitsLive = found.commits;
         await tick();
+        if (!waiting()) return;
         await shell.selectCommit(found.id);
         await tick();
-        shell.scrollToCommit(found.id);
+        if (current() && shell.selectedCommit === found.id) shell.scrollToCommit(found.id);
       } catch (error) {
-        if (seq !== shell.locateSeq) return;
+        if (!waiting()) return;
         shell.actionError = shell.message(error);
       }
     });

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   type Direction = "horizontal" | "vertical";
 
   let {
@@ -26,6 +27,8 @@
   } = $props();
 
   let dragging = $state(false);
+  let stopDrag: (() => void) | undefined;
+  onDestroy(() => stopDrag?.());
 
   function commit(next: number) {
     if (collapsible && next < min * 0.6) {
@@ -67,16 +70,20 @@
 
   function handlePointerDown(e: PointerEvent) {
     if (e.button !== 0) return;
+    stopDrag?.();
     e.preventDefault();
     dragging = true;
     const startPos = direction === "vertical" ? e.clientX : e.clientY;
     const startSize = collapsed ? 0 : size;
     let current = startSize;
+    let pending = startSize;
+    let frame = 0;
+    const cursor = document.body.style.cursor;
+    const selection = document.body.style.userSelect;
 
-    function handlePointerMove(moveEvent: PointerEvent) {
-      const currentPos = direction === "vertical" ? moveEvent.clientX : moveEvent.clientY;
-      const delta = reverse ? startPos - currentPos : currentPos - startPos;
-      let newSize = startSize + delta;
+    function apply() {
+      frame = 0;
+      let newSize = pending;
       if (collapsible && newSize < min * 0.6) {
         collapsed = true;
         size = 0;
@@ -89,25 +96,46 @@
       current = newSize;
     }
 
+    function handlePointerMove(moveEvent: PointerEvent) {
+      if (moveEvent.pointerId !== e.pointerId) return;
+      const currentPos = direction === "vertical" ? moveEvent.clientX : moveEvent.clientY;
+      pending = startSize + (reverse ? startPos - currentPos : currentPos - startPos);
+      if (!frame) frame = requestAnimationFrame(apply);
+    }
+
     function cleanup() {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
       dragging = false;
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
       window.removeEventListener("pointercancel", handlePointerUp);
-      document.body.style.removeProperty("cursor");
-      document.body.style.removeProperty("user-select");
+      window.removeEventListener("blur", finish);
+      document.body.style.cursor = cursor;
+      document.body.style.userSelect = selection;
+      stopDrag = undefined;
     }
 
-    function handlePointerUp() {
+    function finish() {
+      if (frame) {
+        cancelAnimationFrame(frame);
+        apply();
+      }
       cleanup();
       onchange?.(current);
     }
 
+    function handlePointerUp(event: PointerEvent) {
+      if (event.pointerId === e.pointerId) finish();
+    }
+
+    stopDrag = cleanup;
     document.body.style.cursor = direction === "vertical" ? "col-resize" : "row-resize";
     document.body.style.userSelect = "none";
     window.addEventListener("pointermove", handlePointerMove);
     window.addEventListener("pointerup", handlePointerUp);
     window.addEventListener("pointercancel", handlePointerUp);
+    window.addEventListener("blur", finish);
   }
 
   function handleDoubleClick() {

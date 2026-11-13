@@ -778,7 +778,7 @@ export class ShellState {
   patchView = $state<Record<string, { start: number; end: number }>>({});
 
 
-  patchSplits = new Map<string, { lines: DiffLine[]; rows: SplitRow[]; columns: { left: number; right: number } }>();
+  patchSplits = new Map<string, { lines: DiffLine[]; rows: SplitRow[]; columns: { left: number; right: number }; whitespace: boolean; marks: boolean }>();
 
 
   /** Plain cache. The row arrays stay off `$state` so a long graph is not deeply proxied. */
@@ -1770,7 +1770,7 @@ export class ShellState {
   private patchLoading = new Set<string>();
 
   requestPatch(file: string) {
-    if (this.patchCache[file] || this.patchLoading.has(file) || this.patchQueue.includes(file)) return;
+    if (this.patchCache[file] || this.patchLoading.has(`${this.patchGen}:${file}`) || this.patchQueue.includes(file)) return;
     this.patchQueue.push(file);
     this.pumpPatches();
   }
@@ -1779,9 +1779,10 @@ export class ShellState {
     while (this.patchLoading.size < 4 && this.patchQueue.length > 0) {
       const file = this.patchQueue.shift();
       if (!file || this.patchCache[file]) continue;
-      this.patchLoading.add(file);
+      const key = `${this.patchGen}:${file}`;
+      this.patchLoading.add(key);
       void this.ensurePatch(file).finally(() => {
-        this.patchLoading.delete(file);
+        this.patchLoading.delete(key);
         this.pumpPatches();
       });
     }
@@ -1789,7 +1790,7 @@ export class ShellState {
 
   clearPatchQueue() {
     this.patchQueue = [];
-    this.patchLoading.clear();
+    // In-flight reads still occupy their slots until they settle. A reset only drops queued work.
   }
 
 
@@ -6115,6 +6116,7 @@ export class ShellState {
 
   /** Select the commit a branch or tag points at in the history list. */
   locateSeq = 0;
+  reflogGen = 0;
 
 
 

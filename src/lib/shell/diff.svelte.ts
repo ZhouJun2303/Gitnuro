@@ -106,12 +106,14 @@ export function splitColumnsOf(shell: ShellState, rows: SplitRow[]) {
   }
 
 export function cachedSplit(shell: ShellState, file: string, lines: DiffLine[]) {
-    const key = `${shell.selectedCommit ?? ""}:${file}:${shell.settings.showDiffMarks ? 1 : 0}`;
+    const key = `${shell.selectedCommit ?? ""}:${file}`;
+    const whitespace = shell.settings.showWhitespace;
+    const marks = shell.settings.showDiffMarks;
     const hit = shell.patchSplits.get(key);
-    if (hit && hit.lines === lines) return hit;
+    if (hit?.lines === lines && hit.whitespace === whitespace && hit.marks === marks) return hit;
     if (shell.patchSplits.size > 40) shell.patchSplits.clear();
-    const rows = splitDiff(lines);
-    const value = { lines, rows, columns: splitColumnsOf(shell, rows) };
+    const rows = hit?.lines === lines ? hit.rows : splitDiff(lines);
+    const value = { lines, rows, columns: splitColumnsOf(shell, rows), whitespace, marks };
     shell.patchSplits.set(key, value);
     return value;
   }
