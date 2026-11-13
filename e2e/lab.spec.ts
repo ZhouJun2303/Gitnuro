@@ -601,17 +601,27 @@ test("history restores its scroll position after switching sections", async ({ p
 
 test("pushed commits are bold, local ones stay regular and readable", async ({ page }) => {
   await openLabScene(page, "history", ".history .commit-row.unpushed");
-  const local = page.locator(".history .commit-row.unpushed .subject").first();
-  expect(await local.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("400");
-  expect(await local.evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
+  const theme = await page.locator("html").getAttribute("data-theme");
+  const selected = page.locator(".history .commit-row.selected .subject").first();
+  expect(await selected.evaluate((node) => getComputedStyle(node).fontWeight)).toBe(theme === "apple" ? "500" : "600");
   await page.locator(".history").evaluate((node) => {
     node.scrollTop = node.scrollHeight;
     node.dispatchEvent(new Event("scroll"));
   });
   await page.waitForTimeout(400);
-  const pushed = page.locator(".history .commit-row.pushed .subject").first();
-  await expect(pushed).toBeVisible();
-  expect(await pushed.evaluate((node) => getComputedStyle(node).fontWeight)).toBe("600");
+  const pushedRow = page.locator(".history .commit-row.pushed:not(.selected)").first();
+  await expect(pushedRow).toBeVisible();
+  expect(await pushedRow.locator(".subject").evaluate((node) => getComputedStyle(node).fontWeight)).toBe("600");
+  await pushedRow.click();
+  await page.locator(".history").evaluate((node) => {
+    node.scrollTop = 0;
+    node.dispatchEvent(new Event("scroll"));
+  });
+  await page.waitForTimeout(400);
+  const local = page.locator(".history .commit-row.unpushed").first();
+  await expect(local).not.toHaveClass(/selected/);
+  expect(await local.locator(".subject").evaluate((node) => getComputedStyle(node).fontWeight)).toBe("400");
+  expect(await local.locator(".subject").evaluate((node) => getComputedStyle(node).opacity)).toBe("1");
 });
 
 test("remote-only commits stay dimmed and regular", async ({ page }) => {
@@ -848,8 +858,9 @@ test("merge panel opens as a standalone page", async ({ page }) => {
   const viewport = page.viewportSize();
   expect(box).not.toBeNull();
   expect(viewport).not.toBeNull();
-  expect(Math.round(box!.width)).toBe(viewport!.width);
-  expect(Math.round(box!.height)).toBe(viewport!.height);
+  const inset = (await page.locator("html").getAttribute("data-theme")) === "apple" ? 20 : 0;
+  expect(Math.round(box!.width)).toBe(viewport!.width - inset);
+  expect(Math.round(box!.height)).toBe(viewport!.height - inset);
   await expect(page.locator(".merge-scrim")).toHaveCount(0);
 });
 

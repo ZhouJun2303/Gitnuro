@@ -55,7 +55,7 @@ pnpm start
 | 打 macOS 安装包 | `pnpm package:mac` |
 | 发布到 GitHub | `publish.bat` |
 
-UI 用例只跑本次修改涉及的场景，不跑全量。新弹窗要记入 `src/lib/lab/scenes.ts`，否则 `pnpm check` 会失败。
+UI 用例只跑本次修改涉及的场景，不跑全量。改到的页面要在 Apple、经典白色、VS Code 黑色下都测到相关面板，做法见 `dev-docs/development.md`。新弹窗要记入 `src/lib/lab/scenes.ts`，否则 `pnpm check` 会失败。
 
 ### 分支、提交与发布
 
@@ -125,7 +125,7 @@ Common commands:
 | Build the macOS package | `pnpm package:mac` |
 | Publish to GitHub | `publish.bat` |
 
-UI tests run only the scenes touched by the change, never the full set. A new dialog must be added to `src/lib/lab/scenes.ts`, or `pnpm check` fails.
+UI tests run only the scenes touched by the change, never the full set. A changed page is tested in Apple Liquid Glass, classic light, and VS Code dark, down to the panels that changed. The commands are in `dev-docs/development.md`. A new dialog must be added to `src/lib/lab/scenes.ts`, or `pnpm check` fails.
 
 ### Branches, commits, and releases
 

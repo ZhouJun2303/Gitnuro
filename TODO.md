@@ -8,6 +8,7 @@
 
 ## 已处理
 
+- [x] 界面改动在 Apple、经典白色、VS Code 黑色下都测到相关面板。回归：`e2e/theme-panels.spec.ts` 的 `theme panel`，以及 `pushed commits are bold`、`merge panel opens as a standalone page`。
 - [x] PERF-00—10：关联计时、写后刷新与并发读取去重、活动检查点缓存、原生忽略判断与跟踪目录监听、安全的原生自动贮藏检查、纯提交元数据读取、批量冲突元数据、8KB blob 探测、线性冲突匹配、历史分页缓存、预览限额/取消和网络失败分类均已实现。修复：本次工作区改动，拟提交 `perf: 减少后端重复读取并限制后台流程开销`；回归：`commit_metadata_does_not_walk_merge_trees`、`concurrent_reads_share_work_but_the_next_read_runs_again`、`native_ignore_checks_match_git_and_reload_rules_and_the_index`、`watch_filters_keep_tracked_files_inside_ignored_build_directories`、`conflict_blob_probe_keeps_the_prefix_boundary_and_large_object_policy`、`checkpoints_group_a_thousand_conflicts_and_preserve_each_stage`、`history_pages_reuse_summaries_and_detect_external_replacement`、`preview_lane_runs_one_job_and_keeps_only_the_latest_pending_job` 及 `e2e/performance-refresh.spec.ts`。完整测量与验证限制见 [性能计划](dev-docs/performance-plan.md)。
 - [x] 流程与冲突元数据复用 Git 目录缓存，已结束流程不再读取实时检查点。提交：`599049a5`；第一轮结果见 [后端性能检查](dev-docs/backend-performance.md)，后续优化见性能计划。
 - [x] 冲突后继续 rebase 时，自己的提交显示成别人的名字。现在保留原作者，只更换提交者。修复：`331b306b`；回归测试：`rebase_continue_keeps_the_original_author`。
@@ -17,7 +18,7 @@
 
 ## 维护约定
 
-- 每次只验证本次修改涉及的 UI，补对应场景并按文件或 `--grep` 运行，不再全量验证。入口和数据复用方式见 [开发与发布](dev-docs/development.md) 的“测试”部分及 `AGENTS.md` 的“试验台”规则。
+- 每次只验证本次修改涉及的 UI，不跑全量场景。改到的页面要在 Apple、经典白色、VS Code 黑色下都测到受影响的面板。入口、面板名和数据复用方式见 [开发与发布](dev-docs/development.md) 的“测试”部分及 `AGENTS.md` 的“试验台”规则。
 - 关闭一项时写明修复提交和回归测试名，便于以后复查。
 
 # 测试

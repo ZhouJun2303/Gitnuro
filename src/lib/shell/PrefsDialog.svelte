@@ -135,7 +135,7 @@
       <p class="pref-head-hint">{activeTab.hint}</p>
     </header>
 
-    <div class="pref-page" bind:this={shell.prefPage}>
+    <div class="pref-page" data-pref-tab={shell.prefTab} bind:this={shell.prefPage}>
       {#if shell.prefTab === "general"}
         <section class="pref-card">
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecLanguage")}</h3>
@@ -624,7 +624,7 @@
         <section class="pref-card">
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecTools")}</h3>
           <div class="pref-card-body">
-            <div class="pref-tabs tool-tabs">
+            <div class="pref-tabs tool-tabs" data-tool-kind={kind}>
               <button type="button" class:on={kind === "diff"} onclick={() => (shell.toolKind = "diff")}>{shell.tr("dialog.externalDiff")}</button>
               <button type="button" class:on={kind === "merge"} onclick={() => (shell.toolKind = "merge")}>{shell.tr("dialog.externalMerge")}</button>
               <button type="button" class:on={kind === "editor"} onclick={() => (shell.toolKind = "editor")}>{shell.tr("dialog.textEditor")}</button>

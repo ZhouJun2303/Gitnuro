@@ -129,7 +129,15 @@ pnpm test:ui -- --reuse e2e/merge-layout.spec.ts
 
 试验台用浏览器看界面：`pnpm dev`，默认在 http://localhost:1420 。场景清单在 `src/lib/lab/scenes.ts`，新弹窗必须记入，否则 `pnpm check` 会失败。`.lab/` 不提交，种子脚本 `scripts/lab-seed.mjs` 和场景清单要提交。
 
-用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
+用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts` 和 `pnpm test:ui -- --reuse e2e/theme-panels.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。当前是 161 个场景、三种主题共 483 项。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
+
+改了页面、弹窗或其中的面板后，相关界面要在三套主题下都测到：Apple Liquid Glass（`apple`）、经典白色（`light`）、VS Code 黑色（`dark`）。场景检查按主题分组，`--grep` 场景名会把三组一起跑到，例如 `pnpm test:ui -- --reuse e2e/scenes.spec.ts --grep "scene history$"`。面板是否还在，以及主题合同，在 `e2e/theme-panels.spec.ts`：Apple 选中提交的字重是 500，未选中的本地提交是 400、已推送提交是 600；独立合并窗在 Apple 下每边内收 10px，另外两套主题铺满窗口；Apple 侧栏圆角 20、偏好设置弹窗圆角 24，经典白色弹窗圆角 14，VS Code 黑色弹窗圆角 8。用面板名而不是主题名做 `--grep`，三套主题会一起跑：
+
+```powershell
+pnpm test:ui -- --reuse e2e/theme-panels.spec.ts --grep "theme panel history"
+```
+
+面板名：`welcome`、`changes`、`diff text`、`diff image`、`diff binary`、`history`、`history remote`、`commit detail`、`file tree`、`conflict`、`merge text`、`merge binary`、`merge hunks`、`file history`、`blob`、`operation flow`、`search`、`menu`、`confirm`、`command log`、`repository picker`、`update`、`preferences general`、`preferences workspace`、`preferences diff`、`preferences commit`、`preferences ai`、`preferences git`、`preferences integration`、`preferences integration merge`、`preferences integration editor`、`preferences commands`、`preferences network`、`preferences accounts`、`preferences advanced`。局部修改只跑碰到的面板；共享主题改动才跑整个文件。
 
 已有 `pnpm dev` 服务时，可直接复用：PowerShell 中先设置 `$env:AWEGIT_UI_URL = 'http://127.0.0.1:1420'`，再执行 `pnpm exec playwright test e2e/merge-window.spec.ts`。这条命令使用现有试验台，不启动或停止开发服务。
 
@@ -222,7 +230,7 @@ Git 无法替换或写入工作区文件时，命令日志会逐个列出文件�
 
 颜色、字体和形状使用 `src/lib/theme.css` 中的共享变量；Apple 的玻璃材质、静态背景和悬浮布局集中在 `src/lib/AppleGlass.css`，只作用于 `data-theme="apple"`，不会覆盖经典白色与黑色主题。模糊只用于固定面板、菜单和弹窗，代码行与虚拟列表行不单独模糊。中文显式使用系统无衬线字体，代码和提交哈希使用等宽字体。减少透明效果的系统偏好会把玻璃面板改成实色。
 
-外观试验场景是 `prefs-appearance`。验证三套样式、保存重载、窄窗口操作及独立窗口同步：`pnpm test:ui -- --reuse e2e/appearance.spec.ts`。单个页面的外观检查示例：`pnpm test:ui -- --reuse e2e/scenes.spec.ts --grep "scene prefs-appearance$"`。只有修改覆盖全部页面的共享主题时才运行整个 `e2e/scenes.spec.ts`：160 个场景分别检查中文 Apple / 经典白色（1440×900）和英文 VS Code 黑色（960×640），截图在 `.lab/ui-audit/`。
+外观试验场景是 `prefs-appearance`。验证三套样式、保存重载、窄窗口操作及独立窗口同步：`pnpm test:ui -- --reuse e2e/appearance.spec.ts`。单个页面的外观检查示例：`pnpm test:ui -- --reuse e2e/scenes.spec.ts --grep "scene prefs-appearance$"`。这会跑该场景的三套主题。面板合同和全量场景范围见上文，不在这里重复。
 
 语言快捷键在首选项和输入框中也可使用，从当前显示语言切换到另一种语言并保存；也可在“外观”菜单中选择“切换语言”。首选项点击面板外空白处保持打开，通过右上角关闭按钮、“完成”或 `Escape` 关闭。试验台场景：`prefs-language`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|preferences backdrop|appearance menu"`。
 
