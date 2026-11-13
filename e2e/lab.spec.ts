@@ -306,6 +306,52 @@ test("dragging lines selects rows beneath the floating hunk actions", async ({ p
   expect(Math.min(...picked)).toBe(firstCode);
 });
 
+test("split view scrolls both columns together", async ({ page }) => {
+  await openLabScene(page, "diff-large-asset", ".diff-load", { diffStyle: "split" });
+  await page.locator(".diff-load .pane-chip").click();
+  await expect(page.locator("section.diff .diff-body.split .split-code").first()).toBeVisible({ timeout: 30_000 });
+  const readBars = () =>
+    page.evaluate(() => {
+      const read = (side: string) => {
+        const node = document.querySelector<HTMLElement>(`section.diff .split-bar[data-bar="${side}"]`);
+        if (!node) return null;
+        return { at: Math.round(node.scrollLeft), max: Math.round(node.scrollWidth - node.clientWidth) };
+      };
+      const body = document.querySelector<HTMLElement>("section.diff .diff-body");
+      return {
+        left: read("left"),
+        right: read("right"),
+        styles: {
+          left: body?.style.getPropertyValue("--sx-left") ?? "",
+          right: body?.style.getPropertyValue("--sx-right") ?? "",
+        },
+      };
+    });
+  const drag = (side: "left" | "right", value: number) =>
+    page.evaluate(
+      ({ side, value }) => {
+        const node = document.querySelector<HTMLElement>(`section.diff .split-bar[data-bar="${side}"]`)!;
+        node.scrollLeft = value;
+        node.dispatchEvent(new Event("scroll"));
+      },
+      { side, value },
+    );
+
+  const start = await readBars();
+  expect(start.left, "left bar").not.toBeNull();
+  expect(start.right, "right bar").not.toBeNull();
+  expect(Math.min(start.left!.max, start.right!.max)).toBeGreaterThan(60);
+
+  await drag("left", 40);
+  const expectedRight = Math.min(40, start.right!.max);
+  await expect.poll(async () => (await readBars()).right!.at).toBe(expectedRight);
+  expect((await readBars()).styles.right).toBe(`${expectedRight}px`);
+
+  await drag("right", 12);
+  await expect.poll(async () => (await readBars()).left!.at).toBe(12);
+  expect((await readBars()).styles.left).toBe("12px");
+});
+
 test("wrapped hunk actions anchor to the hunk under the pointer", async ({ page }) => {
   const scenes: Array<[string, string]> = [
     ["diff-wrap", ".split-meta"],

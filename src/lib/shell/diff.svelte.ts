@@ -128,10 +128,28 @@ export function splitScroller(shell: ShellState, node: HTMLElement, columns?: { 
         node.style.setProperty(`--sx-${side}`, `${track.scrollLeft}px`);
       }
     };
+    // Both columns scroll together so lines stay aligned; the follower clamps
+    // at its own width and its echoed scroll event must not scroll the leader back.
+    let echo: { side: string; value: number } | null = null;
     const onScroll = (event: Event) => {
       const target = event.target as HTMLElement;
       const side = target.dataset?.bar;
-      if (side) node.style.setProperty(`--sx-${side}`, `${target.scrollLeft}px`);
+      if (!side) return;
+      node.style.setProperty(`--sx-${side}`, `${target.scrollLeft}px`);
+      if (echo) {
+        if (echo.side === side && Math.abs(echo.value - target.scrollLeft) <= 1) {
+          echo = null;
+          return;
+        }
+        echo = null;
+      }
+      const otherSide = side === "left" ? "right" : "left";
+      const other = bar(otherSide);
+      if (!other || Math.abs(other.scrollLeft - target.scrollLeft) < 1) return;
+      other.scrollLeft = target.scrollLeft;
+      const at = other.scrollLeft;
+      node.style.setProperty(`--sx-${otherSide}`, `${at}px`);
+      echo = { side: otherSide, value: at };
     };
     const onWheel = (event: WheelEvent) => {
       const delta = event.shiftKey && !event.deltaX ? event.deltaY : event.deltaX;
