@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { openLabScene } from "./helpers";
@@ -47,10 +48,12 @@ test("large text assets load their diff on demand", async ({ page }) => {
 
 test("pushbox commits and pushes", async () => {
   const layout = (await lab("lab_layout")) as { pushbox: string; remotePush: string };
+  const summary = `lab: record the push note ${Date.now()}`;
+  appendFileSync(resolve(layout.pushbox, "note.txt"), `${summary}\n`);
   await lab("stage_path", { path: layout.pushbox, file: "note.txt" });
   await lab("commit_changes", {
     path: layout.pushbox,
-    summary: "lab: record the push note",
+    summary,
     description: "",
     amend: false,
     signOff: false,
@@ -61,7 +64,7 @@ test("pushbox commits and pushes", async () => {
     request: { action: "push", remote: "origin", setUpstream: true, tags: false, forceWithLease: false },
   });
   const subject = execFileSync("git", ["--git-dir", layout.remotePush, "log", "-1", "--format=%s"], { encoding: "utf8" }).trim();
-  expect(subject).toBe("lab: record the push note");
+  expect(subject).toBe(summary);
 });
 
 test("dialog close button dismisses the dialog", async ({ page }) => {
@@ -275,7 +278,7 @@ test("floating hunk actions stay inside the pane while scrolling", async ({ page
 });
 
 test("dragging lines selects rows beneath the floating hunk actions", async ({ page }) => {
-  await openLabScene(page, "diff-long", ".diff-body .split-code");
+  await openLabScene(page, "diff-long", ".diff-body .split-code", { diffStyle: "split" });
   const body = page.locator("section.diff .diff-body");
   await body.locator(".split-code").nth(20).hover();
   const actions = page.locator(".diff-hunk-actions");
@@ -308,7 +311,7 @@ test("wrapped hunk actions anchor to the hunk under the pointer", async ({ page 
     ["diff-wrap-unified", ".virtual-row.hunk"],
   ];
   for (const [scene, selector] of scenes) {
-    await openLabScene(page, scene, selector);
+    await openLabScene(page, scene, selector, { diffStyle: "split" });
     const body = page.locator("section.diff .diff-body");
     const header = body.locator(selector, { hasText: "@@" }).nth(1);
     await header.scrollIntoViewIfNeeded();
@@ -470,19 +473,19 @@ test("submenu stays open while the pointer moves through its items", async ({ pa
 });
 
 test("a write blocked by local changes offers stash and retry", async ({ page }) => {
-  await openLabScene(page, "action-error-retry", '.identity-floor[data-layer="error"]');
+  await openLabScene(page, "action-error-retry", '.identity-floor[data-layer="error"]', { locale: "en" });
   await expect(page.locator('.identity-floor[data-layer="error"]')).toContainText("Stash and retry");
 });
 
 test("applying a stash asks before it touches the work tree", async ({ page }) => {
-  await openLabScene(page, "stash-apply-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "stash-apply-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("working tree");
   await expect(confirm.locator(".commit")).toBeEnabled();
 });
 
 test("reverting a commit asks before it runs", async ({ page }) => {
-  await openLabScene(page, "revert-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "revert-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("Revert commit");
   await expect(confirm).toContainText("new revert commit");
@@ -490,7 +493,7 @@ test("reverting a commit asks before it runs", async ({ page }) => {
 });
 
 test("popping a stash asks before it runs", async ({ page }) => {
-  await openLabScene(page, "stash-pop-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "stash-pop-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("Pop stash");
   await expect(confirm).toContainText("remove it from the stash list");
@@ -498,7 +501,7 @@ test("popping a stash asks before it runs", async ({ page }) => {
 });
 
 test("resetting a branch asks before it moves", async ({ page }) => {
-  await openLabScene(page, "reset-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "reset-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("Mixed reset");
   await expect(confirm).toContainText("unstaged");
@@ -506,7 +509,7 @@ test("resetting a branch asks before it moves", async ({ page }) => {
 });
 
 test("cherry-picking asks before it runs", async ({ page }) => {
-  await openLabScene(page, "cherry-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "cherry-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("Cherry-pick (note source commit)");
   await expect(confirm).toContainText("records the source commit");
@@ -514,7 +517,7 @@ test("cherry-picking asks before it runs", async ({ page }) => {
 });
 
 test("a stale index.lock offers removal and retry", async ({ page }) => {
-  await openLabScene(page, "stale-lock-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "stale-lock-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("index.lock");
   await expect(confirm).toContainText("812 seconds");
@@ -523,7 +526,7 @@ test("a stale index.lock offers removal and retry", async ({ page }) => {
 });
 
 test("branch confirmation keeps the branch name on one line", async ({ page }) => {
-  await openLabScene(page, "force-delete-confirm", '[data-layer="confirm"]');
+  await openLabScene(page, "force-delete-confirm", '[data-layer="confirm"]', { locale: "en" });
   const confirm = page.locator('[data-layer="confirm"]');
   await expect(confirm).toContainText("Force delete branch");
   const subject = confirm.locator(".confirm-subject");
@@ -564,7 +567,7 @@ test("multi-file confirmation lists one file per line with a total", async ({ pa
 });
 
 test("commit patch renders each hunk header once", async ({ page }) => {
-  await openLabScene(page, "commit", ".detail");
+  await openLabScene(page, "commit", ".detail", { diffStyle: "split" });
   await page.locator(".patch-toggle").first().click();
   const meta = page.locator(".detail .split-meta");
   await expect(meta.first()).toBeVisible();
@@ -760,7 +763,7 @@ test("damaged settings use the recovery banner", async ({ page }) => {
 });
 
 test("returning to changes reloads a diff cleared by a history refresh", async ({ page }) => {
-  await openLabScene(page, "changes", "section.diff .diff-body");
+  await openLabScene(page, "changes", "section.diff .diff-body", { locale: "en" });
   await page.locator('[data-section="history"]').click();
   await page.waitForTimeout(400);
   await page.locator(".menubar button", { hasText: "View" }).click();
@@ -784,7 +787,7 @@ test("switching repositories clears the previous commit detail", async ({ page }
 });
 
 test("interactive rebase from HEAD explains there is nothing newer", async ({ page }) => {
-  await openLabScene(page, "history", ".commit-row");
+  await openLabScene(page, "history", ".commit-row", { locale: "en" });
   await page.locator(".commit-row").first().click({ button: "right" });
   await page.locator('[data-layer="menu"] button', { hasText: /Interactive rebase/ }).click();
   await expect(page.locator('[data-dialog="rebase"]')).toHaveCount(0);
@@ -801,7 +804,7 @@ test("changing one rebase verb leaves the other rows alone", async ({ page }) =>
 });
 
 test("shortcuts do not open layers behind a menu or the forge dialog", async ({ page }) => {
-  await openLabScene(page, "history", ".commit-row");
+  await openLabScene(page, "history", ".commit-row", { locale: "en" });
   await page.locator(".menubar button", { hasText: "View" }).click();
   await page.keyboard.press("Control+,");
   await expect(page.locator('[data-dialog="prefs"]')).toHaveCount(0);
@@ -817,7 +820,7 @@ test("shortcuts do not open layers behind a menu or the forge dialog", async ({ 
 });
 
 test("merge stays available with local changes and stashes them", async ({ page }) => {
-  await openLabScene(page, "dialog-merge", '[data-dialog="merge"]');
+  await openLabScene(page, "dialog-merge", '[data-dialog="merge"]', { locale: "en" });
   const dialog = page.locator('[data-dialog="merge"]');
   await expect(dialog.locator(".commit")).toBeEnabled();
   await expect(dialog.locator(".dialog-error")).toHaveCount(0);

@@ -211,6 +211,11 @@ export async function applyConflictChoice(shell: ShellState, ours: boolean, thei
     await shell.mutate({ action: "resolve", file, side: ours ? "ours" : "theirs", text: "" });
   }
 
+type DiffFlight = { key: string; promise: Promise<void> };
+
+/** One in-flight read per shell. Joining the same key must not bump diffToken. */
+const diffFlights = new WeakMap<ShellState, DiffFlight>();
+
 export async function loadDiff(shell: ShellState, loadLarge = false) {
     if (shell.mode !== "live" || !shell.selectedPath || shell.section !== "changes") {
       shell.diff = null;
@@ -218,16 +223,23 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
       shell.conflictView = null;
       return;
     }
-    const token = ++shell.diffToken;
     const file = shell.selectedPath;
     const stagedSide = shell.selectedSide === "staged";
     const path = shell.repoPath();
     const loadKey = `${path}\0${stagedSide ? "staged" : "unstaged"}\0${file}`;
     const load = loadLarge || shell.largeLoaded.has(loadKey);
+    const flightKey = `${loadKey}\0${load ? "large" : "text"}`;
+    const existing = diffFlights.get(shell);
+    if (existing?.key === flightKey) {
+      await existing.promise;
+      return;
+    }
+    const token = ++shell.diffToken;
     if (loadLarge) shell.largeLoaded.add(loadKey);
     const rows = stagedSide ? shell.snapshot?.staged : shell.snapshot?.unstaged;
     const conflicted = rows?.some((item) => item.path === file && item.kind === "conflict") ?? false;
-    await shell.withWork(shell.tr("chrome.readingFile"), async () => {
+    const flight: DiffFlight = { key: flightKey, promise: Promise.resolve() };
+    const promise = shell.withWork(shell.tr("chrome.readingFile"), async () => {
     try {
       if (conflicted) {
         const view = await invoke<ConflictView>("conflict_view", { path, file });
@@ -273,7 +285,12 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
         shell.diffError = shell.message(error);
       }
     }
+    }).finally(() => {
+      if (diffFlights.get(shell) === flight) diffFlights.delete(shell);
     });
+    flight.promise = promise;
+    diffFlights.set(shell, flight);
+    await promise;
   }
 
 export function tabText(shell: ShellState, path: string) {

@@ -806,35 +806,37 @@ fn run_prepared_capped(
         }
     }
     untrack(pid);
-    flow_command.finish(output.status.success(), &output.stderr);
+    // A capped read is intentionally incomplete. Do not turn it into a lock error.
     if truncated {
-        let note = failure_note(output.status.success(), true, &output.stderr);
+        flow_command.finish(output.status.success(), &output.stderr);
+        let note = failure_note(output.status.success(), true, &output.stdout, &output.stderr);
         if let Some(hook) = TRACE.get() {
             hook(args, started.elapsed(), true, &note);
         }
         note_captured(&output.stdout, &output.stderr);
         return Ok((output, true));
     }
-    let note = failure_note(output.status.success(), allow_failure, &output.stderr);
+    let stderr_text = settle_stderr(&output.stderr);
+    // Git for Windows can exit 0 after `checkout` while leaving the locked file
+    // unchanged. The unlink message is still the failure the user has to see.
+    let locked = if !allow_failure && output.status.success() {
+        crate::locks::explain(repo, &stderr_text)
+    } else {
+        None
+    };
+    let succeeded = output.status.success() && locked.is_none();
+    flow_command.finish(succeeded, &output.stderr);
+    let note = failure_note(succeeded, allow_failure, &output.stdout, &output.stderr);
     if let Some(hook) = TRACE.get() {
-        hook(
-            args,
-            started.elapsed(),
-            output.status.success() || allow_failure,
-            &note,
-        );
+        hook(args, started.elapsed(), succeeded || allow_failure, &note);
     }
     note_captured(&output.stdout, &output.stderr);
-    if output.status.success() || allow_failure {
+    if succeeded || allow_failure {
         return Ok((output, false));
     }
-    let stderr = settle_stderr(&output.stderr);
-    let detail = if stderr.is_empty() {
-        format!("git {} failed", args.join(" "))
-    } else {
-        stderr
-    };
-    Err(Error::Git(match crate::locks::explain(repo, &detail) {
+    let detail = command_failure_detail(&output.stdout, &stderr_text, args);
+    let explained = locked.or_else(|| crate::locks::explain(repo, &detail));
+    Err(Error::Git(match explained {
         Some(message) => format!("{message}\n{detail}"),
         None => detail,
     }))
@@ -1013,12 +1015,36 @@ fn percent_in(text: &str) -> Option<u8> {
     found
 }
 
-/// Stderr tail for a failure the caller will surface. Expected non-zero exits stay empty.
-fn failure_note(success: bool, allow_failure: bool, stderr: &[u8]) -> String {
+/// Output tail for a failure the caller will surface. Expected non-zero exits stay empty.
+///
+/// Git often prints the useful sentence on stdout (`nothing to commit`) and leaves
+/// stderr empty. Prefer stderr when both exist.
+fn failure_note(success: bool, allow_failure: bool, stdout: &[u8], stderr: &[u8]) -> String {
     if success || allow_failure {
         return String::new();
     }
-    tail_text(&settle_stderr(stderr), 500)
+    tail_text(&command_failure_text(stdout, stderr), 500)
+}
+
+fn command_failure_detail(stdout: &[u8], stderr_text: &str, args: &[&str]) -> String {
+    if !stderr_text.is_empty() {
+        return stderr_text.to_string();
+    }
+    let stdout_text = settle_stderr(stdout);
+    if stdout_text.is_empty() {
+        format!("git {} failed", args.join(" "))
+    } else {
+        tail_text(&stdout_text, 500)
+    }
+}
+
+fn command_failure_text(stdout: &[u8], stderr: &[u8]) -> String {
+    let stderr_text = settle_stderr(stderr);
+    if !stderr_text.is_empty() {
+        stderr_text
+    } else {
+        settle_stderr(stdout)
+    }
 }
 
 fn tail_text(text: &str, max_chars: usize) -> String {
@@ -1434,11 +1460,46 @@ mod progress_tests {
     #[test]
     fn failure_note_keeps_stderr_only_for_real_errors() {
         let stderr = b"Receiving objects:  10% (1/10)\rReceiving objects:  40% (4/10)\r\nfatal: could not read Username\n";
-        assert_eq!(failure_note(true, false, stderr), "");
-        assert_eq!(failure_note(false, true, stderr), "");
-        let note = failure_note(false, false, stderr);
+        assert_eq!(failure_note(true, false, b"nothing to commit\n", stderr), "");
+        assert_eq!(failure_note(false, true, b"nothing to commit\n", stderr), "");
+        let note = failure_note(false, false, b"nothing to commit\n", stderr);
         assert!(note.contains("could not read Username"));
         assert!(note.contains("40%"));
+        assert!(!note.contains("nothing to commit"));
+        let stdout_note = failure_note(false, false, b"nothing to commit, working tree clean\n", b"");
+        assert!(stdout_note.contains("nothing to commit"));
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::run;
+
+    #[test]
+    fn empty_commit_failure_includes_the_stdout_explanation() {
+        let repo = std::env::temp_dir().join(format!(
+            "awegit-empty-commit-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&repo);
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            run(&repo, args).unwrap_or_else(|error| panic!("git {}: {error}", args.join(" ")));
+        };
+        git(&["init", "-q", "-b", "main", "--template="]);
+        git(&["config", "user.name", "Test"]);
+        git(&["config", "user.email", "test@example.com"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        git(&["config", "core.hooksPath", ".git/no-hooks"]);
+        let message = run(&repo, &["commit", "-m", "test: empty"])
+            .unwrap_err()
+            .to_string();
+        let lower = message.to_ascii_lowercase();
+        assert!(
+            lower.contains("nothing to commit") || lower.contains("working tree clean"),
+            "{message}"
+        );
+        let _ = std::fs::remove_dir_all(&repo);
     }
 }
 

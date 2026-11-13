@@ -489,6 +489,306 @@ pub struct Preview {
 }
 
 static SANDBOX_ID: AtomicU64 = AtomicU64::new(1);
+
+/// How many replay steps one `merge-tree --stdin` call may cover.
+/// A conflict ends the preview, so the batch stays short enough that the first
+/// conflict does not merge the rest of a long branch.
+const PREVIEW_BATCH: usize = 32;
+
+struct PlannedCommit {
+    commit: Commit,
+    verb: String,
+    parents: Option<Vec<String>>,
+    tree: String,
+}
+
+struct MergeOutcome {
+    clean: bool,
+    tree: String,
+    files: Vec<String>,
+}
+
+struct BatchProgress {
+    next: usize,
+    current: String,
+    conflict: bool,
+}
+
+fn copy_preview_config(repo: &Path, sandbox: &Path) -> Result<(), Error> {
+    // Stored keys are lowercase. One regexp replaces a failing `config --get` per key.
+    let output = run_output(
+        repo,
+        &[
+            "config",
+            "--get-regexp",
+            r"^(merge\.(renames|renamelimit|directoryrenames|renormalize)|diff\.renames|core\.ignorecase)$",
+        ],
+    )?;
+    if !output.status.success() {
+        return Ok(());
+    }
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let Some((key, value)) = line.split_once(' ') else {
+            continue;
+        };
+        if key.is_empty() {
+            continue;
+        }
+        run(sandbox, &["config", key, value])?;
+    }
+    Ok(())
+}
+
+fn replay_plan(repo: &Path, onto: &str, head: &str) -> Result<Vec<PlannedCommit>, Error> {
+    check_rev(onto)?;
+    check_rev(head)?;
+    let range = format!("{onto}..{head}");
+    let output = run(
+        repo,
+        &[
+            "log",
+            "--reverse",
+            "--topo-order",
+            "--no-merges",
+            "--max-count=2001",
+            "--format=%H%x00%s%x00%an%x00%P%x00%T",
+            "-z",
+            &range,
+        ],
+    )?;
+    let values: Vec<_> = output.stdout.split(|byte| *byte == 0).collect();
+    Ok(values
+        .chunks_exact(5)
+        .map(|parts| PlannedCommit {
+            commit: Commit {
+                id: String::from_utf8_lossy(parts[0]).into(),
+                summary: String::from_utf8_lossy(parts[1]).into(),
+                author: String::from_utf8_lossy(parts[2]).into(),
+            },
+            verb: "pick".into(),
+            parents: Some(
+                String::from_utf8_lossy(parts[3])
+                    .split_whitespace()
+                    .filter(|item| !item.is_empty())
+                    .map(str::to_string)
+                    .collect(),
+            ),
+            tree: String::from_utf8_lossy(parts[4]).into(),
+        })
+        .collect())
+}
+
+fn lookup_parents(repo: &Path, id: &str) -> Result<Vec<String>, Error> {
+    let parents = text(repo, &["rev-list", "--parents", "-n", "1", id])?;
+    Ok(parents
+        .split_whitespace()
+        .skip(1)
+        .map(str::to_string)
+        .collect())
+}
+
+fn field_at(bytes: &[u8], index: &mut usize) -> Option<String> {
+    let start = *index;
+    let rest = bytes.get(start..)?;
+    let end = rest.iter().position(|byte| *byte == 0)?;
+    *index = start + end + 1;
+    Some(String::from_utf8_lossy(&bytes[start..start + end]).into_owned())
+}
+
+fn skip_merge_messages(bytes: &[u8], index: &mut usize) -> Option<()> {
+    while *index < bytes.len() {
+        if bytes[*index] == 0 {
+            *index += 1;
+            return Some(());
+        }
+        let count: usize = field_at(bytes, index)?.parse().ok()?;
+        for _ in 0..count {
+            field_at(bytes, index)?;
+        }
+        field_at(bytes, index)?;
+        field_at(bytes, index)?;
+    }
+    None
+}
+
+/// `merge-tree --stdin` records: status, tree, files, messages, then a trailing NUL.
+fn parse_merge_tree_stdin(bytes: &[u8]) -> Option<Vec<MergeOutcome>> {
+    if bytes.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut index = 0;
+    let mut merges = Vec::new();
+    while index < bytes.len() {
+        let status = field_at(bytes, &mut index)?;
+        let clean = match status.as_str() {
+            "1" => true,
+            "0" => false,
+            _ => return None,
+        };
+        let tree = field_at(bytes, &mut index)?;
+        if !matches!(tree.len(), 40 | 64) {
+            return None;
+        }
+        let mut files = Vec::new();
+        if clean {
+            if !field_at(bytes, &mut index)?.is_empty() {
+                return None;
+            }
+        } else {
+            loop {
+                let file = field_at(bytes, &mut index)?;
+                if file.is_empty() {
+                    break;
+                }
+                files.push(file);
+            }
+            skip_merge_messages(bytes, &mut index)?;
+        }
+        merges.push(MergeOutcome { clean, tree, files });
+    }
+    Some(merges)
+}
+
+fn outcome_from_merge(output: &std::process::Output) -> Option<MergeOutcome> {
+    if !matches!(output.status.code(), Some(0 | 1)) {
+        return None;
+    }
+    let parts: Vec<_> = output.stdout.split(|byte| *byte == 0).collect();
+    let tree = parts
+        .first()
+        .map(|value| String::from_utf8_lossy(value).trim().to_string())
+        .unwrap_or_default();
+    if !matches!(tree.len(), 40 | 64) {
+        return None;
+    }
+    let files = if output.status.success() {
+        Vec::new()
+    } else {
+        parts
+            .iter()
+            .skip(1)
+            .take_while(|part| !part.is_empty())
+            .map(|part| String::from_utf8_lossy(part).into_owned())
+            .collect()
+    };
+    Some(MergeOutcome {
+        clean: output.status.success(),
+        tree,
+        files,
+    })
+}
+
+fn batch_end(commits: &[PlannedCommit], start: usize) -> usize {
+    let mut end = start;
+    while end < commits.len() && end < 200 && end - start < PREVIEW_BATCH {
+        let step = &commits[end];
+        let Some(parents) = &step.parents else {
+            break;
+        };
+        if parents.len() != 1
+            || matches!(step.verb.as_str(), "drop" | "squash" | "fixup")
+            || !matches!(step.tree.len(), 40 | 64)
+        {
+            break;
+        }
+        end += 1;
+    }
+    end
+}
+
+fn known_commit(commits: &[PlannedCommit], source: &str, current: &str) -> bool {
+    current == source || commits.iter().any(|item| item.commit.id == current)
+}
+
+fn recorded_step(step: &PlannedCommit, state: &str, files: Vec<String>) -> PreviewStep {
+    PreviewStep {
+        commit: step.commit.clone(),
+        state: state.into(),
+        files,
+        verb: step.verb.clone(),
+    }
+}
+
+fn advance_current(step: &PlannedCommit, tree: &str) -> String {
+    if !step.tree.is_empty() && tree == step.tree {
+        step.commit.id.clone()
+    } else {
+        tree.to_string()
+    }
+}
+
+/// Replay a prefix in one process. Later rows assume each previous result tree
+/// is that commit's own tree; the first row that breaks the chain is kept, and
+/// the rows after it are discarded.
+fn apply_batch(
+    sandbox: &Path,
+    commits: &[PlannedCommit],
+    start: usize,
+    end: usize,
+    current: &str,
+    preview: &mut Preview,
+) -> Result<Option<BatchProgress>, Error> {
+    let mut input = String::new();
+    let mut ours = current.to_string();
+    for step in &commits[start..end] {
+        let parents = step.parents.as_ref().expect("batch steps have one parent");
+        input.push_str(&format!("{} -- {} {}\n", parents[0], ours, step.commit.id));
+        ours = step.commit.id.clone();
+    }
+    let output = match run_stdin(
+        sandbox,
+        &["merge-tree", "--write-tree", "--name-only", "-z", "--stdin"],
+        input.as_bytes(),
+    ) {
+        Ok(output) => output,
+        Err(_) => return Ok(None),
+    };
+    let Some(merges) = parse_merge_tree_stdin(&output.stdout) else {
+        return Ok(None);
+    };
+    if merges.len() != end - start {
+        return Ok(None);
+    }
+    let mut current = current.to_string();
+    let mut consumed = start;
+    for (offset, merge) in merges.iter().enumerate() {
+        let step_index = start + offset;
+        if offset > 0 {
+            let previous = &merges[offset - 1];
+            let previous_step = &commits[step_index - 1];
+            if !previous.clean || previous.tree != previous_step.tree {
+                break;
+            }
+        }
+        let step = &commits[step_index];
+        if merge.clean {
+            current = advance_current(step, &merge.tree);
+            preview.steps.push(recorded_step(step, "clean", Vec::new()));
+            consumed = step_index + 1;
+            if merge.tree != step.tree {
+                break;
+            }
+        } else {
+            preview
+                .steps
+                .push(recorded_step(step, "conflict", merge.files.clone()));
+            return Ok(Some(BatchProgress {
+                next: step_index + 1,
+                current,
+                conflict: true,
+            }));
+        }
+    }
+    if consumed == start {
+        return Ok(None);
+    }
+    Ok(Some(BatchProgress {
+        next: consumed,
+        current,
+        conflict: false,
+    }))
+}
+
 struct Sandbox(PathBuf);
 impl Drop for Sandbox {
     fn drop(&mut self) {
@@ -511,18 +811,7 @@ fn sandbox(repo: &Path) -> Result<Sandbox, Error> {
     run(&sandbox.0, &["init", "--quiet", "--template="])?;
     run(&sandbox.0, &["config", "core.hooksPath", ".git/no-hooks"])?;
     run(&sandbox.0, &["config", "core.fsmonitor", "false"])?;
-    for key in [
-        "merge.renames",
-        "merge.renameLimit",
-        "merge.directoryRenames",
-        "merge.renormalize",
-        "diff.renames",
-        "core.ignoreCase",
-    ] {
-        if let Ok(value) = text(repo, &["config", "--get", key]) {
-            run(&sandbox.0, &["config", key, &value])?;
-        }
-    }
+    copy_preview_config(repo, &sandbox.0)?;
     let objects = text(
         repo,
         &[
@@ -594,18 +883,27 @@ pub fn preview_at_cancellable(
     if cancelled() { preview.detail = "preview-cancelled".into(); return Ok(preview); }
     let sandbox = sandbox(repo)?;
     let started = Instant::now();
-    let commits = if !rebase {
-        vec![(source.clone(), "merge".to_string())]
+    let commits: Vec<PlannedCommit> = if !rebase {
+        vec![PlannedCommit {
+            commit: source.clone(),
+            verb: "merge".into(),
+            parents: None,
+            tree: String::new(),
+        }]
     } else if !instructions.is_empty() {
         instructions
             .iter()
-            .filter_map(|step| commit(repo, &step.rev).map(|commit| (commit, step.verb.clone())))
+            .filter_map(|step| {
+                commit(repo, &step.rev).map(|commit| PlannedCommit {
+                    commit,
+                    verb: step.verb.clone(),
+                    parents: None,
+                    tree: String::new(),
+                })
+            })
             .collect()
     } else {
-        replay_commits(repo, &source.id, &target.id)?
-            .into_iter()
-            .map(|commit| (commit, "pick".to_string()))
-            .collect()
+        replay_plan(repo, &source.id, &target.id)?
     };
     let mut current = if rebase {
         source.id.clone()
@@ -613,17 +911,15 @@ pub fn preview_at_cancellable(
         target.id.clone()
     };
     let mut conditional = false;
-    for (index, (original, verb)) in commits.into_iter().enumerate() {
-        if cancelled() { preview.detail = "preview-cancelled".into(); return Ok(preview); }
-        let mut step = PreviewStep {
-            commit: original.clone(),
-            state: "conditional".into(),
-            files: Vec::new(),
-            verb: verb.clone(),
-        };
-        if verb == "drop" {
-            step.state = "dropped".into();
-            preview.steps.push(step);
+    let mut index = 0;
+    while index < commits.len() {
+        if cancelled() {
+            preview.detail = "preview-cancelled".into();
+            return Ok(preview);
+        }
+        if commits[index].verb == "drop" {
+            preview.steps.push(recorded_step(&commits[index], "dropped", Vec::new()));
+            index += 1;
             continue;
         }
         if conditional || index >= 200 || started.elapsed().as_secs() >= 5 {
@@ -631,83 +927,140 @@ pub fn preview_at_cancellable(
             if preview.detail.is_empty() {
                 preview.detail = "conditional-after-conflict-or-limit".into();
             }
-            preview.steps.push(step);
+            preview
+                .steps
+                .push(recorded_step(&commits[index], "conditional", Vec::new()));
+            index += 1;
             continue;
         }
-        let mut args = vec![
-            "merge-tree".to_string(),
-            "--write-tree".into(),
-            "--name-only".into(),
-            "-z".into(),
-        ];
-        // Make committed attributes visible without checking out files or running filters.
-        std::fs::write(sandbox.0.join(".git/HEAD"), format!("{current}\n")).map_err(|source| {
-            Error::Read {
-                path: sandbox.0.display().to_string(),
-                source,
-            }
-        })?;
-        run(&sandbox.0, &["read-tree", &current])?;
-        if cancelled() { preview.detail = "preview-cancelled".into(); return Ok(preview); }
+        if cancelled() {
+            preview.detail = "preview-cancelled".into();
+            return Ok(preview);
+        }
+        // merge-tree --write-tree does not read the index or work tree, so the
+        // sandbox does not need read-tree. A result tree is a valid next "ours"
+        // when --merge-base is set, so the replay does not need commit-tree either.
         if rebase {
-            // A replay is a three-way application of this commit against its original parent,
-            // not a merge of the two final branch trees.
-            let parents = text(repo, &["rev-list", "--parents", "-n", "1", &original.id])?;
-            let parents: Vec<_> = parents.split_whitespace().skip(1).collect();
-            if parents.len() != 1 || matches!(verb.as_str(), "squash" | "fixup") {
-                step.state = "unknown".into();
+            let end = batch_end(&commits, index);
+            if end > index + 1 && known_commit(&commits, &source.id, &current) {
+                if let Some(applied) = apply_batch(&sandbox.0, &commits, index, end, &current, &mut preview)? {
+                    index = applied.next;
+                    current = applied.current;
+                    if applied.conflict {
+                        conditional = true;
+                    }
+                    continue;
+                }
+            }
+            let parents = match &commits[index].parents {
+                Some(parents) => parents.clone(),
+                None => lookup_parents(repo, &commits[index].commit.id)?,
+            };
+            if parents.len() != 1 || matches!(commits[index].verb.as_str(), "squash" | "fixup") {
                 preview.detail = "preview-unavailable".into();
                 conditional = true;
-                preview.steps.push(step);
+                preview
+                    .steps
+                    .push(recorded_step(&commits[index], "unknown", Vec::new()));
+                index += 1;
                 continue;
             }
-            let parent = parents[0];
-            args.push(format!("--merge-base={parent}"));
-        }
-        args.extend([current.clone(), original.id.clone()]);
-        let borrowed: Vec<_> = args.iter().map(String::as_str).collect();
-        let output = run_output(&sandbox.0, &borrowed)?;
-        let parts: Vec<_> = output.stdout.split(|byte| *byte == 0).collect();
-        let tree = parts
-            .first()
-            .map(|value| String::from_utf8_lossy(value).trim().to_string())
-            .unwrap_or_default();
-        if output.status.success() && matches!(tree.len(), 40 | 64) {
-            step.state = "clean".into();
-            if rebase {
-                let output = run_stdin(
-                    &sandbox.0,
-                    &[
-                        "-c",
-                        "commit.gpgsign=false",
-                        "-c",
-                        "user.name=AweGit preview",
-                        "-c",
-                        "user.email=preview@localhost",
-                        "commit-tree",
-                        &tree,
-                        "-p",
-                        &current,
-                    ],
-                    b"AweGit isolated preview\n",
-                )?;
-                current = String::from_utf8_lossy(&output.stdout).trim().into();
+            let output = run_output(
+                &sandbox.0,
+                &[
+                    "merge-tree",
+                    "--write-tree",
+                    "--name-only",
+                    "-z",
+                    &format!("--merge-base={}", parents[0]),
+                    &current,
+                    &commits[index].commit.id,
+                ],
+            )?;
+            match outcome_from_merge(&output) {
+                Some(outcome) if outcome.clean => {
+                    current = advance_current(&commits[index], &outcome.tree);
+                    preview
+                        .steps
+                        .push(recorded_step(&commits[index], "clean", Vec::new()));
+                }
+                Some(outcome) => {
+                    conditional = true;
+                    preview.steps.push(recorded_step(
+                        &commits[index],
+                        "conflict",
+                        outcome.files,
+                    ));
+                }
+                None => {
+                    preview.detail = "preview-unavailable".into();
+                    conditional = true;
+                    preview
+                        .steps
+                        .push(recorded_step(&commits[index], "unknown", Vec::new()));
+                }
             }
-        } else if output.status.code() == Some(1) && matches!(tree.len(), 40 | 64) {
-            step.state = "conflict".into();
-            step.files = parts
-                .iter()
-                .skip(1)
-                .take_while(|part| !part.is_empty())
-                .map(|part| String::from_utf8_lossy(part).into_owned())
-                .collect();
-            conditional = true;
-        } else {
-            step.state = "unknown".into();
-            preview.detail = "preview-unavailable".into();
-            conditional = true;
+            index += 1;
+            continue;
         }
-        preview.steps.push(step);
+        let output = run_output(
+            &sandbox.0,
+            &[
+                "merge-tree",
+                "--write-tree",
+                "--name-only",
+                "-z",
+                &current,
+                &commits[index].commit.id,
+            ],
+        )?;
+        match outcome_from_merge(&output) {
+            Some(outcome) if outcome.clean => {
+                preview
+                    .steps
+                    .push(recorded_step(&commits[index], "clean", Vec::new()));
+            }
+            Some(outcome) => {
+                conditional = true;
+                preview.steps.push(recorded_step(
+                    &commits[index],
+                    "conflict",
+                    outcome.files,
+                ));
+            }
+            None => {
+                preview.detail = "preview-unavailable".into();
+                conditional = true;
+                preview
+                    .steps
+                    .push(recorded_step(&commits[index], "unknown", Vec::new()));
+            }
+        }
+        index += 1;
     }
     Ok(preview)
+}
+
+#[cfg(test)]
+mod stdin_parse_tests {
+    use super::parse_merge_tree_stdin;
+
+    #[test]
+    fn reads_a_clean_record_and_a_conflict_record() {
+        let mut bytes = Vec::new();
+        bytes.extend(b"1\0");
+        bytes.extend(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\0\0");
+        bytes.extend(b"0\0");
+        bytes.extend(b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\0");
+        bytes.extend(b"n.txt\0\0");
+        bytes.extend(b"1\0n.txt\0Auto-merging\0Auto-merging n.txt\n\0");
+        bytes.extend(b"1\0n.txt\0CONFLICT (contents)\0CONFLICT (content): Merge conflict in n.txt\n\0\0");
+        let merges = parse_merge_tree_stdin(&bytes).expect("records");
+        assert_eq!(merges.len(), 2);
+        assert!(merges[0].clean);
+        assert!(merges[0].files.is_empty());
+        assert!(!merges[1].clean);
+        assert_eq!(merges[1].files, ["n.txt"]);
+        assert_eq!(merges[1].tree, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    }
 }
