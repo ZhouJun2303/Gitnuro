@@ -55,13 +55,13 @@ const COMMON: &[(&str, &str)] = &[
 pub fn support(repo: &Path, file: &str) -> Option<Support> {
     let path = safe_path(file)?;
     let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if let Some((_, kind)) = UNITY.iter().find(|(ext, _)| *ext == extension) {
+        return Some(Support {
+            tool: "unity",
+            kind,
+        });
+    }
     if unity_asset(repo, &path) {
-        if let Some((_, kind)) = UNITY.iter().find(|(ext, _)| *ext == extension) {
-            return Some(Support {
-                tool: "unity",
-                kind,
-            });
-        }
         if let Some((_, kind)) = COMMON
             .iter()
             .find(|(ext, kind)| *ext == extension && (*kind == "image" || *ext == "cs"))
@@ -88,8 +88,9 @@ fn unity_asset(repo: &Path, path: &Path) -> bool {
             .as_os_str()
             .to_string_lossy()
             .eq_ignore_ascii_case("Assets")
-            && repo.join(&prefix).join("ProjectSettings").is_dir()
             && repo.join(&prefix).join("Assets").is_dir()
+            && (prefix.as_os_str().is_empty()
+                || repo.join(&prefix).join("ProjectSettings").is_dir())
         {
             return true;
         }
@@ -220,6 +221,41 @@ mod tests {
     }
 
     #[test]
+    fn unity_assets_work_without_project_settings() {
+        let root = std::env::temp_dir().join(format!("awegit-assets-only-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("Assets/ResBundles/Prefabs/UI")).unwrap();
+        assert_eq!(
+            support(&root, "Assets/ResBundles/Prefabs/UI/UIChapter.prefab"),
+            Some(Support {
+                tool: "unity",
+                kind: "prefab"
+            })
+        );
+        assert_eq!(
+            support(&root, "Assets/Script/Player.cs"),
+            Some(Support {
+                tool: "unity",
+                kind: "script"
+            })
+        );
+        assert_eq!(
+            support(&root, "Assets/UI/icon.png"),
+            Some(Support {
+                tool: "unity",
+                kind: "image"
+            })
+        );
+        assert_eq!(
+            support(&root, "Other/UIChapter.prefab"),
+            Some(Support {
+                tool: "unity",
+                kind: "prefab"
+            })
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn writes_historical_bytes_without_replacing_existing_copies() {
         use std::process::Command;
         let root = std::env::temp_dir().join(format!(
@@ -271,7 +307,13 @@ mod tests {
         std::fs::create_dir_all(root.join("ProjectSettings")).unwrap();
         std::fs::write(root.join("Assets/Player.cs"), b"class Player {}").unwrap();
         std::fs::write(root.join("Assets/Game.asmdef"), b"{}").unwrap();
-        git(&["add", "Assets/Player.cs", "Assets/Game.asmdef"]);
+        std::fs::write(root.join("Assets/UIChapter.prefab"), b"%YAML 1.1\n").unwrap();
+        git(&[
+            "add",
+            "Assets/Player.cs",
+            "Assets/Game.asmdef",
+            "Assets/UIChapter.prefab",
+        ]);
         git(&[
             "-c",
             "user.name=test",
@@ -282,12 +324,16 @@ mod tests {
             "test: unity assets",
         ]);
         let unity_rev = git(&["rev-parse", "HEAD"]);
+        std::fs::remove_dir(root.join("ProjectSettings")).unwrap();
         assert!(create(&root, &unity_rev, "Assets/Player.cs")
             .unwrap()
             .ends_with(".cs.txt"));
         assert!(create(&root, &unity_rev, "Assets/Game.asmdef")
             .unwrap()
             .ends_with(".asmdef.txt"));
+        let prefab = create(&root, &unity_rev, "Assets/UIChapter.prefab").unwrap();
+        assert!(prefab.ends_with(".prefab"));
+        assert_eq!(std::fs::read(prefab).unwrap(), b"%YAML 1.1\n");
         std::fs::remove_dir_all(root).unwrap();
     }
 }
