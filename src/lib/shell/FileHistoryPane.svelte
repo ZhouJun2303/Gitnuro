@@ -19,7 +19,7 @@
   let listTop = $state(0);
   let copySupport = $state<{ tool: string; kind: string } | null>(null);
   let copySupportError = $state("");
-  type PreviewCopy = { repo: string; file: string; path: string };
+  type PreviewCopy = { repo: string; file: string; path: string; tool: string };
   let previews = $state<Record<string, PreviewCopy>>({});
   let autoClean = $state(true);
   let busy = $state(false);
@@ -84,6 +84,14 @@
 
   const previewKey = (id: string) => `${shell.repoPath()}\0${shell.historyFilter}\0${id}`;
   const previewName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+  function copyName(path: string, tool: string) {
+    const name = previewName(path);
+    if (tool !== "unity") return name;
+    const script = name.match(/\.(?:cs|asmdef)\.txt$/i);
+    if (script) return name.slice(0, -script[0].length);
+    const dot = name.lastIndexOf(".");
+    return dot > 0 ? name.slice(0, dot) : name;
+  }
 
   function runAction(body: () => Promise<void>) {
     if (pendingAction || closing) return;
@@ -98,13 +106,14 @@
     const repo = shell.repoPath();
     const file = shell.historyFilter;
     if (!copySupport || !repo || !file) return;
+    const tool = copySupport.tool;
     const key = previewKey(id);
     runAction(async () => {
       copySupportError = "";
       copiedPath = "";
       const path = await invoke<string>("create_revision_copy", { path: repo, rev: id, file });
-      previews = { ...previews, [key]: { repo, file, path } };
-      shell.copyText(previewName(path));
+      previews = { ...previews, [key]: { repo, file, path, tool } };
+      shell.copyText(copyName(path, tool));
       if (repo === shell.repoPath() && file === shell.historyFilter) copiedPath = path;
     });
   }
@@ -227,7 +236,7 @@
               </button>
               {#if previews[key]}
                 <div class="preview-actions">
-                  <button class="revision-action" type="button" disabled={busy || closing} aria-label={shell.tr("chrome.copyPreviewName")} title={shell.tr("chrome.copyPreviewName")} onclick={() => shell.copyText(previewName(previews[key].path))}>
+                  <button class="revision-action" type="button" disabled={busy || closing} aria-label={shell.tr("chrome.copyPreviewName")} title={shell.tr("chrome.copyPreviewName")} onclick={() => shell.copyText(copyName(previews[key].path, previews[key].tool))}>
                     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1"/><path d="M3 11H2V2h9v1"/></svg>
                   </button>
                   <button class="revision-action" type="button" disabled={busy || closing} aria-label={shell.tr("chrome.cancelPreview")} title={shell.tr("chrome.cancelPreview")} onclick={() => cancelPreview(key)}>

@@ -477,11 +477,23 @@ function seedTagsRepo() {
   }
 }
 
+function seedUnityRepo() {
+  const path = join(repos, "unity");
+  wipe(path);
+  initWork(path);
+  commit(path, "ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 2022.3.62f1\n", "create the unity project");
+  commit(path, "Assets/Scripts/Player.cs", "public class Player {}\n", "add the player script");
+  commit(path, "Assets/Prefabs/UIChapter.prefab", "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!1 &1\nGameObject:\n  m_Name: UIChapter\n", "add the chapter prefab");
+  commit(path, "Assets/Scripts/Player.cs", "public class Player\n{\n    public int level;\n}\n", "track the player level");
+  commit(path, "Assets/Prefabs/UIChapter.prefab", "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!1 &1\nGameObject:\n  m_Name: UIChapter\n  m_IsActive: 1\n", "activate the chapter prefab");
+}
+
 const restore = {
   "unstage-initial": seedUnstageInitialRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
   "pull-deleted": seedPullDeletedRepo,
   tags: seedTagsRepo,
+  unity: seedUnityRepo,
   operation: seedOperationRepo,
   conflict: seedConflictRepo,
   merge: seedMergeRepo,
@@ -548,6 +560,7 @@ cloneFrom(origin, join(repos, "copies", "full"));
 git(ahead, ["remote", "add", "mirror", origin]);
 git(ahead, ["fetch", "mirror"]);
 seedBisectRepo();
+seedUnityRepo();
 
 for (let i = 1; i <= FILL; i++) {
   commit(ahead, `local/ahead-${pad(i)}.txt`, `ahead ${i}\n`, `local ahead ${i}`);
