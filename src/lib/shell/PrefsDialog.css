@@ -187,6 +187,15 @@
   min-width: 0;
 }
 
+.dialog .pref-setting-hint {
+  margin: 0 0 4px;
+  max-height: none;
+  white-space: normal;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
 .pref-control > select { width: 190px; }
 
 .pref-control > input { width: 200px; }

@@ -277,6 +277,7 @@ fn apply_session() {
         ssl_verify: values.ssl_verify,
         ssl_ca: values.ssl_ca_file.trim().to_string(),
         sign_commits: values.sign_commits,
+        autostash_include_untracked: values.autostash_include_untracked,
         ask_user: String::new(),
     });
 }

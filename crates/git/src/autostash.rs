@@ -26,12 +26,13 @@ pub(crate) enum Restored {
     Missing,
 }
 
-/// Stash every work-tree change, including untracked files, except the root
-/// `.fakeignore` that only AweGit reads. `None` when the tree has nothing to stash.
+/// Stash tracked changes, optionally including untracked files except the root
+/// `.fakeignore` that only AweGit reads. `None` when there is nothing to stash.
 pub(crate) fn push(repo: &Path, label: &str) -> Result<Option<String>, Error> {
+    let include_untracked = crate::cli::session_snapshot().0.autostash_include_untracked;
     let Changes { paths, exclude_fakeignore, index_only } = {
         let _phase = crate::timing_phase("autostash-check");
-        changed_paths(repo)?
+        changed_paths(repo, include_untracked)?
     };
     if paths.is_empty() {
         return Ok(None);
@@ -53,10 +54,12 @@ pub(crate) fn push(repo: &Path, label: &str) -> Result<Option<String>, Error> {
     let mut args = vec![
         "stash",
         "push",
-        "--include-untracked",
         "-m",
         message.as_str(),
     ];
+    if include_untracked {
+        args.push("--include-untracked");
+    }
     if exclude_fakeignore {
         args.extend(["--", ".", ":(exclude).fakeignore"]);
     }
@@ -70,7 +73,7 @@ pub(crate) fn push(repo: &Path, label: &str) -> Result<Option<String>, Error> {
         // after proving a new stash exists and every included change is saved.
         let empty_cleanup = error.to_string().contains("No valid patches in input")
             && !oid.is_empty() && before != after
-            && changed_paths(repo).map(|changes| {
+            && changed_paths(repo, include_untracked).map(|changes| {
                 changes.paths.iter().all(|path| changes.exclude_fakeignore && path == ".fakeignore")
             }).unwrap_or(false);
         if !empty_cleanup {
@@ -254,11 +257,11 @@ struct Changes {
 }
 
 /// Work-tree paths from `status --porcelain -z`, in the order Git prints them.
-fn changed_paths(repo: &Path) -> Result<Changes, Error> {
-    if let Ok(changes) = changed_paths_native(repo) { return Ok(changes); }
+fn changed_paths(repo: &Path, include_untracked: bool) -> Result<Changes, Error> {
+    if let Ok(changes) = changed_paths_native(repo, include_untracked) { return Ok(changes); }
     let output = run(
         repo,
-        &["status", "--porcelain", "-z", "--untracked-files=normal"],
+        &["status", "--porcelain", "-z", if include_untracked { "--untracked-files=normal" } else { "--untracked-files=no" }],
     )?;
     let text = String::from_utf8_lossy(&output.stdout);
     let mut entries = text.split('\0');
@@ -278,19 +281,19 @@ fn changed_paths(repo: &Path) -> Result<Changes, Error> {
             entries.next();
         }
     }
-    Ok(Changes { paths, exclude_fakeignore: fakeignore_is_untracked(repo), index_only })
+    Ok(Changes { paths, exclude_fakeignore: include_untracked && fakeignore_is_untracked(repo), index_only })
 }
 
-fn changed_paths_native(path: &Path) -> Result<Changes, Error> {
+fn changed_paths_native(path: &Path, include_untracked: bool) -> Result<Changes, Error> {
     let repo = crate::open_repo(path)?;
     if repo.git_dir() != repo.common_dir() { return Err(Error::Git("use porcelain for linked-worktree exclude rules".into())); }
     let index = repo.index_or_empty().map_err(|error| Error::Git(error.to_string()))?;
-    let exclude_fakeignore = path.join(".fakeignore").is_file()
+    let exclude_fakeignore = include_untracked && path.join(".fakeignore").is_file()
         && index.entry_by_path(gix::bstr::BStr::new(b".fakeignore")).is_none();
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
     let iter = repo.status(gix::progress::Discard)?
-        .untracked_files(gix::status::UntrackedFiles::Collapsed)
+        .untracked_files(if include_untracked { gix::status::UntrackedFiles::Collapsed } else { gix::status::UntrackedFiles::None })
         .into_iter(Vec::<gix::bstr::BString>::new())?;
     for item in iter {
         match item? {

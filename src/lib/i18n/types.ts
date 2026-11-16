@@ -777,6 +777,8 @@ export type Messages = {
     forceWithLease: string;
     checkoutAfter: string;
     includeUntracked: string;
+    autostashIncludeUntracked: string;
+    autostashIncludeUntrackedHint: string;
     ignoreSpace: string;
     flowKind: string;
     privateRepo: string;

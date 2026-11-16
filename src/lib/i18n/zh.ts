@@ -836,6 +836,8 @@ export const zh: Messages = {
     forceWithLease: "使用 --force-with-lease",
     checkoutAfter: "创建后检出",
     includeUntracked: "包含未跟踪文件",
+    autostashIncludeUntracked: "自动贮藏包含未跟踪文件",
+    autostashIncludeUntrackedHint: "用于拉取、切换分支等操作，默认关闭。关闭时新文件留在工作区；若同名文件阻挡操作，需先处理后重试。",
     ignoreSpace: "忽略空白",
     flowKind: "类型",
     privateRepo: "私有仓库",

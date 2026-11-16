@@ -213,6 +213,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "prefs-diff", group: "弹窗", title: "偏好设置 · 差异", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-preview-formats", group: "弹窗", title: "偏好设置 · 历史预览格式", repo: "full", ready: '[data-pref-tab="previewFormats"]', dialog: "prefs" }),
   scene({ id: "prefs-git", group: "弹窗", title: "偏好设置 · Git", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-autostash", group: "弹窗", title: "偏好设置 · 自动贮藏范围", repo: "checkout-index", ready: 'input[name="autostashIncludeUntracked"]', dialog: "prefs" }),
   scene({ id: "prefs-commit", group: "弹窗", title: "偏好设置 · 提交", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-ai", group: "弹窗", title: "偏好设置 · AI", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-integration", group: "弹窗", title: "偏好设置 · 集成", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),

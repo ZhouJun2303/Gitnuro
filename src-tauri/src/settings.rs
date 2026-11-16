@@ -24,6 +24,8 @@ pub struct Settings {
     pub theme: String,
     #[serde(default)]
     pub pull_rebase: bool,
+    #[serde(default)]
+    pub autostash_include_untracked: bool,
     #[serde(default = "default_true")]
     pub fetch_prune: bool,
     #[serde(default = "split_style")]
@@ -523,6 +525,7 @@ impl Default for Settings {
             recovery_notice: String::new(),
             theme: theme_default(),
             pull_rebase: false,
+            autostash_include_untracked: false,
             fetch_prune: true,
             diff_style: split_style(),
             proxy: String::new(),
@@ -1563,6 +1566,20 @@ mod tests {
           }
         }"#;
         (serde_json::from_str(text).unwrap(), text.to_string())
+    }
+
+    #[test]
+    fn automatic_stash_untracked_defaults_off_and_keeps_an_explicit_choice() {
+        assert!(!Settings::default().autostash_include_untracked);
+        assert!(!serde_json::from_str::<Settings>(r#"{"pullRebase":true}"#).unwrap().autostash_include_untracked);
+        for enabled in [false, true] {
+            let settings: Settings = serde_json::from_value(serde_json::json!({
+                "autostashIncludeUntracked": enabled,
+            })).unwrap();
+            let saved = serde_json::to_value(&settings).unwrap();
+            assert_eq!(saved["autostashIncludeUntracked"], enabled);
+            assert_eq!(serde_json::from_value::<Settings>(saved).unwrap().autostash_include_untracked, enabled);
+        }
     }
 
     #[test]

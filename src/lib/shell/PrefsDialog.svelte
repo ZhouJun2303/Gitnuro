@@ -618,6 +618,11 @@
               <input type="checkbox" bind:checked={shell.settings.applyStashDelete} />
               <span class="pref-label">{shell.tr("dialog.applyStashDelete")}</span>
             </label>
+            <label class="pref-row pref-toggle">
+              <input type="checkbox" name="autostashIncludeUntracked" aria-describedby="autostash-untracked-hint" bind:checked={shell.settings.autostashIncludeUntracked} />
+              <span class="pref-label">{shell.tr("dialog.autostashIncludeUntracked")}</span>
+            </label>
+            <p class="pref-setting-hint" id="autostash-untracked-hint">{shell.tr("dialog.autostashIncludeUntrackedHint")}</p>
           </div>
         </section>
       {:else if shell.prefTab === "integration"}

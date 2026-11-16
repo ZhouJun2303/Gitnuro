@@ -836,6 +836,8 @@ export const en: Messages = {
     forceWithLease: "Use --force-with-lease",
     checkoutAfter: "Check out after creating",
     includeUntracked: "Include untracked files",
+    autostashIncludeUntracked: "Include untracked files in automatic stashes",
+    autostashIncludeUntrackedHint: "Used for pull, checkout and similar operations. Off by default. New files stay in the working directory when off; resolve any path collisions before retrying.",
     ignoreSpace: "Ignore whitespace",
     flowKind: "Kind",
     privateRepo: "Private repository",

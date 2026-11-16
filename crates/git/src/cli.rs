@@ -154,6 +154,7 @@ pub struct Session {
     pub ssl_verify: bool,
     pub ssl_ca: String,
     pub sign_commits: bool,
+    pub autostash_include_untracked: bool,
     pub ask_user: String,
 }
 
@@ -166,6 +167,7 @@ impl Default for Session {
             ssl_verify: true,
             ssl_ca: String::new(),
             sign_commits: false,
+            autostash_include_untracked: false,
             ask_user: String::new(),
         }
     }
@@ -184,6 +186,7 @@ static PROCESS: Mutex<Process> = Mutex::new(Process {
         ssl_verify: true,
         ssl_ca: String::new(),
         sign_commits: false,
+        autostash_include_untracked: false,
         ask_user: String::new(),
     },
     passphrase: String::new(),

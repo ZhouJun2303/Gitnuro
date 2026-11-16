@@ -219,11 +219,13 @@ pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.
 
 双击本地、远程分支和右键检出统一调用一次后端写操作。后端保存本地修改，按贮藏提交 ID 恢复暂存与未暂存内容；前端不再额外执行 `stash push` 或固定弹出 `stash@{0}`。鼠标单击延后 280ms 定位历史，双击取消该定位并使旧定位失效，避免先读取两次历史再等待检出；键盘定位立即执行。重复双击沿用前台写操作保护，不会再保存或弹出另一份贮藏。
 
+设置 → Git → 贮藏中的“自动贮藏包含未跟踪文件”（`autostashIncludeUntracked`）默认关闭，旧设置未包含该字段时也按关闭处理。关闭时只保存已跟踪的暂存与工作区修改，保护检查跳过未跟踪目录遍历；未跟踪文件留在原地，只有这类文件时不创建自动贮藏。已 `git add` 的新文件属于暂存内容，仍会保存。未跟踪文件与目标分支路径重名时，由 Git 阻止覆盖并报告原因，原有暂存/未暂存内容恢复。开启后自动贮藏添加 `--include-untracked`，仍排除未跟踪的根 `.fakeignore` 和被 Git 忽略的未跟踪文件。该开关适用于检出、Pull、合并、变基等自动保护流程，与手动贮藏的“包含未跟踪文件”设置独立；恢复已有贮藏时始终按原备份内容处理。
+
 切换、合并或拉取后，若 `stash apply --index` 明确报 `conflicts in index. Try without --index.`，说明原暂存补丁与新基线不兼容。此时按 Git 的提示合并贮藏内容到工作区，保留原贮藏中的暂存内容；真实冲突保留冲突文件并恢复其余文件。其他恢复错误不重跑可能已部分写入的命令，并保留待恢复标记。正常恢复仍保持暂存/未暂存划分，恢复失败不删除备份。
 
 命令记录把本次写请求中实际启动的 Git 命令逐条加粗，包含参数、毫秒耗时和退出码，也记录没有输出的命令和失败前已执行的步骤。准备及收尾查询与写命令按执行顺序展示；认证注入参数不进入命令文本，返回日志继续脱敏。Git 命令耗时不包含命令退出后的流程记录处理。记录末尾的 `backend` 包含后端排队、Git 操作、流程记录和状态读取，`refresh` 是返回后到界面刷新完成的等待，`wait` 是前端等待写操作的时间，`total` 是这几段的总等待；Git 时间包含在 `backend` 中，不重复相加。原生 `git pull --no-autostash --rebase` 或 `--no-rebase` 自行执行 fetch 和后续整合，AweGit 单独保存并恢复本地修改。
 
-回归：`crates/git/tests/checkout.rs` 覆盖暂存补丁不兼容、合并后的真实冲突、两种 pull 模式、检出失败和未跟踪文件恢复受阻；`capture_logs_empty_commands_and_failures_with_arguments_and_time` 覆盖无输出和失败命令记录。界面场景为 `checkout-dirty`、`checkout-index`、`checkout-conflict`；Apple、经典白色和 VS Code 黑色验证：`pnpm test:ui -- --reuse e2e/checkout.spec.ts e2e/pull.spec.ts`。
+回归：`crates/git/tests/checkout.rs` 覆盖暂存补丁不兼容、合并后的真实冲突、两种 pull 模式、检出失败、未跟踪文件恢复受阻及自动贮藏范围开关；`capture_logs_empty_commands_and_failures_with_arguments_and_time` 覆盖无输出和失败命令记录。界面场景为 `checkout-dirty`、`checkout-index`、`checkout-conflict`、`prefs-autostash`；Apple、经典白色和 VS Code 黑色验证：`pnpm test:ui -- --reuse e2e/autostash-settings.spec.ts e2e/checkout.spec.ts e2e/pull.spec.ts`。
 
 ## 文件占用提示
 

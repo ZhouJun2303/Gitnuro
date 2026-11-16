@@ -622,6 +622,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
         "prefs-commit": "commit",
         "prefs-ai": "ai",
         "prefs-git": "git",
+        "prefs-autostash": "git",
         "prefs-integration": "integration",
         "prefs-integration-merge": "integration",
         "prefs-integration-editor": "integration",
@@ -632,6 +633,11 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       };
       if (sceneId === "prefs-language") shell.settings.locale = "zh";
       shell.prefTab = prefTabs[sceneId] ?? "general";
+      if (sceneId === "prefs-autostash") {
+        shell.section = "changes";
+        shell.collapsedSide = [];
+        shell.sideQuery = "";
+      }
       fillSourceRoots(shell);
       fillLabTools(shell);
       if (sceneId === "prefs-commit") shell.resetCommitTypes();

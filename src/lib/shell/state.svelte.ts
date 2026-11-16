@@ -178,6 +178,7 @@ export class ShellState {
   defaultSettings: Settings = {
     theme: "apple",
     pullRebase: false,
+    autostashIncludeUntracked: false,
     fetchPrune: true,
     diffStyle: "split",
     proxy: "",
