@@ -923,6 +923,8 @@ test("dialogs focus the first field and fall back to the dialog", async ({ page 
   await expect(page.locator('[data-dialog="branch"] input').first()).toBeFocused();
   await openLabScene(page, "dialog-about", '[data-dialog="about"]');
   await expect(page.locator('[data-dialog="about"]')).toContainText("2.56.0");
+  await expect(page.locator('[data-dialog="about"] [data-build-marker]')).toHaveAttribute("data-build-marker", /^AweGit-Build:/);
+  await expect(page.locator('[data-dialog="about"]')).toContainText(/应用编号|App code/);
   await expect(page.locator('[data-dialog="about"]')).toBeFocused();
 });
 

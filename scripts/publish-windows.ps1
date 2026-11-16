@@ -41,7 +41,7 @@ function Test-ManifestReady([string]$version) {
     return ([string]$written.appVersion -eq $version -and $download -match "/releases/download/v$ver/")
 }
 
-function Write-LatestManifest([string]$version, [string]$notes, [string]$nsisPath) {
+function Get-NextAppCode {
     $latestPath = Join-Path $root "latest.json"
     $appCode = 26
     if (Test-Path $latestPath) {
@@ -50,6 +50,11 @@ function Write-LatestManifest([string]$version, [string]$notes, [string]$nsisPat
             $appCode = [Math]::Max(26, [int]$previous.appCode + 1)
         }
     }
+    return $appCode
+}
+
+function Write-LatestManifest([string]$version, [string]$notes, [string]$nsisPath, [int]$appCode) {
+    $latestPath = Join-Path $root "latest.json"
     $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nsisPath).Hash.ToLower()
     $fileName = [IO.Path]::GetFileName($nsisPath)
     $download = "https://github.com/$repo/releases/download/v$version/$fileName"
@@ -250,10 +255,13 @@ if ($releaseExists) {
         if (-not (Test-Path $nsis)) {
             throw "GitHub release $tag already exists, and latest.json does not point at it"
         }
-        Write-LatestManifest $version $Notes $nsis
+        Write-LatestManifest $version $Notes $nsis (Get-NextAppCode)
     }
 } else {
     Set-PublishStage "packaging"
+    $appCode = Get-NextAppCode
+    # build.rs embeds this code in the About panel; the manifest below writes the same number.
+    $env:AWE_APP_CODE = "$appCode"
     & (Join-Path $root "scripts\package-windows.ps1")
     if ($LASTEXITCODE -ne 0) {
         throw "Windows packaging failed"
@@ -271,7 +279,7 @@ if ($releaseExists) {
         # The manifest commit is tagged before the release exists, so the tag
         # names the exact commit release will end up at. Letting gh create the
         # tag would put it on origin release, still the previous publish.
-        Write-LatestManifest $version $Notes $nsis
+        Write-LatestManifest $version $Notes $nsis $appCode
         $commit = Commit-Manifest $version
         Reset-StaleTag $tag
         New-ReleaseTag $tag $commit $version

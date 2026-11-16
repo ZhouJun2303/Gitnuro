@@ -901,6 +901,11 @@ export type Messages = {
     signOffFormat: string;
     repoLocalHint: string;
     aboutBody: string;
+    aboutBuild: string;
+    aboutAppCode: string;
+    aboutProfileDebug: string;
+    aboutProfileRelease: string;
+    aboutPlatform: string;
     weekdays: string;
     byHour: string;
     flowName: string;

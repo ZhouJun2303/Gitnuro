@@ -273,14 +273,14 @@ Windows：
 pnpm package:windows
 ```
 
-脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build --no-bundle` 编译，再用 `pnpm tauri bundle` 打包。打包会重新下载 WebView2 引导程序，失败时最多重试三次，避免一次网络超时让整次构建失败。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。版本号以 `src-tauri/Cargo.toml` 为准，`node scripts/check-versions.mjs` 会核对安装包、清单和关于页。当前版本是 2.0.7：
+脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build --no-bundle` 编译，再用 `pnpm tauri bundle` 打包。打包会重新下载 WebView2 引导程序，失败时最多重试三次，避免一次网络超时让整次构建失败。编译时 `src-tauri\build.rs` 把 UTC 构建时间和 `appCode` 写进二进制，关于面板显示构建时间、应用编号（发布时与 `latest.json` 的 `appCode` 相同）、平台和 Tauri 版本；同一个版本号的两个包也能用构建时间区分。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。版本号以 `src-tauri/Cargo.toml` 为准，`node scripts/check-versions.mjs` 会核对安装包、清单和关于页。当前版本是 2.0.7：
 
 - `target\release\bundle\nsis\AweGit_2.0.7_x64-setup.exe`
 - `target\release\bundle\msi\AweGit_2.0.7_x64_en-US.msi`
 
 发布到 GitHub 时，在仓库根目录双击或运行 `publish.bat`。第 1 项会把修订号加一（2.0.0 变成 2.0.1），然后打包并上传。也可以选次版本、主版本、指定版本、不改版本，或只打包不上传。
 
-先在本机试用时选第 8 项：不改版本号、不上传，打包后用安装包静默替换本机已安装的 AweGit，保留原来的安装目录和卸载项。本机没有安装、或不是用 NSIS 安装包装的，就只留下安装包。这个模式不要求工作区干净。试完没问题，再按正常流程发布。
+先在本机试用时选第 8 项：不改版本号、不上传，打包后用安装包静默替换本机已安装的 AweGit，保留原来的安装目录和卸载项。替换后用构建标记核对本机文件和刚打包的包是否一致，标记也显示在关于面板。本机没有安装、或不是用 NSIS 安装包装的，就只留下安装包。这个模式不要求工作区干净。试完没问题，再按正常流程发布。
 
 在 `feat/dev` 上发布时，脚本会先提交版本号，再切到 `release` 合并这个分支，打包上传后回到 `feat/dev`。从其他分支发布也走同一条合并路径。工作区要是干净的，并且 `gh` 已经登录。
 

@@ -412,6 +412,16 @@ export type FilePreview = {
   animated: boolean;
 };
 
+export type AppInfo = {
+  version: string;
+  appCode: number;
+  build: string;
+  platform: string;
+  arch: string;
+  tauri: string;
+  debug: boolean;
+};
+
 export type UpdateNotice = {
   appVersion: string;
   appCode: number;

@@ -1652,6 +1652,34 @@ fn app_version() -> String {
     updates::current_version().to_string()
 }
 
+/// Written by build.rs on every compile, so it identifies this exact binary.
+const BUILD_MARKER: &str = concat!("AweGit-Build:", env!("AWE_BUILD_STAMP"));
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppInfo {
+    version: String,
+    app_code: i64,
+    build: &'static str,
+    platform: &'static str,
+    arch: &'static str,
+    tauri: &'static str,
+    debug: bool,
+}
+
+#[tauri::command]
+fn app_info() -> AppInfo {
+    AppInfo {
+        version: updates::current_version().to_string(),
+        app_code: env!("AWE_APP_CODE").parse().unwrap_or(0),
+        build: BUILD_MARKER,
+        platform: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        tauri: tauri::VERSION,
+        debug: cfg!(debug_assertions),
+    }
+}
+
 #[tauri::command]
 fn update_release_page() -> String {
     updates::release_page().to_string()
@@ -2539,6 +2567,7 @@ pub fn run() {
             approve_credential,
             check_for_update,
             app_version,
+            app_info,
             update_release_page,
             download_update,
             cancel_update,
@@ -2655,6 +2684,37 @@ pub fn run() {
                 perf::summary();
             }
         });
+}
+
+#[cfg(test)]
+mod build_stamp_tests {
+    #[test]
+    fn app_info_reports_the_compiled_build() {
+        let info = super::app_info();
+        assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(info.app_code, env!("AWE_APP_CODE").parse().unwrap_or(0));
+        assert_eq!(info.build, super::BUILD_MARKER);
+        assert_eq!(info.platform, std::env::consts::OS);
+        assert_eq!(info.tauri, tauri::VERSION);
+    }
+
+    #[test]
+    fn build_marker_is_a_fixed_utc_timestamp() {
+        let stamp = super::BUILD_MARKER
+            .strip_prefix("AweGit-Build:")
+            .expect("build marker prefix");
+        assert_eq!(stamp.len(), 20, "unexpected build stamp {stamp}");
+        assert!(stamp[0..4].parse::<u32>().unwrap() >= 2020, "unexpected build stamp {stamp}");
+        assert_eq!(&stamp[4..5], "-");
+        assert_eq!(&stamp[7..8], "-");
+        assert_eq!(&stamp[10..11], "T");
+        assert_eq!(&stamp[13..14], ":");
+        assert_eq!(&stamp[16..17], ":");
+        assert_eq!(&stamp[19..20], "Z");
+        for (start, end) in [(5, 7), (8, 10), (11, 13), (14, 16), (17, 19)] {
+            assert!(stamp[start..end].chars().all(|c| c.is_ascii_digit()), "unexpected build stamp {stamp}");
+        }
+    }
 }
 
 #[cfg(test)]

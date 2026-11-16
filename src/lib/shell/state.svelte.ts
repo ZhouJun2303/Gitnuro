@@ -18,6 +18,7 @@ import { configureShortcuts, shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
+    type AppInfo,
     type BlameLine,
     type CommandRecord,
     type CommitDetail,
@@ -849,6 +850,27 @@ export class ShellState {
   updateCancelRequested = false;
 
   appVersion = $state("2.0.9");
+
+  appInfo = $state<AppInfo | null>(null);
+
+  appBuildUtc() {
+    return (this.appInfo?.build ?? "")
+      .replace(/^AweGit-Build:/, "")
+      .replace("T", " ")
+      .replace(/Z$/, "");
+  }
+
+  appBuildLocal() {
+    const stamp = (this.appInfo?.build ?? "").replace(/^AweGit-Build:/, "");
+    const date = new Date(stamp);
+    if (Number.isNaN(date.getTime())) return "";
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
+  appBuildZone() {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  }
 
 
   passphrase = $state("");
@@ -2554,7 +2576,10 @@ export class ShellState {
         return { name: `Diff Tool ${n}`, path: `C:\\Tools\\diff-${n}.exe`, args: "$LOCAL $REMOTE", primary: index === 0 };
       });
       this.aiModels = Array.from({ length: 24 }, (_, index) => `lab-model-${String(index + 1).padStart(2, "0")}`);
-      void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
+      void invoke<AppInfo>("app_info").then((value) => {
+        this.appInfo = value;
+        if (value?.version) this.appVersion = value.version;
+      }).catch(() => {});
       void invoke<string>("update_release_page").then((value) => { if (value) this.updateReleaseUrl = value; }).catch(() => {});
       if (item.repo) {
         const path = layout[item.repo];
@@ -6626,7 +6651,10 @@ export class ShellState {
     let stopped = false;
     this.mode = "loading";
     this.selectedPath = null;
-    void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
+    void invoke<AppInfo>("app_info").then((value) => {
+      this.appInfo = value;
+      if (value?.version) this.appVersion = value.version;
+    }).catch(() => {});
     void invoke<string>("update_release_page").then((value) => { if (value) this.updateReleaseUrl = value; }).catch(() => {});
     void invoke<GitRuntime>("git_runtime").then((value) => {
       this.gitRuntime = value;

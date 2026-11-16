@@ -341,6 +341,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "approve_credential" => Ok(Value::Null),
         "check_for_update" => Ok(Value::Null),
         "app_version" => done(super::app_version()),
+        "app_info" => done(super::app_info()),
         "update_release_page" => done(super::updates::release_page()),
         "download_update" => Ok(Value::Null),
         "conflict_sides" => done_result(super::conflict_sides(req(args, "path")?, req(args, "file")?)),

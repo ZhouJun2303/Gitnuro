@@ -64,6 +64,7 @@
     "allow-approve-credential",
     "allow-check-for-update",
     "allow-app-version",
+    "allow-app-info",
     "allow-update-release-page",
     "allow-download-update",
     "allow-cancel-update",

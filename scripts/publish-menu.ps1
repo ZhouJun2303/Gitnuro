@@ -226,6 +226,16 @@ function Get-InstallProcess([string]$executable) {
     })
 }
 
+# build.rs writes this marker into every binary; "About AweGit" shows the same
+# value, so it tells two builds of one version apart.
+function Get-BuildMarker([string]$path) {
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($path))
+    $match = [regex]::Match($text, 'AweGit-Build:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z')
+    if ($match.Success) { return $match.Value }
+    return $null
+}
+
 # Silent NSIS install over the same version replaces the files in place and
 # keeps the uninstall entry, so a local build can be tried before publishing.
 function Install-LocalApp([string]$Version) {
@@ -269,12 +279,22 @@ function Install-LocalApp([string]$Version) {
         throw "安装包返回 $($install.ExitCode)，本机版本没有替换"
     }
     $built = Join-Path $root "target\release\awegit.exe"
-    $builtHash = (Get-FileHash -LiteralPath $built -Algorithm SHA256).Hash
-    $installedHash = (Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash
-    if ($builtHash -ne $installedHash) {
-        Write-Host "本机 $installedExe 和刚打包的文件不一致，请确认是否替换成功。"
+    $marker = Get-BuildMarker $built
+    if (-not $marker) {
+        Write-Host "刚打包的 $built 里没有构建标记，无法核对本机是否替换成功。"
+        return
+    }
+    Write-Host "本次构建标记：$marker"
+    $installedMarker = Get-BuildMarker $installedExe
+    for ($i = 0; $i -lt 10 -and $installedMarker -ne $marker; $i++) {
+        Start-Sleep -Milliseconds 300
+        $installedMarker = Get-BuildMarker $installedExe
+    }
+    if ($installedMarker -ne $marker) {
+        $found = if ($installedMarker) { $installedMarker } else { "没有构建标记" }
+        Write-Host "本机 $installedExe 是 $found，和刚打包的 $marker 不一致，替换没有生效，请确认。"
     } else {
-        Write-Host "已替换本机安装：$installedExe（版本 $Version，没有改版本号，也没有上传）"
+        Write-Host "已替换本机安装：$installedExe（$marker，版本 $Version，没有改版本号，也没有上传）"
     }
 }
 

@@ -767,6 +767,11 @@
         {:else if shell.dialog === "about"}
           <h2>{shell.tr("dialog.about")} {shell.appVersion}</h2>
           <p class="empty">{shell.tr("dialog.aboutBody")}</p>
+          {#if shell.appInfo}
+            <p class="empty" data-build-marker={shell.appInfo.build}>{shell.tr("dialog.aboutBuild", { utc: shell.appBuildUtc(), local: shell.appBuildLocal(), zone: shell.appBuildZone() })}</p>
+            <p class="empty">{shell.tr("dialog.aboutAppCode", { code: String(shell.appInfo.appCode || "—"), profile: shell.tr(shell.appInfo.debug ? "dialog.aboutProfileDebug" : "dialog.aboutProfileRelease") })}</p>
+            <p class="empty">{shell.tr("dialog.aboutPlatform", { platform: shell.appInfo.platform, arch: shell.appInfo.arch, tauri: shell.appInfo.tauri })}</p>
+          {/if}
           {#if shell.gitRuntime?.version}
             <p class="empty">{shell.tr("chrome.gitSummary", { version: shell.gitRuntime.version, program: shell.gitRuntime.program })}</p>
             {#if !shell.gitRuntime.lfs}<p class="empty">{shell.tr("chrome.gitNoLfs")}</p>{/if}
