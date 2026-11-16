@@ -68,7 +68,8 @@ pub fn porcelain_z_paths(bytes: &[u8]) -> Result<Vec<String>, Error> {
     Ok(paths)
 }
 
-/// Paths from `git status --porcelain -z`. A rename or copy contributes both names.
+/// Work-tree changes from `git status --porcelain -z`. A staged rename's old
+/// name is already absent from the index and must not be passed to `git add`.
 fn status_record_paths(bytes: &[u8]) -> Result<Vec<String>, Error> {
     let parts: Vec<&[u8]> = bytes.split(|byte| *byte == 0).collect();
     let mut paths = Vec::new();
@@ -81,12 +82,12 @@ fn status_record_paths(bytes: &[u8]) -> Result<Vec<String>, Error> {
         }
         let code = &part[..2];
         let path = utf8_field(&part[3..])?;
-        if !path.is_empty() {
+        if code[1] != b' ' && code != b"!!" && !path.is_empty() {
             paths.push(path);
         }
         if code.contains(&b'R') || code.contains(&b'C') {
             if let Some(next) = parts.get(index) {
-                if !next.is_empty() {
+                if code[1] == b'R' && !next.is_empty() {
                     paths.push(utf8_field(next)?);
                 }
                 index += 1;
@@ -97,6 +98,10 @@ fn status_record_paths(bytes: &[u8]) -> Result<Vec<String>, Error> {
 }
 
 fn stage_path_chunks(repo: &Path, paths: &[String]) -> Result<(), Error> {
+    // Without pathspecs `add -A` would also stage every unresolved conflict.
+    if paths.is_empty() {
+        return Ok(());
+    }
     run_paths(repo, &["add", "-A"], paths).map(|_| ())
 }
 
@@ -119,27 +124,14 @@ pub fn unstage_paths(repo: &Path, paths: &[String]) -> Result<(), Error> {
     if paths.is_empty() {
         return Ok(());
     }
-    match run_paths(repo, &["restore", "--staged"], paths) {
-        Ok(_) => Ok(()),
-        // A repository with no commits yet has nothing to restore from.
-        Err(Error::Git(message)) if message.contains("HEAD") => {
-            run_paths(repo, &["rm", "--cached", "--ignore-unmatch"], paths).map(|_| ())
-        }
-        Err(error) => Err(error),
-    }
+    // Path-limited reset only changes the index. Its implicit HEAD also handles
+    // an unborn branch without a failing restore/rm fallback or touching files.
+    run_paths(repo, &["reset", "--quiet"], paths).map(|_| ())
 }
 
 /// Unstage everything that is currently in the index relative to `HEAD`.
 pub fn unstage_all(repo: &Path) -> Result<(), Error> {
-    match run(repo, &["restore", "--staged", "--", "."]) {
-        Ok(_) => Ok(()),
-        Err(Error::Git(message)) if message.contains("HEAD") => run(
-            repo,
-            &["rm", "-r", "--cached", "--ignore-unmatch", "--", "."],
-        )
-        .map(|_| ()),
-        Err(error) => Err(error),
-    }
+    run(repo, &["reset", "--quiet", "--", "."]).map(|_| ())
 }
 
 /// Create a commit from the index. An empty summary is rejected before `git` runs.
@@ -2481,16 +2473,17 @@ mod porcelain_tests {
     }
 
     #[test]
-    fn status_records_keep_both_rename_names() {
-        let raw = b" M a b.txt\0?? \xE4\xB8\xAD\xE6\x96\x87.txt\0R  old name\0new\nname.txt\0";
+    fn status_records_keep_only_paths_that_need_staging() {
+        let raw = b" M a b.txt\0?? \xE4\xB8\xAD\xE6\x96\x87.txt\0R  staged.txt\0old-staged.txt\0RM edited.txt\0old-edited.txt\0 R new name\0old\nname.txt\0D  deleted.txt\0";
         let paths = status_record_paths(raw).unwrap();
         assert_eq!(
             paths,
             vec![
                 "a b.txt".to_string(),
                 "中文.txt".to_string(),
-                "old name".to_string(),
-                "new\nname.txt".to_string()
+                "edited.txt".to_string(),
+                "new name".to_string(),
+                "old\nname.txt".to_string()
             ]
         );
     }

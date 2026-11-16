@@ -188,6 +188,8 @@ fn layout() -> Result<Value, String> {
         "rebase": text(repos.join("rebase")),
         "operation": text(repos.join("operation")),
         "pull-deleted": text(repos.join("pull-deleted")),
+        "unstage-initial": text(repos.join("unstage-initial")),
+        "stage-conflict-paths": text(repos.join("stage-conflict-paths")),
         "cherry": text(repos.join("cherry")),
         "revert": text(repos.join("revert")),
         "detached": text(repos.join("detached")),

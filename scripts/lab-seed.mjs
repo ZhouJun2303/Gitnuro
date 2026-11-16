@@ -402,6 +402,32 @@ function seedOperationRepo() {
   git(path, ["checkout", "main"]); write(path, "note.txt", "uncommitted work\n");
 }
 
+function seedUnstageInitialRepo() {
+  const path = join(repos, "unstage-initial");
+  wipe(path); initWork(path);
+  write(path, "new.txt", "staged before first commit\n");
+  git(path, ["add", "new.txt"]);
+  write(path, "new.txt", "edited after staging\n");
+}
+
+function seedStageConflictPathsRepo() {
+  const path = join(repos, "stage-conflict-paths");
+  wipe(path); initWork(path);
+  commit(path, "conflict.txt", "base\n", "base");
+  commit(path, "old.txt", "original\n", "rename source");
+  commit(path, "delete.txt", "delete\n", "delete source");
+  git(path, ["checkout", "-b", "topic"]);
+  commit(path, "conflict.txt", "topic\n", "topic");
+  git(path, ["checkout", "main"]);
+  commit(path, "conflict.txt", "main\n", "main");
+  const result = git(path, ["merge", "topic"], { allowFail: true });
+  if (result.status !== 1) throw new Error("stage-conflict-paths did not conflict");
+  git(path, ["mv", "old.txt", "renamed.txt"]);
+  git(path, ["rm", "delete.txt"]);
+  write(path, "renamed.txt", "edited after rename\n");
+  write(path, "loose.txt", "new file\n");
+}
+
 function seedPullDeletedRepo() {
   const path = join(repos, "pull-deleted");
   const upstream = join(repos, "pull-deleted-upstream");
@@ -452,6 +478,8 @@ function seedTagsRepo() {
 }
 
 const restore = {
+  "unstage-initial": seedUnstageInitialRepo,
+  "stage-conflict-paths": seedStageConflictPathsRepo,
   "pull-deleted": seedPullDeletedRepo,
   tags: seedTagsRepo,
   operation: seedOperationRepo,
@@ -654,6 +682,8 @@ seedConflictRepo();
 seedMergeRepo();
 seedRebaseRepo();
 seedOperationRepo();
+seedUnstageInitialRepo();
+seedStageConflictPathsRepo();
 seedPullDeletedRepo();
 seedCherryRepo();
 seedRevertRepo();

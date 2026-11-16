@@ -1,6 +1,6 @@
 # TODO：项目问题与优化清单
 
-> 最近更新：2026-11-13。性能工作的统一记录见 [项目性能优化计划](dev-docs/performance-plan.md)，包含日志复核、PERF-00—10 的实现、回归结果及 release 测量。
+> 最近更新：2026-11-14。性能工作的统一记录见 [项目性能优化计划](dev-docs/performance-plan.md)，包含日志复核、PERF-00—10 的实现、回归结果及 release 测量。
 
 ## 待处理
 
@@ -9,6 +9,7 @@
 ## 已处理
 
 - [x] 全界面性能与交互检查：修复差异换行重叠、长列表缩短后空白、历史读取竞态、补丁并发及后台读取抢选中项，减少历史比较和分隔条拖动开销。修复：本条所在提交 `fix: 修复差异换行与历史读取竞态并降低界面开销`；回归：`e2e/ui-performance.spec.ts`、`e2e/wrapped-diff.spec.ts`，全场景、主题面板与相关交互共 690 项通过（3 项恢复试验数据后复验）；`pnpm check`、`pnpm build` 通过。测量、问题与验证范围见 [UI 检查记录](dev-docs/ui-audit.md)。
+- [x] 常用 Git 操作边界与兼容性：首次提交前取消暂存支持修改后文件、目录和空索引，统一一次命令完成；冲突中全部暂存跳过已暂存的删除/重命名旧路径，空选择不再误解决冲突；检出禁止回退为同名文件，远程检出和推送兼容同名标签；旧版 Git 在临时对象库内预览变基，新版继续批量重放；失败详情同时保留 stdout 原因和 stderr 警告。修复：本条所在提交 `fix: 修复常用 Git 操作边界并兼容旧版预览`；回归：`crates/git/tests/common_operations.rs` 的 9 项、`preview_preserves_upstream_changes_across_multiple_replayed_trees`、`failure_detail_keeps_stdout_when_stderr_contains_a_warning`。完整 `pnpm test`：183 项 Git、107 项应用测试通过，2 项手动基准默认忽略；操作与流程 18 项分别在 Git 2.38.1、2.50.1、MinGit 2.56.0 上通过；三套主题 `e2e/common-operations.spec.ts` 共 6 项、`pnpm check` 通过。同步使用独立本地远端验证。实现约定见 [开发文档](dev-docs/development.md#常用操作兼容)。
 - [x] 拉取时新增文件暂存后再删除，遇到 `.fakeignore` 排除规则会在自动贮藏清理阶段报空补丁错误；恢复时还可能重新生成该文件。现在核实贮藏和清理结果，并持久保存、恢复原始删除状态及暂存内容。Windows 共用 Git 执行器对短暂文件占用在命令内部有界重试，兼容 MinGit，持续占用仍保留修改并明确报错。修复：本条所在提交 `fix: 修复拉取删除状态并重试短暂文件占用`；回归：`pull_preserves_a_staged_addition_deleted_from_the_worktree`、`pull_preserves_local_deletions_and_the_index_with_fakeignore`、`pull_accepts_a_file_deleted_both_locally_and_upstream`、`pull_abort_restores_index_only_deletions_after_a_paused_rebase`、`pull_keeps_a_real_modify_delete_conflict_and_its_backup`、`pull_retries_transient_windows_file_locks`、`pull_bounds_persistent_windows_locks_and_preserves_local_work`。7 项在系统 Git 2.38.1、Fork 附带 Git 2.50.1、打包 MinGit 2.56.0 上通过；三套主题的拉取和文件访问错误场景共 12 项、`pnpm check` 通过。完整 Git 回归 172 项通过；应用回归的路径显示用例要求临时目录不在 Git 工作区内，改用默认系统临时目录单独通过，其余 106 项通过、2 项性能基准按默认忽略。行为和参考资料见 [开发文档](dev-docs/development.md)。
 - [x] 并行 Vite 实例共用预打包缓存时，重建会删掉另一服务正在使用的 SSR `svelte_store.js`，报 `ERR_OUTDATED_OPTIMIZED_DEP`。现在按实际端口隔离客户端和 SSR 缓存，临时端口及中间件实例各用独立目录，构建单独缓存，同端口重启保留复用。修复：本条所在提交 `fix: 隔离并行 Vite 服务的预打包缓存`；回归：`Vite keeps reusable desktop, UI and build caches separate`、`Vite gives temporary and middleware servers separate caches and respects explicit caches`、`a second Vite prebundle cannot invalidate the first server's SSR store module`，连同原有开发服务用例共 6 项通过；`pnpm check` 通过，实际 1420 服务在临时实例启动前后均返回 HTTP 200。
 - [x] 开发版在自身源码仓库执行「删除」后，Vite 模块 404、Cargo 找不到 `src/lib.rs`，导致开发窗口失效。现在后端在执行 Git 前拒绝单个或批量自删，并说明可改用已安装的正式版；保留暂存和恢复文件的能力。修复：本条所在提交 `fix: 阻止开发版删除自身源码导致启动失败`；回归：`development_delete_reports_an_error_before_removing_files`、`development_rejects_single_and_batch_deletes_of_its_source_checkout`、`source_delete_guard_leaves_release_builds_and_other_checkouts_usable`、`development_source_guard_allows_staging_and_recovering_deleted_files`、`delete_paths_removes_tracked_and_untracked_files`，以及 `pnpm check`、`pnpm build`。

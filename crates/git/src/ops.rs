@@ -732,7 +732,8 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             include_untracked,
         } => stash_paths(repo, &files, &message, include_untracked),
         Mutation::Checkout { name } => with_autostash(repo, &format!("checkout {name}"), || {
-            run(repo, &["checkout", check_rev(&name)?]).map(|_| ())
+            // A missing ref must not fall back to checking out a same-named file.
+            run(repo, &["checkout", check_rev(&name)?, "--"]).map(|_| ())
         }),
         Mutation::CreateBranch { name, start } => create_branch(repo, &name, start.as_deref()),
         Mutation::DeleteBranch { name, force } => {
@@ -2717,10 +2718,10 @@ fn checkout_remote(repo: &Path, remote: &str, branch: &str) -> Result<(), Error>
         ],
     );
     if local.is_ok() {
-        run(repo, &["checkout", branch]).map(|_| ())
+        run(repo, &["checkout", branch, "--"]).map(|_| ())
     } else {
-        let tracked = format!("{remote}/{branch}");
-        run(repo, &["checkout", "--track", &tracked]).map(|_| ())
+        let tracked = format!("refs/remotes/{remote}/{branch}");
+        run(repo, &["checkout", "-b", branch, "--track", &tracked, "--"]).map(|_| ())
     }
 }
 
@@ -2743,7 +2744,8 @@ fn push_ref(repo: &Path, options: PushRefOptions<'_>) -> Result<(), Error> {
     } else {
         check_name(remote_branch)?
     };
-    let spec = format!("{branch}:{target}");
+    // The branch selector must keep working when a tag has the same name.
+    let spec = format!("refs/heads/{branch}:refs/heads/{target}");
     let mut args = vec!["push"];
     if options.set_upstream {
         args.push("--set-upstream");

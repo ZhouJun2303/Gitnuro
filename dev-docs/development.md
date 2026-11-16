@@ -170,7 +170,7 @@ pnpm perf:seed --tracked=1000 --untracked=1000 --history=10000 --conflicts=10,10
 pnpm perf:backend --release --writes --manifest=.lab/performance/run-实际目录/manifest.json
 ```
 
-使用种子命令最后输出的 manifest 路径。`perf:seed` 也可通过 `node scripts/lab-seed.mjs --performance` 调用，参数相同。默认优先使用项目自带 Git 2.56；系统 Git 2.38 不支持已有预览需要的 `merge-tree --merge-base`。对照系统 Git 可加 `--system-git`，但不得把不同 Git 版本的时间混作前后对照。
+使用种子命令最后输出的 manifest 路径。`perf:seed` 也可通过 `node scripts/lab-seed.mjs --performance` 调用，参数相同。默认优先使用项目自带 Git 2.56；旧版 Git 的预览兼容方式见下方“常用操作兼容”。对照系统 Git 可加 `--system-git`，但不得把不同 Git 版本的时间混作前后对照。
 
 种子生成时隔离全局配置，测量时沿用当前 Git 读取的配置，与客户端一致；不写全局配置。对照时同时保留配置条件，尤其不要在一组结果中混入关闭 `core.fscache` 的样本，大仓库下会明显改变 Git 自身的耗时。
 
@@ -203,6 +203,16 @@ node scripts/with-rust-path.mjs cargo test -p awegit --lib --offline -- --test-t
 ```powershell
 pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.ts e2e/sync-toolbar.spec.ts e2e/merge-window.spec.ts --grep 'covered write events|context reads|observer follows conflicts|observer automatic closing keeps completed|sync toolbar|one huge merge hunk|late response'
 ```
+
+## 常用操作兼容
+
+取消暂存统一使用限定路径的 `git reset --quiet -- <路径>`，只更新索引，不移动分支、不改工作区。首次提交前、暂存后继续修改、目录选择和重复取消均可直接完成；大量路径继续通过 NUL 分隔的标准输入传入，避免 Windows 命令行长度限制。无需先执行一次必然失败的 `restore` 再根据错误文本补救。
+
+有冲突时“全部暂存”只处理尚未暂存的非冲突路径，跳过已暂存的删除与重命名旧路径；没有可暂存项时直接结束，保留所有冲突索引条目。切换分支禁止 Git 回退为同名文件检出；远程分支检出与指定分支推送使用完整引用，兼容同名标签。
+
+变基预览按当前 Git 的 `--merge-base` 能力选择实现，能力检测在进程内缓存。支持时继续批量重放；Git 2.38/2.39 使用临时对象库中的合成提交提供准确的共同父提交，保留原仓库的索引、文件和引用。两种实现均保持原有的取消、5 秒和 200 步检查。命令失败同时保留 stdout 的原因与 stderr 的警告，避免“没有可提交内容”等说明被无关警告盖住。
+
+相关回归位于 `crates/git/tests/common_operations.rs` 和 `crates/git/tests/flow.rs`。界面场景为 `unstage-initial`、`stage-conflict-paths`，三套主题的实际操作验证：`pnpm test:ui -- --reuse e2e/common-operations.spec.ts`；测试会单独恢复自己的场景仓库。
 
 ## 文件占用提示
 

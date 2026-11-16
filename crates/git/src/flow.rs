@@ -11,7 +11,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{check_rev, run, run_output, run_stdin};
+use crate::cli::{check_rev, run, run_env, run_output, run_stdin};
 use crate::{Error, InProgress};
 
 static IDS: AtomicU64 = AtomicU64::new(1);
@@ -717,6 +717,48 @@ fn advance_current(step: &PlannedCommit, tree: &str) -> String {
     }
 }
 
+fn merge_tree_supports_explicit_base(repo: &Path) -> bool {
+    static SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        // Older Git has --write-tree but lacks --merge-base and the explicit
+        // base syntax in --stdin. Probe once, including vendor backports.
+        run_output(repo, &["merge-tree", "-h"]).is_ok_and(|output| {
+            [&output.stdout, &output.stderr].iter().any(|bytes| {
+                String::from_utf8_lossy(bytes).contains("--merge-base")
+            })
+        })
+    })
+}
+
+fn replay_merge(
+    sandbox: &Path,
+    parent: &str,
+    current: &str,
+    next: &str,
+    explicit_base: bool,
+) -> Result<std::process::Output, Error> {
+    if explicit_base {
+        return run_output(sandbox, &[
+            "merge-tree", "--write-tree", "--name-only", "-z",
+            &format!("--merge-base={parent}"), current, next,
+        ]);
+    }
+    // Git 2.38/2.39 can merge two commits. Give our current tree the replayed
+    // commit's parent so Git finds exactly that merge base. Only the disposable
+    // object database is written; no index, refs, worktree, hooks or signing.
+    let output = run_env(sandbox, &[
+        "commit-tree", &format!("{current}^{{tree}}"), "-p", parent,
+        "-m", "AweGit preview",
+    ], &[
+        ("GIT_AUTHOR_NAME", "AweGit"), ("GIT_AUTHOR_EMAIL", "preview@awegit.invalid"),
+        ("GIT_COMMITTER_NAME", "AweGit"), ("GIT_COMMITTER_EMAIL", "preview@awegit.invalid"),
+    ])?;
+    let ours = String::from_utf8_lossy(&output.stdout);
+    run_output(sandbox, &[
+        "merge-tree", "--write-tree", "--name-only", "-z", ours.trim(), next,
+    ])
+}
+
 /// Replay a prefix in one process. Later rows assume each previous result tree
 /// is that commit's own tree; the first row that breaks the chain is kept, and
 /// the rows after it are discarded.
@@ -883,6 +925,7 @@ pub fn preview_at_cancellable(
     if cancelled() { preview.detail = "preview-cancelled".into(); return Ok(preview); }
     let sandbox = sandbox(repo)?;
     let started = Instant::now();
+    let explicit_base = !rebase || merge_tree_supports_explicit_base(&sandbox.0);
     let commits: Vec<PlannedCommit> = if !rebase {
         vec![PlannedCommit {
             commit: source.clone(),
@@ -937,12 +980,11 @@ pub fn preview_at_cancellable(
             preview.detail = "preview-cancelled".into();
             return Ok(preview);
         }
-        // merge-tree --write-tree does not read the index or work tree, so the
-        // sandbox does not need read-tree. A result tree is a valid next "ours"
-        // when --merge-base is set, so the replay does not need commit-tree either.
+        // Newer Git reuses result trees directly and can replay a batch in one
+        // process. Older Git uses synthetic commits in the same isolated sandbox.
         if rebase {
             let end = batch_end(&commits, index);
-            if end > index + 1 && known_commit(&commits, &source.id, &current) {
+            if explicit_base && end > index + 1 && known_commit(&commits, &source.id, &current) {
                 if let Some(applied) = apply_batch(&sandbox.0, &commits, index, end, &current, &mut preview)? {
                     index = applied.next;
                     current = applied.current;
@@ -965,17 +1007,8 @@ pub fn preview_at_cancellable(
                 index += 1;
                 continue;
             }
-            let output = run_output(
-                &sandbox.0,
-                &[
-                    "merge-tree",
-                    "--write-tree",
-                    "--name-only",
-                    "-z",
-                    &format!("--merge-base={}", parents[0]),
-                    &current,
-                    &commits[index].commit.id,
-                ],
+            let output = replay_merge(
+                &sandbox.0, &parents[0], &current, &commits[index].commit.id, explicit_base,
             )?;
             match outcome_from_merge(&output) {
                 Some(outcome) if outcome.clean => {

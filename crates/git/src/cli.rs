@@ -1092,10 +1092,16 @@ fn failure_note(success: bool, allow_failure: bool, stdout: &[u8], stderr: &[u8]
 }
 
 fn command_failure_detail(stdout: &[u8], stderr_text: &str, args: &[&str]) -> String {
-    if !stderr_text.is_empty() {
-        return stderr_text.to_string();
-    }
     let stdout_text = settle_stderr(stdout);
+    if !stderr_text.is_empty() {
+        // Warnings on stderr must not hide the explanation Git printed on
+        // stdout (for example "nothing to commit"). Keep stdout bounded.
+        return if stdout_text.is_empty() || stderr_text.contains(&stdout_text) {
+            stderr_text.to_string()
+        } else {
+            format!("{}\n{stderr_text}", tail_text(&stdout_text, 500))
+        };
+    }
     if stdout_text.is_empty() {
         format!("git {} failed", args.join(" "))
     } else {
@@ -1688,7 +1694,23 @@ mod progress_tests {
 
 #[cfg(test)]
 mod failure_tests {
-    use super::run;
+    use super::{command_failure_detail, run};
+
+    #[test]
+    fn failure_detail_keeps_stdout_when_stderr_contains_a_warning() {
+        let detail = command_failure_detail(
+            b"On branch main\nnothing to commit, working tree clean\n",
+            "warning: unable to access the global ignore file",
+            &["commit"],
+        );
+        assert!(detail.contains("nothing to commit"), "{detail}");
+        assert!(detail.contains("warning:"), "{detail}");
+        let large = format!("{}\nuseful explanation", "x".repeat(2_000));
+        let detail = command_failure_detail(large.as_bytes(), "fatal: failed", &["commit"]);
+        assert!(detail.contains("useful explanation"));
+        assert!(detail.ends_with("fatal: failed"));
+        assert!(detail.chars().count() <= 514);
+    }
 
     #[test]
     fn empty_commit_failure_includes_the_stdout_explanation() {
