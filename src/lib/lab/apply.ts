@@ -148,6 +148,11 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.showFileHistory("README.md");
     return;
   }
+  if (id === "file-history-unity") {
+    const file = new URLSearchParams(window.location.search).get("file") || "Assets/Prefabs/UIChapter.prefab";
+    await shell.showFileHistory(file);
+    return;
+  }
   if (id === "blob") {
     shell.blobFile = "README.md";
     shell.blobRev = "HEAD";

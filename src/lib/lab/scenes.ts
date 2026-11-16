@@ -127,6 +127,14 @@ export const surfaceScenes: LabScene[] = [
     href: "/?scene=file-history&view=history&file=README.md",
   }),
   scene({
+    id: "file-history-unity",
+    group: "主界面",
+    title: "文件历史 · Unity 资产",
+    repo: "unity",
+    ready: ".history-commit",
+    href: "/?scene=file-history-unity&view=history&file=Assets/Prefabs/UIChapter.prefab",
+  }),
+  scene({
     id: "blob",
     group: "主界面",
     title: "文件内容",
