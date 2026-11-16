@@ -349,6 +349,9 @@ pub enum Mutation {
         path: String,
     },
     SubmoduleUpdate,
+    SubmoduleUpdatePath {
+        path: String,
+    },
     SubmoduleAdd {
         url: String,
         path: String,
@@ -975,6 +978,10 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::SubmoduleUpdate => {
             run(repo, &["submodule", "update", "--init", "--recursive"]).map(|_| ())
         }
+        Mutation::SubmoduleUpdatePath { path } => run(
+            repo,
+            &["submodule", "update", "--init", "--recursive", "--", check_path(&path)?],
+        ).map(|_| ()),
         Mutation::SubmoduleAdd { url, path } => run(
             repo,
             &["submodule", "add", check_url(&url)?, check_path(&path)?],
@@ -982,7 +989,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         .map(|_| ()),
         Mutation::SubmoduleInit { path } => run(
             repo,
-            &["submodule", "update", "--init", "--", check_path(&path)?],
+            &["submodule", "update", "--init", "--recursive", "--", check_path(&path)?],
         )
         .map(|_| ()),
         Mutation::SubmoduleSync { path } => {
@@ -1851,6 +1858,7 @@ fn discard(repo: &Path, file: &str) -> Result<(), Error> {
                 "restore",
                 "--worktree",
                 "--source=HEAD",
+                "--recurse-submodules",
                 "--",
                 file,
             ],
@@ -1891,7 +1899,7 @@ fn discard_paths(repo: &Path, files: &[String]) -> Result<(), Error> {
     }
     git_arg_paths(
         repo,
-        &["restore", "--worktree", "--source=HEAD", "--"],
+        &["restore", "--worktree", "--source=HEAD", "--recurse-submodules", "--"],
         &restore,
     )?;
     git_arg_paths(repo, &["rm", "-f", "--"], &remove_index)?;
@@ -1954,10 +1962,35 @@ fn paths_in_head(repo: &Path, paths: &[String]) -> Result<HashSet<String>, Error
     };
     let text = String::from_utf8_lossy(&output.stdout);
     let mut found = HashSet::new();
+    let mut unresolved = Vec::new();
     for (path, line) in paths.iter().zip(text.lines()) {
         let kind = line.split_whitespace().nth(1);
         if kind == Some("blob") || kind == Some("commit") {
             found.insert(path.clone());
+        } else {
+            unresolved.push(path.clone());
+        }
+    }
+    // A gitlink names a commit stored in the submodule, not the superproject.
+    // cat-file reports it missing even though the HEAD tree tracks the path.
+    for chunk in unresolved.chunks(40) {
+        let mut args = vec!["--literal-pathspecs", "ls-tree", "-z", "HEAD", "--"];
+        args.extend(chunk.iter().map(String::as_str));
+        let output = match run(repo, &args) {
+            Ok(output) => output,
+            Err(_) if run(repo, &["rev-parse", "--verify", "HEAD"]).is_err() => return Ok(found),
+            Err(error) => return Err(error),
+        };
+        for record in output.stdout.split(|byte| *byte == 0) {
+            let Some(tab) = record.iter().position(|byte| *byte == b'\t') else { continue };
+            let (meta, path) = record.split_at(tab);
+            let path = &path[1..];
+            if meta.starts_with(b"160000 commit ") {
+                let path = String::from_utf8_lossy(path).to_string();
+                if chunk.iter().any(|candidate| slash(candidate) == path) {
+                    found.insert(path);
+                }
+            }
         }
     }
     Ok(found)

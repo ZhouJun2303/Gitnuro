@@ -427,6 +427,7 @@ export type Messages = {
     restoreFileBody: string;
     discardBody: string;
     discardFilesBody: string;
+    discardSubmoduleBody: string;
     fileCount: string;
     discardLinesBody: string;
     deleteBody: string;

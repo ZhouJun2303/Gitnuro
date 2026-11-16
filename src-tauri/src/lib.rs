@@ -641,6 +641,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::AddWorktree { .. } => "addWorktree",
         awegit_git::Mutation::RemoveWorktree { .. } => "removeWorktree",
         awegit_git::Mutation::SubmoduleUpdate => "submoduleUpdate",
+        awegit_git::Mutation::SubmoduleUpdatePath { .. } => "submoduleUpdatePath",
         awegit_git::Mutation::SubmoduleAdd { .. } => "submoduleAdd",
         awegit_git::Mutation::SubmoduleInit { .. } => "submoduleInit",
         awegit_git::Mutation::SubmoduleSync { .. } => "submoduleSync",
@@ -729,7 +730,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::AddWorktree { path, branch } => join([scrub(path), scrub(branch)]),
         Mutation::RemoveWorktree { path } => scrub(path),
         Mutation::SubmoduleAdd { url, path } => join([scrub(path), public_url(url)]),
-        Mutation::SubmoduleInit { path } | Mutation::SubmoduleSync { path } | Mutation::SubmoduleRemove { path } => scrub(path),
+        Mutation::SubmoduleInit { path } | Mutation::SubmoduleUpdatePath { path } | Mutation::SubmoduleSync { path } | Mutation::SubmoduleRemove { path } => scrub(path),
         Mutation::GitFlowStart { name, kind } | Mutation::GitFlowFinish { name, kind } => join([scrub(name), scrub(kind)]),
         Mutation::GitFlowInit { master, develop, feature, release, hotfix, support } => {
             join([scrub(master), scrub(develop), scrub(feature), scrub(release), scrub(hotfix), scrub(support)])

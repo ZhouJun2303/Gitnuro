@@ -8,6 +8,7 @@
 
 ## 已处理
 
+- [x] 子模块在变更列表里无法丢弃，批量丢弃甚至会把已跟踪子模块误判为新增项并移除：现在按父仓库的 gitlink 恢复检出，同时保留子模块内未跟踪文件；侧栏更新只作用于所选子模块，未初始化项也可更新，单项初始化支持递归。修复：本条所在提交 `fix: 修复子模块丢弃并限定单项更新范围`；回归：`discard_submodule_restores_checkout_without_touching_other_submodules`、`discard_paths_restores_submodule_and_regular_file_together`、`update_one_submodule_leaves_the_other_at_its_current_commit`、`discard_paths_in_unborn_repository_still_removes_untracked_files`、`submodule menu updates one path and allows uninitialized entries`。
 - [x] 用 Delete 打开「丢弃修改」确认时，默认焦点停在「取消」，接着按 Enter 只会取消。现在键盘快捷键（Delete、Backspace、Ctrl+Shift+D）打开时默认选中「确认」；工具栏和右键菜单等鼠标入口仍默认停在「取消」。修复：本条所在提交 `fix: 按 Delete 打开丢弃确认时默认选中确认`；回归：`e2e/lab.spec.ts` 的 `multi-file confirmation lists one file per line with a total`、`discard opened with Delete focuses the confirm button`，确认框在 Apple、经典白色、VS Code 黑色下默认焦点均在「确认」。
 - [x] 文件历史关闭时只要有一个预览被修改，清理失败会让窗口拒绝关闭，只能先取消「关闭时清理预览」。现在关闭时先删除其余预览；被修改的预览弹出二级确认，可选「保留并关闭」或「强制删除并关闭」，删除仍失败的文件会保留并在主窗口提示。修复：本条所在提交 `fix: 文件历史关闭时询问保留还是强制删除预览`；回归：`e2e/file-history-copy.spec.ts` 的 `closing asks whether to keep a modified preview`、`force deleting a modified preview removes it on close`。
 - [x] 文件历史生成 Unity 版本临时副本后，复制的预览文件名带着 `.prefab`、`.cs.txt` 等后缀，粘到 Unity 里对不上资产名。现在自动复制和「复制预览文件名」都会去掉 Unity 资产的后缀（脚本预览的 `.cs.txt` 一并去掉），其他格式仍复制完整文件名。修复：本条所在提交 `fix: 复制 Unity 预览文件名时不带后缀`；回归：`e2e/file-history-copy.spec.ts` 的 `Unity previews copy names without the file extension`。

@@ -2894,7 +2894,7 @@ export class ShellState {
     "merge", "rebase", "rebaseInteractive", "abort", "continue", "skip", "reset", "cherryPick", "revert",
     "reword", "tag", "deleteTag", "deleteRemoteTag", "stash", "stashPop", "stashApply", "stashDrop",
     "stashRename", "stashBranch", "stashPaths", "pushRef", "pullRef", "setUpstream", "deleteRemoteBranch",
-    "addRemote", "removeRemote", "setRemoteUrl", "submoduleAdd", "submoduleInit", "submoduleSync", "submoduleRemove",
+    "addRemote", "removeRemote", "setRemoteUrl", "submoduleUpdate", "submoduleUpdatePath", "submoduleAdd", "submoduleInit", "submoduleSync", "submoduleRemove",
     "gitFlowInit", "gitFlowStart", "gitFlowFinish", "squash", "clone", "init", "setHidden", "setExpanded",
   ]);
 
@@ -2959,10 +2959,10 @@ export class ShellState {
       case "revert":
         return { title: this.tr("dialog.revert"), command: this.gitLine(["revert", request.noCommit ? "--no-commit" : "", text("rev")]) };
       case "discard":
-        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--", text("file")]) };
+        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--recurse-submodules", "--", text("file")]) };
       case "discardPaths": {
         const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
-        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--", ...files.slice(0, 8)]) };
+        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--recurse-submodules", "--", ...files.slice(0, 8)]) };
       }
       case "resolvePaths": {
         const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
@@ -2984,6 +2984,8 @@ export class ShellState {
         return { title: text("command").split("\n")[0] || this.tr("chrome.activity"), command: text("command") };
       case "submoduleUpdate":
         return { title: this.tr("chrome.submodules"), command: this.gitLine(["submodule", "update", "--init", "--recursive"]) };
+      case "submoduleUpdatePath":
+        return { title: `${this.tr("menu.update")} ${text("path")}`, command: this.gitLine(["submodule", "update", "--init", "--recursive", "--", text("path")]) };
       case "abort": {
         const command = this.progress === "cherryPick" ? "cherry-pick" : this.progress;
         return this.progress

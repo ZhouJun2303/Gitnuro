@@ -485,6 +485,7 @@ export const en: Messages = {
     restoreFileBody: "Uncommitted work in the working copy is replaced by this revision.",
     discardBody: "These changes cannot be recovered.",
     discardFilesBody: "Discard changes in the files below?",
+    discardSubmoduleBody: "Discard changes in the files below? Tracked local changes inside selected submodules will also be overwritten. Untracked files inside them are kept.",
     fileCount: "{count} files",
     discardLinesBody: "Discard the {count} selected lines?",
     deleteBody: "The file is removed from the working tree.",

@@ -485,6 +485,7 @@ export const zh: Messages = {
     restoreFileBody: "工作区里的未提交修改会被这个版本覆盖。",
     discardBody: "这些修改无法恢复。",
     discardFilesBody: "丢弃以下文件的修改？",
+    discardSubmoduleBody: "丢弃以下文件的修改？所选子模块内已跟踪文件的本地修改也会被覆盖；未跟踪文件会保留。",
     fileCount: "共 {count} 个文件",
     discardLinesBody: "放弃所选的 {count} 行？",
     deleteBody: "文件会从工作区删除。",
