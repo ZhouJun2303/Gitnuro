@@ -111,6 +111,42 @@ fn fast_forward_pull_fetches_once_and_restores_local_changes() {
 }
 
 #[test]
+fn fast_forward_pull_carries_many_disjoint_changes_without_rewriting_them() {
+    for include in [false, true] {
+        awegit_git::configure(awegit_git::Session { autostash_include_untracked: include, ..Default::default() });
+        for rebase in [false, true] {
+            let (upstream, local) = pair();
+            for index in 0..256 { fs::write(upstream.path.join(format!("local-{index}.txt")), "base\n").unwrap(); }
+            upstream.git(&["add", "."]); upstream.git(&["commit", "-m", "many tracked files"]);
+            pull(&local, rebase, false).unwrap();
+            fs::write(upstream.path.join("remote.txt"), "incoming\n").unwrap();
+            upstream.git(&["commit", "-am", "incoming"]);
+            for index in 0..256 { fs::write(local.path.join(format!("local-{index}.txt")), "working\n").unwrap(); }
+            fs::write(local.path.join("keep.txt"), "staged\n").unwrap();
+            fs::write(local.path.join("new.txt"), "staged addition\n").unwrap();
+            local.git(&["add", "keep.txt", "new.txt"]);
+            fs::remove_file(local.path.join("new.txt")).unwrap();
+            fs::write(local.path.join("keep.txt"), "working\n").unwrap();
+            fs::write(local.path.join("loose.txt"), "loose\n").unwrap();
+            let before = local.output(&["status", "--porcelain", "-z"]);
+            let time = fs::metadata(local.path.join("keep.txt")).unwrap().modified().unwrap();
+            let (result, log) = awegit_git::capture_output(|| pull(&local, rebase, false));
+            result.unwrap();
+            assert!(!log.contains("$ git stash "), "{log}");
+            assert_eq!(local.output(&["status", "--porcelain", "-z"]), before);
+            assert_eq!(fs::metadata(local.path.join("keep.txt")).unwrap().modified().unwrap(), time);
+            assert_eq!(local.output(&["show", ":keep.txt"]), "staged\n");
+            assert!(!local.path.join("new.txt").exists());
+            assert_eq!(local.output(&["show", ":new.txt"]), "staged addition\n");
+            for index in 0..256 { assert_eq!(fs::read_to_string(local.path.join(format!("local-{index}.txt"))).unwrap(), "working\n"); }
+            assert_eq!(fs::read_to_string(local.path.join("remote.txt")).unwrap(), "incoming\n");
+            assert_eq!(fs::read_to_string(local.path.join("loose.txt")).unwrap(), "loose\n");
+        }
+    }
+    awegit_git::configure(awegit_git::Session::default());
+}
+
+#[test]
 fn pull_fetch_failure_does_not_stash_or_rewrite_local_files() {
     let (_upstream, local) = pair();
     fs::write(local.path.join("keep.txt"), "local\n").unwrap();

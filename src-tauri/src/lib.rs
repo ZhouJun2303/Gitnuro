@@ -523,7 +523,11 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         let _https = accounts::install_https(&repo, &request);
         record_action(&request);
         let action_name = action_label(&request);
-        let before_refs = matches!(action_name, "pull" | "pullRef").then(|| awegit_git::pull_refresh_state(&repo)).flatten();
+        let before_refs = matches!(action_name,
+            "fetch" | "pull" | "pullRef" | "push" | "pushRef" | "checkout" | "checkoutRemote"
+            | "merge" | "rebase" | "rebaseInteractive" | "reset" | "cherryPick" | "revert"
+            | "stash" | "stashPop" | "stashApply" | "stashDrop" | "stashPaths"
+        ).then(|| awegit_git::pull_refresh_state(&repo)).flatten();
         let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
         let report = report_path(given, &repo);
         let action = || awegit_git::with_operation_repo(&report, || {

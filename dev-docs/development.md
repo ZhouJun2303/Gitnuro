@@ -184,6 +184,13 @@ pnpm perf:seed --tracked=1000 --modified=100 --untracked=1000 --history=0 --conf
 pnpm perf:backend --release --pull-only --samples=30 --manifest=.lab/performance/run-实际目录/manifest.json
 ```
 
+常用写操作用 `--operations-only`，覆盖 fetch/push 的空操作与有更新、同树/不同树 checkout、空/有更新 pull（含两种自动保护范围）、暂存/取消暂存、提交、贮藏、快进 merge/rebase、cherry-pick、revert、原位 soft reset、创建分支与标签。分别测量干净和混合本地修改，包含完整后端写请求及最新状态；不包含 IPC、前端刷新和贮藏弹出时间。默认每项预热一次、采样 5 次，`--cases=fetch-noop,push-updated,checkout-same,pull-updated` 可筛选。修改规模由种子的 `--modified` 指定，计时外核对内容与状态。前后对照仍需保留相同入口的旧、新二进制。
+
+```powershell
+pnpm perf:seed --tracked=20000 --modified=10000 --untracked=1000 --history=0 --conflicts=1
+pnpm perf:backend --release --operations-only --samples=3 --manifest=.lab/performance/run-实际目录/manifest.json
+```
+
 对照旧实现时，在旧代码加入相同基准入口并编译后，把应用测试可执行文件另存为 `target/release/deps/baseline_pull.exe`，保留在原目录以便 Windows 找到运行库。新实现同样保留为 `optimized_pull.exe`，通过 `node scripts/with-rust-path.mjs node scripts/perf-bench.mjs --release --pull-only --samples=30 --manifest=... --executable=target/release/deps/baseline_pull.exe` 选择二进制；优化后换用对应文件。JSON 中的 revision 是启动器当前工作区版本，另需记录二进制对应的源码基线；失败或空结果不参与比较。同一数据集按顺序运行，避免还原与计时相互干扰。
 
 10 万文件的数据集可显式减少样本，结果中保留实际样本数：
@@ -226,7 +233,9 @@ pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.
 
 ## 检出与命令记录
 
-双击本地、远程分支和右键检出统一调用一次后端写操作。后端保存本地修改，按贮藏提交 ID 恢复暂存与未暂存内容；前端不再额外执行 `stash push` 或固定弹出 `stash@{0}`。鼠标单击延后 280ms 定位历史，双击取消该定位并使旧定位失效，避免先读取两次历史再等待检出；键盘定位立即执行。重复双击沿用前台写操作保护，不会再保存或弹出另一份贮藏。
+双击本地、远程分支和右键检出统一调用一次后端写操作。后端按需保存本地修改，按贮藏提交 ID 恢复暂存与未暂存内容；前端不再额外执行 `stash push` 或固定弹出 `stash@{0}`。鼠标单击延后 280ms 定位历史，双击取消该定位并使旧定位失效，避免先读取两次历史再等待检出；键盘定位立即执行。重复双击沿用前台写操作保护，不会再保存或弹出另一份贮藏。
+
+可确认目标树的检出、常规快进 pull 和普通快进 merge 会先比较目标改动路径。目标树不变时跳过工作区扫描；本地暂存/未暂存路径与目标改动不重叠时，由原生 Git 直接携带修改，保留删除状态，避免重写大量本地文件。重命名两端、父子目录和 ASCII 大小写别名都计入重叠判断；特殊索引、子模块、附加工作树、替换对象及无法确认的目标仍走原保护流程。大小写不敏感且路径包含非 ASCII 字符时保守回退。实际 checkout/merge 仍执行一次，保留原生命令与 hooks；失败后不重试可能已部分写入的命令。非快进、no-ff、squash 和需要重放的操作仍按原流程保护索引。
 
 设置 → Git → 贮藏中的“自动贮藏包含未跟踪文件”（`autostashIncludeUntracked`）默认关闭，旧设置未包含该字段时也按关闭处理。关闭时只保存已跟踪的暂存与工作区修改，保护检查跳过未跟踪目录遍历；未跟踪文件留在原地，只有这类文件时不创建自动贮藏。已 `git add` 的新文件属于暂存内容，仍会保存。未跟踪文件与目标分支路径重名时，由 Git 阻止覆盖并报告原因，原有暂存/未暂存内容恢复。开启后自动贮藏添加 `--include-untracked`，仍排除未跟踪的根 `.fakeignore` 和被 Git 忽略的未跟踪文件。该开关适用于检出、Pull、合并、变基等自动保护流程，与手动贮藏的“包含未跟踪文件”设置独立；恢复已有贮藏时始终按原备份内容处理。
 
@@ -236,7 +245,9 @@ pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.
 
 开启自动贮藏的常规拉取先执行一次 `git fetch --update-head-ok`。当前分支与原跟踪分支一致、上游和配置符合条件时，以本次 `FETCH_HEAD` 判断更新：目标仍是 HEAD 就直接完成，不检查/保存/恢复本地修改，也不启动整合预览；快进才保护修改并执行 `git merge --ff-only --no-autostash <目标>`。分叉、本地领先、浅仓库、子模块、附加工作树、特殊 refspec、`fetch.all`、no-ff/签名/策略设置等保留原生 `git pull --no-autostash --rebase` 或 `--no-rebase`。获取后发现上游历史重写或配置变化也回退原生 pull，异常路径可能再获取一次。获取失败直接返回，不先贮藏本地内容。
 
-拉取返回前始终重新读取工作区状态；仅当 HEAD、全部 refs、配置与工作树元数据都没变化时，前端复用分支和历史，仍刷新当前差异。标签变化或无法可靠比较时完整刷新。启动自动获取延后 1 秒，在空闲时执行；打开拉取框或明确获取/拉取会取消尚未开始的定时任务，后台获取也会避开前台写入和拉取框。已经开始的获取仍按仓库排队，网络等待单独观察。
+fetch、push、pull、checkout 及相关整合/贮藏写操作返回前始终重新读取工作区状态；成功且 HEAD、全部 refs、配置、贮藏 reflog 与工作树元数据都没变化时，前端复用分支和历史，仍刷新当前差异。新远程分支、标签、上游配置、贮藏列表变化或无法可靠比较时完整刷新；不以此推进前端上下文版本，外部事件仍可刷新。启动自动获取延后 1 秒，在空闲时执行；打开拉取框或明确获取/拉取会取消尚未开始的定时任务，后台获取也会避开前台写入和拉取框。已经开始的获取仍按仓库排队，网络等待单独观察。
+
+相关回归：`e2e/operation-performance.spec.ts` 在三套主题下验证空 fetch/push 不重复读分支历史、远程更新完整刷新，以及 `pull-disjoint` 场景的 1000 个跟踪修改和等待期间虚拟列表滚动。检出场景额外验证不重叠时没有贮藏，重叠、失败和冲突仍恢复并保留原有备份。
 
 空拉取回归：`crates/git/tests/pull.rs` 覆盖索引字节及时间不变、暂存/未暂存和删除状态、已有贮藏、两种模式与开关、单次获取、快进、获取失败和原生回退；`pull-noop` 场景包含 1000 个新文件。运行 `pnpm test:ui -- --reuse e2e/pull.spec.ts e2e/performance-refresh.spec.ts` 验证三套主题、无重复状态/分支/历史请求、自动获取取消与外部变化处理。
 

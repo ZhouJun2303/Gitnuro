@@ -189,6 +189,7 @@ fn layout() -> Result<Value, String> {
         "operation": text(repos.join("operation")),
         "pull-deleted": text(repos.join("pull-deleted")),
         "pull-noop": text(repos.join("pull-noop")),
+        "pull-disjoint": text(repos.join("pull-disjoint")),
         "checkout-dirty": text(repos.join("checkout-dirty")),
         "checkout-index": text(repos.join("checkout-index")),
         "checkout-conflict": text(repos.join("checkout-conflict")),

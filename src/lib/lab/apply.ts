@@ -158,7 +158,7 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.sideQuery = "";
     return;
   }
-  if (["changes", "pull-deleted", "pull-noop", "unstage-initial", "stage-conflict-paths"].includes(id)) {
+  if (["changes", "pull-deleted", "pull-noop", "pull-disjoint", "unstage-initial", "stage-conflict-paths"].includes(id)) {
     shell.section = "changes";
     return;
   }
