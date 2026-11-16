@@ -85,6 +85,8 @@ export type ConfirmAsk = {
     subject?: string;
     detail?: string;
     danger?: boolean;
+    /** Focus the confirm button on open instead of Cancel. For dialogs opened by keyboard. */
+    focusConfirm?: boolean;
     confirmLabel?: string;
     revert?: { commit: boolean; message: string };
     files?: string[];

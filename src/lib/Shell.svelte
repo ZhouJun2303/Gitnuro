@@ -1107,7 +1107,7 @@
   {#if shell.confirmAsk}
     {@const ask = shell.confirmAsk}
     <div class="scrim confirm-scrim" role="presentation">
-      <div class="dialog sm confirm" class:danger={ask.danger} data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={[ask.body ? "confirm-body" : "", ask.detail ? "confirm-detail" : ""].filter(Boolean).join(" ") || undefined} tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ask.danger ? ".text-button" : ".commit" }}>
+      <div class="dialog sm confirm" class:danger={ask.danger} data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={[ask.body ? "confirm-body" : "", ask.detail ? "confirm-detail" : ""].filter(Boolean).join(" ") || undefined} tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ask.danger && !ask.focusConfirm ? ".text-button" : ".commit" }}>
         <div class="confirm-head">
           <span class="confirm-icon" class:danger={ask.danger} aria-hidden="true">
             {#if ask.danger}

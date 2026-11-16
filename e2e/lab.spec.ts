@@ -732,9 +732,19 @@ test("multi-file confirmation lists one file per line with a total", async ({ pa
   await expect(rows).toHaveCount(6);
   await expect(confirm.locator(".confirm-count")).toHaveText(/^(6 files|共 6 个文件)$/);
   await expect(rows.first()).toContainText("Y语言表_Data_Language.xlsx");
-  await expect(confirm.locator(".text-button")).toBeFocused();
+  await expect(confirm.locator(".commit")).toBeFocused();
   const heights = await rows.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
   expect(Math.max(...heights)).toBeLessThan(26);
+});
+
+test("discard opened with Delete focuses the confirm button", async ({ page }) => {
+  await openLabScene(page, "changes", ".unstaged-pane .file-list");
+  await page.locator(".unstaged-pane .file-select").first().click();
+  await page.keyboard.press("Delete");
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toBeVisible();
+  await expect(confirm.locator(".commit")).toBeFocused();
+  expect(await confirm.locator(".commit").evaluate((node) => node.matches(":focus-visible"))).toBe(true);
 });
 
 test("commit patch renders each hunk header once", async ({ page }) => {

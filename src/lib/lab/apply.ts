@@ -417,8 +417,8 @@ async function fillSurface(shell: ShellState, id: string) {
       "README.md",
       "docs/release-notes.md",
     ];
-    shell.discardChosen(names);
-    if (!shell.confirmAsk) shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => {}, names, { danger: true });
+    shell.discardChosen(names, true);
+    if (!shell.confirmAsk) shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => {}, names, { danger: true, focusConfirm: true });
     return;
   }
   if (id === "stash-apply-confirm") {

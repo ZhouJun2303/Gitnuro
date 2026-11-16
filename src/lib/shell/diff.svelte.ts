@@ -806,10 +806,10 @@ export function confirmPicked(shell: ShellState, files: string[], title: string,
     shell.ask(title, "", () => void run(files), files, { danger: true });
   }
 
-export function discardChosen(shell: ShellState, files: string[]) {
+export function discardChosen(shell: ShellState, files: string[], focusConfirm = false) {
     const names = files.filter((path) => path.length > 0);
     if (names.length === 0 || shell.mode !== "live") return;
-    shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => void shell.discardPicked(names), names, { danger: true });
+    shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => void shell.discardPicked(names), names, { danger: true, focusConfirm });
   }
 
 export function deleteChosen(shell: ShellState, files: string[]) {
