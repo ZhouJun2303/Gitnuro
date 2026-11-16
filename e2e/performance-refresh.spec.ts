@@ -1,5 +1,34 @@
 import { expect, test } from "@playwright/test";
 
+test("automatic fetch waits for idle and a foreground sync cancels the pending timer", async ({ page }) => {
+  await page.goto("/?scene=clean");
+  await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();
+  const result = await page.evaluate(async () => {
+    const modulePath = "/src/lib/shell/state.svelte.ts";
+    const { ShellState } = await import(/* @vite-ignore */ modulePath);
+    const shell: any = {
+      automaticFetchTimer: null, openGen: 1, settings: { fetchAutomatically: true },
+      repoPath: () => "D:/perf/one", viewing: () => true,
+    };
+    for (const method of ["scheduleAutomaticFetch", "cancelAutomaticFetch"] as const) shell[method] = ShellState.prototype[method].bind(shell);
+    let calls = 0;
+    shell.doFetch = () => { calls++; };
+    shell.scheduleAutomaticFetch();
+    const immediate = calls;
+    shell.cancelAutomaticFetch();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const cancelled = calls;
+    shell.scheduleAutomaticFetch();
+    shell.openGen++;
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const switched = calls;
+    shell.scheduleAutomaticFetch();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    return { immediate, cancelled, switched, idle: calls };
+  });
+  expect(result).toEqual({ immediate: 0, cancelled: 0, switched: 0, idle: 1 });
+});
+
 test("covered write events reuse snapshots while external and unversioned changes refresh", async ({ page }) => {
   await page.goto("/?scene=clean");
   await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();

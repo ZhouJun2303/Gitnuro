@@ -383,6 +383,8 @@ export class ShellState {
   /** Repositories with an automatic fetch in flight. This does not count as busy. */
   backgroundFetch = new Set<string>();
 
+  automaticFetchTimer: ReturnType<typeof setTimeout> | null = null;
+
 
   /** Set as soon as a tab is chosen, before that repository's status returns. */
   focusPath = $state<string | null>(null);
@@ -3216,6 +3218,7 @@ export class ShellState {
     if (!this.backend() || !path) return;
     const background = source === "background";
     const action = String(request.action ?? "");
+    if (!background && ["fetch", "pull", "pullRef"].includes(action)) this.cancelAutomaticFetch();
     // Menus and shortcuts obey the same restrictions as the sync toolbar.
     if (["fetch", "pull", "pullRef", "push", "pushRef"].includes(action)) {
       const kind = action === "pullRef" ? "pull" : action === "pushRef" ? "push" : action as "fetch" | "pull" | "push";
@@ -3267,7 +3270,7 @@ export class ShellState {
         const superseded = background && this.busy;
         if (this.viewing(path) && !superseded) {
           this.applySnapshot(value);
-          if (refreshContext) await this.loadContext(operation);
+          if (refreshContext && value.refreshScope !== "status") await this.loadContext(operation);
           if (!background && this.viewing(path)) await this.loadDiff();
         }
         // Any write made while other paths stay unmerged reports "conflict" even when it
@@ -3413,7 +3416,7 @@ export class ShellState {
     if (source !== "background") return this.mutate(request, source);
     const path = this.repoPath();
     const key = this.jobKey(path);
-    if (!key || this.backgroundFetch.has(key)) return;
+    if (!key || this.backgroundFetch.has(key) || this.busy || this.userWrites > 0 || this.dialog === "pull") return;
     this.backgroundFetch.add(key);
     return this.mutate(request, source).finally(() => {
       this.backgroundFetch.delete(key);
@@ -3421,6 +3424,20 @@ export class ShellState {
     });
   }
 
+  cancelAutomaticFetch() {
+    if (this.automaticFetchTimer !== null) clearTimeout(this.automaticFetchTimer);
+    this.automaticFetchTimer = null;
+  }
+
+  scheduleAutomaticFetch() {
+    this.cancelAutomaticFetch();
+    const path = this.repoPath();
+    const gen = this.openGen;
+    this.automaticFetchTimer = setTimeout(() => {
+      this.automaticFetchTimer = null;
+      if (gen === this.openGen && this.viewing(path) && this.settings.fetchAutomatically) void this.doFetch("background");
+    }, 1000);
+  }
 
 
   doPull() {
@@ -4748,7 +4765,7 @@ export class ShellState {
       if (!running) this.stopWork(stopAt);
       if (gen === this.openGen) this.focusPath = null;
     }
-    if (gen === this.openGen && this.settings.fetchAutomatically && this.viewing(path) && !this.busy) void this.doFetch("background");
+    if (gen === this.openGen && this.settings.fetchAutomatically && this.viewing(path) && !this.busy) this.scheduleAutomaticFetch();
   }
 
 
@@ -6527,9 +6544,9 @@ export class ShellState {
     $effect(() => {
     if (!this.settings.fetchAutomatically) return;
     const timer = window.setInterval(() => {
-    if (!this.busy && this.snapshot) void this.doFetch("background");
+    if (!this.busy && this.snapshot) this.scheduleAutomaticFetch();
     }, 10 * 60 * 1000);
-    return () => window.clearInterval(timer);
+    return () => { window.clearInterval(timer); this.cancelAutomaticFetch(); };
     });
     $effect(() => {
     const seconds = this.settings.statusInterval;

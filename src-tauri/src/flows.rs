@@ -2209,6 +2209,81 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "local pull benchmark; set AWEGIT_PERF_MANIFEST"]
+    fn seeded_pull_timings() {
+        let manifest = std::env::var("AWEGIT_PERF_MANIFEST").expect("manifest required");
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(manifest).unwrap()).unwrap();
+        let workspace = PathBuf::from(value["workspace"].as_str().unwrap());
+        let allowed = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join(".lab/performance").canonicalize().unwrap();
+        assert!(workspace.canonicalize().unwrap().starts_with(&allowed));
+        let repo = std::mem::ManuallyDrop::new(Repo(workspace.clone()));
+        // The complete mutation must use isolated settings, including its log path.
+        std::env::set_var("AWEGIT_SETTINGS", Path::new(value["run"].as_str().unwrap()).join("settings.json"));
+        let count = value["untracked"].as_u64().unwrap() as usize;
+        let modified = value["modified"].as_u64().unwrap_or(100).min(value["tracked"].as_u64().unwrap()) as usize;
+        let samples = benchmark_samples(30);
+        awegit_git::set_timing_trace(|_, _| {});
+        for include in [false, true] {
+            let mut settings = super::super::settings::Settings::default();
+            settings.autostash_include_untracked = include;
+            super::super::settings::save(&settings).unwrap();
+            for updated in [false, true] {
+                for (label, files) in [("clean", 0), ("modified", 0), ("untracked", count)] {
+                    for layer in ["core", "mutation"] {
+                        let mut times = Vec::new();
+                        let mut calls = 0;
+                        for iteration in 0..=samples {
+                            let base = value[if updated { "base" } else { "incoming" }].as_str().unwrap();
+                            repo.git(&["reset", "--hard", base]);
+                            repo.git(&["update-ref", "refs/remotes/origin/main", base]);
+                            for index in 0..count {
+                                let path = workspace.join(format!("untracked/{index}.txt"));
+                                if path.is_file() { fs::remove_file(path).unwrap(); }
+                            }
+                            if label != "clean" {
+                                for index in 0..modified {
+                                    fs::write(workspace.join(format!("tracked/{}/file-{index}.txt", index / 500)), "working\n").unwrap();
+                                }
+                                fs::write(workspace.join("tracked/0/file-0.txt"), "staged\n").unwrap();
+                                repo.git(&["add", "tracked/0/file-0.txt"]);
+                                fs::write(workspace.join("tracked/0/file-0.txt"), "working\n").unwrap();
+                            }
+                            fs::create_dir_all(workspace.join("untracked")).unwrap();
+                            for index in 0..files { fs::write(workspace.join(format!("untracked/{index}.txt")), "local\n").unwrap(); }
+                            let before = repo.git(&["status", "--porcelain", "-z"]);
+                            awegit_git::configure(awegit_git::Session { autostash_include_untracked: include, ..Default::default() });
+                            let start = Instant::now();
+                            let (_, processes) = count_git_calls(|| {
+                                let request = Mutation::Pull { rebase: true, autostash: true };
+                                if layer == "core" { awegit_git::perform(&workspace, request).unwrap(); }
+                                else {
+                                    let report = super::super::mutate(Some(workspace.display().to_string()), request, None).unwrap();
+                                    assert_eq!(report.outcome, "completed", "{}", report.error);
+                                }
+                            });
+                            let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+                            if iteration > 0 { times.push(elapsed); calls += processes; }
+                            assert_eq!(repo.git(&["rev-parse", "HEAD"]), value["incoming"].as_str().unwrap());
+                            assert_eq!(repo.git(&["status", "--porcelain", "-z"]), before);
+                            if label != "clean" {
+                                for index in 0..modified {
+                                    assert_eq!(fs::read_to_string(workspace.join(format!("tracked/{}/file-{index}.txt", index / 500))).unwrap(), "working\n");
+                                }
+                                assert_eq!(repo.git(&["show", ":tracked/0/file-0.txt"]), "staged");
+                            }
+                            for index in 0..files { assert_eq!(fs::read_to_string(workspace.join(format!("untracked/{index}.txt"))).unwrap(), "local\n"); }
+                            assert!(repo.git(&["stash", "list"]).is_empty());
+                        }
+                        let raw = times.clone();
+                        times.sort_by(f64::total_cmp);
+                        println!("PERF {}", serde_json::json!({ "label": format!("pull {} {label} {layer} include={include}", if updated { "updated" } else { "noop" }), "samples": samples, "rawMs": raw, "p50Ms": times[(samples-1)/2], "p95Ms": times[(samples*95).div_ceil(100)-1], "maxMs": times[samples-1], "gitProcesses": calls }));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn finished_flow_reads_do_not_spawn_git() {
         let repo = Repo::new();
         let summary = repo.run(Mutation::Reset {

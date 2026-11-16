@@ -692,9 +692,8 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             tags,
         } => fetch(repo, remote, prune, tags),
         Mutation::Pull { rebase, autostash } => {
-            let label = if rebase { "pull --rebase" } else { "pull" };
             if autostash {
-                with_autostash(repo, label, || pull(repo, rebase))
+                pull_autostashed(repo, rebase, None)
             } else {
                 pull(repo, rebase)
             }
@@ -944,9 +943,8 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             rebase,
             autostash,
         } => {
-            let label = format!("pull {remote}/{branch}");
             if autostash {
-                with_autostash(repo, &label, || pull_ref(repo, &remote, &branch, rebase))
+                pull_autostashed(repo, rebase, Some((&remote, &branch)))
             } else {
                 pull_ref(repo, &remote, &branch, rebase)
             }
@@ -1067,6 +1065,48 @@ fn pull(repo: &Path, rebase: bool) -> Result<(), Error> {
             AuthorMode::Both
         },
     ))
+}
+
+fn pull_autostashed(repo: &Path, rebase: bool, explicit: Option<(&str, &str)>) -> Result<(), Error> {
+    autostash::settle_before(repo)?;
+    let label = explicit.map(|(remote, branch)| format!("pull {remote}/{branch}"))
+        .unwrap_or_else(|| if rebase { "pull --rebase" } else { "pull" }.into());
+    if let Some(prepared) = crate::pull::prepare(repo, explicit) {
+        {
+            let _phase = crate::timing_phase("pull-fetch");
+            // Match native pull's fetch scope; fetch --all would contact unrelated remotes.
+            let mut args = vec!["fetch", "--update-head-ok"];
+            if explicit.is_some() { args.extend([prepared.remote.as_str(), prepared.remote_branch.as_str()]); }
+            surface(run(repo, &args).map(|_| ()))?;
+        }
+        if let Some(target) = prepared.target(repo) {
+            if target == prepared.head {
+                crate::flow::emit(crate::flow::Event {
+                    key: "pull-up-to-date".into(), kind: "integration".into(), state: "completed".into(),
+                    detail: "already-up-to-date".into(), ..Default::default()
+                });
+                return Ok(());
+            }
+            if is_ancestor(repo, &prepared.head, &target) {
+                return with_autostash(repo, &label, || {
+                    let _phase = crate::timing_phase("pull-integrate");
+                    surface(with_editor_mode(repo, &["merge", "--ff-only", "--no-autostash", &target],
+                        if rebase { AuthorMode::CommitterOnly } else { AuthorMode::Both }))
+                });
+            }
+        }
+        // Remote history can be rewritten while fetching. Keep native fork-point
+        // and policy handling on this exceptional path, including its own fetch.
+        let _phase = crate::timing_phase("pull-native-fallback");
+        return with_autostash(repo, &label, || match explicit {
+            Some((remote, branch)) => pull_ref(repo, remote, branch, rebase),
+            None => pull(repo, rebase),
+        });
+    }
+    with_autostash(repo, &label, || match explicit {
+        Some((remote, branch)) => pull_ref(repo, remote, branch, rebase),
+        None => pull(repo, rebase),
+    })
 }
 
 fn push(

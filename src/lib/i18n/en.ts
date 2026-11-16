@@ -54,7 +54,7 @@ export const en: Messages = {
     "preview-conditional": "Earlier results are undecided. Check again during execution.", "preview-unknown": "A reliable prediction is unavailable.",
     "preview-unavailable": "A reliable prediction is unavailable. Actual Git results take precedence.", "custom-merge-driver": "Custom merge drivers prevent a reliable simulation.",
     "conditional-after-conflict-or-limit": "Later steps depend on conflict resolution. Long previews have time and commit limits.",
-    "git-child": "Internal Git pull phase", "recording-interrupted": "The app exited before this step's result was recorded. The workflow was recovered from Git's current state.", recording: "Could not save workflow: {error}", updateError: "Refresh failed: {error}", command: "Actual command", time: "Time",
+    "git-child": "Internal Git pull phase", "already-up-to-date": "Already up to date. Local changes did not need to be saved or restored.", "recording-interrupted": "The app exited before this step's result was recorded. The workflow was recovered from Git's current state.", recording: "Could not save workflow: {error}", updateError: "Refresh failed: {error}", command: "Actual command", time: "Time",
     stage1: "Base blob", stage2: "Current-side blob", stage3: "Incoming-side blob", missingBlob: "Absent (added / deleted)", pending: "Stash awaiting restoration",
     pull: "Pull", pullRef: "Pull branch", push: "Push", pushRef: "Push branch", fetch: "Fetch remote commits", merge: "Merge", rebase: "Rebase",
     rebaseInteractive: "Interactive rebase", "cherry-pick": "Cherry-pick", cherryPick: "Cherry-pick", revert: "Revert commit", reset: "Reset baseline", checkout: "Switch branch",

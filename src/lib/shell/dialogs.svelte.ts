@@ -516,6 +516,7 @@ export async function pastePatch(shell: ShellState) {
   }
 
 export function confirmSync(shell: ShellState, kind: "fetch" | "pull" | "push") {
+    if (kind === "pull") shell.cancelAutomaticFetch();
     const current = shell.refs?.branches.find((branch) => branch.current);
     const upstream = current?.upstream ?? "";
     const firstRemote = shell.refs?.remotes[0]?.name ?? "";

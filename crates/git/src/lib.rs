@@ -11,11 +11,13 @@ mod locks;
 mod model;
 mod ops;
 mod proc;
+mod pull;
 mod timing;
 
 use std::path::{Path, PathBuf};
 
 pub use timing::{enter_timing, set_timing_trace, timing_context, timing_phase, timing_repository, TimingContext, TimingPhase, TimingScope};
+pub use pull::{refresh_state as pull_refresh_state, RefreshState as PullRefreshState};
 
 pub use change::{
     blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line,

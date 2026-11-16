@@ -444,6 +444,18 @@ function seedPullDeletedRepo() {
   write(path, ".fakeignore", "local-only\n");
 }
 
+function seedPullNoopRepo() {
+  const path = join(repos, "pull-noop");
+  const upstream = join(repos, "pull-noop-upstream");
+  wipe(path); wipe(upstream); initWork(upstream);
+  commit(upstream, "note.txt", "base\n", "base");
+  cloneFrom(fileUrl(upstream), path);
+  write(path, "note.txt", "staged\n");
+  git(path, ["add", "note.txt"]);
+  write(path, "note.txt", "working\n");
+  for (let index = 0; index < 1000; index++) write(path, `loose/file-${index}.txt`, "untracked\n");
+}
+
 function seedCheckoutRepo(name = "checkout-dirty") {
   const path = join(repos, name);
   wipe(path); initWork(path);
@@ -518,6 +530,7 @@ const restore = {
   "unstage-initial": seedUnstageInitialRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
   "pull-deleted": seedPullDeletedRepo,
+  "pull-noop": seedPullNoopRepo,
   tags: seedTagsRepo,
   unity: seedUnityRepo,
   operation: seedOperationRepo,
@@ -726,6 +739,7 @@ seedOperationRepo();
 seedUnstageInitialRepo();
 seedStageConflictPathsRepo();
 seedPullDeletedRepo();
+seedPullNoopRepo();
 seedCherryRepo();
 seedRevertRepo();
 seedTagsRepo();

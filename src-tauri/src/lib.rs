@@ -494,6 +494,8 @@ struct MutationReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     stale_lock: Option<awegit_git::StaleIndexLock>,
     flow: Option<flows::Summary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refresh_scope: Option<&'static str>,
 }
 
 #[derive(serde::Serialize)]
@@ -521,6 +523,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         let _https = accounts::install_https(&repo, &request);
         record_action(&request);
         let action_name = action_label(&request);
+        let before_refs = matches!(action_name, "pull" | "pullRef").then(|| awegit_git::pull_refresh_state(&repo)).flatten();
         let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
         let report = report_path(given, &repo);
         let action = || awegit_git::with_operation_repo(&report, || {
@@ -537,6 +540,8 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         let stale_lock = if result.is_err() { awegit_git::stale_index_lock(&next) } else { None };
         let flow = flow.map(|flow| { let _phase = perf::phase("flow-finish"); flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name) });
         let status = read_status(&next)?;
+        let refresh_scope = if result.is_ok() && before_refs.is_some()
+            && before_refs == awegit_git::pull_refresh_state(&repo) { Some("status") } else { None };
         let conflicted = status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict);
         let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
         let error = result.as_ref().err().map(ToString::to_string).unwrap_or_default();
@@ -549,6 +554,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             error,
             stale_lock,
             flow,
+            refresh_scope,
         })
     });
     let log = perf::redact(&log);

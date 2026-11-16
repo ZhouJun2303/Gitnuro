@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const options = new Map(process.argv.slice(2).filter((arg) => arg !== "--performance").map((arg) => {
-  const match = /^--(tracked|untracked|history|conflicts)=(\d+(?:,\d+)*)$/.exec(arg);
+  const match = /^--(tracked|untracked|modified|history|conflicts)=(\d+(?:,\d+)*)$/.exec(arg);
   if (!match) throw new Error(`unknown performance option: ${arg}`);
   return [match[1], match[2]];
 }));
@@ -17,6 +17,8 @@ const count = (name, fallback) => {
 };
 const tracked = Math.max(3, count("tracked", 1000));
 const untracked = count("untracked", 1000);
+const modified = Math.min(tracked, count("modified", 100));
+if (modified < 1) throw new Error("modified must be at least 1; the benchmark already includes a clean case");
 const histories = count("history", 1000);
 const conflictCounts = (options.get("conflicts") ?? "10,100,1000").split(",").map(Number);
 if (conflictCounts.some((value) => value < 1 || value > 10000)) throw new Error("conflicts must be between 1 and 10000");
@@ -100,6 +102,6 @@ for (let index = 0; index < histories; index++) {
   writeFileSync(join(historyDir, `${id}.json`), JSON.stringify(summary));
   writeFileSync(join(historyDir, `${id}.jsonl`), JSON.stringify({ summary, node: null }) + "\n");
 }
-const manifest = { run, workspace, remote, base, incoming, tracked, untracked, histories, conflicts, blobs, blobCases, git: program, gitVersion: git(run, ["--version"]), createdAt: startedAt };
+const manifest = { run, workspace, remote, base, incoming, tracked, untracked, modified, histories, conflicts, blobs, blobCases, git: program, gitVersion: git(run, ["--version"]), createdAt: startedAt };
 writeFileSync(join(run, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 console.log(join(run, "manifest.json"));
