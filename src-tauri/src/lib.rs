@@ -9,6 +9,7 @@ mod http;
 mod lab;
 mod perf;
 mod reads;
+mod repo_inspection;
 mod revision_copy;
 mod secrets;
 mod settings;
@@ -2545,6 +2546,7 @@ pub fn run() {
             reflog,
             commit_tree,
             repository_summary,
+            repo_inspection::repository_inspection,
             rebase_conflicts,
             lfs_locks,
             launch_tool,

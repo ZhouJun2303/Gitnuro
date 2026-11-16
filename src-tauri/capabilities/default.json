@@ -78,6 +78,7 @@
     "allow-reflog",
     "allow-commit-tree",
     "allow-repository-summary",
+    "allow-repository-inspection",
     "allow-rebase-conflicts",
     "allow-lfs-locks",
     "allow-launch-tool",

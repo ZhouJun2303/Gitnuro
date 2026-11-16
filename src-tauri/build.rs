@@ -64,6 +64,7 @@ fn main() {
             "reflog",
             "commit_tree",
             "repository_summary",
+            "repository_inspection",
             "rebase_conflicts",
             "lfs_locks",
             "launch_tool",

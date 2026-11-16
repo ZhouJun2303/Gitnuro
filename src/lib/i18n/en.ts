@@ -1,6 +1,13 @@
 import type { Messages } from "./types";
 
 export const en: Messages = {
+  repoInfo: {
+    title: "Repository info", path: "Path", kind: "Project type", generic: "Git repository", unity: "Unity", android: "Android",
+    files: "Worktree files", directories: "Directories", worktreeSize: "Worktree size", gitSize: "Git data size",
+    totalSize: "Total size", scope: "Includes untracked and ignored files; excludes symlink targets", skipped: "Unreadable entries: {count}",
+    remotes: "Remotes", noRemotes: "No remotes", loading: "Reading repository…", error: "Could not read: {message}",
+    account: "Account used", noAccount: "Git credentials or SSH configuration", edit: "Edit remote URL and account", close: "Close",
+  },
   shortcuts: {
     refresh: "Refresh", commit: "Commit", exit: "Close / cancel", up: "Previous item", down: "Next item",
     pull: "Pull", push: "Push", branch: "Create branch", stash: "Stash", open: "Open repository",

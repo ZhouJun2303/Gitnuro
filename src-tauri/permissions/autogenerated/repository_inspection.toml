@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-repository-inspection"
+description = "Enables the repository_inspection command without any pre-configured scope."
+commands.allow = ["repository_inspection"]
+
+[[permission]]
+identifier = "deny-repository-inspection"
+description = "Denies the repository_inspection command without any pre-configured scope."
+commands.deny = ["repository_inspection"]

@@ -1,6 +1,13 @@
 import type { Messages } from "./types";
 
 export const zh: Messages = {
+  repoInfo: {
+    title: "仓库信息", path: "路径", kind: "项目类型", generic: "普通 Git 仓库", unity: "Unity", android: "Android",
+    files: "工作区文件", directories: "目录", worktreeSize: "工作区大小", gitSize: "Git 数据大小",
+    totalSize: "合计大小", scope: "含未跟踪与忽略文件，不含符号链接目标", skipped: "无法读取的项目：{count}",
+    remotes: "远程", noRemotes: "没有远程", loading: "正在读取仓库信息…", error: "读取失败：{message}",
+    account: "将使用的账号", noAccount: "使用 Git 凭据或 SSH 配置", edit: "编辑远程地址与账号", close: "关闭",
+  },
   shortcuts: {
     refresh: "刷新", commit: "提交", exit: "关闭 / 取消", up: "上一项", down: "下一项",
     pull: "拉取", push: "推送", branch: "新建分支", stash: "贮藏", open: "打开仓库",

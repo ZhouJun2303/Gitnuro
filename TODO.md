@@ -8,7 +8,6 @@
 
 ## 已处理
 
-- [x] 文件历史生成 Unity 版本临时副本后，复制的预览文件名带着 `.prefab`、`.cs.txt` 等后缀，粘到 Unity 里对不上资产名。现在自动复制和「复制预览文件名」都会去掉 Unity 资产的后缀（脚本预览的 `.cs.txt` 一并去掉），其他格式仍复制完整文件名。修复：本条所在提交 `fix: 复制 Unity 预览文件名时不带后缀`；回归：`e2e/file-history-copy.spec.ts` 的 `Unity previews copy names without the file extension`。
 - [x] 快速启动的命令面板原来只按当前界面语言过滤，中文界面搜英文、英文界面搜中文都找不到。现在每条命令同时带上另一种语言的文案参与匹配，分支检出也按两种语言的动词匹配。修复：本条所在提交 `feat: 快速启动面板支持中英文双向搜索`；回归：`e2e/palette-search.spec.ts` 的 `palette search matches commands in either language`。
 - [x] 全界面性能与交互检查：修复差异换行重叠、长列表缩短后空白、历史读取竞态、补丁并发及后台读取抢选中项，减少历史比较和分隔条拖动开销。修复：本条所在提交 `fix: 修复差异换行与历史读取竞态并降低界面开销`；回归：`e2e/ui-performance.spec.ts`、`e2e/wrapped-diff.spec.ts`，全场景、主题面板与相关交互共 690 项通过（3 项恢复试验数据后复验）；`pnpm check`、`pnpm build` 通过。测量、问题与验证范围见 [UI 检查记录](dev-docs/ui-audit.md)。
 - [x] 常用 Git 操作边界与兼容性：首次提交前取消暂存支持修改后文件、目录和空索引，统一一次命令完成；冲突中全部暂存跳过已暂存的删除/重命名旧路径，空选择不再误解决冲突；检出禁止回退为同名文件，远程检出和推送兼容同名标签；旧版 Git 在临时对象库内预览变基，新版继续批量重放；失败详情同时保留 stdout 原因和 stderr 警告。修复：本条所在提交 `fix: 修复常用 Git 操作边界并兼容旧版预览`；回归：`crates/git/tests/common_operations.rs` 的 9 项、`preview_preserves_upstream_changes_across_multiple_replayed_trees`、`failure_detail_keeps_stdout_when_stderr_contains_a_warning`。完整 `pnpm test`：183 项 Git、107 项应用测试通过，2 项手动基准默认忽略；操作与流程 18 项分别在 Git 2.38.1、2.50.1、MinGit 2.56.0 上通过；三套主题 `e2e/common-operations.spec.ts` 共 6 项、`pnpm check` 通过。同步使用独立本地远端验证。实现约定见 [开发文档](dev-docs/development.md#常用操作兼容)。

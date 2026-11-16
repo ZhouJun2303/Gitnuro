@@ -1,6 +1,7 @@
 export type Locale = "en" | "zh";
 
 export type Messages = {
+  repoInfo: Record<string, string>;
   shortcuts: Record<string, string>;
   flow: Record<string, string>;
   chrome: {

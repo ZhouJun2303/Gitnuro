@@ -10,6 +10,7 @@
   import { buildRebaseSteps } from "./dialogs.svelte";
   import { recentWorkspaceId, type Account } from "../status";
   import { resolveRemoteAccount } from "./remoteAccount";
+  import RepoInfoPanel from "./RepoInfoPanel.svelte";
 
   const shell = getShell();
   let remoteAccountPick = $state("");
@@ -847,6 +848,10 @@
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing || !shell.draftExtra.trim()}>{shell.tr(shell.remoteEdit ? "dialog.setRemoteUrl" : "dialog.create")}</button>
           </div>
+        {:else if shell.dialog === "repoInfo"}
+          {#key shell.repoInfoPath}
+            <RepoInfoPanel path={shell.repoInfoPath} />
+          {/key}
         {:else if shell.dialog === "squash"}
           <h2>{shell.tr("dialog.squash")}</h2>
           <p class="empty">{shell.tr("dialog.squashHint")}</p>

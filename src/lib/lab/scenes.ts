@@ -39,6 +39,7 @@ export const dialogScenes = {
   command: dialog("command", "自定义命令"),
   tag: dialog("tag", "新建标签"),
   remote: dialog("remote", "远程"),
+  repoInfo: scene({ id: "dialog-repoInfo", group: "弹窗", title: "仓库信息", repo: "full", ready: ".repo-info-stats", dialog: "repoInfo" }),
   squash: dialog("squash", "压缩提交"),
   credential: dialog("credential", "HTTPS 登录", "full", "叠层"),
   fetch: dialog("fetch", "获取"),
@@ -116,6 +117,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "branch-badges", group: "主界面", title: "分支角标", repo: "full", ready: ".sidebar .track-dot.missing" }),
   scene({ id: "vertical-tabs", group: "主界面", title: "垂直标签", repo: "full", ready: ".vertical-tabs" }),
   scene({ id: "tab-copy-path", group: "主界面", title: "项目标签 · 拷贝项目路径", repo: "full", ready: ".chrome-tabs .tab" }),
+  scene({ id: "tab-repo-info", group: "主界面", title: "项目标签 · 仓库信息", repo: "full", ready: ".chrome-tabs .tab" }),
   scene({ id: "tab-same-name", group: "主界面", title: "同名项目标签 · 显示父目录", repo: "full", ready: ".chrome-tabs .tab" }),
   scene({ id: "search", group: "主界面", title: "搜索提交", repo: "full", ready: "[data-layer=\"search\"]" }),
   scene({
@@ -125,14 +127,6 @@ export const surfaceScenes: LabScene[] = [
     repo: "full",
     ready: ".history-commit",
     href: "/?scene=file-history&view=history&file=README.md",
-  }),
-  scene({
-    id: "file-history-unity",
-    group: "主界面",
-    title: "文件历史 · Unity 资产",
-    repo: "unity",
-    ready: ".history-commit",
-    href: "/?scene=file-history-unity&view=history&file=Assets/Prefabs/UIChapter.prefab",
   }),
   scene({
     id: "blob",

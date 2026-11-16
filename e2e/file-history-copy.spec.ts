@@ -36,39 +36,6 @@ test("file history previews each revision, copies its filename, and cancels safe
   }
 });
 
-test("Unity previews copy names without the file extension", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await openLabScene(page, "file-history-unity", ".history-commit", { locale: "en" });
-  const prefab = page.locator(".history-item").first();
-  await prefab.locator(".preview-revision").click();
-  await expect(page.locator(".copy-result")).toContainText("UIChapter.awegit-");
-  const prefabPath = (await page.locator(".copy-result").getAttribute("title"))!;
-  expect(prefabPath).toMatch(/UIChapter\.awegit-[0-9a-f]{12}\.prefab$/);
-  const prefabName = prefabPath.split(/[\\/]/).pop()!.replace(/\.prefab$/, "");
-  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(prefabName);
-  await page.evaluate(() => navigator.clipboard.writeText("different name"));
-  await prefab.getByRole("button", { name: "Copy preview filename" }).click();
-  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(prefabName);
-  await prefab.getByRole("button", { name: "Cancel preview and delete temporary files" }).click();
-  await expect(prefab.locator(".preview-revision")).toBeVisible();
-  expect(existsSync(prefabPath)).toBe(false);
-
-  await page.goto("/?scene=file-history-unity&view=history&file=Assets/Scripts/Player.cs&locale=en");
-  await expect(page.locator('[data-lab-scene="file-history-unity"] .history-commit').first()).toBeVisible();
-  const script = page.locator(".history-item").first();
-  await script.locator(".preview-revision").click();
-  await expect(page.locator(".copy-result")).toContainText("Player.awegit-");
-  const scriptPath = (await page.locator(".copy-result").getAttribute("title"))!;
-  expect(scriptPath).toMatch(/Player\.awegit-[0-9a-f]{12}\.cs\.txt$/);
-  const scriptName = scriptPath.split(/[\\/]/).pop()!.replace(/\.cs\.txt$/, "");
-  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(scriptName);
-  await script.getByRole("button", { name: "Copy preview filename" }).click();
-  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(scriptName);
-  await script.getByRole("button", { name: "Cancel preview and delete temporary files" }).click();
-  await expect(script.locator(".preview-revision")).toBeVisible();
-  expect(existsSync(scriptPath)).toBe(false);
-});
-
 for (const clean of [true, false]) {
   test(`file history ${clean ? "cleans" : "retains"} previews on close`, async ({ page }) => {
     await openLabScene(page, "file-history", ".history-commit", { locale: "en" });

@@ -93,6 +93,38 @@ test("tab context menu copies the clicked project's full path", async ({ page, c
   await expect(page.locator('[data-layer="menu"]')).toHaveCount(0);
 });
 
+test("tab repository info inspects the clicked repo once and lists every remote", async ({ page }) => {
+  const layout = await lab("lab_layout") as { full: string; even: string };
+  const remoteNames = execFileSync("git", ["-C", layout.even, "remote"], { encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
+  let inspections = 0;
+  await page.route("**/__lab/invoke", async (route) => {
+    const request = route.request().postDataJSON() as { cmd: string };
+    if (request.cmd === "repository_inspection") {
+      inspections += 1;
+      await new Promise((done) => setTimeout(done, 300));
+    }
+    await route.continue();
+  });
+  await openLabScene(page, "tab-repo-info", ".chrome-tabs .tab");
+  const other = page.locator(".chrome-tabs .tab", { hasText: "MyTest" });
+  await other.click({ button: "right" });
+  await page.locator('[data-layer="menu"] button', { hasText: /仓库信息|Repository info/ }).click();
+  const dialog = page.locator('[data-dialog="repoInfo"]');
+  await expect(dialog.getByRole("status")).toBeVisible();
+  await expect(dialog.locator(".repo-info-path strong")).toHaveText(layout.even);
+  await expect(dialog.locator(".repo-info-remote")).toHaveCount(remoteNames.length);
+  for (const name of remoteNames) await expect(dialog.locator(".repo-info-remote-head strong", { hasText: name })).toBeVisible();
+  await expect(dialog.locator(".repo-info-stats strong")).toHaveCount(5);
+  await dialog.locator(".repo-info-stats").hover();
+  expect(inspections).toBe(1);
+  await expect(other).not.toHaveClass(/active/);
+  if (remoteNames.length) {
+    await dialog.locator(".repo-info-remote-head button").first().click();
+    await expect(page.locator('[data-dialog="remote"]')).toBeVisible();
+    await expect(page.locator('[data-dialog="remote"] input').first()).toHaveValue(/.+/);
+  }
+});
+
 test("open tabs with the same project name show their parent folder", async ({ page }) => {
   const scene = scenes.find((item) => item.id === "tab-same-name");
   if (!scene) throw new Error("tab-same-name");

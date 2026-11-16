@@ -14,6 +14,7 @@ export type Dialog =
     | "command"
     | "tag"
     | "remote"
+    | "repoInfo"
     | "squash"
     | "credential"
     | "fetch"

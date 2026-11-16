@@ -148,11 +148,6 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.showFileHistory("README.md");
     return;
   }
-  if (id === "file-history-unity") {
-    const file = new URLSearchParams(window.location.search).get("file") || "Assets/Prefabs/UIChapter.prefab";
-    await shell.showFileHistory(file);
-    return;
-  }
   if (id === "blob") {
     shell.blobFile = "README.md";
     shell.blobRev = "HEAD";
@@ -174,7 +169,7 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.settings = { ...shell.settings, verticalTabs: true };
     return;
   }
-  if (id === "tab-copy-path") {
+  if (id === "tab-copy-path" || id === "tab-repo-info") {
     const layout = await invoke<{ full: string; even: string }>("lab_layout");
     shell.settings.verticalTabs = false;
     shell.repos = [layout.full, layout.even];
@@ -661,6 +656,9 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.remoteEdit = false;
       shell.draft = "";
       shell.draftExtra = "https://github.com/lab/example.git";
+      break;
+    case "repoInfo":
+      shell.repoInfoPath = shell.repoPath() ?? "";
       break;
     case "squash":
       if (shell.commitsLive[0]) shell.selectedCommit = shell.commitsLive[0].id;

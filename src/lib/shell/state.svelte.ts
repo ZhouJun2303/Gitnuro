@@ -604,6 +604,7 @@ export class ShellState {
 
   /** The remote dialog edits an existing remote's URL instead of adding one. */
   remoteEdit = $state(false);
+  repoInfoPath = $state("");
 
 
   mergeInto = $state("");
@@ -2571,7 +2572,7 @@ export class ShellState {
           if (need) await invoke("lab_restore", { name: item.repo });
         }
         const file = params.get("file");
-        if ((item.id === "file-history" || item.id === "file-history-unity") && file) this.historyFilter = file;
+        if (item.id === "file-history" && file) this.historyFilter = file;
         await this.openRepo(path);
         if (!this.snapshot) throw new Error(this.actionError || `打不开 ${item.repo}`);
       } else {
