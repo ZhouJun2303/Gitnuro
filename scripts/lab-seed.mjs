@@ -543,6 +543,8 @@ const ahead = join(repos, "ahead");
 cloneFrom(origin, full);
 cloneFrom(origin, even);
 cloneFrom(origin, ahead);
+// Same folder name as `full` under another parent, for the duplicate tab-label scene.
+cloneFrom(origin, join(repos, "copies", "full"));
 git(ahead, ["remote", "add", "mirror", origin]);
 git(ahead, ["fetch", "mirror"]);
 seedBisectRepo();

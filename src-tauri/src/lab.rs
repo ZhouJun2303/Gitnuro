@@ -198,6 +198,7 @@ fn layout() -> Result<Value, String> {
         "ahead": text(repos.join("ahead")),
         "behind": text(repos.join("behind")),
         "even": text(repos.join("even")),
+        "duplicate": text(repos.join("copies").join("full")),
         "pushbox": text(repos.join("pushbox")),
     }))
 }

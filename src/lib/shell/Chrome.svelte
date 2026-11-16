@@ -207,8 +207,8 @@
           { label: shell.tr("menu.tabColor"), run: () => { shell.draft = shell.tabColor(repo); shell.draftExtra = repo; shell.dialog = "colorTab"; } },
           { label: shell.tr("chrome.close"), run: () => shell.closeTab(repo) },
         ])}>
-          <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabText(repo)} onclick={() => shell.openRepo(repo)}>{#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}{shell.tabText(repo)}</button>
-          <button class="text-button row-action tab-close" type="button" onclick={() => shell.closeTab(repo)} aria-label={`${shell.tr("chrome.close")} ${shell.tabText(repo)}`} title={`${shell.tr("chrome.close")} ${shell.tabText(repo)}`}>×</button>
+          <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabDisplay(repo)} onclick={() => shell.openRepo(repo)}>{#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}{shell.tabDisplay(repo)}</button>
+          <button class="text-button row-action tab-close" type="button" onclick={() => shell.closeTab(repo)} aria-label={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`} title={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`}>×</button>
         </div>
       {:else}
         <button class="tab active" type="button">{shell.tabLabel}</button>

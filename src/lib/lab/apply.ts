@@ -176,6 +176,12 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.settings.tabLabels = shell.pairSetting(shell.settings.tabLabels, layout.even, "MyTest");
     return;
   }
+  if (id === "tab-same-name") {
+    const layout = await invoke<{ full: string; duplicate: string }>("lab_layout");
+    shell.settings.verticalTabs = false;
+    shell.repos = [layout.full, layout.duplicate];
+    return;
+  }
   if (id === "picker") {
     await shell.toggleRepoPicker();
     return;

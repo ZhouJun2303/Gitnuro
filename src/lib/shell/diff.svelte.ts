@@ -319,6 +319,16 @@ export function tabText(shell: ShellState, path: string) {
     return named ? named.slice(path.length + 1) : shell.folderName(path);
   }
 
+/** Tab label; appends the parent folder when another open tab has the same name. */
+export function tabDisplay(shell: ShellState, path: string) {
+    const name = tabText(shell, path);
+    const key = name.trim().toLowerCase();
+    const shared = key !== "" && shell.repos.some((peer) => normalPath(shell, peer) !== normalPath(shell, path) && tabText(shell, peer).trim().toLowerCase() === key);
+    if (!shared) return name;
+    const parent = shell.folderName(shell.parentDir(path));
+    return parent ? `${name} (${parent})` : name;
+  }
+
 export function tabColor(shell: ShellState, path: string) {
     const named = shell.settings.tabColors.find((item) => item.startsWith(`${path}\t`));
     return named ? named.slice(path.length + 1) : "";

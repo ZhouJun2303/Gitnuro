@@ -93,6 +93,18 @@ test("tab context menu copies the clicked project's full path", async ({ page, c
   await expect(page.locator('[data-layer="menu"]')).toHaveCount(0);
 });
 
+test("open tabs with the same project name show their parent folder", async ({ page }) => {
+  const scene = scenes.find((item) => item.id === "tab-same-name");
+  if (!scene) throw new Error("tab-same-name");
+  for (const theme of ["apple", "light", "dark"] as const) {
+    await openScene(page, scene, `&theme=${theme}`);
+    const tabs = page.locator(".chrome-tabs .tab");
+    await expect(tabs).toHaveCount(2);
+    await expect(tabs.filter({ hasText: "full (repos)" })).toHaveCount(1);
+    await expect(tabs.filter({ hasText: "full (copies)" })).toHaveCount(1);
+  }
+});
+
 test("tab color can be set and cleared", async ({ page }) => {
   await openLabScene(page, "dialog-colorTab", '[data-dialog="colorTab"]');
   const dialog = page.locator('[data-dialog="colorTab"]');
