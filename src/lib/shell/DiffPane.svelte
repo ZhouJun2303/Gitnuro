@@ -3,7 +3,8 @@
   import { getShell } from "./context";
   import "./DiffPane.css";
   import { sampleImages } from "../sample";
-  import { onVirtualScroll, wrapPrefix, type SplitRow } from "../view";
+  import { onVirtualScroll, type SplitRow } from "../view";
+  import WrappedRows from "../WrappedRows.svelte";
   import type { Row, Side } from "./types";
   import { applyConflictChoice, clearPixel, mergeToolLabel, mergeToolMissing, openConflictTool } from "./diff.svelte";
   import BinaryDiff from "./BinaryDiff.svelte";
@@ -66,8 +67,7 @@
   }
 
   const hunkList = $derived(shell.mode === "live" && shell.section === "changes" ? shell.hunkRanges() : []);
-  const wrapLines = $derived(shell.settings.diffWordWrap && shell.settings.diffStyle !== "split" ? wrapPrefix(shell.diffLines) : null);
-  const wrapSplit = $derived(shell.settings.diffWordWrap && shell.settings.diffStyle === "split" ? wrapPrefix(shell.splitRows) : null);
+  let wrapped = $state<{ scrollTo: (index: number) => Promise<void> }>();
   const conflictSelection = $derived(shell.section === "changes" ? shell.pickedConflicts() : []);
   const activeAt = $derived(hunkList.findIndex((range) => range.index === activeHunk));
 
@@ -183,11 +183,11 @@
         const right = shell.splitLineAt(item, "right");
         return left === line || right === line;
       });
-      const units = wrapSplit ? (wrapSplit[Math.max(0, row)] ?? 0) : Math.max(0, row);
-      node.scrollTop = Math.max(0, units * shell.splitRowHeight);
+      if (shell.settings.diffWordWrap && wrapped) { void wrapped.scrollTo(Math.max(0, row)); return; }
+      node.scrollTop = Math.max(0, row * shell.splitRowHeight);
     } else {
-      const at = wrapLines ? (wrapLines[line] ?? line) : line;
-      node.scrollTop = Math.max(0, at * shell.diffRowHeight);
+      if (shell.settings.diffWordWrap && wrapped) { void wrapped.scrollTo(line); return; }
+      node.scrollTop = Math.max(0, line * shell.diffRowHeight);
     }
     shell.diffTop = node.scrollTop;
   }
@@ -202,11 +202,11 @@
         const right = shell.splitLineAt(item, "right");
         return (left != null && left >= range.start && left < range.end) || (right != null && right >= range.start && right < range.end);
       });
-      const units = wrapSplit ? (wrapSplit[Math.max(0, row)] ?? 0) : Math.max(0, row);
-      node.scrollTop = Math.max(0, units * shell.splitRowHeight - 8);
+      if (shell.settings.diffWordWrap && wrapped) { void wrapped.scrollTo(Math.max(0, row)); return; }
+      node.scrollTop = Math.max(0, row * shell.splitRowHeight - 8);
     } else {
-      const at = wrapLines ? (wrapLines[range.start] ?? range.start) : range.start;
-      node.scrollTop = Math.max(0, at * shell.diffRowHeight - 8);
+      if (shell.settings.diffWordWrap && wrapped) { void wrapped.scrollTo(range.start); return; }
+      node.scrollTop = Math.max(0, range.start * shell.diffRowHeight - 8);
     }
     shell.diffTop = node.scrollTop;
   }
@@ -423,22 +423,17 @@
               <div class="diff-viewport">
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div class="diff-body split pick-{shell.splitPick}" class:virtual={!shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} style:--split-row="{shell.splitRowHeight}px" role="presentation" bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onmousedown={shell.pickSplitSide.bind(shell)} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover} use:splitScroller={shell.splitColumns}>
+                {#if shell.settings.diffWordWrap}
+                  <WrappedRows items={shell.splitRows} rowHeight={shell.splitRowHeight} split bind:this={wrapped}>
+                    {#snippet children(row, index)}{@render liveSplitRow(row, index)}{/snippet}
+                  </WrappedRows>
+                {:else}
                 {#if shell.splitWindow.beforePx > 0}<div class="split-gap" style:height="{shell.splitWindow.beforePx}px"></div>{/if}
                 {#each shell.splitWindow.rows as row, offset (shell.splitWindow.start + offset)}
-                  {@const index = shell.splitWindow.start + offset}
-                  {@const leftAt = shell.splitLineAt(row, "left")}
-                  {@const rightAt = shell.splitLineAt(row, "right")}
-                  {@const rowLit = litOn(leftAt) || litOn(rightAt)}
-                  {#if row.meta}
-                    <div class="split-meta" class:hunk-hover={rowLit} class:hunk-top={rowLit && (leftAt === litStart || rightAt === litStart)} class:hunk-bottom={rowLit && (leftAt === litEnd || rightAt === litEnd)} data-line={row.lineIndex}>{row.left}</div>
-                  {:else}
-                    <div class="split-row" class:hunk-hover={rowLit} class:hunk-top={rowLit && (leftAt === litStart || rightAt === litStart)} class:hunk-bottom={rowLit && (leftAt === litEnd || rightAt === litEnd)}>
-                      {@render splitCell(row, "left", shell.selectedPath ?? "", `l${index}`, leftAt)}
-                      {@render splitCell(row, "right", shell.selectedPath ?? "", `r${index}`, rightAt)}
-                    </div>
-                  {/if}
+                  {@render liveSplitRow(row, shell.splitWindow.start + offset)}
                 {/each}
                 {#if shell.splitWindow.afterPx > 0}<div class="split-gap" style:height="{shell.splitWindow.afterPx}px"></div>{/if}
+                {/if}
                 {@render splitBar()}
               </div>
               {@render hunkActions()}
@@ -447,21 +442,18 @@
             {:else}
               <div class="diff-viewport">
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <div class="diff-body" class:wrap-window={shell.settings.diffWordWrap} class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
-                <div class="commit-window" class:wrap-window={shell.settings.diffWordWrap} style:height="{shell.diffWindow.height}px">
+              <div class="diff-body" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} bind:this={shell.diffEl} bind:clientHeight={shell.diffHeight} onscroll={onDiffScroll} onmousemove={hoverDiffLine} onmouseleave={clearHunkHover}>
+                {#if shell.settings.diffWordWrap}
+                  <WrappedRows items={shell.diffLines} rowHeight={shell.diffRowHeight} bind:this={wrapped}>
+                    {#snippet children(line, at)}{@render liveUnifiedRow(line, at)}{/snippet}
+                  </WrappedRows>
+                {:else}
+                <div class="commit-window" style:height="{shell.diffWindow.height}px">
                   {#each shell.diffWindow.rows as line, index (`d${shell.diffWindow.start + index}`)}
-                    {@const at = shell.diffWindow.start + index}
-                    <!-- svelte-ignore a11y_click_events_have_key_events -->
-                    <!-- svelte-ignore a11y_no_static_element_interactions -->
-                    <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={litOn(at)} class:hunk-top={at === litStart} class:hunk-bottom={at === litEnd} data-line={at} style:top="{shell.diffWindow.tops[index] ?? 0}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
-                      <!-- svelte-ignore a11y_no_static_element_interactions -->
-                      <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.oldNo ?? ""}</span>
-                      <!-- svelte-ignore a11y_no_static_element_interactions -->
-                      <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.newNo ?? ""}</span>
-                      {#each shell.paint(line.text, shell.selectedPath ?? "") as token, tokenIndex (`d${at}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}
-                    </span>
+                    {@render liveUnifiedRow(line, shell.diffWindow.start + index)}
                   {/each}
                 </div>
+                {/if}
                 {#if shell.diff.truncated}<span class="meta">{shell.tr("chrome.truncated")}</span>{/if}
               </div>
               {@render hunkActions()}
@@ -494,6 +486,32 @@
             <p class="diff-empty">{shell.tr("chrome.selectFile")}</p>
           {/if}
         </section>
+{#snippet liveSplitRow(row: SplitRow, index: number)}
+  {@const leftAt = shell.splitLineAt(row, "left")}
+  {@const rightAt = shell.splitLineAt(row, "right")}
+  {@const rowLit = litOn(leftAt) || litOn(rightAt)}
+  {#if row.meta}
+    <div class="split-meta" class:hunk-hover={rowLit} class:hunk-top={rowLit && (leftAt === litStart || rightAt === litStart)} class:hunk-bottom={rowLit && (leftAt === litEnd || rightAt === litEnd)} data-line={row.lineIndex}>{row.left}</div>
+  {:else}
+    <div class="split-row" class:hunk-hover={rowLit} class:hunk-top={rowLit && (leftAt === litStart || rightAt === litStart)} class:hunk-bottom={rowLit && (leftAt === litEnd || rightAt === litEnd)}>
+      {@render splitCell(row, "left", shell.selectedPath ?? "", `l${index}`, leftAt)}
+      {@render splitCell(row, "right", shell.selectedPath ?? "", `r${index}`, rightAt)}
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet liveUnifiedRow(line: DiffLine, at: number)}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <span class="virtual-row {line.kind}" class:add={line.kind === "add"} class:del={line.kind === "delete"} class:hunk={line.kind === "hunk"} class:meta={line.kind === "meta"} class:picked={shell.diffPicked.has(at)} class:hunk-hover={litOn(at)} class:hunk-top={at === litStart} class:hunk-bottom={at === litEnd} data-line={at} style:top="{at * shell.diffRowHeight}px" onclick={(event) => shell.clickDiffLine(at, event)} oncontextmenu={(event) => shell.openMenu(event, shell.diffLineMenu(at))}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.oldNo ?? ""}</span>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <span class="gutter" onmousedown={(event) => shell.dragDiffLine(at, event)}>{shell.shownDiffLines[at]?.newNo ?? ""}</span>
+    <span class="diff-line-text">{#each shell.paint(line.text, shell.selectedPath ?? "") as token, tokenIndex (`d${at}-${tokenIndex}`)}<span class={token.cls}>{token.text}</span>{/each}</span>
+  </span>
+{/snippet}
+
 {#snippet splitCell(row: SplitRow, side: "left" | "right", file: string, key: string, lineIndex: number | null = null)}
     {@const kind = side === "left" ? row.leftKind : row.rightKind}
     {@const mark = side === "left" ? "delete" : "add"}

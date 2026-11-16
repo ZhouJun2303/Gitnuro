@@ -93,6 +93,50 @@ test("tab context menu copies the clicked project's full path", async ({ page, c
   await expect(page.locator('[data-layer="menu"]')).toHaveCount(0);
 });
 
+test("tab repository info inspects the clicked repo once and lists every remote", async ({ page }) => {
+  const layout = await lab("lab_layout") as { full: string; even: string };
+  const remoteNames = execFileSync("git", ["-C", layout.even, "remote"], { encoding: "utf8" }).trim().split(/\r?\n/).filter(Boolean);
+  let inspections = 0;
+  await page.route("**/__lab/invoke", async (route) => {
+    const request = route.request().postDataJSON() as { cmd: string };
+    if (request.cmd === "repository_inspection") {
+      inspections += 1;
+      await new Promise((done) => setTimeout(done, 300));
+    }
+    await route.continue();
+  });
+  await openLabScene(page, "tab-repo-info", ".chrome-tabs .tab");
+  const other = page.locator(".chrome-tabs .tab", { hasText: "MyTest" });
+  await other.click({ button: "right" });
+  await page.locator('[data-layer="menu"] button', { hasText: /仓库信息|Repository info/ }).click();
+  const dialog = page.locator('[data-dialog="repoInfo"]');
+  await expect(dialog.getByRole("status")).toBeVisible();
+  await expect(dialog.locator(".repo-info-path strong")).toHaveText(layout.even);
+  await expect(dialog.locator(".repo-info-remote")).toHaveCount(remoteNames.length);
+  for (const name of remoteNames) await expect(dialog.locator(".repo-info-remote-head strong", { hasText: name })).toBeVisible();
+  await expect(dialog.locator(".repo-info-stats strong")).toHaveCount(5);
+  await dialog.locator(".repo-info-stats").hover();
+  expect(inspections).toBe(1);
+  await expect(other).not.toHaveClass(/active/);
+  if (remoteNames.length) {
+    await dialog.locator(".repo-info-remote-head button").first().click();
+    await expect(page.locator('[data-dialog="remote"]')).toBeVisible();
+    await expect(page.locator('[data-dialog="remote"] input').first()).toHaveValue(/.+/);
+  }
+});
+
+test("open tabs with the same project name show their parent folder", async ({ page }) => {
+  const scene = scenes.find((item) => item.id === "tab-same-name");
+  if (!scene) throw new Error("tab-same-name");
+  for (const theme of ["apple", "light", "dark"] as const) {
+    await openScene(page, scene, `&theme=${theme}`);
+    const tabs = page.locator(".chrome-tabs .tab");
+    await expect(tabs).toHaveCount(2);
+    await expect(tabs.filter({ hasText: "full (repos)" })).toHaveCount(1);
+    await expect(tabs.filter({ hasText: "full (copies)" })).toHaveCount(1);
+  }
+});
+
 test("tab color can be set and cleared", async ({ page }) => {
   await openLabScene(page, "dialog-colorTab", '[data-dialog="colorTab"]');
   const dialog = page.locator('[data-dialog="colorTab"]');
@@ -256,6 +300,32 @@ test("hunk toolbar selects a hunk without hovering", async ({ page }) => {
   await page.locator(".hunk-tools .hunk-step").nth(1).click();
   await expect(page.locator(".hunk-pos")).toHaveText("1/1");
   await expect(stage).toBeEnabled();
+});
+
+test("diff header path supports partial mouse selection and copy", async ({ page }) => {
+  await openLabScene(page, "diff-text", ".diff-head > span:first-child");
+  const path = page.locator(".diff-head > span:first-child");
+  const fullPath = (await path.textContent())!;
+  expect(fullPath.length).toBeGreaterThan(8);
+  expect(await path.evaluate((node) => getComputedStyle(node).userSelect)).toBe("text");
+  const box = await path.boundingBox();
+  expect(box).not.toBeNull();
+  const start = { x: box!.x + 2, y: box!.y + box!.height / 2 };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + 42, start.y, { steps: 8 });
+  await page.mouse.up();
+  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(selected.length).toBeGreaterThan(0);
+  expect(selected.length).toBeLessThan(fullPath.length);
+  expect(fullPath).toContain(selected);
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.keyboard.press("ControlOrMeta+C");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(selected);
+  await page.mouse.dblclick(start.x + 20, start.y);
+  const word = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(word.length).toBeGreaterThan(0);
+  expect(fullPath).toContain(word);
 });
 
 test("floating hunk actions stay inside the pane while scrolling", async ({ page }) => {
@@ -662,9 +732,19 @@ test("multi-file confirmation lists one file per line with a total", async ({ pa
   await expect(rows).toHaveCount(6);
   await expect(confirm.locator(".confirm-count")).toHaveText(/^(6 files|共 6 个文件)$/);
   await expect(rows.first()).toContainText("Y语言表_Data_Language.xlsx");
-  await expect(confirm.locator(".text-button")).toBeFocused();
+  await expect(confirm.locator(".commit")).toBeFocused();
   const heights = await rows.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
   expect(Math.max(...heights)).toBeLessThan(26);
+});
+
+test("discard opened with Delete focuses the confirm button", async ({ page }) => {
+  await openLabScene(page, "changes", ".unstaged-pane .file-list");
+  await page.locator(".unstaged-pane .file-select").first().click();
+  await page.keyboard.press("Delete");
+  const confirm = page.locator('[data-layer="confirm"]');
+  await expect(confirm).toBeVisible();
+  await expect(confirm.locator(".commit")).toBeFocused();
+  expect(await confirm.locator(".commit").evaluate((node) => node.matches(":focus-visible"))).toBe(true);
 });
 
 test("commit patch renders each hunk header once", async ({ page }) => {
@@ -843,6 +923,8 @@ test("dialogs focus the first field and fall back to the dialog", async ({ page 
   await expect(page.locator('[data-dialog="branch"] input').first()).toBeFocused();
   await openLabScene(page, "dialog-about", '[data-dialog="about"]');
   await expect(page.locator('[data-dialog="about"]')).toContainText("2.56.0");
+  await expect(page.locator('[data-dialog="about"] [data-build-marker]')).toHaveAttribute("data-build-marker", /^AweGit-Build:/);
+  await expect(page.locator('[data-dialog="about"]')).toContainText(/应用编号|App code/);
   await expect(page.locator('[data-dialog="about"]')).toBeFocused();
 });
 

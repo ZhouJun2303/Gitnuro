@@ -38,7 +38,7 @@ const pages: PanelPage[] = [
   { name: "merge text", scene: "text-merge-window", merge: true, panels: [".merge-panel.standalone", ".merge-panel-title", ".merge-parties", ".merge-top", ".merge-result-pane", ".merge-panel-foot"] },
   { name: "merge binary", scene: "file-merge", merge: true, panels: [".merge-panel.standalone", ".merge-panel-title", ".merge-parties", ".merge-stage.files", ".merge-panel-foot"] },
   { name: "merge hunks", scene: "text-merge-many", merge: true, panels: [".merge-panel.standalone", ".merge-count", ".merge-top", ".merge-result-pane", ".merge-panel-foot"] },
-  { name: "file history", scene: "file-history", panels: [".file-history", ".history-file", ".history-list", ".history-diff"] },
+  { name: "file history", scene: "file-history", panels: [".file-history", ".history-file", ".history-list", ".preview-revision", ".history-diff"] },
   { name: "blob", scene: "blob", panels: [".blob-pane", ".blob-pane > header", ".blob-scroll"] },
   { name: "operation flow", scene: "operation-flow", panels: [".flow-window", ".flow-header", ".flow-overview", ".flow-graph-pane", ".flow-node.active", ".flow-footer"] },
   { name: "search", scene: "search", panels: ["[data-layer=\"search\"]"] },
@@ -46,10 +46,12 @@ const pages: PanelPage[] = [
   { name: "confirm", scene: "confirm", panels: ["[data-layer=\"confirm\"]"] },
   { name: "command log", scene: "commands", panels: ["[data-layer=\"commands\"]"] },
   { name: "repository picker", scene: "picker", panels: ["[data-layer=\"repos\"]"] },
+  { name: "launcher files", scene: "launch-files", panels: [".palette", ".palette-list.files", ".palette-list button"] },
   { name: "update", scene: "update-available", panels: [".update-panel"] },
   { name: "preferences general", scene: "prefs-appearance", tab: "general", panels: [".pref-nav", ".pref-page", ".theme-styles"] },
   { name: "preferences workspace", scene: "prefs-workspace", tab: "workspace", panels: [".pref-nav", ".pref-page", ".pref-source-row"] },
   { name: "preferences diff", scene: "prefs-diff", tab: "diff", panels: [".pref-page", "[data-pref=\"diff-style\"]"] },
+  { name: "preferences preview formats", scene: "prefs-preview-formats", tab: "previewFormats", panels: [".pref-page", ".preview-catalog", "[data-tool=\"unity\"]"] },
   { name: "preferences commit", scene: "prefs-commit", tab: "commit", panels: [".pref-page", ".commit-type-list"] },
   { name: "preferences ai", scene: "prefs-ai", tab: "ai", panels: [".pref-page", "[data-ai-field=\"enabled\"]"] },
   { name: "preferences git", scene: "prefs-git", tab: "git", panels: [".pref-page", ".pref-card"] },
@@ -93,6 +95,22 @@ for (const theme of themes) {
         test.setTimeout(60_000);
         const scene = scenes.find((entry) => entry.id === item.scene);
         if (!scene) throw new Error(`Unknown lab scene: ${item.scene}`);
+        if (item.scene === "launch-files") {
+          await page.setViewportSize({ width: 540, height: 456 });
+          await page.route("**/__lab/invoke", (route) => {
+            if (route.request().postDataJSON()?.cmd === "commit_tree") {
+              return route.fulfill({ json: { ok: true, value: [
+                "AI_SKILLS/framework/references/ui-prefab-export-structure.md",
+                "AI_SKILLS/framework/references/build-hotfix-agent.md",
+                "Assets/3rd/Epic Toon FX/Demo/Demo Prefabs/VFX/Library/MainUICanvas.prefab",
+                "Assets/3rd/Epic Toon FX/Demo/Missile Prefabs/LiquidAcidOrb.prefab",
+                "src/ui.md",
+                "src/uitestThisIsAnExtremelyLongFileNameWithoutSpacesThatMustWrapEvenInANarrowWindowBecauseItCannotBeTruncated.md",
+              ] } });
+            }
+            return route.continue();
+          });
+        }
         await openScene(page, scene, `&locale=${theme.locale}&theme=${theme.name}`);
         await expect(page.locator("html")).toHaveAttribute("data-theme", theme.name);
         await expect(page.locator("html")).toHaveAttribute("lang", theme.locale === "zh" ? "zh-CN" : "en");
@@ -123,10 +141,56 @@ for (const theme of themes) {
         if (item.history) await expectHistoryWeights(page, theme.name);
         if (item.remote) await expectRemoteSubject(page);
         if (item.merge) await expectMergeFrame(page, theme.name);
+        if (item.scene === "launch-files") {
+          await expectLauncherFiles(page);
+          await page.setViewportSize({ width: 320, height: 480 });
+          await expectLauncherFiles(page);
+        }
         if (item.scene === "prefs-accounts") await expectAccountActions(page, theme.locale);
       });
     }
   });
+}
+
+async function expectLauncherFiles(page: Page) {
+  await page.locator(".palette-input").fill("ui");
+  const buttons = page.locator(".palette-list.files button");
+  await expect(buttons).toHaveCount(6);
+  const rows = await buttons.evaluateAll((nodes) => nodes.map((node) => {
+    const button = node.getBoundingClientRect();
+    const name = node.querySelector(".name")!;
+    const meta = node.querySelector(".meta")!;
+    const nameBox = name.getBoundingClientRect();
+    const metaBox = meta.getBoundingClientRect();
+    return {
+      top: button.top, bottom: button.bottom, height: button.height,
+      nameBottom: nameBox.bottom, metaTop: metaBox.top, metaBottom: metaBox.bottom,
+      nameWrap: getComputedStyle(name).whiteSpace, metaWrap: getComputedStyle(meta).whiteSpace,
+      nameOverflow: name.scrollWidth - name.clientWidth,
+      metaOverflow: meta.scrollWidth - meta.clientWidth,
+      nameVerticalOverflow: name.scrollHeight - nameBox.height,
+      metaVerticalOverflow: meta.scrollHeight - metaBox.height,
+      title: node.getAttribute("title"), path: meta.textContent,
+    };
+  }));
+  for (const [index, row] of rows.entries()) {
+    expect(row.height).toBeGreaterThanOrEqual(56);
+    expect(row.nameWrap).toBe("normal");
+    expect(row.metaWrap).toBe("normal");
+    expect(row.nameOverflow).toBeLessThanOrEqual(1);
+    expect(row.metaOverflow).toBeLessThanOrEqual(1);
+    expect(row.nameVerticalOverflow).toBeLessThanOrEqual(1);
+    expect(row.metaVerticalOverflow).toBeLessThanOrEqual(1);
+    expect(row.metaTop).toBeGreaterThanOrEqual(row.nameBottom);
+    expect(row.metaBottom).toBeLessThanOrEqual(row.bottom);
+    expect(row.title).toBe(row.path);
+    if (index > 0) expect(row.top).toBeGreaterThanOrEqual(rows[index - 1].bottom);
+  }
+  expect(rows.some((row) => row.height > 56)).toBe(true);
+  expect(await page.locator(".palette-list.files").evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+  for (let index = 1; index < 6; index++) await page.locator(".palette-input").press("ArrowDown");
+  await expect(buttons.last()).toHaveClass(/on/);
+  await expect(buttons.last()).toBeInViewport();
 }
 
 async function expectAccountActions(page: Page, locale: "zh" | "en") {

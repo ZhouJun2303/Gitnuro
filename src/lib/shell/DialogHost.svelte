@@ -3,12 +3,15 @@
   import "./DialogHost.css";
   import PrefsDialog from "./PrefsDialog.svelte";
   import UpdatePanel from "./UpdatePanel.svelte";
+  import ResetPanel from "./ResetPanel.svelte";
   import { flushClientLog, invoke } from "../perf";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { cloneTarget, cloneUrl } from "../clonePath";
   import { buildRebaseSteps } from "./dialogs.svelte";
   import { recentWorkspaceId, type Account } from "../status";
   import { resolveRemoteAccount } from "./remoteAccount";
+  import RepoInfoPanel from "./RepoInfoPanel.svelte";
+  import AccountAvatar from "./AccountAvatar.svelte";
 
   const shell = getShell();
   let remoteAccountPick = $state("");
@@ -143,7 +146,7 @@
       } else {
         box.setAttribute("aria-label", shell.tr("dialog.preferences"));
       }
-      const fields = [...box.querySelectorAll<HTMLElement>('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="color"]), select, textarea')];
+      const fields = [...box.querySelectorAll<HTMLElement>('input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="color"]), select, textarea, [role="combobox"]')];
       const target = fields.find((item) => item.offsetParent !== null) ?? box;
       target.focus({ preventScroll: true });
       if (target instanceof HTMLTextAreaElement) {
@@ -181,6 +184,7 @@
           else if (shell.dialog === "command") void shell.runCommand({ command: shell.draftUser || shell.draft, prompt: shell.commandPrompt });
           else if (shell.dialog === "flow") void shell.mutate({ action: "gitFlowStart", name: shell.draft, kind: shell.flowKind });
           else if (shell.dialog === "prefs") void shell.savePrefs();
+          else if (shell.dialog === "reset" && !shell.progress && shell.draft) shell.confirmReset(shell.draft, shell.resetMode, shell.draftExtra);
           else if (shell.dialog === "editorImport") shell.importEditorCandidates();
           else if (shell.dialog === "tag") {
             await shell.mutate({ action: "tag", name: shell.draft, rev: shell.draftExtra || "HEAD", message: shell.draftUser });
@@ -359,13 +363,7 @@
         {:else if shell.dialog === "update"}
           <UpdatePanel />
         {:else if shell.dialog === "reset"}
-          <h2>{shell.tr("dialog.resetTo", { name: shell.draft.slice(0, 7) })}</h2>
-          <div class="composer-row actions">
-            <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="text-button" type="button" onclick={() => shell.confirmReset(shell.draft, "soft")}>{shell.tr("menu.soft")}</button>
-            <button class="text-button" type="button" onclick={() => shell.confirmReset(shell.draft, "mixed")}>{shell.tr("menu.mixed")}</button>
-            <button class="text-button danger" type="button" onclick={shell.hardReset.bind(shell)}>{shell.tr("menu.hard")}</button>
-          </div>
+          <ResetPanel />
         {:else if shell.dialog === "flow"}
           <h2>{shell.tr("chrome.flow")}</h2>
           <label>{shell.tr("dialog.flowName")}<input bind:value={shell.draft} /></label>
@@ -769,6 +767,11 @@
         {:else if shell.dialog === "about"}
           <h2>{shell.tr("dialog.about")} {shell.appVersion}</h2>
           <p class="empty">{shell.tr("dialog.aboutBody")}</p>
+          {#if shell.appInfo}
+            <p class="empty" data-build-marker={shell.appInfo.build}>{shell.tr("dialog.aboutBuild", { utc: shell.appBuildUtc(), local: shell.appBuildLocal(), zone: shell.appBuildZone() })}</p>
+            <p class="empty">{shell.tr("dialog.aboutAppCode", { code: String(shell.appInfo.appCode || "—"), profile: shell.tr(shell.appInfo.debug ? "dialog.aboutProfileDebug" : "dialog.aboutProfileRelease") })}</p>
+            <p class="empty">{shell.tr("dialog.aboutPlatform", { platform: shell.appInfo.platform, arch: shell.appInfo.arch, tauri: shell.appInfo.tauri })}</p>
+          {/if}
           {#if shell.gitRuntime?.version}
             <p class="empty">{shell.tr("chrome.gitSummary", { version: shell.gitRuntime.version, program: shell.gitRuntime.program })}</p>
             {#if !shell.gitRuntime.lfs}<p class="empty">{shell.tr("chrome.gitNoLfs")}</p>{/if}
@@ -818,11 +821,7 @@
               </div>
               {#if account}
                 <div class="account-identity">
-                  {#if account.avatarUrl}
-                    <img class="account-avatar" alt="" src={account.avatarUrl} />
-                  {:else}
-                    <span class="account-avatar" aria-hidden="true">{accountInitial(account)}</span>
-                  {/if}
+                  <AccountAvatar url={account.avatarUrl} initial={accountInitial(account)} />
                   <div class="account-copy">
                     <div class="account-name">
                       <span>{account.name || account.label || account.login || account.forge}</span>
@@ -851,6 +850,10 @@
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={shell.writing || !shell.draftExtra.trim()}>{shell.tr(shell.remoteEdit ? "dialog.setRemoteUrl" : "dialog.create")}</button>
           </div>
+        {:else if shell.dialog === "repoInfo"}
+          {#key shell.repoInfoPath}
+            <RepoInfoPanel path={shell.repoInfoPath} />
+          {/key}
         {:else if shell.dialog === "squash"}
           <h2>{shell.tr("dialog.squash")}</h2>
           <p class="empty">{shell.tr("dialog.squashHint")}</p>

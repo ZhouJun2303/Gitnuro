@@ -106,12 +106,14 @@ export function splitColumnsOf(shell: ShellState, rows: SplitRow[]) {
   }
 
 export function cachedSplit(shell: ShellState, file: string, lines: DiffLine[]) {
-    const key = `${shell.selectedCommit ?? ""}:${file}:${shell.settings.showDiffMarks ? 1 : 0}`;
+    const key = `${shell.selectedCommit ?? ""}:${file}`;
+    const whitespace = shell.settings.showWhitespace;
+    const marks = shell.settings.showDiffMarks;
     const hit = shell.patchSplits.get(key);
-    if (hit && hit.lines === lines) return hit;
+    if (hit?.lines === lines && hit.whitespace === whitespace && hit.marks === marks) return hit;
     if (shell.patchSplits.size > 40) shell.patchSplits.clear();
-    const rows = splitDiff(lines);
-    const value = { lines, rows, columns: splitColumnsOf(shell, rows) };
+    const rows = hit?.lines === lines ? hit.rows : splitDiff(lines);
+    const value = { lines, rows, columns: splitColumnsOf(shell, rows), whitespace, marks };
     shell.patchSplits.set(key, value);
     return value;
   }
@@ -315,6 +317,16 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
 export function tabText(shell: ShellState, path: string) {
     const named = shell.settings.tabLabels.find((item) => item.startsWith(`${path}\t`));
     return named ? named.slice(path.length + 1) : shell.folderName(path);
+  }
+
+/** Tab label; appends the parent folder when another open tab has the same name. */
+export function tabDisplay(shell: ShellState, path: string) {
+    const name = tabText(shell, path);
+    const key = name.trim().toLowerCase();
+    const shared = key !== "" && shell.repos.some((peer) => normalPath(shell, peer) !== normalPath(shell, path) && tabText(shell, peer).trim().toLowerCase() === key);
+    if (!shared) return name;
+    const parent = shell.folderName(shell.parentDir(path));
+    return parent ? `${name} (${parent})` : name;
   }
 
 export function tabColor(shell: ShellState, path: string) {
@@ -794,10 +806,10 @@ export function confirmPicked(shell: ShellState, files: string[], title: string,
     shell.ask(title, "", () => void run(files), files, { danger: true });
   }
 
-export function discardChosen(shell: ShellState, files: string[]) {
+export function discardChosen(shell: ShellState, files: string[], focusConfirm = false) {
     const names = files.filter((path) => path.length > 0);
     if (names.length === 0 || shell.mode !== "live") return;
-    shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => void shell.discardPicked(names), names, { danger: true });
+    shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => void shell.discardPicked(names), names, { danger: true, focusConfirm });
   }
 
 export function deleteChosen(shell: ShellState, files: string[]) {

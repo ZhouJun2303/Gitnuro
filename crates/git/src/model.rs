@@ -937,12 +937,36 @@ pub(crate) fn pending_autostash(repo: &Path) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-pub(crate) fn set_pending_autostash(repo: &Path, oid: Option<&str>) -> Result<(), Error> {
+pub(crate) fn pending_autostash_deletions(repo: &Path) -> Result<Vec<String>, Error> {
+    let value = value_key(repo, "autostash", "indexOnly");
+    if value.is_empty() { return Ok(Vec::new()); }
+    serde_json::from_str(&value).map_err(|error| Error::Git(format!("invalid autostash deletion record: {error}")))
+}
+
+pub(crate) fn set_pending_autostash(repo: &Path, oid: Option<&str>, index_only: &[String]) -> Result<(), Error> {
     let values: Vec<String> = oid
         .filter(|value| !value.is_empty())
         .map(|value| vec![value.to_string()])
         .unwrap_or_default();
-    rewrite_local_key(repo, "autostash", "pending", &values)
+    let dir = absolute_git_dir(repo)?;
+    let path = dir.join("awegit");
+    let existing = read_local(&path)?;
+    let next = rewrite_key(&existing, "autostash", "pending", &values);
+    let deletions = if oid.is_some() && !index_only.is_empty() {
+        vec![serde_json::to_string(index_only).map_err(|error| Error::Git(error.to_string()))?]
+    } else { Vec::new() };
+    write_local(&path, &rewrite_key(&next, "autostash", "indexOnly", &deletions))
+}
+
+/// The single revert that must leave its inverse staged after conflict resolution.
+pub(crate) fn revert_no_commit(repo: &Path) -> Option<String> {
+    let value = value_key(repo, "revert", "noCommit");
+    (!value.is_empty()).then_some(value)
+}
+
+pub(crate) fn set_revert_no_commit(repo: &Path, rev: Option<&str>) -> Result<(), Error> {
+    let values = rev.map(|value| vec![value.to_string()]).unwrap_or_default();
+    rewrite_local_key(repo, "revert", "noCommit", &values)
 }
 
 fn rewrite_local_key(repo: &Path, section: &str, key: &str, names: &[String]) -> Result<(), Error> {

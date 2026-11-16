@@ -14,10 +14,11 @@ import { resolveLocale, translate } from "../i18n";
 import { broadcastLocale, onLocaleChange } from "../i18n/sync";
 import { isAppearance, onAppearanceChange, resolveAppearance, type Appearance } from "../appearance";
 import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
-import { shortcut, shortcutLabel, typing } from "../keys";
+import { configureShortcuts, shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
+    type AppInfo,
     type BlameLine,
     type CommandRecord,
     type CommitDetail,
@@ -46,7 +47,7 @@ import {
     workspaceTabWidth,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
-import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, selectFolder, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabColor, pairSetting } from "./diff.svelte";
+import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, selectFolder, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabDisplay, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
@@ -225,6 +226,7 @@ export class ShellState {
     workspaces: [],
     currentWorkspace: "",
     commands: [],
+    shortcuts: {},
     flowMaster: "main",
     flowDevelop: "develop",
     flowFeature: "feature/",
@@ -598,8 +600,12 @@ export class ShellState {
   draftExtra = $state("");
 
 
+  resetMode = $state<"soft" | "mixed" | "hard">("soft");
+
+
   /** The remote dialog edits an existing remote's URL instead of adding one. */
   remoteEdit = $state(false);
+  repoInfoPath = $state("");
 
 
   mergeInto = $state("");
@@ -775,7 +781,7 @@ export class ShellState {
   patchView = $state<Record<string, { start: number; end: number }>>({});
 
 
-  patchSplits = new Map<string, { lines: DiffLine[]; rows: SplitRow[]; columns: { left: number; right: number } }>();
+  patchSplits = new Map<string, { lines: DiffLine[]; rows: SplitRow[]; columns: { left: number; right: number }; whitespace: boolean; marks: boolean }>();
 
 
   /** Plain cache. The row arrays stay off `$state` so a long graph is not deeply proxied. */
@@ -843,7 +849,28 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.9");
+  appVersion = $state("2.0.10");
+
+  appInfo = $state<AppInfo | null>(null);
+
+  appBuildUtc() {
+    return (this.appInfo?.build ?? "")
+      .replace(/^AweGit-Build:/, "")
+      .replace("T", " ")
+      .replace(/Z$/, "");
+  }
+
+  appBuildLocal() {
+    const stamp = (this.appInfo?.build ?? "").replace(/^AweGit-Build:/, "");
+    const date = new Date(stamp);
+    if (Number.isNaN(date.getTime())) return "";
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  }
+
+  appBuildZone() {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  }
 
 
   passphrase = $state("");
@@ -1767,7 +1794,7 @@ export class ShellState {
   private patchLoading = new Set<string>();
 
   requestPatch(file: string) {
-    if (this.patchCache[file] || this.patchLoading.has(file) || this.patchQueue.includes(file)) return;
+    if (this.patchCache[file] || this.patchLoading.has(`${this.patchGen}:${file}`) || this.patchQueue.includes(file)) return;
     this.patchQueue.push(file);
     this.pumpPatches();
   }
@@ -1776,9 +1803,10 @@ export class ShellState {
     while (this.patchLoading.size < 4 && this.patchQueue.length > 0) {
       const file = this.patchQueue.shift();
       if (!file || this.patchCache[file]) continue;
-      this.patchLoading.add(file);
+      const key = `${this.patchGen}:${file}`;
+      this.patchLoading.add(key);
       void this.ensurePatch(file).finally(() => {
-        this.patchLoading.delete(file);
+        this.patchLoading.delete(key);
         this.pumpPatches();
       });
     }
@@ -1786,7 +1814,7 @@ export class ShellState {
 
   clearPatchQueue() {
     this.patchQueue = [];
-    this.patchLoading.clear();
+    // In-flight reads still occupy their slots until they settle. A reset only drops queued work.
   }
 
 
@@ -2110,6 +2138,9 @@ export class ShellState {
     const query = this.launch.trim().toLowerCase();
     const action = this.tr("chrome.groupAction");
     const repoGroup = this.tr("chrome.groupRepo");
+    // The list shows the active language; keep the other one searchable.
+    const alt = (key: string) => translate(this.activeLocale === "zh" ? "en" : "zh", key);
+    const cmd = (key: string, run: () => void, stay = false): LaunchItem => ({ label: this.tr(key), keywords: alt(key), group: action, run, stay });
     if (query.startsWith("!")) {
       const command = query.slice(1);
       return [{ label: command ? `! ${command}` : "!", group: action, run: () => this.mutate({ action: "custom", command }) }];
@@ -2129,32 +2160,32 @@ export class ShellState {
       return files;
     }
     const items: LaunchItem[] = [
-      { label: this.tr("chrome.fetch"), group: action, run: () => void this.doFetch() },
-      { label: this.tr("chrome.fetchAll"), group: action, run: () => void this.mutate({ action: "fetch", remote: null, prune: this.settings.fetchPrune, tags: this.settings.fetchTags }) },
-      { label: this.tr("chrome.pull"), group: action, run: () => void this.doPull() },
-      { label: this.tr("dialog.fastForward"), group: action, run: () => { this.settings.pullRebase = false; void this.doPull(); } },
-      { label: this.tr("chrome.push"), group: action, run: () => void this.doPush() },
-      { label: this.tr("menu.createTag"), group: action, run: () => { this.draft = ""; this.draftExtra = "HEAD"; this.draftUser = ""; this.dialog = "tag"; } },
-      { label: this.tr("chrome.pushTags"), group: action, run: () => void this.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: this.settings.forceWithLease }) },
-      { label: this.tr("chrome.stash"), group: action, run: () => this.openStash([]) },
-      { label: this.tr("chrome.pop"), group: action, run: () => this.confirmPopStash() },
-      { label: this.tr("chrome.refresh"), group: action, run: () => void this.refresh() },
-      { label: this.tr("chrome.stageAll"), group: action, run: () => void this.runChange("stage_all") },
-      { label: this.tr("chrome.commit"), group: action, run: () => void this.submitCommit(false) },
-      { label: this.tr("chrome.commitAndPush"), group: action, run: () => void this.submitCommit(true) },
-      { label: this.tr("chrome.preferences"), group: action, run: () => { this.dialog = "prefs"; } },
-      { label: this.tr("chrome.terminal"), group: action, run: () => void invoke("open_terminal", { path: this.repoPath() }) },
-      { label: this.tr("chrome.explorer"), group: action, run: () => { if (this.snapshot) void this.openLocal(this.snapshot.path); } },
-      { label: this.tr("chrome.flow"), group: action, run: () => { this.draft = ""; this.dialog = "flow"; } },
-      { label: this.tr("chrome.about"), group: action, run: () => { this.dialog = "about"; } },
-      { label: this.tr("chrome.open"), group: action, run: () => this.beginOpen() },
-      { label: this.tr("chrome.workspace"), group: action, run: () => { this.draft = ""; this.dialog = "workspace"; } },
-      { label: this.tr("chrome.clone"), group: action, run: () => void this.beginClone("clone") },
-      { label: this.tr("chrome.newRepo"), group: action, run: () => void this.beginClone("init") },
-      { label: this.tr("chrome.notifications"), group: action, run: () => this.openForge("notes") },
-      { label: this.tr("chrome.pulls"), group: action, run: () => this.openForge("pulls") },
-      { label: this.tr("chrome.changes"), group: action, run: () => { this.section = "changes"; } },
-      { label: this.tr("chrome.commits"), group: action, run: () => { this.section = "history"; } },
+      cmd("chrome.fetch", () => void this.doFetch()),
+      cmd("chrome.fetchAll", () => void this.mutate({ action: "fetch", remote: null, prune: this.settings.fetchPrune, tags: this.settings.fetchTags })),
+      cmd("chrome.pull", () => void this.doPull()),
+      cmd("dialog.fastForward", () => { this.settings.pullRebase = false; void this.doPull(); }),
+      cmd("chrome.push", () => void this.doPush()),
+      cmd("menu.createTag", () => { this.draft = ""; this.draftExtra = "HEAD"; this.draftUser = ""; this.dialog = "tag"; }),
+      cmd("chrome.pushTags", () => void this.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: this.settings.forceWithLease })),
+      cmd("chrome.stash", () => this.openStash([])),
+      cmd("chrome.pop", () => this.confirmPopStash()),
+      cmd("chrome.refresh", () => void this.refresh()),
+      cmd("chrome.stageAll", () => void this.runChange("stage_all")),
+      cmd("chrome.commit", () => void this.submitCommit(false)),
+      cmd("chrome.commitAndPush", () => void this.submitCommit(true)),
+      cmd("chrome.preferences", () => { this.dialog = "prefs"; }),
+      cmd("chrome.terminal", () => void invoke("open_terminal", { path: this.repoPath() })),
+      cmd("chrome.explorer", () => { if (this.snapshot) void this.openLocal(this.snapshot.path); }),
+      cmd("chrome.flow", () => { this.draft = ""; this.dialog = "flow"; }),
+      cmd("chrome.about", () => { this.dialog = "about"; }),
+      cmd("chrome.open", () => this.beginOpen()),
+      cmd("chrome.workspace", () => { this.draft = ""; this.dialog = "workspace"; }),
+      cmd("chrome.clone", () => void this.beginClone("clone")),
+      cmd("chrome.newRepo", () => void this.beginClone("init")),
+      cmd("chrome.notifications", () => this.openForge("notes")),
+      cmd("chrome.pulls", () => this.openForge("pulls")),
+      cmd("chrome.changes", () => { this.section = "changes"; }),
+      cmd("chrome.commits", () => { this.section = "history"; }),
       ...this.settings.workspaces.map((workspace) => ({
         label: this.workspaceName(workspace),
         group: this.tr("chrome.workspace"),
@@ -2168,10 +2199,11 @@ export class ShellState {
     ];
     if (this.mode === "live") {
       items.push(
-        { label: this.tr("chrome.fileHistory"), group: action, stay: true, run: () => { this.launchMode = "files"; this.launch = ""; this.launchIndex = 0; void this.loadLaunchFiles(); } },
+        cmd("chrome.fileHistory", () => { this.launchMode = "files"; this.launch = ""; this.launchIndex = 0; void this.loadLaunchFiles(); }, true),
         ...this.settings.commands.map((command) => ({ label: command.name, group: action, run: () => this.runCommand(command) })),
         ...(this.refs?.branches ?? []).map((branch) => ({
           label: `${this.tr("menu.checkout")} ${branch.name}`,
+          keywords: `${alt("menu.checkout")} ${branch.name}`,
           group: this.tr("chrome.groupBranch"),
           run: () => void this.mutate({ action: "checkout", name: branch.name }),
         })),
@@ -2197,7 +2229,7 @@ export class ShellState {
     for (const item of items) {
       const key = `${item.group}\0${item.label}`;
       if (seen.has(key)) continue;
-      if (query && !this.fuzzy(query, item.label)) continue;
+      if (query && !this.fuzzy(query, item.keywords ? `${item.label} ${item.keywords}` : item.label)) continue;
       seen.add(key);
       unique.push(item);
     }
@@ -2544,7 +2576,10 @@ export class ShellState {
         return { name: `Diff Tool ${n}`, path: `C:\\Tools\\diff-${n}.exe`, args: "$LOCAL $REMOTE", primary: index === 0 };
       });
       this.aiModels = Array.from({ length: 24 }, (_, index) => `lab-model-${String(index + 1).padStart(2, "0")}`);
-      void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
+      void invoke<AppInfo>("app_info").then((value) => {
+        this.appInfo = value;
+        if (value?.version) this.appVersion = value.version;
+      }).catch(() => {});
       void invoke<string>("update_release_page").then((value) => { if (value) this.updateReleaseUrl = value; }).catch(() => {});
       if (item.repo) {
         const path = layout[item.repo];
@@ -2562,7 +2597,7 @@ export class ShellState {
           if (need) await invoke("lab_restore", { name: item.repo });
         }
         const file = params.get("file");
-        if (item.id === "file-history" && file) this.historyFilter = file;
+        if ((item.id === "file-history" || item.id === "file-history-unity") && file) this.historyFilter = file;
         await this.openRepo(path);
         if (!this.snapshot) throw new Error(this.actionError || `打不开 ${item.repo}`);
       } else {
@@ -2921,6 +2956,8 @@ export class ShellState {
         return { title: `${this.tr("menu.checkout")} ${text("name")}`, command: this.gitLine(["checkout", text("name")]) };
       case "merge":
         return { title: `${this.tr("menu.merge")} ${text("name")}`, command: this.gitLine(["merge", request.squash ? "--squash" : "", request.noFf ? "--no-ff" : "", text("summary") ? "-m" : "", text("summary"), text("name")]) };
+      case "revert":
+        return { title: this.tr("dialog.revert"), command: this.gitLine(["revert", request.noCommit ? "--no-commit" : "", text("rev")]) };
       case "discard":
         return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--", text("file")]) };
       case "discardPaths": {
@@ -3475,19 +3512,30 @@ export class ShellState {
   }
 
 
-  confirmReset(rev: string, mode: "soft" | "mixed", summary = "") {
+  openReset(rev: string, summary = "") {
+    this.draft = rev;
+    this.draftExtra = summary;
+    this.resetMode = "soft";
+    this.dialog = "reset";
+  }
+
+
+  confirmReset(rev: string, mode: "soft" | "mixed" | "hard", summary = "") {
     const short = rev.slice(0, 7);
     const target = summary ? `${short} "${summary}"` : short;
-    const title = this.tr(mode === "soft" ? "dialog.softReset" : "dialog.mixedReset");
-    const body = this.tr(mode === "soft" ? "dialog.softResetBody" : "dialog.mixedResetBody");
-    this.ask(title, body, () => void this.mutate({ action: "reset", rev, mode }), [], { subject: target });
+    const title = this.tr(`dialog.${mode}Reset`);
+    const body = this.tr(`dialog.${mode}ResetBody`);
+    this.ask(title, body, () => void this.mutate({ action: "reset", rev, mode }), [], { subject: target, danger: mode === "hard" });
   }
 
 
 
   confirmRevert(id: string, summary: string) {
     const subject = `${id.slice(0, 7)} ${summary}`.trim();
-    this.ask(this.tr("dialog.revert"), this.tr("dialog.revertBody"), () => void this.mutate({ action: "revert", rev: id }), [], { subject });
+    const options = $state({ commit: true, message: `revert: ${summary}\n\nThis reverts commit ${id}.` });
+    this.ask(this.tr("dialog.revert"), this.tr("dialog.revertBody"), () => void this.mutate({
+      action: "revert", rev: id, noCommit: !options.commit, message: options.message,
+    }), [], { subject, revert: options, confirmLabel: this.tr("menu.revert") });
   }
 
 
@@ -3503,6 +3551,7 @@ export class ShellState {
         tabWidth: item.tabWidth || workspaceTabWidth(item.repositories?.length || item.openTabs?.length || 0),
       })),
       commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })),
+      shortcuts: value.shortcuts ?? {},
       expandedGroups: value.expandedGroups ?? [],
       accounts: (value.accounts ?? []).map((item) => ({
         ...item,
@@ -3518,6 +3567,7 @@ export class ShellState {
       sourceDirectories: value.sourceDirectories ?? [],
       groupNames: value.groupNames ?? [],
     });
+    configureShortcuts(this.settings.shortcuts);
     applyCommitTypes(this);
     this.syncRecentWorkspace();
     if (recovered) this.settings = { ...this.settings, recoveryNotice: "" };
@@ -3946,6 +3996,12 @@ export class ShellState {
 
 
 
+  tabDisplay(path: string) {
+    return tabDisplay(this, path);
+  }
+
+
+
   tabColor(path: string) {
     return tabColor(this, path);
   }
@@ -4244,7 +4300,7 @@ export class ShellState {
 
 
 
-  ask(title: string, body: string, run: () => void, files: string[] = [], extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "confirmLabel"> = {}) {
+  ask(title: string, body: string, run: () => void, files: string[] = [], extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "focusConfirm" | "confirmLabel" | "revert"> = {}) {
     return ask(this, title, body, run, files, extras);
   }
 
@@ -5354,8 +5410,8 @@ export class ShellState {
 
 
 
-  discardChosen(files: string[]) {
-    return discardChosen(this, files);
+  discardChosen(files: string[], focusConfirm = false) {
+    return discardChosen(this, files, focusConfirm);
   }
 
 
@@ -6099,6 +6155,7 @@ export class ShellState {
 
   /** Select the commit a branch or tag points at in the history list. */
   locateSeq = 0;
+  reflogGen = 0;
 
 
 
@@ -6174,6 +6231,7 @@ export class ShellState {
       const target = event.target;
       if (target instanceof Element && target.closest("[data-confirm]")) return false;
       event.preventDefault();
+      if (this.confirmAsk.revert?.commit && !this.confirmAsk.revert.message.trim()) return true;
       const run = this.confirmAsk.run;
       this.confirmAsk = null;
       run();
@@ -6210,12 +6268,19 @@ export class ShellState {
   onShortcut(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
     const action = shortcut(event);
+    // Print stays disabled even when the configured action is blocked by another layer.
+    if (action === "launch" || ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "p")) event.preventDefault();
     if (action === "switchLanguage") {
       event.preventDefault();
       if (!event.repeat && !event.isComposing) this.switchLanguage();
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c") {
+    if (action === "performance") {
+      event.preventDefault();
+      window.dispatchEvent(new CustomEvent("awegit-perf"));
+      return;
+    }
+    if (action === "copy") {
       if (typing(event) || this.dialog || this.launchOpen) return;
       if (this.heldText) {
         event.preventDefault();
@@ -6352,7 +6417,7 @@ export class ShellState {
       const inUnstaged = (event.target as HTMLElement | null)?.closest(".unstaged-pane");
       if ((bareDelete && !inUnstaged) || this.dialog || this.menu || this.launchOpen || !this.selectedPath || this.selectedSide !== "unstaged") return;
       const chosen = this.pickedIn(this.shownUnstaged);
-      this.discardChosen(chosen.length > 1 && chosen.includes(this.selectedPath) ? chosen : [this.selectedPath]);
+      this.discardChosen(chosen.length > 1 && chosen.includes(this.selectedPath) ? chosen : [this.selectedPath], true);
     } else if (action === "explorer" && this.snapshot) void this.openLocal(this.snapshot.path);
     else if (action === "terminal") void invoke("open_terminal", { path: this.repoPath() });
     else if (action === "filterBranch") this.toggleHistoryScope(); else if (action === "reopen") this.reopenClosed();
@@ -6580,12 +6645,16 @@ export class ShellState {
     let unresized = () => {};
     let unnav = () => {};
     let unreveal = () => {};
+    let ukept = () => {};
     let unupdate = () => {};
     let placeTimer = 0;
     let stopped = false;
     this.mode = "loading";
     this.selectedPath = null;
-    void invoke<string>("app_version").then((value) => { if (value) this.appVersion = value; }).catch(() => {});
+    void invoke<AppInfo>("app_info").then((value) => {
+      this.appInfo = value;
+      if (value?.version) this.appVersion = value.version;
+    }).catch(() => {});
     void invoke<string>("update_release_page").then((value) => { if (value) this.updateReleaseUrl = value; }).catch(() => {});
     void invoke<GitRuntime>("git_runtime").then((value) => {
       this.gitRuntime = value;
@@ -6668,6 +6737,11 @@ export class ShellState {
       if (!id || (repo && repo !== this.repoPath())) return;
       void this.locateRef(id);
     });
+    ukept = await listen<{ files?: string[] }>("awegit-preview-kept", (event) => {
+      if (this.standalone) return;
+      const files = (event.payload?.files ?? []).filter((file) => typeof file === "string" && file);
+      if (files.length) this.actionError = this.tr("chrome.previewKept", { files: files.join(", ") });
+    });
     } catch {
     /* navigation events are optional outside the desktop shell */
     }
@@ -6732,6 +6806,7 @@ export class ShellState {
     unresized();
     unnav();
     unreveal();
+    ukept();
     unupdate();
     };
     });

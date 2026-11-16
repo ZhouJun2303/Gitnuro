@@ -1,5 +1,6 @@
 ﻿# Interactive Windows publish menu.
-# Bumps the patch, minor, or major version, then either packages only or publishes to GitHub.
+# Bumps the patch, minor, or major version, then either packages only,
+# installs the package over the local AweGit, or publishes to GitHub.
 
 param(
     [string]$Action = "",
@@ -194,6 +195,109 @@ function Get-CurrentBranch {
     return $branch
 }
 
+function Get-InstalledApp {
+    $hives = @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+    )
+    foreach ($hive in $hives) {
+        if (-not (Test-Path $hive)) { continue }
+        foreach ($key in Get-ChildItem -Path $hive -ErrorAction SilentlyContinue) {
+            $entry = Get-ItemProperty -Path $key.PSPath -ErrorAction SilentlyContinue
+            if ($entry -and "$($entry.DisplayName)".Trim() -eq "AweGit") {
+                return [pscustomobject]@{
+                    Location = "$($entry.InstallLocation)".Trim().Trim('"')
+                    Uninstall = "$($entry.UninstallString)".Trim()
+                }
+            }
+        }
+    }
+    return $null
+}
+
+function Get-InstallProcess([string]$executable) {
+    @(Get-Process -Name "awegit" -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $_.Path -and $_.Path.Equals($executable, [StringComparison]::OrdinalIgnoreCase)
+        } catch {
+            $false
+        }
+    })
+}
+
+# build.rs writes this marker into every binary; "About AweGit" shows the same
+# value, so it tells two builds of one version apart.
+function Get-BuildMarker([string]$path) {
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($path))
+    $match = [regex]::Match($text, 'AweGit-Build:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z')
+    if ($match.Success) { return $match.Value }
+    return $null
+}
+
+# Silent NSIS install over the same version replaces the files in place and
+# keeps the uninstall entry, so a local build can be tried before publishing.
+function Install-LocalApp([string]$Version) {
+    $setup = Join-Path $root "target\release\bundle\nsis\AweGit_${Version}_x64-setup.exe"
+    if (-not (Test-Path -LiteralPath $setup)) { throw "没找到安装包 $setup" }
+
+    $app = Get-InstalledApp
+    if (-not $app) {
+        Write-Host "本机没有安装 AweGit，跳过替换。安装包在 $setup"
+        return
+    }
+    if ($app.Uninstall -notmatch 'uninstall\.exe') {
+        Write-Host "本机的 AweGit 不是 NSIS 安装包装的，跳过替换。安装包在 $setup"
+        return
+    }
+    $installDir = if ($app.Location) { $app.Location } else { Join-Path $env:LOCALAPPDATA "AweGit" }
+    $installedExe = Join-Path $installDir "awegit.exe"
+    if (-not (Test-Path -LiteralPath $installedExe)) {
+        Write-Host "本机安装目录里没找到 $installedExe，跳过替换。安装包在 $setup"
+        return
+    }
+
+    $running = Get-InstallProcess $installedExe
+    if ($running.Count -gt 0) {
+        Write-Host "AweGit 正在运行，替换前要先关闭它。"
+        $answer = Read-Host "输入 y 关闭并继续，直接回车取消替换"
+        if ($answer -ne "y" -and $answer -ne "Y") {
+            Write-Host "没有替换本机版本。安装包在 $setup"
+            return
+        }
+        foreach ($item in $running) { Stop-Process -Id $item.Id -Force -ErrorAction SilentlyContinue }
+        for ($i = 0; $i -lt 20; $i++) {
+            if ((Get-InstallProcess $installedExe).Count -eq 0) { break }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+
+    Write-Host "正在替换本机安装：$installDir"
+    $install = Start-Process -FilePath $setup -ArgumentList "/S" -PassThru -Wait
+    if ($install.ExitCode -ne 0) {
+        throw "安装包返回 $($install.ExitCode)，本机版本没有替换"
+    }
+    $built = Join-Path $root "target\release\awegit.exe"
+    $marker = Get-BuildMarker $built
+    if (-not $marker) {
+        Write-Host "刚打包的 $built 里没有构建标记，无法核对本机是否替换成功。"
+        return
+    }
+    Write-Host "本次构建标记：$marker"
+    $installedMarker = Get-BuildMarker $installedExe
+    for ($i = 0; $i -lt 10 -and $installedMarker -ne $marker; $i++) {
+        Start-Sleep -Milliseconds 300
+        $installedMarker = Get-BuildMarker $installedExe
+    }
+    if ($installedMarker -ne $marker) {
+        $found = if ($installedMarker) { $installedMarker } else { "没有构建标记" }
+        Write-Host "本机 $installedExe 是 $found，和刚打包的 $marker 不一致，替换没有生效，请确认。"
+    } else {
+        Write-Host "已替换本机安装：$installedExe（$marker，版本 $Version，没有改版本号，也没有上传）"
+    }
+}
+
 # Everything on this branch that the last publish did not ship yet.
 # origin/release is the boundary, not the v* tags: tags made before the
 # publish scripts tagged the manifest commit sit on the previous release.
@@ -259,6 +363,106 @@ function Get-ChangelogNotes {
     return $summary
 }
 
+function Get-AiNoteTools {
+    $script = Join-Path $root "scripts\release-notes.mjs"
+    $lines = @(& node $script list 2>$null)
+    if ($LASTEXITCODE -ne 0) { return @() }
+    $tools = @()
+    foreach ($line in $lines) {
+        $text = "$line".Trim()
+        if (-not $text) { continue }
+        $parts = $text -split '\|'
+        if ($parts.Count -lt 2) { continue }
+        $tools += [pscustomobject]@{ Id = $parts[0]; Label = $parts[1] }
+    }
+    return $tools
+}
+
+function Get-PreferredAiTool([object[]]$tools) {
+    $path = Join-Path $root ".git\awegit-release-ai"
+    if (-not (Test-Path -LiteralPath $path)) { return "" }
+    $saved = (Get-Content -Raw -Encoding UTF8 -LiteralPath $path).Trim()
+    foreach ($tool in $tools) {
+        if ($tool.Id -eq $saved) { return $saved }
+    }
+    return ""
+}
+
+function Save-PreferredAiTool([string]$id) {
+    $path = Join-Path $root ".git\awegit-release-ai"
+    [IO.File]::WriteAllText($path, $id, (New-Object System.Text.UTF8Encoding $false))
+}
+
+function Invoke-AiReleaseNotes([string]$toolId, [string]$version) {
+    $dir = Join-Path ([IO.Path]::GetTempPath()) ("awegit-notes-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $mdPath = Join-Path $dir "notes.md"
+    $textPath = Join-Path $dir "notes.txt"
+    $errorPath = Join-Path $dir "error.txt"
+    try {
+        $arguments = @((Join-Path $root "scripts\release-notes.mjs"), "generate", "--tool", $toolId, "--version", $version, "--md", $mdPath, "--text", $textPath, "--error", $errorPath)
+        & node @arguments 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $textPath)) {
+            if (Test-Path -LiteralPath $errorPath) {
+                $message = (Get-Content -Raw -Encoding UTF8 -LiteralPath $errorPath).Trim()
+                if ($message) { Write-Host $message }
+            }
+            return $null
+        }
+        return [pscustomobject]@{
+            Markdown = (Get-Content -Raw -Encoding UTF8 -LiteralPath $mdPath).Trim()
+            Text = (Get-Content -Raw -Encoding UTF8 -LiteralPath $textPath).Trim()
+        }
+    } finally {
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Read-AiReleaseNotes([string]$version) {
+    $tools = @(Get-AiNoteTools)
+    if ($tools.Count -eq 0) {
+        Write-Host "没有找到 claude、codex、grok、cursor-agent，更新说明改用提交摘要。"
+        return $null
+    }
+    $preferred = Get-PreferredAiTool $tools
+    while ($true) {
+        Write-Host ""
+        Write-Host "生成更新说明"
+        for ($i = 0; $i -lt $tools.Count; $i++) {
+            $suffix = ""
+            if ($tools[$i].Id -eq $preferred) { $suffix = "  （上次使用）" }
+            Write-Host "$($i + 1)  $($tools[$i].Label)$suffix"
+        }
+        $skipIndex = $tools.Count + 1
+        Write-Host "$skipIndex  不用 AI，按提交自动汇总"
+        $default = 1
+        for ($i = 0; $i -lt $tools.Count; $i++) {
+            if ($tools[$i].Id -eq $preferred) { $default = $i + 1 }
+        }
+        $choice = Read-Host "请选择（直接回车用 $default）"
+        if (-not $choice) { $choice = "$default" }
+        $index = 0
+        if (-not [int]::TryParse($choice, [ref]$index) -or $index -lt 1 -or $index -gt $skipIndex) {
+            Write-Host "没有这个选项"
+            continue
+        }
+        if ($index -eq $skipIndex) { return $null }
+        $tool = $tools[$index - 1]
+        Write-Host "正在调用 $($tool.Label) 生成更新说明，可能需要几十秒…"
+        $notes = Invoke-AiReleaseNotes $tool.Id $version
+        if (-not $notes) {
+            $answer = Read-Host "换一个 AI 重试输入 r，直接回车改用提交摘要"
+            if ($answer -eq "r" -or $answer -eq "R") {
+                $preferred = ""
+                continue
+            }
+            return $null
+        }
+        Save-PreferredAiTool $tool.Id
+        return $notes
+    }
+}
+
 function Assert-ReleaseAvailable([string]$version) {
     Assert-GhAuthenticated
     if ((Test-GitHubRelease -Tag "v$version" -Repo $repo) -and (Test-ManifestPublished $version)) {
@@ -271,16 +475,21 @@ function Invoke-ReleaseFlow {
         [string]$Bump = "",
         [string]$SetVersion = "",
         [switch]$Publish,
+        [switch]$InstallLocal,
         [string]$ReleaseNotes = "",
         [switch]$Confirm
     )
 
-    Assert-Clean
+    if (-not $InstallLocal) { Assert-Clean }
+    $notesMarkdown = ""
     $current = Get-ProjectVersion
     $target = $current
     if ($Bump) { $target = Get-BumpedVersion $current $Bump }
     if ($SetVersion) { $target = $SetVersion }
     ConvertTo-Parts $target | Out-Null
+    if ($InstallLocal -and $target -ne $current) {
+        throw "本地替换模式不改版本号，当前版本保持 $current"
+    }
     if ($target -ne $current -and -not (Test-VersionGreater $target $current)) {
         throw "新版本 $target 必须高于当前版本 $current"
     }
@@ -303,17 +512,32 @@ function Invoke-ReleaseFlow {
             Write-Host "当前不在 $devBranch 或 release 上。会把 $branch 合并进 release，打包并上传，完成后回到 $branch"
         }
         if (-not $ReleaseNotes) {
-            $ReleaseNotes = Get-ChangelogNotes
-            Write-Host ""
-            if ($ReleaseNotes) {
-                Write-Host "更新说明（按上个发布版本以来的提交自动生成）"
+            $aiNotes = $null
+            if (-not $Confirm) {
+                $aiNotes = Read-AiReleaseNotes $target
+            }
+            if ($aiNotes) {
+                $ReleaseNotes = $aiNotes.Text
+                $notesMarkdown = $aiNotes.Markdown
+                Write-Host ""
+                Write-Host "更新说明（AI 生成）"
                 Write-Host $ReleaseNotes
             } else {
-                Write-Host "没找到上次发布之后的提交，更新说明用 AweGit $target"
+                $ReleaseNotes = Get-ChangelogNotes
+                Write-Host ""
+                if ($ReleaseNotes) {
+                    Write-Host "更新说明（按上个发布版本以来的提交自动生成）"
+                    Write-Host $ReleaseNotes
+                } else {
+                    Write-Host "没找到上次发布之后的提交，更新说明用 AweGit $target"
+                }
             }
         } else {
             Write-Host "说明：$ReleaseNotes"
         }
+    } elseif ($InstallLocal) {
+        Write-Host "只打包，不上传，版本号保持 $current"
+        Write-Host "打包后替换本机已安装的 AweGit（如果有）"
     } else {
         Write-Host "只打包，不上传"
     }
@@ -366,7 +590,7 @@ function Invoke-ReleaseFlow {
             $stagePath = Join-Path $root ".git\awegit-publish-stage"
             if (Test-Path $stagePath) { Remove-Item $stagePath -Force }
             try {
-                & (Join-Path $root "scripts\publish-windows.ps1") -Notes $ReleaseNotes
+                & (Join-Path $root "scripts\publish-windows.ps1") -Notes $ReleaseNotes -NotesMarkdown $notesMarkdown
                 if ($LASTEXITCODE -ne 0) { throw "发布失败" }
             } catch {
                 $stage = ""
@@ -388,6 +612,7 @@ function Invoke-ReleaseFlow {
         } else {
             & (Join-Path $root "scripts\package-windows.ps1")
             if ($LASTEXITCODE -ne 0) { throw "打包失败" }
+            if ($InstallLocal) { Install-LocalApp $target }
         }
     } finally {
         if ($switched) {
@@ -419,6 +644,7 @@ function Show-Menu {
     Write-Host "5  不改版本，直接发布 $current"
     Write-Host "6  修订号 +1，只打包不上传"
     Write-Host "7  不改版本，只打包不上传"
+    Write-Host "8  不改版本，打包并替换本机安装"
     Write-Host "0  退出"
     Write-Host ""
 }
@@ -433,6 +659,7 @@ switch ($Action) {
     "5" { $Action = "current" }
     "6" { $Action = "package-patch" }
     "7" { $Action = "package" }
+    "8" { $Action = "install" }
 }
 
 if (-not $Action -or $Action -eq "menu") {
@@ -451,6 +678,7 @@ if (-not $Action -or $Action -eq "menu") {
             "5" { $done = Invoke-ReleaseFlow -Publish }
             "6" { $done = Invoke-ReleaseFlow -Bump patch }
             "7" { $done = Invoke-ReleaseFlow }
+            "8" { $done = Invoke-ReleaseFlow -InstallLocal }
             "0" { exit 0 }
             default { Write-Host "没有这个选项" }
         }
@@ -466,10 +694,11 @@ switch ($Action) {
     "current" { Invoke-ReleaseFlow -Publish -ReleaseNotes $Notes -Confirm:$Yes | Out-Null }
     "package-patch" { Invoke-ReleaseFlow -Bump patch -Confirm:$Yes | Out-Null }
     "package" { Invoke-ReleaseFlow -Confirm:$Yes | Out-Null }
+    "install" { Invoke-ReleaseFlow -InstallLocal -Confirm:$Yes | Out-Null }
     "status" {
         $current = Get-ProjectVersion
         Write-Host "$current  $(Get-BumpedVersion $current 'patch')  $(Get-CurrentBranch)"
     }
     "notes" { Get-ChangelogNotes }
-    default { throw "未知选项 $Action。可用 patch、minor、major、set、current、package-patch、package、status、notes。" }
+    default { throw "未知选项 $Action。可用 patch、minor、major、set、current、package-patch、package、install、status、notes。" }
 }

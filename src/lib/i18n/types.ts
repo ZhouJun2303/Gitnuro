@@ -1,6 +1,8 @@
 export type Locale = "en" | "zh";
 
 export type Messages = {
+  repoInfo: Record<string, string>;
+  shortcuts: Record<string, string>;
   flow: Record<string, string>;
   chrome: {
     open: string;
@@ -14,6 +16,16 @@ export type Messages = {
     errorTitle: string;
     copyError: string;
     copied: string;
+    createTempCopy: string;
+    copyCreated: string;
+    cleanPreviewOnClose: string;
+    copyPreviewName: string;
+    cancelPreview: string;
+    previewKept: string;
+    previewModifiedTitle: string;
+    previewModifiedBody: string;
+    previewKeep: string;
+    previewForceDelete: string;
     locating: string;
     readingCommit: string;
     readingFile: string;
@@ -437,6 +449,10 @@ export type Messages = {
     mixedResetBody: string;
     revert: string;
     revertBody: string;
+    revertCommitChanges: string;
+    revertCommitNote: string;
+    revertNoCommitNote: string;
+    revertMessage: string;
     cherryPickBody: string;
     cherryPickRecordNote: string;
     deleteRemoteBody: string;
@@ -501,6 +517,13 @@ export type Messages = {
     imageSwipe: string;
     imageOnion: string;
     imagePixel: string;
+    resetBranch: string;
+    resetBranchBody: string;
+    resetMoveTo: string;
+    resetType: string;
+    resetSoftHint: string;
+    resetMixedHint: string;
+    resetHardHint: string;
     imageWorking: string;
     imageTooLarge: string;
     imageFailed: string;
@@ -583,6 +606,21 @@ export type Messages = {
     commitTypeReset: string;
     integration: string;
     customCommands: string;
+    shortcutPage: string;
+    shortcutHint: string;
+    shortcutSearch: string;
+    shortcutRecord: string;
+    shortcutUnbound: string;
+    shortcutConflict: string;
+    shortcutClear: string;
+    shortcutAdd: string;
+    shortcutNoResults: string;
+    shortcutReset: string;
+    shortcutResetAll: string;
+    shortcutGroupApp: string;
+    shortcutGroupRepo: string;
+    shortcutGroupNavigate: string;
+    shortcutGroupChanges: string;
     workspacePage: string;
     accountsPage: string;
     prefGroupGeneral: string;
@@ -591,6 +629,16 @@ export type Messages = {
     prefHintGeneral: string;
     prefHintWorkspace: string;
     prefHintDiff: string;
+    previewFormatsPage: string;
+    prefHintPreviewFormats: string;
+    previewExecutables: string;
+    previewExeNone: string;
+    previewFormats: string;
+    previewFormatsLoading: string;
+    previewToolCommon: string;
+    previewScopeAny: string;
+    previewScopeUnityAssets: string;
+    previewOtherTools: string;
     prefHintCommit: string;
     prefHintAi: string;
     prefHintGit: string;
@@ -853,6 +901,11 @@ export type Messages = {
     signOffFormat: string;
     repoLocalHint: string;
     aboutBody: string;
+    aboutBuild: string;
+    aboutAppCode: string;
+    aboutProfileDebug: string;
+    aboutProfileRelease: string;
+    aboutPlatform: string;
     weekdays: string;
     byHour: string;
     flowName: string;

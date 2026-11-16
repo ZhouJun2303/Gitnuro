@@ -1,6 +1,8 @@
 mod accounts;
 mod ai;
+mod avatars;
 mod changes;
+mod development;
 mod forge;
 mod flow_window;
 mod flows;
@@ -8,6 +10,8 @@ mod http;
 mod lab;
 mod perf;
 mod reads;
+mod repo_inspection;
+mod revision_copy;
 mod secrets;
 mod settings;
 mod tools;
@@ -510,6 +514,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         _ => repo.clone(),
     };
     let _turn = repo_turn(&next);
+    development::check_delete(&repo, &request)?;
     apply_session();
     let _https = accounts::install_https(&repo, &request);
     record_action(&request);
@@ -686,7 +691,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         }
         Mutation::Reset { rev, mode } => join([scrub(rev), format!("{mode:?}")]),
         Mutation::CherryPick { rev, record } => join([scrub(rev), flag("record", *record)]),
-        Mutation::Revert { rev } => scrub(rev),
+        Mutation::Revert { rev, no_commit, message } => join([scrub(rev), flag("noCommit", *no_commit), bytes("message", message)]),
         Mutation::Reword { rev, summary } => join([scrub(rev), bytes("summary", summary)]),
         Mutation::Tag { name, rev, message } => join([scrub(name), scrub(rev), bytes("message", message)]),
         Mutation::DeleteTag { name } | Mutation::RemoveRemote { name } => scrub(name),
@@ -1647,6 +1652,34 @@ fn app_version() -> String {
     updates::current_version().to_string()
 }
 
+/// Written by build.rs on every compile, so it identifies this exact binary.
+const BUILD_MARKER: &str = concat!("AweGit-Build:", env!("AWE_BUILD_STAMP"));
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppInfo {
+    version: String,
+    app_code: i64,
+    build: &'static str,
+    platform: &'static str,
+    arch: &'static str,
+    tauri: &'static str,
+    debug: bool,
+}
+
+#[tauri::command]
+fn app_info() -> AppInfo {
+    AppInfo {
+        version: updates::current_version().to_string(),
+        app_code: env!("AWE_APP_CODE").parse().unwrap_or(0),
+        build: BUILD_MARKER,
+        platform: std::env::consts::OS,
+        arch: std::env::consts::ARCH,
+        tauri: tauri::VERSION,
+        debug: cfg!(debug_assertions),
+    }
+}
+
 #[tauri::command]
 fn update_release_page() -> String {
     updates::release_page().to_string()
@@ -1709,6 +1742,29 @@ fn revision_preview(path: Option<String>, rev: String, file: String) -> Result<O
 fn blob_view(path: Option<String>, rev: String, file: String) -> Result<awegit_git::BlobView, String> {
     let repo = repo_from(path)?;
     awegit_git::blob_view(&repo, &rev, &file).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn revision_copy_support(path: Option<String>, file: String) -> Result<Option<revision_copy::Support>, String> {
+    let repo = repo_from(path)?;
+    Ok(revision_copy::support(&repo, &file))
+}
+
+#[tauri::command]
+fn revision_copy_formats() -> revision_copy::FormatCatalog {
+    revision_copy::formats()
+}
+
+#[tauri::command]
+fn create_revision_copy(path: Option<String>, rev: String, file: String) -> Result<String, String> {
+    let repo = repo_from(path)?;
+    revision_copy::create(&repo, &rev, &file)
+}
+
+#[tauri::command]
+fn remove_revision_copy(path: Option<String>, file: String, copy: String, force: Option<bool>) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    revision_copy::remove(&repo, &file, &copy, force.unwrap_or(false))
 }
 
 #[tauri::command]
@@ -1984,6 +2040,15 @@ fn create_hosted_repo(forge_name: String, name: String, private_repo: bool, host
 #[tauri::command]
 fn account_services() -> Vec<accounts::ServiceInfo> {
     accounts::services()
+}
+
+#[tauri::command]
+fn avatar_image(url: String) -> Result<String, String> {
+    if lab::lab_guarded() {
+        return Err(http::coded("avatar", "lab has no avatars"));
+    }
+    let values = settings::load().unwrap_or_default();
+    http::with_net(http::NetOptions::from_settings(&values), || avatars::image(&url))
 }
 
 #[tauri::command]
@@ -2502,6 +2567,7 @@ pub fn run() {
             approve_credential,
             check_for_update,
             app_version,
+            app_info,
             update_release_page,
             download_update,
             cancel_update,
@@ -2512,9 +2578,14 @@ pub fn run() {
             set_repo_author,
             revision_preview,
             blob_view,
+            revision_copy_support,
+            revision_copy_formats,
+            create_revision_copy,
+            remove_revision_copy,
             reflog,
             commit_tree,
             repository_summary,
+            repo_inspection::repository_inspection,
             rebase_conflicts,
             lfs_locks,
             launch_tool,
@@ -2537,6 +2608,7 @@ pub fn run() {
             account_services,
             sync_accounts,
             test_account,
+            avatar_image,
             browser_login,
             cancel_browser_login,
             remote_matches,
@@ -2612,6 +2684,37 @@ pub fn run() {
                 perf::summary();
             }
         });
+}
+
+#[cfg(test)]
+mod build_stamp_tests {
+    #[test]
+    fn app_info_reports_the_compiled_build() {
+        let info = super::app_info();
+        assert_eq!(info.version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(info.app_code, env!("AWE_APP_CODE").parse().unwrap_or(0));
+        assert_eq!(info.build, super::BUILD_MARKER);
+        assert_eq!(info.platform, std::env::consts::OS);
+        assert_eq!(info.tauri, tauri::VERSION);
+    }
+
+    #[test]
+    fn build_marker_is_a_fixed_utc_timestamp() {
+        let stamp = super::BUILD_MARKER
+            .strip_prefix("AweGit-Build:")
+            .expect("build marker prefix");
+        assert_eq!(stamp.len(), 20, "unexpected build stamp {stamp}");
+        assert!(stamp[0..4].parse::<u32>().unwrap() >= 2020, "unexpected build stamp {stamp}");
+        assert_eq!(&stamp[4..5], "-");
+        assert_eq!(&stamp[7..8], "-");
+        assert_eq!(&stamp[10..11], "T");
+        assert_eq!(&stamp[13..14], ":");
+        assert_eq!(&stamp[16..17], ":");
+        assert_eq!(&stamp[19..20], "Z");
+        for (start, end) in [(5, 7), (8, 10), (11, 13), (14, 16), (17, 19)] {
+            assert!(stamp[start..end].chars().all(|c| c.is_ascii_digit()), "unexpected build stamp {stamp}");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2834,5 +2937,28 @@ mod watch_plan_tests {
         assert!(!defaults.contains("**"));
         assert!(!defaults.contains("allow-open-path"));
         assert!(!defaults.contains("opener:allow-reveal-item-in-dir"));
+    }
+
+    #[test]
+    fn revision_copies_are_only_allowed_in_history_windows() {
+        let history: serde_json::Value = serde_json::from_str(include_str!("../capabilities/history-copy.json")).unwrap();
+        let main: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        assert_eq!(history["windows"], serde_json::json!(["history"]));
+        assert!(main["permissions"].as_array().unwrap().contains(&serde_json::json!("allow-revision-copy-formats")));
+        assert_eq!(history["permissions"], serde_json::json!([
+            "allow-revision-copy-support", "allow-create-revision-copy", "allow-remove-revision-copy"
+        ]));
+        for other in [
+            include_str!("../capabilities/default.json"),
+            include_str!("../capabilities/viewers.json"),
+            include_str!("../capabilities/flows.json"),
+        ] {
+            let capability: serde_json::Value = serde_json::from_str(other).unwrap();
+            for permission in capability["permissions"].as_array().unwrap() {
+                assert_ne!(permission.as_str(), Some("allow-revision-copy-support"));
+                assert_ne!(permission.as_str(), Some("allow-create-revision-copy"));
+                assert_ne!(permission.as_str(), Some("allow-remove-revision-copy"));
+            }
+        }
     }
 }

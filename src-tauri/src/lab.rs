@@ -187,6 +187,9 @@ fn layout() -> Result<Value, String> {
         "merge": text(repos.join("merge")),
         "rebase": text(repos.join("rebase")),
         "operation": text(repos.join("operation")),
+        "pull-deleted": text(repos.join("pull-deleted")),
+        "unstage-initial": text(repos.join("unstage-initial")),
+        "stage-conflict-paths": text(repos.join("stage-conflict-paths")),
         "cherry": text(repos.join("cherry")),
         "revert": text(repos.join("revert")),
         "detached": text(repos.join("detached")),
@@ -195,6 +198,8 @@ fn layout() -> Result<Value, String> {
         "ahead": text(repos.join("ahead")),
         "behind": text(repos.join("behind")),
         "even": text(repos.join("even")),
+        "unity": text(repos.join("unity")),
+        "duplicate": text(repos.join("copies").join("full")),
         "pushbox": text(repos.join("pushbox")),
     }))
 }
@@ -336,6 +341,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "approve_credential" => Ok(Value::Null),
         "check_for_update" => Ok(Value::Null),
         "app_version" => done(super::app_version()),
+        "app_info" => done(super::app_info()),
         "update_release_page" => done(super::updates::release_page()),
         "download_update" => Ok(Value::Null),
         "conflict_sides" => done_result(super::conflict_sides(req(args, "path")?, req(args, "file")?)),
@@ -351,6 +357,15 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "set_repo_author" => done_result(super::set_repo_author(req(args, "path")?, req(args, "name")?, req(args, "email")?)),
         "revision_preview" => done_result(super::revision_preview(req(args, "path")?, req(args, "rev")?, req(args, "file")?)),
         "blob_view" => done_result(super::blob_view(req(args, "path")?, req(args, "rev")?, req(args, "file")?)),
+        "revision_copy_support" => done_result(super::revision_copy_support(req(args, "path")?, req(args, "file")?)),
+        "revision_copy_formats" => done_result(Ok(super::revision_copy_formats())),
+        "create_revision_copy" => done_result(super::create_revision_copy(req(args, "path")?, req(args, "rev")?, req(args, "file")?)),
+        "remove_revision_copy" => done_result(super::remove_revision_copy(
+            req(args, "path")?,
+            req(args, "file")?,
+            req(args, "copy")?,
+            req(args, "force")?,
+        )),
         "reflog" => done_result(super::reflog(req(args, "path")?, req(args, "limit")?)),
         "commit_tree" => done_result(super::commit_tree(req(args, "path")?, req(args, "rev")?)),
         "repository_summary" => {
@@ -358,6 +373,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             ensure_lab_path(Path::new(&path))?;
             done_result(super::repository_summary(path))
         }
+        "repository_inspection" => done_result(crate::repo_inspection::repository_inspection(req(args, "path")?)),
         "rebase_conflicts" => done_result(super::rebase_conflicts(req(args, "path")?, req(args, "onto")?)),
         "lfs_locks" => done_result(super::lfs_locks(req(args, "path")?, req(args, "list")?)),
         "launch_tool" => Ok(Value::Null),
@@ -402,6 +418,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "sync_accounts" => done_result(super::load_settings()),
         "save_window_bounds" => Ok(Value::Null),
         "test_account" => done(crate::accounts::lab_probe()),
+        "avatar_image" => Err("lab has no avatars".into()),
         "browser_login" => done(crate::accounts::lab_login()),
         "cancel_browser_login" => Ok(Value::Null),
         "remote_matches" => done(vec![crate::accounts::lab_remote()]),

@@ -4,6 +4,7 @@
   import { invoke } from "../perf";
   import type { Account, Settings } from "../status";
   import { getShell } from "./context";
+  import AccountAvatar from "./AccountAvatar.svelte";
   import "./AccountsPage.css";
 
   const shell = getShell();
@@ -422,11 +423,7 @@
           {@const code = statusOf[account.id] || "unknown"}
           <article class="account-card" data-account-card={account.id} data-status={code}>
             <div class="account-identity">
-              {#if account.avatarUrl}
-                <img class="account-avatar" alt="" src={account.avatarUrl} />
-              {:else}
-                <span class="account-avatar" aria-hidden="true">{initial(account)}</span>
-              {/if}
+              <AccountAvatar url={account.avatarUrl} initial={initial(account)} />
               <div class="account-copy">
                 <div class="account-name">
                   <span>{account.name || account.label || account.login || account.forge}</span>

@@ -521,6 +521,16 @@ textarea {
     right: 0;
   }
 
+.diff-line-text { flex: none; }
+
+.shell.diff-wrap .virtual-row { align-items: flex-start; }
+
+.shell.diff-wrap .diff-line-text { flex: 1; min-width: 0; }
+
+.shell.diff-wrap .diff-body .wrapped-row .virtual-row,
+.shell.diff-wrap .diff-body .wrapped-row .split-row > span,
+.shell.diff-wrap .diff-body .wrapped-row .split-meta { content-visibility: visible; }
+
 .diff-body .add { background: var(--diff-add); }
 
 .diff-body .del { background: var(--diff-del); }

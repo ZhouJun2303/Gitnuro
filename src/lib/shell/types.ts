@@ -14,6 +14,7 @@ export type Dialog =
     | "command"
     | "tag"
     | "remote"
+    | "repoInfo"
     | "squash"
     | "credential"
     | "fetch"
@@ -84,7 +85,10 @@ export type ConfirmAsk = {
     subject?: string;
     detail?: string;
     danger?: boolean;
+    /** Focus the confirm button on open instead of Cancel. For dialogs opened by keyboard. */
+    focusConfirm?: boolean;
     confirmLabel?: string;
+    revert?: { commit: boolean; message: string };
     files?: string[];
     run: () => void;
 };
@@ -153,9 +157,10 @@ export const STATUS_NOTICE_ENTRY: Record<StatusNoticeId, number> = {
 
 export type RepoJob = { label: string; percent: number | null; depth: number };
 
-export type PrefTab = "general" | "workspace" | "diff" | "commit" | "ai" | "git" | "integration" | "network" | "accounts" | "advanced" | "commands";
+export type PrefTab = "general" | "workspace" | "diff" | "previewFormats" | "commit" | "ai" | "git" | "integration" | "network" | "accounts" | "advanced" | "commands" | "shortcuts";
 
-export type LaunchItem = { label: string; group: string; run: () => void; stay?: boolean };
+/** `keywords` holds the label in other UI languages, so a query typed in any language still matches. */
+export type LaunchItem = { label: string; keywords?: string; group: string; run: () => void; stay?: boolean };
 
 export type Place = {
     section: "changes" | "history";

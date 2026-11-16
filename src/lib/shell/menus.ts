@@ -118,14 +118,7 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
       { label: shell.tr("menu.cherryPick"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, false, commit.summary) },
       { label: shell.tr("menu.cherryPickRecord"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, true, commit.summary) },
       { label: shell.tr("menu.revert"), disabled: locked || !!shell.progress, run: () => shell.confirmRevert(commit.id, commit.summary) },
-      {
-        label: shell.tr("menu.reset"),
-        children: [
-          { label: shell.tr("menu.soft"), disabled: locked || !!shell.progress, run: () => shell.confirmReset(commit.id, "soft", commit.summary) },
-          { label: shell.tr("menu.mixed"), disabled: locked || !!shell.progress, run: () => shell.confirmReset(commit.id, "mixed", commit.summary) },
-          { label: shell.tr("menu.hard"), disabled: locked || !!shell.progress, run: () => shell.ask(shell.tr("dialog.hardReset"), shell.tr("dialog.hardResetBody"), () => void shell.mutate({ action: "reset", rev: commit.id, mode: "hard" }), [], { danger: true }) },
-        ],
-      },
+      { label: shell.tr("menu.reset"), disabled: locked || !!shell.progress, run: () => shell.openReset(commit.id, commit.summary) },
       { sep: true, label: "" },
       { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "branch"; } },
       { label: shell.tr("menu.createTag"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "tag"; } },
@@ -241,7 +234,7 @@ export function helpItems(shell: ShellState) {
     return [
       { label: shell.tr("chrome.about"), run: () => (shell.dialog = "about") },
       { label: shell.tr("chrome.checkUpdate"), run: () => shell.openUpdatePanel(true) },
-      { label: shell.tr("chrome.performance"), shortcut: "Ctrl+Alt+P", run: () => window.dispatchEvent(new CustomEvent("awegit-perf")) },
+      { label: shell.tr("chrome.performance"), shortcut: shortcutLabel("performance"), run: () => window.dispatchEvent(new CustomEvent("awegit-perf")) },
     ];
   }
 

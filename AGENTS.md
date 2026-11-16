@@ -39,7 +39,7 @@
 - 测试：`pnpm test`（`scripts/test-all.mjs`，依次跑 `awegit-git` 和 `awegit --lib`，都是 `--test-threads=1`）
 - 类型检查：`pnpm check`
 - Windows 打包：`pnpm package:windows`
-- Windows 发布：`publish.bat`（默认定修订号加一后打包并上传），在 `feat/dev` 上运行，脚本会合并进 `release`。`pnpm publish:windows` 只在 `release` 分支发布当前版本
+- Windows 发布：`publish.bat`（默认定修订号加一后打包并上传，发布前可选 claude、codex、grok、cursor-agent 生成更新说明），在 `feat/dev` 上运行，脚本会合并进 `release`。`pnpm publish:windows` 只在 `release` 分支发布当前版本
 - macOS 打包：`pnpm package:mac`
 - 不提交 `target/`、`node_modules/`、`src-tauri/target/`，也不提交打包进来的 MinGit
 

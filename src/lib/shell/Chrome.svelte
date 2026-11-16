@@ -6,6 +6,7 @@
   import { invoke } from "../perf";
 
   const shell = getShell();
+  const launchShortcut = $derived.by(() => { shell.settings.shortcuts; return shortcutLabel("launch"); });
 
   $effect(() => {
     const path = shell.meterPath ?? shell.snapshot?.path ?? "";
@@ -91,7 +92,7 @@
   <header class="chrome">
     <div class="chrome-tools">
       <div class="chrome-left">
-        <button class="tool-btn stack" type="button" title="{shell.tr("chrome.quickLaunch")} ({shortcutLabel("launch")})" onclick={() => void shell.openLaunch()}>
+        <button class="tool-btn stack" type="button" title="{shell.tr("chrome.quickLaunch")} ({launchShortcut})" onclick={() => void shell.openLaunch()}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
           <span>{shell.tr("chrome.launch")}</span>
         </button>
@@ -199,6 +200,7 @@
       {#each shell.repos as repo (repo)}
         {@const job = shell.jobs[shell.jobKey(repo)]}
         <div class="tab" role="group" class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} oncontextmenu={(event) => shell.openMenu(event, [
+          { label: shell.tr("repoInfo.title"), run: () => { shell.repoInfoPath = repo; shell.dialog = "repoInfo"; } },
           { label: shell.tr("chrome.terminal"), disabled: shell.mode !== "live", run: () => void invoke("open_terminal", { path: repo }) },
           { label: shell.tr("chrome.explorer"), run: () => void shell.openLocal(repo) },
           { label: shell.tr("menu.copyProjectPath"), run: () => shell.copyText(repo) },
@@ -206,8 +208,8 @@
           { label: shell.tr("menu.tabColor"), run: () => { shell.draft = shell.tabColor(repo); shell.draftExtra = repo; shell.dialog = "colorTab"; } },
           { label: shell.tr("chrome.close"), run: () => shell.closeTab(repo) },
         ])}>
-          <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabText(repo)} onclick={() => shell.openRepo(repo)}>{#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}{shell.tabText(repo)}</button>
-          <button class="text-button row-action tab-close" type="button" onclick={() => shell.closeTab(repo)} aria-label={`${shell.tr("chrome.close")} ${shell.tabText(repo)}`} title={`${shell.tr("chrome.close")} ${shell.tabText(repo)}`}>×</button>
+          <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabDisplay(repo)} onclick={() => shell.openRepo(repo)}>{#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}{shell.tabDisplay(repo)}</button>
+          <button class="text-button row-action tab-close" type="button" onclick={() => shell.closeTab(repo)} aria-label={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`} title={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`}>×</button>
         </div>
       {:else}
         <button class="tab active" type="button">{shell.tabLabel}</button>

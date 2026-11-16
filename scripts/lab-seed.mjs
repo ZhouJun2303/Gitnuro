@@ -402,6 +402,48 @@ function seedOperationRepo() {
   git(path, ["checkout", "main"]); write(path, "note.txt", "uncommitted work\n");
 }
 
+function seedUnstageInitialRepo() {
+  const path = join(repos, "unstage-initial");
+  wipe(path); initWork(path);
+  write(path, "new.txt", "staged before first commit\n");
+  git(path, ["add", "new.txt"]);
+  write(path, "new.txt", "edited after staging\n");
+}
+
+function seedStageConflictPathsRepo() {
+  const path = join(repos, "stage-conflict-paths");
+  wipe(path); initWork(path);
+  commit(path, "conflict.txt", "base\n", "base");
+  commit(path, "old.txt", "original\n", "rename source");
+  commit(path, "delete.txt", "delete\n", "delete source");
+  git(path, ["checkout", "-b", "topic"]);
+  commit(path, "conflict.txt", "topic\n", "topic");
+  git(path, ["checkout", "main"]);
+  commit(path, "conflict.txt", "main\n", "main");
+  const result = git(path, ["merge", "topic"], { allowFail: true });
+  if (result.status !== 1) throw new Error("stage-conflict-paths did not conflict");
+  git(path, ["mv", "old.txt", "renamed.txt"]);
+  git(path, ["rm", "delete.txt"]);
+  write(path, "renamed.txt", "edited after rename\n");
+  write(path, "loose.txt", "new file\n");
+}
+
+function seedPullDeletedRepo() {
+  const path = join(repos, "pull-deleted");
+  const upstream = join(repos, "pull-deleted-upstream");
+  wipe(path); wipe(upstream); initWork(upstream);
+  commit(upstream, "deleted.txt", "base\n", "base");
+  commit(upstream, "remote.txt", "base\n", "remote base");
+  cloneFrom(fileUrl(upstream), path);
+  commit(upstream, "remote.txt", "remote update\n", "remote update");
+  git(path, ["fetch", "origin"]);
+  rmSync(join(path, "deleted.txt"));
+  write(path, "new.txt", "staged new file\n");
+  git(path, ["add", "new.txt"]);
+  rmSync(join(path, "new.txt"));
+  write(path, ".fakeignore", "local-only\n");
+}
+
 function seedRevertRepo() {
   const path = join(repos, "revert");
   wipe(path);
@@ -435,8 +477,23 @@ function seedTagsRepo() {
   }
 }
 
+function seedUnityRepo() {
+  const path = join(repos, "unity");
+  wipe(path);
+  initWork(path);
+  commit(path, "ProjectSettings/ProjectVersion.txt", "m_EditorVersion: 2022.3.62f1\n", "create the unity project");
+  commit(path, "Assets/Scripts/Player.cs", "public class Player {}\n", "add the player script");
+  commit(path, "Assets/Prefabs/UIChapter.prefab", "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!1 &1\nGameObject:\n  m_Name: UIChapter\n", "add the chapter prefab");
+  commit(path, "Assets/Scripts/Player.cs", "public class Player\n{\n    public int level;\n}\n", "track the player level");
+  commit(path, "Assets/Prefabs/UIChapter.prefab", "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!1 &1\nGameObject:\n  m_Name: UIChapter\n  m_IsActive: 1\n", "activate the chapter prefab");
+}
+
 const restore = {
+  "unstage-initial": seedUnstageInitialRepo,
+  "stage-conflict-paths": seedStageConflictPathsRepo,
+  "pull-deleted": seedPullDeletedRepo,
   tags: seedTagsRepo,
+  unity: seedUnityRepo,
   operation: seedOperationRepo,
   conflict: seedConflictRepo,
   merge: seedMergeRepo,
@@ -498,9 +555,12 @@ const ahead = join(repos, "ahead");
 cloneFrom(origin, full);
 cloneFrom(origin, even);
 cloneFrom(origin, ahead);
+// Same folder name as `full` under another parent, for the duplicate tab-label scene.
+cloneFrom(origin, join(repos, "copies", "full"));
 git(ahead, ["remote", "add", "mirror", origin]);
 git(ahead, ["fetch", "mirror"]);
 seedBisectRepo();
+seedUnityRepo();
 
 for (let i = 1; i <= FILL; i++) {
   commit(ahead, `local/ahead-${pad(i)}.txt`, `ahead ${i}\n`, `local ahead ${i}`);
@@ -637,6 +697,9 @@ seedConflictRepo();
 seedMergeRepo();
 seedRebaseRepo();
 seedOperationRepo();
+seedUnstageInitialRepo();
+seedStageConflictPathsRepo();
+seedPullDeletedRepo();
 seedCherryRepo();
 seedRevertRepo();
 seedTagsRepo();

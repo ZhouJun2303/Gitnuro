@@ -1,5 +1,6 @@
 //! Local settings. This file is created on save and is not the old DataStore.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -123,6 +124,9 @@ pub struct Settings {
     pub current_workspace: String,
     #[serde(default)]
     pub commands: Vec<CommandRecord>,
+    /// Only customized shortcuts are stored; an empty list disables an action.
+    #[serde(default)]
+    pub shortcuts: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub flow_master: String,
     #[serde(default = "develop_name")]
@@ -567,6 +571,7 @@ impl Default for Settings {
             workspaces: Vec::new(),
             current_workspace: String::new(),
             commands: Vec::new(),
+            shortcuts: BTreeMap::new(),
             flow_master: String::new(),
             flow_develop: develop_name(),
             flow_feature: feature_prefix(),
@@ -1564,6 +1569,17 @@ mod tests {
     fn missing_commit_type_stays_feat() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings.commit_type, "feat");
+    }
+
+    #[test]
+    fn shortcuts_default_to_builtin_and_keep_custom_bindings() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(settings.shortcuts.is_empty());
+        let settings: Settings = serde_json::from_str(r#"{"shortcuts":{"launch":["Ctrl+J","Ctrl+P"],"search":[]}}"#).unwrap();
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["shortcuts"]["launch"], serde_json::json!(["Ctrl+J", "Ctrl+P"]));
+        assert_eq!(saved["shortcuts"]["search"], serde_json::json!([]));
+        assert_eq!(serde_json::from_value::<Settings>(saved).unwrap().shortcuts, settings.shortcuts);
     }
 
     #[test]

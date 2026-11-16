@@ -213,6 +213,7 @@ export type Settings = {
   workspaces: WorkspaceRecord[];
   currentWorkspace: string;
   commands: CommandRecord[];
+  shortcuts: Record<string, string[]>;
   flowMaster: string;
   flowDevelop: string;
   flowFeature: string;
@@ -409,6 +410,16 @@ export type FilePreview = {
   mime: string;
   dataUrl: string;
   animated: boolean;
+};
+
+export type AppInfo = {
+  version: string;
+  appCode: number;
+  build: string;
+  platform: string;
+  arch: string;
+  tauri: string;
+  debug: boolean;
 };
 
 export type UpdateNotice = {

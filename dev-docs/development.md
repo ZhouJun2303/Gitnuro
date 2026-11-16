@@ -70,6 +70,7 @@ macOS 使用系统 Git 和系统上的 `cargo`，不需要上面的 PATH。
 | UI 自动化 | `pnpm test:ui` | Playwright 跑试验台场景 |
 | 打 Windows 安装包 | `pnpm package:windows` | `target\release\bundle` 下的 exe 和 msi |
 | 发布到 GitHub | `publish.bat` | 选择版本号，打包并上传到 Release |
+| 本机试用新构建 | `publish.bat` 第 8 项 | 不改版本号，打包后替换本机安装 |
 | 打 macOS 安装包 | `pnpm package:mac` | 只能在 Mac 上运行，产物在 `target/release/bundle` |
 
 `pnpm start` 就是 `pnpm tauri dev`。`pnpm test` 跑 `scripts/test-all.mjs`，依次执行 `cargo test -p awegit-git` 和 `cargo test -p awegit --lib`，都加 `--test-threads=1`。
@@ -88,6 +89,10 @@ pnpm start
 
 1420 上已经有页面服务时，`pnpm start` 和 `pnpm dev` 都会沿用并持续监测它；服务停止后自动接管，自己启动的 Vite 意外退出时也会重启。退出试验台时只停止自己启动的进程，沿用的页面服务继续运行。启动、退出原因和 Vite 输出保存在 `.lab/logs/dev-server.log`。
 
+并行页面服务按实际端口分别使用 `node_modules/.vite/awegit/dev-<端口>` 的预打包缓存；临时端口和中间件实例各自使用独立目录，构建使用 `build` 子目录。客户端和 SSR 依赖一起隔离，避免试验台或临时校验重建缓存时让另一个开发窗口的模块失效。同一端口重启时继续使用已有缓存；显式传入 `cacheDir` 时沿用指定目录。
+
+开发版会拒绝在其编译时的源码工作副本中执行「删除」或「删除所选」，避免删掉 Vite 正在加载的模块和 Cargo 入口文件。需要删除该工作副本中的文件时，使用已安装的正式版；开发测试使用 `.lab` 中的独立仓库。恢复已删除文件可用「丢弃修改」。
+
 设置在 Windows 的 `%APPDATA%\AweGit\settings.json`，macOS 的 `~/Library/Application Support/AweGit/settings.json`。签名口令只留在当前进程里，HTTPS 密码交给 Git 的凭据存储。API key、代理密码和各平台 token 放在系统凭据库（Windows 凭据管理器、macOS 钥匙串），配置文件里这些字段是空的。
 
 重新链接桌面程序前先关掉 `awegit.exe`。它占着 `WebView2Loader.dll` 时，`cargo build -p awegit` 会失败。Vite 可以留着。
@@ -105,7 +110,7 @@ pnpm test
 
 `pnpm check` 查界面类型。`pnpm test` 跑状态、差异、提交、变基、贮藏这些 Git 行为，以及设置、更新和凭据这些桌面单元测试。仓库都建在临时目录里。测试不打开窗口，也不要拿当前这个 AweGit 仓库去做暂存或提交实验。
 
-页面服务的端口复用、自动接管、重启与退出清理可单独运行 `node --test scripts/dev-server.test.mjs scripts/lab-dev.test.mjs`；这些测试在 `.lab` 中使用临时端口和模拟后端，不启动桌面程序。
+页面服务的端口复用、自动接管、重启、退出清理与并行缓存隔离可单独运行 `node --test scripts/dev-server.test.mjs scripts/lab-dev.test.mjs scripts/vite-cache.test.mjs scripts/release-notes.test.mjs`；这些测试在 `.lab` 中使用临时端口和模拟后端，不启动桌面程序。
 
 每次验证只运行本次修改相关的测试，UI 不跑全量场景。改动界面时补对应的试验台场景，用测试文件和 `--grep` 选择相关用例：
 
@@ -166,7 +171,7 @@ pnpm perf:seed --tracked=1000 --untracked=1000 --history=10000 --conflicts=10,10
 pnpm perf:backend --release --writes --manifest=.lab/performance/run-实际目录/manifest.json
 ```
 
-使用种子命令最后输出的 manifest 路径。`perf:seed` 也可通过 `node scripts/lab-seed.mjs --performance` 调用，参数相同。默认优先使用项目自带 Git 2.56；系统 Git 2.38 不支持已有预览需要的 `merge-tree --merge-base`。对照系统 Git 可加 `--system-git`，但不得把不同 Git 版本的时间混作前后对照。
+使用种子命令最后输出的 manifest 路径。`perf:seed` 也可通过 `node scripts/lab-seed.mjs --performance` 调用，参数相同。默认优先使用项目自带 Git 2.56；旧版 Git 的预览兼容方式见下方“常用操作兼容”。对照系统 Git 可加 `--system-git`，但不得把不同 Git 版本的时间混作前后对照。
 
 种子生成时隔离全局配置，测量时沿用当前 Git 读取的配置，与客户端一致；不写全局配置。对照时同时保留配置条件，尤其不要在一组结果中混入关闭 `core.fscache` 的样本，大仓库下会明显改变 Git 自身的耗时。
 
@@ -200,9 +205,25 @@ node scripts/with-rust-path.mjs cargo test -p awegit --lib --offline -- --test-t
 pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.ts e2e/sync-toolbar.spec.ts e2e/merge-window.spec.ts --grep 'covered write events|context reads|observer follows conflicts|observer automatic closing keeps completed|sync toolbar|one huge merge hunk|late response'
 ```
 
+## 常用操作兼容
+
+取消暂存统一使用限定路径的 `git reset --quiet -- <路径>`，只更新索引，不移动分支、不改工作区。首次提交前、暂存后继续修改、目录选择和重复取消均可直接完成；大量路径继续通过 NUL 分隔的标准输入传入，避免 Windows 命令行长度限制。无需先执行一次必然失败的 `restore` 再根据错误文本补救。
+
+有冲突时“全部暂存”只处理尚未暂存的非冲突路径，跳过已暂存的删除与重命名旧路径；没有可暂存项时直接结束，保留所有冲突索引条目。切换分支禁止 Git 回退为同名文件检出；远程分支检出与指定分支推送使用完整引用，兼容同名标签。
+
+变基预览按当前 Git 的 `--merge-base` 能力选择实现，能力检测在进程内缓存。支持时继续批量重放；Git 2.38/2.39 使用临时对象库中的合成提交提供准确的共同父提交，保留原仓库的索引、文件和引用。两种实现均保持原有的取消、5 秒和 200 步检查。命令失败同时保留 stdout 的原因与 stderr 的警告，避免“没有可提交内容”等说明被无关警告盖住。
+
+相关回归位于 `crates/git/tests/common_operations.rs` 和 `crates/git/tests/flow.rs`。界面场景为 `unstage-initial`、`stage-conflict-paths`，三套主题的实际操作验证：`pnpm test:ui -- --reuse e2e/common-operations.spec.ts`；测试会单独恢复自己的场景仓库。
+
 ## 文件占用提示
 
 Git 无法替换或写入工作区文件时，命令日志会逐个列出文件和原因。Windows 能识别占用程序时显示程序名与 PID，并提示保存工作、关闭文件或退出程序、在任务管理器核对残留进程，再刷新仓库状态并继续或重试操作。无法识别程序时，提示排查占用、只读属性和写权限，避免把所有访问失败都认定为占用。说明适用于各类文件及共用 Git 执行器的操作，原始 Git 错误仍完整保留并可复制。
+
+Windows 文件删除、替换或重命名遇到短暂占用时，通过 Git for Windows 的 `GIT_ASK_YESNO` 接口，在当前命令内部最多额外重试 6 次，每次等待 500 毫秒；子命令共享次数，取消操作会结束重试进程。MinGit 未包含 `sleep` 时使用 Windows PowerShell 计时。持续占用仍显示上面的文件和进程说明，不强制结束编辑器，不重跑可能已部分写入的整条 pull、checkout 或 stash。
+
+自动贮藏保留本地删除和暂存/未暂存状态，包括“新增文件暂存后又从磁盘删除”。Git 对排除 `.fakeignore` 的空清理补丁报错时，只有核实新贮藏已生成且工作区清理完成才继续；这类文件的删除记录与待恢复贮藏一起写入 `.git/awegit`，中止或继续变基后也能恢复。远端修改与本地删除构成的真实冲突仍保留冲突和备份。回归：`pnpm test:git pull_`；界面场景：`pull-deleted`，验证 `pnpm test:ui -- --reuse e2e/pull.spec.ts`。
+
+参考：[Fork Windows 发布记录](https://git-fork.com/releasenoteswin)公开了拉取时贮藏并恢复、恢复暂存状态的行为；其记录中的 LFS 解锁和 Git 索引锁清理，与 Windows 编辑器持有的文件句柄不同。文件重试接口依据 [Git for Windows 的实现](https://github.com/git-for-windows/git/blob/main/compat/mingw.c)，不假定 Fork 会强制释放其他程序的句柄。
 
 这类重要提示在日志中使用红色边框、16px 粗体标题和 14px 正文，文件、原因及程序/PID 加粗，窄窗口中自动换行且可以滚动查看解除步骤。从顶部“文件占用 / 访问受限”提示或错误列表打开，都能看到完整说明。试验台场景：`commands-file-access`、`commands-file-access-unknown`。相关验证：`pnpm test:git locks::tests` 和上方的 `file access errors` UI 用例；Windows 程序识别测试需要可访问 Restart Manager 的正常系统权限。
 
@@ -252,12 +273,21 @@ Windows：
 pnpm package:windows
 ```
 
-脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build`。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。版本号以 `src-tauri/Cargo.toml` 为准，`node scripts/check-versions.mjs` 会核对安装包、清单和关于页。当前版本是 2.0.7：
+脚本会下载并校验 MinGit 2.56.0，放到 `src-tauri\resources\git`，然后执行 `pnpm tauri build --no-bundle` 编译，再用 `pnpm tauri bundle` 打包。打包会重新下载 WebView2 引导程序，失败时最多重试三次，避免一次网络超时让整次构建失败。编译时 `src-tauri\build.rs` 把 UTC 构建时间和 `appCode` 写进二进制，关于面板显示构建时间、应用编号（发布时与 `latest.json` 的 `appCode` 相同）、平台和 Tauri 版本；同一个版本号的两个包也能用构建时间区分。这一步自己设置 WinLibs 和 cargo 的 PATH。安装包在 `target\release\bundle`，文件名里的版本号来自 `src-tauri\tauri.conf.json`。版本号以 `src-tauri/Cargo.toml` 为准，`node scripts/check-versions.mjs` 会核对安装包、清单和关于页。当前版本是 2.0.7：
 
 - `target\release\bundle\nsis\AweGit_2.0.7_x64-setup.exe`
 - `target\release\bundle\msi\AweGit_2.0.7_x64_en-US.msi`
 
 发布到 GitHub 时，在仓库根目录双击或运行 `publish.bat`。第 1 项会把修订号加一（2.0.0 变成 2.0.1），然后打包并上传。也可以选次版本、主版本、指定版本、不改版本，或只打包不上传。
+
+发布前会列出本机可用的 `claude`、`codex`、`grok`、`cursor-agent`，选一个让 AI 把上次发布以来的提交整理成更新说明：每个用户能感知的改动一行，按新功能、体验优化、问题修复分区。选过的工具记在 `.git/awegit-release-ai`，下次默认选中。某个 CLI 失败时可以换一个，或直接改用按提交自动汇总。Markdown 写进 GitHub release，去掉标记的纯文本写进 `latest.json`；更新面板按行显示，说明较长时在面板里滚动。生成器可以单独运行：
+
+```sh
+node scripts/release-notes.mjs list
+node scripts/release-notes.mjs generate --tool codex --version 2.0.11 --md notes.md --text notes.txt
+```
+
+先在本机试用时选第 8 项：不改版本号、不上传，打包后用安装包静默替换本机已安装的 AweGit，保留原来的安装目录和卸载项。替换后用构建标记核对本机文件和刚打包的包是否一致，标记也显示在关于面板。本机没有安装、或不是用 NSIS 安装包装的，就只留下安装包。这个模式不要求工作区干净。试完没问题，再按正常流程发布。
 
 在 `feat/dev` 上发布时，脚本会先提交版本号，再切到 `release` 合并这个分支，打包上传后回到 `feat/dev`。从其他分支发布也走同一条合并路径。工作区要是干净的，并且 `gh` 已经登录。
 
@@ -277,6 +307,8 @@ pnpm package:mac
 
 ## 窗口快捷键
 
+首选项的“键盘快捷键”独立页面可搜索全部动作，点击现有按键重新录入、添加或清除组合键，也能单项或全部恢复默认。冲突会提示占用的动作，修改后立即保存到设置文件。未自定义的动作保持下表默认值；`Ctrl+P` 默认打开快速启动，应用内不再触发打印。
+
 下面是 Windows 上的按键。macOS 上，除了切换标签的 `Ctrl+Tab` 和 `Ctrl+Shift+Tab`，其余带 Ctrl 的组合改为 Command。方向键仍是上、下。`Escape` 关闭当前对话框。
 
 | 操作 | 按键 |
@@ -288,6 +320,7 @@ pnpm package:mac
 | 全部暂存或全部取消暂存 | `Ctrl+Alt+Shift+S` |
 | 丢弃修改 | `Delete`、`Ctrl+Shift+D` 或 `Backspace` |
 | 全选当前列表或差异，再按一次取消 | `Ctrl+A` |
+| 复制所选文本或路径 | `Ctrl+C` |
 | 粘贴补丁 | `Ctrl+Shift+V` |
 | 获取 | `Ctrl+Shift+F` 或 `Ctrl+Alt+Shift+F` |
 | 拉取 | `Ctrl+Shift+L` 或 `Ctrl+Alt+Shift+L` |
@@ -304,12 +337,14 @@ pnpm package:mac
 | 变更 / 历史 | `Ctrl+1` / `Ctrl+2` |
 | 当前分支 / 所有分支 | `Ctrl+Shift+A` |
 | 定位当前分支 | `Ctrl+0` |
-| 快速启动 | `Ctrl+K` |
+| 快速启动 | `Ctrl+K` 或 `Ctrl+P` |
 | 搜索提交 | `Ctrl+F` |
 | 后退 / 前进 | `Alt+Left` / `Alt+Right` |
 | 设置 | `Ctrl+,` |
 | 切换中英文 | `Ctrl+Alt+L` |
 | 在文件管理器中显示 | `Ctrl+Alt+O` |
+| 打开终端 | `Ctrl+Alt+Shift+T` |
+| 性能面板 | `Ctrl+Alt+P` |
 | 放大 / 缩小 | `Ctrl+=` / `Ctrl+-` |
 
-终端从仓库菜单打开，没有单独的快捷键。
+所有默认按键均可在首选项的“键盘快捷键”页面修改或禁用。

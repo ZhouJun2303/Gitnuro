@@ -1,4 +1,4 @@
-import type { DiffLine } from "./status";
+import type { CommitRow, DiffLine } from "./status";
 
 export const laneColors = ["#e0a106", "#3b82f6", "#16a34a", "#7c3aed", "#e11d48", "#0d9488", "#db2777", "#64748b"];
 
@@ -372,7 +372,8 @@ export function numberedDiff(lines: DiffLine[]) {
 
 export function windowSlice<T>(items: T[], scrollTop: number, rowHeight: number, limit = 80, size = 72) {
   if (items.length <= limit) return { start: 0, rows: items };
-  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 16);
+  // Filtering or refreshing can shrink the list before the browser clamps its scroll offset.
+  const start = Math.min(Math.max(0, Math.floor(scrollTop / rowHeight) - 16), Math.max(0, items.length - size));
   return { start, rows: items.slice(start, Math.min(items.length, start + size)) };
 }
 
@@ -393,7 +394,7 @@ export function wrapPrefix(rows: ReadonlyArray<{ text?: string; left?: string; r
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index];
     const units = row.left !== undefined || row.right !== undefined
-      ? visualUnits(row.left ?? "") + visualUnits(row.right ?? "")
+      ? Math.max(visualUnits(row.left ?? ""), visualUnits(row.right ?? ""))
       : visualUnits(row.text ?? "");
     prefix[index + 1] = prefix[index] + units;
   }
@@ -473,39 +474,33 @@ export function virtualSplit(rows: SplitRow[], scrollTop: number, rowHeight: num
   };
 }
 
-function mixStamp(hash: number, text: string) {
-  let value = hash >>> 0;
-  for (let index = 0; index < text.length; index += 1) value = Math.imul(value ^ text.charCodeAt(index), 16777619) >>> 0;
-  return value;
-}
-
-/** Length, id, summary, ref badges, and push flags. A matching stamp keeps the previous array. */
-export function historyStamp(rows: { id: string; summary: string; refs: string[]; unpushed?: boolean; remoteOnly?: boolean }[]) {
-  let hash = rows.length >>> 0;
-  for (const row of rows) {
-    hash = mixStamp(hash, row.id);
-    hash = mixStamp(hash, row.summary);
-    for (const ref of row.refs) hash = mixStamp(hash, ref);
-    hash = Math.imul(hash ^ (row.unpushed ? 1 : 0) ^ ((row.remoteOnly ? 1 : 0) << 1), 16777619) >>> 0;
-  }
-  return hash >>> 0;
-}
-
-export function sameHistory(left: { id: string; summary: string; refs: string[]; unpushed?: boolean; remoteOnly?: boolean }[], right: { id: string; summary: string; refs: string[]; unpushed?: boolean; remoteOnly?: boolean }[]) {
+/** Retain unchanged rows without hashing every character or losing metadata-only changes. */
+export function sameHistory(left: CommitRow[], right: CommitRow[]) {
   if (left === right) return true;
   if (left.length !== right.length) return false;
-  return historyStamp(left) === historyStamp(right);
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index], b = right[index];
+    if (a === b) continue;
+    if (a.id !== b.id || a.shortId !== b.shortId || a.summary !== b.summary
+      || a.author !== b.author || a.email !== b.email || a.at !== b.at || a.when !== b.when
+      || a.lane !== b.lane || a.unpushed !== b.unpushed || a.remoteOnly !== b.remoteOnly
+      || a.parents.length !== b.parents.length || a.refs.length !== b.refs.length
+      || a.parents.some((parent, at) => parent !== b.parents[at])
+      || a.refs.some((ref, at) => ref !== b.refs[at])) return false;
+  }
+  return true;
 }
 
 /** Coalesce scroll events so a virtual list writes state at most once per frame. */
 export function onVirtualScroll(apply: (top: number) => void) {
   let frame = 0;
+  let latest: HTMLElement;
   return (event: Event) => {
-    const node = event.currentTarget as HTMLElement;
+    latest = event.currentTarget as HTMLElement;
     if (frame) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
-      apply(node.scrollTop);
+      if (latest.isConnected) apply(latest.scrollTop);
     });
   };
 }

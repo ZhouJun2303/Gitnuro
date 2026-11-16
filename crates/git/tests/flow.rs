@@ -95,6 +95,29 @@ fn frozen_preview_keeps_the_original_head_after_the_branch_moves() {
 }
 
 #[test]
+fn preview_preserves_upstream_changes_across_multiple_replayed_trees() {
+    let repo = repo();
+    save(&repo, "note", "base\n", "base");
+    repo.git(&["branch", "upstream"]);
+    save(&repo, "note", "first\n", "first");
+    save(&repo, "note", "second\n", "second");
+    repo.git(&["checkout", "upstream"]);
+    save(&repo, "remote-only", "keep upstream\n", "upstream");
+    repo.git(&["checkout", "main"]);
+    fs::write(repo.path.join("note"), "local edit\n").unwrap();
+    let head = repo.output(&["rev-parse", "HEAD"]);
+    let index = fs::read(repo.path.join(".git/index")).unwrap();
+    let preview = flow::preview(&repo.path, "upstream", true, &[]).unwrap();
+    assert_eq!(preview.steps.len(), 2);
+    assert!(preview.steps.iter().all(|step| step.state == "clean"), "{preview:?}");
+    assert!(preview.detail.is_empty(), "{preview:?}");
+    assert_eq!(repo.output(&["rev-parse", "HEAD"]), head);
+    assert_eq!(fs::read(repo.path.join(".git/index")).unwrap(), index);
+    assert_eq!(fs::read_to_string(repo.path.join("note")).unwrap(), "local edit\n");
+    assert!(!repo.path.join("remote-only").exists());
+}
+
+#[test]
 fn custom_merge_driver_is_never_executed_by_a_preview() {
     let repo = repo();
     save(&repo, "note", "base\n", "base");

@@ -140,5 +140,26 @@ function Ensure-WebView2Bootstrapper {
 
 Ensure-WebView2Bootstrapper
 Set-Location $root
-pnpm tauri build
-Write-Host "Installer output is under target\release\bundle"
+pnpm tauri build --no-bundle
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "编译失败"
+    exit 1
+}
+
+# Bundling downloads the WebView2 bootstrapper for the MSI on every run and
+# does not retry a timed-out request, so retry only the bundle step.
+$attempts = 3
+for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+    Write-Host "打包（第 $attempt/$attempts 次）"
+    pnpm tauri bundle
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Installer output is under target\release\bundle"
+        exit 0
+    }
+    if ($attempt -lt $attempts) {
+        Write-Host "打包失败，5 秒后重试"
+        Start-Sleep -Seconds 5
+    }
+}
+Write-Host "打包失败，试了 $attempts 次"
+exit 1
