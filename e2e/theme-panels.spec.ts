@@ -104,6 +104,7 @@ for (const theme of themes) {
                 "Assets/3rd/Epic Toon FX/Demo/Demo Prefabs/VFX/Library/MainUICanvas.prefab",
                 "Assets/3rd/Epic Toon FX/Demo/Missile Prefabs/LiquidAcidOrb.prefab",
                 "src/ui.md",
+                "src/uitestThisIsAnExtremelyLongFileNameWithoutSpacesThatMustWrapEvenInANarrowWindowBecauseItCannotBeTruncated.md",
               ] } });
             }
             return route.continue();
@@ -139,7 +140,11 @@ for (const theme of themes) {
         if (item.history) await expectHistoryWeights(page, theme.name);
         if (item.remote) await expectRemoteSubject(page);
         if (item.merge) await expectMergeFrame(page, theme.name);
-        if (item.scene === "launch-files") await expectLauncherFiles(page);
+        if (item.scene === "launch-files") {
+          await expectLauncherFiles(page);
+          await page.setViewportSize({ width: 320, height: 480 });
+          await expectLauncherFiles(page);
+        }
         if (item.scene === "prefs-accounts") await expectAccountActions(page, theme.locale);
       });
     }
@@ -149,7 +154,7 @@ for (const theme of themes) {
 async function expectLauncherFiles(page: Page) {
   await page.locator(".palette-input").fill("ui");
   const buttons = page.locator(".palette-list.files button");
-  await expect(buttons).toHaveCount(5);
+  await expect(buttons).toHaveCount(6);
   const rows = await buttons.evaluateAll((nodes) => nodes.map((node) => {
     const button = node.getBoundingClientRect();
     const name = node.querySelector(".name")!;
@@ -158,23 +163,33 @@ async function expectLauncherFiles(page: Page) {
     const metaBox = meta.getBoundingClientRect();
     return {
       top: button.top, bottom: button.bottom, height: button.height,
-      nameRight: nameBox.right, metaLeft: metaBox.left, metaRight: metaBox.right,
-      right: button.right, nameWrap: getComputedStyle(name).whiteSpace,
-      metaWrap: getComputedStyle(meta).whiteSpace,
-      clipped: meta.scrollWidth > meta.clientWidth,
+      nameBottom: nameBox.bottom, metaTop: metaBox.top, metaBottom: metaBox.bottom,
+      nameWrap: getComputedStyle(name).whiteSpace, metaWrap: getComputedStyle(meta).whiteSpace,
+      nameOverflow: name.scrollWidth - name.clientWidth,
+      metaOverflow: meta.scrollWidth - meta.clientWidth,
+      nameVerticalOverflow: name.scrollHeight - nameBox.height,
+      metaVerticalOverflow: meta.scrollHeight - metaBox.height,
       title: node.getAttribute("title"), path: meta.textContent,
     };
   }));
   for (const [index, row] of rows.entries()) {
-    expect(row.height).toBe(36);
-    expect(row.nameWrap).toBe("nowrap");
-    expect(row.metaWrap).toBe("nowrap");
-    expect(row.nameRight).toBeLessThanOrEqual(row.metaLeft);
-    expect(row.metaRight).toBeLessThanOrEqual(row.right);
+    expect(row.height).toBeGreaterThanOrEqual(56);
+    expect(row.nameWrap).toBe("normal");
+    expect(row.metaWrap).toBe("normal");
+    expect(row.nameOverflow).toBeLessThanOrEqual(1);
+    expect(row.metaOverflow).toBeLessThanOrEqual(1);
+    expect(row.nameVerticalOverflow).toBeLessThanOrEqual(1);
+    expect(row.metaVerticalOverflow).toBeLessThanOrEqual(1);
+    expect(row.metaTop).toBeGreaterThanOrEqual(row.nameBottom);
+    expect(row.metaBottom).toBeLessThanOrEqual(row.bottom);
     expect(row.title).toBe(row.path);
     if (index > 0) expect(row.top).toBeGreaterThanOrEqual(rows[index - 1].bottom);
   }
-  expect(rows.some((row) => row.clipped)).toBe(true);
+  expect(rows.some((row) => row.height > 56)).toBe(true);
+  expect(await page.locator(".palette-list.files").evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+  for (let index = 1; index < 6; index++) await page.locator(".palette-input").press("ArrowDown");
+  await expect(buttons.last()).toHaveClass(/on/);
+  await expect(buttons.last()).toBeInViewport();
 }
 
 async function expectAccountActions(page: Page, locale: "zh" | "en") {

@@ -828,6 +828,8 @@
     border-top: 1px solid var(--line);
   }
 
+.palette-list.files { max-height: min(360px, calc(100dvh - 132px)); }
+
 .palette-list button {
     width: 100%;
     height: 36px;
@@ -845,16 +847,24 @@
   }
 
 .palette-list.files button {
-    display: grid;
-    grid-template-columns: minmax(0, 36%) minmax(0, 1fr);
+    height: auto;
+    min-height: 56px;
+    padding: 8px 10px;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: 2px;
   }
 
 .palette-list.files button :is(.name, .meta) {
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
+
+.palette-list.files button .meta { color: var(--text-secondary); font-size: 12px; }
 
 .palette-list button.on { background: var(--selection); }
 
