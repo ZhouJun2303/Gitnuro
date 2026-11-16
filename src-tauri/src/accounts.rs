@@ -1217,6 +1217,7 @@ fn targets_for(repo: &Path, request: &awegit_git::Mutation) -> Vec<RemoteTarget>
         | awegit_git::Mutation::Pull { .. }
         | awegit_git::Mutation::Push { remote: None, .. }
         | awegit_git::Mutation::SubmoduleUpdate
+        | awegit_git::Mutation::SubmoduleUpdatePath { .. }
         | awegit_git::Mutation::SubmoduleSync { .. }
         | awegit_git::Mutation::LfsPush
         | awegit_git::Mutation::LfsPull => all_remotes(repo),

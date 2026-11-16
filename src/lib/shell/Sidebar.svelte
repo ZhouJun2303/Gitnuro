@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { onDestroy, tick } from "svelte";
   import { getShell } from "./context";
   import "./Sidebar.css";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -15,6 +15,33 @@
   let searchMenuEl = $state<HTMLElement | null>(null);
   let sideRepo = "";
   let sideQuerySeen = "";
+  let locateTimer = 0;
+
+  function clearLocate() {
+    clearTimeout(locateTimer);
+    locateTimer = 0;
+  }
+  onDestroy(clearLocate);
+
+  function locate(event: MouseEvent, name: string) {
+    clearLocate();
+    if (event.detail > 1) return;
+    if (event.detail === 0) {
+      void shell.locateRef(name);
+      return;
+    }
+    const path = shell.repoPath();
+    const gen = shell.openGen;
+    locateTimer = window.setTimeout(() => {
+      locateTimer = 0;
+      if (gen === shell.openGen && shell.repoPath() === path) void shell.locateRef(name);
+    }, 280);
+  }
+
+  function checkout(name: string, remote?: { remote: string; branch: string }) {
+    clearLocate();
+    void shell.quickCheckout(name, remote);
+  }
 
   function searchItems() {
     return [...(searchMenuEl?.querySelectorAll<HTMLButtonElement>(".side-search-item") ?? [])];
@@ -242,7 +269,7 @@
               ...shell.commandItems("branch"),
             ])}
           >
-            <button class="file-select" type="button" title={remoteState === "missing" ? `${row.name} · ${shell.tr("chrome.localOnly")}` : row.name} onclick={(event) => { shell.sideSelected = `local:${row.name}`; if (event.ctrlKey || event.metaKey) shell.compareWith = row.name; else void shell.locateRef(row.name); }} ondblclick={() => !row.current && void shell.quickCheckout(row.name)}>
+            <button class="file-select" type="button" title={remoteState === "missing" ? `${row.name} · ${shell.tr("chrome.localOnly")}` : row.name} onclick={(event) => { clearLocate(); shell.sideSelected = `local:${row.name}`; if (event.ctrlKey || event.metaKey) shell.compareWith = row.name; else locate(event, row.name); }} ondblclick={() => !row.current && checkout(row.name)}>
               <span class="twist"></span>
               {@render glyph(row.current ? "check" : "branch")}
               {#if remoteState === "missing"}
@@ -288,7 +315,7 @@
               { label: shell.tr("menu.copyName"), run: () => shell.copyText(`${row.remote}/${row.name}`) },
             ])}
           >
-            <button class="file-select" type="button" title={`${row.remote}/${row.name}`} onclick={() => { shell.sideSelected = `remote:${row.remote}:${row.name}`; void shell.locateRef(`${row.remote}/${row.name}`); }} ondblclick={() => void shell.quickCheckout(`${row.remote}/${row.name}`, { remote: row.remote, branch: row.name })}>
+            <button class="file-select" type="button" title={`${row.remote}/${row.name}`} onclick={(event) => { shell.sideSelected = `remote:${row.remote}:${row.name}`; locate(event, `${row.remote}/${row.name}`); }} ondblclick={() => checkout(`${row.remote}/${row.name}`, { remote: row.remote, branch: row.name })}>
               <span class="twist"></span>
               {@render glyph("branch")}
               <span class="name">{row.label}</span>
@@ -302,7 +329,7 @@
             { label: shell.tr("menu.deleteRemoteTag"), disabled: shell.mode !== "live" || !shell.refs?.remotes[0], run: () => { const remote = shell.refs?.remotes[0]?.name ?? ""; shell.ask(shell.tr("menu.deleteRemoteTag"), shell.tr("dialog.deleteRemoteTagBody"), () => void shell.mutate({ action: "deleteRemoteTag", remote, name: row.name }), [], { subject: `${remote} ${row.name}`, danger: true }); } },
             { label: shell.tr("menu.copyName"), run: () => shell.copyText(row.name) },
           ])}>
-            <button class="file-select" type="button" title={row.name} onclick={() => { shell.sideSelected = `tag:${row.name}`; void shell.locateRef(row.name); }} ondblclick={() => void shell.quickCheckout(row.name)}><span class="twist"></span>{@render glyph("tag")}<span class="name">{row.label}</span></button>
+            <button class="file-select" type="button" title={row.name} onclick={(event) => { shell.sideSelected = `tag:${row.name}`; locate(event, row.name); }} ondblclick={() => checkout(row.name)}><span class="twist"></span>{@render glyph("tag")}<span class="name">{row.label}</span></button>
           </div>
         {:else if row.kind === "stash"}
           <div class="side nested" class:selected={shell.sideSelected === `stash:${row.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
@@ -319,8 +346,8 @@
           <div class="side nested" class:selected={shell.sideSelected === `submodule:${row.path}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.initialize"), disabled: shell.mode !== "live" || row.ready, run: () => shell.mutate({ action: "submoduleInit", path: row.path }) },
             { label: shell.tr("menu.openFile"), disabled: !row.ready, run: () => shell.openRepo(shell.fullPath(row.path)) },
-            { label: shell.tr("menu.sync"), disabled: shell.mode !== "live" || !row.ready, run: () => shell.mutate({ action: "submoduleSync", path: row.path }) },
-            { label: shell.tr("menu.update"), disabled: shell.mode !== "live" || !row.ready, run: () => shell.mutate({ action: "submoduleUpdate" }) },
+            { label: shell.tr("menu.sync"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "submoduleSync", path: row.path }) },
+            { label: shell.tr("menu.update"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "submoduleUpdatePath", path: row.path }) },
             { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), shell.tr("dialog.removeSubmoduleBody"), () => void shell.mutate({ action: "submoduleRemove", path: row.path }), [], { subject: row.path, danger: true }) },
           ])}>
             <button class="file-select" type="button" title={row.path} onclick={() => (shell.sideSelected = `submodule:${row.path}`)} ondblclick={() => row.ready && shell.openRepo(shell.fullPath(row.path))}><span class="twist"></span>{@render glyph("submodule")}<span class="name">{row.path}</span></button>
@@ -432,7 +459,7 @@
             { label: shell.tr("menu.deleteRemoteTag"), disabled: shell.mode !== "live" || !shell.refs?.remotes[0], run: () => { const remote = shell.refs?.remotes[0]?.name ?? ""; shell.ask(shell.tr("menu.deleteRemoteTag"), shell.tr("dialog.deleteRemoteTagBody"), () => void shell.mutate({ action: "deleteRemoteTag", remote, name: tag.name }), [], { subject: `${remote} ${tag.name}`, danger: true }); } },
             { label: shell.tr("menu.copyName"), run: () => shell.copyText(tag.name) },
           ])}>
-            <button class="file-select" type="button" title={tag.name} onclick={() => { shell.sideSelected = `tag:${tag.name}`; void shell.locateRef(tag.name); }} ondblclick={() => void shell.quickCheckout(tag.name)}><span class="twist"></span>{@render glyph("tag")}<span class="name">{group ? tag.name.slice(group.length + 1) : tag.name}</span></button>
+            <button class="file-select" type="button" title={tag.name} onclick={(event) => { shell.sideSelected = `tag:${tag.name}`; locate(event, tag.name); }} ondblclick={() => checkout(tag.name)}><span class="twist"></span>{@render glyph("tag")}<span class="name">{group ? tag.name.slice(group.length + 1) : tag.name}</span></button>
           </div>
           {/if}
         {/each}
@@ -463,8 +490,8 @@
           <div class="side nested" class:selected={shell.sideSelected === `submodule:${row.path}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.initialize"), disabled: shell.mode !== "live" || row.ready, run: () => shell.mutate({ action: "submoduleInit", path: row.path }) },
             { label: shell.tr("menu.openFile"), disabled: !row.ready, run: () => shell.openRepo(shell.fullPath(row.path)) },
-            { label: shell.tr("menu.sync"), disabled: shell.mode !== "live" || !row.ready, run: () => shell.mutate({ action: "submoduleSync", path: row.path }) },
-            { label: shell.tr("menu.update"), disabled: shell.mode !== "live" || !row.ready, run: () => shell.mutate({ action: "submoduleUpdate" }) },
+            { label: shell.tr("menu.sync"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "submoduleSync", path: row.path }) },
+            { label: shell.tr("menu.update"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "submoduleUpdatePath", path: row.path }) },
             { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), shell.tr("dialog.removeSubmoduleBody"), () => void shell.mutate({ action: "submoduleRemove", path: row.path }), [], { subject: row.path, danger: true }) },
           ])}>
             <button class="file-select" type="button" title={row.path} onclick={() => (shell.sideSelected = `submodule:${row.path}`)} ondblclick={() => row.ready && shell.openRepo(shell.fullPath(row.path))}><span class="twist"></span>{@render glyph("submodule")}<span class="name">{row.path}</span></button>

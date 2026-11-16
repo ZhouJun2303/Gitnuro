@@ -427,6 +427,7 @@ export type Messages = {
     restoreFileBody: string;
     discardBody: string;
     discardFilesBody: string;
+    discardSubmoduleBody: string;
     fileCount: string;
     discardLinesBody: string;
     deleteBody: string;
@@ -776,6 +777,8 @@ export type Messages = {
     forceWithLease: string;
     checkoutAfter: string;
     includeUntracked: string;
+    autostashIncludeUntracked: string;
+    autostashIncludeUntrackedHint: string;
     ignoreSpace: string;
     flowKind: string;
     privateRepo: string;

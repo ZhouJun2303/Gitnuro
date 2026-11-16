@@ -349,6 +349,9 @@ pub enum Mutation {
         path: String,
     },
     SubmoduleUpdate,
+    SubmoduleUpdatePath {
+        path: String,
+    },
     SubmoduleAdd {
         url: String,
         path: String,
@@ -689,9 +692,8 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             tags,
         } => fetch(repo, remote, prune, tags),
         Mutation::Pull { rebase, autostash } => {
-            let label = if rebase { "pull --rebase" } else { "pull" };
             if autostash {
-                with_autostash(repo, label, || pull(repo, rebase))
+                pull_autostashed(repo, rebase, None)
             } else {
                 pull(repo, rebase)
             }
@@ -941,9 +943,8 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             rebase,
             autostash,
         } => {
-            let label = format!("pull {remote}/{branch}");
             if autostash {
-                with_autostash(repo, &label, || pull_ref(repo, &remote, &branch, rebase))
+                pull_autostashed(repo, rebase, Some((&remote, &branch)))
             } else {
                 pull_ref(repo, &remote, &branch, rebase)
             }
@@ -975,6 +976,10 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::SubmoduleUpdate => {
             run(repo, &["submodule", "update", "--init", "--recursive"]).map(|_| ())
         }
+        Mutation::SubmoduleUpdatePath { path } => run(
+            repo,
+            &["submodule", "update", "--init", "--recursive", "--", check_path(&path)?],
+        ).map(|_| ()),
         Mutation::SubmoduleAdd { url, path } => run(
             repo,
             &["submodule", "add", check_url(&url)?, check_path(&path)?],
@@ -982,7 +987,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         .map(|_| ()),
         Mutation::SubmoduleInit { path } => run(
             repo,
-            &["submodule", "update", "--init", "--", check_path(&path)?],
+            &["submodule", "update", "--init", "--recursive", "--", check_path(&path)?],
         )
         .map(|_| ()),
         Mutation::SubmoduleSync { path } => {
@@ -1060,6 +1065,48 @@ fn pull(repo: &Path, rebase: bool) -> Result<(), Error> {
             AuthorMode::Both
         },
     ))
+}
+
+fn pull_autostashed(repo: &Path, rebase: bool, explicit: Option<(&str, &str)>) -> Result<(), Error> {
+    autostash::settle_before(repo)?;
+    let label = explicit.map(|(remote, branch)| format!("pull {remote}/{branch}"))
+        .unwrap_or_else(|| if rebase { "pull --rebase" } else { "pull" }.into());
+    if let Some(prepared) = crate::pull::prepare(repo, explicit) {
+        {
+            let _phase = crate::timing_phase("pull-fetch");
+            // Match native pull's fetch scope; fetch --all would contact unrelated remotes.
+            let mut args = vec!["fetch", "--update-head-ok"];
+            if explicit.is_some() { args.extend([prepared.remote.as_str(), prepared.remote_branch.as_str()]); }
+            surface(run(repo, &args).map(|_| ()))?;
+        }
+        if let Some(target) = prepared.target(repo) {
+            if target == prepared.head {
+                crate::flow::emit(crate::flow::Event {
+                    key: "pull-up-to-date".into(), kind: "integration".into(), state: "completed".into(),
+                    detail: "already-up-to-date".into(), ..Default::default()
+                });
+                return Ok(());
+            }
+            if is_ancestor(repo, &prepared.head, &target) {
+                return with_autostash(repo, &label, || {
+                    let _phase = crate::timing_phase("pull-integrate");
+                    surface(with_editor_mode(repo, &["merge", "--ff-only", "--no-autostash", &target],
+                        if rebase { AuthorMode::CommitterOnly } else { AuthorMode::Both }))
+                });
+            }
+        }
+        // Remote history can be rewritten while fetching. Keep native fork-point
+        // and policy handling on this exceptional path, including its own fetch.
+        let _phase = crate::timing_phase("pull-native-fallback");
+        return with_autostash(repo, &label, || match explicit {
+            Some((remote, branch)) => pull_ref(repo, remote, branch, rebase),
+            None => pull(repo, rebase),
+        });
+    }
+    with_autostash(repo, &label, || match explicit {
+        Some((remote, branch)) => pull_ref(repo, remote, branch, rebase),
+        None => pull(repo, rebase),
+    })
 }
 
 fn push(
@@ -1851,6 +1898,7 @@ fn discard(repo: &Path, file: &str) -> Result<(), Error> {
                 "restore",
                 "--worktree",
                 "--source=HEAD",
+                "--recurse-submodules",
                 "--",
                 file,
             ],
@@ -1891,7 +1939,7 @@ fn discard_paths(repo: &Path, files: &[String]) -> Result<(), Error> {
     }
     git_arg_paths(
         repo,
-        &["restore", "--worktree", "--source=HEAD", "--"],
+        &["restore", "--worktree", "--source=HEAD", "--recurse-submodules", "--"],
         &restore,
     )?;
     git_arg_paths(repo, &["rm", "-f", "--"], &remove_index)?;
@@ -1954,10 +2002,35 @@ fn paths_in_head(repo: &Path, paths: &[String]) -> Result<HashSet<String>, Error
     };
     let text = String::from_utf8_lossy(&output.stdout);
     let mut found = HashSet::new();
+    let mut unresolved = Vec::new();
     for (path, line) in paths.iter().zip(text.lines()) {
         let kind = line.split_whitespace().nth(1);
         if kind == Some("blob") || kind == Some("commit") {
             found.insert(path.clone());
+        } else {
+            unresolved.push(path.clone());
+        }
+    }
+    // A gitlink names a commit stored in the submodule, not the superproject.
+    // cat-file reports it missing even though the HEAD tree tracks the path.
+    for chunk in unresolved.chunks(40) {
+        let mut args = vec!["--literal-pathspecs", "ls-tree", "-z", "HEAD", "--"];
+        args.extend(chunk.iter().map(String::as_str));
+        let output = match run(repo, &args) {
+            Ok(output) => output,
+            Err(_) if run(repo, &["rev-parse", "--verify", "HEAD"]).is_err() => return Ok(found),
+            Err(error) => return Err(error),
+        };
+        for record in output.stdout.split(|byte| *byte == 0) {
+            let Some(tab) = record.iter().position(|byte| *byte == b'\t') else { continue };
+            let (meta, path) = record.split_at(tab);
+            let path = &path[1..];
+            if meta.starts_with(b"160000 commit ") {
+                let path = String::from_utf8_lossy(path).to_string();
+                if chunk.iter().any(|candidate| slash(candidate) == path) {
+                    found.insert(path);
+                }
+            }
         }
     }
     Ok(found)

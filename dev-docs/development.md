@@ -134,7 +134,7 @@ pnpm test:ui -- --reuse e2e/merge-layout.spec.ts
 
 试验台用浏览器看界面：`pnpm dev`，默认在 http://localhost:1420 。场景清单在 `src/lib/lab/scenes.ts`，新弹窗必须记入，否则 `pnpm check` 会失败。`.lab/` 不提交，种子脚本 `scripts/lab-seed.mjs` 和场景清单要提交。
 
-用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts` 和 `pnpm test:ui -- --reuse e2e/theme-panels.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。当前是 161 个场景、三种主题共 483 项。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
+用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts` 和 `pnpm test:ui -- --reuse e2e/theme-panels.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。当前是 162 个场景、三种主题共 486 项。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
 
 改了页面、弹窗或其中的面板后，相关界面要在三套主题下都测到：Apple Liquid Glass（`apple`）、经典白色（`light`）、VS Code 黑色（`dark`）。场景检查按主题分组，`--grep` 场景名会把三组一起跑到，例如 `pnpm test:ui -- --reuse e2e/scenes.spec.ts --grep "scene history$"`。面板是否还在，以及主题合同，在 `e2e/theme-panels.spec.ts`：Apple 选中提交的字重是 500，未选中的本地提交是 400、已推送提交是 600；独立合并窗在 Apple 下每边内收 10px，另外两套主题铺满窗口；Apple 侧栏圆角 20、偏好设置弹窗圆角 24，经典白色弹窗圆角 14，VS Code 黑色弹窗圆角 8。用面板名而不是主题名做 `--grep`，三套主题会一起跑：
 
@@ -177,6 +177,15 @@ pnpm perf:backend --release --writes --manifest=.lab/performance/run-实际目�
 
 `--writes` 仅在生成的仓库测量本地远端拉取：每次在计时外恢复相同基线，分别测量干净、少量混合改动、大量未跟踪文件，并核对 HEAD、暂存/未暂存内容、未跟踪文件和贮藏恢复。此计时覆盖核心 Git 操作，不包含桌面日志、流程记录和界面刷新。
 
+空拉取专项使用 `--pull-only`，替代普通读取和 `--writes` 基准。`--modified=N` 指定本地修改的已跟踪文件数（默认 100，至少 1，不超过已跟踪总数）；未跟踪场景也包含这些本地修改。矩阵分别覆盖无更新/有更新、干净/本地修改/再加未跟踪文件、自动贮藏包含未跟踪文件的开关，以及核心 `perform` 和完整 `mutate`。后者包含流程记录、日志处理和最终状态读取，不包含桌面 IPC 与前端刷新。每项预热一次，再保留原始样本和 p50/p95/最大值；准备、还原及内容核对不计时。
+
+```powershell
+pnpm perf:seed --tracked=1000 --modified=100 --untracked=1000 --history=0 --conflicts=1
+pnpm perf:backend --release --pull-only --samples=30 --manifest=.lab/performance/run-实际目录/manifest.json
+```
+
+对照旧实现时，在旧代码加入相同基准入口并编译后，把应用测试可执行文件另存为 `target/release/deps/baseline_pull.exe`，保留在原目录以便 Windows 找到运行库。新实现同样保留为 `optimized_pull.exe`，通过 `node scripts/with-rust-path.mjs node scripts/perf-bench.mjs --release --pull-only --samples=30 --manifest=... --executable=target/release/deps/baseline_pull.exe` 选择二进制；优化后换用对应文件。JSON 中的 revision 是启动器当前工作区版本，另需记录二进制对应的源码基线；失败或空结果不参与比较。同一数据集按顺序运行，避免还原与计时相互干扰。
+
 10 万文件的数据集可显式减少样本，结果中保留实际样本数：
 
 ```powershell
@@ -192,7 +201,7 @@ node scripts/with-rust-path.mjs cargo test -p awegit --lib flows::tests::backend
 
 后端优化完成后运行上方“测试”部分的类型检查与完整功能回归。
 
-当前 Windows 环境中，原有 `locks::tests::writes_name_the_process_and_explain_how_to_release_the_file` 无法稳定识别占用进程或遇到 Git unlink 返回异常；原始代码在沙箱内外也已复现。保留失败记录后，可显式跳过它补查其他测试，不能据此宣称全量通过：
+Windows 上，`locks::tests::writes_name_the_process_and_explain_how_to_release_the_file` 需要系统进程查询权限；沙箱内可能无法识别占用进程或遇到 Git unlink 返回异常。2026-11-16 完整回归在正常系统权限下通过。遇到环境失败先保留原始记录并检查权限；必要时可显式跳过它补查其他测试，跳过不能据此宣称全量通过：
 
 ```powershell
 node scripts/with-rust-path.mjs cargo test -p awegit-git --offline --no-fail-fast -- --test-threads=1 --skip writes_name_the_process_and_explain_how_to_release_the_file
@@ -214,6 +223,24 @@ pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.
 变基预览按当前 Git 的 `--merge-base` 能力选择实现，能力检测在进程内缓存。支持时继续批量重放；Git 2.38/2.39 使用临时对象库中的合成提交提供准确的共同父提交，保留原仓库的索引、文件和引用。两种实现均保持原有的取消、5 秒和 200 步检查。命令失败同时保留 stdout 的原因与 stderr 的警告，避免“没有可提交内容”等说明被无关警告盖住。
 
 相关回归位于 `crates/git/tests/common_operations.rs` 和 `crates/git/tests/flow.rs`。界面场景为 `unstage-initial`、`stage-conflict-paths`，三套主题的实际操作验证：`pnpm test:ui -- --reuse e2e/common-operations.spec.ts`；测试会单独恢复自己的场景仓库。
+
+## 检出与命令记录
+
+双击本地、远程分支和右键检出统一调用一次后端写操作。后端保存本地修改，按贮藏提交 ID 恢复暂存与未暂存内容；前端不再额外执行 `stash push` 或固定弹出 `stash@{0}`。鼠标单击延后 280ms 定位历史，双击取消该定位并使旧定位失效，避免先读取两次历史再等待检出；键盘定位立即执行。重复双击沿用前台写操作保护，不会再保存或弹出另一份贮藏。
+
+设置 → Git → 贮藏中的“自动贮藏包含未跟踪文件”（`autostashIncludeUntracked`）默认关闭，旧设置未包含该字段时也按关闭处理。关闭时只保存已跟踪的暂存与工作区修改，保护检查跳过未跟踪目录遍历；未跟踪文件留在原地，只有这类文件时不创建自动贮藏。已 `git add` 的新文件属于暂存内容，仍会保存。未跟踪文件与目标分支路径重名时，由 Git 阻止覆盖并报告原因，原有暂存/未暂存内容恢复。开启后自动贮藏添加 `--include-untracked`，仍排除未跟踪的根 `.fakeignore` 和被 Git 忽略的未跟踪文件。该开关适用于检出、Pull、合并、变基等自动保护流程，与手动贮藏的“包含未跟踪文件”设置独立；恢复已有贮藏时始终按原备份内容处理。
+
+切换、合并或拉取后，若 `stash apply --index` 明确报 `conflicts in index. Try without --index.`，说明原暂存补丁与新基线不兼容。此时按 Git 的提示合并贮藏内容到工作区，保留原贮藏中的暂存内容；真实冲突保留冲突文件并恢复其余文件。其他恢复错误不重跑可能已部分写入的命令，并保留待恢复标记。正常恢复仍保持暂存/未暂存划分，恢复失败不删除备份。
+
+命令记录把本次写请求中实际启动的 Git 命令逐条加粗，包含参数、毫秒耗时和退出码，也记录没有输出的命令和失败前已执行的步骤。准备及收尾查询与写命令按执行顺序展示；认证注入参数不进入命令文本，返回日志继续脱敏。Git 命令耗时不包含命令退出后的流程记录处理。记录末尾的 `backend` 包含后端排队、Git 操作、流程记录和状态读取，`refresh` 是返回后到界面刷新完成的等待，`wait` 是前端等待写操作的时间，`total` 是这几段的总等待；Git 时间包含在 `backend` 中，不重复相加。
+
+开启自动贮藏的常规拉取先执行一次 `git fetch --update-head-ok`。当前分支与原跟踪分支一致、上游和配置符合条件时，以本次 `FETCH_HEAD` 判断更新：目标仍是 HEAD 就直接完成，不检查/保存/恢复本地修改，也不启动整合预览；快进才保护修改并执行 `git merge --ff-only --no-autostash <目标>`。分叉、本地领先、浅仓库、子模块、附加工作树、特殊 refspec、`fetch.all`、no-ff/签名/策略设置等保留原生 `git pull --no-autostash --rebase` 或 `--no-rebase`。获取后发现上游历史重写或配置变化也回退原生 pull，异常路径可能再获取一次。获取失败直接返回，不先贮藏本地内容。
+
+拉取返回前始终重新读取工作区状态；仅当 HEAD、全部 refs、配置与工作树元数据都没变化时，前端复用分支和历史，仍刷新当前差异。标签变化或无法可靠比较时完整刷新。启动自动获取延后 1 秒，在空闲时执行；打开拉取框或明确获取/拉取会取消尚未开始的定时任务，后台获取也会避开前台写入和拉取框。已经开始的获取仍按仓库排队，网络等待单独观察。
+
+空拉取回归：`crates/git/tests/pull.rs` 覆盖索引字节及时间不变、暂存/未暂存和删除状态、已有贮藏、两种模式与开关、单次获取、快进、获取失败和原生回退；`pull-noop` 场景包含 1000 个新文件。运行 `pnpm test:ui -- --reuse e2e/pull.spec.ts e2e/performance-refresh.spec.ts` 验证三套主题、无重复状态/分支/历史请求、自动获取取消与外部变化处理。
+
+回归：`crates/git/tests/checkout.rs` 覆盖暂存补丁不兼容、合并后的真实冲突、两种 pull 模式、检出失败、未跟踪文件恢复受阻及自动贮藏范围开关；`capture_logs_empty_commands_and_failures_with_arguments_and_time` 覆盖无输出和失败命令记录。界面场景为 `checkout-dirty`、`checkout-index`、`checkout-conflict`、`prefs-autostash`；Apple、经典白色和 VS Code 黑色验证：`pnpm test:ui -- --reuse e2e/autostash-settings.spec.ts e2e/checkout.spec.ts e2e/pull.spec.ts`。
 
 ## 文件占用提示
 

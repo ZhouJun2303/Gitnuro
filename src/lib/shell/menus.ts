@@ -343,7 +343,7 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
       {
         label: shell.tr("menu.discard"),
         disabled: locked || !file,
-        run: () => shell.ask(shell.tr("menu.discard"), shell.tr("dialog.discardBody"), () => void shell.mutate({ action: "discard", file }), [], { subject: file ?? "", danger: true }),
+        run: () => shell.discardChosen(file ? [file] : []),
       },
     );
     items.push({ sep: true, label: "" });

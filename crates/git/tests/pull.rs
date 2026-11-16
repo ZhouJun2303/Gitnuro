@@ -51,6 +51,152 @@ fn pull(local: &TempRepo, rebase: bool, explicit: bool) -> Result<String, awegit
 }
 
 #[test]
+fn noop_pull_leaves_the_index_worktree_and_existing_stash_untouched() {
+    for include in [false, true] {
+        awegit_git::configure(awegit_git::Session { autostash_include_untracked: include, ..Default::default() });
+        for rebase in [false, true] {
+            for explicit in [false, true] {
+                let (_upstream, local) = pair();
+                fs::write(local.path.join("keep.txt"), "older stash\n").unwrap();
+                local.git(&["stash", "push", "-m", "user backup"]);
+                fs::write(local.path.join("keep.txt"), "staged\n").unwrap();
+                local.git(&["add", "keep.txt"]);
+                fs::write(local.path.join("keep.txt"), "working\n").unwrap();
+                fs::remove_file(local.path.join("deleted.txt")).unwrap();
+                fs::write(local.path.join("new.txt"), "staged addition\n").unwrap();
+                local.git(&["add", "new.txt"]);
+                fs::remove_file(local.path.join("new.txt")).unwrap();
+                fs::write(local.path.join(".fakeignore"), "local-only\n").unwrap();
+                fs::create_dir(local.path.join("loose")).unwrap();
+                for index in 0..100 { fs::write(local.path.join(format!("loose/{index}.txt")), "untracked\n").unwrap(); }
+                let status = local.output(&["status", "--porcelain", "-z"]);
+                let index = fs::read(local.path.join(".git/index")).unwrap();
+                let index_time = fs::metadata(local.path.join(".git/index")).unwrap().modified().unwrap();
+                let file_time = fs::metadata(local.path.join("keep.txt")).unwrap().modified().unwrap();
+                let stash = local.output(&["rev-parse", "refs/stash"]);
+                let (result, log) = awegit_git::capture_output(|| pull(&local, rebase, explicit));
+                result.unwrap();
+                assert_eq!(fs::read(local.path.join(".git/index")).unwrap(), index);
+                assert_eq!(fs::metadata(local.path.join(".git/index")).unwrap().modified().unwrap(), index_time);
+                assert_eq!(fs::metadata(local.path.join("keep.txt")).unwrap().modified().unwrap(), file_time);
+                assert_eq!(local.output(&["status", "--porcelain", "-z"]), status);
+                assert_eq!(local.output(&["rev-parse", "refs/stash"]), stash);
+                assert_eq!(log.lines().filter(|line| line.starts_with("$ git fetch ")).count(), 1, "{log}");
+                assert!(!log.contains("$ git stash ") && !log.contains("$ git pull ") && !log.contains("$ git merge "), "{log}");
+                assert!(!local.path.join(".git/awegit").exists());
+            }
+        }
+    }
+    awegit_git::configure(awegit_git::Session::default());
+}
+
+#[test]
+fn fast_forward_pull_fetches_once_and_restores_local_changes() {
+    for rebase in [false, true] {
+        let (upstream, local) = pair();
+        fs::write(upstream.path.join("remote.txt"), "incoming\n").unwrap();
+        upstream.git(&["commit", "-am", "incoming"]);
+        fs::write(local.path.join("keep.txt"), "staged\n").unwrap();
+        local.git(&["add", "keep.txt"]);
+        fs::write(local.path.join("keep.txt"), "working\n").unwrap();
+        let (result, log) = awegit_git::capture_output(|| pull(&local, rebase, true));
+        result.unwrap();
+        assert_eq!(local.output(&["show", ":keep.txt"]), "staged\n");
+        assert_eq!(fs::read_to_string(local.path.join("keep.txt")).unwrap(), "working\n");
+        assert_eq!(local.output(&["rev-parse", "HEAD"]), upstream.output(&["rev-parse", "HEAD"]));
+        assert_eq!(log.lines().filter(|line| line.starts_with("$ git fetch ")).count(), 1, "{log}");
+        assert!(log.contains("$ git merge --ff-only --no-autostash"), "{log}");
+        assert!(!log.contains("$ git pull "), "{log}");
+    }
+}
+
+#[test]
+fn pull_fetch_failure_does_not_stash_or_rewrite_local_files() {
+    let (_upstream, local) = pair();
+    fs::write(local.path.join("keep.txt"), "local\n").unwrap();
+    local.git(&["remote", "set-url", "origin", "missing-remote"]);
+    let (result, log) = awegit_git::capture_output(|| pull(&local, true, false));
+    assert!(result.is_err());
+    assert!(!log.contains("$ git stash "), "{log}");
+    assert_eq!(fs::read_to_string(local.path.join("keep.txt")).unwrap(), "local\n");
+    assert!(local.output(&["stash", "list"]).is_empty());
+}
+
+#[test]
+fn pull_preserves_no_ff_configuration_and_rewritten_upstream_semantics() {
+    let (upstream, local) = pair();
+    local.git(&["config", "pull.ff", "false"]);
+    fs::write(upstream.path.join("remote.txt"), "incoming\n").unwrap();
+    upstream.git(&["commit", "-am", "incoming"]);
+    pull(&local, false, false).unwrap();
+    assert_eq!(local.output(&["show", "-s", "--format=%P", "HEAD"]).split_whitespace().count(), 2);
+
+    let (upstream, local) = pair();
+    upstream.git(&["checkout", "--orphan", "rewritten"]);
+    upstream.git(&["commit", "-am", "rewritten root"]);
+    upstream.git(&["branch", "-f", "main", "HEAD"]);
+    fs::write(local.path.join("keep.txt"), "local\n").unwrap();
+    pull(&local, true, false).unwrap();
+    assert_eq!(local.output(&["rev-parse", "HEAD"]), upstream.output(&["rev-parse", "main"]));
+    assert_eq!(fs::read_to_string(local.path.join("keep.txt")).unwrap(), "local\n");
+}
+
+#[test]
+fn pull_preserves_worktree_when_fetch_all_can_update_the_current_branch() {
+    let (upstream, local) = pair();
+    fs::write(upstream.path.join("remote.txt"), "incoming\n").unwrap();
+    upstream.git(&["commit", "-am", "incoming"]);
+    local.git(&["remote", "add", "extra", upstream.path.to_str().unwrap()]);
+    local.git(&["config", "remote.extra.fetch", "+refs/heads/main:refs/heads/main"]);
+    local.git(&["config", "fetch.all", "true"]);
+    fs::write(local.path.join("keep.txt"), "staged\n").unwrap();
+    local.git(&["add", "keep.txt"]);
+    fs::write(local.path.join("keep.txt"), "working\n").unwrap();
+
+    let (result, log) = awegit_git::capture_output(|| pull(&local, true, false));
+    result.unwrap();
+
+    assert_eq!(fs::read_to_string(local.path.join("remote.txt")).unwrap(), "incoming\n");
+    assert_eq!(fs::read_to_string(local.path.join("keep.txt")).unwrap(), "working\n");
+    assert_eq!(local.output(&["show", ":keep.txt"]), "staged\n");
+    assert_eq!(local.output(&["rev-parse", "HEAD"]), upstream.output(&["rev-parse", "HEAD"]));
+    assert!(local.output(&["stash", "list"]).is_empty());
+    assert!(log.contains("$ git pull "), "{log}");
+}
+
+#[test]
+fn pull_refresh_state_detects_tags_configuration_and_worktrees() {
+    let (_upstream, local) = pair();
+    let state = awegit_git::pull_refresh_state(&local.path);
+    assert!(state.is_some());
+    assert!(state == awegit_git::pull_refresh_state(&local.path));
+    local.git(&["tag", "new-tag"]);
+    assert!(state != awegit_git::pull_refresh_state(&local.path));
+    let state = awegit_git::pull_refresh_state(&local.path);
+    local.git(&["config", "signoff.enabled", "true"]);
+    assert!(state != awegit_git::pull_refresh_state(&local.path));
+    let state = awegit_git::pull_refresh_state(&local.path);
+    let worktree = local.path.join("another-worktree");
+    local.git(&["worktree", "add", "--detach", worktree.to_str().unwrap()]);
+    assert!(state != awegit_git::pull_refresh_state(&local.path));
+    fs::write(local.path.join(".gitmodules"), "[submodule \"module\"]\npath = module\n").unwrap();
+    assert!(awegit_git::pull_refresh_state(&local.path).is_none());
+}
+
+#[test]
+fn noop_pull_records_completion_without_local_save_or_preview_events() {
+    let (_upstream, local) = pair();
+    fs::write(local.path.join("keep.txt"), "working\n").unwrap();
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = events.clone();
+    awegit_git::flow::observe(std::sync::Arc::new(move |event| observed.lock().unwrap().push(event)), || pull(&local, true, false).unwrap());
+    let events = events.lock().unwrap();
+    assert!(events.iter().any(|event| event.kind == "fetch" && event.state == "completed"));
+    assert!(events.iter().any(|event| event.detail == "already-up-to-date" && event.state == "completed"));
+    assert!(!events.iter().any(|event| matches!(event.kind.as_str(), "local-saved" | "local-restore" | "preview" | "merge" | "rebase")));
+}
+
+#[test]
 fn pull_preserves_local_deletions_and_the_index_with_fakeignore() {
     for rebase in [false, true] {
         for staged in [false, true] {

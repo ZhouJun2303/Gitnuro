@@ -881,6 +881,85 @@ fn submodule_and_worktree() {
 }
 
 #[test]
+fn discard_submodule_restores_checkout_without_touching_other_submodules() {
+    let lib = repo();
+    commit_file(&lib, "lib.txt", "first\n", "first");
+    let app = repo();
+    commit_file(&app, "app.txt", "original\n", "app");
+    let url = file_url(&lib.path);
+    for name in ["vendor", "other"] {
+        app.git(&["-c", "protocol.file.allow=always", "submodule", "add", &url, name]);
+    }
+    app.git(&["commit", "-m", "add submodules"]);
+    let original = app.output(&["rev-parse", "HEAD:vendor"]);
+    let vendor = app.path.join("vendor");
+    let other = app.path.join("other");
+    fs::write(vendor.join("lib.txt"), "second\n").unwrap();
+    git_at(&vendor, &["add", "lib.txt"]);
+    git_at(&vendor, &["-c", "core.hooksPath=.git/no-hooks", "commit", "-m", "second"]);
+    fs::write(vendor.join("local-only.txt"), "keep\n").unwrap();
+    fs::write(other.join("lib.txt"), "keep this edit\n").unwrap();
+
+    perform(&app.path, Mutation::Discard { file: "vendor".into() }).unwrap();
+    assert_eq!(git_at(&vendor, &["rev-parse", "HEAD"]).trim(), original.trim());
+    assert_eq!(fs::read_to_string(vendor.join("lib.txt")).unwrap().replace("\r\n", "\n"), "first\n");
+    assert_eq!(fs::read_to_string(vendor.join("local-only.txt")).unwrap(), "keep\n");
+    assert_eq!(fs::read_to_string(other.join("lib.txt")).unwrap(), "keep this edit\n");
+}
+
+#[test]
+fn discard_paths_restores_submodule_and_regular_file_together() {
+    let lib = repo();
+    commit_file(&lib, "lib.txt", "first\n", "first");
+    let app = repo();
+    commit_file(&app, "app.txt", "original\n", "app");
+    app.git(&["-c", "protocol.file.allow=always", "submodule", "add", &file_url(&lib.path), "vendor"]);
+    app.git(&["commit", "-m", "add submodule"]);
+    let vendor = app.path.join("vendor");
+    fs::write(vendor.join("lib.txt"), "edited\n").unwrap();
+    fs::write(app.path.join("app.txt"), "edited\n").unwrap();
+
+    perform(&app.path, Mutation::DiscardPaths { files: vec!["vendor".into(), "app.txt".into()] }).unwrap();
+    assert_eq!(fs::read_to_string(vendor.join("lib.txt")).unwrap().replace("\r\n", "\n"), "first\n");
+    assert_eq!(fs::read_to_string(app.path.join("app.txt")).unwrap(), "original\n");
+    let after = status(&app.path).unwrap();
+    assert!(after.unstaged.is_empty(), "{after:?}");
+}
+
+#[test]
+fn update_one_submodule_leaves_the_other_at_its_current_commit() {
+    let lib = repo();
+    commit_file(&lib, "lib.txt", "first\n", "first");
+    let app = repo();
+    commit_file(&app, "app.txt", "app\n", "app");
+    let url = file_url(&lib.path);
+    for name in ["vendor", "other"] {
+        app.git(&["-c", "protocol.file.allow=always", "submodule", "add", &url, name]);
+    }
+    app.git(&["commit", "-m", "add submodules"]);
+    let original = app.output(&["rev-parse", "HEAD:vendor"]);
+    for name in ["vendor", "other"] {
+        let checkout = app.path.join(name);
+        fs::write(checkout.join("lib.txt"), "second\n").unwrap();
+        git_at(&checkout, &["add", "lib.txt"]);
+        git_at(&checkout, &["-c", "core.hooksPath=.git/no-hooks", "commit", "-m", "second"]);
+    }
+    let other = git_at(&app.path.join("other"), &["rev-parse", "HEAD"]);
+
+    perform(&app.path, Mutation::SubmoduleUpdatePath { path: "vendor".into() }).unwrap();
+    assert_eq!(git_at(&app.path.join("vendor"), &["rev-parse", "HEAD"]).trim(), original.trim());
+    assert_eq!(git_at(&app.path.join("other"), &["rev-parse", "HEAD"]), other);
+}
+
+#[test]
+fn discard_paths_in_unborn_repository_still_removes_untracked_files() {
+    let app = repo();
+    fs::write(app.path.join("new.txt"), "untracked\n").unwrap();
+    perform(&app.path, Mutation::DiscardPaths { files: vec!["new.txt".into()] }).unwrap();
+    assert!(!app.path.join("new.txt").exists());
+}
+
+#[test]
 fn git_flow_start_and_finish() {
     let repo = repo();
     commit_file(&repo, "a.txt", "a\n", "base");

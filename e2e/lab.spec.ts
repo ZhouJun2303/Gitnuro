@@ -3,7 +3,7 @@ import { appendFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { scenes } from "../src/lib/lab/scenes";
-import { openLabScene, openScene } from "./helpers";
+import { openLabScene, openScene, pinLabSettings } from "./helpers";
 
 async function lab(cmd: string, args: Record<string, unknown> = {}) {
   const response = await fetch("http://127.0.0.1:1429/invoke", {
@@ -746,6 +746,23 @@ test("discard opened with Delete focuses the confirm button", async ({ page }) =
   await expect(confirm.locator(".commit")).toBeFocused();
   expect(await confirm.locator(".commit").evaluate((node) => node.matches(":focus-visible"))).toBe(true);
 });
+
+for (const theme of ["apple", "light", "dark"]) {
+  test(`submodule menu updates one path and allows uninitialized entries (${theme})`, async ({ page }) => {
+    await pinLabSettings(page, { theme });
+    await openLabScene(page, "submodule", ".sidebar .side.nested", { locale: "en" });
+    const menu = page.locator('[data-layer="menu"]');
+    await page.locator('.sidebar .side.nested:has(button[title="vendor"])').last().click({ button: "right" });
+    await expect(menu.getByRole("menuitem", { name: "Update", exact: true })).toBeEnabled();
+    await expect(menu.getByRole("menuitem", { name: "Initialize", exact: true })).toBeDisabled();
+    await page.keyboard.press("Escape");
+    await page.locator(".sidebar .side-filter input").first().fill("libs/lib-01");
+    await page.locator('.sidebar .side.nested:has(button[title="libs/lib-01"])').last().click({ button: "right" });
+    await expect(menu.getByRole("menuitem", { name: "Update", exact: true })).toBeEnabled();
+    await expect(menu.getByRole("menuitem", { name: "Initialize", exact: true })).toBeEnabled();
+    await expect(menu.getByRole("menuitem", { name: "Sync", exact: true })).toBeEnabled();
+  });
+}
 
 test("commit patch renders each hunk header once", async ({ page }) => {
   await openLabScene(page, "commit", ".detail", { diffStyle: "split" });

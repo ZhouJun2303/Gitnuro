@@ -178,6 +178,7 @@ export class ShellState {
   defaultSettings: Settings = {
     theme: "apple",
     pullRebase: false,
+    autostashIncludeUntracked: false,
     fetchPrune: true,
     diffStyle: "split",
     proxy: "",
@@ -381,6 +382,8 @@ export class ShellState {
 
   /** Repositories with an automatic fetch in flight. This does not count as busy. */
   backgroundFetch = new Set<string>();
+
+  automaticFetchTimer: ReturnType<typeof setTimeout> | null = null;
 
 
   /** Set as soon as a tab is chosen, before that repository's status returns. */
@@ -849,7 +852,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.10");
+  appVersion = $state("2.0.11");
 
   appInfo = $state<AppInfo | null>(null);
 
@@ -2894,7 +2897,7 @@ export class ShellState {
     "merge", "rebase", "rebaseInteractive", "abort", "continue", "skip", "reset", "cherryPick", "revert",
     "reword", "tag", "deleteTag", "deleteRemoteTag", "stash", "stashPop", "stashApply", "stashDrop",
     "stashRename", "stashBranch", "stashPaths", "pushRef", "pullRef", "setUpstream", "deleteRemoteBranch",
-    "addRemote", "removeRemote", "setRemoteUrl", "submoduleAdd", "submoduleInit", "submoduleSync", "submoduleRemove",
+    "addRemote", "removeRemote", "setRemoteUrl", "submoduleUpdate", "submoduleUpdatePath", "submoduleAdd", "submoduleInit", "submoduleSync", "submoduleRemove",
     "gitFlowInit", "gitFlowStart", "gitFlowFinish", "squash", "clone", "init", "setHidden", "setExpanded",
   ]);
 
@@ -2918,7 +2921,8 @@ export class ShellState {
 
 
   commandExcerpt(text: string) {
-    const line = text.split(/\r?\n/).map((item) => item.trim()).find((item) => item.length > 0) ?? "";
+    const lines = text.split(/\r?\n/).map((item) => item.trim());
+    const line = lines.findLast((item) => item.startsWith("[AweGit]")) ?? lines.find((item) => item.length > 0) ?? "";
     return line.length > 140 ? `${line.slice(0, 137)}…` : line;
   }
 
@@ -2936,14 +2940,14 @@ export class ShellState {
           command: this.gitLine(["fetch", request.prune ? "--prune" : "", request.tags ? "--tags" : "", remote || "--all"]),
         };
       case "pull":
-        return { title: this.tr("chrome.pull"), command: this.gitLine(["pull", request.autostash ? "--autostash" : "", request.rebase ? "--rebase" : "--no-rebase"]) };
+        return { title: this.tr("chrome.pull"), command: this.gitLine(["pull", "--no-autostash", request.rebase ? "--rebase" : "--no-rebase"]) };
       case "push":
         return {
           title: remote ? this.tr("chrome.commandPushTo", { branch, remote }) : this.tr("chrome.push"),
           command: this.gitLine(["push", request.setUpstream ? "--set-upstream" : "", request.tags ? "--tags" : "", request.force ? "--force" : request.forceWithLease ? "--force-with-lease" : "", remote, request.setUpstream ? "HEAD" : ""]),
         };
       case "pullRef":
-        return { title: `${this.tr("chrome.pull")} ${remote}/${text("branch")}`, command: this.gitLine(["pull", request.autostash ? "--autostash" : "", request.rebase ? "--rebase" : "--no-rebase", remote, text("branch")]) };
+        return { title: `${this.tr("chrome.pull")} ${remote}/${text("branch")}`, command: this.gitLine(["pull", "--no-autostash", request.rebase ? "--rebase" : "--no-rebase", remote, text("branch")]) };
       case "pushRef": {
         const target = text("remoteBranch") || text("branch");
         return {
@@ -2952,17 +2956,18 @@ export class ShellState {
         };
       }
       case "checkout":
-      case "checkoutRemote":
         return { title: `${this.tr("menu.checkout")} ${text("name")}`, command: this.gitLine(["checkout", text("name")]) };
+      case "checkoutRemote":
+        return { title: `${this.tr("menu.checkout")} ${remote}/${text("branch")}`, command: "" };
       case "merge":
         return { title: `${this.tr("menu.merge")} ${text("name")}`, command: this.gitLine(["merge", request.squash ? "--squash" : "", request.noFf ? "--no-ff" : "", text("summary") ? "-m" : "", text("summary"), text("name")]) };
       case "revert":
         return { title: this.tr("dialog.revert"), command: this.gitLine(["revert", request.noCommit ? "--no-commit" : "", text("rev")]) };
       case "discard":
-        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--", text("file")]) };
+        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--recurse-submodules", "--", text("file")]) };
       case "discardPaths": {
         const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
-        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--", ...files.slice(0, 8)]) };
+        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--recurse-submodules", "--", ...files.slice(0, 8)]) };
       }
       case "resolvePaths": {
         const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
@@ -2984,6 +2989,8 @@ export class ShellState {
         return { title: text("command").split("\n")[0] || this.tr("chrome.activity"), command: text("command") };
       case "submoduleUpdate":
         return { title: this.tr("chrome.submodules"), command: this.gitLine(["submodule", "update", "--init", "--recursive"]) };
+      case "submoduleUpdatePath":
+        return { title: `${this.tr("menu.update")} ${text("path")}`, command: this.gitLine(["submodule", "update", "--init", "--recursive", "--", text("path")]) };
       case "abort": {
         const command = this.progress === "cherryPick" ? "cherry-pick" : this.progress;
         return this.progress
@@ -3211,6 +3218,7 @@ export class ShellState {
     if (!this.backend() || !path) return;
     const background = source === "background";
     const action = String(request.action ?? "");
+    if (!background && ["fetch", "pull", "pullRef"].includes(action)) this.cancelAutomaticFetch();
     // Menus and shortcuts obey the same restrictions as the sync toolbar.
     if (["fetch", "pull", "pullRef", "push", "pushRef"].includes(action)) {
       const kind = action === "pullRef" ? "pull" : action === "pushRef" ? "push" : action as "fetch" | "pull" | "push";
@@ -3225,6 +3233,7 @@ export class ShellState {
       if (this.userWrites > 0) return;
       this.userWrites += 1;
     }
+    const startedAt = performance.now();
     let started = false;
     try {
       if (this.busy) {
@@ -3244,15 +3253,24 @@ export class ShellState {
         started = true;
       }
       let report: (StatusSnapshot & import("../operation-flow").MutationResult) | null = null;
+      const backendStarted = performance.now();
+      let backendFinished = 0;
+      const executionLog = (output: string) => {
+        const now = performance.now();
+        const backend = Math.round((backendFinished || now) - backendStarted);
+        const refresh = backendFinished ? Math.round(now - backendFinished) : 0;
+        return `${output.trim()}\n\n[AweGit] backend=${backend} ms; refresh=${refresh} ms; wait=${Math.round(backendStarted - startedAt)} ms; total=${Math.round(now - startedAt)} ms`.trim();
+      };
       try {
         report = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash }, undefined, operation);
+        backendFinished = performance.now();
         const value = report;
         const output = value.output ?? "";
         // A foreground write started while this was running will paint the later status itself.
         const superseded = background && this.busy;
         if (this.viewing(path) && !superseded) {
           this.applySnapshot(value);
-          if (refreshContext) await this.loadContext(operation);
+          if (refreshContext && value.refreshScope !== "status") await this.loadContext(operation);
           if (!background && this.viewing(path)) await this.loadDiff();
         }
         // Any write made while other paths stay unmerged reports "conflict" even when it
@@ -3265,7 +3283,7 @@ export class ShellState {
           this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
         }
         this.noteActivity(`${action}${output ? " output" : " ok"}`);
-        this.recordCommand(action, described, value.log || output, true, source);
+        this.recordCommand(action, described, executionLog(value.log || output), true, source);
         const restoreConflict = !background && this.viewing(path) && !superseded && this.conflictCount > 0 && this.flowConflictAction(action);
         if (!background && this.viewing(path) && this.dialog === dialogBefore) {
           if (restoreConflict) {
@@ -3286,9 +3304,9 @@ export class ShellState {
         }
         return "completed" as const;
       } catch (error) {
+        if (!backendFinished) backendFinished = performance.now();
         const text = this.message(error);
         this.noteActivity(`${String(request.action ?? "")} failed`);
-        this.recordCommand(String(request.action ?? ""), described, text, false, source);
         if (this.viewing(path) && !(background && this.busy)) {
           try {
             this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }, undefined, operation));
@@ -3325,6 +3343,7 @@ export class ShellState {
             if (action === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
           }
         }
+        this.recordCommand(action, described, executionLog([text, report?.log].filter(Boolean).join("\n\n")), false, source);
         return this.conflictCount > 0 ? "conflict" as const : "failed" as const;
       } finally {
         if (started) this.stopWork(path);
@@ -3397,7 +3416,7 @@ export class ShellState {
     if (source !== "background") return this.mutate(request, source);
     const path = this.repoPath();
     const key = this.jobKey(path);
-    if (!key || this.backgroundFetch.has(key)) return;
+    if (!key || this.backgroundFetch.has(key) || this.busy || this.userWrites > 0 || this.dialog === "pull") return;
     this.backgroundFetch.add(key);
     return this.mutate(request, source).finally(() => {
       this.backgroundFetch.delete(key);
@@ -3405,6 +3424,20 @@ export class ShellState {
     });
   }
 
+  cancelAutomaticFetch() {
+    if (this.automaticFetchTimer !== null) clearTimeout(this.automaticFetchTimer);
+    this.automaticFetchTimer = null;
+  }
+
+  scheduleAutomaticFetch() {
+    this.cancelAutomaticFetch();
+    const path = this.repoPath();
+    const gen = this.openGen;
+    this.automaticFetchTimer = setTimeout(() => {
+      this.automaticFetchTimer = null;
+      if (gen === this.openGen && this.viewing(path) && this.settings.fetchAutomatically) void this.doFetch("background");
+    }, 1000);
+  }
 
 
   doPull() {
@@ -3948,7 +3981,7 @@ export class ShellState {
 
 
 
-  /** Double-click checkout: stash local work first, switch, then tell the user. */
+  /** Double-click checkout uses the backend's durable automatic stash. */
   async quickCheckout(name: string, remote?: { remote: string; branch: string }) {
     return quickCheckout(this, name, remote);
   }
@@ -4732,7 +4765,7 @@ export class ShellState {
       if (!running) this.stopWork(stopAt);
       if (gen === this.openGen) this.focusPath = null;
     }
-    if (gen === this.openGen && this.settings.fetchAutomatically && this.viewing(path) && !this.busy) void this.doFetch("background");
+    if (gen === this.openGen && this.settings.fetchAutomatically && this.viewing(path) && !this.busy) this.scheduleAutomaticFetch();
   }
 
 
@@ -6511,9 +6544,9 @@ export class ShellState {
     $effect(() => {
     if (!this.settings.fetchAutomatically) return;
     const timer = window.setInterval(() => {
-    if (!this.busy && this.snapshot) void this.doFetch("background");
+    if (!this.busy && this.snapshot) this.scheduleAutomaticFetch();
     }, 10 * 60 * 1000);
-    return () => window.clearInterval(timer);
+    return () => { window.clearInterval(timer); this.cancelAutomaticFetch(); };
     });
     $effect(() => {
     const seconds = this.settings.statusInterval;

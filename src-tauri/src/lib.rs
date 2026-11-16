@@ -277,6 +277,7 @@ fn apply_session() {
         ssl_verify: values.ssl_verify,
         ssl_ca: values.ssl_ca_file.trim().to_string(),
         sign_commits: values.sign_commits,
+        autostash_include_untracked: values.autostash_include_untracked,
         ask_user: String::new(),
     });
 }
@@ -493,6 +494,8 @@ struct MutationReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     stale_lock: Option<awegit_git::StaleIndexLock>,
     flow: Option<flows::Summary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refresh_scope: Option<&'static str>,
 }
 
 #[derive(serde::Serialize)]
@@ -514,40 +517,50 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         _ => repo.clone(),
     };
     let _turn = repo_turn(&next);
-    development::check_delete(&repo, &request)?;
-    apply_session();
-    let _https = accounts::install_https(&repo, &request);
-    record_action(&request);
-    let action_name = action_label(&request);
-    let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
-    let report = report_path(given, &repo);
-    let action = || awegit_git::capture_output(|| awegit_git::with_operation_repo(&report, || {
-        let _phase = perf::phase("perform");
-        let output = if retry_stash.unwrap_or(false) { awegit_git::perform_stashed(&repo, request)? } else { awegit_git::perform(&repo, request)? };
-        if matches!(action_name, "resolve" | "resolvePaths" | "stagePaths" | "stageHunk" | "stageLine" | "stageLines") {
-            awegit_git::flow::restore_pending(&repo)?;
-        }
-        Ok::<_, awegit_git::Error>(output)
-    }));
-    let (result, log) = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
-    // A killed Git process can leave index.lock behind and make the write fail
-    // without a usable stderr. Report the file so the UI can offer to remove it.
-    let stale_lock = if result.is_err() { awegit_git::stale_index_lock(&next) } else { None };
-    let flow = flow.map(|flow| { let _phase = perf::phase("flow-finish"); flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name) });
-    let status = read_status(&next)?;
-    let conflicted = status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict);
-    let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
-    let error = result.as_ref().err().map(ToString::to_string).unwrap_or_default();
-    let output = result.unwrap_or_default();
-    Ok(MutationReport {
-        status,
-        output,
-        log,
-        outcome,
-        error,
-        stale_lock,
-        flow,
-    })
+    let (result, log) = awegit_git::capture_output(|| -> Result<MutationReport, String> {
+        development::check_delete(&repo, &request)?;
+        apply_session();
+        let _https = accounts::install_https(&repo, &request);
+        record_action(&request);
+        let action_name = action_label(&request);
+        let before_refs = matches!(action_name, "pull" | "pullRef").then(|| awegit_git::pull_refresh_state(&repo)).flatten();
+        let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
+        let report = report_path(given, &repo);
+        let action = || awegit_git::with_operation_repo(&report, || {
+            let _phase = perf::phase("perform");
+            let output = if retry_stash.unwrap_or(false) { awegit_git::perform_stashed(&repo, request)? } else { awegit_git::perform(&repo, request)? };
+            if matches!(action_name, "resolve" | "resolvePaths" | "stagePaths" | "stageHunk" | "stageLine" | "stageLines") {
+                awegit_git::flow::restore_pending(&repo)?;
+            }
+            Ok::<_, awegit_git::Error>(output)
+        });
+        let result = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
+        // A killed Git process can leave index.lock behind and make the write fail
+        // without a usable stderr. Report the file so the UI can offer to remove it.
+        let stale_lock = if result.is_err() { awegit_git::stale_index_lock(&next) } else { None };
+        let flow = flow.map(|flow| { let _phase = perf::phase("flow-finish"); flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name) });
+        let status = read_status(&next)?;
+        let refresh_scope = if result.is_ok() && before_refs.is_some()
+            && before_refs == awegit_git::pull_refresh_state(&repo) { Some("status") } else { None };
+        let conflicted = status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict);
+        let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
+        let error = result.as_ref().err().map(ToString::to_string).unwrap_or_default();
+        let output = result.unwrap_or_default();
+        Ok(MutationReport {
+            status,
+            output,
+            log: String::new(),
+            outcome,
+            error,
+            stale_lock,
+            flow,
+            refresh_scope,
+        })
+    });
+    let log = perf::redact(&log);
+    let mut report = result.map_err(|error| if log.is_empty() { error } else { format!("{error}\n\n{log}") })?;
+    report.log = log;
+    Ok(report)
 }
 
 #[tauri::command]
@@ -641,6 +654,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::AddWorktree { .. } => "addWorktree",
         awegit_git::Mutation::RemoveWorktree { .. } => "removeWorktree",
         awegit_git::Mutation::SubmoduleUpdate => "submoduleUpdate",
+        awegit_git::Mutation::SubmoduleUpdatePath { .. } => "submoduleUpdatePath",
         awegit_git::Mutation::SubmoduleAdd { .. } => "submoduleAdd",
         awegit_git::Mutation::SubmoduleInit { .. } => "submoduleInit",
         awegit_git::Mutation::SubmoduleSync { .. } => "submoduleSync",
@@ -729,7 +743,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::AddWorktree { path, branch } => join([scrub(path), scrub(branch)]),
         Mutation::RemoveWorktree { path } => scrub(path),
         Mutation::SubmoduleAdd { url, path } => join([scrub(path), public_url(url)]),
-        Mutation::SubmoduleInit { path } | Mutation::SubmoduleSync { path } | Mutation::SubmoduleRemove { path } => scrub(path),
+        Mutation::SubmoduleInit { path } | Mutation::SubmoduleUpdatePath { path } | Mutation::SubmoduleSync { path } | Mutation::SubmoduleRemove { path } => scrub(path),
         Mutation::GitFlowStart { name, kind } | Mutation::GitFlowFinish { name, kind } => join([scrub(name), scrub(kind)]),
         Mutation::GitFlowInit { master, develop, feature, release, hotfix, support } => {
             join([scrub(master), scrub(develop), scrub(feature), scrub(release), scrub(hotfix), scrub(support)])

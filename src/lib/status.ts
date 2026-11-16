@@ -165,6 +165,7 @@ export type ToolRecord = {
 export type Settings = {
   theme: string;
   pullRebase: boolean;
+  autostashIncludeUntracked: boolean;
   fetchPrune: boolean;
   diffStyle: string;
   proxy: string;

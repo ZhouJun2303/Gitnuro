@@ -444,6 +444,41 @@ function seedPullDeletedRepo() {
   write(path, ".fakeignore", "local-only\n");
 }
 
+function seedPullNoopRepo() {
+  const path = join(repos, "pull-noop");
+  const upstream = join(repos, "pull-noop-upstream");
+  wipe(path); wipe(upstream); initWork(upstream);
+  commit(upstream, "note.txt", "base\n", "base");
+  cloneFrom(fileUrl(upstream), path);
+  write(path, "note.txt", "staged\n");
+  git(path, ["add", "note.txt"]);
+  write(path, "note.txt", "working\n");
+  for (let index = 0; index < 1000; index++) write(path, `loose/file-${index}.txt`, "untracked\n");
+}
+
+function seedCheckoutRepo(name = "checkout-dirty") {
+  const path = join(repos, name);
+  wipe(path); initWork(path);
+  git(path, ["config", "core.autocrlf", "false"]);
+  commit(path, "note.txt", "one\ntwo\nthree\nfour\nfive\n", "base");
+  commit(path, "keep.txt", "base\n", "keep base");
+  write(path, "keep.txt", "older stash\n");
+  git(path, ["stash", "push", "-m", "older user stash"]);
+  git(path, ["checkout", "-b", "topic"]);
+  if (name === "checkout-index") commit(path, "note.txt", "one\nremote two\nthree\nfour\nfive\n", "remote note");
+  else if (name === "checkout-conflict") commit(path, "note.txt", "one\ntwo\nthree\nfour\nremote five\n", "remote note");
+  else commit(path, "remote.txt", "remote\n", "topic file");
+  git(path, ["checkout", "main"]);
+  git(path, ["remote", "add", "origin", "."]);
+  git(path, ["fetch", "origin"]);
+  write(path, "note.txt", "one\ntwo\nthree\nfour\nlocal five\n");
+  write(path, "keep.txt", "staged\n");
+  git(path, ["add", "note.txt", "keep.txt"]);
+  write(path, "keep.txt", "unstaged\n");
+  write(path, "loose.txt", "untracked\n");
+  write(path, ".fakeignore", "local-only\n");
+}
+
 function seedRevertRepo() {
   const path = join(repos, "revert");
   wipe(path);
@@ -489,9 +524,13 @@ function seedUnityRepo() {
 }
 
 const restore = {
+  "checkout-dirty": () => seedCheckoutRepo(),
+  "checkout-index": () => seedCheckoutRepo("checkout-index"),
+  "checkout-conflict": () => seedCheckoutRepo("checkout-conflict"),
   "unstage-initial": seedUnstageInitialRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
   "pull-deleted": seedPullDeletedRepo,
+  "pull-noop": seedPullNoopRepo,
   tags: seedTagsRepo,
   unity: seedUnityRepo,
   operation: seedOperationRepo,
@@ -700,6 +739,7 @@ seedOperationRepo();
 seedUnstageInitialRepo();
 seedStageConflictPathsRepo();
 seedPullDeletedRepo();
+seedPullNoopRepo();
 seedCherryRepo();
 seedRevertRepo();
 seedTagsRepo();
@@ -725,6 +765,8 @@ for (let i = 1; i <= FILL; i++) {
   initWork(path);
   commit(path, "README.md", `shelf ${i}\n`, `shelf ${i}`);
 }
+
+for (const name of ["checkout-dirty", "checkout-index", "checkout-conflict"]) seedCheckoutRepo(name);
 
 const recent = readdirSync(shelf)
   .filter((name) => name.startsWith("r"))

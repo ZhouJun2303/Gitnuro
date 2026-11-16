@@ -152,7 +152,13 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.progress = null;
     return;
   }
-  if (["changes", "pull-deleted", "unstage-initial", "stage-conflict-paths"].includes(id)) {
+  if (id.startsWith("checkout-")) {
+    shell.section = "changes";
+    shell.collapsedSide = [];
+    shell.sideQuery = "";
+    return;
+  }
+  if (["changes", "pull-deleted", "pull-noop", "unstage-initial", "stage-conflict-paths"].includes(id)) {
     shell.section = "changes";
     return;
   }
@@ -616,6 +622,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
         "prefs-commit": "commit",
         "prefs-ai": "ai",
         "prefs-git": "git",
+        "prefs-autostash": "git",
         "prefs-integration": "integration",
         "prefs-integration-merge": "integration",
         "prefs-integration-editor": "integration",
@@ -626,6 +633,11 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       };
       if (sceneId === "prefs-language") shell.settings.locale = "zh";
       shell.prefTab = prefTabs[sceneId] ?? "general";
+      if (sceneId === "prefs-autostash") {
+        shell.section = "changes";
+        shell.collapsedSide = [];
+        shell.sideQuery = "";
+      }
       fillSourceRoots(shell);
       fillLabTools(shell);
       if (sceneId === "prefs-commit") shell.resetCommitTypes();
