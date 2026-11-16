@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-create-revision-copy"
+description = "Enables the create_revision_copy command without any pre-configured scope."
+commands.allow = ["create_revision_copy"]
+
+[[permission]]
+identifier = "deny-create-revision-copy"
+description = "Denies the create_revision_copy command without any pre-configured scope."
+commands.deny = ["create_revision_copy"]

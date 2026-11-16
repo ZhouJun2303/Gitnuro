@@ -2852,4 +2852,24 @@ mod watch_plan_tests {
         assert!(!defaults.contains("allow-open-path"));
         assert!(!defaults.contains("opener:allow-reveal-item-in-dir"));
     }
+
+    #[test]
+    fn revision_copies_are_only_allowed_in_history_windows() {
+        let history: serde_json::Value = serde_json::from_str(include_str!("../capabilities/history-copy.json")).unwrap();
+        assert_eq!(history["windows"], serde_json::json!(["history"]));
+        assert_eq!(history["permissions"], serde_json::json!([
+            "allow-revision-copy-support", "allow-create-revision-copy"
+        ]));
+        for other in [
+            include_str!("../capabilities/default.json"),
+            include_str!("../capabilities/viewers.json"),
+            include_str!("../capabilities/flows.json"),
+        ] {
+            let capability: serde_json::Value = serde_json::from_str(other).unwrap();
+            for permission in capability["permissions"].as_array().unwrap() {
+                assert_ne!(permission.as_str(), Some("allow-revision-copy-support"));
+                assert_ne!(permission.as_str(), Some("allow-create-revision-copy"));
+            }
+        }
+    }
 }

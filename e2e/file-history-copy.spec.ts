@@ -31,3 +31,13 @@ test("unsupported file types do not show the copy action", async ({ page }) => {
   await openLabScene(page, "file-history", ".history-commit");
   await expect(page.locator(".copy-revision")).toHaveCount(0);
 });
+
+test("file history shows a support lookup failure instead of silently hiding the action", async ({ page }) => {
+  await page.route("**/__lab/invoke", async (route) => {
+    const body = route.request().postDataJSON() as { cmd?: string };
+    if (body.cmd === "revision_copy_support") return route.fulfill({ json: { ok: false, error: "revision_copy_support not allowed" } });
+    return route.continue();
+  });
+  await openLabScene(page, "file-history", ".history-commit");
+  await expect(page.locator(".copy-error")).toHaveText("revision_copy_support not allowed");
+});

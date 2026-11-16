@@ -57,6 +57,8 @@ fn main() {
             "set_repo_author",
             "revision_preview",
             "blob_view",
+            "revision_copy_support",
+            "create_revision_copy",
             "reflog",
             "commit_tree",
             "repository_summary",

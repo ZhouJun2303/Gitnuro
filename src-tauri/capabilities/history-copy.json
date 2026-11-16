@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "history-copy",
+  "description": "Historical file copies in the standalone file history window",
+  "windows": ["history"],
+  "permissions": [
+    "allow-revision-copy-support",
+    "allow-create-revision-copy"
+  ]
+}

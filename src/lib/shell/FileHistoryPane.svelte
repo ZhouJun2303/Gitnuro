@@ -17,6 +17,7 @@
   const splitWindow = $derived(virtualSplit(splitRows, shell.historyDiffTop, shell.splitRowHeight, diffHeight, shell.settings.diffWordWrap));
   let listTop = $state(0);
   let copySupport = $state<{ tool: string; kind: string } | null>(null);
+  let copySupportError = $state("");
   let copying = $state<string | null>(null);
   let copiedPath = $state("");
   const onListScroll = onVirtualScroll((top) => (listTop = top));
@@ -64,11 +65,12 @@
     const path = shell.repoPath();
     let cancelled = false;
     copySupport = null;
+    copySupportError = "";
     copiedPath = "";
     if (shell.mode === "live" && file) {
       void invoke<{ tool: string; kind: string } | null>("revision_copy_support", { path, file })
         .then((value) => { if (!cancelled) copySupport = value; })
-        .catch((error) => { if (!cancelled) shell.actionError = shell.message(error); });
+        .catch((error) => { if (!cancelled) copySupportError = shell.message(error); });
     }
     return () => { cancelled = true; };
   });
@@ -107,6 +109,7 @@
 <div class="file-history">
   <header class="history-file">
     <strong>{shell.historyFilter || shell.tr("menu.history")}</strong>
+    {#if copySupportError}<span class="copy-error" role="alert" title={copySupportError}>{copySupportError}</span>{/if}
     {#if copiedPath}<span class="copy-result" role="status" title={copiedPath}>{shell.tr("chrome.copyCreated")}: {copiedPath}</span>{/if}
     <button class="text-button" type="button" aria-label={shell.tr("chrome.close")} onclick={closePane}>{shell.tr("chrome.close")}</button>
   </header>
@@ -280,7 +283,9 @@
     flex: none;
   }
 
-  .copy-result { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-weight: 400; }
+  .copy-result, .copy-error { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+  .copy-result { color: var(--text-secondary); }
+  .copy-error { color: var(--deleted); }
 
   .history-time {
     position: relative;
