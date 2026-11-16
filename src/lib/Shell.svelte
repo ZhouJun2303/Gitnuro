@@ -990,9 +990,14 @@
     {/each}
   {/snippet}
 
+  {#snippet commandText(text: string)}
+    {#each text.split("\n") as line, index}{#if index > 0}{"\n"}{/if}{#if line.startsWith("$ git ")}<strong class="git-command">{line}</strong>{:else}{line}{/if}{/each}
+  {/snippet}
+
   {#snippet commandOutput(output: string, command = "")}
     {@const report = fileAccessReport(output)}
-    <pre>{#if command}<strong>$ {command}</strong>{/if}{#if output}{command ? "\n\n" : ""}{#if report}<span class="file-access-notice" role="note">{#each report.lines as line, index}<span class:file-access-heading={index === 0 || line === "How to release access:"} class:file-access-important={/^(File:|Cause:|In use by:)/.test(line)}>{line}{index < report.lines.length - 1 ? "\n" : ""}</span>{/each}</span>{report.detail ? `\n${report.detail}` : ""}{:else}{output}{/if}{/if}</pre>
+    {@const fallback = command && !/^\$ git /m.test(output) ? command : ""}
+    <pre>{#if fallback}<strong>$ {fallback}</strong>{/if}{#if output}{fallback ? "\n\n" : ""}{#if report}<span class="file-access-notice" role="note">{#each report.lines as line, index}<span class:file-access-heading={index === 0 || line === "How to release access:"} class:file-access-important={/^(File:|Cause:|In use by:)/.test(line)}>{line}{index < report.lines.length - 1 ? "\n" : ""}</span>{/each}</span>{#if report.detail}{"\n"}{@render commandText(report.detail)}{/if}{:else}{@render commandText(output)}{/if}{/if}</pre>
   {/snippet}
 
   {#if shell.commandLogOpen}

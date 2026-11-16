@@ -48,6 +48,7 @@ export const zh: Messages = {
     "source-vs-target": "传入提交与当前分支的改动发生冲突。", "revert-vs-current": "逆向应用此提交的改动时，与当前结果发生冲突；三方比较基线为被还原的原提交。", "restore-after-integration": "整合结束后恢复本地修改；可能出现新一轮冲突。",
     "stash-kept": "贮藏仍保留。解决恢复冲突后，可自行检查并删除。", "stash-restored": "本地修改已恢复，自动贮藏已删除。",
     "stash-restored-kept": "本地修改已恢复，贮藏删除失败，原条目仍保留。", "stash-missing": "记录的贮藏已不存在，需要人工检查；流程不会自动关闭。",
+    "stash-restored-without-index": "本地修改已恢复。原暂存状态与新分支不兼容，改动已合并到工作区；原暂存内容仍保留在贮藏中，请检查后再删除。",
     "git-processed-sequence": "Git 已结束提交序列；提交可能被重放、成为空提交或因补丁已存在而跳过。",
     "preview-clean": "此提交当前预测可干净应用。", "preview-conflict": "此提交预测会冲突，列出的文件为预测结果。",
     "preview-conditional": "前序结果尚未确定，执行时重新检查。", "preview-unknown": "当前无法可靠预测。",

@@ -490,39 +490,14 @@ export function commitWeb(shell: ShellState, id: string) {
   }
 
 export function requestCheckout(shell: ShellState, name: string) {
-    const dirty = (shell.snapshot?.staged.length ?? 0) + (shell.snapshot?.unstaged.length ?? 0) > 0;
-    if (!dirty) {
-      void shell.mutate({ action: "checkout", name });
-      return;
-    }
-    void checkoutWithStash(shell, name);
-  }
-
-async function checkoutWithStash(shell: ShellState, name: string, remote?: { remote: string; branch: string }) {
-    await shell.mutate({ action: "stash", message: shell.tr("dialog.checkoutStashMessage", { name }), includeUntracked: true });
-    if (shell.actionError) return;
-    if (remote) await shell.mutate({ action: "checkoutRemote", remote: remote.remote, branch: remote.branch });
-    else await shell.mutate({ action: "checkout", name });
-    if (shell.actionError) {
-      const failure = shell.actionError;
-      await shell.mutate({ action: "stashPop", name: "stash@{0}" });
-      shell.actionError = shell.actionError ? `${failure}\n${shell.actionError}` : failure;
-      return;
-    }
-    await shell.mutate({ action: "stashPop", name: "stash@{0}" });
-    if (shell.actionError) {
-      shell.pendingCheckout = name;
-      shell.dialog = "checkoutNotice";
-    }
+    void quickCheckout(shell, name);
   }
 
 export async function quickCheckout(shell: ShellState, name: string, remote?: { remote: string; branch: string }) {
     if (shell.mode !== "live") return;
-    const dirty = (shell.snapshot?.staged.length ?? 0) + (shell.snapshot?.unstaged.length ?? 0) > 0;
-    if (dirty) {
-      await checkoutWithStash(shell, name, remote);
-      return;
-    }
+    shell.locateSeq += 1;
+    // One backend write owns saving, checkout and restoration by stash commit id.
+    // The normal mutation guard also absorbs repeated double-clicks.
     if (remote) await shell.mutate({ action: "checkoutRemote", remote: remote.remote, branch: remote.branch });
     else await shell.mutate({ action: "checkout", name });
   }

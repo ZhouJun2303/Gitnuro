@@ -104,7 +104,7 @@ thread_local! {
     static CAPTURED: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
-/// Keep stdout and stderr from `git` started on this thread, then return that text.
+/// Keep each command, duration, exit status, stdout and stderr on this thread.
 pub fn capture_output<T>(body: impl FnOnce() -> T) -> (T, String) {
     CAPTURE.with(|flag| flag.set(true));
     CAPTURED.with(|slot| slot.borrow_mut().clear());
@@ -114,27 +114,32 @@ pub fn capture_output<T>(body: impl FnOnce() -> T) -> (T, String) {
     (value, text)
 }
 
-fn note_captured(stdout: &[u8], stderr: &[u8]) {
+fn note_captured(args: &[String], elapsed: std::time::Duration, code: Option<i32>, stdout: &[u8], stderr: &[u8]) {
     if !CAPTURE.with(|flag| flag.get()) {
         return;
     }
     let out = String::from_utf8_lossy(stdout).trim().to_string();
     let err = settle_stderr(stderr);
-    if out.is_empty() && err.is_empty() {
-        return;
-    }
     CAPTURED.with(|slot| {
         let mut text = slot.borrow_mut();
         if !text.is_empty() {
             text.push('\n');
         }
+        let command = args.iter().map(|arg| {
+            if arg.chars().all(|ch| ch.is_ascii_alphanumeric() || "-_/.:=@{},+%".contains(ch)) && !arg.is_empty() {
+                arg.clone()
+            } else {
+                format!("{arg:?}")
+            }
+        }).collect::<Vec<_>>().join(" ");
+        // Authentication overrides are added separately and never reach args.
+        text.push_str(&crate::flow::redact(&format!("$ git {command}  [{} ms, exit {}]", elapsed.as_millis(), code.map(|code| code.to_string()).unwrap_or_else(|| "interrupted".into()))));
         if !out.is_empty() {
+            text.push('\n');
             text.push_str(&out);
         }
         if !err.is_empty() {
-            if !out.is_empty() {
-                text.push('\n');
-            }
+            text.push('\n');
             text.push_str(&err);
         }
     });
@@ -749,7 +754,7 @@ fn run_prepared_capped(
         args.iter().map(|arg| (*arg).to_string()).collect::<Vec<_>>()
     };
     let mut full = credential_args;
-    full.extend(progressed);
+    full.extend(progressed.iter().cloned());
     command.args(&full);
     command
         .stdin(Stdio::piped())
@@ -871,14 +876,17 @@ fn run_prepared_capped(
         }
     }
     untrack(pid);
+    // Observer updates and trace cleanup belong to AweGit's bookkeeping, not
+    // the child process duration displayed next to the Git command.
+    let elapsed = started.elapsed();
     // A capped read is intentionally incomplete. Do not turn it into a lock error.
     if truncated {
         flow_command.finish(output.status.success(), &output.stderr);
         let note = failure_note(output.status.success(), true, &output.stdout, &output.stderr);
         if let Some(hook) = TRACE.get() {
-            hook(args, started.elapsed(), true, &note);
+            hook(args, elapsed, true, &note);
         }
-        note_captured(&output.stdout, &output.stderr);
+        note_captured(&progressed, elapsed, output.status.code(), &output.stdout, &output.stderr);
         return Ok((output, true));
     }
     let stderr_text = settle_stderr(&output.stderr);
@@ -893,9 +901,9 @@ fn run_prepared_capped(
     flow_command.finish(succeeded, &output.stderr);
     let note = failure_note(succeeded, allow_failure, &output.stdout, &output.stderr);
     if let Some(hook) = TRACE.get() {
-        hook(args, started.elapsed(), succeeded || allow_failure, &note);
+        hook(args, elapsed, succeeded || allow_failure, &note);
     }
-    note_captured(&output.stdout, &output.stderr);
+    note_captured(&progressed, elapsed, output.status.code(), &output.stdout, &output.stderr);
     if succeeded || allow_failure {
         return Ok((output, false));
     }
@@ -1694,7 +1702,28 @@ mod progress_tests {
 
 #[cfg(test)]
 mod failure_tests {
-    use super::{command_failure_detail, run};
+    use super::{capture_output, command_failure_detail, run};
+
+    #[test]
+    fn capture_logs_empty_commands_and_failures_with_arguments_and_time() {
+        let repo = std::env::temp_dir().join(format!("awegit-capture-{}", std::process::id()));
+        std::fs::create_dir_all(&repo).unwrap();
+        let (result, log) = capture_output(|| {
+            run(&repo, &["init", "-q", "--template="])?;
+            run(&repo, &["config", "awegit.test", "value with spaces"])?;
+            run(&repo, &["rev-parse", "--verify", "refs/heads/missing"])
+        });
+        assert!(result.is_err());
+        let commands: Vec<_> = log.lines().filter(|line| line.starts_with("$ git ")).collect();
+        assert_eq!(commands.len(), 3, "{log}");
+        assert!(commands[0].starts_with("$ git init -q --template="));
+        assert!(commands[1].contains("config awegit.test \"value with spaces\""));
+        assert!(commands[1].ends_with(" ms, exit 0]"));
+        assert!(commands[2].contains("rev-parse --verify refs/heads/missing"));
+        assert!(commands[2].ends_with(" ms, exit 128]"));
+        assert!(log.contains("fatal:"), "{log}");
+        let _ = std::fs::remove_dir_all(&repo);
+    }
 
     #[test]
     fn failure_detail_keeps_stdout_when_stderr_contains_a_warning() {

@@ -215,6 +215,16 @@ pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.
 
 相关回归位于 `crates/git/tests/common_operations.rs` 和 `crates/git/tests/flow.rs`。界面场景为 `unstage-initial`、`stage-conflict-paths`，三套主题的实际操作验证：`pnpm test:ui -- --reuse e2e/common-operations.spec.ts`；测试会单独恢复自己的场景仓库。
 
+## 检出与命令记录
+
+双击本地、远程分支和右键检出统一调用一次后端写操作。后端保存本地修改，按贮藏提交 ID 恢复暂存与未暂存内容；前端不再额外执行 `stash push` 或固定弹出 `stash@{0}`。鼠标单击延后 280ms 定位历史，双击取消该定位并使旧定位失效，避免先读取两次历史再等待检出；键盘定位立即执行。重复双击沿用前台写操作保护，不会再保存或弹出另一份贮藏。
+
+切换、合并或拉取后，若 `stash apply --index` 明确报 `conflicts in index. Try without --index.`，说明原暂存补丁与新基线不兼容。此时按 Git 的提示合并贮藏内容到工作区，保留原贮藏中的暂存内容；真实冲突保留冲突文件并恢复其余文件。其他恢复错误不重跑可能已部分写入的命令，并保留待恢复标记。正常恢复仍保持暂存/未暂存划分，恢复失败不删除备份。
+
+命令记录把本次写请求中实际启动的 Git 命令逐条加粗，包含参数、毫秒耗时和退出码，也记录没有输出的命令和失败前已执行的步骤。准备及收尾查询与写命令按执行顺序展示；认证注入参数不进入命令文本，返回日志继续脱敏。Git 命令耗时不包含命令退出后的流程记录处理。记录末尾的 `backend` 包含后端排队、Git 操作、流程记录和状态读取，`refresh` 是返回后到界面刷新完成的等待，`wait` 是前端等待写操作的时间，`total` 是这几段的总等待；Git 时间包含在 `backend` 中，不重复相加。原生 `git pull --no-autostash --rebase` 或 `--no-rebase` 自行执行 fetch 和后续整合，AweGit 单独保存并恢复本地修改。
+
+回归：`crates/git/tests/checkout.rs` 覆盖暂存补丁不兼容、合并后的真实冲突、两种 pull 模式、检出失败和未跟踪文件恢复受阻；`capture_logs_empty_commands_and_failures_with_arguments_and_time` 覆盖无输出和失败命令记录。界面场景为 `checkout-dirty`、`checkout-index`、`checkout-conflict`；Apple、经典白色和 VS Code 黑色验证：`pnpm test:ui -- --reuse e2e/checkout.spec.ts e2e/pull.spec.ts`。
+
 ## 文件占用提示
 
 Git 无法替换或写入工作区文件时，命令日志会逐个列出文件和原因。Windows 能识别占用程序时显示程序名与 PID，并提示保存工作、关闭文件或退出程序、在任务管理器核对残留进程，再刷新仓库状态并继续或重试操作。无法识别程序时，提示排查占用、只读属性和写权限，避免把所有访问失败都认定为占用。说明适用于各类文件及共用 Git 执行器的操作，原始 Git 错误仍完整保留并可复制。

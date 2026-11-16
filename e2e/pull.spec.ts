@@ -29,6 +29,17 @@ for (const theme of ["apple", "light", "dark"]) {
     await expect(page.locator(".staged-pane")).toContainText("new.txt");
     await expect(page.locator(".unstaged-pane")).toContainText("new.txt");
     await expect(page.locator(".unstaged-pane")).toContainText("deleted.txt");
+    await page.locator(".history-btn").click();
+    await page.locator(".command-filters").getByRole("button", { name: "用户", exact: true }).click();
+    const detail = page.locator(".command-detail");
+    const pull = detail.locator("strong.git-command").filter({ hasText: "--no-autostash" });
+    await expect(pull).toHaveCount(1);
+    await expect(pull).toContainText("--no-autostash");
+    await expect(pull).toContainText("--no-rebase");
+    await expect(pull).toContainText(/\[\d+ ms, exit 0\]/);
+    await expect(pull).toHaveCSS("font-weight", "700");
+    await expect(detail).toContainText("[AweGit] backend=");
+    await expect(detail).toContainText("total=");
     await page.screenshot({ path: `.lab/pull-deleted-${theme}.png` });
   });
 }

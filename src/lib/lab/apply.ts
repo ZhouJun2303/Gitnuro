@@ -152,6 +152,12 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.progress = null;
     return;
   }
+  if (id.startsWith("checkout-")) {
+    shell.section = "changes";
+    shell.collapsedSide = [];
+    shell.sideQuery = "";
+    return;
+  }
   if (["changes", "pull-deleted", "unstage-initial", "stage-conflict-paths"].includes(id)) {
     shell.section = "changes";
     return;

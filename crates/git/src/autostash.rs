@@ -16,7 +16,7 @@ use crate::Error;
 pub(crate) enum Restored {
     /// No stash was pending.
     None,
-    /// The stash was applied and dropped.
+    /// The contents were restored; a backup may remain for inspection.
     Applied,
     /// The operation is still paused, or its result still has unmerged paths.
     Kept,
@@ -124,23 +124,38 @@ pub(crate) fn finish_if_settled(repo: &Path) -> Result<Restored, Error> {
         base: crate::flow::commit(repo, &format!("{oid}^1")), ..Default::default()
     };
     crate::flow::emit(event.clone());
+    let mut restored_without_index = false;
     let applied = {
         let _phase = crate::timing_phase("autostash-restore");
-        run(repo, &["stash", "apply", "--index", &selector])
+        let indexed = run(repo, &["stash", "apply", "--index", &oid]);
+        // Git applies the saved index patch before touching the worktree. This
+        // specific failure means that patch no longer fits the new HEAD; Git
+        // explicitly asks us to merge the saved contents without --index.
+        // Never retry other errors: they may have already changed files.
+        let applied = match indexed {
+            Err(error) if error.to_string().contains("conflicts in index. Try without --index.") && !has_unmerged(repo) => {
+                restored_without_index = true;
+                run(repo, &["stash", "apply", &oid])
+            }
+            result => result,
+        };
+        applied
             .and_then(|output| restore_worktree_deletions(repo, &oid, &index_only).map(|_| output))
     };
     match applied {
         Ok(_) => {
-            let dropped = run(repo, &["stash", "drop", &selector]).is_ok();
+            // A content merge cannot promise the original staged/unstaged
+            // split. Keep that exact index in the backup for manual inspection.
+            let dropped = !restored_without_index && run(repo, &["stash", "drop", &selector]).is_ok();
             set_pending_autostash(repo, None, &[])?;
             crate::flow::emit(crate::flow::Event {
-                state: "completed".into(), detail: if dropped { "stash-restored" } else { "stash-restored-kept" }.into(), ..event
+                state: "completed".into(), detail: if restored_without_index { "stash-restored-without-index" } else if dropped { "stash-restored" } else { "stash-restored-kept" }.into(), ..event
             });
             Ok(Restored::Applied)
         }
         Err(error) => {
-            set_pending_autostash(repo, None, &[])?;
             if has_unmerged(repo) {
+                set_pending_autostash(repo, None, &[])?;
                 crate::flow::emit(crate::flow::Event { state: "conflict".into(), detail: "stash-kept".into(), ..event });
                 Ok(Restored::Conflict)
             } else {

@@ -48,6 +48,7 @@ export const en: Messages = {
     "source-vs-target": "Incoming changes conflict with the current branch.", "revert-vs-current": "Applying this commit's inverse patch conflicts with the current result. The three-way base is the original commit being reverted.", "restore-after-integration": "Restore local changes after integration. This can cause another conflict round.",
     "stash-kept": "The stash is kept. Inspect it after resolving before deleting it.", "stash-restored": "Local changes restored; automatic stash deleted.",
     "stash-restored-kept": "Local changes restored; stash deletion failed, so the entry is kept.", "stash-missing": "The recorded stash is missing. Inspect manually; the window will stay open.",
+    "stash-restored-without-index": "Local changes restored. The saved index does not fit the new branch, so changes were merged into the worktree. The original staged contents remain in the stash; inspect before deleting it.",
     "git-processed-sequence": "Git ended the sequence. Commits may have been replayed, become empty, or been skipped because their patches already exist.",
     "preview-clean": "This commit is currently predicted to apply cleanly.", "preview-conflict": "This commit is predicted to conflict in the listed files.",
     "preview-conditional": "Earlier results are undecided. Check again during execution.", "preview-unknown": "A reliable prediction is unavailable.",

@@ -2918,7 +2918,8 @@ export class ShellState {
 
 
   commandExcerpt(text: string) {
-    const line = text.split(/\r?\n/).map((item) => item.trim()).find((item) => item.length > 0) ?? "";
+    const lines = text.split(/\r?\n/).map((item) => item.trim());
+    const line = lines.findLast((item) => item.startsWith("[AweGit]")) ?? lines.find((item) => item.length > 0) ?? "";
     return line.length > 140 ? `${line.slice(0, 137)}…` : line;
   }
 
@@ -2936,14 +2937,14 @@ export class ShellState {
           command: this.gitLine(["fetch", request.prune ? "--prune" : "", request.tags ? "--tags" : "", remote || "--all"]),
         };
       case "pull":
-        return { title: this.tr("chrome.pull"), command: this.gitLine(["pull", request.autostash ? "--autostash" : "", request.rebase ? "--rebase" : "--no-rebase"]) };
+        return { title: this.tr("chrome.pull"), command: this.gitLine(["pull", "--no-autostash", request.rebase ? "--rebase" : "--no-rebase"]) };
       case "push":
         return {
           title: remote ? this.tr("chrome.commandPushTo", { branch, remote }) : this.tr("chrome.push"),
           command: this.gitLine(["push", request.setUpstream ? "--set-upstream" : "", request.tags ? "--tags" : "", request.force ? "--force" : request.forceWithLease ? "--force-with-lease" : "", remote, request.setUpstream ? "HEAD" : ""]),
         };
       case "pullRef":
-        return { title: `${this.tr("chrome.pull")} ${remote}/${text("branch")}`, command: this.gitLine(["pull", request.autostash ? "--autostash" : "", request.rebase ? "--rebase" : "--no-rebase", remote, text("branch")]) };
+        return { title: `${this.tr("chrome.pull")} ${remote}/${text("branch")}`, command: this.gitLine(["pull", "--no-autostash", request.rebase ? "--rebase" : "--no-rebase", remote, text("branch")]) };
       case "pushRef": {
         const target = text("remoteBranch") || text("branch");
         return {
@@ -2952,8 +2953,9 @@ export class ShellState {
         };
       }
       case "checkout":
-      case "checkoutRemote":
         return { title: `${this.tr("menu.checkout")} ${text("name")}`, command: this.gitLine(["checkout", text("name")]) };
+      case "checkoutRemote":
+        return { title: `${this.tr("menu.checkout")} ${remote}/${text("branch")}`, command: "" };
       case "merge":
         return { title: `${this.tr("menu.merge")} ${text("name")}`, command: this.gitLine(["merge", request.squash ? "--squash" : "", request.noFf ? "--no-ff" : "", text("summary") ? "-m" : "", text("summary"), text("name")]) };
       case "revert":
@@ -3227,6 +3229,7 @@ export class ShellState {
       if (this.userWrites > 0) return;
       this.userWrites += 1;
     }
+    const startedAt = performance.now();
     let started = false;
     try {
       if (this.busy) {
@@ -3246,8 +3249,17 @@ export class ShellState {
         started = true;
       }
       let report: (StatusSnapshot & import("../operation-flow").MutationResult) | null = null;
+      const backendStarted = performance.now();
+      let backendFinished = 0;
+      const executionLog = (output: string) => {
+        const now = performance.now();
+        const backend = Math.round((backendFinished || now) - backendStarted);
+        const refresh = backendFinished ? Math.round(now - backendFinished) : 0;
+        return `${output.trim()}\n\n[AweGit] backend=${backend} ms; refresh=${refresh} ms; wait=${Math.round(backendStarted - startedAt)} ms; total=${Math.round(now - startedAt)} ms`.trim();
+      };
       try {
         report = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash }, undefined, operation);
+        backendFinished = performance.now();
         const value = report;
         const output = value.output ?? "";
         // A foreground write started while this was running will paint the later status itself.
@@ -3267,7 +3279,7 @@ export class ShellState {
           this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
         }
         this.noteActivity(`${action}${output ? " output" : " ok"}`);
-        this.recordCommand(action, described, value.log || output, true, source);
+        this.recordCommand(action, described, executionLog(value.log || output), true, source);
         const restoreConflict = !background && this.viewing(path) && !superseded && this.conflictCount > 0 && this.flowConflictAction(action);
         if (!background && this.viewing(path) && this.dialog === dialogBefore) {
           if (restoreConflict) {
@@ -3288,9 +3300,9 @@ export class ShellState {
         }
         return "completed" as const;
       } catch (error) {
+        if (!backendFinished) backendFinished = performance.now();
         const text = this.message(error);
         this.noteActivity(`${String(request.action ?? "")} failed`);
-        this.recordCommand(String(request.action ?? ""), described, text, false, source);
         if (this.viewing(path) && !(background && this.busy)) {
           try {
             this.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }, undefined, operation));
@@ -3327,6 +3339,7 @@ export class ShellState {
             if (action === "stageHunk" && this.settings.ignoreSpace) this.actionError = `${this.actionError} ${this.tr("dialog.spaceHint")}`;
           }
         }
+        this.recordCommand(action, described, executionLog([text, report?.log].filter(Boolean).join("\n\n")), false, source);
         return this.conflictCount > 0 ? "conflict" as const : "failed" as const;
       } finally {
         if (started) this.stopWork(path);
@@ -3950,7 +3963,7 @@ export class ShellState {
 
 
 
-  /** Double-click checkout: stash local work first, switch, then tell the user. */
+  /** Double-click checkout uses the backend's durable automatic stash. */
   async quickCheckout(name: string, remote?: { remote: string; branch: string }) {
     return quickCheckout(this, name, remote);
   }
