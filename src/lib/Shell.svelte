@@ -844,6 +844,18 @@
     text-align: left;
   }
 
+.palette-list.files button {
+    display: grid;
+    grid-template-columns: minmax(0, 36%) minmax(0, 1fr);
+  }
+
+.palette-list.files button :is(.name, .meta) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
 .palette-list button.on { background: var(--selection); }
 
 .palette-hint {
@@ -1169,9 +1181,9 @@
             onkeydown={shell.onLaunchKey.bind(shell)}
           />
         </div>
-        <div class="palette-list" bind:this={shell.launchList}>
+        <div class="palette-list" class:files={shell.launchMode === "files"} bind:this={shell.launchList}>
           {#each shell.matches as item, index (`${item.group}-${item.label}`)}
-            <button type="button" class:on={index === shell.launchIndex} onmouseenter={() => (shell.launchIndex = index)} onclick={() => shell.runLaunch(item)}>
+            <button type="button" class:on={index === shell.launchIndex} title={shell.launchMode === "files" ? item.group : undefined} onmouseenter={() => (shell.launchIndex = index)} onclick={() => shell.runLaunch(item)}>
               <span class="name">{item.label}</span>
               <span class="meta">{item.group}</span>
             </button>

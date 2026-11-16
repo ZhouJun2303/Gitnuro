@@ -46,6 +46,7 @@ const pages: PanelPage[] = [
   { name: "confirm", scene: "confirm", panels: ["[data-layer=\"confirm\"]"] },
   { name: "command log", scene: "commands", panels: ["[data-layer=\"commands\"]"] },
   { name: "repository picker", scene: "picker", panels: ["[data-layer=\"repos\"]"] },
+  { name: "launcher files", scene: "launch-files", panels: [".palette", ".palette-list.files", ".palette-list button"] },
   { name: "update", scene: "update-available", panels: [".update-panel"] },
   { name: "preferences general", scene: "prefs-appearance", tab: "general", panels: [".pref-nav", ".pref-page", ".theme-styles"] },
   { name: "preferences workspace", scene: "prefs-workspace", tab: "workspace", panels: [".pref-nav", ".pref-page", ".pref-source-row"] },
@@ -93,6 +94,21 @@ for (const theme of themes) {
         test.setTimeout(60_000);
         const scene = scenes.find((entry) => entry.id === item.scene);
         if (!scene) throw new Error(`Unknown lab scene: ${item.scene}`);
+        if (item.scene === "launch-files") {
+          await page.setViewportSize({ width: 540, height: 456 });
+          await page.route("**/__lab/invoke", (route) => {
+            if (route.request().postDataJSON()?.cmd === "commit_tree") {
+              return route.fulfill({ json: { ok: true, value: [
+                "AI_SKILLS/framework/references/ui-prefab-export-structure.md",
+                "AI_SKILLS/framework/references/build-hotfix-agent.md",
+                "Assets/3rd/Epic Toon FX/Demo/Demo Prefabs/VFX/Library/MainUICanvas.prefab",
+                "Assets/3rd/Epic Toon FX/Demo/Missile Prefabs/LiquidAcidOrb.prefab",
+                "src/ui.md",
+              ] } });
+            }
+            return route.continue();
+          });
+        }
         await openScene(page, scene, `&locale=${theme.locale}&theme=${theme.name}`);
         await expect(page.locator("html")).toHaveAttribute("data-theme", theme.name);
         await expect(page.locator("html")).toHaveAttribute("lang", theme.locale === "zh" ? "zh-CN" : "en");
@@ -123,10 +139,42 @@ for (const theme of themes) {
         if (item.history) await expectHistoryWeights(page, theme.name);
         if (item.remote) await expectRemoteSubject(page);
         if (item.merge) await expectMergeFrame(page, theme.name);
+        if (item.scene === "launch-files") await expectLauncherFiles(page);
         if (item.scene === "prefs-accounts") await expectAccountActions(page, theme.locale);
       });
     }
   });
+}
+
+async function expectLauncherFiles(page: Page) {
+  await page.locator(".palette-input").fill("ui");
+  const buttons = page.locator(".palette-list.files button");
+  await expect(buttons).toHaveCount(5);
+  const rows = await buttons.evaluateAll((nodes) => nodes.map((node) => {
+    const button = node.getBoundingClientRect();
+    const name = node.querySelector(".name")!;
+    const meta = node.querySelector(".meta")!;
+    const nameBox = name.getBoundingClientRect();
+    const metaBox = meta.getBoundingClientRect();
+    return {
+      top: button.top, bottom: button.bottom, height: button.height,
+      nameRight: nameBox.right, metaLeft: metaBox.left, metaRight: metaBox.right,
+      right: button.right, nameWrap: getComputedStyle(name).whiteSpace,
+      metaWrap: getComputedStyle(meta).whiteSpace,
+      clipped: meta.scrollWidth > meta.clientWidth,
+      title: node.getAttribute("title"), path: meta.textContent,
+    };
+  }));
+  for (const [index, row] of rows.entries()) {
+    expect(row.height).toBe(36);
+    expect(row.nameWrap).toBe("nowrap");
+    expect(row.metaWrap).toBe("nowrap");
+    expect(row.nameRight).toBeLessThanOrEqual(row.metaLeft);
+    expect(row.metaRight).toBeLessThanOrEqual(row.right);
+    expect(row.title).toBe(row.path);
+    if (index > 0) expect(row.top).toBeGreaterThanOrEqual(rows[index - 1].bottom);
+  }
+  expect(rows.some((row) => row.clipped)).toBe(true);
 }
 
 async function expectAccountActions(page: Page, locale: "zh" | "en") {
