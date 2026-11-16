@@ -302,6 +302,32 @@ test("hunk toolbar selects a hunk without hovering", async ({ page }) => {
   await expect(stage).toBeEnabled();
 });
 
+test("diff header path supports partial mouse selection and copy", async ({ page }) => {
+  await openLabScene(page, "diff-text", ".diff-head > span:first-child");
+  const path = page.locator(".diff-head > span:first-child");
+  const fullPath = (await path.textContent())!;
+  expect(fullPath.length).toBeGreaterThan(8);
+  expect(await path.evaluate((node) => getComputedStyle(node).userSelect)).toBe("text");
+  const box = await path.boundingBox();
+  expect(box).not.toBeNull();
+  const start = { x: box!.x + 2, y: box!.y + box!.height / 2 };
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + 42, start.y, { steps: 8 });
+  await page.mouse.up();
+  const selected = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(selected.length).toBeGreaterThan(0);
+  expect(selected.length).toBeLessThan(fullPath.length);
+  expect(fullPath).toContain(selected);
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.keyboard.press("ControlOrMeta+C");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(selected);
+  await page.mouse.dblclick(start.x + 20, start.y);
+  const word = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+  expect(word.length).toBeGreaterThan(0);
+  expect(fullPath).toContain(word);
+});
+
 test("floating hunk actions stay inside the pane while scrolling", async ({ page }) => {
   await openLabScene(page, "diff-long", ".diff-body .split-code, .diff-body .virtual-row");
   const body = page.locator("section.diff .diff-body");

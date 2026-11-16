@@ -200,6 +200,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    user-select: text;
+    cursor: text;
   }
 
 .diff-head .text-button {
