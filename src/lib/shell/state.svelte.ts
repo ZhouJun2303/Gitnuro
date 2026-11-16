@@ -2115,6 +2115,9 @@ export class ShellState {
     const query = this.launch.trim().toLowerCase();
     const action = this.tr("chrome.groupAction");
     const repoGroup = this.tr("chrome.groupRepo");
+    // The list shows the active language; keep the other one searchable.
+    const alt = (key: string) => translate(this.activeLocale === "zh" ? "en" : "zh", key);
+    const cmd = (key: string, run: () => void, stay = false): LaunchItem => ({ label: this.tr(key), keywords: alt(key), group: action, run, stay });
     if (query.startsWith("!")) {
       const command = query.slice(1);
       return [{ label: command ? `! ${command}` : "!", group: action, run: () => this.mutate({ action: "custom", command }) }];
@@ -2134,32 +2137,32 @@ export class ShellState {
       return files;
     }
     const items: LaunchItem[] = [
-      { label: this.tr("chrome.fetch"), group: action, run: () => void this.doFetch() },
-      { label: this.tr("chrome.fetchAll"), group: action, run: () => void this.mutate({ action: "fetch", remote: null, prune: this.settings.fetchPrune, tags: this.settings.fetchTags }) },
-      { label: this.tr("chrome.pull"), group: action, run: () => void this.doPull() },
-      { label: this.tr("dialog.fastForward"), group: action, run: () => { this.settings.pullRebase = false; void this.doPull(); } },
-      { label: this.tr("chrome.push"), group: action, run: () => void this.doPush() },
-      { label: this.tr("menu.createTag"), group: action, run: () => { this.draft = ""; this.draftExtra = "HEAD"; this.draftUser = ""; this.dialog = "tag"; } },
-      { label: this.tr("chrome.pushTags"), group: action, run: () => void this.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: this.settings.forceWithLease }) },
-      { label: this.tr("chrome.stash"), group: action, run: () => this.openStash([]) },
-      { label: this.tr("chrome.pop"), group: action, run: () => this.confirmPopStash() },
-      { label: this.tr("chrome.refresh"), group: action, run: () => void this.refresh() },
-      { label: this.tr("chrome.stageAll"), group: action, run: () => void this.runChange("stage_all") },
-      { label: this.tr("chrome.commit"), group: action, run: () => void this.submitCommit(false) },
-      { label: this.tr("chrome.commitAndPush"), group: action, run: () => void this.submitCommit(true) },
-      { label: this.tr("chrome.preferences"), group: action, run: () => { this.dialog = "prefs"; } },
-      { label: this.tr("chrome.terminal"), group: action, run: () => void invoke("open_terminal", { path: this.repoPath() }) },
-      { label: this.tr("chrome.explorer"), group: action, run: () => { if (this.snapshot) void this.openLocal(this.snapshot.path); } },
-      { label: this.tr("chrome.flow"), group: action, run: () => { this.draft = ""; this.dialog = "flow"; } },
-      { label: this.tr("chrome.about"), group: action, run: () => { this.dialog = "about"; } },
-      { label: this.tr("chrome.open"), group: action, run: () => this.beginOpen() },
-      { label: this.tr("chrome.workspace"), group: action, run: () => { this.draft = ""; this.dialog = "workspace"; } },
-      { label: this.tr("chrome.clone"), group: action, run: () => void this.beginClone("clone") },
-      { label: this.tr("chrome.newRepo"), group: action, run: () => void this.beginClone("init") },
-      { label: this.tr("chrome.notifications"), group: action, run: () => this.openForge("notes") },
-      { label: this.tr("chrome.pulls"), group: action, run: () => this.openForge("pulls") },
-      { label: this.tr("chrome.changes"), group: action, run: () => { this.section = "changes"; } },
-      { label: this.tr("chrome.commits"), group: action, run: () => { this.section = "history"; } },
+      cmd("chrome.fetch", () => void this.doFetch()),
+      cmd("chrome.fetchAll", () => void this.mutate({ action: "fetch", remote: null, prune: this.settings.fetchPrune, tags: this.settings.fetchTags })),
+      cmd("chrome.pull", () => void this.doPull()),
+      cmd("dialog.fastForward", () => { this.settings.pullRebase = false; void this.doPull(); }),
+      cmd("chrome.push", () => void this.doPush()),
+      cmd("menu.createTag", () => { this.draft = ""; this.draftExtra = "HEAD"; this.draftUser = ""; this.dialog = "tag"; }),
+      cmd("chrome.pushTags", () => void this.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: this.settings.forceWithLease })),
+      cmd("chrome.stash", () => this.openStash([])),
+      cmd("chrome.pop", () => this.confirmPopStash()),
+      cmd("chrome.refresh", () => void this.refresh()),
+      cmd("chrome.stageAll", () => void this.runChange("stage_all")),
+      cmd("chrome.commit", () => void this.submitCommit(false)),
+      cmd("chrome.commitAndPush", () => void this.submitCommit(true)),
+      cmd("chrome.preferences", () => { this.dialog = "prefs"; }),
+      cmd("chrome.terminal", () => void invoke("open_terminal", { path: this.repoPath() })),
+      cmd("chrome.explorer", () => { if (this.snapshot) void this.openLocal(this.snapshot.path); }),
+      cmd("chrome.flow", () => { this.draft = ""; this.dialog = "flow"; }),
+      cmd("chrome.about", () => { this.dialog = "about"; }),
+      cmd("chrome.open", () => this.beginOpen()),
+      cmd("chrome.workspace", () => { this.draft = ""; this.dialog = "workspace"; }),
+      cmd("chrome.clone", () => void this.beginClone("clone")),
+      cmd("chrome.newRepo", () => void this.beginClone("init")),
+      cmd("chrome.notifications", () => this.openForge("notes")),
+      cmd("chrome.pulls", () => this.openForge("pulls")),
+      cmd("chrome.changes", () => { this.section = "changes"; }),
+      cmd("chrome.commits", () => { this.section = "history"; }),
       ...this.settings.workspaces.map((workspace) => ({
         label: this.workspaceName(workspace),
         group: this.tr("chrome.workspace"),
@@ -2173,10 +2176,11 @@ export class ShellState {
     ];
     if (this.mode === "live") {
       items.push(
-        { label: this.tr("chrome.fileHistory"), group: action, stay: true, run: () => { this.launchMode = "files"; this.launch = ""; this.launchIndex = 0; void this.loadLaunchFiles(); } },
+        cmd("chrome.fileHistory", () => { this.launchMode = "files"; this.launch = ""; this.launchIndex = 0; void this.loadLaunchFiles(); }, true),
         ...this.settings.commands.map((command) => ({ label: command.name, group: action, run: () => this.runCommand(command) })),
         ...(this.refs?.branches ?? []).map((branch) => ({
           label: `${this.tr("menu.checkout")} ${branch.name}`,
+          keywords: `${alt("menu.checkout")} ${branch.name}`,
           group: this.tr("chrome.groupBranch"),
           run: () => void this.mutate({ action: "checkout", name: branch.name }),
         })),
@@ -2202,7 +2206,7 @@ export class ShellState {
     for (const item of items) {
       const key = `${item.group}\0${item.label}`;
       if (seen.has(key)) continue;
-      if (query && !this.fuzzy(query, item.label)) continue;
+      if (query && !this.fuzzy(query, item.keywords ? `${item.label} ${item.keywords}` : item.label)) continue;
       seen.add(key);
       unique.push(item);
     }

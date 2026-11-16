@@ -156,7 +156,8 @@ export type RepoJob = { label: string; percent: number | null; depth: number };
 
 export type PrefTab = "general" | "workspace" | "diff" | "previewFormats" | "commit" | "ai" | "git" | "integration" | "network" | "accounts" | "advanced" | "commands" | "shortcuts";
 
-export type LaunchItem = { label: string; group: string; run: () => void; stay?: boolean };
+/** `keywords` holds the label in other UI languages, so a query typed in any language still matches. */
+export type LaunchItem = { label: string; keywords?: string; group: string; run: () => void; stay?: boolean };
 
 export type Place = {
     section: "changes" | "history";
