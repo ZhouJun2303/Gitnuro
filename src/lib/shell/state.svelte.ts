@@ -852,7 +852,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.10");
+  appVersion = $state("2.0.11");
 
   appInfo = $state<AppInfo | null>(null);
 
