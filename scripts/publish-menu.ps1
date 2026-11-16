@@ -1,5 +1,6 @@
 ﻿# Interactive Windows publish menu.
-# Bumps the patch, minor, or major version, then either packages only or publishes to GitHub.
+# Bumps the patch, minor, or major version, then either packages only,
+# installs the package over the local AweGit, or publishes to GitHub.
 
 param(
     [string]$Action = "",
@@ -194,6 +195,89 @@ function Get-CurrentBranch {
     return $branch
 }
 
+function Get-InstalledApp {
+    $hives = @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+    )
+    foreach ($hive in $hives) {
+        if (-not (Test-Path $hive)) { continue }
+        foreach ($key in Get-ChildItem -Path $hive -ErrorAction SilentlyContinue) {
+            $entry = Get-ItemProperty -Path $key.PSPath -ErrorAction SilentlyContinue
+            if ($entry -and "$($entry.DisplayName)".Trim() -eq "AweGit") {
+                return [pscustomobject]@{
+                    Location = "$($entry.InstallLocation)".Trim().Trim('"')
+                    Uninstall = "$($entry.UninstallString)".Trim()
+                }
+            }
+        }
+    }
+    return $null
+}
+
+function Get-InstallProcess([string]$executable) {
+    @(Get-Process -Name "awegit" -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $_.Path -and $_.Path.Equals($executable, [StringComparison]::OrdinalIgnoreCase)
+        } catch {
+            $false
+        }
+    })
+}
+
+# Silent NSIS install over the same version replaces the files in place and
+# keeps the uninstall entry, so a local build can be tried before publishing.
+function Install-LocalApp([string]$Version) {
+    $setup = Join-Path $root "target\release\bundle\nsis\AweGit_${Version}_x64-setup.exe"
+    if (-not (Test-Path -LiteralPath $setup)) { throw "没找到安装包 $setup" }
+
+    $app = Get-InstalledApp
+    if (-not $app) {
+        Write-Host "本机没有安装 AweGit，跳过替换。安装包在 $setup"
+        return
+    }
+    if ($app.Uninstall -notmatch 'uninstall\.exe') {
+        Write-Host "本机的 AweGit 不是 NSIS 安装包装的，跳过替换。安装包在 $setup"
+        return
+    }
+    $installDir = if ($app.Location) { $app.Location } else { Join-Path $env:LOCALAPPDATA "AweGit" }
+    $installedExe = Join-Path $installDir "awegit.exe"
+    if (-not (Test-Path -LiteralPath $installedExe)) {
+        Write-Host "本机安装目录里没找到 $installedExe，跳过替换。安装包在 $setup"
+        return
+    }
+
+    $running = Get-InstallProcess $installedExe
+    if ($running.Count -gt 0) {
+        Write-Host "AweGit 正在运行，替换前要先关闭它。"
+        $answer = Read-Host "输入 y 关闭并继续，直接回车取消替换"
+        if ($answer -ne "y" -and $answer -ne "Y") {
+            Write-Host "没有替换本机版本。安装包在 $setup"
+            return
+        }
+        foreach ($item in $running) { Stop-Process -Id $item.Id -Force -ErrorAction SilentlyContinue }
+        for ($i = 0; $i -lt 20; $i++) {
+            if ((Get-InstallProcess $installedExe).Count -eq 0) { break }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+
+    Write-Host "正在替换本机安装：$installDir"
+    $install = Start-Process -FilePath $setup -ArgumentList "/S" -PassThru -Wait
+    if ($install.ExitCode -ne 0) {
+        throw "安装包返回 $($install.ExitCode)，本机版本没有替换"
+    }
+    $built = Join-Path $root "target\release\awegit.exe"
+    $builtHash = (Get-FileHash -LiteralPath $built -Algorithm SHA256).Hash
+    $installedHash = (Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash
+    if ($builtHash -ne $installedHash) {
+        Write-Host "本机 $installedExe 和刚打包的文件不一致，请确认是否替换成功。"
+    } else {
+        Write-Host "已替换本机安装：$installedExe（版本 $Version，没有改版本号，也没有上传）"
+    }
+}
+
 # Everything on this branch that the last publish did not ship yet.
 # origin/release is the boundary, not the v* tags: tags made before the
 # publish scripts tagged the manifest commit sit on the previous release.
@@ -271,16 +355,20 @@ function Invoke-ReleaseFlow {
         [string]$Bump = "",
         [string]$SetVersion = "",
         [switch]$Publish,
+        [switch]$InstallLocal,
         [string]$ReleaseNotes = "",
         [switch]$Confirm
     )
 
-    Assert-Clean
+    if (-not $InstallLocal) { Assert-Clean }
     $current = Get-ProjectVersion
     $target = $current
     if ($Bump) { $target = Get-BumpedVersion $current $Bump }
     if ($SetVersion) { $target = $SetVersion }
     ConvertTo-Parts $target | Out-Null
+    if ($InstallLocal -and $target -ne $current) {
+        throw "本地替换模式不改版本号，当前版本保持 $current"
+    }
     if ($target -ne $current -and -not (Test-VersionGreater $target $current)) {
         throw "新版本 $target 必须高于当前版本 $current"
     }
@@ -314,6 +402,9 @@ function Invoke-ReleaseFlow {
         } else {
             Write-Host "说明：$ReleaseNotes"
         }
+    } elseif ($InstallLocal) {
+        Write-Host "只打包，不上传，版本号保持 $current"
+        Write-Host "打包后替换本机已安装的 AweGit（如果有）"
     } else {
         Write-Host "只打包，不上传"
     }
@@ -388,6 +479,7 @@ function Invoke-ReleaseFlow {
         } else {
             & (Join-Path $root "scripts\package-windows.ps1")
             if ($LASTEXITCODE -ne 0) { throw "打包失败" }
+            if ($InstallLocal) { Install-LocalApp $target }
         }
     } finally {
         if ($switched) {
@@ -419,6 +511,7 @@ function Show-Menu {
     Write-Host "5  不改版本，直接发布 $current"
     Write-Host "6  修订号 +1，只打包不上传"
     Write-Host "7  不改版本，只打包不上传"
+    Write-Host "8  不改版本，打包并替换本机安装"
     Write-Host "0  退出"
     Write-Host ""
 }
@@ -433,6 +526,7 @@ switch ($Action) {
     "5" { $Action = "current" }
     "6" { $Action = "package-patch" }
     "7" { $Action = "package" }
+    "8" { $Action = "install" }
 }
 
 if (-not $Action -or $Action -eq "menu") {
@@ -451,6 +545,7 @@ if (-not $Action -or $Action -eq "menu") {
             "5" { $done = Invoke-ReleaseFlow -Publish }
             "6" { $done = Invoke-ReleaseFlow -Bump patch }
             "7" { $done = Invoke-ReleaseFlow }
+            "8" { $done = Invoke-ReleaseFlow -InstallLocal }
             "0" { exit 0 }
             default { Write-Host "没有这个选项" }
         }
@@ -466,10 +561,11 @@ switch ($Action) {
     "current" { Invoke-ReleaseFlow -Publish -ReleaseNotes $Notes -Confirm:$Yes | Out-Null }
     "package-patch" { Invoke-ReleaseFlow -Bump patch -Confirm:$Yes | Out-Null }
     "package" { Invoke-ReleaseFlow -Confirm:$Yes | Out-Null }
+    "install" { Invoke-ReleaseFlow -InstallLocal -Confirm:$Yes | Out-Null }
     "status" {
         $current = Get-ProjectVersion
         Write-Host "$current  $(Get-BumpedVersion $current 'patch')  $(Get-CurrentBranch)"
     }
     "notes" { Get-ChangelogNotes }
-    default { throw "未知选项 $Action。可用 patch、minor、major、set、current、package-patch、package、status、notes。" }
+    default { throw "未知选项 $Action。可用 patch、minor、major、set、current、package-patch、package、install、status、notes。" }
 }

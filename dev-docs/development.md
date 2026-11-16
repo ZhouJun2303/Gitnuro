@@ -70,6 +70,7 @@ macOS 使用系统 Git 和系统上的 `cargo`，不需要上面的 PATH。
 | UI 自动化 | `pnpm test:ui` | Playwright 跑试验台场景 |
 | 打 Windows 安装包 | `pnpm package:windows` | `target\release\bundle` 下的 exe 和 msi |
 | 发布到 GitHub | `publish.bat` | 选择版本号，打包并上传到 Release |
+| 本机试用新构建 | `publish.bat` 第 8 项 | 不改版本号，打包后替换本机安装 |
 | 打 macOS 安装包 | `pnpm package:mac` | 只能在 Mac 上运行，产物在 `target/release/bundle` |
 
 `pnpm start` 就是 `pnpm tauri dev`。`pnpm test` 跑 `scripts/test-all.mjs`，依次执行 `cargo test -p awegit-git` 和 `cargo test -p awegit --lib`，都加 `--test-threads=1`。
@@ -278,6 +279,8 @@ pnpm package:windows
 - `target\release\bundle\msi\AweGit_2.0.7_x64_en-US.msi`
 
 发布到 GitHub 时，在仓库根目录双击或运行 `publish.bat`。第 1 项会把修订号加一（2.0.0 变成 2.0.1），然后打包并上传。也可以选次版本、主版本、指定版本、不改版本，或只打包不上传。
+
+先在本机试用时选第 8 项：不改版本号、不上传，打包后用安装包静默替换本机已安装的 AweGit，保留原来的安装目录和卸载项。本机没有安装、或不是用 NSIS 安装包装的，就只留下安装包。这个模式不要求工作区干净。试完没问题，再按正常流程发布。
 
 在 `feat/dev` 上发布时，脚本会先提交版本号，再切到 `release` 合并这个分支，打包上传后回到 `feat/dev`。从其他分支发布也走同一条合并路径。工作区要是干净的，并且 `gh` 已经登录。
 
