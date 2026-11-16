@@ -1,12 +1,12 @@
 {
-    "appVersion": "2.0.11",
-    "notes":  "✨ 新功能\n\n· 关于面板可查看构建时间。\n· 右键仓库标签可查看仓库信息。\n· 快速启动支持中英文双向搜索。\n· 可在设置中自定义快捷键。\n· 可用 Ctrl+P 打开快速启动。\n· 文件历史可按格式生成版本临时副本。\n· 文件历史可查看支持的预览格式。\n· 关闭文件历史时可选择保留或删除预览。\n· 还原时可选择是否立即提交。\n· 还原前可预览提交说明。\n\n⚡ 体验优化\n\n· 更新面板按行显示更新说明。\n· 账号头像缓存到本地，打开面板无需重复下载。\n· 按 Delete 丢弃更改时默认选中确认。\n· 同名项目标签显示父目录，方便区分。\n· 重置操作集中在同一面板，默认使用 Soft。\n· 文件历史的导出按钮更加醒目。\n· 差异标题中的路径可选中并复制。\n· 浏览较长历史记录时界面更流畅。\n\n🐛 问题修复\n\n· 未删除的预览不再阻止关闭文件历史。\n· 文件历史窗口现在可以正常关闭。\n· 复制 Unity 预览文件名时不再带后缀。\n· 缺少工程设置目录时也能识别 Unity 历史版本。\n· Java 历史文件现在可以生成版本副本。\n· 文件历史窗口现在可以正常生成版本副本。\n· 文件历史启动器可完整显示长路径，文字不再重叠。\n· 修复差异换行时的显示问题。\n· 修复切换历史记录时的读取竞态问题。\n· 修复拉取后文件删除状态显示不正确的问题。\n· 拉取遇到短暂文件占用时会自动重试。",
-    "appCode":  37,
-    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.10/AweGit_2.0.10_x64-setup.exe",
+    "appVersion":  "2.0.11",
+    "notes":  "✨ 新功能\n\n· 自动贮藏新增包含未跟踪文件的开关，默认关闭\n\n⚡ 体验优化\n\n· 拉取无更新时跳过自动贮藏\n· 减少操作后的重复刷新，提升界面响应速度\n· 显示 Git 命令的实际执行耗时\n\n🐛 问题修复\n\n· 修复检出后本地修改未正确恢复的问题\n· 修复子模块改动无法正确丢弃的问题\n· 修复更新单个子模块时影响其他子模块的问题",
+    "appCode":  38,
+    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.11/AweGit_2.0.11_x64-setup.exe",
     "downloads":  {
                       "windows":  {
-                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.10/AweGit_2.0.10_x64-setup.exe",
-                                      "sha256":  "0f1f9b01d2449f3c15661265bfa7f60b8d3cbed7a0f51f157a5667f15bc2cae3"
+                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.11/AweGit_2.0.11_x64-setup.exe",
+                                      "sha256":  "152c80e63a7a193935fabaf4f6fe17ca6ca4e60472e030eac7cbeb1e6da1610a"
                                   },
                       "macos":  ""
                   }
