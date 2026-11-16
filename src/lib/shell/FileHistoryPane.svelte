@@ -25,6 +25,7 @@
   let autoClean = $state(true);
   let busy = $state(false);
   let closing = $state(false);
+  let pendingClose = $state<PreviewCopy[]>([]);
   let allowClose = false;
   let pendingAction: Promise<void> | null = null;
   let copiedPath = $state("");
@@ -138,13 +139,21 @@
     void getCurrentWindow().setTitle(`${shell.tr("menu.history")} — ${file}`).catch(() => {});
   });
 
+  async function closeWindow() {
+    if (shell.inApp()) {
+      allowClose = true;
+      await getCurrentWindow().close();
+    }
+    else window.location.href = "/";
+  }
+
   async function closePane() {
-    if (closing) return;
+    if (closing || pendingClose.length) return;
     closing = true;
     try {
       await pendingAction;
       if (autoClean) {
-        const kept: string[] = [];
+        const modified: PreviewCopy[] = [];
         for (const [key, preview] of Object.entries(previews)) {
           try {
             await invoke("remove_revision_copy", { path: preview.repo, file: preview.file, copy: preview.path });
@@ -152,16 +161,44 @@
             delete remaining[key];
             previews = remaining;
           } catch {
+            modified.push(preview);
+          }
+        }
+        if (modified.length) {
+          pendingClose = modified;
+          closing = false;
+          return;
+        }
+      }
+      await closeWindow();
+    } catch (error) {
+      copySupportError = shell.message(error);
+      allowClose = false;
+      closing = false;
+    }
+  }
+
+  async function resolveClose(action: "keep" | "remove") {
+    const targets = pendingClose;
+    pendingClose = [];
+    closing = true;
+    try {
+      if (action === "remove") {
+        const kept: string[] = [];
+        for (const preview of targets) {
+          try {
+            await invoke("remove_revision_copy", { path: preview.repo, file: preview.file, copy: preview.path, force: true });
+            const remaining = { ...previews };
+            for (const [key, item] of Object.entries(remaining)) if (item.path === preview.path) delete remaining[key];
+            previews = remaining;
+            if (copiedPath === preview.path) copiedPath = "";
+          } catch {
             kept.push(previewName(preview.path));
           }
         }
         if (kept.length) await emit("awegit-preview-kept", { files: kept }).catch(() => {});
       }
-      if (shell.inApp()) {
-        allowClose = true;
-        await getCurrentWindow().close();
-      }
-      else window.location.href = "/";
+      await closeWindow();
     } catch (error) {
       copySupportError = shell.message(error);
       allowClose = false;
@@ -303,6 +340,23 @@
       {/if}
     </section>
   </div>
+  {#if pendingClose.length}
+    <div class="preview-confirm" role="dialog" aria-modal="true" aria-label={shell.tr("chrome.previewModifiedTitle")}>
+      <div class="preview-confirm-card">
+        <h3>{shell.tr("chrome.previewModifiedTitle")}</h3>
+        <p>{shell.tr("chrome.previewModifiedBody")}</p>
+        <ul>
+          {#each pendingClose as preview (preview.path)}
+            <li title={preview.path}>{previewName(preview.path)}</li>
+          {/each}
+        </ul>
+        <div class="preview-confirm-actions">
+          <button type="button" onclick={() => void resolveClose("keep")}>{shell.tr("chrome.previewKeep")}</button>
+          <button type="button" class="danger" onclick={() => void resolveClose("remove")}>{shell.tr("chrome.previewForceDelete")}</button>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 {#snippet historySplitRow(row: SplitRow)}
@@ -336,6 +390,7 @@
 
 <style>
   .file-history {
+    position: relative;
     flex: 1;
     min-height: 0;
     display: flex;
@@ -579,4 +634,66 @@
 
   .history-diff .virtual-row.hunk,
   .history-diff .virtual-row.meta { color: var(--text-secondary); }
+
+  .preview-confirm {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: color-mix(in srgb, var(--text) 18%, transparent);
+  }
+
+  .preview-confirm-card {
+    width: min(440px, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px 22px 18px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    background: var(--elevated);
+    box-shadow: var(--shadow);
+  }
+
+  .preview-confirm-card h3 { margin: 0; font-size: 16px; font-weight: 650; }
+
+  .preview-confirm-card p { margin: 0; color: var(--text-secondary); line-height: 1.5; }
+
+  .preview-confirm-card ul {
+    margin: 0;
+    padding: 8px 10px;
+    max-height: 160px;
+    overflow: auto;
+    list-style: none;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--field);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  .preview-confirm-card li { overflow-wrap: anywhere; }
+
+  .preview-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
+  .preview-confirm-actions button {
+    height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--elevated);
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .preview-confirm-actions button:hover { background: var(--hover); }
+
+  .preview-confirm-actions button.danger { color: var(--deleted); }
+
+  .preview-confirm-actions button.danger:hover {
+    border-color: color-mix(in srgb, var(--deleted) 45%, transparent);
+    background: color-mix(in srgb, var(--deleted) 10%, transparent);
+  }
 </style>

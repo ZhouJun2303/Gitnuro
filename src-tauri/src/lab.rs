@@ -359,7 +359,12 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "revision_copy_support" => done_result(super::revision_copy_support(req(args, "path")?, req(args, "file")?)),
         "revision_copy_formats" => done_result(Ok(super::revision_copy_formats())),
         "create_revision_copy" => done_result(super::create_revision_copy(req(args, "path")?, req(args, "rev")?, req(args, "file")?)),
-        "remove_revision_copy" => done_result(super::remove_revision_copy(req(args, "path")?, req(args, "file")?, req(args, "copy")?)),
+        "remove_revision_copy" => done_result(super::remove_revision_copy(
+            req(args, "path")?,
+            req(args, "file")?,
+            req(args, "copy")?,
+            req(args, "force")?,
+        )),
         "reflog" => done_result(super::reflog(req(args, "path")?, req(args, "limit")?)),
         "commit_tree" => done_result(super::commit_tree(req(args, "path")?, req(args, "rev")?)),
         "repository_summary" => {

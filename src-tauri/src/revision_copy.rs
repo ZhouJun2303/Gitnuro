@@ -272,7 +272,7 @@ pub fn create(repo: &Path, rev: &str, file: &str) -> Result<String, String> {
     Err("Too many temporary copies of this revision".into())
 }
 
-pub fn remove(repo: &Path, file: &str, copy: &str) -> Result<(), String> {
+pub fn remove(repo: &Path, file: &str, copy: &str, force: bool) -> Result<(), String> {
     let dest = PathBuf::from(copy);
     let mut registry = created_copies().lock().unwrap_or_else(|e| e.into_inner());
     let record = registry
@@ -288,9 +288,11 @@ pub fn remove(repo: &Path, file: &str, copy: &str) -> Result<(), String> {
 
     match std::fs::symlink_metadata(&dest) {
         Ok(metadata) if metadata.file_type().is_file() => {
-            let bytes = std::fs::read(&dest).map_err(|e| e.to_string())?;
-            if Sha256::digest(&bytes).to_vec() != record.digest {
-                return Err("Preview was modified; it was not deleted".into());
+            if !force {
+                let bytes = std::fs::read(&dest).map_err(|e| e.to_string())?;
+                if Sha256::digest(&bytes).to_vec() != record.digest {
+                    return Err("Preview was modified; it was not deleted".into());
+                }
             }
             std::fs::remove_file(&dest).map_err(|e| e.to_string())?;
         }
@@ -498,11 +500,12 @@ mod tests {
         assert!(remove(
             &root,
             "art/icon.png",
-            root.join("art/icon.png").to_str().unwrap()
+            root.join("art/icon.png").to_str().unwrap(),
+            false
         )
         .is_err());
-        assert!(remove(&root, "other.png", &first).is_err());
-        remove(&root, "art/icon.png", &first).unwrap();
+        assert!(remove(&root, "other.png", &first, false).is_err());
+        remove(&root, "art/icon.png", &first, false).unwrap();
         assert!(!Path::new(&first).exists());
         assert_eq!(
             std::fs::read(&preserved_meta).unwrap(),
@@ -510,7 +513,7 @@ mod tests {
         );
         let generated_meta = meta_path(Path::new(&second));
         std::fs::write(&generated_meta, b"generated metadata").unwrap();
-        remove(&root, "art/icon.png", &second).unwrap();
+        remove(&root, "art/icon.png", &second, false).unwrap();
         assert!(!Path::new(&second).exists());
         assert!(!generated_meta.exists());
         assert_eq!(std::fs::read(root.join("art/icon.png")).unwrap(), [9, 8, 7]);
@@ -546,8 +549,14 @@ mod tests {
         assert!(prefab.ends_with(".prefab"));
         assert_eq!(std::fs::read(&prefab).unwrap(), b"%YAML 1.1\n");
         std::fs::write(&prefab, b"edited in Unity").unwrap();
-        assert!(remove(&root, "Assets/UIChapter.prefab", &prefab).is_err());
+        assert!(remove(&root, "Assets/UIChapter.prefab", &prefab, false).is_err());
         assert_eq!(std::fs::read(&prefab).unwrap(), b"edited in Unity");
+        remove(&root, "Assets/UIChapter.prefab", &prefab, true).unwrap();
+        assert!(!Path::new(&prefab).exists());
+        assert_eq!(
+            std::fs::read(root.join("Assets/UIChapter.prefab")).unwrap(),
+            b"%YAML 1.1\n"
+        );
         std::fs::create_dir_all(root.join("unityLibrary/src/main/java/com/unity3d/player"))
             .unwrap();
         std::fs::write(

@@ -87,7 +87,7 @@ for (const clean of [true, false]) {
   });
 }
 
-test("closing keeps a modified preview and still deletes the others", async ({ page }) => {
+test("closing asks whether to keep a modified preview", async ({ page }) => {
   await openLabScene(page, "file-history", ".history-commit", { locale: "en" });
   const rows = page.locator(".history-item");
   await rows.nth(0).locator(".preview-revision").click();
@@ -99,9 +99,32 @@ test("closing keeps a modified preview and still deletes the others", async ({ p
     await expect(rows.nth(1).getByRole("button", { name: "Copy preview filename" })).toBeVisible();
     const other = (await page.locator(".copy-result").getAttribute("title"))!;
     await page.getByRole("button", { name: "Close" }).click();
+    const dialog = page.getByRole("dialog", { name: "Preview was modified" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(modified.split(/[\\/]/).pop()!);
+    await dialog.getByRole("button", { name: "Keep and close" }).click();
     await expect(page.locator(".file-history")).toHaveCount(0);
     expect(existsSync(modified)).toBe(true);
     expect(existsSync(other)).toBe(false);
+  } finally {
+    if (existsSync(modified)) unlinkSync(modified);
+  }
+});
+
+test("force deleting a modified preview removes it on close", async ({ page }) => {
+  await openLabScene(page, "file-history", ".history-commit", { locale: "en" });
+  const row = page.locator(".history-item").first();
+  await row.locator(".preview-revision").click();
+  await expect(row.getByRole("button", { name: "Copy preview filename" })).toBeVisible();
+  const modified = (await page.locator(".copy-result").getAttribute("title"))!;
+  try {
+    writeFileSync(modified, "modified preview");
+    await page.getByRole("button", { name: "Close" }).click();
+    const dialog = page.getByRole("dialog", { name: "Preview was modified" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Force delete and close" }).click();
+    await expect(page.locator(".file-history")).toHaveCount(0);
+    expect(existsSync(modified)).toBe(false);
   } finally {
     if (existsSync(modified)) unlinkSync(modified);
   }

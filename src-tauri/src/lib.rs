@@ -1733,9 +1733,9 @@ fn create_revision_copy(path: Option<String>, rev: String, file: String) -> Resu
 }
 
 #[tauri::command]
-fn remove_revision_copy(path: Option<String>, file: String, copy: String) -> Result<(), String> {
+fn remove_revision_copy(path: Option<String>, file: String, copy: String, force: Option<bool>) -> Result<(), String> {
     let repo = repo_from(path)?;
-    revision_copy::remove(&repo, &file, &copy)
+    revision_copy::remove(&repo, &file, &copy, force.unwrap_or(false))
 }
 
 #[tauri::command]
