@@ -6,7 +6,7 @@
   import { translate, resolveLocale, type Locale } from "./i18n";
   import { broadcastLocale, onLocaleChange } from "./i18n/sync";
   import { isAppearance, onAppearanceChange, resolveAppearance } from "./appearance";
-  import { shortcut } from "./keys";
+  import { configureShortcuts, shortcut } from "./keys";
   import { buildFlowPipeline, isFutureStep, stateSymbol, type FlowCommit, type FlowDelta, type FlowNode, type FlowSnapshot, type FlowSummary } from "./operation-flow";
   import type { Settings } from "./status";
   import "./FlowWindow.css";
@@ -192,6 +192,7 @@
     const boot = async () => {
       try {
         const settings = await invoke<Settings>("load_settings");
+        configureShortcuts(settings.shortcuts);
         autoClose = settings.flowAutoClose === true;
         locale = scene ? params.get("locale") === "en" ? "en" : "zh" : resolveLocale(settings.locale);
         appearance = scene && isAppearance(params.get("theme")) ? params.get("theme")! : settings.theme;

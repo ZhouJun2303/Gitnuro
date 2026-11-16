@@ -1,6 +1,7 @@
 export type Locale = "en" | "zh";
 
 export type Messages = {
+  shortcuts: Record<string, string>;
   flow: Record<string, string>;
   chrome: {
     open: string;
@@ -16,6 +17,9 @@ export type Messages = {
     copied: string;
     createTempCopy: string;
     copyCreated: string;
+    cleanPreviewOnClose: string;
+    copyPreviewName: string;
+    cancelPreview: string;
     locating: string;
     readingCommit: string;
     readingFile: string;
@@ -596,6 +600,21 @@ export type Messages = {
     commitTypeReset: string;
     integration: string;
     customCommands: string;
+    shortcutPage: string;
+    shortcutHint: string;
+    shortcutSearch: string;
+    shortcutRecord: string;
+    shortcutUnbound: string;
+    shortcutConflict: string;
+    shortcutClear: string;
+    shortcutAdd: string;
+    shortcutNoResults: string;
+    shortcutReset: string;
+    shortcutResetAll: string;
+    shortcutGroupApp: string;
+    shortcutGroupRepo: string;
+    shortcutGroupNavigate: string;
+    shortcutGroupChanges: string;
     workspacePage: string;
     accountsPage: string;
     prefGroupGeneral: string;

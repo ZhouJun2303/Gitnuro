@@ -213,6 +213,7 @@ export type Settings = {
   workspaces: WorkspaceRecord[];
   currentWorkspace: string;
   commands: CommandRecord[];
+  shortcuts: Record<string, string[]>;
   flowMaster: string;
   flowDevelop: string;
   flowFeature: string;

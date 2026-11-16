@@ -193,6 +193,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "workspace-menu-busy", group: "叠层", title: "工作区菜单：刷新中", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "prefs-flow", group: "弹窗", title: "偏好设置 · 流程窗口自动打开与关闭", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-appearance", group: "弹窗", title: "偏好设置 · Apple Liquid Glass、经典白色与 VS Code 黑色", repo: "full", ready: ".theme-styles", dialog: "prefs" }),
+  scene({ id: "prefs-shortcuts", group: "弹窗", title: "偏好设置 · 键盘快捷键", repo: "full", ready: '[data-pref-tab="shortcuts"]', dialog: "prefs" }),
   scene({ id: "prefs-language", group: "弹窗", title: "偏好设置 · 语言切换、窗口同步与空白点击", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-workspace", group: "弹窗", title: "偏好设置 · 工作区与扫描", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-diff", group: "弹窗", title: "偏好设置 · 差异", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),

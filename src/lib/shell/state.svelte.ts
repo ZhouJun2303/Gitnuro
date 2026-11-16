@@ -14,7 +14,7 @@ import { resolveLocale, translate } from "../i18n";
 import { broadcastLocale, onLocaleChange } from "../i18n/sync";
 import { isAppearance, onAppearanceChange, resolveAppearance, type Appearance } from "../appearance";
 import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
-import { shortcut, shortcutLabel, typing } from "../keys";
+import { configureShortcuts, shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
@@ -225,6 +225,7 @@ export class ShellState {
     workspaces: [],
     currentWorkspace: "",
     commands: [],
+    shortcuts: {},
     flowMaster: "main",
     flowDevelop: "develop",
     flowFeature: "feature/",
@@ -3520,6 +3521,7 @@ export class ShellState {
         tabWidth: item.tabWidth || workspaceTabWidth(item.repositories?.length || item.openTabs?.length || 0),
       })),
       commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })),
+      shortcuts: value.shortcuts ?? {},
       expandedGroups: value.expandedGroups ?? [],
       accounts: (value.accounts ?? []).map((item) => ({
         ...item,
@@ -3535,6 +3537,7 @@ export class ShellState {
       sourceDirectories: value.sourceDirectories ?? [],
       groupNames: value.groupNames ?? [],
     });
+    configureShortcuts(this.settings.shortcuts);
     applyCommitTypes(this);
     this.syncRecentWorkspace();
     if (recovered) this.settings = { ...this.settings, recoveryNotice: "" };
@@ -6229,12 +6232,19 @@ export class ShellState {
   onShortcut(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
     const action = shortcut(event);
+    // Print stays disabled even when the configured action is blocked by another layer.
+    if (action === "launch" || ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "p")) event.preventDefault();
     if (action === "switchLanguage") {
       event.preventDefault();
       if (!event.repeat && !event.isComposing) this.switchLanguage();
       return;
     }
-    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c") {
+    if (action === "performance") {
+      event.preventDefault();
+      window.dispatchEvent(new CustomEvent("awegit-perf"));
+      return;
+    }
+    if (action === "copy") {
       if (typing(event) || this.dialog || this.launchOpen) return;
       if (this.heldText) {
         event.preventDefault();

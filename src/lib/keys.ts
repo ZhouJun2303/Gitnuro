@@ -40,7 +40,9 @@ export type Shortcut =
   | "filterBranch"
   | "reopen"
   | "pastePatch"
-  | "selectAll";
+  | "selectAll"
+  | "performance"
+  | "copy";
 
 type Chord = { key: string; ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean };
 
@@ -83,6 +85,8 @@ const commandOnMac = new Set<Shortcut>([
   "reopen",
   "pastePatch",
   "selectAll",
+  "performance",
+  "copy",
 ]);
 
 const base: Array<[Shortcut, Chord[]]> = [
@@ -102,7 +106,7 @@ const base: Array<[Shortcut, Chord[]]> = [
   ["tabRight", [{ key: "Tab", ctrl: true }]],
   ["settings", [{ key: ",", ctrl: true }]],
   ["switchLanguage", [{ key: "l", ctrl: true, alt: true }]],
-  ["launch", [{ key: "k", ctrl: true }]],
+  ["launch", [{ key: "k", ctrl: true }, { key: "p", ctrl: true }]],
   ["back", [{ key: "ArrowLeft", alt: true }]],
   ["forward", [{ key: "ArrowRight", alt: true }]],
   ["fetch", [{ key: "f", ctrl: true, shift: true }]],
@@ -128,6 +132,8 @@ const base: Array<[Shortcut, Chord[]]> = [
   ["selectAll", [{ key: "a", ctrl: true }]],
   ["reopen", [{ key: "t", ctrl: true, shift: true }]],
   ["pastePatch", [{ key: "v", ctrl: true, shift: true }]],
+  ["performance", [{ key: "p", ctrl: true, alt: true }]],
+  ["copy", [{ key: "c", ctrl: true }]],
 ];
 
 function chords(action: Shortcut, items: Chord[]): Chord[] {
@@ -135,7 +141,64 @@ function chords(action: Shortcut, items: Chord[]): Chord[] {
   return items.map((item) => (item.ctrl ? { ...item, ctrl: false, meta: true } : item));
 }
 
-const bindings = base.map(([action, items]) => ({ action, items: chords(action, items) }));
+const defaults = base.map(([action, items]) => ({ action, items: chords(action, items) }));
+let bindings = defaults;
+
+function label(chord: Chord) {
+  const parts: string[] = [];
+  if (chord.meta) parts.push("⌘");
+  if (chord.ctrl) parts.push("Ctrl");
+  if (chord.alt) parts.push("Alt");
+  if (chord.shift) parts.push("Shift");
+  parts.push(chord.key.length === 1 ? chord.key.toUpperCase() : chord.key);
+  return parts.join("+");
+}
+
+function parseChord(value: string): Chord | null {
+  if (typeof value !== "string") return null;
+  const parts = value.split("+");
+  const rawKey = parts.pop() ?? "";
+  const key = rawKey.length === 1 ? rawKey.toLowerCase() : rawKey;
+  if (!key || !(key.length === 1 || /^(F(?:[1-9]|1\d|2[0-4])|Escape|Enter|Tab|Delete|Backspace|Arrow(?:Up|Down|Left|Right))$/.test(key))) return null;
+  const modifiers = new Set(parts);
+  if (modifiers.size !== parts.length || parts.some((part) => !["Ctrl", "⌘", "Alt", "Shift"].includes(part))) return null;
+  return { key, ctrl: modifiers.has("Ctrl"), meta: modifiers.has("⌘"), alt: modifiers.has("Alt"), shift: modifiers.has("Shift") };
+}
+
+export function configureShortcuts(overrides: Record<string, string[]> = {}) {
+  const claimed = new Set<string>();
+  bindings = defaults.map(({ action, items }) => {
+    const custom = overrides[action];
+    const chosen = Array.isArray(custom) ? custom.map(parseChord).filter((item): item is Chord => item !== null) : items;
+    return { action, items: chosen.filter((item) => {
+      const key = label(item);
+      if (claimed.has(key)) return false;
+      claimed.add(key);
+      return true;
+    }) };
+  });
+}
+
+export function defaultShortcutLabels(action: Shortcut) {
+  return defaults.find((item) => item.action === action)?.items.map(label) ?? [];
+}
+
+export function shortcutLabels(action: Shortcut, overrides?: Record<string, string[]>) {
+  const custom = overrides?.[action];
+  if (Array.isArray(custom)) return custom.map(parseChord).filter((item): item is Chord => item !== null).map(label);
+  return bindings.find((item) => item.action === action)?.items.map(label) ?? [];
+}
+
+export function shortcutOwner(value: string, exclude: Shortcut): Shortcut | null {
+  return bindings.find((binding) => binding.action !== exclude && binding.items.some((item) => label(item) === value))?.action ?? null;
+}
+
+export function capturedShortcut(event: KeyboardEvent): string | null {
+  if (event.isComposing || ["Control", "Meta", "Alt", "Shift", "Dead", "Process"].includes(event.key)) return null;
+  const key = event.key === "+" ? "=" : event.key === "_" ? "-" : event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  const chord = parseChord(`${event.metaKey ? "⌘+" : ""}${event.ctrlKey ? "Ctrl+" : ""}${event.altKey ? "Alt+" : ""}${event.shiftKey ? "Shift+" : ""}${key}`);
+  return chord ? label(chord) : null;
+}
 
 function sameKey(event: KeyboardEvent, key: string) {
   if (event.key === key) return true;
@@ -159,16 +222,7 @@ export function shortcut(event: KeyboardEvent): Shortcut | null {
 }
 
 export function shortcutLabel(action: Shortcut) {
-  const binding = bindings.find((item) => item.action === action);
-  const chord = binding?.items[0];
-  if (!chord) return "";
-  const parts: string[] = [];
-  if (chord.meta) parts.push("⌘");
-  if (chord.ctrl) parts.push("Ctrl");
-  if (chord.alt) parts.push("Alt");
-  if (chord.shift) parts.push("Shift");
-  parts.push(chord.key.length === 1 ? chord.key.toUpperCase() : chord.key);
-  return parts.join("+");
+  return shortcutLabels(action)[0] ?? "";
 }
 
 export function typing(event: KeyboardEvent) {

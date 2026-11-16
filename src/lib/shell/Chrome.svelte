@@ -6,6 +6,7 @@
   import { invoke } from "../perf";
 
   const shell = getShell();
+  const launchShortcut = $derived.by(() => { shell.settings.shortcuts; return shortcutLabel("launch"); });
 
   $effect(() => {
     const path = shell.meterPath ?? shell.snapshot?.path ?? "";
@@ -91,7 +92,7 @@
   <header class="chrome">
     <div class="chrome-tools">
       <div class="chrome-left">
-        <button class="tool-btn stack" type="button" title="{shell.tr("chrome.quickLaunch")} ({shortcutLabel("launch")})" onclick={() => void shell.openLaunch()}>
+        <button class="tool-btn stack" type="button" title="{shell.tr("chrome.quickLaunch")} ({launchShortcut})" onclick={() => void shell.openLaunch()}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>
           <span>{shell.tr("chrome.launch")}</span>
         </button>

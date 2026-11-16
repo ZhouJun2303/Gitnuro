@@ -1,0 +1,20 @@
+.shortcut-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 2px 0 8px; }
+.shortcut-toolbar input { flex: 1; min-width: 0; max-width: 360px; }
+.shortcut-toolbar button { flex: none; }
+.shortcut-group { flex: none; }
+.shortcut-group h4 { margin: 6px 0 0; padding: 5px 0; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+.shortcut-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-height: 42px; padding: 6px 2px; border-top: 1px solid var(--line); font-size: 12px; }
+.shortcut-name { flex: 1; min-width: 130px; color: var(--text); }
+.shortcut-binding { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.shortcut-pair { display: inline-flex; align-items: center; min-width: 0; }
+.shortcut-key, .shortcut-add, .shortcut-remove, .shortcut-reset { flex: none; border: 1px solid var(--line); border-radius: var(--radius); background: var(--elevated); color: var(--text); font: inherit; cursor: pointer; }
+.shortcut-key { min-width: 60px; max-width: 200px; min-height: 28px; padding: 3px 8px; overflow-wrap: anywhere; }
+.shortcut-key.recording { border-color: var(--accent); color: var(--accent); }
+.shortcut-add, .shortcut-remove, .shortcut-reset { width: 28px; height: 28px; font-size: 16px; }
+.shortcut-remove { border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.shortcut-pair .shortcut-key { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.shortcut-key:hover, .shortcut-add:hover, .shortcut-remove:hover, .shortcut-reset:hover { background: var(--hover); }
+.shortcut-unbound { color: var(--text-secondary); }
+.shortcut-error { width: 100%; color: var(--deleted); text-align: right; }
+.shortcut-empty { color: var(--text-secondary); }
+@media (max-width: 680px) { .shortcut-name { min-width: 100%; } .shortcut-binding { justify-content: flex-start; } .shortcut-toolbar { flex-wrap: wrap; } }

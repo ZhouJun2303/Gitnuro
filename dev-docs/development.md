@@ -297,6 +297,8 @@ pnpm package:mac
 
 ## 窗口快捷键
 
+首选项的“键盘快捷键”独立页面可搜索全部动作，点击现有按键重新录入、添加或清除组合键，也能单项或全部恢复默认。冲突会提示占用的动作，修改后立即保存到设置文件。未自定义的动作保持下表默认值；`Ctrl+P` 默认打开快速启动，应用内不再触发打印。
+
 下面是 Windows 上的按键。macOS 上，除了切换标签的 `Ctrl+Tab` 和 `Ctrl+Shift+Tab`，其余带 Ctrl 的组合改为 Command。方向键仍是上、下。`Escape` 关闭当前对话框。
 
 | 操作 | 按键 |
@@ -308,6 +310,7 @@ pnpm package:mac
 | 全部暂存或全部取消暂存 | `Ctrl+Alt+Shift+S` |
 | 丢弃修改 | `Delete`、`Ctrl+Shift+D` 或 `Backspace` |
 | 全选当前列表或差异，再按一次取消 | `Ctrl+A` |
+| 复制所选文本或路径 | `Ctrl+C` |
 | 粘贴补丁 | `Ctrl+Shift+V` |
 | 获取 | `Ctrl+Shift+F` 或 `Ctrl+Alt+Shift+F` |
 | 拉取 | `Ctrl+Shift+L` 或 `Ctrl+Alt+Shift+L` |
@@ -324,12 +327,14 @@ pnpm package:mac
 | 变更 / 历史 | `Ctrl+1` / `Ctrl+2` |
 | 当前分支 / 所有分支 | `Ctrl+Shift+A` |
 | 定位当前分支 | `Ctrl+0` |
-| 快速启动 | `Ctrl+K` |
+| 快速启动 | `Ctrl+K` 或 `Ctrl+P` |
 | 搜索提交 | `Ctrl+F` |
 | 后退 / 前进 | `Alt+Left` / `Alt+Right` |
 | 设置 | `Ctrl+,` |
 | 切换中英文 | `Ctrl+Alt+L` |
 | 在文件管理器中显示 | `Ctrl+Alt+O` |
+| 打开终端 | `Ctrl+Alt+Shift+T` |
+| 性能面板 | `Ctrl+Alt+P` |
 | 放大 / 缩小 | `Ctrl+=` / `Ctrl+-` |
 
-终端从仓库菜单打开，没有单独的快捷键。
+所有默认按键均可在首选项的“键盘快捷键”页面修改或禁用。

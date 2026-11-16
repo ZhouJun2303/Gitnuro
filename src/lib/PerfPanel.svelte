@@ -28,20 +28,12 @@
   });
 
   onMount(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.altKey && !event.shiftKey && event.key.toLowerCase() === "p") {
-        event.preventDefault();
-        open = !open;
-      }
-    };
     const onToggle = (event: Event) => {
       const detail = (event as CustomEvent<{ open?: boolean }>).detail;
       open = detail?.open ?? !open;
     };
-    window.addEventListener("keydown", onKey);
     window.addEventListener("awegit-perf", onToggle);
     return () => {
-      window.removeEventListener("keydown", onKey);
       window.removeEventListener("awegit-perf", onToggle);
     };
   });

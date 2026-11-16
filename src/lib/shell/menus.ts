@@ -234,7 +234,7 @@ export function helpItems(shell: ShellState) {
     return [
       { label: shell.tr("chrome.about"), run: () => (shell.dialog = "about") },
       { label: shell.tr("chrome.checkUpdate"), run: () => shell.openUpdatePanel(true) },
-      { label: shell.tr("chrome.performance"), shortcut: "Ctrl+Alt+P", run: () => window.dispatchEvent(new CustomEvent("awegit-perf")) },
+      { label: shell.tr("chrome.performance"), shortcut: shortcutLabel("performance"), run: () => window.dispatchEvent(new CustomEvent("awegit-perf")) },
     ];
   }
 
