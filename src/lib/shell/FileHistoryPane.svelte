@@ -384,7 +384,7 @@
   .history-item.selected .history-commit,
   .history-item.selected .history-commit:hover { background: var(--selection); }
 
-  .copy-revision { position: absolute; right: 7px; top: 27px; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+  .copy-revision { position: absolute; right: 7px; top: 27px; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--field); color: var(--text); cursor: pointer; }
   .copy-revision:hover, .copy-revision:focus-visible { border-color: var(--line); background: var(--hover); color: var(--text); }
   .copy-revision:disabled { opacity: .45; cursor: default; }
   .copy-revision svg { width: 16px; height: 16px; }

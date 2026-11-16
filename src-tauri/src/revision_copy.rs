@@ -36,6 +36,9 @@ const COMMON: &[(&str, &str)] = &[
     ("psd", "image"),
     ("svg", "image"),
     ("cs", "script"),
+    ("java", "script"),
+    ("kt", "script"),
+    ("kts", "script"),
     ("js", "script"),
     ("ts", "script"),
     ("tsx", "script"),
@@ -45,6 +48,8 @@ const COMMON: &[(&str, &str)] = &[
     ("gd", "script"),
     ("lua", "script"),
     ("json", "data"),
+    ("gradle", "data"),
+    ("properties", "data"),
     ("yaml", "data"),
     ("yml", "data"),
     ("xml", "data"),
@@ -214,6 +219,23 @@ mod tests {
                 kind: "script"
             })
         );
+        assert_eq!(
+            support(
+                &root,
+                "unityLibrary/src/main/java/com/unity3d/player/GoogleHelper.java"
+            ),
+            Some(Support {
+                tool: "common",
+                kind: "script"
+            })
+        );
+        assert_eq!(
+            support(&root, "unityLibrary/build.gradle"),
+            Some(Support {
+                tool: "common",
+                kind: "data"
+            })
+        );
         assert_eq!(support(&root, "Assets/item.unknown"), None);
         assert_eq!(support(&root, "Assets/../secrets.png"), None);
         assert_eq!(support(&root, ".git/config.txt"), None);
@@ -334,6 +356,35 @@ mod tests {
         let prefab = create(&root, &unity_rev, "Assets/UIChapter.prefab").unwrap();
         assert!(prefab.ends_with(".prefab"));
         assert_eq!(std::fs::read(prefab).unwrap(), b"%YAML 1.1\n");
+        std::fs::create_dir_all(root.join("unityLibrary/src/main/java/com/unity3d/player"))
+            .unwrap();
+        std::fs::write(
+            root.join("unityLibrary/src/main/java/com/unity3d/player/GoogleHelper.java"),
+            b"class GoogleHelper {}",
+        )
+        .unwrap();
+        git(&[
+            "add",
+            "unityLibrary/src/main/java/com/unity3d/player/GoogleHelper.java",
+        ]);
+        git(&[
+            "-c",
+            "user.name=test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qm",
+            "test: android source",
+        ]);
+        let android_rev = git(&["rev-parse", "HEAD"]);
+        let java = create(
+            &root,
+            &android_rev,
+            "unityLibrary/src/main/java/com/unity3d/player/GoogleHelper.java",
+        )
+        .unwrap();
+        assert!(java.ends_with(".java"));
+        assert_eq!(std::fs::read(java).unwrap(), b"class GoogleHelper {}");
         std::fs::remove_dir_all(root).unwrap();
     }
 }
