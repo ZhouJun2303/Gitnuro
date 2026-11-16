@@ -79,6 +79,7 @@ export const en: Messages = {
     cleanPreviewOnClose: "Clean previews on close",
     copyPreviewName: "Copy preview filename",
     cancelPreview: "Cancel preview and delete temporary files",
+    previewKept: "Previews kept on close: {files}",
     locating: "Locating {name}",
     readingCommit: "Reading commit",
     readingFile: "Reading file",

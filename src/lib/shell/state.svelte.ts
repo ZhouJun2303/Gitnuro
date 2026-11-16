@@ -6620,6 +6620,7 @@ export class ShellState {
     let unresized = () => {};
     let unnav = () => {};
     let unreveal = () => {};
+    let ukept = () => {};
     let unupdate = () => {};
     let placeTimer = 0;
     let stopped = false;
@@ -6708,6 +6709,11 @@ export class ShellState {
       if (!id || (repo && repo !== this.repoPath())) return;
       void this.locateRef(id);
     });
+    ukept = await listen<{ files?: string[] }>("awegit-preview-kept", (event) => {
+      if (this.standalone) return;
+      const files = (event.payload?.files ?? []).filter((file) => typeof file === "string" && file);
+      if (files.length) this.actionError = this.tr("chrome.previewKept", { files: files.join(", ") });
+    });
     } catch {
     /* navigation events are optional outside the desktop shell */
     }
@@ -6772,6 +6778,7 @@ export class ShellState {
     unresized();
     unnav();
     unreveal();
+    ukept();
     unupdate();
     };
     });

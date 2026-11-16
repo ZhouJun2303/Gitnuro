@@ -79,6 +79,7 @@ export const zh: Messages = {
     cleanPreviewOnClose: "关闭时清理预览",
     copyPreviewName: "复制预览文件名",
     cancelPreview: "取消预览并删除临时资源",
+    previewKept: "关闭时保留了这些预览：{files}",
     locating: "定位 {name}",
     readingCommit: "读取提交",
     readingFile: "读取文件",

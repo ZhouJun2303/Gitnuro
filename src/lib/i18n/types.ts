@@ -21,6 +21,7 @@ export type Messages = {
     cleanPreviewOnClose: string;
     copyPreviewName: string;
     cancelPreview: string;
+    previewKept: string;
     locating: string;
     readingCommit: string;
     readingFile: string;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { emit } from "@tauri-apps/api/event";
   import { invoke } from "../perf";
   import { getShell } from "./context";
   import BinaryDiff from "./BinaryDiff.svelte";
@@ -143,18 +144,18 @@
     try {
       await pendingAction;
       if (autoClean) {
-        const errors: string[] = [];
+        const kept: string[] = [];
         for (const [key, preview] of Object.entries(previews)) {
           try {
             await invoke("remove_revision_copy", { path: preview.repo, file: preview.file, copy: preview.path });
             const remaining = { ...previews };
             delete remaining[key];
             previews = remaining;
-          } catch (error) {
-            errors.push(`${previewName(preview.path)}: ${shell.message(error)}`);
+          } catch {
+            kept.push(previewName(preview.path));
           }
         }
-        if (errors.length) throw new Error(errors.join("; "));
+        if (kept.length) await emit("awegit-preview-kept", { files: kept }).catch(() => {});
       }
       if (shell.inApp()) {
         allowClose = true;

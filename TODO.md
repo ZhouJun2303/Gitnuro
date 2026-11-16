@@ -8,6 +8,7 @@
 
 ## 已处理
 
+- [x] 文件历史关闭时只要有一个预览被修改，清理失败会让窗口拒绝关闭，只能先取消「关闭时清理预览」。现在删除失败的预览保留在磁盘上，窗口照常关闭，主窗口提示保留了哪些文件。修复：本条所在提交 `fix: 文件历史关闭时不再被未删除的预览阻塞`；回归：`e2e/file-history-copy.spec.ts` 的 `closing keeps a modified preview and still deletes the others`。
 - [x] 文件历史生成 Unity 版本临时副本后，复制的预览文件名带着 `.prefab`、`.cs.txt` 等后缀，粘到 Unity 里对不上资产名。现在自动复制和「复制预览文件名」都会去掉 Unity 资产的后缀（脚本预览的 `.cs.txt` 一并去掉），其他格式仍复制完整文件名。修复：本条所在提交 `fix: 复制 Unity 预览文件名时不带后缀`；回归：`e2e/file-history-copy.spec.ts` 的 `Unity previews copy names without the file extension`。
 - [x] 快速启动的命令面板原来只按当前界面语言过滤，中文界面搜英文、英文界面搜中文都找不到。现在每条命令同时带上另一种语言的文案参与匹配，分支检出也按两种语言的动词匹配。修复：本条所在提交 `feat: 快速启动面板支持中英文双向搜索`；回归：`e2e/palette-search.spec.ts` 的 `palette search matches commands in either language`。
 - [x] 全界面性能与交互检查：修复差异换行重叠、长列表缩短后空白、历史读取竞态、补丁并发及后台读取抢选中项，减少历史比较和分隔条拖动开销。修复：本条所在提交 `fix: 修复差异换行与历史读取竞态并降低界面开销`；回归：`e2e/ui-performance.spec.ts`、`e2e/wrapped-diff.spec.ts`，全场景、主题面板与相关交互共 690 项通过（3 项恢复试验数据后复验）；`pnpm check`、`pnpm build` 通过。测量、问题与验证范围见 [UI 检查记录](dev-docs/ui-audit.md)。

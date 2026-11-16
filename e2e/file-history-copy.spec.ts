@@ -87,7 +87,7 @@ for (const clean of [true, false]) {
   });
 }
 
-test("close retains a modified preview and still cleans the other previews", async ({ page }) => {
+test("closing keeps a modified preview and still deletes the others", async ({ page }) => {
   await openLabScene(page, "file-history", ".history-commit", { locale: "en" });
   const rows = page.locator(".history-item");
   await rows.nth(0).locator(".preview-revision").click();
@@ -99,13 +99,9 @@ test("close retains a modified preview and still cleans the other previews", asy
     await expect(rows.nth(1).getByRole("button", { name: "Copy preview filename" })).toBeVisible();
     const other = (await page.locator(".copy-result").getAttribute("title"))!;
     await page.getByRole("button", { name: "Close" }).click();
-    await expect(page.locator(".copy-error")).toContainText("Preview was modified");
-    await expect(page.locator(".file-history")).toBeVisible();
+    await expect(page.locator(".file-history")).toHaveCount(0);
     expect(existsSync(modified)).toBe(true);
     expect(existsSync(other)).toBe(false);
-    await page.getByRole("checkbox", { name: "Clean previews on close" }).uncheck();
-    await page.getByRole("button", { name: "Close" }).click();
-    await expect(page.locator(".file-history")).toHaveCount(0);
   } finally {
     if (existsSync(modified)) unlinkSync(modified);
   }
