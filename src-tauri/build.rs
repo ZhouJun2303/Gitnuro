@@ -90,6 +90,7 @@ fn main() {
             "account_services",
             "sync_accounts",
             "test_account",
+            "avatar_image",
             "browser_login",
             "cancel_browser_login",
             "remote_matches",

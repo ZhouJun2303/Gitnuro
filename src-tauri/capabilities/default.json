@@ -105,6 +105,7 @@
     "allow-account-services",
     "allow-sync-accounts",
     "allow-test-account",
+    "allow-avatar-image",
     "allow-browser-login",
     "allow-cancel-browser-login",
     "allow-remote-matches",

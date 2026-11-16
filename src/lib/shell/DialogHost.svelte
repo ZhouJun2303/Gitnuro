@@ -11,6 +11,7 @@
   import { recentWorkspaceId, type Account } from "../status";
   import { resolveRemoteAccount } from "./remoteAccount";
   import RepoInfoPanel from "./RepoInfoPanel.svelte";
+  import AccountAvatar from "./AccountAvatar.svelte";
 
   const shell = getShell();
   let remoteAccountPick = $state("");
@@ -815,11 +816,7 @@
               </div>
               {#if account}
                 <div class="account-identity">
-                  {#if account.avatarUrl}
-                    <img class="account-avatar" alt="" src={account.avatarUrl} />
-                  {:else}
-                    <span class="account-avatar" aria-hidden="true">{accountInitial(account)}</span>
-                  {/if}
+                  <AccountAvatar url={account.avatarUrl} initial={accountInitial(account)} />
                   <div class="account-copy">
                     <div class="account-name">
                       <span>{account.name || account.label || account.login || account.forge}</span>

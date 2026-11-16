@@ -5,11 +5,12 @@
 //! is a direct connection, so unit tests do not read the user's settings file.
 
 use std::cell::RefCell;
+use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(test)]
-use std::io::{Read, Write};
+use std::io::Write;
 #[cfg(test)]
 use std::net::TcpListener;
 
@@ -51,6 +52,12 @@ impl NetOptions {
 pub struct HttpResponse {
     pub status: u16,
     pub body: String,
+}
+
+#[derive(Debug)]
+pub struct HttpBytes {
+    pub content_type: String,
+    pub body: Vec<u8>,
 }
 
 pub fn with_net<T>(options: NetOptions, body: impl FnOnce() -> T) -> T {
@@ -139,6 +146,35 @@ pub fn send_once(method: &str, url: &str, headers: &[(&str, &str)], body: Option
     let net = current();
     let agent = build_agent_redirects(net.timeout_secs.max(1), true, 0)?;
     dispatch(&agent, method, url, headers, body)
+}
+
+/// A binary GET, capped at `limit` bytes and kept on HTTPS through redirects.
+pub fn send_bytes(url: &str, limit: u64) -> Result<HttpBytes, String> {
+    let net = current();
+    let agent = build_agent(net.timeout_secs.max(1), true)?;
+    let response = match agent.get(url).call() {
+        Ok(response) => response,
+        Err(ureq::Error::Status(status, _)) => return Err(coded("network", &format!("HTTP {status}"))),
+        Err(error) => return Err(coded("network", &error.to_string())),
+    };
+    let content_type = response
+        .header("content-type")
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let mut body = Vec::new();
+    response
+        .into_reader()
+        .take(limit + 1)
+        .read_to_end(&mut body)
+        .map_err(|error| coded("network", &error.to_string()))?;
+    if body.len() as u64 > limit {
+        return Err(coded("network", "response too large"));
+    }
+    Ok(HttpBytes { content_type, body })
 }
 
 fn dispatch(agent: &ureq::Agent, method: &str, url: &str, headers: &[(&str, &str)], body: Option<&str>) -> Result<HttpResponse, String> {

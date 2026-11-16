@@ -1,5 +1,6 @@
 mod accounts;
 mod ai;
+mod avatars;
 mod changes;
 mod development;
 mod forge;
@@ -2014,6 +2015,15 @@ fn account_services() -> Vec<accounts::ServiceInfo> {
 }
 
 #[tauri::command]
+fn avatar_image(url: String) -> Result<String, String> {
+    if lab::lab_guarded() {
+        return Err(http::coded("avatar", "lab has no avatars"));
+    }
+    let values = settings::load().unwrap_or_default();
+    http::with_net(http::NetOptions::from_settings(&values), || avatars::image(&url))
+}
+
+#[tauri::command]
 fn sync_accounts() -> Result<settings::Settings, String> {
     if lab::lab_guarded() {
         return settings::load();
@@ -2569,6 +2579,7 @@ pub fn run() {
             account_services,
             sync_accounts,
             test_account,
+            avatar_image,
             browser_login,
             cancel_browser_login,
             remote_matches,

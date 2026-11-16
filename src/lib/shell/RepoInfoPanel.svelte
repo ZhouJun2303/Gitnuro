@@ -3,6 +3,7 @@
   import { getShell } from "./context";
   import { invoke } from "../perf";
   import { resolveRemoteAccount } from "./remoteAccount";
+  import AccountAvatar from "./AccountAvatar.svelte";
   import "./RepoInfoPanel.css";
 
   let { path }: { path: string } = $props();
@@ -82,8 +83,7 @@
               {#if preview.account}
                 {@const account = preview.account}
                 <div class="repo-info-identity">
-                  {#if account.avatarUrl}<img class="account-avatar" src={account.avatarUrl} alt="" />
-                  {:else}<span class="account-avatar" aria-hidden="true">{(account.name || account.login || account.label || "?").slice(0, 1).toUpperCase()}</span>{/if}
+                  <AccountAvatar url={account.avatarUrl} initial={(account.name || account.login || account.label || "?").slice(0, 1).toUpperCase()} />
                   <div class="repo-info-account-copy">
                     <strong>{account.name || account.label || account.login || account.forge}</strong>
                     {#if account.defaultForHost}<em>{shell.tr("dialog.accountsDefault")}</em>{/if}

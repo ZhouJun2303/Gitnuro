@@ -417,6 +417,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "sync_accounts" => done_result(super::load_settings()),
         "save_window_bounds" => Ok(Value::Null),
         "test_account" => done(crate::accounts::lab_probe()),
+        "avatar_image" => Err("lab has no avatars".into()),
         "browser_login" => done(crate::accounts::lab_login()),
         "cancel_browser_login" => Ok(Value::Null),
         "remote_matches" => done(vec![crate::accounts::lab_remote()]),
