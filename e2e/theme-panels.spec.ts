@@ -38,7 +38,7 @@ const pages: PanelPage[] = [
   { name: "merge text", scene: "text-merge-window", merge: true, panels: [".merge-panel.standalone", ".merge-panel-title", ".merge-parties", ".merge-top", ".merge-result-pane", ".merge-panel-foot"] },
   { name: "merge binary", scene: "file-merge", merge: true, panels: [".merge-panel.standalone", ".merge-panel-title", ".merge-parties", ".merge-stage.files", ".merge-panel-foot"] },
   { name: "merge hunks", scene: "text-merge-many", merge: true, panels: [".merge-panel.standalone", ".merge-count", ".merge-top", ".merge-result-pane", ".merge-panel-foot"] },
-  { name: "file history", scene: "file-history", panels: [".file-history", ".history-file", ".history-list", ".history-diff"] },
+  { name: "file history", scene: "file-history", panels: [".file-history", ".history-file", ".history-list", ".copy-revision", ".history-diff"] },
   { name: "blob", scene: "blob", panels: [".blob-pane", ".blob-pane > header", ".blob-scroll"] },
   { name: "operation flow", scene: "operation-flow", panels: [".flow-window", ".flow-header", ".flow-overview", ".flow-graph-pane", ".flow-node.active", ".flow-footer"] },
   { name: "search", scene: "search", panels: ["[data-layer=\"search\"]"] },

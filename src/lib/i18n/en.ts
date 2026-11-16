@@ -54,6 +54,8 @@ export const en: Messages = {
     errorTitle: "Operation failed",
     copyError: "Copy error",
     copied: "Copied",
+    createTempCopy: "Create temporary copy of this revision",
+    copyCreated: "Created",
     locating: "Locating {name}",
     readingCommit: "Reading commit",
     readingFile: "Reading file",

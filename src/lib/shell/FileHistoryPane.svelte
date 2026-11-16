@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { invoke } from "../perf";
   import { getShell } from "./context";
   import BinaryDiff from "./BinaryDiff.svelte";
   import WrappedRows from "../WrappedRows.svelte";
@@ -15,6 +16,9 @@
   const splitColumns = $derived(shell.splitColumnsOf(splitRows));
   const splitWindow = $derived(virtualSplit(splitRows, shell.historyDiffTop, shell.splitRowHeight, diffHeight, shell.settings.diffWordWrap));
   let listTop = $state(0);
+  let copySupport = $state<{ tool: string; kind: string } | null>(null);
+  let copying = $state<string | null>(null);
+  let copiedPath = $state("");
   const onListScroll = onVirtualScroll((top) => (listTop = top));
   const onDiffScroll = onVirtualScroll((top) => (shell.historyDiffTop = top));
   const windowed = $derived(windowSlice(shell.commitsLive, listTop, rowHeight));
@@ -57,6 +61,36 @@
 
   $effect(() => {
     const file = shell.historyFilter;
+    const path = shell.repoPath();
+    let cancelled = false;
+    copySupport = null;
+    copiedPath = "";
+    if (shell.mode === "live" && file) {
+      void invoke<{ tool: string; kind: string } | null>("revision_copy_support", { path, file })
+        .then((value) => { if (!cancelled) copySupport = value; })
+        .catch((error) => { if (!cancelled) shell.actionError = shell.message(error); });
+    }
+    return () => { cancelled = true; };
+  });
+
+  async function createCopy(id: string) {
+    const path = shell.repoPath();
+    const file = shell.historyFilter;
+    if (!copySupport || !file || copying) return;
+    copying = id;
+    copiedPath = "";
+    try {
+      const result = await invoke<string>("create_revision_copy", { path, rev: id, file });
+      if (path === shell.repoPath() && file === shell.historyFilter) copiedPath = result;
+    } catch (error) {
+      if (path === shell.repoPath() && file === shell.historyFilter) shell.actionError = shell.message(error);
+    } finally {
+      copying = null;
+    }
+  }
+
+  $effect(() => {
+    const file = shell.historyFilter;
     if (!file || !shell.inApp()) return;
     void getCurrentWindow().setTitle(`${shell.tr("menu.history")} — ${file}`).catch(() => {});
   });
@@ -73,6 +107,7 @@
 <div class="file-history">
   <header class="history-file">
     <strong>{shell.historyFilter || shell.tr("menu.history")}</strong>
+    {#if copiedPath}<span class="copy-result" role="status" title={copiedPath}>{shell.tr("chrome.copyCreated")}: {copiedPath}</span>{/if}
     <button class="text-button" type="button" aria-label={shell.tr("chrome.close")} onclick={closePane}>{shell.tr("chrome.close")}</button>
   </header>
   {#if span}
@@ -97,30 +132,35 @@
       {:else}
         <div class="commit-window" style:height="{shell.commitsLive.length * rowHeight}px">
           {#each windowed.rows as commit, index (commit.id)}
-            <button
-              class="history-commit"
-              class:selected={shell.selectedCommit === commit.id}
-              type="button"
-              style:top="{(windowed.start + index) * rowHeight}px"
-              onclick={() => void choose(commit.id)}
-              oncontextmenu={(event) => shell.openMenu(event, shell.historyFileMenu(commit))}
-            >
-              <span class="history-meta">
-                <span class="commit-author">
-                  {#if shell.settings.gravatar && commit.email}
-                    <img class="avatar" alt="" src={gravatarUrl(commit.email)} />
-                  {:else}
-                    <span class="avatar" style:background={shell.avatarColor(commit.author)} title={commit.author}>{(commit.author || "?").slice(0, 1).toUpperCase()}</span>
-                  {/if}
-                  <span class="author" title={commit.author}>{commit.author}</span>
+            <div class="history-item" class:selected={shell.selectedCommit === commit.id} data-rev={commit.id} style:top="{(windowed.start + index) * rowHeight}px">
+              <button
+                class="history-commit"
+                type="button"
+                onclick={() => void choose(commit.id)}
+                oncontextmenu={(event) => shell.openMenu(event, shell.historyFileMenu(commit))}
+              >
+                <span class="history-meta">
+                  <span class="commit-author">
+                    {#if shell.settings.gravatar && commit.email}
+                      <img class="avatar" alt="" src={gravatarUrl(commit.email)} />
+                    {:else}
+                      <span class="avatar" style:background={shell.avatarColor(commit.author)} title={commit.author}>{(commit.author || "?").slice(0, 1).toUpperCase()}</span>
+                    {/if}
+                    <span class="author" title={commit.author}>{commit.author}</span>
+                  </span>
+                  <span class="commit-facts">
+                    <span class="date" title={commit.at ? shell.forkWhenFull(commit.at) : commit.when}>{shell.whenLabel(commit)}</span>
+                    <span class="sha" title={commit.shortId}>{commit.shortId}</span>
+                  </span>
                 </span>
-                <span class="commit-facts">
-                  <span class="date" title={commit.at ? shell.forkWhenFull(commit.at) : commit.when}>{shell.whenLabel(commit)}</span>
-                  <span class="sha" title={commit.shortId}>{commit.shortId}</span>
-                </span>
-              </span>
-              <span class="subject" title={commit.summary}>{commit.summary}</span>
-            </button>
+                <span class="subject" title={commit.summary}>{commit.summary}</span>
+              </button>
+              {#if copySupport}
+                <button class="copy-revision" type="button" disabled={copying !== null} aria-label={`${shell.tr("chrome.createTempCopy")} (${copySupport.tool}, ${copySupport.kind})`} title={`${shell.tr("chrome.createTempCopy")} (${copySupport.tool}, ${copySupport.kind})`} onclick={() => void createCopy(commit.id)}>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8m-3-3 3 3 3-3M3 11v2h10v-2"/></svg>
+                </button>
+              {/if}
+            </div>
           {/each}
         </div>
       {/if}
@@ -240,6 +280,8 @@
     flex: none;
   }
 
+  .copy-result { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-weight: 400; }
+
   .history-time {
     position: relative;
     height: 32px;
@@ -284,16 +326,22 @@
     border-right: 1px solid var(--line);
   }
 
-  .history-commit {
+  .history-item {
     position: absolute;
     left: 0;
     right: 0;
     height: 56px;
+  }
+
+  .history-commit {
+    position: relative;
+    width: 100%;
+    height: 100%;
     display: flex;
     flex-direction: column;
     justify-content: center;
     gap: 4px;
-    padding: 0 12px 0 28px;
+    padding: 0 38px 0 28px;
     border: 0;
     background: transparent;
     color: inherit;
@@ -328,8 +376,13 @@
 
   .history-commit:hover { background: var(--hover); }
 
-  .history-commit.selected,
-  .history-commit.selected:hover { background: var(--selection); }
+  .history-item.selected .history-commit,
+  .history-item.selected .history-commit:hover { background: var(--selection); }
+
+  .copy-revision { position: absolute; right: 7px; top: 27px; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+  .copy-revision:hover, .copy-revision:focus-visible { border-color: var(--line); background: var(--hover); color: var(--text); }
+  .copy-revision:disabled { opacity: .45; cursor: default; }
+  .copy-revision svg { width: 16px; height: 16px; }
 
   .history-meta {
     display: flex;

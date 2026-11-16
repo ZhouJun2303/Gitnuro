@@ -354,6 +354,8 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "set_repo_author" => done_result(super::set_repo_author(req(args, "path")?, req(args, "name")?, req(args, "email")?)),
         "revision_preview" => done_result(super::revision_preview(req(args, "path")?, req(args, "rev")?, req(args, "file")?)),
         "blob_view" => done_result(super::blob_view(req(args, "path")?, req(args, "rev")?, req(args, "file")?)),
+        "revision_copy_support" => done_result(super::revision_copy_support(req(args, "path")?, req(args, "file")?)),
+        "create_revision_copy" => done_result(super::create_revision_copy(req(args, "path")?, req(args, "rev")?, req(args, "file")?)),
         "reflog" => done_result(super::reflog(req(args, "path")?, req(args, "limit")?)),
         "commit_tree" => done_result(super::commit_tree(req(args, "path")?, req(args, "rev")?)),
         "repository_summary" => {

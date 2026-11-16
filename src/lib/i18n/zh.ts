@@ -54,6 +54,8 @@ export const zh: Messages = {
     errorTitle: "操作失败",
     copyError: "复制错误信息",
     copied: "已复制",
+    createTempCopy: "生成此版本的临时文件",
+    copyCreated: "已生成",
     locating: "定位 {name}",
     readingCommit: "读取提交",
     readingFile: "读取文件",

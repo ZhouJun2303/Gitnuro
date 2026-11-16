@@ -14,6 +14,8 @@ export type Messages = {
     errorTitle: string;
     copyError: string;
     copied: string;
+    createTempCopy: string;
+    copyCreated: string;
     locating: string;
     readingCommit: string;
     readingFile: string;

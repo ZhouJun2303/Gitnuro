@@ -9,6 +9,7 @@ mod http;
 mod lab;
 mod perf;
 mod reads;
+mod revision_copy;
 mod secrets;
 mod settings;
 mod tools;
@@ -1714,6 +1715,18 @@ fn blob_view(path: Option<String>, rev: String, file: String) -> Result<awegit_g
 }
 
 #[tauri::command]
+fn revision_copy_support(path: Option<String>, file: String) -> Result<Option<revision_copy::Support>, String> {
+    let repo = repo_from(path)?;
+    Ok(revision_copy::support(&repo, &file))
+}
+
+#[tauri::command]
+fn create_revision_copy(path: Option<String>, rev: String, file: String) -> Result<String, String> {
+    let repo = repo_from(path)?;
+    revision_copy::create(&repo, &rev, &file)
+}
+
+#[tauri::command]
 fn reflog(path: Option<String>, limit: Option<usize>) -> Result<Vec<awegit_git::ReflogRow>, String> {
     let repo = repo_from(path)?;
     awegit_git::reflog(&repo, limit.unwrap_or(200)).map_err(|error| error.to_string())
@@ -2514,6 +2527,8 @@ pub fn run() {
             set_repo_author,
             revision_preview,
             blob_view,
+            revision_copy_support,
+            create_revision_copy,
             reflog,
             commit_tree,
             repository_summary,
