@@ -363,6 +363,106 @@ function Get-ChangelogNotes {
     return $summary
 }
 
+function Get-AiNoteTools {
+    $script = Join-Path $root "scripts\release-notes.mjs"
+    $lines = @(& node $script list 2>$null)
+    if ($LASTEXITCODE -ne 0) { return @() }
+    $tools = @()
+    foreach ($line in $lines) {
+        $text = "$line".Trim()
+        if (-not $text) { continue }
+        $parts = $text -split '\|'
+        if ($parts.Count -lt 2) { continue }
+        $tools += [pscustomobject]@{ Id = $parts[0]; Label = $parts[1] }
+    }
+    return $tools
+}
+
+function Get-PreferredAiTool([object[]]$tools) {
+    $path = Join-Path $root ".git\awegit-release-ai"
+    if (-not (Test-Path -LiteralPath $path)) { return "" }
+    $saved = (Get-Content -Raw -Encoding UTF8 -LiteralPath $path).Trim()
+    foreach ($tool in $tools) {
+        if ($tool.Id -eq $saved) { return $saved }
+    }
+    return ""
+}
+
+function Save-PreferredAiTool([string]$id) {
+    $path = Join-Path $root ".git\awegit-release-ai"
+    [IO.File]::WriteAllText($path, $id, (New-Object System.Text.UTF8Encoding $false))
+}
+
+function Invoke-AiReleaseNotes([string]$toolId, [string]$version) {
+    $dir = Join-Path ([IO.Path]::GetTempPath()) ("awegit-notes-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $mdPath = Join-Path $dir "notes.md"
+    $textPath = Join-Path $dir "notes.txt"
+    $errorPath = Join-Path $dir "error.txt"
+    try {
+        $arguments = @((Join-Path $root "scripts\release-notes.mjs"), "generate", "--tool", $toolId, "--version", $version, "--md", $mdPath, "--text", $textPath, "--error", $errorPath)
+        & node @arguments 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $textPath)) {
+            if (Test-Path -LiteralPath $errorPath) {
+                $message = (Get-Content -Raw -Encoding UTF8 -LiteralPath $errorPath).Trim()
+                if ($message) { Write-Host $message }
+            }
+            return $null
+        }
+        return [pscustomobject]@{
+            Markdown = (Get-Content -Raw -Encoding UTF8 -LiteralPath $mdPath).Trim()
+            Text = (Get-Content -Raw -Encoding UTF8 -LiteralPath $textPath).Trim()
+        }
+    } finally {
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Read-AiReleaseNotes([string]$version) {
+    $tools = @(Get-AiNoteTools)
+    if ($tools.Count -eq 0) {
+        Write-Host "没有找到 claude、codex、grok、cursor-agent，更新说明改用提交摘要。"
+        return $null
+    }
+    $preferred = Get-PreferredAiTool $tools
+    while ($true) {
+        Write-Host ""
+        Write-Host "生成更新说明"
+        for ($i = 0; $i -lt $tools.Count; $i++) {
+            $suffix = ""
+            if ($tools[$i].Id -eq $preferred) { $suffix = "  （上次使用）" }
+            Write-Host "$($i + 1)  $($tools[$i].Label)$suffix"
+        }
+        $skipIndex = $tools.Count + 1
+        Write-Host "$skipIndex  不用 AI，按提交自动汇总"
+        $default = 1
+        for ($i = 0; $i -lt $tools.Count; $i++) {
+            if ($tools[$i].Id -eq $preferred) { $default = $i + 1 }
+        }
+        $choice = Read-Host "请选择（直接回车用 $default）"
+        if (-not $choice) { $choice = "$default" }
+        $index = 0
+        if (-not [int]::TryParse($choice, [ref]$index) -or $index -lt 1 -or $index -gt $skipIndex) {
+            Write-Host "没有这个选项"
+            continue
+        }
+        if ($index -eq $skipIndex) { return $null }
+        $tool = $tools[$index - 1]
+        Write-Host "正在调用 $($tool.Label) 生成更新说明，可能需要几十秒…"
+        $notes = Invoke-AiReleaseNotes $tool.Id $version
+        if (-not $notes) {
+            $answer = Read-Host "换一个 AI 重试输入 r，直接回车改用提交摘要"
+            if ($answer -eq "r" -or $answer -eq "R") {
+                $preferred = ""
+                continue
+            }
+            return $null
+        }
+        Save-PreferredAiTool $tool.Id
+        return $notes
+    }
+}
+
 function Assert-ReleaseAvailable([string]$version) {
     Assert-GhAuthenticated
     if ((Test-GitHubRelease -Tag "v$version" -Repo $repo) -and (Test-ManifestPublished $version)) {
@@ -381,6 +481,7 @@ function Invoke-ReleaseFlow {
     )
 
     if (-not $InstallLocal) { Assert-Clean }
+    $notesMarkdown = ""
     $current = Get-ProjectVersion
     $target = $current
     if ($Bump) { $target = Get-BumpedVersion $current $Bump }
@@ -411,13 +512,25 @@ function Invoke-ReleaseFlow {
             Write-Host "当前不在 $devBranch 或 release 上。会把 $branch 合并进 release，打包并上传，完成后回到 $branch"
         }
         if (-not $ReleaseNotes) {
-            $ReleaseNotes = Get-ChangelogNotes
-            Write-Host ""
-            if ($ReleaseNotes) {
-                Write-Host "更新说明（按上个发布版本以来的提交自动生成）"
+            $aiNotes = $null
+            if (-not $Confirm) {
+                $aiNotes = Read-AiReleaseNotes $target
+            }
+            if ($aiNotes) {
+                $ReleaseNotes = $aiNotes.Text
+                $notesMarkdown = $aiNotes.Markdown
+                Write-Host ""
+                Write-Host "更新说明（AI 生成）"
                 Write-Host $ReleaseNotes
             } else {
-                Write-Host "没找到上次发布之后的提交，更新说明用 AweGit $target"
+                $ReleaseNotes = Get-ChangelogNotes
+                Write-Host ""
+                if ($ReleaseNotes) {
+                    Write-Host "更新说明（按上个发布版本以来的提交自动生成）"
+                    Write-Host $ReleaseNotes
+                } else {
+                    Write-Host "没找到上次发布之后的提交，更新说明用 AweGit $target"
+                }
             }
         } else {
             Write-Host "说明：$ReleaseNotes"
@@ -477,7 +590,7 @@ function Invoke-ReleaseFlow {
             $stagePath = Join-Path $root ".git\awegit-publish-stage"
             if (Test-Path $stagePath) { Remove-Item $stagePath -Force }
             try {
-                & (Join-Path $root "scripts\publish-windows.ps1") -Notes $ReleaseNotes
+                & (Join-Path $root "scripts\publish-windows.ps1") -Notes $ReleaseNotes -NotesMarkdown $notesMarkdown
                 if ($LASTEXITCODE -ne 0) { throw "发布失败" }
             } catch {
                 $stage = ""

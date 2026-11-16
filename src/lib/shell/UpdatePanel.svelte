@@ -19,6 +19,19 @@
       : "",
   );
 
+  type NoteLine = { kind: "section" | "item" | "text"; text: string };
+  const noteLines = $derived.by((): NoteLine[] =>
+    (notice?.notes ?? "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        if (/^(✨|⚡|🐛|🔧|🎉|🚀)/u.test(line)) return { kind: "section", text: line };
+        if (line.startsWith("· ") || line.startsWith("- ")) return { kind: "item", text: line.slice(2) };
+        return { kind: "text", text: line };
+      }),
+  );
+
   function formatBytes(value: number) {
     if (!Number.isFinite(value) || value <= 0) return "0 B";
     const units = ["B", "KB", "MB", "GB"];
@@ -93,9 +106,17 @@
         <span class="update-version-chip">v{notice.appVersion}</span>
         <strong>{shell.tr("chrome.updateAvailable", { name: `AweGit ${notice.appVersion}` })}</strong>
       </header>
-      {#if notice.notes}
+      {#if noteLines.length > 0}
         <div class="update-notes-label">{shell.tr("chrome.updateReleaseNotes")}</div>
-        <div class="update-notes">{notice.notes}</div>
+        <div class="update-notes">
+          {#each noteLines as line}
+            {#if line.kind === "section"}
+              <div class="update-notes-section">{line.text}</div>
+            {:else}
+              <div class="update-notes-item" class:update-notes-plain={line.kind === "text"}>{line.text}</div>
+            {/if}
+          {/each}
+        </div>
       {/if}
       {#if notice.fileName}<p class="meta update-file">{shell.tr("chrome.updateFileName", { name: notice.fileName })}</p>{/if}
     </section>

@@ -110,7 +110,7 @@ pnpm test
 
 `pnpm check` 查界面类型。`pnpm test` 跑状态、差异、提交、变基、贮藏这些 Git 行为，以及设置、更新和凭据这些桌面单元测试。仓库都建在临时目录里。测试不打开窗口，也不要拿当前这个 AweGit 仓库去做暂存或提交实验。
 
-页面服务的端口复用、自动接管、重启、退出清理与并行缓存隔离可单独运行 `node --test scripts/dev-server.test.mjs scripts/lab-dev.test.mjs scripts/vite-cache.test.mjs`；这些测试在 `.lab` 中使用临时端口和模拟后端，不启动桌面程序。
+页面服务的端口复用、自动接管、重启、退出清理与并行缓存隔离可单独运行 `node --test scripts/dev-server.test.mjs scripts/lab-dev.test.mjs scripts/vite-cache.test.mjs scripts/release-notes.test.mjs`；这些测试在 `.lab` 中使用临时端口和模拟后端，不启动桌面程序。
 
 每次验证只运行本次修改相关的测试，UI 不跑全量场景。改动界面时补对应的试验台场景，用测试文件和 `--grep` 选择相关用例：
 
@@ -279,6 +279,13 @@ pnpm package:windows
 - `target\release\bundle\msi\AweGit_2.0.7_x64_en-US.msi`
 
 发布到 GitHub 时，在仓库根目录双击或运行 `publish.bat`。第 1 项会把修订号加一（2.0.0 变成 2.0.1），然后打包并上传。也可以选次版本、主版本、指定版本、不改版本，或只打包不上传。
+
+发布前会列出本机可用的 `claude`、`codex`、`grok`、`cursor-agent`，选一个让 AI 把上次发布以来的提交整理成更新说明：每个用户能感知的改动一行，按新功能、体验优化、问题修复分区。选过的工具记在 `.git/awegit-release-ai`，下次默认选中。某个 CLI 失败时可以换一个，或直接改用按提交自动汇总。Markdown 写进 GitHub release，去掉标记的纯文本写进 `latest.json`；更新面板按行显示，说明较长时在面板里滚动。生成器可以单独运行：
+
+```sh
+node scripts/release-notes.mjs list
+node scripts/release-notes.mjs generate --tool codex --version 2.0.11 --md notes.md --text notes.txt
+```
 
 先在本机试用时选第 8 项：不改版本号、不上传，打包后用安装包静默替换本机已安装的 AweGit，保留原来的安装目录和卸载项。替换后用构建标记核对本机文件和刚打包的包是否一致，标记也显示在关于面板。本机没有安装、或不是用 NSIS 安装包装的，就只留下安装包。这个模式不要求工作区干净。试完没问题，再按正常流程发布。
 

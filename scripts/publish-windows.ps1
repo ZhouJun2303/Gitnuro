@@ -3,7 +3,8 @@
 # It commits latest.json, tags that commit, uploads the installers, then pushes origin release.
 
 param(
-    [string]$Notes = ""
+    [string]$Notes = "",
+    [string]$NotesMarkdown = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -271,9 +272,11 @@ if ($releaseExists) {
     }
     $assets = @(Get-InstallerAssets $version $nsis)
     $releaseNotes = if ($Notes) { $Notes } else { "AweGit $version" }
+    # latest.json shows the plain lines in the app; GitHub renders the Markdown.
+    $releaseBody = if ($NotesMarkdown) { $NotesMarkdown } else { $releaseNotes }
     # Multi-line notes cannot survive the Windows command line; gh reads them from a file.
     $notesFile = Join-Path $env:TEMP ("awegit-notes-" + [guid]::NewGuid().ToString("N") + ".txt")
-    [IO.File]::WriteAllText($notesFile, $releaseNotes, (New-Object System.Text.UTF8Encoding $false))
+    [IO.File]::WriteAllText($notesFile, $releaseBody, (New-Object System.Text.UTF8Encoding $false))
     $tagPushed = $false
     try {
         # The manifest commit is tagged before the release exists, so the tag
