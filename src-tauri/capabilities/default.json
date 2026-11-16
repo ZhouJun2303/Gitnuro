@@ -73,6 +73,7 @@
     "allow-compare-file",
     "allow-set-repo-author",
     "allow-revision-preview",
+    "allow-revision-copy-formats",
     "allow-blob-view",
     "allow-reflog",
     "allow-commit-tree",

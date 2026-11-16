@@ -1,24 +1,80 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
 import { openLabScene } from "./helpers";
 
-test("file history creates separate copies for each revision without changing the selection", async ({ page }) => {
-  await openLabScene(page, "file-history", ".history-commit");
+test("file history previews each revision, copies its filename, and cancels safely", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await openLabScene(page, "file-history", ".history-commit", { locale: "en" });
   const rows = page.locator(".history-item");
-  await expect(rows.nth(1).locator(".copy-revision")).toBeVisible();
+  await expect(rows.nth(1).locator(".preview-revision")).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "Clean previews on close" })).toBeChecked();
   const selected = await page.locator(".history-item.selected .sha").textContent();
   const repo = process.cwd() + "/.lab/repos/full";
 
   for (const index of [1, 0]) {
     const row = rows.nth(index);
     const sha = (await row.getAttribute("data-rev"))!;
-    await row.locator(".copy-revision").click();
+    await row.locator(".preview-revision").click();
     await expect(page.locator(".copy-result")).toContainText(`README.awegit-${sha.slice(0, 12)}`);
     const path = await page.locator(".copy-result").getAttribute("title");
     expect(path).toMatch(/\.md$/);
     expect(readFileSync(path!)).toEqual(execFileSync("git", ["-C", repo, "show", `${sha}:README.md`]));
+    await expect(row.locator(".preview-revision")).toHaveCount(0);
+    await expect(row.getByRole("button", { name: "Copy preview filename" })).toBeVisible();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(path!.split(/[\\/]/).pop());
+    await page.evaluate(() => navigator.clipboard.writeText("different name"));
+    await row.getByRole("button", { name: "Copy preview filename" }).click();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(path!.split(/[\\/]/).pop());
     await expect(page.locator(".history-item.selected .sha")).toHaveText(selected!);
+    const meta = `${path}.meta`;
+    writeFileSync(meta, "Unity-generated metadata");
+    await row.getByRole("button", { name: "Cancel preview and delete temporary files" }).click();
+    await expect(row.locator(".preview-revision")).toBeVisible();
+    expect(existsSync(path!)).toBe(false);
+    expect(existsSync(meta)).toBe(false);
+  }
+});
+
+for (const clean of [true, false]) {
+  test(`file history ${clean ? "cleans" : "retains"} previews on close`, async ({ page }) => {
+    await openLabScene(page, "file-history", ".history-commit", { locale: "en" });
+    const row = page.locator(".history-item").first();
+    await row.locator(".preview-revision").click();
+    await expect(row.getByRole("button", { name: "Copy preview filename" })).toBeVisible();
+    const path = (await page.locator(".copy-result").getAttribute("title"))!;
+    const meta = `${path}.meta`;
+    writeFileSync(meta, "Unity-generated metadata");
+    if (!clean) await page.getByRole("checkbox", { name: "Clean previews on close" }).uncheck();
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(page.locator(".file-history")).toHaveCount(0);
+    expect(existsSync(path)).toBe(!clean);
+    expect(existsSync(meta)).toBe(!clean);
+    if (!clean) { unlinkSync(path); unlinkSync(meta); }
+  });
+}
+
+test("close retains a modified preview and still cleans the other previews", async ({ page }) => {
+  await openLabScene(page, "file-history", ".history-commit", { locale: "en" });
+  const rows = page.locator(".history-item");
+  await rows.nth(0).locator(".preview-revision").click();
+  await expect(rows.nth(0).getByRole("button", { name: "Copy preview filename" })).toBeVisible();
+  const modified = (await page.locator(".copy-result").getAttribute("title"))!;
+  try {
+    writeFileSync(modified, "modified preview");
+    await rows.nth(1).locator(".preview-revision").click();
+    await expect(rows.nth(1).getByRole("button", { name: "Copy preview filename" })).toBeVisible();
+    const other = (await page.locator(".copy-result").getAttribute("title"))!;
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(page.locator(".copy-error")).toContainText("Preview was modified");
+    await expect(page.locator(".file-history")).toBeVisible();
+    expect(existsSync(modified)).toBe(true);
+    expect(existsSync(other)).toBe(false);
+    await page.getByRole("checkbox", { name: "Clean previews on close" }).uncheck();
+    await page.getByRole("button", { name: "Close" }).click();
+    await expect(page.locator(".file-history")).toHaveCount(0);
+  } finally {
+    if (existsSync(modified)) unlinkSync(modified);
   }
 });
 
@@ -29,7 +85,7 @@ test("unsupported file types do not show the copy action", async ({ page }) => {
     return route.continue();
   });
   await openLabScene(page, "file-history", ".history-commit");
-  await expect(page.locator(".copy-revision")).toHaveCount(0);
+  await expect(page.locator(".preview-revision")).toHaveCount(0);
 });
 
 test("file history shows a support lookup failure instead of silently hiding the action", async ({ page }) => {

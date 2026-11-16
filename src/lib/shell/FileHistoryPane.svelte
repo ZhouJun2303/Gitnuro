@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { invoke } from "../perf";
   import { getShell } from "./context";
@@ -18,7 +19,13 @@
   let listTop = $state(0);
   let copySupport = $state<{ tool: string; kind: string } | null>(null);
   let copySupportError = $state("");
-  let copying = $state<string | null>(null);
+  type PreviewCopy = { repo: string; file: string; path: string };
+  let previews = $state<Record<string, PreviewCopy>>({});
+  let autoClean = $state(true);
+  let busy = $state(false);
+  let closing = $state(false);
+  let allowClose = false;
+  let pendingAction: Promise<void> | null = null;
   let copiedPath = $state("");
   const onListScroll = onVirtualScroll((top) => (listTop = top));
   const onDiffScroll = onVirtualScroll((top) => (shell.historyDiffTop = top));
@@ -75,20 +82,44 @@
     return () => { cancelled = true; };
   });
 
-  async function createCopy(id: string) {
-    const path = shell.repoPath();
+  const previewKey = (id: string) => `${shell.repoPath()}\0${shell.historyFilter}\0${id}`;
+  const previewName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+
+  function runAction(body: () => Promise<void>) {
+    if (pendingAction || closing) return;
+    busy = true;
+    pendingAction = body().catch((error) => { copySupportError = shell.message(error); }).finally(() => {
+      busy = false;
+      pendingAction = null;
+    });
+  }
+
+  function createCopy(id: string) {
+    const repo = shell.repoPath();
     const file = shell.historyFilter;
-    if (!copySupport || !file || copying) return;
-    copying = id;
-    copiedPath = "";
-    try {
-      const result = await invoke<string>("create_revision_copy", { path, rev: id, file });
-      if (path === shell.repoPath() && file === shell.historyFilter) copiedPath = result;
-    } catch (error) {
-      if (path === shell.repoPath() && file === shell.historyFilter) shell.actionError = shell.message(error);
-    } finally {
-      copying = null;
-    }
+    if (!copySupport || !repo || !file) return;
+    const key = previewKey(id);
+    runAction(async () => {
+      copySupportError = "";
+      copiedPath = "";
+      const path = await invoke<string>("create_revision_copy", { path: repo, rev: id, file });
+      previews = { ...previews, [key]: { repo, file, path } };
+      shell.copyText(previewName(path));
+      if (repo === shell.repoPath() && file === shell.historyFilter) copiedPath = path;
+    });
+  }
+
+  function cancelPreview(key: string) {
+    const preview = previews[key];
+    if (!preview) return;
+    runAction(async () => {
+      copySupportError = "";
+      await invoke("remove_revision_copy", { path: preview.repo, file: preview.file, copy: preview.path });
+      const remaining = { ...previews };
+      delete remaining[key];
+      previews = remaining;
+      if (copiedPath === preview.path) copiedPath = "";
+    });
   }
 
   $effect(() => {
@@ -97,13 +128,47 @@
     void getCurrentWindow().setTitle(`${shell.tr("menu.history")} — ${file}`).catch(() => {});
   });
 
-  function closePane() {
-    if (shell.inApp()) {
-      void getCurrentWindow().close();
-      return;
+  async function closePane() {
+    if (closing) return;
+    closing = true;
+    try {
+      await pendingAction;
+      if (autoClean) {
+        const errors: string[] = [];
+        for (const [key, preview] of Object.entries(previews)) {
+          try {
+            await invoke("remove_revision_copy", { path: preview.repo, file: preview.file, copy: preview.path });
+            const remaining = { ...previews };
+            delete remaining[key];
+            previews = remaining;
+          } catch (error) {
+            errors.push(`${previewName(preview.path)}: ${shell.message(error)}`);
+          }
+        }
+        if (errors.length) throw new Error(errors.join("; "));
+      }
+      if (shell.inApp()) {
+        allowClose = true;
+        await getCurrentWindow().close();
+      }
+      else window.location.href = "/";
+    } catch (error) {
+      copySupportError = shell.message(error);
+      allowClose = false;
+      closing = false;
     }
-    window.location.href = "/";
   }
+
+  onMount(() => {
+    let disposed = false;
+    let off: (() => void) | undefined;
+    if (shell.inApp()) void getCurrentWindow().onCloseRequested((event) => {
+      if (allowClose || (!closing && !pendingAction && (!autoClean || Object.keys(previews).length === 0))) return;
+      event.preventDefault();
+      void closePane();
+    }).then((value) => { if (disposed) value(); else off = value; });
+    return () => { disposed = true; off?.(); };
+  });
 </script>
 
 <div class="file-history">
@@ -111,7 +176,8 @@
     <strong>{shell.historyFilter || shell.tr("menu.history")}</strong>
     {#if copySupportError}<span class="copy-error" role="alert" title={copySupportError}>{copySupportError}</span>{/if}
     {#if copiedPath}<span class="copy-result" role="status" title={copiedPath}>{shell.tr("chrome.copyCreated")}: {copiedPath}</span>{/if}
-    <button class="text-button" type="button" aria-label={shell.tr("chrome.close")} onclick={closePane}>{shell.tr("chrome.close")}</button>
+    <label class="auto-clean"><input type="checkbox" bind:checked={autoClean} disabled={closing} />{shell.tr("chrome.cleanPreviewOnClose")}</label>
+    <button class="text-button" type="button" disabled={closing} aria-label={shell.tr("chrome.close")} onclick={() => void closePane()}>{shell.tr("chrome.close")}</button>
   </header>
   {#if span}
     <div class="history-time">
@@ -135,7 +201,8 @@
       {:else}
         <div class="commit-window" style:height="{shell.commitsLive.length * rowHeight}px">
           {#each windowed.rows as commit, index (commit.id)}
-            <div class="history-item" class:selected={shell.selectedCommit === commit.id} data-rev={commit.id} style:top="{(windowed.start + index) * rowHeight}px">
+            {@const key = previewKey(commit.id)}
+            <div class="history-item" class:selected={shell.selectedCommit === commit.id} class:has-preview={!!previews[key]} data-rev={commit.id} style:top="{(windowed.start + index) * rowHeight}px">
               <button
                 class="history-commit"
                 type="button"
@@ -158,9 +225,18 @@
                 </span>
                 <span class="subject" title={commit.summary}>{commit.summary}</span>
               </button>
-              {#if copySupport}
-                <button class="copy-revision" type="button" disabled={copying !== null} aria-label={`${shell.tr("chrome.createTempCopy")} (${copySupport.tool}, ${copySupport.kind})`} title={`${shell.tr("chrome.createTempCopy")} (${copySupport.tool}, ${copySupport.kind})`} onclick={() => void createCopy(commit.id)}>
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8m-3-3 3 3 3-3M3 11v2h10v-2"/></svg>
+              {#if previews[key]}
+                <div class="preview-actions">
+                  <button class="revision-action" type="button" disabled={busy || closing} aria-label={shell.tr("chrome.copyPreviewName")} title={shell.tr("chrome.copyPreviewName")} onclick={() => shell.copyText(previewName(previews[key].path))}>
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="1"/><path d="M3 11H2V2h9v1"/></svg>
+                  </button>
+                  <button class="revision-action" type="button" disabled={busy || closing} aria-label={shell.tr("chrome.cancelPreview")} title={shell.tr("chrome.cancelPreview")} onclick={() => cancelPreview(key)}>
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg>
+                  </button>
+                </div>
+              {:else if copySupport}
+                <button class="revision-action preview-revision" type="button" disabled={busy || closing} aria-label={`${shell.tr("chrome.createTempCopy")} (${copySupport.tool}, ${copySupport.kind})`} title={`${shell.tr("chrome.createTempCopy")} (${copySupport.tool}, ${copySupport.kind})`} onclick={() => createCopy(commit.id)}>
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M2 8s2.3-4 6-4 6 4 6 4-2.3 4-6 4-6-4-6-4Z"/><circle cx="8" cy="8" r="2"/></svg>
                 </button>
               {/if}
             </div>
@@ -283,6 +359,9 @@
     flex: none;
   }
 
+  .auto-clean { display: inline-flex; align-items: center; gap: 4px; flex: none; white-space: nowrap; color: var(--text-secondary); cursor: pointer; }
+  .auto-clean input { margin: 0; accent-color: var(--accent); }
+
   .copy-result, .copy-error { min-width: 0; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
   .copy-result { color: var(--text-secondary); }
   .copy-error { color: var(--deleted); }
@@ -381,13 +460,17 @@
 
   .history-commit:hover { background: var(--hover); }
 
+  .history-item.has-preview .history-commit { padding-right: 70px; }
+
   .history-item.selected .history-commit,
   .history-item.selected .history-commit:hover { background: var(--selection); }
 
-  .copy-revision { position: absolute; right: 7px; top: 27px; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--field); color: var(--text); cursor: pointer; }
-  .copy-revision:hover, .copy-revision:focus-visible { border-color: var(--line); background: var(--hover); color: var(--text); }
-  .copy-revision:disabled { opacity: .45; cursor: default; }
-  .copy-revision svg { width: 16px; height: 16px; }
+  .preview-revision, .preview-actions { position: absolute; right: 7px; top: 27px; }
+  .preview-actions { display: flex; gap: 3px; }
+  .revision-action { width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--field); color: var(--text); cursor: pointer; }
+  .revision-action:hover, .revision-action:focus-visible { background: var(--hover); color: var(--text); }
+  .revision-action:disabled { opacity: .45; cursor: default; }
+  .revision-action svg { width: 16px; height: 16px; }
 
   .history-meta {
     display: flex;

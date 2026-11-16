@@ -5,6 +5,7 @@
   "windows": ["history"],
   "permissions": [
     "allow-revision-copy-support",
-    "allow-create-revision-copy"
+    "allow-create-revision-copy",
+    "allow-remove-revision-copy"
   ]
 }

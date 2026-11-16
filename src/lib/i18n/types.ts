@@ -623,6 +623,16 @@ export type Messages = {
     prefHintGeneral: string;
     prefHintWorkspace: string;
     prefHintDiff: string;
+    previewFormatsPage: string;
+    prefHintPreviewFormats: string;
+    previewExecutables: string;
+    previewExeNone: string;
+    previewFormats: string;
+    previewFormatsLoading: string;
+    previewToolCommon: string;
+    previewScopeAny: string;
+    previewScopeUnityAssets: string;
+    previewOtherTools: string;
     prefHintCommit: string;
     prefHintAi: string;
     prefHintGit: string;

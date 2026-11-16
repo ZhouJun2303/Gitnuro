@@ -540,11 +540,12 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.editorDetecting = false;
       break;
     case "prefs": {
-      const prefTabs: Record<string, "general" | "workspace" | "diff" | "shortcuts" | "commit" | "ai" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
+      const prefTabs: Record<string, "general" | "workspace" | "diff" | "previewFormats" | "shortcuts" | "commit" | "ai" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
         "prefs-flow": "advanced",
         "prefs-workspace": "workspace",
         "prefs-shortcuts": "shortcuts",
         "prefs-diff": "diff",
+        "prefs-preview-formats": "previewFormats",
         "prefs-commit": "commit",
         "prefs-ai": "ai",
         "prefs-git": "git",

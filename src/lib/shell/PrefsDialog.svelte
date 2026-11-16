@@ -3,6 +3,7 @@
   import "./PrefsDialog.css";
   import AccountsPage from "./AccountsPage.svelte";
   import ShortcutPage from "./ShortcutPage.svelte";
+  import RevisionPreviewFormats from "./RevisionPreviewFormats.svelte";
   import type { MenuItem, PrefTab } from "./types";
 
   const shell = getShell();
@@ -24,6 +25,7 @@
         { id: "general" as PrefTab, label: shell.tr("dialog.general"), hint: shell.tr("dialog.prefHintGeneral") },
         { id: "workspace" as PrefTab, label: shell.tr("dialog.workspacePage"), hint: shell.tr("dialog.prefHintWorkspace") },
         { id: "diff" as PrefTab, label: shell.tr("dialog.diff"), hint: shell.tr("dialog.prefHintDiff") },
+        { id: "previewFormats" as PrefTab, label: shell.tr("dialog.previewFormatsPage"), hint: shell.tr("dialog.prefHintPreviewFormats") },
         { id: "shortcuts" as PrefTab, label: shell.tr("dialog.shortcutPage"), hint: shell.tr("dialog.shortcutHint") },
       ],
     },
@@ -78,6 +80,9 @@
       <rect x="1.8" y="2.4" width="5.3" height="11.2" rx="1.1" />
       <rect x="8.9" y="2.4" width="5.3" height="11.2" rx="1.1" />
       <path d="M3.3 5.4h2.3M3.3 7.8h2.3M10.4 5.4h2.3M10.4 7.8h2.3M10.4 10.2h2.3" />
+    {:else if id === "previewFormats"}
+      <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z" />
+      <circle cx="8" cy="8" r="2" />
     {:else if id === "shortcuts"}
       <rect x="1.5" y="3.5" width="13" height="9" rx="1.2" />
       <path d="M4 6h.5M7.8 6h.5M11.5 6h.5M4 8.5h.5M7.8 8.5h.5M11.5 8.5h.5M5 10.5h6" />
@@ -261,6 +266,8 @@
         </section>
       {:else if shell.prefTab === "shortcuts"}
         <ShortcutPage />
+      {:else if shell.prefTab === "previewFormats"}
+        <RevisionPreviewFormats />
       {:else if shell.prefTab === "workspace"}
         <section class="pref-card">
           <h3 class="pref-card-title">{shell.tr("dialog.sourceFolder")}</h3>

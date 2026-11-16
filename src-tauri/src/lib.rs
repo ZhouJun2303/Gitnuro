@@ -1721,9 +1721,20 @@ fn revision_copy_support(path: Option<String>, file: String) -> Result<Option<re
 }
 
 #[tauri::command]
+fn revision_copy_formats() -> revision_copy::FormatCatalog {
+    revision_copy::formats()
+}
+
+#[tauri::command]
 fn create_revision_copy(path: Option<String>, rev: String, file: String) -> Result<String, String> {
     let repo = repo_from(path)?;
     revision_copy::create(&repo, &rev, &file)
+}
+
+#[tauri::command]
+fn remove_revision_copy(path: Option<String>, file: String, copy: String) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    revision_copy::remove(&repo, &file, &copy)
 }
 
 #[tauri::command]
@@ -2528,7 +2539,9 @@ pub fn run() {
             revision_preview,
             blob_view,
             revision_copy_support,
+            revision_copy_formats,
             create_revision_copy,
+            remove_revision_copy,
             reflog,
             commit_tree,
             repository_summary,
@@ -2856,9 +2869,11 @@ mod watch_plan_tests {
     #[test]
     fn revision_copies_are_only_allowed_in_history_windows() {
         let history: serde_json::Value = serde_json::from_str(include_str!("../capabilities/history-copy.json")).unwrap();
+        let main: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         assert_eq!(history["windows"], serde_json::json!(["history"]));
+        assert!(main["permissions"].as_array().unwrap().contains(&serde_json::json!("allow-revision-copy-formats")));
         assert_eq!(history["permissions"], serde_json::json!([
-            "allow-revision-copy-support", "allow-create-revision-copy"
+            "allow-revision-copy-support", "allow-create-revision-copy", "allow-remove-revision-copy"
         ]));
         for other in [
             include_str!("../capabilities/default.json"),
@@ -2869,6 +2884,7 @@ mod watch_plan_tests {
             for permission in capability["permissions"].as_array().unwrap() {
                 assert_ne!(permission.as_str(), Some("allow-revision-copy-support"));
                 assert_ne!(permission.as_str(), Some("allow-create-revision-copy"));
+                assert_ne!(permission.as_str(), Some("allow-remove-revision-copy"));
             }
         }
     }

@@ -154,7 +154,7 @@ export const STATUS_NOTICE_ENTRY: Record<StatusNoticeId, number> = {
 
 export type RepoJob = { label: string; percent: number | null; depth: number };
 
-export type PrefTab = "general" | "workspace" | "diff" | "commit" | "ai" | "git" | "integration" | "network" | "accounts" | "advanced" | "commands" | "shortcuts";
+export type PrefTab = "general" | "workspace" | "diff" | "previewFormats" | "commit" | "ai" | "git" | "integration" | "network" | "accounts" | "advanced" | "commands" | "shortcuts";
 
 export type LaunchItem = { label: string; group: string; run: () => void; stay?: boolean };
 

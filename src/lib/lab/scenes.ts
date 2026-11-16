@@ -198,6 +198,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "prefs-language", group: "弹窗", title: "偏好设置 · 语言切换、窗口同步与空白点击", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-workspace", group: "弹窗", title: "偏好设置 · 工作区与扫描", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-diff", group: "弹窗", title: "偏好设置 · 差异", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
+  scene({ id: "prefs-preview-formats", group: "弹窗", title: "偏好设置 · 历史预览格式", repo: "full", ready: '[data-pref-tab="previewFormats"]', dialog: "prefs" }),
   scene({ id: "prefs-git", group: "弹窗", title: "偏好设置 · Git", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-commit", group: "弹窗", title: "偏好设置 · 提交", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-ai", group: "弹窗", title: "偏好设置 · AI", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),

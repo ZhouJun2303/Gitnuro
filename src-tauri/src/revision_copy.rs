@@ -1,8 +1,31 @@
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
+
+#[derive(Clone)]
+struct CreatedCopy {
+    repo: PathBuf,
+    file: String,
+    parent: PathBuf,
+    digest: Vec<u8>,
+    meta_existed: bool,
+}
+
+fn created_copies() -> &'static Mutex<HashMap<PathBuf, CreatedCopy>> {
+    static COPIES: OnceLock<Mutex<HashMap<PathBuf, CreatedCopy>>> = OnceLock::new();
+    COPIES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn meta_path(copy: &Path) -> PathBuf {
+    let mut name = copy.as_os_str().to_os_string();
+    name.push(".meta");
+    PathBuf::from(name)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +79,68 @@ const COMMON: &[(&str, &str)] = &[
     ("txt", "text"),
     ("md", "text"),
 ];
+
+#[derive(Serialize)]
+pub struct FormatCatalog {
+    executables: Vec<&'static str>,
+    groups: Vec<FormatGroup>,
+}
+
+#[derive(Serialize)]
+pub struct FormatGroup {
+    tool: &'static str,
+    scope: &'static str,
+    kinds: Vec<FormatKind>,
+}
+
+#[derive(Serialize)]
+pub struct FormatKind {
+    kind: &'static str,
+    extensions: Vec<String>,
+}
+
+fn grouped_formats(formats: impl Iterator<Item = (&'static str, &'static str)>) -> Vec<FormatKind> {
+    let mut kinds: Vec<FormatKind> = Vec::new();
+    for (ext, kind) in formats {
+        if let Some(entry) = kinds.iter_mut().find(|entry| entry.kind == kind) {
+            entry.extensions.push(format!(".{ext}"));
+        } else {
+            kinds.push(FormatKind {
+                kind,
+                extensions: vec![format!(".{ext}")],
+            });
+        }
+    }
+    kinds
+}
+
+pub fn formats() -> FormatCatalog {
+    FormatCatalog {
+        executables: vec![],
+        groups: vec![
+            FormatGroup {
+                tool: "unity",
+                scope: "any",
+                kinds: grouped_formats(UNITY.iter().copied()),
+            },
+            FormatGroup {
+                tool: "unity",
+                scope: "unityAssets",
+                kinds: grouped_formats(
+                    COMMON
+                        .iter()
+                        .copied()
+                        .filter(|(ext, kind)| *kind == "image" || *ext == "cs"),
+                ),
+            },
+            FormatGroup {
+                tool: "common",
+                scope: "any",
+                kinds: grouped_formats(COMMON.iter().copied()),
+            },
+        ],
+    }
+}
 
 pub fn support(repo: &Path, file: &str) -> Option<Support> {
     let path = safe_path(file)?;
@@ -157,6 +242,7 @@ pub fn create(repo: &Path, rev: &str, file: &str) -> Result<String, String> {
             format!("-{index}")
         };
         let dest = parent.join(format!("{stem}.awegit-{}{}.{}", &rev[..12], number, suffix));
+        let meta_existed = std::fs::symlink_metadata(meta_path(&dest)).is_ok();
         match OpenOptions::new().write(true).create_new(true).open(&dest) {
             Ok(mut output) => {
                 if let Err(error) = output.write_all(&bytes) {
@@ -164,6 +250,19 @@ pub fn create(repo: &Path, rev: &str, file: &str) -> Result<String, String> {
                     let _ = std::fs::remove_file(&dest);
                     return Err(error.to_string());
                 }
+                created_copies()
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(
+                        dest.clone(),
+                        CreatedCopy {
+                            repo: root.clone(),
+                            file: file.to_string(),
+                            parent: parent.clone(),
+                            digest: Sha256::digest(&bytes).to_vec(),
+                            meta_existed,
+                        },
+                    );
                 return Ok(dest.display().to_string());
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -171,6 +270,48 @@ pub fn create(repo: &Path, rev: &str, file: &str) -> Result<String, String> {
         }
     }
     Err("Too many temporary copies of this revision".into())
+}
+
+pub fn remove(repo: &Path, file: &str, copy: &str) -> Result<(), String> {
+    let dest = PathBuf::from(copy);
+    let mut registry = created_copies().lock().unwrap_or_else(|e| e.into_inner());
+    let record = registry
+        .get(&dest)
+        .ok_or("This preview was not created in this session")?;
+    let root = repo.canonicalize().map_err(|e| e.to_string())?;
+    if root != record.repo
+        || file != record.file
+        || dest.parent().and_then(|p| p.canonicalize().ok()) != Some(record.parent.clone())
+    {
+        return Err("Preview path or repository changed".into());
+    }
+
+    match std::fs::symlink_metadata(&dest) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            let bytes = std::fs::read(&dest).map_err(|e| e.to_string())?;
+            if Sha256::digest(&bytes).to_vec() != record.digest {
+                return Err("Preview was modified; it was not deleted".into());
+            }
+            std::fs::remove_file(&dest).map_err(|e| e.to_string())?;
+        }
+        Ok(_) => return Err("Preview is no longer a regular file".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+
+    if !record.meta_existed {
+        let meta = meta_path(&dest);
+        match std::fs::symlink_metadata(&meta) {
+            Ok(metadata) if metadata.file_type().is_file() => {
+                std::fs::remove_file(meta).map_err(|e| e.to_string())?
+            }
+            Ok(_) => return Err("Preview metadata is no longer a regular file".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    registry.remove(&dest);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -240,6 +381,33 @@ mod tests {
         assert_eq!(support(&root, "Assets/../secrets.png"), None);
         assert_eq!(support(&root, ".git/config.txt"), None);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn format_catalog_tracks_supported_extensions() {
+        let catalog = formats();
+        assert!(catalog.executables.is_empty());
+        assert_eq!(catalog.groups[0].tool, "unity");
+        assert_eq!(catalog.groups[1].scope, "unityAssets");
+        assert!(catalog.groups[0]
+            .kinds
+            .iter()
+            .any(|entry| entry.extensions.contains(&".prefab".to_string())));
+        assert!(catalog.groups[1]
+            .kinds
+            .iter()
+            .any(|entry| entry.extensions.contains(&".png".to_string())));
+        assert!(catalog.groups[2]
+            .kinds
+            .iter()
+            .any(|entry| entry.extensions.contains(&".md".to_string())));
+        for (ext, _) in UNITY.iter().chain(COMMON.iter()) {
+            assert!(catalog
+                .groups
+                .iter()
+                .flat_map(|group| &group.kinds)
+                .any(|kind| kind.extensions.contains(&format!(".{ext}"))));
+        }
     }
 
     #[test]
@@ -317,14 +485,35 @@ mod tests {
         ]);
         let rev = git(&["rev-parse", "HEAD"]);
         std::fs::write(root.join("art/icon.png"), [9, 8, 7]).unwrap();
+        let preserved_meta = root.join(format!("art/icon.awegit-{}.png.meta", &rev[..12]));
+        std::fs::write(&preserved_meta, b"existing metadata").unwrap();
         let first = create(&root, &rev, "art/icon.png").unwrap();
         let second = create(&root, &rev, "art/icon.png").unwrap();
         assert_ne!(first, second);
-        assert_eq!(std::fs::read(first).unwrap(), [0, 1, 2, 255]);
-        assert_eq!(std::fs::read(second).unwrap(), [0, 1, 2, 255]);
+        assert_eq!(std::fs::read(&first).unwrap(), [0, 1, 2, 255]);
+        assert_eq!(std::fs::read(&second).unwrap(), [0, 1, 2, 255]);
         assert_eq!(std::fs::read(root.join("art/icon.png")).unwrap(), [9, 8, 7]);
         assert!(create(&root, &rev, "../art/icon.png").is_err());
         assert!(create(&root, "HEAD", "art/icon.png").is_err());
+        assert!(remove(
+            &root,
+            "art/icon.png",
+            root.join("art/icon.png").to_str().unwrap()
+        )
+        .is_err());
+        assert!(remove(&root, "other.png", &first).is_err());
+        remove(&root, "art/icon.png", &first).unwrap();
+        assert!(!Path::new(&first).exists());
+        assert_eq!(
+            std::fs::read(&preserved_meta).unwrap(),
+            b"existing metadata"
+        );
+        let generated_meta = meta_path(Path::new(&second));
+        std::fs::write(&generated_meta, b"generated metadata").unwrap();
+        remove(&root, "art/icon.png", &second).unwrap();
+        assert!(!Path::new(&second).exists());
+        assert!(!generated_meta.exists());
+        assert_eq!(std::fs::read(root.join("art/icon.png")).unwrap(), [9, 8, 7]);
         std::fs::create_dir_all(root.join("Assets")).unwrap();
         std::fs::create_dir_all(root.join("ProjectSettings")).unwrap();
         std::fs::write(root.join("Assets/Player.cs"), b"class Player {}").unwrap();
@@ -355,7 +544,10 @@ mod tests {
             .ends_with(".asmdef.txt"));
         let prefab = create(&root, &unity_rev, "Assets/UIChapter.prefab").unwrap();
         assert!(prefab.ends_with(".prefab"));
-        assert_eq!(std::fs::read(prefab).unwrap(), b"%YAML 1.1\n");
+        assert_eq!(std::fs::read(&prefab).unwrap(), b"%YAML 1.1\n");
+        std::fs::write(&prefab, b"edited in Unity").unwrap();
+        assert!(remove(&root, "Assets/UIChapter.prefab", &prefab).is_err());
+        assert_eq!(std::fs::read(&prefab).unwrap(), b"edited in Unity");
         std::fs::create_dir_all(root.join("unityLibrary/src/main/java/com/unity3d/player"))
             .unwrap();
         std::fs::write(
