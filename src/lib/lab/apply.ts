@@ -624,10 +624,15 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       fillSourceRoots(shell);
       break;
     case "editorImport":
-      shell.editorCandidates = [
+      shell.toolImportKind = sceneId === "detect-diff-tools" ? "diff" : sceneId === "detect-merge-tools" ? "merge" : "editor";
+      shell.editorCandidates = shell.toolImportKind === "editor" ? [
         { name: "Visual Studio Code", path: "C:\\Program Files\\Microsoft VS Code\\Code.exe", args: "-g \"{file}:{line}\"" },
         { name: "Cursor", path: "C:\\Users\\lab\\AppData\\Local\\Programs\\cursor\\Cursor.exe", args: "-g \"{file}:{line}\"" },
         { name: "Sublime Text", path: "C:\\Program Files\\Sublime Text\\sublime_text.exe", args: "\"{file}:{line}\"" },
+      ] : [
+        { name: "Beyond Compare", path: "C:\\Program Files\\Beyond Compare 5\\BComp.exe", args: shell.toolImportKind === "diff" ? '"{left}" "{right}"' : '"{ours}" "{theirs}" "{base}" "{working}"' },
+        { name: "WinMerge", path: "C:\\Program Files\\WinMerge\\WinMergeU.exe", args: shell.toolImportKind === "diff" ? '"{left}" "{right}"' : '-e -u -o "{working}" "{ours}" "{base}" "{theirs}"' },
+        { name: "VS Code", path: "C:\\Program Files\\Microsoft VS Code\\Code.exe", args: shell.toolImportKind === "diff" ? '--wait --diff "{left}" "{right}"' : '--wait --merge "{ours}" "{theirs}" "{base}" "{working}"' },
       ];
       shell.editorPicked = [];
       shell.editorDetecting = false;

@@ -1413,8 +1413,9 @@ export async function importTools(shell: ShellState, kind: ToolKind, source: Too
     return added;
   }
 
-/** Open the editor picker and scan install paths only now, when the user asked for it. */
-export function openEditorImport(shell: ShellState) {
+/** Scan install paths only when the user opens the picker for this tool kind. */
+export function openEditorImport(shell: ShellState, kind: ToolKind = "editor") {
+    shell.toolImportKind = kind;
     shell.dialog = "editorImport";
     shell.editorCandidates = [];
     shell.editorPicked = [];
@@ -1423,16 +1424,24 @@ export function openEditorImport(shell: ShellState) {
   }
 
 export async function detectEditors(shell: ShellState) {
+    const kind = shell.toolImportKind;
+    const request = ++shell.toolDetectRequest;
+    shell.actionError = "";
     shell.editorDetecting = true;
     try {
-      const rows = await invoke<EditorTool[]>("editor_tools");
-      if (shell.dialog !== "editorImport") return;
+      const rows = kind === "editor"
+        ? await invoke<EditorTool[]>("editor_tools")
+        : (await invoke<CommonTool[]>("common_tools"))
+          .map((row) => ({ name: row.name, path: row.path, args: kind === "merge" ? row.mergeArgs : row.diffArgs }))
+          .filter((row) => row.args.trim().length > 0);
+      if (shell.dialog !== "editorImport" || request !== shell.toolDetectRequest) return;
       shell.editorCandidates = rows;
-      shell.editorPicked = shell.editorPicked.filter((path) => rows.some((row) => shell.pathsMatch(row.path, path)));
+      shell.editorPicked = shell.editorPicked.filter((path) => rows.some((row) => shell.pathsMatch(row.path, path))
+        && !toolsOf(shell, kind).some((tool) => shell.pathsMatch(tool.path, path)));
     } catch (error) {
-      if (shell.dialog === "editorImport") shell.actionError = shell.message(error);
+      if (shell.dialog === "editorImport" && request === shell.toolDetectRequest) shell.actionError = shell.message(error);
     } finally {
-      shell.editorDetecting = false;
+      if (request === shell.toolDetectRequest) shell.editorDetecting = false;
     }
   }
 
@@ -1444,8 +1453,10 @@ export function toggleEditorCandidate(shell: ShellState, path: string) {
   }
 
 export function importEditorCandidates(shell: ShellState) {
+    if (shell.editorDetecting) return;
+    const kind = shell.toolImportKind;
     const picked = shell.editorCandidates.filter((row) => shell.editorPicked.some((path) => shell.pathsMatch(path, row.path)));
-    const tools = [...toolsOf(shell, "editor")];
+    const tools = [...toolsOf(shell, kind)];
     const fresh: ToolRecord[] = [];
     for (const row of picked) {
       if (!row.path.trim() || tools.some((tool) => shell.pathsMatch(tool.path, row.path))) continue;
@@ -1454,7 +1465,8 @@ export function importEditorCandidates(shell: ShellState) {
       fresh.push(tool);
     }
     if (fresh.length > 0) {
-      setTools(shell, "editor", tools);
+      setTools(shell, kind, tools);
+      applyToolSettings(shell);
       shell.toolPick = fresh[0].id;
       void shell.savePrefs(false);
     }
@@ -1462,12 +1474,13 @@ export function importEditorCandidates(shell: ShellState) {
   }
 
 export function closeEditorImport(shell: ShellState) {
+    shell.toolDetectRequest += 1;
     shell.editorCandidates = [];
     shell.editorPicked = [];
     shell.editorDetecting = false;
     shell.dialog = "prefs";
     shell.prefTab = "integration";
-    shell.toolKind = "editor";
+    shell.toolKind = shell.toolImportKind;
   }
 
 export async function loadExternalTools(shell: ShellState) {

@@ -1,4 +1,4 @@
-//! External diff and merge tools taken from Fork's settings.
+//! Installed external tools and imports from Fork's settings.
 //!
 //! A built-in Fork type is kept only when the file on disk is that program.
 //! A path that is missing, or a Beyond Compare entry that points at another executable, is dropped.
@@ -24,7 +24,7 @@ pub struct ExternalTools {
     pub diff: Vec<ExternalTool>,
 }
 
-/// A known tool that supports both modes, used by the settings import.
+/// An installed tool with arguments for each supported mode (empty means unsupported).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommonTool {
@@ -81,14 +81,18 @@ pub fn tools_in_fork_text(text: &str) -> ExternalTools {
     tools_from_fork_json(text, |_| true)
 }
 
-/// Tools from well-known install folders. Only programs present on disk are returned.
+/// Tools from install folders, PATH and Windows App Paths. No programs are launched.
 pub fn common_tools() -> Vec<CommonTool> {
+    installed_common_tools(common_presets(), program_exists)
+}
+
+fn installed_common_tools(presets: Vec<CommonTool>, exists: impl Fn(&str) -> bool) -> Vec<CommonTool> {
     let mut tools: Vec<CommonTool> = Vec::new();
-    for preset in common_presets() {
-        if preset.path.trim().is_empty() || !program_exists(&preset.path) {
+    for preset in presets {
+        if preset.path.trim().is_empty() || !exists(&preset.path) {
             continue;
         }
-        if tools.iter().any(|item| same_path(&item.path, &preset.path)) {
+        if tools.iter().any(|item| item.name.eq_ignore_ascii_case(&preset.name) || same_path(&item.path, &preset.path)) {
             continue;
         }
         tools.push(preset);
@@ -97,94 +101,192 @@ pub fn common_tools() -> Vec<CommonTool> {
 }
 
 fn common_presets() -> Vec<CommonTool> {
-    let program = |folder: &str, file: &str| {
-        std::env::var("ProgramFiles")
-            .ok()
-            .map(|base| Path::new(&base).join(folder).join(file).display().to_string())
-            .unwrap_or_default()
-    };
-    let program_x86 = |folder: &str, file: &str| {
-        std::env::var("ProgramFiles(x86)")
-            .ok()
-            .map(|base| Path::new(&base).join(folder).join(file).display().to_string())
-            .unwrap_or_default()
-    };
-    let local = |folder: &str, file: &str| {
-        std::env::var("LOCALAPPDATA")
-            .ok()
-            .map(|base| Path::new(&base).join(folder).join(file).display().to_string())
-            .unwrap_or_default()
-    };
-    let mut rows = vec![
-        CommonTool {
-            name: "Beyond Compare".into(),
-            path: program("Beyond Compare 5", "BCompare.exe"),
-            diff_args: "{left} {right}".into(),
-            merge_args: "{ours} {theirs} {base} {working}".into(),
-        },
-        CommonTool {
-            name: "Beyond Compare".into(),
-            path: program("Beyond Compare 4", "BCompare.exe"),
-            diff_args: "{left} {right}".into(),
-            merge_args: "{ours} {theirs} {base} {working}".into(),
-        },
-        CommonTool {
-            name: "WinMerge".into(),
-            path: program("WinMerge", "WinMergeU.exe"),
-            diff_args: "{left} {right}".into(),
-            merge_args: "-e -ub {ours} {theirs} {working}".into(),
-        },
-        CommonTool {
-            name: "KDiff3".into(),
-            path: program("KDiff3", "kdiff3.exe"),
-            diff_args: "{left} {right}".into(),
-            merge_args: "{base} {ours} {theirs} -o {working}".into(),
-        },
-        CommonTool {
-            name: "Meld".into(),
-            path: program("Meld", "Meld.exe"),
-            diff_args: "{left} {right}".into(),
-            merge_args: "{ours} {base} {theirs} -o {working}".into(),
-        },
-        CommonTool {
-            name: "P4Merge".into(),
-            path: program("Perforce", "p4merge.exe"),
-            diff_args: "{left} {right}".into(),
-            merge_args: "{base} {ours} {theirs} {working}".into(),
-        },
-        CommonTool {
-            name: "TortoiseGitMerge".into(),
-            path: program("TortoiseGit", "bin\\TortoiseGitMerge.exe"),
-            diff_args: "{left} {right}".into(),
-            merge_args: "-mine:{ours} -base:{base} -theirs:{theirs} -merged:{working}".into(),
-        },
-        CommonTool {
-            name: "VS Code".into(),
-            path: local("Programs\\Microsoft VS Code", "Code.exe"),
-            diff_args: "--diff \"{left}\" \"{right}\"".into(),
-            merge_args: String::new(),
-        },
-        CommonTool {
-            name: "VS Code".into(),
-            path: program("Microsoft VS Code", "Code.exe"),
-            diff_args: "--diff \"{left}\" \"{right}\"".into(),
-            merge_args: String::new(),
-        },
-    ];
-    for (folder, file) in [("WinMerge", "WinMergeU.exe"), ("KDiff3", "kdiff3.exe"), ("Meld", "Meld.exe")] {
-        rows.push(CommonTool {
-            name: folder.into(),
-            path: program_x86(folder, file),
-            diff_args: "{left} {right}".into(),
-            merge_args: match folder {
-                "KDiff3" => "{base} {ours} {theirs} -o {working}".into(),
-                "Meld" => "{ours} {base} {theirs} -o {working}".into(),
-                _ => "-e -ub {ours} {theirs} {working}".into(),
-            },
-        });
+    common_presets_with(&registered_programs())
+}
+
+fn common_presets_with(registered: &[(String, String)]) -> Vec<CommonTool> {
+    let mut rows = Vec::new();
+    for preset in COMMON_PRESETS {
+        let mut paths = Vec::new();
+        for variable in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+            let Some(root) = std::env::var_os(variable).map(std::path::PathBuf::from) else { continue };
+            for folder in preset.folders {
+                for file in preset.executables.iter().filter(|file| file.ends_with(".exe")) {
+                    paths.push(root.join(folder).join(file).display().to_string());
+                    if variable == "LOCALAPPDATA" {
+                        paths.push(root.join("Programs").join(folder).join(file).display().to_string());
+                    }
+                }
+            }
+        }
+        paths.extend(registered.iter()
+            .filter(|(file, _)| preset.executables.iter().any(|exe| file.eq_ignore_ascii_case(exe)))
+            .map(|(_, path)| path.clone()));
+        if cfg!(target_os = "macos") {
+            for app_path in preset.mac_paths {
+                paths.push(format!("/Applications/{app_path}"));
+                if let Some(home) = std::env::var_os("HOME") {
+                    paths.push(Path::new(&home).join("Applications").join(app_path).display().to_string());
+                }
+            }
+            if preset.name == "FileMerge" {
+                paths.push("/Library/Developer/CommandLineTools/usr/bin/opendiff".into());
+                paths.push("/Applications/Xcode.app/Contents/Developer/usr/bin/opendiff".into());
+            }
+        }
+        paths.extend(preset.executables.iter().map(|file| on_path(file)).filter(|path| !path.is_empty()));
+        // `compare.exe` is also shipped by unrelated programs such as ImageMagick.
+        rows.extend(paths.into_iter()
+            .filter(|path| preset.name != "Araxis Merge" || path.to_ascii_lowercase().contains("araxis"))
+            .map(|path| CommonTool {
+            name: preset.name.into(), path,
+            diff_args: preset.diff_args.into(), merge_args: preset.merge_args.into(),
+        }));
     }
     rows
 }
+
+struct CommonPreset {
+    name: &'static str,
+    folders: &'static [&'static str],
+    executables: &'static [&'static str],
+    mac_paths: &'static [&'static str],
+    diff_args: &'static str,
+    merge_args: &'static str,
+}
+
+const DIFF_ARGS: &str = "\"{left}\" \"{right}\"";
+const CODE_DIFF_ARGS: &str = "--wait --diff \"{left}\" \"{right}\"";
+const CODE_MERGE_ARGS: &str = "--wait --merge \"{ours}\" \"{theirs}\" \"{base}\" \"{working}\"";
+const TORTOISE_DIFF_ARGS: &str = "-base:\"{left}\" -mine:\"{right}\"";
+const TORTOISE_MERGE_ARGS: &str = "-base:\"{base}\" -mine:\"{ours}\" -theirs:\"{theirs}\" -merged:\"{working}\"";
+
+const COMMON_PRESETS: &[CommonPreset] = &[
+    CommonPreset {
+        name: "Beyond Compare", folders: &["Beyond Compare 5", "Beyond Compare 4", "Beyond Compare 3"],
+        executables: &["BComp.exe", "BCompare.exe", "bcomp", "bcompare"],
+        mac_paths: &["Beyond Compare.app/Contents/MacOS/bcomp"],
+        diff_args: DIFF_ARGS, merge_args: "\"{ours}\" \"{theirs}\" \"{base}\" \"{working}\"",
+    },
+    CommonPreset {
+        name: "WinMerge", folders: &["WinMerge"], executables: &["WinMergeU.exe", "WinMerge.exe"], mac_paths: &[],
+        diff_args: DIFF_ARGS, merge_args: "-e -u -o \"{working}\" \"{ours}\" \"{base}\" \"{theirs}\"",
+    },
+    CommonPreset {
+        name: "Araxis Merge", folders: &["Araxis\\Araxis Merge", "Araxis Merge"],
+        executables: &["Compare.exe", "Merge.exe", "araxis"], mac_paths: &["Araxis Merge.app/Contents/Utilities/compare"],
+        diff_args: "-wait \"{left}\" \"{right}\"", merge_args: "-wait -merge -3 -a1 \"{ours}\" \"{base}\" \"{theirs}\" \"{working}\"",
+    },
+    CommonPreset {
+        name: "KDiff3", folders: &["KDiff3"], executables: &["kdiff3.exe", "kdiff3"],
+        mac_paths: &["kdiff3.app/Contents/MacOS/kdiff3", "KDiff3.app/Contents/MacOS/kdiff3"],
+        diff_args: DIFF_ARGS, merge_args: "\"{base}\" \"{ours}\" \"{theirs}\" -o \"{working}\"",
+    },
+    CommonPreset {
+        name: "Meld", folders: &["Meld"], executables: &["Meld.exe", "meld"], mac_paths: &["Meld.app/Contents/MacOS/Meld"],
+        diff_args: DIFF_ARGS, merge_args: "\"{ours}\" \"{base}\" \"{theirs}\" -o \"{working}\"",
+    },
+    CommonPreset {
+        name: "P4Merge", folders: &["Perforce", "Perforce\\P4Merge"], executables: &["p4merge.exe", "p4merge"],
+        mac_paths: &["p4merge.app/Contents/MacOS/p4merge"],
+        diff_args: DIFF_ARGS, merge_args: "\"{base}\" \"{ours}\" \"{theirs}\" \"{working}\"",
+    },
+    CommonPreset {
+        name: "DiffMerge", folders: &["SourceGear\\Common\\DiffMerge", "SourceGear\\DiffMerge", "DiffMerge"],
+        executables: &["sgdm.exe", "DiffMerge.exe", "diffmerge"], mac_paths: &["DiffMerge.app/Contents/MacOS/DiffMerge"],
+        diff_args: DIFF_ARGS, merge_args: "--merge --result=\"{working}\" \"{ours}\" \"{base}\" \"{theirs}\"",
+    },
+    CommonPreset {
+        name: "TortoiseGitMerge", folders: &["TortoiseGit\\bin"], executables: &["TortoiseGitMerge.exe"], mac_paths: &[],
+        diff_args: TORTOISE_DIFF_ARGS, merge_args: TORTOISE_MERGE_ARGS,
+    },
+    CommonPreset {
+        name: "TortoiseMerge", folders: &["TortoiseSVN\\bin"], executables: &["TortoiseMerge.exe"], mac_paths: &[],
+        diff_args: TORTOISE_DIFF_ARGS, merge_args: TORTOISE_MERGE_ARGS,
+    },
+    CommonPreset {
+        name: "Code Compare", folders: &["Devart\\Code Compare"], executables: &["CodeCompare.exe"], mac_paths: &[],
+        diff_args: DIFF_ARGS, merge_args: "",
+    },
+    CommonPreset {
+        name: "Code Merge", folders: &["Devart\\Code Compare"], executables: &["CodeMerge.exe"], mac_paths: &[],
+        diff_args: "", merge_args: "-MF=\"{ours}\" -BF=\"{base}\" -TF=\"{theirs}\" -RF=\"{working}\"",
+    },
+    CommonPreset {
+        name: "VS Code", folders: &["Microsoft VS Code"], executables: &["Code.exe", "code.cmd", "code"],
+        mac_paths: &["Visual Studio Code.app/Contents/Resources/app/bin/code"],
+        diff_args: CODE_DIFF_ARGS, merge_args: CODE_MERGE_ARGS,
+    },
+    CommonPreset {
+        name: "VS Code Insiders", folders: &["Microsoft VS Code Insiders"], executables: &["Code - Insiders.exe", "code-insiders.cmd", "code-insiders"],
+        mac_paths: &["Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code-insiders"],
+        diff_args: CODE_DIFF_ARGS, merge_args: CODE_MERGE_ARGS,
+    },
+    CommonPreset {
+        name: "Cursor", folders: &["cursor"], executables: &["Cursor.exe", "cursor.cmd", "cursor"],
+        mac_paths: &["Cursor.app/Contents/Resources/app/bin/cursor"], diff_args: CODE_DIFF_ARGS, merge_args: CODE_MERGE_ARGS,
+    },
+    CommonPreset {
+        name: "Windsurf", folders: &["Windsurf"], executables: &["Windsurf.exe", "windsurf.cmd", "windsurf"],
+        mac_paths: &["Windsurf.app/Contents/Resources/app/bin/windsurf"], diff_args: CODE_DIFF_ARGS, merge_args: CODE_MERGE_ARGS,
+    },
+    CommonPreset {
+        name: "VSCodium", folders: &["VSCodium"], executables: &["VSCodium.exe", "codium.cmd", "codium"],
+        mac_paths: &["VSCodium.app/Contents/Resources/app/bin/codium"], diff_args: CODE_DIFF_ARGS, merge_args: CODE_MERGE_ARGS,
+    },
+    CommonPreset {
+        name: "FileMerge", folders: &[], executables: &["opendiff"], mac_paths: &[],
+        diff_args: DIFF_ARGS, merge_args: "\"{ours}\" \"{theirs}\" -ancestor \"{base}\" -merge \"{working}\"",
+    },
+    CommonPreset {
+        name: "Kaleidoscope", folders: &[], executables: &["ksdiff"], mac_paths: &["Kaleidoscope.app/Contents/MacOS/ksdiff"],
+        diff_args: "--wait \"{left}\" \"{right}\"", merge_args: "--wait --merge --output \"{working}\" --base \"{base}\" \"{ours}\" \"{theirs}\"",
+    },
+];
+
+#[cfg(windows)]
+fn registered_programs() -> Vec<(String, String)> {
+    use std::os::windows::process::CommandExt;
+    // Registry APIs preserve Unicode paths and expand REG_EXPAND_SZ values.
+    // Query both views without changing the registry or starting any detected tool.
+    const SCRIPT: &str = r#"
+        [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+        $found = [Collections.Generic.List[object]]::new()
+        foreach ($hive in @('CurrentUser', 'LocalMachine')) {
+            foreach ($view in @('Registry64', 'Registry32')) {
+                $root = $null; $apps = $null
+                try {
+                    $root = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, $view)
+                    $apps = $root.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\App Paths')
+                    if ($null -eq $apps) { continue }
+                    foreach ($name in $apps.GetSubKeyNames()) {
+                        if (!$name.EndsWith('.exe', [StringComparison]::OrdinalIgnoreCase)) { continue }
+                        $app = $null
+                        try {
+                            $app = $apps.OpenSubKey($name)
+                            if ($null -eq $app) { continue }
+                            $path = $app.GetValue('')
+                            if ($path -is [string] -and $path) { $found.Add(@($name, $path.Trim('"'))) }
+                        } catch {} finally { if ($null -ne $app) { $app.Dispose() } }
+                    }
+                } catch {} finally {
+                    if ($null -ne $apps) { $apps.Dispose() }
+                    if ($null -ne $root) { $root.Dispose() }
+                }
+            }
+        }
+        ConvertTo-Json -InputObject @($found.ToArray()) -Depth 3 -Compress
+    "#;
+    std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+        .creation_flags(0x08000000).output().ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| serde_json::from_slice(&output.stdout).ok())
+        .unwrap_or_default()
+}
+
+#[cfg(not(windows))]
+fn registered_programs() -> Vec<(String, String)> { Vec::new() }
 
 /// Editors installed on this machine, newest names first. Only programs present on disk are returned.
 pub fn editor_tools() -> Vec<EditorTool> {
@@ -702,6 +804,69 @@ mod tests {
         assert_eq!(tools.diff.len(), 1);
         assert_eq!(tools.diff[0].name, "Beyond Compare");
         assert_eq!(tools.diff[0].args, "{left} {right}");
+    }
+
+    #[test]
+    fn common_detection_skips_missing_programs_and_prefers_one_launcher_per_tool() {
+        use super::{installed_common_tools, CommonTool};
+        let preset = |name: &str, path: &str| CommonTool {
+            name: name.into(), path: path.into(), diff_args: "{left} {right}".into(), merge_args: String::new(),
+        };
+        let tools = installed_common_tools(vec![
+            preset("Beyond Compare", "missing.exe"),
+            preset("Beyond Compare", "C:/Beyond Compare 5/BComp.exe"),
+            preset("Beyond Compare", "C:/Beyond Compare 4/BCompare.exe"),
+            preset("VS Code", "D:/Portable Code/Code.exe"),
+            preset("VS Code", "D:/Portable Code/bin/code.cmd"),
+            preset("Another alias", "d:\\portable code\\CODE.EXE"),
+            preset("WinMerge", ""),
+        ], |path| path != "missing.exe");
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].path, "C:/Beyond Compare 5/BComp.exe");
+        assert_eq!(tools[1].path, "D:/Portable Code/Code.exe");
+    }
+
+    #[test]
+    fn common_detection_finds_portable_tools_on_path() {
+        use super::common_presets_with;
+        let root = std::env::temp_dir().join(format!("awegit-tool-detection-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let program = root.join("WinMergeU.exe");
+        std::fs::write(&program, "").unwrap();
+        let previous = std::env::var_os("PATH");
+        std::env::set_var("PATH", &root);
+        let found = common_presets_with(&[]);
+        match previous {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
+        let _ = std::fs::remove_file(&program);
+        let _ = std::fs::remove_dir(root);
+        assert!(found.iter().any(|tool| tool.name == "WinMerge" && std::path::Path::new(&tool.path) == program));
+    }
+
+    #[test]
+    fn common_detection_accepts_registered_tools_in_unicode_custom_folders() {
+        use super::{common_presets_with, installed_common_tools};
+        let path = "D:\\我的工具\\Beyond Compare\\BComp.exe";
+        let tools = installed_common_tools(common_presets_with(&[
+            ("bcomp.EXE".into(), path.into()),
+            ("Compare.exe".into(), "D:\\ImageMagick\\compare.exe".into()),
+        ]), |candidate| candidate == path || candidate == "D:\\ImageMagick\\compare.exe");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "Beyond Compare");
+        assert_eq!(tools[0].path, path);
+    }
+
+    #[test]
+    fn common_tools_keep_three_way_merge_order_and_mode_capabilities() {
+        use super::COMMON_PRESETS;
+        let args = |name: &str| COMMON_PRESETS.iter().find(|preset| preset.name == name).unwrap();
+        assert_eq!(args("WinMerge").merge_args, "-e -u -o \"{working}\" \"{ours}\" \"{base}\" \"{theirs}\"");
+        assert_eq!(args("VS Code").merge_args, "--wait --merge \"{ours}\" \"{theirs}\" \"{base}\" \"{working}\"");
+        assert_eq!(args("TortoiseGitMerge").diff_args, "-base:\"{left}\" -mine:\"{right}\"");
+        assert!(args("Code Compare").merge_args.is_empty());
+        assert!(args("Code Merge").diff_args.is_empty());
     }
 
     #[test]

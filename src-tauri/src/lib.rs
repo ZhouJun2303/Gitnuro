@@ -838,8 +838,8 @@ fn external_tools() -> tools::ExternalTools {
 }
 
 #[tauri::command]
-fn common_tools() -> Vec<tools::CommonTool> {
-    tools::common_tools()
+async fn common_tools() -> Result<Vec<tools::CommonTool>, String> {
+    tauri::async_runtime::spawn_blocking(tools::common_tools).await.map_err(|error| error.to_string())
 }
 
 #[tauri::command]

@@ -738,6 +738,10 @@ export type Messages = {
     toolImportCommon: string;
     toolImportFork: string;
     detectEditors: string;
+    detectDiffTools: string;
+    detectMergeTools: string;
+    noToolsFound: string;
+    toolImportHint: string;
     detect: string;
     detectingEditors: string;
     noEditorsFound: string;

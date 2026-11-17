@@ -664,9 +664,8 @@
                 <div class="tool-actions">
                   <button class="text-button" type="button" onclick={() => shell.addTool(kind)}>{shell.tr("dialog.toolAdd")}</button>
                   <button class="text-button" type="button" disabled={!picked} onclick={() => picked && shell.removeTool(kind, picked.id)}>{shell.tr("dialog.toolRemove")}</button>
-                  {#if kind === "editor"}
-                    <button class="text-button tool-import" type="button" onclick={() => shell.openEditorImport()}>{shell.tr("dialog.detect")}</button>
-                  {:else}
+                  <button class="text-button tool-detect" type="button" onclick={() => shell.openEditorImport(kind)}>{shell.tr("dialog.detect")}</button>
+                  {#if kind !== "editor"}
                     <button class="text-button tool-import" type="button" onclick={(event) => shell.openMenu(event, toolImportItems(kind))}>{shell.tr("dialog.toolImport")}</button>
                   {/if}
                   <span class="grow"></span>

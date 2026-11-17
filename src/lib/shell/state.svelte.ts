@@ -5247,6 +5247,10 @@ export class ShellState {
 
   editorCandidates = $state<EditorTool[]>([]);
 
+  toolImportKind = $state<ToolKind>("editor");
+
+  toolDetectRequest = 0;
+
   editorPicked = $state<string[]>([]);
 
   editorDetecting = $state(false);
@@ -5345,8 +5349,8 @@ export class ShellState {
     openToolSettings(this, kind, toolId);
   }
 
-  openEditorImport() {
-    openEditorImport(this);
+  openEditorImport(kind: ToolKind = "editor") {
+    openEditorImport(this, kind);
   }
 
   detectEditors() {
@@ -6270,6 +6274,10 @@ export class ShellState {
     }
     if (event.key === "Escape" && this.dialog && !this.busy) {
       event.preventDefault();
+      if (this.dialog === "editorImport") {
+        this.closeEditorImport();
+        return true;
+      }
       if (this.dialog === "prefs") void this.savePrefs(true);
       this.dialog = null;
       return true;
