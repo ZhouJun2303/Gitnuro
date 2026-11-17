@@ -8,6 +8,8 @@
 
 ## 已处理
 
+- [x] 发布关键步骤增加时间、耗时和每 10 秒等待日志，安装包逐个显示文件名、大小、上传序号和重试；提交版本号后先推送开发分支，避免发布完成后仍有版本号提交未推送，推送失败在切换 release 和打包前停止。安装包全部上传后才公开 release 草稿，失败可续传。修复：本条所在提交 `fix: 完善发布进度日志并同步开发分支版本提交`；回归：`scripts/publish.test.ps1` 的 6 项离线测试，覆盖中文 Windows 编码、心跳与原生命令参数 / 管道 / 退出码、API 重试、完整发布与创建超时、上传失败保留草稿并续传、开发分支推送拒绝、只打包不推送；Windows PowerShell 5.1 语法检查通过。
+
 - [x] 分支行区分非悬停信息层和悬停操作层：平时保留分支名、上传 / 下载箭头及数量，已筛选分支常显取消入口；悬停或键盘聚焦时展开带圆角底色和轻边框的操作组。按钮独立占位，不再隐藏或覆盖同步状态。修复：本条所在提交 `fix: 分层展示分支操作并保留同步状态`；回归：`e2e/branch-actions.spec.ts` 的 `branch sync arrows stay visible beside hovered, focused and active filter actions`、`branch action icons and labels follow pin and history filter state`，以及 `e2e/branch-filters.spec.ts`、`e2e/branch-filter-memory.spec.ts`，三套主题相关 UI 共 21 项通过；最终分层样式复验 9 项通过，`pnpm check` 通过。
 
 - [x] 图片历史、提交详情和图片 diff 显示前后像素尺寸、文件大小、精确字节数及宽高 / 大小增减和百分比；尺寸或大小未变时明确提示。并排、洋葱皮、滑动使用同一缩放比例和左上角原点，保留真实长宽比；像素差分持续展示原图信息。修正暂存区预览误读工作区的问题，HEAD / 索引 / 工作区与大小信息对应；沿用 8 MB 预览上限，不新增依赖。修复：本条所在提交 `fix: 显示图片对比的尺寸和文件大小变化`；回归：`index_preview_reads_the_staged_image_and_bounds_missing_and_large_files`、`e2e/image-metadata.spec.ts`、`e2e/history-images.spec.ts`、`e2e/image-diff.spec.ts` 及 `theme panel diff image`，三套主题相关 UI 共 38 项通过；`pnpm check`、`pnpm build` 通过。4K 像素差分探针未记录到主线程像素读取或长任务；说明见 [开发文档](dev-docs/development.md)。

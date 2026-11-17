@@ -10,7 +10,7 @@
 
 `release` 受 GitHub 规则集 “Protect Release branch” 保护：不能删除、不能强制推送，改动必须走 Pull Request，只有仓库所有者 `ZhouJun2303` 可以直接绕过规则。
 
-发布在 `feat/dev` 上运行 `publish.bat`。脚本提交版本号，切到 `release` 合并，打包上传，最后回到 `feat/dev`。
+发布在 `feat/dev` 上运行 `publish.bat`。完整流程见下方“打包”部分。
 
 协作者这样提交：
 
@@ -339,9 +339,11 @@ node scripts/release-notes.mjs generate --tool codex --version 2.0.11 --md notes
 
 先在本机试用时选第 8 项：不改版本号、不上传，打包后用安装包静默替换本机已安装的 AweGit，保留原来的安装目录和卸载项。替换后用构建标记核对本机文件和刚打包的包是否一致，标记也显示在关于面板。本机没有安装、或不是用 NSIS 安装包装的，就只留下安装包。这个模式不要求工作区干净。试完没问题，再按正常流程发布。
 
-在 `feat/dev` 上发布时，脚本会先提交版本号，再切到 `release` 合并这个分支，打包上传后回到 `feat/dev`。从其他分支发布也走同一条合并路径。工作区要是干净的，并且 `gh` 已经登录。
+在 `feat/dev` 上发布时，脚本会先提交版本号并推送开发分支到 `origin`，再切到 `release` 合并这个分支，打包上传后回到 `feat/dev`，避免版本号提交只留在本地。开发分支推送失败会在切换分支和打包前停止。从其他分支发布也走同一条合并路径。工作区要是干净的，并且 `gh` 已经登录。只打包或替换本机安装的模式不推送分支。
 
-发布过程中的顺序是：提交 `latest.json`，在这个清单提交上打 `v版本号` 标签并推送，上传安装包，最后推送 `release`。标签和 GitHub release 指向同一个提交；清单最后推送，避免更新检查拿到还没上传完的安装包。
+发布过程中的顺序是：提交 `latest.json`，在这个清单提交上打 `v版本号` 标签并推送，创建 GitHub release 草稿，逐个上传安装包，附件齐全后公开 release，最后推送 `release`。标签和 GitHub release 指向同一个提交；清单最后推送，避免更新检查拿到还没上传完的安装包。关键步骤输出时间和耗时，GitHub 请求和 Git 推送等待期间每 10 秒输出一次状态；附件日志包含文件名、大小和当前上传序号。失败时显示重试次数，重新发布当前版本会跳过已有附件，补传剩余安装包；上传失败的草稿不会提前公开。
+
+发布脚本的离线回归运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish.test.ps1`，只在 `.lab` 内创建临时仓库并模拟构建和 GitHub 上传，覆盖等待日志、重试、开发分支同步和失败续传。
 
 已经在 `release` 分支、并且不想改版本号时，仍可以用 `pnpm publish:windows`。
 
