@@ -8,6 +8,8 @@
 
 ## 已处理
 
+- [x] AI 提交说明只读取已暂存版本，按 fakeignore 开关同时过滤文件列表和差异；过滤为空时不发送请求，生成说明不改变暂存区。重命名两侧分别匹配规则，忽略的大文件不会占用差异限额。修复：本条所在提交 `fix: AI 提交说明按暂存内容过滤 fakeignore`；回归：`crates/git/tests/commit_prompt.rs` 的 6 项，以及 `ai::tests::suggestions_send_only_visible_staged_files_and_diff_for_all_prompt_styles`、`ai::tests::suggestions_do_not_contact_ai_when_all_staged_files_are_fakeignored`；相关 AI 测试共 18 项、`pnpm check` 通过。
+
 - [x] 每个仓库分别保存历史筛选分支与取消筛选状态，切换仓库、重新打开窗口时在历史读取前恢复；筛选和取消图标即时更新，后台读取未完成时仍可取消。远程筛选使用完整引用名，避免与同名本地分支混淆或在恢复时被移除。修复：本条所在提交 `fix: 按仓库记住历史筛选并即时更新取消图标`；回归：`e2e/branch-filter-memory.spec.ts` 的 `repositories remember separate branch filters after reopening and clearing`、`cancel filter icons update while history loading is blocked`、`saved remote filters stay separate from matching local branch names`，以及 `e2e/branch-filters.spec.ts`、`e2e/branch-actions.spec.ts`，三套主题共 18 项通过，`pnpm check` 通过。实现约定见 [开发文档](dev-docs/development.md)。
 
 - [x] 文件历史、提交「变更」页及展开差异直接展示图片前后版本；Windows 应用更新下载采用系统代理 / PAC 和证书存储，保留流式读取、SHA-256 与完整性校验；分支历史可逐个勾选多个分支、移除和一键清除。新增字体页，默认系统字体及 14 px / 400，提供字号字重、即时预览、恢复默认、保存路径与打开目录；可浏览 Google Fonts 官网后粘贴名称 / 链接，识别为可下载再添加，下载显示进度条、百分比与大小。字体按需缓存，通过只读二进制通道加载，不附带字库或新增依赖。修复：本条所在提交 `feat: 完善图片历史和字体配置并修复更新下载`；回归：`fonts::tests`、`settings::tests::fonts_default_to_system_and_keep_existing_sizes_and_choices`、`http::tests::downloads_require_https_and_respect_an_explicit_ca`、`system_http::tests::system_download_streams_redirects_and_reports_http_errors`；`e2e/history-images.spec.ts`、`e2e/branch-filters.spec.ts`、`e2e/fonts.spec.ts` 及 `theme panel diff image`、`theme panel operation flow` 三主题共 28 项通过，完整应用测试 141 项通过、5 项按默认忽略，`pnpm check`、`pnpm build` 通过。真实安装包与新增字体源的联网检查未获自动批准，当前验证为本地回归；实现见 [开发文档](dev-docs/development.md)。
