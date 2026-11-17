@@ -548,6 +548,14 @@ async function fillSurface(shell: ShellState, id: string) {
     window.setTimeout(() => { delete shell.jobs[key]; }, 2000);
     return;
   }
+  if (id === "file-menu") {
+    const file = shell.shownUnstaged[0] ?? shell.shownStaged[0];
+    if (file) {
+      const side = shell.shownUnstaged.includes(file) ? "unstaged" : "staged";
+      shell.menu = { x: 72, y: 96, items: shell.fileMenu(file, side) };
+    }
+    return;
+  }
   if (id === "external-tool-menu") {
     shell.settings.diffTools = diffFixtures();
     shell.settings.mergeTools = mergeFixtures();

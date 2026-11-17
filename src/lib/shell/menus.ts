@@ -82,6 +82,11 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
     const oursName = sideName(shell.activeConflict?.ours, shell.mergeState?.into || shell.tr("dialog.useOurs"));
     const theirsName = sideName(shell.activeConflict?.theirs, shell.mergeState?.source || shell.tr("dialog.useTheirs"));
     return [
+      { label: shell.tr("menu.reveal"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file.path)) },
+      { label: shell.tr("menu.openFile"), disabled: locked, run: () => void openFile(shell, file.path) },
+      { label: shell.tr("menu.copyPath"), run: () => shell.copyText(shell.fullPath(file.path)) },
+      { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(file.path) },
+      { sep: true, label: "" },
       { label: many ? `${shell.tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected")} (${count})` : shell.tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked, shortcut: shortcutLabel("stageToggle"), run: () => shell.stageChosen(side, targets) },
       { label: many ? shell.tr("menu.discardSelected", { count }) : shell.tr("menu.discard"), disabled: locked || (side === "staged" && many), shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(targets) },
       { label: many ? shell.tr("menu.deleteSelected", { count }) : shell.tr("menu.deleteFile"), disabled: locked, run: () => shell.deleteChosen(targets) },
@@ -97,11 +102,6 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { label: shell.tr("menu.openInEditor"), disabled: locked || file.letter === "D", children: editorItems(shell, file.path, 0) },
       { label: shell.tr("menu.lfsLock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsLock", path: file.path }) },
       { label: shell.tr("menu.lfsUnlock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsUnlock", path: file.path }) },
-      { sep: true, label: "" },
-      { label: shell.tr("menu.reveal"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file.path)) },
-      { label: shell.tr("menu.openFile"), disabled: locked, run: () => void openFile(shell, file.path) },
-      { label: shell.tr("menu.copyPath"), run: () => shell.copyText(shell.fullPath(file.path)) },
-      { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(file.path) },
       ...(file.letter === "C" ? [
         { label: shell.tr("menu.keepSideCount", { name: oursName, count: String(conflicts.length) }), disabled: locked, run: () => void shell.resolvePicked("ours", conflicts) },
         { label: shell.tr("menu.keepSideCount", { name: theirsName, count: String(conflicts.length) }), disabled: locked, run: () => void shell.resolvePicked("theirs", conflicts) },
