@@ -221,6 +221,10 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.showFileHistory(file);
     return;
   }
+  if (id === "file-history-excel") {
+    await shell.showFileHistory("data/sheet.xlsx");
+    return;
+  }
   if (id === "blob") {
     shell.blobFile = "README.md";
     shell.blobRev = "HEAD";

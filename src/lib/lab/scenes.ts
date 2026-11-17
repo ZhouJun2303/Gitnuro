@@ -144,6 +144,14 @@ export const surfaceScenes: LabScene[] = [
     href: "/?scene=file-history-unity&view=history&file=Assets/Prefabs/UIChapter.prefab",
   }),
   scene({
+    id: "file-history-excel",
+    group: "主界面",
+    title: "文件历史 · Excel 表格",
+    repo: "full",
+    ready: ".preview-revision",
+    href: "/?scene=file-history-excel&view=history&file=data/sheet.xlsx",
+  }),
+  scene({
     id: "blob",
     group: "主界面",
     title: "文件内容",
