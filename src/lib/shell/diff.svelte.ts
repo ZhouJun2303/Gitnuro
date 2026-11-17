@@ -205,7 +205,7 @@ export function describeToolError(shell: ShellState, kind: "merge" | "diff", err
 }
 
 export async function launchExternal(shell: ShellState, kind: "merge" | "diff", file: string, template?: string) {
-    if (!file || shell.busy) return;
+    if (!file || shell.writeBlocked) return;
     try {
       await invoke("launch_tool", { path: shell.repoPath(), kind, file, tool: template ?? shell.toolTemplate(kind, file) });
     } catch (error) {
@@ -215,7 +215,7 @@ export async function launchExternal(shell: ShellState, kind: "merge" | "diff", 
 
 export async function openConflictTool(shell: ShellState) {
     const file = shell.selectedPath;
-    if (!file || !mergeToolLabel(shell, file) || shell.busy) return;
+    if (!file || !mergeToolLabel(shell, file) || shell.writeBlocked) return;
     await launchExternal(shell, "merge", file);
 }
 
@@ -223,7 +223,7 @@ export async function applyConflictChoice(shell: ShellState, ours: boolean, thei
     const file = shell.selectedPath;
     const view = shell.activeConflict;
     if (!file || !view) return;
-    if (shell.mode === "live" && shell.busy) return;
+    if (shell.mode === "live" && shell.writeBlocked) return;
     if (ours && theirs) {
       await shell.openTextMerge(file);
       return;
@@ -492,6 +492,27 @@ export function selectTreeFile(shell: ShellState, path: string) {
     shell.revealSelectedRow();
   }
 
+type BlameRead = { path: string | undefined; file: string; version: string; count: number; current: () => boolean; pending: Set<number>; loaded: Set<number> };
+const blameReads = new WeakMap<ShellState, BlameRead>();
+
+export async function loadBlameRange(shell: ShellState) {
+    const read = blameReads.get(shell);
+    if (!read?.current() || !shell.blameLines?.length) return;
+    const start = Math.floor(Math.max(0, shell.blameTop / shell.diffRowHeight) / 200) * 200;
+    if (read.pending.has(start) || read.loaded.has(start)) return;
+    const end = Math.min(start + 200, read.count);
+    if (end <= start) return;
+    read.pending.add(start);
+    try {
+      const rows = await invoke<BlameLine[]>("blame_file", { path: read.path, file: read.file, start: start + 1, end, version: read.version });
+      if (!read.current() || !shell.blameLines) return;
+      const next = [...shell.blameLines];
+      for (const row of rows) if (!row.truncated && row.line > 0 && row.line <= next.length) next[row.line - 1] = row;
+      shell.blameLines = next; read.loaded.add(start);
+    } catch (error) { if (read.current()) shell.actionError = shell.message(error); }
+    finally { read.pending.delete(start); }
+  }
+
 export async function showBlame(shell: ShellState, file: string) {
     const path = shell.repoPath();
     const openGen = shell.openGen;
@@ -504,12 +525,24 @@ export async function showBlame(shell: ShellState, file: string) {
     const historyFile = shell.historyFile;
     const current = () => gen === shell.blameGen && openGen === shell.openGen && shell.repoPath() === path
       && shell.selectedPath === selection && shell.selectedSide === side && shell.section === section
-      && shell.patchGen === patchGen && shell.selectedCommit === commit && shell.historyFile === historyFile;
-    shell.blameLines = null;
+      && shell.patchGen === patchGen && shell.selectedCommit === commit && shell.historyFile === historyFile && shell.blameLines !== null;
+    shell.blameLines = [];
+    shell.blameTop = 0;
     await shell.withWork(shell.tr("chrome.readingFile"), async () => {
       try {
-        const lines = await invoke<BlameLine[]>("blame_file", { path, file });
-        if (current()) shell.blameLines = lines;
+        const source = await invoke<{ text: string; version: string; truncated: boolean }>("blame_source", { path, file });
+        if (!current() || shell.blameLines === null) return;
+        const text = source.text.split(/\r?\n/); if (text.at(-1) === "") text.pop();
+        const rows: BlameLine[] = [];
+        for (let index = 0; index < Math.min(text.length, 50_000); index++) {
+          rows.push({ id: "", shortId: "", summary: "", author: "", line: index + 1, text: text[index], truncated: false });
+          if (index % 1000 === 999) { await new Promise<void>((resolve) => requestAnimationFrame(() => resolve())); if (!current()) return; }
+        }
+        if (source.truncated || text.length > 50_000) rows.push({ id: "", shortId: "", summary: "", author: "", line: 0, text: "…", truncated: true });
+        shell.blameLines = rows;
+        const visible = () => current() && shell.blameLines !== null;
+        blameReads.set(shell, { path, file, version: source.version, count: Math.min(text.length, 50_000), current: visible, pending: new Set(), loaded: new Set() });
+        void loadBlameRange(shell);
       } catch (error) {
         if (current()) shell.actionError = shell.message(error);
       }
@@ -704,7 +737,7 @@ export function unpickFiles(shell: ShellState, files: readonly string[]) {
 
 export async function discardPicked(shell: ShellState, files = [...shell.picked]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
-    if (names.length === 0 || shell.busy || shell.writing) return;
+    if (names.length === 0 || shell.writeBlocked) return;
     if (names.length === 1) await shell.mutate({ action: "discard", file: names[0] });
     else await shell.mutate({ action: "discardPaths", files: names });
     if (!shell.actionError) unpickFiles(shell, names);
@@ -733,7 +766,7 @@ export function pickedConflicts(shell: ShellState, files = [...shell.picked]) {
 /** Keep `ours` or `theirs` for every picked conflict in one write. */
 export async function resolvePicked(shell: ShellState, side: "ours" | "theirs", files = [...shell.picked]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
-    if (names.length === 0 || shell.mode !== "live" || shell.writing) return;
+    if (names.length === 0 || shell.mode !== "live") return;
     await shell.mutate({ action: "resolvePaths", files: names, side });
     if (!shell.actionError) unpickFiles(shell, names);
   }
@@ -825,7 +858,7 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
 
 export async function deletePicked(shell: ShellState, files = [...shell.picked]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
-    if (names.length === 0 || shell.writing) return;
+    if (names.length === 0) return;
     if (names.length === 1) await shell.mutate({ action: "delete", file: names[0] });
     else await shell.mutate({ action: "deletePaths", files: names });
     unpickFiles(shell, names);
@@ -840,17 +873,22 @@ export function discardChosen(shell: ShellState, files: string[], focusConfirm =
     const names = files.filter((path) => path.length > 0);
     if (names.length === 0 || shell.mode !== "live") return;
     const includesSubmodule = shell.refs?.submodules.some((row) => names.includes(row.path));
-    shell.ask(shell.tr("chrome.discardSelected"), shell.tr(includesSubmodule ? "dialog.discardSubmoduleBody" : "dialog.discardFilesBody"), () => void shell.discardPicked(names), names, { danger: true, focusConfirm });
+    const path = shell.repoPath(), openGen = shell.openGen;
+    const discard = shell.bindMutation(names.length === 1 ? { action: "discard", file: names[0] } : { action: "discardPaths", files: names });
+    shell.ask(shell.tr("chrome.discardSelected"), shell.tr(includesSubmodule ? "dialog.discardSubmoduleBody" : "dialog.discardFilesBody"), () => void discard().then((outcome) => {
+      if (outcome === "completed" && openGen === shell.openGen && shell.viewing(path)) unpickFiles(shell, names);
+    }), names, { danger: true, focusConfirm });
   }
 
 export function deleteChosen(shell: ShellState, files: string[]) {
     const names = files.filter((path) => path.length > 0);
     if (names.length === 0 || shell.mode !== "live") return;
+    const remove = shell.bindMutation(names.length === 1 ? { action: "delete", file: names[0] } : { action: "deletePaths", files: names });
     if (names.length === 1) {
-      shell.ask(shell.tr("menu.deleteFile"), shell.tr("dialog.deleteBody"), () => void shell.mutate({ action: "delete", file: names[0] }), [], { subject: names[0], danger: true });
+      shell.ask(shell.tr("menu.deleteFile"), shell.tr("dialog.deleteBody"), () => void remove(), [], { subject: names[0], danger: true });
       return;
     }
-    shell.confirmPicked(names, shell.tr("chrome.deleteSelected"), shell.deletePicked.bind(shell));
+    shell.ask(shell.tr("chrome.deleteSelected"), "", () => void remove(), names, { danger: true });
   }
 
 export function openStash(shell: ShellState, files: string[]) {
@@ -873,13 +911,15 @@ export function ignoreTargets(shell: ShellState, path: string, side: Side) {
 
 export async function addIgnore(shell: ShellState, paths: string[], fake: boolean, directory: boolean) {
     const files = [...new Set(paths.filter((path) => path.length > 0))];
-    if (files.length === 0 || shell.mode !== "live" || shell.busy) return;
+    if (files.length === 0 || shell.mode !== "live" || shell.writeBlocked) return;
+    const path = shell.repoPath(), openGen = shell.openGen;
+    const append = shell.bindMutation({ action: "appendIgnore", files, fake, directory });
     if (fake && shell.settings.fakeIgnore === false) {
       shell.settings = { ...shell.settings, fakeIgnore: true };
-      await shell.savePrefs(false);
+      void shell.savePrefs(false);
     }
-    await shell.mutate({ action: "appendIgnore", files, fake, directory });
-    unpickFiles(shell, files);
+    await append();
+    if (shell.viewing(path) && shell.openGen === openGen) unpickFiles(shell, files);
   }
 
 export function filesInDir(shell: ShellState, dir: string, side: Side) {
@@ -1390,10 +1430,9 @@ export function removesOnApply(shell: ShellState, line: DiffLine, action: "stage
     return unstage === (line.kind === "add");
   }
 
-export async function applyLineOps(shell: ShellState, action: "stageLine" | "discardLine", entries: { line: DiffLine; index: number }[]) {
-    const file = shell.selectedPath;
-    if (!file || entries.length === 0 || !shell.backend() || shell.busy) return;
-    const unstage = shell.selectedSide === "staged";
+export async function applyLineOps(shell: ShellState, action: "stageLine" | "discardLine", entries: { line: DiffLine; index: number }[], binding = { path: shell.repoPath(), file: shell.selectedPath, unstage: shell.selectedSide === "staged", expected: shell.patchExpectation(), openGen: shell.openGen }) {
+    const { file, path, unstage, expected, openGen } = binding;
+    if (!file || entries.length === 0 || !shell.backend() || shell.writeBlocked || shell.pathPending(file)) return;
     const ordered = [...entries]
       .filter((entry) => (action === "stageLine" ? entry.line.stageAt : entry.line.workAt) != null)
       .sort((left, right) => {
@@ -1408,8 +1447,8 @@ export async function applyLineOps(shell: ShellState, action: "stageLine" | "dis
         return right.index - left.index;
       });
     if (ordered.length === 0) return;
-    const path = shell.repoPath();
     if (!path) return;
+    const current = () => openGen === shell.openGen && shell.viewing(path);
     shell.actionError = null;
     shell.startWork(shell.tr("chrome.working"), path);
     shell.diffSelected = [];
@@ -1421,22 +1460,25 @@ export async function applyLineOps(shell: ShellState, action: "stageLine" | "dis
       if (lines.length === 0) return;
       const value = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", {
         path,
+        __expectedDiff: expected,
         request: action === "stageLine"
           ? { action: "stageLines", file, lines, unstage }
           : { action: "discardLines", file, lines },
       });
       if (value.outcome === "failed") throw new Error(value.error || value.log);
-      if (shell.viewing(path)) {
+      if (current()) {
         shell.applySnapshot(value);
-        await shell.loadDiff();
+        void shell.loadDiff();
       }
     } catch (error) {
-      if (!shell.viewing(path)) return;
+      if (!current()) return;
       shell.actionError = shell.message(error);
       if (action === "stageLine" && shell.settings.ignoreSpace) shell.actionError = `${shell.actionError} ${shell.tr("dialog.spaceHint")}`;
       try {
-        shell.applySnapshot(await invoke<StatusSnapshot>("workspace_status", { path }));
-        await shell.loadDiff();
+        const status = await invoke<StatusSnapshot>("workspace_status", { path });
+        if (!current()) return;
+        shell.applySnapshot(status);
+        void shell.loadDiff();
       } catch {
         /* keep the action error */
       }
@@ -1448,6 +1490,9 @@ export async function applyLineOps(shell: ShellState, action: "stageLine" | "dis
 export async function showLineHistory(shell: ShellState, line: DiffLine | undefined) {
     const text = line ? shell.lineText(line).trim() : "";
     if (!shell.selectedPath || !text) return;
-    shell.commandOutput = await invoke<string>("pick_history", { path: shell.repoPath(), file: shell.selectedPath, text }).catch((error) => shell.message(error));
+    const path = shell.repoPath(), file = shell.selectedPath, openGen = shell.openGen;
+    shell.commandOutput = shell.tr("chrome.reading");
     shell.dialog = "output";
+    const result = await invoke<string>("pick_history", { path, file, text }).catch((error) => shell.message(error));
+    if (shell.dialog === "output" && shell.openGen === openGen && shell.viewing(path) && shell.selectedPath === file) shell.commandOutput = result;
   }

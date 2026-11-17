@@ -1,4 +1,5 @@
 import { invoke } from "../perf";
+import { acceptTask } from "../tasks";
 import type { CommandRecord, ToolRecord } from "../status";
 import type { ShellState } from "../shell/state.svelte";
 import type { LabDialog, LabScene } from "./scenes";
@@ -142,6 +143,14 @@ async function showCommitBySummary(shell: ShellState, summary: string) {
 }
 
 async function fillSurface(shell: ShellState, id: string) {
+  if (id === "operation-tasks") {
+    for (const [index, state] of (["running", "queued", "verifying", "completed", "conflict", "failed", "cancelled", "blocked"] as const).entries()) {
+      acceptTask({ id: `lab-task-${index}`, path: shell.repoPath() ?? "", action: "fetch", label: `git fetch origin · ${index + 1}`, targets: ["origin"], state,
+        dependsOn: index === 1 ? ["lab-task-0"] : [], revision: 0, queuedMs: 12, executeMs: 240, verifyMs: 8 });
+    }
+    requestAnimationFrame(() => document.querySelector<HTMLDetailsElement>(".task-queue")?.setAttribute("open", ""));
+    return;
+  }
   if (id === "sync-busy") {
     const path = shell.repoPath() ?? "";
     shell.jobs = { ...shell.jobs, [shell.jobKey(path)]: { label: "pull", percent: 42, depth: 1 } };

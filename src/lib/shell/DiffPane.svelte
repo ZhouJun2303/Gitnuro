@@ -6,7 +6,7 @@
   import { onVirtualScroll, type SplitRow } from "../view";
   import WrappedRows from "../WrappedRows.svelte";
   import type { Row, Side } from "./types";
-  import { applyConflictChoice, clearPixel, mergeToolLabel, mergeToolMissing, openConflictTool } from "./diff.svelte";
+  import { applyConflictChoice, clearPixel, loadBlameRange, mergeToolLabel, mergeToolMissing, openConflictTool } from "./diff.svelte";
   import BinaryDiff from "./BinaryDiff.svelte";
   import ImageComparison from "./ImageComparison.svelte";
   import { formatBytes } from "../format";
@@ -19,7 +19,7 @@
     shell.diffTop = top;
     if (hoveredHunk != null && pointerInside) void hoverUnderPointer();
   });
-  const onBlameScroll = onVirtualScroll((top) => (shell.blameTop = top));
+  const onBlameScroll = onVirtualScroll((top) => { shell.blameTop = top; void loadBlameRange(shell); });
   let pickOurs = $state(true);
   let pickTheirs = $state(true);
   let pickedPath = "";
@@ -228,22 +228,21 @@
 
   function stageActive() {
     const file = shell.selectedPath;
-    if (!file || shell.busy || activeHunk == null) return;
+    if (!file || shell.writeBlocked || shell.pathPending(file) || activeHunk == null) return;
     void shell.mutate({ action: "stageHunk", file, index: activeHunk, unstage: shell.selectedSide === "staged", ignoreSpace: shell.settings.ignoreSpace });
   }
 
   function discardActive() {
     const file = shell.selectedPath;
-    if (!file || shell.busy || activeHunk == null || shell.selectedSide === "staged") return;
+    if (!file || shell.writeBlocked || shell.pathPending(file) || activeHunk == null || shell.selectedSide === "staged") return;
     const index = activeHunk;
-    shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody"), () => {
-      void shell.mutate({ action: "discardHunk", file, index, ignoreSpace: shell.settings.ignoreSpace });
-    }, [], { subject: file, danger: true });
+    const discard = shell.bindMutation({ action: "discardHunk", file, index, ignoreSpace: shell.settings.ignoreSpace });
+    shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody"), () => void discard(), [], { subject: file, danger: true });
   }
 
   function stageHovered() {
     const file = shell.selectedPath;
-    if (!file || shell.busy) return;
+    if (!file || shell.writeBlocked || shell.pathPending(file)) return;
     const index = hoveredHunk;
     const lineMode = useLineOps;
     const lineOps = hoveredLineOps;
@@ -259,7 +258,7 @@
 
   function discardHovered() {
     const file = shell.selectedPath;
-    if (!file || shell.busy || shell.selectedSide === "staged") return;
+    if (!file || shell.writeBlocked || shell.selectedSide === "staged") return;
     const index = hoveredHunk;
     const lineMode = useLineOps;
     const discardOps = hoveredDiscardOps;
@@ -270,13 +269,13 @@
         void shell.applyLineOps("discardLine", discardOps);
         return;
       }
-      shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(discardOps.length) }), () => void shell.applyLineOps("discardLine", discardOps), [], { danger: true });
+      const discard = shell.bindLineOps("discardLine", discardOps);
+      shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(discardOps.length) }), () => void discard(), [], { danger: true });
       return;
     }
     if (index == null) return;
-    shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody"), () => {
-      void shell.mutate({ action: "discardHunk", file, index, ignoreSpace: shell.settings.ignoreSpace });
-    }, [], { subject: file, danger: true });
+    const discard = shell.bindMutation({ action: "discardHunk", file, index, ignoreSpace: shell.settings.ignoreSpace });
+    shell.ask(shell.tr("menu.discardHunk"), shell.tr("dialog.discardBody"), () => void discard(), [], { subject: file, danger: true });
   }
 
   function stageLabel() {
@@ -305,9 +304,9 @@
               <div class="commit-window" style:height="{(shell.blameLines?.length ?? 0) * shell.diffRowHeight}px">
                 {#each shell.blameWindow.rows as line, index (`${line.line}-${line.id}`)}
                   {@const pending = !line.truncated && (!line.id || /^0+$/.test(line.id))}
-                  <button class="virtual-row blame-line" class:blame-pending={pending} type="button" style:top="{(shell.blameWindow.start + index) * shell.diffRowHeight}px" title={line.truncated ? shell.tr("chrome.truncated") : pending ? shell.tr("dialog.notCommitted") : `${line.author} · ${line.summary}`} onclick={() => { if (pending || line.truncated) return; shell.section = "history"; void shell.selectCommit(line.id); }}>
+                  <button class="virtual-row blame-line" class:blame-pending={pending} type="button" style:top="{(shell.blameWindow.start + index) * shell.diffRowHeight}px" title={line.truncated ? shell.tr("chrome.truncated") : !line.id ? shell.tr("chrome.reading") : pending ? shell.tr("dialog.notCommitted") : `${line.author} · ${line.summary}`} onclick={() => { if (pending || line.truncated) return; shell.section = "history"; void shell.selectCommit(line.id); }}>
                     <span class="blame-gutter">{line.truncated ? "…" : line.line}</span>
-                    <span class="blame-who">{line.truncated ? "" : pending ? shell.tr("dialog.notCommitted") : line.author}</span>
+                    <span class="blame-who">{line.truncated ? "" : !line.id ? shell.tr("chrome.reading") : pending ? shell.tr("dialog.notCommitted") : line.author}</span>
                     <span class="blame-code">{line.truncated ? shell.tr("chrome.truncated") : line.text}</span>
                   </button>
                 {/each}
@@ -346,13 +345,13 @@
                   <div class="conflict-end right">{@render conflictCard(view.ours, "ours")}</div>
                 </div>
                 <div class="conflict-actions">
-                  <button class="conflict-merge" type="button" disabled={(!pickOurs && !pickTheirs) || (shell.mode === "live" && shell.busy)} onclick={() => { if (batch && only && shell.mode === "live") void shell.resolvePicked(pickOurs ? "ours" : "theirs", conflictSelection); else void applyConflictChoice(shell, pickOurs, pickTheirs); }}>{only ? (batch ? shell.tr("menu.keepSideCount", { name: only, count: String(conflictSelection.length) }) : shell.tr("chrome.chooseSide", { name: only })) : pickOurs && pickTheirs ? shell.tr("chrome.mergeBoth") : shell.tr("chrome.mergeAction")}</button>
+                  <button class="conflict-merge" type="button" disabled={(!pickOurs && !pickTheirs) || (shell.mode === "live" && shell.writeBlocked)} onclick={() => { if (batch && only && shell.mode === "live") void shell.resolvePicked(pickOurs ? "ours" : "theirs", conflictSelection); else void applyConflictChoice(shell, pickOurs, pickTheirs); }}>{only ? (batch ? shell.tr("menu.keepSideCount", { name: only, count: String(conflictSelection.length) }) : shell.tr("chrome.chooseSide", { name: only })) : pickOurs && pickTheirs ? shell.tr("chrome.mergeBoth") : shell.tr("chrome.mergeAction")}</button>
                   {#if tool && pickOurs && pickTheirs}
                     <span class="conflict-tool-group">
-                      <button class="conflict-tool" type="button" disabled={shell.mode === "live" && shell.busy} onclick={() => { if (shell.mode === "live") void openConflictTool(shell); }}>
+                      <button class="conflict-tool" type="button" disabled={shell.mode === "live" && shell.writeBlocked} onclick={() => { if (shell.mode === "live") void openConflictTool(shell); }}>
                         {shell.tr("chrome.mergeInTool", { name: tool })}
                       </button>
-                      <button class="conflict-tool conflict-caret" type="button" disabled={shell.mode === "live" && shell.busy} aria-label={shell.tr("menu.externalMerge")} title={shell.tr("menu.externalMerge")} onclick={(event) => shell.openExternalToolMenu(event, "merge", shell.selectedPath ?? "")}>
+                      <button class="conflict-tool conflict-caret" type="button" disabled={shell.mode === "live" && shell.writeBlocked} aria-label={shell.tr("menu.externalMerge")} title={shell.tr("menu.externalMerge")} onclick={(event) => shell.openExternalToolMenu(event, "merge", shell.selectedPath ?? "")}>
                         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
                       </button>
                     </span>
@@ -371,20 +370,20 @@
           {:else if shell.mode === "live" && shell.section === "changes" && shell.selectedPath}
             <header class="diff-head">
               <span title={shell.selectedPath}>{shell.selectedPath}</span>
-              <button class="pane-chip" type="button" disabled={shell.busy} title={shell.tr("menu.externalDiff")} onclick={(event) => shell.openExternalToolMenu(event, "diff", shell.selectedPath ?? "")}>{shell.tr("chrome.externalDiff")}</button>
+              <button class="pane-chip" type="button" disabled={shell.writeBlocked} title={shell.tr("menu.externalDiff")} onclick={(event) => shell.openExternalToolMenu(event, "diff", shell.selectedPath ?? "")}>{shell.tr("chrome.externalDiff")}</button>
               {#if hunkList.length > 0}
                 <div class="hunk-tools" role="group" aria-label={shell.tr("chrome.hunkActions")}>
-                  <button class="hunk-step" type="button" disabled={shell.busy} aria-label={shell.tr("menu.prevHunk")} title={shell.tr("menu.prevHunk")} onclick={() => stepHunk(-1)}>‹</button>
+                  <button class="hunk-step" type="button" disabled={shell.writeBlocked} aria-label={shell.tr("menu.prevHunk")} title={shell.tr("menu.prevHunk")} onclick={() => stepHunk(-1)}>‹</button>
                   <span class="hunk-pos" aria-live="polite">{activeAt >= 0 ? activeAt + 1 : "–"}/{hunkList.length}</span>
-                  <button class="hunk-step" type="button" disabled={shell.busy} aria-label={shell.tr("menu.nextHunk")} title={shell.tr("menu.nextHunk")} onclick={() => stepHunk(1)}>›</button>
-                  <button class="pane-chip" type="button" disabled={shell.busy || activeHunk == null} title={shell.tr(shell.selectedSide === "staged" ? "menu.unstageHunk" : "menu.stageHunk")} onclick={stageActive}>{shell.tr(shell.selectedSide === "staged" ? "menu.unstageHunk" : "menu.stageHunk")}</button>
+                  <button class="hunk-step" type="button" disabled={shell.writeBlocked} aria-label={shell.tr("menu.nextHunk")} title={shell.tr("menu.nextHunk")} onclick={() => stepHunk(1)}>›</button>
+                  <button class="pane-chip" type="button" disabled={shell.writeBlocked || activeHunk == null} title={shell.tr(shell.selectedSide === "staged" ? "menu.unstageHunk" : "menu.stageHunk")} onclick={stageActive}>{shell.tr(shell.selectedSide === "staged" ? "menu.unstageHunk" : "menu.stageHunk")}</button>
                   {#if shell.selectedSide === "unstaged"}
-                    <button class="pane-chip danger" type="button" disabled={shell.busy || activeHunk == null} title={shell.tr("menu.discardHunk")} onclick={discardActive}>{shell.tr("menu.discardHunk")}</button>
+                    <button class="pane-chip danger" type="button" disabled={shell.writeBlocked || activeHunk == null} title={shell.tr("menu.discardHunk")} onclick={discardActive}>{shell.tr("menu.discardHunk")}</button>
                   {/if}
                 </div>
               {/if}
               {#if shell.discardableSelected.length > 1}
-                <button class="pane-chip danger" type="button" disabled={shell.busy} onclick={() => shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(shell.discardableSelected.length) }), () => void shell.applyLineOps("discardLine", shell.discardableSelected), [], { danger: true })}>{shell.tr("menu.discardLines")}</button>
+                <button class="pane-chip danger" type="button" disabled={shell.writeBlocked || !!shell.selectedPath && shell.pathPending(shell.selectedPath)} onclick={() => { const discard = shell.bindLineOps("discardLine", shell.discardableSelected); shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(shell.discardableSelected.length) }), () => void discard(), [], { danger: true }); }}>{shell.tr("menu.discardLines")}</button>
               {/if}
             </header>
             {#if shell.diff && shell.diff.lines.length > 0}
@@ -418,7 +417,7 @@
                     {#if shell.diff.newBytes != null}<span>{shell.tr("chrome.binaryNew")} {formatBytes(shell.diff.newBytes, shell.activeLocale)}</span>{/if}
                   </p>
                 {/if}
-                <button class="pane-chip" type="button" disabled={shell.busy} onclick={() => void shell.loadDiff(true)}>{shell.tr("chrome.loadDiff")}</button>
+                <button class="pane-chip" type="button" disabled={shell.writeBlocked} onclick={() => void shell.loadDiff(true)}>{shell.tr("chrome.loadDiff")}</button>
               </div>
             {:else if shell.diff.lines.length === 0}
               <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
@@ -542,10 +541,10 @@
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="diff-hunk-actions" style:top="{hunkActionTop}px" onmouseenter={() => { if (hoveredRange) hoveredHunk = hoveredRange.index; }} onmouseleave={leaveHunkActions}>
       {#if !useLineOps || hoveredLineOps.length > 0}
-        <button type="button" disabled={shell.busy} onclick={(event) => { event.stopPropagation(); stageHovered(); }}>{stageLabel()}</button>
+        <button type="button" disabled={shell.writeBlocked} onclick={(event) => { event.stopPropagation(); stageHovered(); }}>{stageLabel()}</button>
       {/if}
       {#if shell.selectedSide === "unstaged" && (!useLineOps || hoveredDiscardOps.length > 0)}
-        <button class="danger" type="button" disabled={shell.busy} onclick={(event) => { event.stopPropagation(); discardHovered(); }}>{discardLabel()}</button>
+        <button class="danger" type="button" disabled={shell.writeBlocked} onclick={(event) => { event.stopPropagation(); discardHovered(); }}>{discardLabel()}</button>
       {/if}
     </div>
   {/if}

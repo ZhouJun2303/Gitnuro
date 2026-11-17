@@ -17,7 +17,7 @@ export type SideRow =
 
 /** Flat sidebar rows. The view draws only the ones inside the scroll window. */
 export function liveSideRows(shell: ShellState): SideRow[] {
-  const refs = shell.refs;
+  const refs = shell.refView;
   if (!refs) return [];
   const rows: SideRow[] = [];
   const query = shell.sideQuery;

@@ -264,10 +264,17 @@ fn restore_repo(name: String) -> Result<(), String> {
 }
 
 fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
+    if super::tasks::handles(command) {
+        let id = super::tasks::enqueue(command, args)?;
+        return super::tasks::run(&id, || super::tasks::execute(command, args), |value| super::tasks::outcome(command, args, value));
+    }
     match command {
+        "operation_tasks" => Ok(json!(super::operation_tasks())),
+        "cancel_task" => done_result(super::cancel_task(req(args, "id")?)),
         "lab_layout" => layout(),
         "lab_restore" => done_result(restore_repo(req(args, "name")?)),
         "workspace_status" => done_result(super::workspace_status(req(args, "path")?)),
+        "workspace_status_paths" => done_result(super::workspace_status_paths(req(args, "path")?, req(args, "files")?)),
         "stage_all" => done_result(super::stage_all(req(args, "path")?)),
         "unstage_all" => done_result(super::unstage_all(req(args, "path")?)),
         "stage_path" => done_result(super::stage_path(req(args, "path")?, req(args, "file")?, req(args, "files")?, req(args, "filtered")?, req(args, "incremental")?)),
@@ -295,6 +302,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             req(args, "all")?,
             req(args, "order")?,
             req(args, "revs")?,
+            req(args, "offset")?,
         )),
         "commit_detail" => done_result(super::commit_detail(req(args, "path")?, req(args, "id")?)),
         "locate_ref" => done_result(super::locate_ref(req(args, "path")?, req(args, "name")?, req(args, "order")?)),
@@ -307,8 +315,9 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             req(args, "unified")?,
         )),
         "in_progress" => done_result(super::in_progress(req(args, "path")?)),
-        "file_history" => done_result(super::file_history(req(args, "path")?, req(args, "file")?, req(args, "limit")?)),
-        "blame_file" => done_result(super::blame_file(req(args, "path")?, req(args, "file")?)),
+        "file_history" => done_result(super::file_history(req(args, "path")?, req(args, "file")?, req(args, "limit")?, req(args, "offset")?)),
+        "blame_file" => done_result(super::blame_file(req(args, "path")?, req(args, "file")?, req(args, "start")?, req(args, "end")?, req(args, "version")?)),
+        "blame_source" => done_result(super::blame_source(req(args, "path")?, req(args, "file")?)),
         "mutate" => done_result(super::mutate(req(args, "path")?, req(args, "request")?, req(args, "retryStash")?)),
         "operation_flow" => done_result(super::operation_flow(req(args, "path")?, req(args, "id")?)),
         "operation_history" => done_result(super::operation_history(req(args, "path")?, req(args, "offset")?, req(args, "limit")?)),
@@ -320,14 +329,14 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "font_download_progress" => done(super::font_download_progress(req(args, "requestId")?)),
         "font_cache_info" => done_result(super::font_cache_info()),
         "open_font_folder" => Ok(Value::Null),
-        "save_settings" => done_result(super::save_settings(req(args, "values")?)),
+        "save_settings" => super::on_settings_lane({ let values = req(args, "values")?; let fields = req(args, "fields")?; let before = req(args, "before")?; move || done_result(super::save_settings(values, fields, before)) })?,
         "settings_path" => done_result(super::settings_path()),
         "import_fork_settings" => {
             let path: Option<String> = req(args, "path")?;
             if path.as_deref().map(str::trim).unwrap_or("").is_empty() {
                 return Err("fork-settings-missing".into());
             }
-            done_result(super::import_fork_settings(path))
+            super::on_settings_lane(move || done_result(super::import_fork_settings(path)))?
         }
         "external_tools" => done(super::external_tools()),
         "common_tools" => done(crate::tools::common_tools()),
@@ -362,6 +371,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "update_release_page" => done(super::updates::release_page()),
         "download_update" => Ok(Value::Null),
         "conflict_sides" => done_result(super::conflict_sides(req(args, "path")?, req(args, "file")?)),
+        "stash_patch" => done_result(super::stash_patch(req(args, "path")?, req(args, "rev")?)),
         "conflict_view" => done_result(super::conflict_view(req(args, "path")?, req(args, "file")?)),
         "compare_files" => done_result(super::compare_files(req(args, "path")?, req(args, "from")?, req(args, "to")?)),
         "compare_file" => done_result(super::compare_file(
@@ -383,7 +393,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             req(args, "copy")?,
             req(args, "force")?,
         )),
-        "reflog" => done_result(super::reflog(req(args, "path")?, req(args, "limit")?)),
+        "reflog" => done_result(super::reflog(req(args, "path")?, req(args, "limit")?, req(args, "offset")?)),
         "commit_tree" => done_result(super::commit_tree(req(args, "path")?, req(args, "rev")?)),
         "repository_summary" => {
             let path: String = req(args, "path")?;
@@ -412,6 +422,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             ensure_lab_path(Path::new(&root))?;
             done_result(super::scan_repositories(root, req(args, "depth")?))
         }
+        "scan_repositories_page" => done_result(super::scan_repositories_page(req(args, "root")?, req(args, "depth")?, req(args, "cursor")?)),
         "mark_notification" => Ok(Value::Null),
         "create_github_repo" => done("https://example.com/lab/hosted.git".to_string()),
         "generate_ssh_key" => done("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILabKey awegit-lab".to_string()),
@@ -423,6 +434,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             req(args, "query")?,
             req(args, "limit")?,
             req(args, "order")?,
+            req(args, "offset")?,
         )),
         "cherry_preview" => done_result(super::cherry_preview(req(args, "path")?, req(args, "rev")?)),
         "merge_preview" => done_result(super::merge_preview(req(args, "path")?, req(args, "name")?)),
@@ -494,10 +506,12 @@ pub fn run_lab() {
     eprintln!("awegit-lab listening on 127.0.0.1:1429");
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else { continue };
-        if let Err(error) = serve(&mut stream) {
-            let body = json!({ "ok": false, "error": error }).to_string();
-            write_response(&mut stream, &body);
-        }
+        std::thread::spawn(move || {
+            if let Err(error) = serve(&mut stream) {
+                let body = json!({ "ok": false, "error": error }).to_string();
+                write_response(&mut stream, &body);
+            }
+        });
     }
 }
 

@@ -7,13 +7,14 @@
   import CommitDetail from "./CommitDetail.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { sampleReflog } from "../sample";
-  import { gravatarUrl, laneColors, onVirtualScroll, rowGraph, type GraphCell } from "../view";
+  import { gravatarUrl, laneColors, onVirtualScroll, rowGraph, windowSlice, type GraphCell } from "../view";
   import type { Row, SearchKey } from "./types";
 
   const shell = getShell();
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const onHistoryScroll = onVirtualScroll((top) => (shell.historyTop = top));
   const activeColor = $derived(shell.activeLaneColor());
+  const reflogWindow = $derived(windowSlice(shell.reflogRows, shell.historyTop, shell.rowCommit, 80, shell.windowRows(shell.historyHeight, shell.rowCommit)));
 
   function focusSelectionSoon() {
     requestAnimationFrame(() => shell.historyEl?.querySelector<HTMLElement>(".commit-row.selected")?.focus());
@@ -59,8 +60,9 @@
             {#if shell.reflogRows.length === 0}
               <p class="empty">{shell.tr("chrome.noReflog")}</p>
             {:else}
-              {#each shell.reflogRows as row (`${row.selector}-${row.id}`)}
-                <button class="commit-row" data-layer="reflog" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
+              <div class="commit-window" style:height="{shell.reflogRows.length * shell.rowCommit}px">
+              {#each reflogWindow.rows as row, index (`${row.selector}-${row.id}`)}
+                <button class="commit-row virtual" style:top="{(reflogWindow.start + index) * shell.rowCommit}px" data-layer="reflog" type="button" oncontextmenu={(event) => shell.openMenu(event, shell.reflogMenu(row))}>
                   <span class="subject">{row.summary}</span>
                   <span class="commit-side">
                     <span class="meta selector" title={row.selector}>{row.selector}</span>
@@ -68,6 +70,7 @@
                   </span>
                 </button>
               {/each}
+              </div>
             {/if}
           {:else if shell.mode !== "sample"}
             {#if shell.shownCommits.length === 0}

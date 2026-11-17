@@ -1,5 +1,5 @@
 import { onMount, tick } from "svelte";
-import { invoke } from "../perf";
+import { invoke, prefetch } from "../perf";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { branchGroup, changedRanges, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, rowAtUnit, sameHistory, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
@@ -76,7 +76,7 @@ export function currentFilterRefs(shell: ShellState) {
     return names;
   }
 
-export async function loadCommits(shell: ShellState, path: string | undefined, operation?: string) {
+export async function loadCommits(shell: ShellState, path: string | undefined, operation?: string, offset = 0, limit = shell.logLimit) {
     const order = shell.settings.commitSort === "topo" ? "topo" : "date";
     const query = shell.sideView === "search" ? shell.commitSearch.trim() : "";
     if (query && path) {
@@ -85,38 +85,61 @@ export async function loadCommits(shell: ShellState, path: string | undefined, o
         field: shell.commitSearchField,
         scope: shell.commitSearchScope,
         query,
-        limit: shell.logLimit,
+        limit, offset,
         order,
       }, undefined, operation);
     }
-    if (shell.historyFilter) return invoke<CommitRow[]>("file_history", { path, file: shell.historyFilter, limit: 200 }, undefined, operation);
+    if (shell.historyFilter) return invoke<CommitRow[]>("file_history", { path, file: shell.historyFilter, limit, offset }, undefined, operation);
     const revs = shell.exactRefs();
     if (!shell.allBranches && revs.length > 0) {
       try {
-        return await invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, order, revs }, undefined, operation);
+        return await invoke<CommitRow[]>("commit_log", { path, limit, offset, order, revs }, undefined, operation);
       } catch (error) {
         if (shell.graphBranches?.length) throw error;
-        return invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, all: false, order }, undefined, operation);
+        return invoke<CommitRow[]>("commit_log", { path, limit, offset, all: false, order }, undefined, operation);
       }
     }
-    return invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, all: shell.allBranches || revs.length === 0, order }, undefined, operation);
+    return invoke<CommitRow[]>("commit_log", { path, limit, offset, all: shell.allBranches || revs.length === 0, order }, undefined, operation);
   }
+
+const moreReads = new WeakSet<ShellState>();
+export async function loadMoreHistory(shell: ShellState) {
+    if (shell.mode !== "live" || moreReads.has(shell)) return;
+    moreReads.add(shell);
+    const path = shell.repoPath(), openGen = shell.openGen, contextGen = shell.contextGen, statusGen = shell.statusGen;
+    const filter = shell.historyFilter, reflog = shell.reflogOn, order = shell.settings.commitSort;
+    const search = [shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.allBranches, ...shell.exactRefs()];
+    const current = () => shell.viewing(path) && shell.openGen === openGen && shell.contextGen === contextGen && shell.statusGen === statusGen && shell.historyFilter === filter && shell.reflogOn === reflog && shell.settings.commitSort === order && shell.same(search, [shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.allBranches, ...shell.exactRefs()]);
+    try {
+      if (reflog) {
+        const rows = await invoke<typeof shell.reflogRows>("reflog", { path, offset: shell.reflogRows.length, limit: 200 });
+        if (current()) shell.reflogRows = [...shell.reflogRows, ...rows];
+      } else {
+        const rows = await loadCommits(shell, path, undefined, shell.commitsLive.length, 200);
+        if (!current()) return;
+        const existing = new Set(shell.commitsLive.map((row) => row.id));
+        shell.commitsLive = [...shell.commitsLive, ...rows.filter((row) => !existing.has(row.id))];
+        shell.logLimit = Math.min(100_000, Math.max(shell.logLimit, shell.commitsLive.length));
+      }
+    } catch (error) { if (current()) shell.actionError = shell.message(error); }
+    finally { moreReads.delete(shell); }
+}
 
 const contextReads = new WeakMap<ShellState, { key: string; promise: Promise<void> }>();
 
-export function loadContext(shell: ShellState, operation?: string): Promise<void> {
+export function loadContext(shell: ShellState, operation?: string, parts = { history: true, flow: true }): Promise<void> {
     // Only request parameters and a data generation, never serialize history/state.
-    const key = JSON.stringify([shell.repoPath(), shell.statusGen, shell.settings.commitSort, shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.logLimit, shell.allBranches, shell.exactRefs()]);
+    const key = JSON.stringify([shell.repoPath(), shell.statusGen, shell.settings.commitSort, shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.logLimit, shell.allBranches, shell.exactRefs(), parts]);
     const current = contextReads.get(shell);
     if (current?.key === key) return current.promise;
-    const promise = readContext(shell, operation).finally(() => {
+    const promise = readContext(shell, operation, parts).finally(() => {
       if (contextReads.get(shell)?.promise === promise) contextReads.delete(shell);
     });
     contextReads.set(shell, { key, promise });
     return promise;
 }
 
-async function readContext(shell: ShellState, operation?: string) {
+async function readContext(shell: ShellState, operation?: string, parts = { history: true, flow: true }) {
     const path = shell.repoPath();
     const statusGen = shell.statusGen;
     const openGen = shell.openGen;
@@ -124,7 +147,40 @@ async function readContext(shell: ShellState, operation?: string) {
     const nextRefs = await invoke<RefSnapshot>("repository_refs", { path }, undefined, operation);
     if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
     const { revision, ...visibleRefs } = nextRefs;
+    const loaded = new Set(shell.commitsLive.map((row) => row.id));
+    const previousTips = new Set(Object.keys(shell.refs?.labels ?? {}));
+    if (!parts.history && Object.keys(nextRefs.labels ?? {}).some((id) => !loaded.has(id) && !previousTips.has(id))) parts = { ...parts, history: true };
     if (!shell.same(shell.refs, visibleRefs)) shell.refs = visibleRefs;
+    shell.contextRevision = revision ?? 0;
+    if (!parts.history && nextRefs.labels) {
+      const labels = nextRefs.labels;
+      const localNames = new Set(nextRefs.branches.map((branch) => branch.name));
+      const remoteNames = new Set(nextRefs.remotes.flatMap((remote) => remote.branches.map((branch) => `${remote.name}/${branch}`)));
+      const byId = new Map(shell.commitsLive.map((row) => [row.id, row]));
+      const ancestors = async (names: Set<string>) => {
+        const found = new Set<string>();
+        const queue = Object.entries(labels).filter(([, labels]) => labels.some((label) => names.has(label))).map(([id]) => id);
+        for (let index = 0; index < queue.length; index++) {
+          const id = queue[index]; if (found.has(id)) continue;
+          found.add(id); queue.push(...(byId.get(id)?.parents ?? []));
+          if (index % 1000 === 999) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          if (gen !== shell.contextGen || openGen !== shell.openGen) return found;
+        }
+        return found;
+      };
+      const [local, remote] = await Promise.all([ancestors(localNames), ancestors(remoteNames)]);
+      if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
+      const rows: CommitRow[] = [];
+      for (let index = 0; index < shell.commitsLive.length; index++) {
+        const row = shell.commitsLive[index], refs = labels[row.id] ?? [];
+        const unpushed = remote.has(row.id) ? false : local.has(row.id) ? true : row.unpushed;
+        const remoteOnly = local.has(row.id) ? false : remote.has(row.id) ? true : row.remoteOnly;
+        rows.push(shell.same(row.refs, refs) && row.unpushed === unpushed && row.remoteOnly === remoteOnly ? row : { ...row, refs, unpushed, remoteOnly });
+        if (index % 1000 === 999) await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+      if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
+      if (rows.some((row, index) => row !== shell.commitsLive[index])) shell.commitsLive = rows;
+    }
     if (shell.graphBranches?.length) {
       const available = new Set([
         ...nextRefs.branches.map((branch) => branch.name),
@@ -138,9 +194,9 @@ async function readContext(shell: ShellState, operation?: string) {
       }
     }
     const [rows, state, merge] = await Promise.all([
-      shell.loadCommits(path, operation),
-      invoke<InProgress | null>("in_progress", { path }, undefined, operation),
-      invoke<MergeState | null>("merge_state", { path }, undefined, operation).catch(() => null),
+      parts.history ? shell.loadCommits(path, operation) : Promise.resolve(shell.commitsLive),
+      parts.flow ? invoke<InProgress | null>("in_progress", { path }, undefined, operation) : Promise.resolve(shell.progress),
+      parts.flow ? invoke<MergeState | null>("merge_state", { path }, undefined, operation).catch(() => null) : Promise.resolve(shell.mergeState),
     ]);
     if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
     shell.contextRevision = revision ?? 0;
@@ -174,13 +230,17 @@ function clearMergeProgress(shell: ShellState) {
 
 
 export async function previewCherry(shell: ShellState, rev: string, record: boolean, summary = "") {
-    const text = await invoke<string>("cherry_preview", { path: shell.repoPath(), rev }).catch(() => "");
-    const preview = text.trim().replace(/^[0-9a-f]{40,64}\s*/i, "").trim();
+    const path = shell.repoPath(), openGen = shell.openGen;
     const target = summary ? `${rev.slice(0, 7)} "${summary}"` : rev.slice(0, 7);
     const note = record ? ` ${shell.tr("dialog.cherryPickRecordNote")}` : "";
     const intro = `${shell.tr("dialog.cherryPickBody")}${note}`;
     const title = shell.tr(record ? "menu.cherryPickRecord" : "menu.cherryPick");
-    shell.ask(title, intro, () => void shell.mutate({ action: "cherryPick", rev, record }), [], { subject: target, detail: preview });
+    shell.ask(title, intro, () => void shell.mutate({ action: "cherryPick", rev, record }), [], { subject: target, detail: shell.tr("chrome.reading") });
+    const owner = shell.confirmAsk;
+    const text = await invoke<string>("cherry_preview", { path, rev }).catch(() => "");
+    if (owner && shell.confirmAsk === owner && openGen === shell.openGen && shell.viewing(path)) {
+      shell.confirmAsk = { ...owner, detail: text.trim().replace(/^[0-9a-f]{40,64}\s*/i, "").trim() };
+    }
   }
 
 export function toggleFold(shell: ShellState, id: string) {
@@ -474,6 +534,8 @@ export async function selectCommit(shell: ShellState, id: string, event?: MouseE
     const path = shell.repoPath();
     const openGen = shell.openGen;
     const current = () => gen === shell.patchGen && shell.selectedCommit === id && openGen === shell.openGen && shell.viewing(path);
+    const neighbour = shell.commitsLive[rowAt + 1];
+    if (neighbour && /^[0-9a-f]{40,64}$/i.test(neighbour.id)) prefetch("commit_detail", { path, id: neighbour.id });
     await shell.withWork(shell.tr("chrome.readingCommit"), async () => {
     shell.commitDetail = {
       id,

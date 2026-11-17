@@ -3,9 +3,9 @@ import type { MutationResult } from "../operation-flow";
 import { statusPathBefore, type StatusFile, type StatusSnapshot } from "../status";
 import type { ShellState } from "./state.svelte";
 
-export type StageChange = { id: number; repo: string; files: string[]; unstage: boolean };
+export type StageChange = { id: number; taskId?: string; generation?: number; repo: string; files: string[]; unstage: boolean };
 type StageReport = StatusSnapshot & Partial<MutationResult>;
-type StageLane = { tail: Promise<unknown>; generation: number };
+type StageLane = { tail: Promise<unknown>; generation: number; error?: string; reconcile?: Promise<StatusSnapshot | null> };
 const lanes = new WeakMap<ShellState, Map<string, StageLane>>();
 let nextId = 0;
 
@@ -65,10 +65,6 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
   if (shell.mode !== "live" || !path || shell.switching || shell.stageDisabled) return undefined;
   const repo = shell.jobKey(path);
   const alreadyQueued = (shell.pendingStages ?? []).some((change) => change.repo === repo);
-  if (shell.busy && !shell.onlyDiffReads() && !alreadyQueued) {
-    await shell.waitForWriteSlot(true);
-    if (shell.repoPath() !== path || shell.mode !== "live") return undefined;
-  }
   const request = extra.request as { files?: string[]; unstage?: boolean } | undefined;
   const unstage = command.startsWith("unstage") || request?.unstage === true;
   const rows = unstage ? (shell.stagedFiles ?? shell.snapshot?.staged ?? []) : (shell.unstagedFiles ?? shell.snapshot?.unstaged ?? []);
@@ -79,12 +75,12 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
   let repositories = lanes.get(shell);
   if (!repositories) { repositories = new Map(); lanes.set(shell, repositories); }
   let lane = repositories.get(repo);
-  if (!lane) { lane = { tail: Promise.resolve(), generation: 0 }; repositories.set(repo, lane); }
+  if (!lane || lane.error) { lane = { tail: Promise.resolve(), generation: (lane?.generation ?? -1) + 1 }; repositories.set(repo, lane); }
   const activeLane = lane;
   const generation = lane.generation;
-  const change = { id: ++nextId, repo, files, unstage };
-  const args = request ? { ...extra, request: { ...request, files } } : selected ? { ...extra, files } : extra;
   const operation = traceOperation();
+  const change = { id: ++nextId, taskId: operation, generation, repo, files, unstage };
+  const args = request ? { ...extra, request: { ...request, files } } : selected ? { ...extra, files } : extra;
   const queuedAt = performance.now();
   const described = selected ? shell.describeRequest({ action: "stagePaths", files, unstage }) : null;
   const current = () => shell.viewing(path) && (!shell.focusPath || shell.jobKey(shell.focusPath) === repo);
@@ -109,7 +105,7 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
   const remove = () => {
     if (shell.pendingStages.some((item) => item.id === change.id)) shell.pendingStages = shell.pendingStages.filter((item) => item.id !== change.id);
   };
-  const promise = lane.tail.then(async (): Promise<StageReport | null> => {
+  const promise = (async (): Promise<StageReport | null> => {
     if (activeLane.generation !== generation) return null;
     const startedAt = performance.now();
     let backendFinished = 0;
@@ -120,7 +116,7 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
     };
     try {
       const incremental = command === "stage_path" || command === "unstage_path";
-      const value = await invoke<StageReport>(command, { path, ...args, ...(incremental ? { incremental: true } : {}) }, undefined, operation);
+      const value = await invoke<StageReport>(command, { path, ...args, __task: operation, __selection: files, __taskLabel: shell.tr(unstage ? "chrome.unstagePending" : "chrome.stagePending"), ...(incremental ? { incremental: true } : {}) }, undefined, operation);
       report = value;
       backendFinished = performance.now();
       if (value.outcome === "failed" || value.error) throw new Error([value.error, value.log || value.output].filter(Boolean).join("\n\n") || "Git stage failed");
@@ -130,21 +126,27 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
       return value;
     } catch (error) {
       // Later intents may depend on this write. Reconcile before permitting a retry.
-      activeLane.generation += 1;
+      if (!activeLane.error) {
+        activeLane.generation += 1;
+        activeLane.error = shell.message(error);
+        if (current()) shell.actionError = activeLane.error;
+        const later = shell.pendingStages.filter((item) => item.repo === repo && item.generation === generation && item.id > change.id && item.taskId);
+        await Promise.all(later.map((item) => invoke("cancel_task", { id: item.taskId }).catch(() => {})));
+      }
       if (!backendFinished) backendFinished = performance.now();
-      let status: StatusSnapshot | null = null;
-      try { status = await invoke<StatusSnapshot>("workspace_status", { path }, undefined, operation); } catch { /* retain the write error */ }
-      shell.pendingStages = shell.pendingStages.filter((item) => item.repo !== repo);
+      activeLane.reconcile ??= invoke<StatusSnapshot>("workspace_status", { path }, undefined, operation).catch(() => null);
+      const status = await activeLane.reconcile;
+      shell.pendingStages = shell.pendingStages.filter((item) => item.repo !== repo || item.generation !== generation);
       if (current()) {
         if (status) shell.applySnapshot(status);
         else shell.scheduleStageRefresh();
         if (report?.staleLock && request) shell.confirmStaleLock(path, report.staleLock, { ...request, files }, source);
-        else shell.actionError = shell.message(error);
+        else shell.actionError = activeLane.error;
       }
       if (described) shell.recordCommand("stagePaths", described, executionLog(shell.message(error)), false, source);
       return null;
     }
-  }).finally(() => {
+  })().finally(() => {
     remove();
     shell.stopWork(path);
     if (current()) {
@@ -154,7 +156,7 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
   });
   lane.tail = promise;
   const settled = () => {
-    if (activeLane.tail === promise) repositories!.delete(repo);
+    if (repositories!.get(repo) === activeLane && activeLane.tail === promise) repositories!.delete(repo);
   };
   void promise.then(settled, settled);
   return promise;

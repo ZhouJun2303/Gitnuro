@@ -186,8 +186,12 @@ test("independent windows update language immediately and retain merge edits", a
     await expect(blob.getByRole("button", { name: "关闭", exact: true })).toBeVisible();
     await expect(merge.locator(".merge-close")).toHaveAttribute("aria-label", "关闭");
     await expect(result).toHaveValue("Keep my independent merge draft\n");
-    await saveLocale(page, "zh", async () => { releaseSave(); });
+    const settled = page.waitForResponse((response) => response.url().endsWith("/__lab/invoke") && response.request().postDataJSON()?.cmd === "save_settings");
+    releaseSave();
+    await settled;
     await expect(language).toHaveValue("zh");
+    const saved = await page.request.post("/__lab/invoke", { data: { cmd: "load_settings", args: {} } });
+    expect((await saved.json()).value.locale).toBe("zh");
   } finally {
     await Promise.all([flow.close(), history.close(), blob.close(), merge.close()]);
   }

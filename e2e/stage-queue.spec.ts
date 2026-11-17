@@ -86,7 +86,8 @@ for (const theme of ["apple", "light", "dark"]) for (const layout of ["tree", "l
       await row(page, layout, "unstaged", b).dblclick();
       await expect(row(page, layout, "staged", a)).toBeVisible();
       await expect(row(page, layout, "staged", b)).toBeVisible();
-      expect(held.calls).toHaveLength(1);
+      await expect.poll(() => held.calls.length).toBe(4);
+      expect(git("diff", "--cached", "--name-only")).toBe("");
 
       await page.locator(".summary-input").fill("still responsive");
       await expect(page.locator(".summary-input")).toHaveValue("still responsive");
@@ -125,7 +126,8 @@ for (const theme of ["apple", "light", "dark"]) {
       await expect(page.locator(".staged-pane .pane-head .count")).toHaveText("10000");
       await page.getByRole("button", { name: "全部取消暂存", exact: true }).click();
       await expect(page.locator(".staged-pane .pane-head .count")).toHaveText("0");
-      expect(held.calls).toHaveLength(1);
+      await expect.poll(() => held.calls.length).toBe(4);
+      expect(git("diff", "--cached", "--name-only")).toBe("");
     } finally { held.release(); }
     await idle(page);
     expect(held.calls.map((call) => call.cmd)).toEqual(["stage_path", "unstage_path", "stage_all", "unstage_all"]);
@@ -143,7 +145,7 @@ for (const theme of ["apple", "light", "dark"]) {
       await row(page, "tree", "staged", b).click({ modifiers: ["ControlOrMeta"] });
       await page.getByRole("button", { name: "取消暂存所选", exact: true }).click();
       await expect(page.locator(".staged-pane .pane-head .count")).toHaveText("0");
-      await expect.poll(() => batch.calls.length).toBe(1);
+      await expect.poll(() => batch.calls.length).toBe(2);
     } finally { batch.release(); }
     await idle(page);
     expect(batch.calls).toEqual([{ cmd: "mutate", unstage: false }, { cmd: "mutate", unstage: true }]);
@@ -168,7 +170,7 @@ test("a failed write restores confirmed state, cancels dependent intents and all
     expect(git("diff", "--cached", "--name-only").trim()).toBe(a);
   } finally { held.release(); }
   await idle(page);
-  expect(held.calls).toEqual([{ cmd: "stage_path", file: b }]);
+  expect(held.calls).toEqual([{ cmd: "stage_path", file: b }, { cmd: "unstage_path", file: a }, { cmd: "stage_path", file: c }]);
   expect(git("diff", "--cached", "--name-only").trim()).toBe(a);
   await expect(row(page, "list", "staged", a)).toBeVisible();
   await expect(row(page, "list", "unstaged", b)).toBeVisible();
@@ -200,7 +202,7 @@ test("partial staging keeps working contents and shows the final side after queu
     await expect(row(page, "list", "unstaged", file)).toBeVisible();
     await row(page, "list", "unstaged", file).dblclick();
     await expect(row(page, "list", "staged", file)).toBeVisible();
-    expect(held.calls).toHaveLength(1);
+    await expect.poll(() => held.calls.length).toBe(2);
   } finally { held.release(); }
   await idle(page);
   await expect(row(page, "list", "staged", file)).toBeVisible();
@@ -347,7 +349,7 @@ test("tracked deletions can stage and unstage before the first write completes",
       await expect(row(page, "list", "staged", file)).toBeVisible();
       await row(page, "list", "staged", file).dblclick();
       await expect(row(page, "list", "staged", file)).toHaveCount(0);
-      await expect.poll(() => held.calls.length).toBe(1);
+      await expect.poll(() => held.calls.length).toBe(2);
     } finally { held.release(); }
     await idle(page);
     expect(git("diff", "--cached", "--name-only")).toBe("");

@@ -30,6 +30,16 @@ export type Messages = {
     readingCommit: string;
     readingFile: string;
     stagePending: string;
+    backgroundTasks: string;
+    taskQueued: string;
+    taskRunning: string;
+    taskVerifying: string;
+    taskCancelling: string;
+    taskCompleted: string;
+    taskConflict: string;
+    taskFailed: string;
+    taskCancelled: string;
+    taskBlocked: string;
     unstagePending: string;
     fetch: string;
     pull: string;

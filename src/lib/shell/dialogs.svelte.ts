@@ -1,5 +1,7 @@
 import { onMount, tick } from "svelte";
-import { invoke } from "../perf";
+import { invoke, traceOperation } from "../perf";
+import { areasFor } from "../operation-policy";
+import { mergeResponse } from "../reconcile";
 import { broadcastLocale } from "../i18n/sync";
 import { broadcastAppearance } from "../appearance";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -139,12 +141,15 @@ export async function fillFromMessage(shell: ShellState, text: string) {
   }
 
 export async function fillTemplate(shell: ShellState) {
+    const path = shell.repoPath(), gen = shell.openGen;
+    const summary = shell.summary, description = shell.description;
     const value = await shell.loadFacts(true);
+    if (gen !== shell.openGen || !shell.viewing(path)) return;
     if (!value?.template.trim()) return;
     const aligned = alignCommitTemplate(value.template);
     // `feat:` with an empty subject is the template placeholder. Keep the chosen type.
-    if (!shell.summary.trim() && splitSubject(aligned.subject).text.trim()) shell.applySubject(aligned.subject);
-    if (!shell.description.trim() || isCommentary(shell.description)) shell.description = aligned.description;
+    if (shell.summary === summary && !summary.trim() && splitSubject(aligned.subject).text.trim()) shell.applySubject(aligned.subject);
+    if (shell.description === description && (!description.trim() || isCommentary(description))) shell.description = aligned.description;
   }
 
 const MERGE_CONFLICT_MARK = "--- Merge Conflict ---";
@@ -299,7 +304,7 @@ function showFileMerge(shell: ShellState, file: string) {
 export async function loadTextMerge(shell: ShellState) {
     const file = shell.mergeFile;
     const generation = shell.mergeGeneration;
-    if (!file || shell.busy || shell.mergeLoading) return;
+    if (!file || shell.mergeApplying || shell.mergeLoading) return;
     shell.mergeLoading = true;
     shell.mergeError = "";
     try {
@@ -346,6 +351,10 @@ async function readTextMerge(shell: ShellState, file: string, generation: number
     shell.mergeEdited = false;
     shell.mergeEditing = false;
     shell.mergeError = "";
+    shell.textMerge = true;
+    shell.mergePieces = [];
+    shell.mergeSource = [];
+    shell.mergeResult = "";
     shell.section = "changes";
     const already = shell.selectedPath === file;
     shell.selectedPath = file;
@@ -414,30 +423,33 @@ export function buildRebaseSteps(steps: RebaseStep[], picked: string[]): RebaseS
 
 export async function applyTextMerge(shell: ShellState, text?: string): Promise<boolean> {
     const file = shell.mergeFile;
-    if (!file || shell.busy || shell.mergeLarge || shell.mergePieces.length === 0) return false;
+    if (!file || shell.mergeApplying || shell.mergeLarge || shell.mergePieces.length === 0) return false;
     if (shell.mergePieces.some((piece) => piece.kind === "hunk" && piece.pick === "none")) return false;
     return applyMerge(shell, { action: "resolve", file, side: "text", text: text ?? shell.mergeResult });
   }
 
 export async function applyFileMerge(shell: ShellState, side: "ours" | "theirs"): Promise<boolean> {
-    if (!shell.mergeFile || shell.busy) return false;
+    if (!shell.mergeFile || shell.mergeApplying) return false;
     return applyMerge(shell, { action: "resolve", file: shell.mergeFile, side, text: "" });
   }
 
 async function applyMerge(shell: ShellState, request: Record<string, unknown>): Promise<boolean> {
+    const generation = shell.mergeGeneration, path = shell.repoPath();
+    const current = () => generation === shell.mergeGeneration && (shell.mode === "sample" || shell.viewing(path));
     shell.mergeError = "";
     shell.mergeApplying = true;
     try {
       const outcome = shell.mode === "live" ? await shell.mutate(request) : "completed";
+      if (!current()) return false;
       if (outcome !== "completed") {
         shell.mergeError = shell.actionError || shell.tr("dialog.mergeApplyFailed");
         return false;
       }
     } catch (error) {
-      shell.mergeError = shell.message(error);
+      if (current()) shell.mergeError = shell.message(error);
       return false;
     } finally {
-      shell.mergeApplying = false;
+      if (current()) shell.mergeApplying = false;
     }
     shell.mergeDirty = false;
     shell.closeTextMerge();
@@ -511,9 +523,11 @@ export function reopenClosed(shell: ShellState) {
   }
 
 export async function pastePatch(shell: ShellState) {
+    const path = shell.repoPath(), openGen = shell.openGen;
     const text = await navigator.clipboard?.readText().catch(() => "");
-    if (!text?.includes("diff")) return;
-    void shell.mutate({ action: "applyPatch", patch: text });
+    if (!text?.includes("diff") || !shell.viewing(path) || shell.openGen !== openGen) return;
+    shell.draft = text;
+    shell.dialog = "patch";
   }
 
 export function confirmSync(shell: ShellState, kind: "fetch" | "pull" | "push") {
@@ -550,18 +564,21 @@ export function liveOnly(shell: ShellState, run: () => void) {
 
 export async function openForge(shell: ShellState, kind: "notes" | "pulls") {
     shell.forgeOpen = shell.forgeOpen === kind ? null : kind;
+    const gen = ++shell.forgeGen, openGen = shell.openGen;
+    if (!shell.forgeOpen) return;
     if (shell.mode !== "live") {
       shell.notices = sampleNotices;
       shell.pulls = samplePulls;
       return;
     }
     const path = shell.repoPath();
+    const current = () => shell.viewing(path) && shell.openGen === openGen && shell.forgeGen === gen && shell.forgeOpen === kind;
     if (kind === "notes") {
       const notices = await invoke<({ id: string; title: string; url: string; unread: boolean }[])>("forge_notifications").catch(() => []);
-      if (shell.viewing(path)) shell.notices = notices;
+      if (current()) shell.notices = notices;
     } else {
       const pulls = await invoke<({ title: string; author: string; branch: string; url: string }[])>("forge_pulls", { path }).catch(() => []);
-      if (shell.viewing(path)) shell.pulls = pulls;
+      if (current()) shell.pulls = pulls;
     }
   }
 
@@ -590,18 +607,35 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
     if (!messageText) return;
     const description = isCommentary(shell.description) ? "" : shell.description;
     const path = shell.repoPath();
-    const value = await shell.runChange("commit_changes", { summary: messageText, description, amend: shell.amend, signOff: shell.signOff, skipHooks: shell.skipHooks });
+    const draft = { summary: shell.summary, description: shell.description, commitType: shell.commitType, amend: shell.amend, skipHooks: shell.skipHooks };
+    const openGen = shell.openGen;
+    const current = shell.refs?.branches.find((branch) => branch.current);
+    const remote = shell.refs?.remotes.find((remote) => current?.upstream?.startsWith(`${remote.name}/`))?.name ?? shell.refs?.remotes[0]?.name ?? null;
+    const shouldPush = pushAfter || shell.settings.pushOnCommit;
+    const pushRequest = remote && current?.name
+      ? { action: "pushRef", remote, branch: current.name, remoteBranch: current.upstream?.startsWith(`${remote}/`) ? current.upstream.slice(remote.length + 1) : current.name, setUpstream: !current.upstream, forceWithLease: shell.settings.forceWithLease }
+      : { action: "push", remote, setUpstream: !current?.upstream, forceWithLease: shell.settings.forceWithLease };
+    const commitId = traceOperation();
+    const commit = shell.runChange("commit_changes", { summary: messageText, description, amend: shell.amend, signOff: shell.signOff, skipHooks: shell.skipHooks, __task: commitId, __branch: shell.snapshot?.branch });
+    // Submit both stages now; the backend gates Push on the actual commit outcome.
+    const pushing = shouldPush ? invoke<import("../operation-flow").MutationResult>("mutate", {
+      path, request: pushRequest, __dependsOn: [commitId], __taskLabel: shell.tr("chrome.push"),
+    }).then((value) => ({ value, error: "" }), (error) => ({ value: null, error: shell.message(error) })) : null;
+    const value = await commit;
     if (value === undefined) return;
     const failed = value ? "" : (shell.actionError ?? "");
     shell.recordCommand("commit", { title: shell.tr("chrome.commandCommit", { name: messageText || "HEAD" }), command: shell.gitLine(["commit", "-m", messageText]) }, (value?.log ?? failed).trim(), !!value, "user");
-    if (value && !shell.actionError && shell.viewing(path)) {
-      shell.summary = "";
-      shell.description = "";
-      shell.amend = false;
-      shell.skipHooks = false;
-      if (path) shell.drafts.delete(path);
-      await shell.loadContext();
-      void shell.fillTemplate();
+    if (value && shell.viewing(path) && shell.openGen === openGen) {
+      const ownsDraft = shell.summary === draft.summary && shell.description === draft.description && shell.commitType === draft.commitType;
+      if (ownsDraft) {
+        shell.summary = "";
+        shell.description = "";
+        if (shell.amend === draft.amend) shell.amend = false;
+        if (shell.skipHooks === draft.skipHooks) shell.skipHooks = false;
+        if (path) shell.drafts.delete(path);
+        void shell.fillTemplate();
+      }
+      shell.scheduleAuxiliary(areasFor("commit"));
       // A commit can end a paused merge; the autostash it kept may come back as conflicts.
       const restoreConflict = shell.conflictCount > 0;
       if (restoreConflict) {
@@ -610,7 +644,20 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
         shell.dialog = "mergeConflict";
         shell.actionError = null;
       }
-      if (!restoreConflict && (pushAfter || shell.settings.pushOnCommit)) await shell.doPush();
+    }
+    if (value && path && (!shell.viewing(path) || shell.openGen !== openGen)) {
+      const saved = shell.drafts.get(path);
+      if (saved?.summary === draft.summary && saved.description === draft.description && saved.commitType === draft.commitType) shell.drafts.delete(path);
+    }
+    if (pushing) {
+      const result = await pushing;
+      const ok = !!result.value && result.value.outcome === "completed" && !result.value.error;
+      const output = result.error || result.value?.error || result.value?.log || result.value?.output || "";
+      shell.recordCommand("push", { title: shell.tr("chrome.push"), command: shell.gitLine(["push", remote ?? "", current?.name ?? "HEAD"]) }, output, ok, "user");
+      if (shell.viewing(path) && shell.openGen === openGen) {
+        shell.scheduleAuxiliary(areasFor("push"));
+        if (!ok && value) shell.actionError = output;
+      }
     }
   }
 
@@ -657,10 +704,10 @@ export async function testAiEndpoint(shell: ShellState) {
     shell.aiEndpointNote = "";
     try {
       const count = await invoke<number>("test_ai_endpoint", { baseUrl, apiKey });
-      if (shell.settings.aiBaseUrl !== baseUrl) return;
+      if (shell.settings.aiBaseUrl !== baseUrl || shell.settings.aiApiKey !== apiKey) return;
       shell.aiEndpointNote = shell.tr("dialog.endpointOk", { count: String(count) });
     } catch (error) {
-      if (shell.settings.aiBaseUrl !== baseUrl) return;
+      if (shell.settings.aiBaseUrl !== baseUrl || shell.settings.aiApiKey !== apiKey) return;
       shell.aiEndpointNote = explainAiEndpoint(shell, error);
     } finally {
       shell.aiEndpointBusy = "";
@@ -679,12 +726,11 @@ export async function loadAiModels(shell: ShellState) {
     shell.aiEndpointNote = "";
     try {
       const models = await invoke<string[]>("list_ai_models", { baseUrl, apiKey });
-      if (shell.settings.aiBaseUrl !== baseUrl) return;
+      if (shell.settings.aiBaseUrl !== baseUrl || shell.settings.aiApiKey !== apiKey) return;
       shell.aiModels = models;
       shell.aiEndpointNote = models.length ? shell.tr("dialog.modelsLoaded", { count: String(models.length) }) : shell.tr("dialog.noModels");
     } catch (error) {
-      if (shell.settings.aiBaseUrl !== baseUrl) return;
-      shell.aiModels = [];
+      if (shell.settings.aiBaseUrl !== baseUrl || shell.settings.aiApiKey !== apiKey) return;
       shell.aiEndpointNote = explainAiEndpoint(shell, error);
     } finally {
       shell.aiEndpointBusy = "";
@@ -702,7 +748,7 @@ async function openAiSettings(shell: ShellState, field: "enabled" | "baseUrl" | 
 
 export async function suggestMessage(shell: ShellState) {
     const path = shell.repoPath();
-    if (shell.busy) return;
+    if (shell.aiPending) return;
     shell.actionError = null;
     if (shell.mode !== "live" || !path) {
       shell.actionError = shell.tr("chrome.suggestNeedRepo");
@@ -722,23 +768,23 @@ export async function suggestMessage(shell: ShellState) {
     }
     const style = shell.settings.aiPromptStyle === "long" ? "long" : "short";
     const styleName = shell.tr(style === "long" ? "chrome.promptLong" : "chrome.promptShort");
-    shell.startWork(shell.tr("chrome.suggestGenerate", { style: styleName }), path);
+    const input = { summary: shell.summary, description: shell.description, commitType: shell.commitType, generation: shell.statusGen, openGen: shell.openGen };
+    const current = () => shell.viewing(path) && shell.openGen === input.openGen && shell.statusGen === input.generation
+      && shell.summary === input.summary && shell.description === input.description && shell.commitType === input.commitType;
     try {
       const value = await invoke<Suggestion>("suggest_commit_message", { path, style });
-      if (shell.viewing(path)) {
+      if (current()) {
         shell.applySubject(value.summary);
         shell.description = withoutRepeatedSubject(value.description, shell.commitType, shell.summary);
       }
     } catch (error) {
-      if (shell.viewing(path)) {
+      if (current()) {
         const text = shell.message(error);
         if (text.startsWith("Add an API key")) await openAiSettings(shell, "apiKey");
         else if (text.startsWith("Set an API base URL")) await openAiSettings(shell, "baseUrl");
         else if (text.startsWith("AI commit messages are turned off")) await openAiSettings(shell, "enabled");
         else shell.actionError = explainSuggest(shell, error);
       }
-    } finally {
-      shell.stopWork(path);
     }
   }
 
@@ -775,28 +821,44 @@ export function applyToolSettings(shell: ShellState) {
     }
   }
 
-export async function savePrefs(shell: ShellState, close = true) {
+type PreferenceLane = { latest: Settings; waiters: Array<() => void>; running: boolean; timer?: ReturnType<typeof setTimeout> };
+const preferenceLanes = new WeakMap<ShellState, PreferenceLane>();
+
+export function savePrefs(shell: ShellState, close = true): Promise<void> {
     shell.applyToolSettings();
     if (close) shell.dialog = null;
-    if (!shell.backend()) return;
-    const ticket = ++shell.prefsSave;
-    const values = shell.settings;
-    const locale = values.locale;
-    const theme = values.theme;
-    try {
-      const saved = await invoke<Settings>("save_settings", { values });
-      if (ticket === shell.prefsSave) {
-        const localeChanged = shell.settings.locale !== locale;
-        const themeChanged = shell.settings.theme !== theme;
-        shell.settings = { ...saved, locale: shell.settings.locale, theme: shell.settings.theme };
+    if (!shell.backend()) return Promise.resolve();
+    let lane = preferenceLanes.get(shell);
+    if (!lane) { lane = { latest: $state.snapshot(shell.settings) as Settings, waiters: [], running: false }; preferenceLanes.set(shell, lane); }
+    lane.latest = $state.snapshot(shell.settings) as Settings;
+    const waiting = new Promise<void>((resolve) => lane!.waiters.push(resolve));
+    if (lane.timer) clearTimeout(lane.timer);
+    const active = lane;
+    const flush = async () => {
+      active.timer = undefined;
+      if (active.running) return;
+      active.running = true;
+      const values = active.latest;
+      const waiters = active.waiters.splice(0);
+      try {
+        const baseline = shell.prefsBaseline;
+        const fields = baseline ? Object.keys(values).filter((key) => !shell.same(values[key as keyof Settings], baseline[key as keyof Settings])) : undefined;
+        const saved = await invoke<Settings>("save_settings", { values, fields, before: baseline });
+        shell.prefsBaseline = saved;
+        shell.settings = mergeResponse(shell.settings, values, saved, (a, b) => shell.same(a, b));
         broadcastLocale(shell.settings.locale);
         broadcastAppearance(shell.settings.theme);
         applyCommitTypes(shell);
-        if (localeChanged || themeChanged) void shell.savePrefs(false);
+      } catch (error) { shell.actionError = shell.message(error); }
+      finally {
+        active.running = false;
+        for (const resolve of waiters) resolve();
+        if (active.waiters.length) active.timer = setTimeout(() => void flush(), 0);
+        else preferenceLanes.delete(shell);
       }
-    } catch (error) {
-      if (ticket === shell.prefsSave) shell.actionError = shell.message(error);
-    }
+    };
+    if (!lane.running) lane.timer = setTimeout(() => void flush(), 80);
+    return waiting;
   }
 
 /** Point the composer helpers at the saved types and repair a type that was removed. */
@@ -968,7 +1030,7 @@ export function pathsMatch(shell: ShellState, left: string, right: string) {
   }
 
 export async function finishCloneOpen(shell: ShellState, destination: string) {
-    if (!shell.busy) await shell.openRepo(destination);
+    await shell.openRepo(destination);
     shell.cloneDone = shell.snapshot?.path && shell.pathsMatch(shell.snapshot.path, destination) ? null : destination;
   }
 
@@ -1657,12 +1719,14 @@ export function moveStep(shell: ShellState, index: number, delta: number) {
 const NOT_MERGED = "branch is not fully merged";
 
 /** Offer the force delete only after Git reported commits that would be lost. */
-export async function deleteBranchNow(shell: ShellState, name: string, force = false) {
-    const outcome = await shell.mutate({ action: "deleteBranch", name, force });
+export async function deleteBranchNow(shell: ShellState, name: string, force = false, path = shell.repoPath()) {
+    const openGen = shell.openGen;
+    const outcome = await shell.mutate({ action: "deleteBranch", name, force }, "user", false, path);
+    if (!shell.viewing(path) || shell.openGen !== openGen) return;
     if (outcome !== "failed" || force) return;
     if (!(shell.actionError ?? "").includes(NOT_MERGED)) return;
     shell.actionError = null;
-    shell.ask(shell.tr("dialog.forceDeleteBranch"), shell.tr("dialog.forceDeleteBranchBody"), () => void deleteBranchNow(shell, name, true), [], {
+    shell.ask(shell.tr("dialog.forceDeleteBranch"), shell.tr("dialog.forceDeleteBranchBody"), () => void deleteBranchNow(shell, name, true, path), [], {
       subject: name,
       danger: true,
       confirmLabel: shell.tr("menu.forceDelete"),
@@ -1670,7 +1734,8 @@ export async function deleteBranchNow(shell: ShellState, name: string, force = f
   }
 
 export function removeBranch(shell: ShellState, name: string) {
-    shell.ask(shell.tr("dialog.deleteBranch"), shell.tr("dialog.deleteBranchBody"), () => void deleteBranchNow(shell, name), [], {
+    const path = shell.repoPath();
+    shell.ask(shell.tr("dialog.deleteBranch"), shell.tr("dialog.deleteBranchBody"), () => void deleteBranchNow(shell, name, false, path), [], {
       subject: name,
       danger: true,
     });
@@ -1698,7 +1763,7 @@ export function hardReset(shell: ShellState) {
   }
 
 export async function selectWorkspace(shell: ShellState) {
-    await shell.savePrefs(false);
+    void shell.savePrefs(false);
     const workspace = shell.settings.workspaces.find((item) => item.id === shell.settings.currentWorkspace);
     if (!workspace) return;
     const tabs = workspace.openTabs.length > 0 ? [...workspace.openTabs] : [...workspace.repositories];
@@ -1717,7 +1782,7 @@ export async function selectWorkspace(shell: ShellState) {
   }
 
 export async function switchWorkspace(shell: ShellState, id: string) {
-    if (id === shell.settings.currentWorkspace || shell.busy) return;
+    if (id === shell.settings.currentWorkspace) return;
     if (id === recentWorkspaceId) shell.syncRecentWorkspace();
     shell.settings = { ...shell.settings, currentWorkspace: id };
     await shell.selectWorkspace();
@@ -1772,12 +1837,14 @@ export function openRepoSettings(shell: ShellState) {
   }
 
 export async function keepPassphrase(shell: ShellState) {
-    await invoke("set_passphrase", { user: shell.passUser, secret: shell.passphrase });
-    shell.passphrase = "";
+    const user = shell.passUser, secret = shell.passphrase;
+    await invoke("set_passphrase", { user, secret });
+    if (shell.passUser === user && shell.passphrase === secret) shell.passphrase = "";
   }
 
 export async function loadMergePreview(shell: ShellState) {
     const source = shell.draft.trim();
+    const path = shell.repoPath(), openGen = shell.openGen, gen = ++shell.mergePreviewGen;
     const into = shell.snapshot?.branch || "HEAD";
     shell.mergeInto = into;
     if (shell.mode !== "live" || !source) {
@@ -1786,10 +1853,10 @@ export async function loadMergePreview(shell: ShellState) {
       return;
     }
     const preview = await invoke<{ into: string; files: { status: string; path: string }[] }>("merge_preview", {
-      path: shell.repoPath(),
+      path,
       name: source,
     }).catch(() => null);
-    if (shell.dialog !== "merge" || shell.draft.trim() !== source) return;
+    if (!shell.viewing(path) || shell.openGen !== openGen || shell.mergePreviewGen !== gen || shell.dialog !== "merge" || shell.draft.trim() !== source) return;
     shell.mergeInto = preview?.into || into;
     shell.mergeFiles = preview?.files ?? [];
     fillMergeText(shell, shell.mergeInto, source);

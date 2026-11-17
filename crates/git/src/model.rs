@@ -122,6 +122,7 @@ pub struct RefSnapshot {
     #[serde(default)]
     pub head: Option<String>,
     pub branches: Vec<BranchRow>,
+    pub labels: BTreeMap<String, Vec<String>>,
     pub remotes: Vec<RemoteRow>,
     pub tags: Vec<TagRow>,
     pub stashes: Vec<StashRow>,
@@ -200,6 +201,10 @@ pub fn search_log(
     limit: usize,
     topo: bool,
 ) -> Result<Vec<CommitRow>, Error> {
+    search_log_page(repo, field, scope, query, limit, topo, 0)
+}
+
+pub fn search_log_page(repo: &Path, field: &str, scope: &str, query: &str, limit: usize, topo: bool, offset: usize) -> Result<Vec<CommitRow>, Error> {
     let query = query.trim();
     if query.is_empty() || query.starts_with('-') || query.contains(['\n', '\r', '\0']) {
         return Err(Error::Rev(query.to_string()));
@@ -215,6 +220,7 @@ pub fn search_log(
     let order = if topo { "--topo-order" } else { "--date-order" };
     let mut owned = vec![
         "log".to_string(),
+        format!("--skip={}", offset.min(100_000)),
         "-n".to_string(),
         limit_text,
         order.to_string(),
@@ -317,15 +323,30 @@ fn log_with(
     revs: &[&str],
     topo: bool,
 ) -> Result<Vec<CommitRow>, Error> {
+    log_page(repo, limit, all, path, revs, topo, 0)
+}
+
+pub fn commit_log_page(repo: &Path, limit: usize, all: bool, revs: &[String], topo: bool, offset: usize) -> Result<Vec<CommitRow>, Error> {
+    let checked = revs.iter().map(|rev| check_rev(rev)).collect::<Result<Vec<_>, _>>()?;
+    log_page(repo, limit, all, &[], &checked, topo, offset)
+}
+
+pub fn file_history_page(repo: &Path, file: &str, limit: usize, offset: usize) -> Result<Vec<CommitRow>, Error> {
+    log_page(repo, limit, false, &[check_path(file)?], &[], false, offset)
+}
+
+fn log_page(repo: &Path, limit: usize, all: bool, path: &[&str], revs: &[&str], topo: bool, offset: usize) -> Result<Vec<CommitRow>, Error> {
     let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]));
     if !matches!(head, Ok(output) if output.status.success()) {
         return Ok(Vec::new());
     }
     let limit = limit.clamp(1, 100_000).to_string();
     let order = if topo { "--topo-order" } else { "--date-order" };
+    let skip = format!("--skip={}", offset.min(100_000));
     let mut args = vec![
         "--literal-pathspecs",
         "log",
+        &skip,
         "-n",
         &limit,
         order,
@@ -564,6 +585,7 @@ pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
             revision: 0,
             head,
             branches: joined(branches)?,
+            labels: ref_labels(repo)?,
             remotes: joined(remotes)?,
             tags: joined(tags)?,
             stashes: joined(stashes)?,
@@ -576,6 +598,21 @@ pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
             sign_off_format: first(&local, "signoff", "format"),
         })
     })
+}
+
+/// Ref decorations are small metadata; changing a label never requires another log walk.
+fn ref_labels(repo: &Path) -> Result<BTreeMap<String, Vec<String>>, Error> {
+    let output = run(repo, &["for-each-ref", "--format=%(objectname)%09%(*objectname)%09%(refname)"])?;
+    let mut labels: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let mut fields = line.split('\t');
+        let object = fields.next().unwrap_or(""); let peeled = fields.next().unwrap_or(""); let name = fields.next().unwrap_or("");
+        if name.ends_with("/HEAD") { continue; }
+        let short = name.strip_prefix("refs/heads/").or_else(|| name.strip_prefix("refs/remotes/")).or_else(|| name.strip_prefix("refs/tags/"))
+            .or_else(|| (name == "refs/stash").then_some("stash"));
+        if let Some(short) = short { labels.entry(if peeled.is_empty() { object } else { peeled }.to_string()).or_default().push(short.to_string()); }
+    }
+    Ok(labels)
 }
 
 fn joined<T>(handle: ScopedJoinHandle<'_, Result<T, Error>>) -> Result<T, Error> {
@@ -1189,11 +1226,35 @@ pub struct BlameLine {
 }
 
 pub fn blame_file(repo: &Path, path: &str) -> Result<Vec<BlameLine>, Error> {
+    blame_file_range(repo, path, None)
+}
+
+#[derive(Serialize)]
+pub struct BlameSource { pub text: String, pub version: String, pub truncated: bool }
+
+pub fn blame_source(repo: &Path, path: &str) -> Result<BlameSource, Error> {
+    use std::{hash::{Hash, Hasher}, io::Read};
     let path = check_path(path)?;
+    let file = std::fs::File::open(repo.join(path)).map_err(|source| Error::Read { path: path.to_string(), source })?;
+    let mut bytes = Vec::new();
+    file.take(2_000_001).read_to_end(&mut bytes).map_err(|source| Error::Read { path: path.to_string(), source })?;
+    let truncated = bytes.len() > 2_000_000;
+    bytes.truncate(2_000_000);
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    run_output(repo, &["rev-parse", "HEAD"])?.stdout.hash(&mut hash); bytes.hash(&mut hash);
+    Ok(BlameSource { text: String::from_utf8_lossy(&bytes).into_owned(), version: format!("{:016x}", hash.finish()), truncated })
+}
+
+pub fn blame_file_range(repo: &Path, path: &str, range: Option<(usize, usize)>) -> Result<Vec<BlameLine>, Error> {
+    let path = check_path(path)?;
+    let range_arg = range.map(|(start, end)| format!("{},{}", start.max(1), end.max(start).min(100_000)));
+    let mut args = vec!["--literal-pathspecs", "blame", "--porcelain"];
+    if let Some(range) = &range_arg { args.extend(["-L", range]); }
+    args.extend(["--", path]);
     let (output, capped) = with_read(|| {
         run_capped(
             repo,
-            &["--literal-pathspecs", "blame", "--porcelain", "--", path],
+            &args,
             8_000_000,
         )
     })?;
@@ -1588,11 +1649,16 @@ pub struct ReflogRow {
 
 /// Recent HEAD movements. `selector` is a name such as `HEAD@{0}`.
 pub fn reflog(repo: &Path, limit: usize) -> Result<Vec<ReflogRow>, Error> {
+    reflog_page(repo, limit, 0)
+}
+
+pub fn reflog_page(repo: &Path, limit: usize, offset: usize) -> Result<Vec<ReflogRow>, Error> {
     let limit = limit.clamp(1, 2000);
     let output = run(
         repo,
         &[
             "reflog",
+            &format!("--skip={}", offset.min(100_000)),
             &format!("-n{limit}"),
             "--format=%H%x09%h%x09%gd%x09%gs",
         ],

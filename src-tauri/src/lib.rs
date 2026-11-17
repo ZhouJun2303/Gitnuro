@@ -13,8 +13,11 @@ mod perf;
 mod reads;
 mod repo_inspection;
 mod revision_copy;
+mod scans;
 mod secrets;
 mod settings;
+mod settings_merge;
+mod tasks;
 mod tools;
 mod updates;
 #[cfg(windows)]
@@ -86,6 +89,7 @@ struct RepoChange {
     refs: bool,
     path: String,
     revision: u64,
+    paths: Option<Vec<String>>,
 }
 
 /// Transfer percent for one repository. The shell shows it only while that repository is open.
@@ -122,7 +126,7 @@ impl Drop for RepoTurn {
 
 fn repo_turn(repo: &Path) -> RepoTurn {
     let _phase = perf::phase("write-queue");
-    let key = awegit_git::repo_key(repo);
+    let key = awegit_git::common_repo_key(repo);
     let gate = {
         let mut map = repo_gates().lock().unwrap_or_else(|err| err.into_inner());
         let now = Instant::now();
@@ -250,6 +254,7 @@ fn read_status(repo: &Path) -> Result<awegit_git::StatusSnapshot, String> {
 }
 
 fn read_status_paths(repo: &Path, paths: Option<&[String]>) -> Result<awegit_git::StatusSnapshot, String> {
+    tasks::verifying();
     let _phase = perf::phase("status");
     let revision = changes::revision(repo);
     let mut status = match paths {
@@ -321,10 +326,19 @@ fn write_kind_then_status_paths(path: Option<String>, kind: &str, write: impl Fn
 #[tauri::command]
 fn workspace_status(path: Option<String>) -> Result<awegit_git::StatusSnapshot, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     let revision = changes::revision(&repo);
     let status = reads::shared(format!("status:{}:{revision}:{}", awegit_git::repo_key(&repo), use_fakeignore()), || read_status(&repo))?;
     flows::reconcile(&repo);
     Ok(status)
+}
+
+#[tauri::command]
+fn workspace_status_paths(path: Option<String>, files: Vec<String>) -> Result<ChangeReport, String> {
+    let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
+    let status = read_status_paths(&repo, Some(&files))?;
+    Ok(ChangeReport { status, log: String::new(), status_paths: Some(files) })
 }
 
 #[tauri::command]
@@ -437,10 +451,27 @@ fn commit_changes(
 }
 
 #[tauri::command]
-fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u32>, ignore_space: Option<bool>, load: Option<bool>) -> Result<awegit_git::FileDiff, String> {
+fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u32>, ignore_space: Option<bool>, load: Option<bool>) -> Result<DiffReport, String> {
     let repo = repo_from(path)?;
-    awegit_git::file_diff_with(&repo, &file, staged, unified.unwrap_or(3), ignore_space.unwrap_or(false), load.unwrap_or(false))
-        .map_err(|error| error.to_string())
+    tasks::wait_for_writes(&repo);
+    let diff = awegit_git::file_diff_with(&repo, &file, staged, unified.unwrap_or(3), ignore_space.unwrap_or(false), load.unwrap_or(false)).map_err(|error| error.to_string())?;
+    Ok(DiffReport { version: tasks::diff_version(&diff), diff })
+}
+
+#[derive(serde::Serialize)]
+struct DiffReport {
+    #[serde(flatten)]
+    diff: awegit_git::FileDiff,
+    version: String,
+}
+
+#[tauri::command]
+fn operation_tasks() -> Vec<tasks::Snapshot> { tasks::list() }
+
+#[tauri::command]
+fn cancel_task(id: String) -> Result<Option<tasks::Snapshot>, String> {
+    tasks::cancel(&id)?;
+    Ok(tasks::list().into_iter().find(|task| task.id == id))
 }
 
 #[tauri::command]
@@ -450,21 +481,15 @@ fn commit_log(
     all: Option<bool>,
     order: Option<String>,
     revs: Option<Vec<String>>,
+    offset: Option<usize>,
 ) -> Result<Vec<awegit_git::CommitRow>, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     let limit = limit.unwrap_or(500);
     let topo = order.as_deref() == Some("topo");
-    let key = format!("log:{}:{}:{limit}:{topo}:{all:?}:{revs:?}", awegit_git::repo_key(&repo), changes::revision(&repo));
+    let key = format!("log:{}:{}:{limit}:{topo}:{all:?}:{revs:?}:{offset:?}", awegit_git::repo_key(&repo), changes::revision(&repo));
     reads::shared(key, || {
-    if let Some(revs) = revs.as_ref().filter(|items| !items.is_empty()) {
-        return awegit_git::commits_from(&repo, limit, revs, topo).map_err(|error| error.to_string());
-    }
-    let rows = if all.unwrap_or(true) {
-        awegit_git::commit_log_sorted(&repo, limit, topo)
-    } else {
-        awegit_git::branch_commits_sorted(&repo, limit, topo)
-    };
-    rows.map_err(|error| error.to_string())
+        awegit_git::commit_log_page(&repo, limit, all.unwrap_or(true), &revs.unwrap_or_default(), topo, offset.unwrap_or(0)).map_err(|error| error.to_string())
     })
 }
 
@@ -484,6 +509,7 @@ fn locate_ref(path: Option<String>, name: String, order: Option<String>) -> Resu
 #[tauri::command]
 fn repository_refs(path: Option<String>) -> Result<awegit_git::RefSnapshot, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     let revision = changes::revision(&repo);
     reads::shared(format!("refs:{}:{revision}", awegit_git::repo_key(&repo)), || {
         let mut refs = awegit_git::repository_refs(&repo).map_err(|error| error.to_string())?;
@@ -507,26 +533,47 @@ fn show_commit_file(path: Option<String>, id: String, file: String, unified: Opt
 #[tauri::command]
 fn in_progress(path: Option<String>) -> Result<Option<awegit_git::InProgress>, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     awegit_git::in_progress(&repo).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn file_history(path: Option<String>, file: String, limit: Option<usize>) -> Result<Vec<awegit_git::CommitRow>, String> {
+fn file_history(path: Option<String>, file: String, limit: Option<usize>, offset: Option<usize>) -> Result<Vec<awegit_git::CommitRow>, String> {
     let repo = repo_from(path)?;
-    awegit_git::file_history(&repo, &file, limit.unwrap_or(200)).map_err(|error| error.to_string())
+    tasks::wait_for_writes(&repo);
+    awegit_git::file_history_page(&repo, &file, limit.unwrap_or(200), offset.unwrap_or(0)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn blame_file(path: Option<String>, file: String) -> Result<Vec<awegit_git::BlameLine>, String> {
+fn blame_file(path: Option<String>, file: String, start: Option<usize>, end: Option<usize>, version: Option<String>) -> Result<Vec<awegit_git::BlameLine>, String> {
     let repo = repo_from(path)?;
-    awegit_git::blame_file(&repo, &file).map_err(|error| error.to_string())
+    tasks::wait_for_writes(&repo);
+    let valid = || -> Result<(), String> {
+        if let Some(version) = &version {
+            if awegit_git::blame_source(&repo, &file).map_err(|error| error.to_string())?.version != *version {
+                return Err("Blame source changed. Reload the file. / 文件已变化，请重新加载。".into());
+            }
+        }
+        Ok(())
+    };
+    valid()?;
+    let lines = awegit_git::blame_file_range(&repo, &file, start.zip(end)).map_err(|error| error.to_string())?;
+    valid()?;
+    Ok(lines)
+}
+
+#[tauri::command]
+fn blame_source(path: Option<String>, file: String) -> Result<awegit_git::BlameSource, String> {
+    let repo = repo_from(path)?; tasks::wait_for_writes(&repo);
+    awegit_git::blame_source(&repo, &file).map_err(|error| error.to_string())
 }
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MutationReport {
     #[serde(flatten)]
-    status: awegit_git::StatusSnapshot,
+    status: Option<awegit_git::StatusSnapshot>,
+    refresh_areas: Vec<&'static str>,
     #[serde(skip_serializing_if = "String::is_empty")]
     output: String,
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -554,7 +601,15 @@ struct ChangeReport {
 #[tauri::command]
 fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Option<bool>) -> Result<MutationReport, String> {
     let given = path.clone();
-    let repo = repo_from(path)?;
+    let creation = matches!(&request, awegit_git::Mutation::Clone { .. } | awegit_git::Mutation::Init { .. });
+    let repo = match &request {
+        awegit_git::Mutation::Clone { destination, .. } | awegit_git::Mutation::Init { destination } => {
+            let target = Path::new(destination);
+            lab::ensure_lab_path(target)?;
+            target.ancestors().skip(1).find(|path| path.is_dir()).unwrap_or(Path::new(".")).to_path_buf()
+        }
+        _ => repo_from(path)?,
+    };
     let next = match &request {
         awegit_git::Mutation::Clone { destination, .. } | awegit_git::Mutation::Init { destination } => {
             PathBuf::from(destination)
@@ -562,6 +617,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         _ => repo.clone(),
     };
     let _turn = repo_turn(&next);
+    let refresh_areas = request.refresh_areas().to_vec();
     let (result, log) = awegit_git::capture_output(|| -> Result<MutationReport, String> {
         development::check_delete(&repo, &request)?;
         apply_session();
@@ -574,7 +630,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             | "stash" | "stashPop" | "stashApply" | "stashDrop" | "stashPaths"
         ).then(|| awegit_git::pull_refresh_state(&repo)).flatten();
         let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
-        let report = report_path(given, &repo);
+        let report = if creation { next.clone() } else { report_path(given, &repo) };
         let action = || awegit_git::with_operation_repo(&report, || {
             let _phase = perf::phase("perform");
             let output = if retry_stash.unwrap_or(false) { awegit_git::perform_stashed(&repo, request)? } else { awegit_git::perform(&repo, request)? };
@@ -588,15 +644,18 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         // without a usable stderr. Report the file so the UI can offer to remove it.
         let stale_lock = if result.is_err() { awegit_git::stale_index_lock(&next) } else { None };
         let flow = flow.map(|flow| { let _phase = perf::phase("flow-finish"); flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name) });
-        let status = read_status(&next)?;
+        let status = if result.is_err() || refresh_areas.iter().any(|area| matches!(*area, "worktree" | "index" | "flow")) {
+            Some(awegit_git::without_cancellation(|| read_status(&next))?)
+        } else { None };
         let refresh_scope = if result.is_ok() && before_refs.is_some()
             && before_refs == awegit_git::pull_refresh_state(&repo) { Some("status") } else { None };
-        let conflicted = status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict);
+        let conflicted = status.as_ref().is_some_and(|status| status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict));
         let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
         let error = result.as_ref().err().map(ToString::to_string).unwrap_or_default();
         let output = result.unwrap_or_default();
         Ok(MutationReport {
             status,
+            refresh_areas,
             output,
             log: String::new(),
             outcome,
@@ -885,7 +944,17 @@ fn open_font_folder() -> Result<(), String> {
 }
 
 #[tauri::command]
-fn save_settings(mut values: settings::Settings) -> Result<settings::Settings, String> {
+fn save_settings(mut values: settings::Settings, fields: Option<Vec<String>>, before: Option<serde_json::Value>) -> Result<settings::Settings, String> {
+    if let Some(fields) = fields {
+        let mut current = serde_json::to_value(settings::load()?).map_err(|error| error.to_string())?;
+        let edited = serde_json::to_value(&values).map_err(|error| error.to_string())?;
+        for field in fields {
+            if let Some(value) = edited.get(&field) {
+                current[&field] = if let Some(base) = before.as_ref().and_then(|base| base.get(&field)) { settings_merge::apply(&current[&field], base, value) } else { value.clone() };
+            }
+        }
+        values = serde_json::from_value(current).map_err(|error| error.to_string())?;
+    }
     values.recovery_notice.clear();
     values.flow_history_days = values.flow_history_days.clamp(1, 90);
     settings::save(&values)?;
@@ -1009,6 +1078,7 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
             refs: true,
             path: repo.display().to_string(),
             revision: changes::changed(&repo),
+            paths: None,
         },
     );
     let shared = Arc::new(WatchSlot {
@@ -1315,6 +1385,7 @@ fn settle_changes(
                     refs: true,
                     path: repo.display().to_string(),
                     revision,
+                    paths: None,
                 },
             );
             continue;
@@ -1338,7 +1409,7 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
             continue;
         }
         if relative == ".git" {
-            return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo) });
+            return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None });
         }
         if let Some(inner) = relative.strip_prefix(".git/") {
             if inner.ends_with(".lock") { continue; }
@@ -1346,19 +1417,21 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
                 "index" => status = true,
                 "objects" | "modules" | "lfs" | "logs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit" | "awegit-flow" | "gitnuro" | "fsmonitor--daemon"
                     if inner != "logs/refs/stash" => {}
-                _ => return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo) }),
+                _ => return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None }),
             }
             continue;
         }
         files.push(relative);
     }
-    if !status && !files.is_empty() {
+    let entire_index = status;
+    if !files.is_empty() {
         files.sort();
         files.dedup();
         let ignored: HashSet<String> = awegit_git::ignored_paths(repo, &files).into_iter().collect();
-        status = files.iter().any(|file| !ignored.contains(file));
+        files.retain(|file| !ignored.contains(file));
+        status |= !files.is_empty();
     }
-    status.then_some(RepoChange { refs: false, path: repo.display().to_string(), revision: changes::revision(repo) })
+    status.then_some(RepoChange { refs: false, path: repo.display().to_string(), revision: changes::revision(repo), paths: (!entire_index).then_some(files) })
 }
 
 fn watched_relative(repo: &Path, path: &Path) -> Option<String> {
@@ -1643,6 +1716,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 #[tauri::command]
 fn file_preview(path: Option<String>, file: String, staged: Option<bool>) -> Result<Option<awegit_git::FilePreview>, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     if staged.unwrap_or(false) {
         awegit_git::index_preview(&repo, &file).map_err(|error| error.to_string())
     } else {
@@ -1653,6 +1727,7 @@ fn file_preview(path: Option<String>, file: String, staged: Option<bool>) -> Res
 #[tauri::command]
 fn cancel_operation(path: Option<String>) -> Result<Option<String>, String> {
     let requested = path.filter(|path| !path.trim().is_empty());
+    if let Some(path) = &requested { tasks::cancel_path(Path::new(path)); }
     let stopped_write = match &requested {
         Some(path) => awegit_git::cancel_repo(Path::new(path)),
         None => awegit_git::cancel_running(),
@@ -1681,6 +1756,7 @@ fn cancel_operation(path: Option<String>) -> Result<Option<String>, String> {
 #[tauri::command]
 fn remove_index_lock(path: Option<String>) -> Result<bool, String> {
     let repo = repo_from(path)?;
+    let _turn = repo_turn(&repo);
     let Some(lock) = awegit_git::index_lock_path(&repo) else {
         return Ok(false);
     };
@@ -1811,15 +1887,32 @@ fn cancel_update() {
     updates::cancel();
 }
 
+#[derive(Clone, serde::Serialize)]
+struct ConflictSidesReport {
+    #[serde(flatten)]
+    sides: awegit_git::ConflictSides,
+    version: String,
+}
+
 #[tauri::command]
-fn conflict_sides(path: Option<String>, file: String) -> Result<awegit_git::ConflictSides, String> {
+fn conflict_sides(path: Option<String>, file: String) -> Result<ConflictSidesReport, String> {
     let repo = repo_from(path)?;
-    awegit_git::conflict_sides(&repo, &file).map_err(|error| error.to_string())
+    tasks::wait_for_writes(&repo);
+    let sides = awegit_git::conflict_sides(&repo, &file).map_err(|error| error.to_string())?;
+    let version = tasks::content_version(&sides);
+    Ok(ConflictSidesReport { sides, version })
+}
+
+#[tauri::command]
+fn stash_patch(path: Option<String>, rev: String) -> Result<String, String> {
+    let repo = repo_from(path)?;
+    awegit_git::perform(&repo, awegit_git::Mutation::StashPatch { name: rev }).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn conflict_view(path: Option<String>, file: String) -> Result<awegit_git::ConflictView, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     let stamp = flows::checkpoint_stamp(&repo);
     let worktree = std::fs::metadata(repo.join(&file)).ok().map(|meta| (meta.len(), meta.modified().ok()));
     let key = format!("conflict:{}:{}:{stamp:?}:{worktree:?}:{file}", awegit_git::repo_key(&repo), changes::revision(&repo));
@@ -1874,9 +1967,10 @@ fn remove_revision_copy(path: Option<String>, file: String, copy: String, force:
 }
 
 #[tauri::command]
-fn reflog(path: Option<String>, limit: Option<usize>) -> Result<Vec<awegit_git::ReflogRow>, String> {
+fn reflog(path: Option<String>, limit: Option<usize>, offset: Option<usize>) -> Result<Vec<awegit_git::ReflogRow>, String> {
     let repo = repo_from(path)?;
-    awegit_git::reflog(&repo, limit.unwrap_or(200)).map_err(|error| error.to_string())
+    tasks::wait_for_writes(&repo);
+    awegit_git::reflog_page(&repo, limit.unwrap_or(200), offset.unwrap_or(0)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1893,6 +1987,7 @@ fn repository_summary(path: String) -> Result<awegit_git::RepoSummary, String> {
 #[tauri::command]
 fn rebase_conflicts(path: Option<String>, onto: String) -> Result<Vec<String>, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     awegit_git::rebase_conflicts(&repo, &onto).map_err(|error| error.to_string())
 }
 
@@ -1903,6 +1998,7 @@ fn lfs_locks(path: Option<String>, list: Option<bool>) -> Result<LfsLockReport, 
     if !list.unwrap_or(true) {
         return Ok(LfsLockReport { available: awegit_git::lfs_available(&repo), locks: Vec::new() });
     }
+    tasks::wait_for_writes(&repo);
     let (available, locks) = awegit_git::lfs_locks(&repo).map_err(|error| error.to_string())?;
     Ok(LfsLockReport { available, locks })
 }
@@ -1976,6 +2072,7 @@ fn facts_reusable(stored_stamp: &str, stored_full: bool, stamp: &str, full: bool
 #[tauri::command]
 fn repo_facts(path: Option<String>, full: Option<bool>) -> Result<awegit_git::RepoFacts, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     let full = full.unwrap_or(true);
     let key = awegit_git::repo_key(&repo);
     let stamp = facts_stamp(&repo);
@@ -2032,6 +2129,11 @@ fn scan_repositories(root: String, depth: Option<u32>) -> Result<awegit_git::Sca
 }
 
 #[tauri::command]
+fn scan_repositories_page(root: String, depth: Option<u32>, cursor: Option<String>) -> Result<scans::Page, String> {
+    scans::page(root, depth, cursor)
+}
+
+#[tauri::command]
 fn mark_notification(id: String) -> Result<(), String> {
     let values = settings::load()?;
     http::with_net(http::NetOptions::from_settings(&values), || {
@@ -2082,6 +2184,7 @@ fn set_repo_author(path: Option<String>, name: String, email: String) -> Result<
 #[tauri::command]
 fn search_commits(path: Option<String>, kind: String, needle: String) -> Result<Vec<awegit_git::SearchHit>, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     awegit_git::search_commits(&repo, &kind, &needle).map_err(|error| error.to_string())
 }
 
@@ -2093,39 +2196,46 @@ fn search_log(
     query: String,
     limit: Option<usize>,
     order: Option<String>,
+    offset: Option<usize>,
 ) -> Result<Vec<awegit_git::CommitRow>, String> {
     let repo = repo_from(path)?;
     let topo = order.as_deref() == Some("topo");
-    awegit_git::search_log(&repo, &field, &scope, &query, limit.unwrap_or(500), topo).map_err(|error| error.to_string())
+    tasks::wait_for_writes(&repo);
+    awegit_git::search_log_page(&repo, &field, &scope, &query, limit.unwrap_or(500), topo, offset.unwrap_or(0)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn cherry_preview(path: Option<String>, rev: String) -> Result<String, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     awegit_git::cherry_preview(&repo, &rev).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn merge_preview(path: Option<String>, name: String) -> Result<awegit_git::MergePreview, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     awegit_git::merge_preview(&repo, &name).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn merge_state(path: Option<String>) -> Result<Option<awegit_git::MergeState>, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     awegit_git::merge_state(&repo).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn merged_branches(path: Option<String>) -> Result<Vec<String>, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     awegit_git::merged_branches(&repo).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn pick_history(path: Option<String>, file: String, text: String) -> Result<String, String> {
     let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
     awegit_git::pick_history(&repo, &file, &text).map_err(|error| error.to_string())
 }
 
@@ -2238,6 +2348,7 @@ fn remote_matches(path: Option<String>) -> Result<Vec<accounts::RemoteMatch>, St
 #[tauri::command]
 fn save_remote_account(path: Option<String>, remote: String, account_id: String) -> Result<(), String> {
     let repo = repo_from(path)?;
+    let _turn = repo_turn(&repo);
     awegit_git::write_remote_account(&repo, &remote, &account_id).map_err(|error| error.to_string())
 }
 
@@ -2641,6 +2752,7 @@ pub fn run() {
     prefer_bundled_git();
     let handler: std::sync::Arc<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = std::sync::Arc::new(tauri::generate_handler![
             workspace_status,
+            workspace_status_paths,
             stage_all,
             unstage_all,
             stage_path,
@@ -2657,8 +2769,11 @@ pub fn run() {
             mutate,
             operation_flow,
             operation_history,
+            operation_tasks,
+            cancel_task,
             file_history,
             blame_file,
+            blame_source,
             load_settings,
             font_data,
             download_font,
@@ -2700,6 +2815,7 @@ pub fn run() {
             download_update,
             cancel_update,
             conflict_sides,
+            stash_patch,
             conflict_view,
             compare_files,
             compare_file,
@@ -2721,6 +2837,7 @@ pub fn run() {
             forge_pulls,
             repo_facts,
             scan_repositories,
+            scan_repositories_page,
             mark_notification,
             create_github_repo,
             generate_ssh_key,
@@ -2782,6 +2899,7 @@ pub fn run() {
             }
             let handle = app.handle().clone();
             flows::install(handle.clone());
+            tasks::install(handle.clone());
             perf::watch_main_thread(handle.clone());
             awegit_git::set_progress(move |path, percent| {
                 let _ = handle.emit("git-progress", GitProgress { path: path.to_string(), percent });
@@ -2793,6 +2911,11 @@ pub fn run() {
         })
         .invoke_handler(move |invoke| {
             let name = invoke.message.command().to_string();
+            let args = match invoke.message.payload() {
+                tauri::ipc::InvokeBody::Json(value) => value.clone(),
+                _ => serde_json::Value::Null,
+            };
+            let task = if tasks::handles(&name) { Some(tasks::enqueue(&name, &args)) } else { None };
             let trace = match invoke.message.payload() {
                 tauri::ipc::InvokeBody::Json(value) => value.get("__perf").and_then(serde_json::Value::as_str).map(str::to_string),
                 _ => None,
@@ -2801,6 +2924,11 @@ pub fn run() {
             let resolver = invoke.resolver.clone();
             dispatch(&name.clone(), Box::new(move || {
                 let _span = (!matches!(name.as_str(), "log_client" | "perf_snapshot")).then(|| perf::command_with_id(&name, trace.as_deref()));
+                if let Some(task) = task {
+                    let result = task.and_then(|id| tasks::run(&id, || tasks::execute(&name, &args), |value| tasks::outcome(&name, &args, value)));
+                    match result { Ok(value) => resolver.resolve(value), Err(error) => resolver.reject(error) }
+                    return;
+                }
                 match std::panic::catch_unwind(AssertUnwindSafe(|| handler(invoke))) {
                     Ok(true) => {}
                     Ok(false) => resolver.reject(format!("Command {name} not found")),

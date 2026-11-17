@@ -329,7 +329,17 @@ impl Session {
 
     pub fn observer(self: &Arc<Self>) -> Observer {
         let session = self.clone();
+        let task = crate::tasks::current_id();
         Arc::new(move |mut event| {
+            if let Some(task) = &task {
+                let phase = match event.kind.as_str() {
+                    "stash-push" | "local-saved" => "saved",
+                    "local-restore" => "restore",
+                    "fetch" => "fetch",
+                    _ => "integration",
+                };
+                if event.state == "running" || event.kind == "local-saved" { crate::tasks::phase(task, phase); }
+            }
             let fetched = event.detail == "git-child"
                 && event.state == "running"
                 && matches!(event.kind.as_str(), "rebase" | "merge");
@@ -1593,7 +1603,7 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_syncs_reuse_context_but_read_local_edits_and_changed_upstreams() {
+    fn metadata_syncs_skip_workspace_scans_and_keep_changed_upstreams_and_external_edits_readable() {
         let repo = Repo::new();
         struct SettingsEnv(Option<std::ffi::OsString>, Option<std::ffi::OsString>);
         impl Drop for SettingsEnv {
@@ -1613,7 +1623,9 @@ mod tests {
         let first = run(fetch()); assert_eq!(first.refresh_scope, None);
         fs::write(repo.0.join("note"), "external edit\n").unwrap();
         let second = run(fetch()); assert_eq!(second.refresh_scope, Some("status"));
-        assert!(second.status.unstaged.iter().any(|file| file.path == "note"));
+        assert!(second.status.is_none(), "fetch only changes references");
+        let status = super::super::workspace_status(Some(repo.0.display().to_string())).unwrap();
+        assert!(status.unstaged.iter().any(|file| file.path == "note"), "independent status reconciliation retains external edits");
         let push = |set_upstream| Mutation::Push { remote: Some("origin".into()), set_upstream, tags: false, force_with_lease: false, force: false };
         assert_eq!(run(push(true)).refresh_scope, None, "setting an upstream changes context");
         assert_eq!(run(push(false)).refresh_scope, Some("status"));

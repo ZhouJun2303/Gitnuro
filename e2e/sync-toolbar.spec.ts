@@ -46,8 +46,20 @@ for (const scene of ["rebase-progress", "sync-stash-conflict", "sync-busy"]) {
     const pull = toolbar.getByTitle(/^(拉取|Pull)$/);
     const push = toolbar.getByTitle(/^(推送|Push)$/);
     const busy = scene === "sync-busy";
-    if (busy) await expect(fetch).toBeDisabled();
-    else await expect(fetch).toBeEnabled();
+    await expect(fetch).toBeEnabled();
+    if (busy) {
+      // A task's activity indicator does not lock unrelated controls or browsing.
+      await expect(pull).toBeEnabled();
+      await expect(push).toBeEnabled();
+      await pull.click();
+      await expect(page.locator('[data-dialog="pull"]')).toBeVisible();
+      await page.keyboard.press("Escape");
+      await push.click();
+      await expect(page.locator('[data-dialog="push"]')).toBeVisible();
+      await page.keyboard.press("Escape");
+      expect(mutations).toEqual([]);
+      return;
+    }
     await expect(pull).toBeDisabled();
     await expect(push).toBeDisabled();
 

@@ -4,10 +4,11 @@
 
 ## 待处理
 
-- [ ] 后台任务调度与界面响应优化：按仓库保序执行写操作，分离界面反馈、状态核验和辅助读取，按影响范围刷新并保护任务依赖。普通整文件暂存/取消暂存的先行反馈已完成，其他操作和大目录刷新中的偶发长任务继续优化。完整清单见 [后台任务与界面响应优化设计](dev-docs/operation-responsiveness.md)，本轮结果见[性能记录第 13 节](dev-docs/performance-plan.md#13-2026-11-17-暂存与取消暂存的先行反馈对照-06121756)。
 - [ ] 发布后的真实性能观测：用新的关联计时核对安装包从点击到刷新完成的等待、实际远端网络长尾和系统峰值内存。当前 release 基准为独立本地种子，不能宣称历史 TLS 失败已消失或得到完整桌面提速比例，见 [性能计划第 8、10 节](dev-docs/performance-plan.md)。
 
 ## 已处理
+
+- [x] 后台任务调度与界面响应完整清单九类全部实施：共用仓库写入队列、依赖与取消，分离即时反馈、真实核验及辅助读取，引用与文件等待状态、按影响刷新、增量历史 / 搜索 / Blame / 目录扫描、设置三方合并、账户 / AI / 更新迟到结果保护均已接入。实现：本条所在提交 `perf: 完善后台任务调度与操作响应`；回归：`tasks::tests`、`settings_merge::tests`、`crates/git/tests/responsiveness.rs`、`e2e/operation-scheduler.spec.ts`、`e2e/operation-responsiveness.spec.ts`，以及暂存队列、同步、历史、弹窗、设置、Reset、更新与三主题相关场景。`pnpm test`、`pnpm check`、`pnpm build` 通过。实现边界见[完整清单](dev-docs/operation-responsiveness.md)，验收与测量限制见[性能记录第 14 节](dev-docs/performance-plan.md#14-2026-11-17-全部操作的后台调度与响应对照-31e52132)。
 
 - [x] 普通文件、目录、多选和全部暂存/取消暂存先移动列表并显示等待标记，真实索引按仓库顺序写入；支持连续反向操作，失败时回读真实状态并取消后续暂存请求，保留残留锁文件移除/重试，旧差异不覆盖新选择。实现：本条所在提交 `perf: 暂存和取消暂存立即反馈并按仓库排队`；回归：`e2e/stage-queue.spec.ts` 的 20 项，覆盖三主题、三布局、失败/重试、部分暂存、重命名、删除和迟到预览；与 `stage-performance`、`stage-dense`、`common-operations`、`performance-refresh`、相关主题面板和锁文件确认共 53 项通过，重命名用例核对原生单路径语义并滚动到虚拟列表目标后单项复验通过。`pnpm check`、`pnpm build` 通过；验证边界和一次 59ms 目录刷新长任务见[性能记录第 13 节](dev-docs/performance-plan.md#13-2026-11-17-暂存与取消暂存的先行反馈对照-06121756)。
 

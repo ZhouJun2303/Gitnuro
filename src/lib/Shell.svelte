@@ -1162,11 +1162,11 @@
         {#if shell.forgeOpen === "notes"}
           {#if shell.notices.length === 0}<p class="empty">{signedIn || shell.mode !== "live" ? shell.tr("dialog.noNotifications") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.notices as notice (notice.id)}
-            <div class="composer-row"><span>{notice.title}</span><span class="grow"></span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => { if (shell.mode === "live") void invoke("mark_notification", { id: notice.id }).then(() => (shell.notices = shell.notices.filter((item) => item.id !== notice.id))); else shell.notices = shell.notices.filter((item) => item.id !== notice.id); }}>{shell.tr("dialog.markRead")}</button></div>
+            <div class="composer-row"><span>{notice.title}</span><span class="grow"></span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => void shell.markNotifications([notice.id])}>{shell.tr("dialog.markRead")}</button></div>
           {/each}
           {#if shell.notices.length > 0}
             <div class="composer-row">
-              <button class="text-button" type="button" onclick={() => { const ids = shell.notices.map((item) => item.id); if (shell.mode === "live") void Promise.all(ids.map((id) => invoke("mark_notification", { id }))).then(() => (shell.notices = [])).catch((error) => (shell.actionError = shell.message(error))); else shell.notices = []; }}>{shell.tr("dialog.markAllRead")}</button>
+              <button class="text-button" type="button" onclick={() => void shell.markNotifications(shell.notices.map((item) => item.id))}>{shell.tr("dialog.markAllRead")}</button>
             </div>
           {/if}
         {:else}

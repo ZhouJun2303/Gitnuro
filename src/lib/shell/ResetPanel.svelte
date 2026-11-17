@@ -90,7 +90,7 @@
         aria-haspopup="listbox"
         aria-controls={open ? "reset-mode-options" : undefined}
         aria-activedescendant={open ? `reset-mode-${modes[active].value}` : undefined}
-        disabled={shell.writing}
+        disabled={shell.writeBlocked}
         bind:this={trigger}
         onclick={toggle}
         onkeydown={onKey}
@@ -127,8 +127,8 @@
   </div>
 
   <div class="composer-row actions">
-    <button class="text-button" type="button" disabled={shell.busy} onclick={() => { shell.dialog = null; }}>{shell.tr("dialog.cancel")}</button>
-    <button class="commit" class:reset-danger={shell.resetMode === "hard"} type="submit" disabled={shell.writing || !!shell.progress || !shell.draft}>{shell.tr("menu.reset")}</button>
+    <button class="text-button" type="button" disabled={shell.switching} onclick={() => { shell.dialog = null; }}>{shell.tr("dialog.cancel")}</button>
+    <button class="commit" class:reset-danger={shell.resetMode === "hard"} type="submit" disabled={shell.writeBlocked || !!shell.progress || !shell.draft}>{shell.tr("menu.reset")}</button>
   </div>
 </div>
 

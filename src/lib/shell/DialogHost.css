@@ -649,3 +649,4 @@
     font-weight: 600;
     font-style: normal;
 }
+.patch-targets { max-height: 160px; overflow: auto; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }

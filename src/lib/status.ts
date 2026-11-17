@@ -36,6 +36,8 @@ export type DiffLine = {
 };
 
 export type FileDiff = {
+  /** Backend fingerprint used by queued line and hunk edits. */
+  version?: string;
   path: string;
   staged: boolean;
   binary: boolean;
@@ -118,6 +120,7 @@ export type SubmoduleRow = { path: string; id: string; ready: boolean };
 export type WorktreeRow = { path: string; branch: string | null; detached: boolean };
 
 export type RefSnapshot = {
+  labels?: Record<string, string[]>;
   revision?: number;
   head?: string | null;
   branches: BranchRow[];
@@ -394,6 +397,7 @@ export type CommandRecord = {
 };
 
 export type ConflictSides = {
+  version?: string;
   ours: string;
   theirs: string;
   working: string;
@@ -465,6 +469,7 @@ export type GitRuntime = {
 };
 
 export type RepoScan = {
+  cursor?: string | null;
   paths: string[];
   truncated: boolean;
 };

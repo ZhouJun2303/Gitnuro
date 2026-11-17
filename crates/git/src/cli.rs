@@ -9,7 +9,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -60,15 +60,55 @@ fn progress_hook() -> Option<ProgressHook> {
 
 /// Stable identity for one repository. Slash direction and a trailing slash do not matter.
 pub fn repo_key(path: &Path) -> String {
-    path.to_string_lossy()
+    let key = path.to_string_lossy()
         .replace('\\', "/")
         .trim_end_matches('/')
-        .to_lowercase()
+        .to_string();
+    if cfg!(windows) { key.to_lowercase() } else { key }
+}
+
+/// Linked worktrees share refs, config and stash; coordinate their writes together.
+pub fn common_repo_key(path: &Path) -> String {
+    let common = gix::open(path).ok().map(|repo| repo.common_dir().to_path_buf());
+    let resolved = common.as_deref().unwrap_or(path);
+    repo_key(&std::fs::canonicalize(resolved).unwrap_or_else(|_| resolved.to_path_buf()))
 }
 
 thread_local! {
     static OPERATION_REPO: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
     static READ_SCOPE: Cell<bool> = const { Cell::new(false) };
+    static CANCELLATION: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+}
+
+pub fn with_cancellation<T>(token: Arc<AtomicBool>, body: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Arc<AtomicBool>>);
+    impl Drop for Restore { fn drop(&mut self) { CANCELLATION.with(|slot| *slot.borrow_mut() = self.0.take()); } }
+    let _restore = Restore(CANCELLATION.with(|slot| slot.replace(Some(token))));
+    body()
+}
+
+pub fn without_cancellation<T>(body: impl FnOnce() -> T) -> T {
+    with_cancellation(Arc::new(AtomicBool::new(false)), body)
+}
+
+pub fn check_cancelled() -> Result<(), Error> {
+    if CANCELLATION.with(|slot| slot.borrow().as_ref().is_some_and(|token| token.load(Ordering::Acquire))) {
+        Err(Error::Git("awegit:cancelled:".into()))
+    } else { Ok(()) }
+}
+
+/// Custom commands need the same process-tree cancellation as Git itself.
+pub(crate) fn run_external(repo: &Path, command: &mut Command) -> Result<std::process::Output, Error> {
+    check_cancelled()?;
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let (child, group) = crate::proc::spawn_prepared(command).map_err(Error::GitMissing)?;
+    let pid = child.id();
+    let generation = track(repo_key(&operation_path(repo)), pid, false, group);
+    if check_cancelled().is_err() { stop_generation(generation); }
+    let output = child.wait_with_output().map_err(Error::GitMissing);
+    untrack(pid);
+    check_cancelled()?;
+    output
 }
 
 /// Mark `git` processes started inside `body` as reads, so a newer read can stop them
@@ -693,6 +733,9 @@ pub fn run_capped(
     args: &[&str],
     limit: usize,
 ) -> Result<(std::process::Output, bool), Error> {
+    if CANCELLATION.with(|slot| slot.borrow().as_ref().is_some_and(|token| token.load(Ordering::Acquire))) {
+        return Err(Error::Git("awegit:cancelled:".into()));
+    }
     run_prepared_capped(repo, args, &[], None, AuthorMode::Both, false, Some(limit))
 }
 
@@ -744,6 +787,7 @@ fn run_prepared_capped(
     allow_failure: bool,
     cap: Option<usize>,
 ) -> Result<(std::process::Output, bool), Error> {
+    check_cancelled()?;
     let mut flow_command = crate::flow::CommandSpan::start(args);
     let progress = progress_hook();
     let (credential_args, helper_dir) = https_prefix(args);
@@ -821,7 +865,11 @@ fn run_prepared_capped(
     let pid = child.id();
     let key = repo_key(&owned);
     let is_read = READ_SCOPE.with(|slot| slot.get());
-    track(key, pid, is_read, group);
+    let generation = track(key, pid, is_read, group);
+    // Cancellation can race the spawn. Recheck after registration as well.
+    if CANCELLATION.with(|slot| slot.borrow().as_ref().is_some_and(|token| token.load(Ordering::Acquire))) {
+        stop_generation(generation);
+    }
     let (output, write_result, truncated) = std::thread::scope(|scope| {
         // Feed stdin while stdout is drained. Writing the whole input first deadlocks
         // as soon as the child fills its stdout pipe and stops reading.

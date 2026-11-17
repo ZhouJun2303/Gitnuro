@@ -6,8 +6,12 @@
   import { getShell } from "./context";
   import AccountAvatar from "./AccountAvatar.svelte";
   import "./AccountsPage.css";
+  import { mergeFields, mergeRecords } from "../reconcile";
 
   const shell = getShell();
+  let mounted = true;
+  let draftProbeGeneration = 0;
+  let remoteGeneration = 0;
 
   type ServiceInfo = { id: string; label: string; host: string; tokenUrl: string; browser: boolean; probe: string };
   type AccountProbe = { code: string; login: string; name: string; email: string; avatarUrl: string; message: string };
@@ -134,7 +138,11 @@
   }
 
   async function loadServices() {
-    services = await invoke<ServiceInfo[]>("account_services").catch(() => []);
+    const service = draftService, host = draftHost;
+    const found = await invoke<ServiceInfo[]>("account_services").catch(() => []);
+    if (!mounted) return;
+    services = found;
+    if (draftService !== service || draftHost !== host) return;
     if (!services.some((item) => item.id === draftService) && services[0]) {
       draftService = services[0].id;
       draftHost = services[0].host;
@@ -143,29 +151,34 @@
 
   async function loadRemotes() {
     const path = shell.repoPath();
+    const gen = ++remoteGeneration, openGen = shell.openGen;
     if (!path) {
       noRepo = true;
       remotes = [];
       return;
     }
     noRepo = false;
-    remotes = await invoke<RemoteMatch[]>("remote_matches", { path }).catch(() => []);
+    const found = await invoke<RemoteMatch[]>("remote_matches", { path }).catch(() => []);
+    if (mounted && shell.viewing(path) && shell.openGen === openGen && gen === remoteGeneration) remotes = found;
   }
 
   async function syncOnce() {
     if (syncing) return;
     syncing = true;
     notice = "";
+    const before = $state.snapshot(shell.settings) as Settings;
     try {
       const saved = await invoke<Settings>("sync_accounts");
+      const merged = mergeFields(shell.settings, before, saved, shell.same.bind(shell));
       shell.settings = {
         ...shell.settings,
-        accounts: saved.accounts,
-        githubToken: saved.githubToken,
-        gitlabToken: saved.gitlabToken,
-        bitbucketToken: saved.bitbucketToken,
-        azureToken: saved.azureToken,
+        accounts: mergeRecords(shell.settings.accounts, before.accounts, saved.accounts, shell.same.bind(shell)),
+        githubToken: merged.githubToken,
+        gitlabToken: merged.gitlabToken,
+        bitbucketToken: merged.bitbucketToken,
+        azureToken: merged.azureToken,
       };
+      await shell.savePrefs(false);
     } catch (error) {
       shell.actionError = shell.message(error);
     } finally {
@@ -204,22 +217,26 @@
   }
 
   async function testCard(account: Account) {
+    const before = $state.snapshot(account) as Account;
     const probe = await runProbe(account, probeUrls[account.id] ?? "");
     if (probe.code !== "ok") return;
     const next = applyProbe(account, probe);
     shell.settings = {
       ...shell.settings,
-      accounts: shell.settings.accounts.map((item) => (item.id === account.id ? next : item)),
+      accounts: shell.settings.accounts.map((item) => (item.id === account.id ? mergeFields(item, before, next, shell.same.bind(shell)) : item)),
     };
     await shell.savePrefs(false);
   }
 
+  let loginGeneration = 0;
   async function startLogin(forge: string, host: string) {
     if (logging) return;
     logging = true;
+    const generation = ++loginGeneration;
     notice = shell.tr("dialog.accountsBrowserWait");
     try {
       const result = await invoke<LoginResult>("browser_login", { forgeName: forge, host });
+      if (generation !== loginGeneration) return;
       if (result.message === "cancelled") {
         notice = "";
         return;
@@ -239,17 +256,19 @@
         if (match) match.tokenUrl = result.tokenUrl;
       }
     } catch (error) {
+      if (generation !== loginGeneration) return;
       notice = shell.tr("dialog.accountsBrowserMissing");
       shell.actionError = shell.message(error);
     } finally {
-      logging = false;
+      if (generation === loginGeneration) logging = false;
     }
   }
 
   async function cancelLogin() {
-    await invoke("cancel_browser_login").catch(() => {});
+    loginGeneration++;
     logging = false;
     notice = "";
+    await invoke("cancel_browser_login").catch(() => {});
   }
 
   function chooseService(service: ServiceInfo) {
@@ -296,7 +315,10 @@
 
   async function testDraft() {
     const account = draftAccount();
+    const gen = ++draftProbeGeneration;
+    const before = [draftService, draftForge, draftHost, draftToken, draftClient, draftLogin, draftProbe];
     const probe = await runProbe(account, draftProbe.trim());
+    if (!mounted || gen !== draftProbeGeneration || before.some((value, index) => value !== [draftService, draftForge, draftHost, draftToken, draftClient, draftLogin, draftProbe][index])) return null;
     draftStatus = probe.code;
     if (probe.code === "ok") {
       const next = applyProbe(account, probe);
@@ -351,18 +373,27 @@
     return accounts.filter((item) => hostKey(item.forge, item.host) === hostKey("", host) || hostKey(item.forge, item.host) === host);
   }
 
-  function stopDevice() {
+  let deviceGeneration = 0;
+  let devicePolling = false;
+  function clearDeviceTimer() {
     if (deviceTimer) clearInterval(deviceTimer);
     deviceTimer = undefined;
   }
 
+  function stopDevice() { deviceGeneration++; clearDeviceTimer(); }
+
   async function pollDevice() {
+    if (devicePolling) return;
+    const generation = deviceGeneration;
+    const before = { token: draftToken, forge: draftForge, host: draftHost, client: draftClient };
     deviceTries += 1;
     if (deviceTries > 20) {
       stopDevice();
       return;
     }
-    const token = await invoke<string>("device_poll").catch(() => "pending");
+    devicePolling = true;
+    const token = await invoke<string>("device_poll").catch(() => "pending").finally(() => { devicePolling = false; });
+    if (generation !== deviceGeneration || before.token !== draftToken || before.forge !== draftForge || before.host !== draftHost || before.client !== draftClient) return;
     if (token === "pending" || !token) return;
     stopDevice();
     draftToken = token;
@@ -370,6 +401,9 @@
   }
 
   async function startDevice() {
+    stopDevice();
+    const generation = deviceGeneration;
+    const before = [draftForge, draftHost, draftClient];
     deviceCode = "";
     deviceUrl = "";
     try {
@@ -378,21 +412,22 @@
         clientId: draftClient.trim() || shell.settings.oauthClientId,
         host: draftHost.trim(),
       });
+      if (!mounted || generation !== deviceGeneration || before.some((value, index) => value !== [draftForge, draftHost, draftClient][index])) return;
       deviceCode = value.userCode;
       deviceUrl = value.verificationUri;
       if (value.verificationUri) void openUrl(value.verificationUri);
       deviceTries = 0;
-      stopDevice();
+      clearDeviceTimer();
       deviceTimer = setInterval(() => void pollDevice(), 3000);
     } catch (error) {
-      shell.actionError = shell.message(error);
+      if (generation === deviceGeneration) shell.actionError = shell.message(error);
     }
   }
 
   onMount(() => {
     void loadServices();
     void loadRemotes();
-    return () => stopDevice();
+    return () => { mounted = false; loginGeneration++; draftProbeGeneration++; stopDevice(); };
   });
 </script>
 

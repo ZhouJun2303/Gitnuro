@@ -446,7 +446,39 @@ pub struct RebaseStep {
     pub message: String,
 }
 
+impl Mutation {
+    /// Independent invalidation domains; metadata-only operations do not scan files.
+    pub fn refresh_areas(&self) -> &'static [&'static str] {
+        use Mutation::*;
+        match self {
+            Fetch { .. } | Push { .. } | PushRef { .. } | CreateBranch { .. } | DeleteBranch { .. }
+                | Tag { .. } | DeleteTag { .. } | DeleteRemoteTag { .. } | DeleteRemoteBranch { .. } => &["refs"],
+            RenameBranch { .. } | SetUpstream { .. } | AddRemote { .. } | RemoveRemote { .. } | SetRemoteUrl { .. }
+                | AddWorktree { .. } | RemoveWorktree { .. } => &["refs", "config"],
+            StashDrop { .. } | StashRename { .. } => &["stashes"],
+            Stash { .. } | StashPop { .. } | StashPaths { .. } => &["worktree", "index", "stashes"],
+            StashApply { .. } | RestoreFile { .. } | Discard { .. } | DiscardPaths { .. } | Delete { .. } | DeletePaths { .. }
+                | ApplyPatch { .. } | SubmoduleUpdate | SubmoduleUpdatePath { .. } => &["worktree", "index"],
+            StageHunk { .. } | StageLine { .. } | StageLines { .. } | StagePaths { .. } => &["index"],
+            DiscardHunk { .. } | DiscardLine { .. } | DiscardLines { .. } | LfsPull => &["worktree"],
+            Resolve { .. } | ResolvePaths { .. } => &["worktree", "index", "flow"],
+            WriteGitignore { .. } | AppendIgnore { .. } | SubmoduleAdd { .. } | SubmoduleRemove { .. } => &["worktree", "index", "config"],
+            WriteMailmap { .. } => &["worktree", "config", "history"],
+            SubmoduleInit { .. } | SubmoduleSync { .. } | GitFlowInit { .. } | LfsLock { .. } | LfsUnlock { .. }
+                | SetHidden { .. } | SetExpanded { .. } | SetSignOff { .. } => &["config"],
+            StashPatch { .. } | LfsPush => &[],
+            Reset { mode: ResetMode::Soft, .. } => &["refs", "history", "flow"],
+            Pull { .. } | PullRef { .. } | Checkout { .. } | CheckoutRemote { .. } | Merge { .. } | Rebase { .. }
+                | RebaseInteractive { .. } | Abort | Continue { .. } | Skip | Reset { .. } | CherryPick { .. }
+                | Revert { .. } | Reword { .. } | Bisect { .. } | GitFlowStart { .. } | GitFlowFinish { .. }
+                | Squash { .. } | Clone { .. } | Init { .. } | Custom { .. } => &["worktree", "index", "refs", "history", "flow"],
+            StashBranch { .. } => &["worktree", "index", "refs", "history", "stashes", "flow"],
+        }
+    }
+}
+
 pub fn perform(repo: &Path, mutation: Mutation) -> Result<String, Error> {
+    crate::cli::check_cancelled()?;
     if let Mutation::Custom {
         command,
         repo: marked,
@@ -2105,6 +2137,7 @@ fn delete_path(repo: &Path, file: &str) -> Result<(), Error> {
 }
 
 fn remove_worktree_file(repo: &Path, file: &str) -> Result<(), Error> {
+    crate::cli::check_cancelled()?;
     let full = repo.join(file);
     if !full.starts_with(repo) {
         return Err(Error::Path(file.to_string()));
@@ -2742,15 +2775,14 @@ fn custom(
         process.arg("-c").arg(expanded);
         process
     };
-    let output = process
+    process
         .current_dir(repo)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("AWEGIT_REPO", &repo_text)
         .env("AWEGIT_SHA", sha)
         .env("AWEGIT_BRANCH", branch)
-        .env("AWEGIT_FILE", file)
-        .output()
-        .map_err(|source| Error::Git(format!("could not start the custom command: {source}")))?;
+        .env("AWEGIT_FILE", file);
+    let output = crate::cli::run_external(repo, &mut process)?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if output.status.success() {
@@ -3378,6 +3410,52 @@ pub struct ScanResult {
 }
 
 const SCAN_CAP: usize = 300;
+
+/// Keep directory iterators between pages so even a single large source root yields results.
+pub struct RepositoryScan {
+    stack: Vec<(PathBuf, usize, Option<std::fs::ReadDir>)>,
+    limit: usize,
+    found: usize,
+}
+
+impl RepositoryScan {
+    pub fn new(root: &Path, depth: usize) -> Result<Self, Error> {
+        if !root.is_dir() { return Err(Error::Git(format!("{} is not a directory", root.display()))); }
+        Ok(Self { stack: vec![(root.to_path_buf(), 0, None)], limit: if depth == 0 { 5 } else { depth }, found: 0 })
+    }
+
+    pub fn next_page(&mut self) -> (ScanResult, bool) {
+        let started = std::time::Instant::now();
+        let mut result = ScanResult { paths: Vec::new(), truncated: false };
+        for _ in 0..128 {
+            let Some((dir, depth, entries)) = self.stack.last_mut() else { break };
+            if entries.is_none() {
+                if dir.join(".git").exists() {
+                    if self.found == SCAN_CAP { result.truncated = true; self.stack.clear(); break; }
+                    result.paths.push(dir.display().to_string()); self.found += 1;
+                    self.stack.pop();
+                    if result.paths.len() >= 16 { break; }
+                    continue;
+                }
+                if *depth > self.limit { self.stack.pop(); continue; }
+                *entries = std::fs::read_dir(dir).ok();
+            }
+            let entry = entries.as_mut().and_then(Iterator::next);
+            match entry {
+                Some(Ok(entry)) if *depth < self.limit && entry.file_type().is_ok_and(|kind| kind.is_dir()) => {
+                    if !matches!(entry.file_name().to_string_lossy().as_ref(), "node_modules" | "target" | "dist" | "vendor" | ".git" | ".next" | "out") {
+                        let next_depth = *depth + 1; self.stack.push((entry.path(), next_depth, None));
+                    }
+                }
+                None => { self.stack.pop(); }
+                _ => {}
+            }
+            if started.elapsed().as_millis() >= 20 { break; }
+        }
+        let more = !self.stack.is_empty();
+        (result, more)
+    }
+}
 
 /// Find git work trees under `root`, without entering a repository or common build folders.
 pub fn scan_repositories(root: &Path, depth_limit: usize) -> Result<ScanResult, Error> {

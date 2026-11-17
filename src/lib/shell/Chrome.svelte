@@ -4,6 +4,7 @@
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
+  import TaskQueue from "./TaskQueue.svelte";
 
   const shell = getShell();
   const launchShortcut = $derived.by(() => { shell.settings.shortcuts; return shortcutLabel("launch"); });
@@ -108,11 +109,11 @@
           { label: shell.tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: shell.syncDisabled("push"), run: () => void shell.doPush() },
           { label: shell.tr("chrome.pushTags"), disabled: shell.syncDisabled("push"), run: () => void shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease }) },
         ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg><span>{shell.tr("chrome.push")}</span>{#if shell.currentBranch && shell.currentBranch.ahead > 0}<em class="sync-count">{shell.currentBranch.ahead > 99 ? "99+" : shell.currentBranch.ahead}</em>{/if}</button>
-        <button class="tool-btn stack" type="button" title={shell.tr("chrome.stash")} disabled={shell.busy || shell.mode !== "live"} onclick={() => shell.openStash([])} oncontextmenu={(event) => shell.openMenu(event, shell.stashItems())}>
+        <button class="tool-btn stack" type="button" title={shell.tr("chrome.stash")} disabled={shell.writeBlocked || shell.mode !== "live"} onclick={() => shell.openStash([])} oncontextmenu={(event) => shell.openMenu(event, shell.stashItems())}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
           <span>{shell.tr("chrome.stash")}</span>
         </button>
-        <button class="tool-btn caret-only" type="button" disabled={shell.busy || shell.mode !== "live"} aria-label={shell.tr("chrome.stash")} aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.stashItems())}>
+        <button class="tool-btn caret-only" type="button" disabled={shell.writeBlocked || shell.mode !== "live"} aria-label={shell.tr("chrome.stash")} aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.stashItems())}>
           <svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
         </button>
       </div>
@@ -177,6 +178,7 @@
         {/if}
       </div>
       <div class="chrome-right">
+        <TaskQueue />
         <button class="tool-btn stack" type="button" title={shell.tr("chrome.explorer")} disabled={!shell.snapshot} onclick={() => shell.snapshot && void shell.openLocal(shell.snapshot.path)}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>
           <span>{shell.tr("chrome.explorer")}</span>
