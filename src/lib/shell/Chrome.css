@@ -187,7 +187,7 @@
     bottom: 0;
     width: 46%;
     background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 34%, white), transparent);
-    animation: busy-flow 0.1s linear infinite;
+    animation: busy-flow 0.3s linear infinite;
   }
 
 .history-btn { position: relative; }

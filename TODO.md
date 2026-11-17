@@ -8,6 +8,8 @@
 
 ## 已处理
 
+- [x] 顶部扫光统一为 0.3 秒一趟，移除“减少动态效果”将时长覆盖成 3 秒的规则。修复：本条所在提交 `fix: 将顶部扫光统一为 0.3 秒一趟`；回归：`e2e/sync-toolbar.spec.ts` 的 `busy toolbar sweep keeps its 300ms duration across motion preferences`，三套主题下切换系统偏好后，浏览器计算样式及运行中的动画周期均为 300ms，三项通过；`pnpm check` 通过。旧规则已复现为 3 秒。
+
 - [x] 顶部扫光默认时长从 1.3 秒缩短为 0.1 秒一趟，保留系统“减少动态效果”设置。修复：本条所在提交 `style: 将顶部扫光时长缩短为 0.1 秒`；回归：`e2e/scenes.spec.ts` 的 `scene sync-busy`，Apple、经典白色、VS Code 黑色三项通过，`pnpm check` 通过。
 
 - [x] 大量修改和未跟踪文件下的单文件、目录双击暂存与取消暂存：改为受影响路径状态读取、合并整仓校验，去掉重复索引刷新，安全压缩完整目录路径，复用选择索引和已加载差异，旧预览不再阻塞暂存写入。修复：本条所在提交 `perf: 优化大量改动下的暂存和取消暂存响应`；回归：`directory_stage_compacts_only_complete_selections_and_keeps_hidden_scratch_out`、`scoped_status_is_literal_and_keeps_unrelated_directories_out`、`folder_staging_keeps_filtered_fakeignored_and_empty_selections_exact`、`stage_responses_scope_normal_writes_and_fully_refresh_conflict_flows`，以及 `e2e/stage-performance.spec.ts`、`e2e/stage-dense.spec.ts` 和相关三主题面板共 37 项 UI。补测 25,000 行和 120,000 行全部修改，预览挂起时仍可暂存/取消、滚动和输入；后端相关 39 项、`pnpm check`、`pnpm build` 通过。测量和限制见 [性能记录第 12 节](dev-docs/performance-plan.md#12-2026-11-17-大量修改与未跟踪文件下的暂存响应对照-aaf0c347)。
