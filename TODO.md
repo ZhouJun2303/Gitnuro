@@ -8,6 +8,8 @@
 
 ## 已处理
 
+- [x] 大量修改和未跟踪文件下的单文件、目录双击暂存与取消暂存：改为受影响路径状态读取、合并整仓校验，去掉重复索引刷新，安全压缩完整目录路径，复用选择索引和已加载差异，旧预览不再阻塞暂存写入。修复：本条所在提交 `perf: 优化大量改动下的暂存和取消暂存响应`；回归：`directory_stage_compacts_only_complete_selections_and_keeps_hidden_scratch_out`、`scoped_status_is_literal_and_keeps_unrelated_directories_out`、`folder_staging_keeps_filtered_fakeignored_and_empty_selections_exact`、`stage_responses_scope_normal_writes_and_fully_refresh_conflict_flows`，以及 `e2e/stage-performance.spec.ts`、`e2e/stage-dense.spec.ts` 和相关三主题面板共 37 项 UI。补测 25,000 行和 120,000 行全部修改，预览挂起时仍可暂存/取消、滚动和输入；后端相关 39 项、`pnpm check`、`pnpm build` 通过。测量和限制见 [性能记录第 12 节](dev-docs/performance-plan.md#12-2026-11-17-大量修改与未跟踪文件下的暂存响应对照-aaf0c347)。
+
 - [x] 发布关键步骤增加时间、耗时和每 10 秒等待日志，安装包逐个显示文件名、大小、上传序号和重试；提交版本号后先推送开发分支，避免发布完成后仍有版本号提交未推送，推送失败在切换 release 和打包前停止。安装包全部上传后才公开 release 草稿，失败可续传。修复：本条所在提交 `fix: 完善发布进度日志并同步开发分支版本提交`；回归：`scripts/publish.test.ps1` 的 6 项离线测试，覆盖中文 Windows 编码、心跳与原生命令参数 / 管道 / 退出码、API 重试、完整发布与创建超时、上传失败保留草稿并续传、开发分支推送拒绝、只打包不推送；Windows PowerShell 5.1 语法检查通过。
 
 - [x] 分支行区分非悬停信息层和悬停操作层：平时保留分支名、上传 / 下载箭头及数量，已筛选分支常显取消入口；悬停或键盘聚焦时展开带圆角底色和轻边框的操作组。按钮独立占位，不再隐藏或覆盖同步状态。修复：本条所在提交 `fix: 分层展示分支操作并保留同步状态`；回归：`e2e/branch-actions.spec.ts` 的 `branch sync arrows stay visible beside hovered, focused and active filter actions`、`branch action icons and labels follow pin and history filter state`，以及 `e2e/branch-filters.spec.ts`、`e2e/branch-filter-memory.spec.ts`，三套主题相关 UI 共 21 项通过；最终分层样式复验 9 项通过，`pnpm check` 通过。

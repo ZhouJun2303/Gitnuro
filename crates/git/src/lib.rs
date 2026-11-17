@@ -23,7 +23,7 @@ pub use change::{
     blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line,
     discard_lines, file_diff, file_diff_with, file_preview, index_preview, launch_diff_pair, launch_diff_tool,
     launch_editor, launch_merge_tool, porcelain_z_paths, range_diff, resolve_conflict,
-    resolve_conflicts, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths,
+    compact_directory_paths, resolve_conflicts, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths,
     staged_diff, unstage_all, unstage_paths, workspace_diff, BlobView, CommitRequest,
     ConflictSides, ConflictView, DiffLine, DiffLineKind, FileDiff, FilePreview, LineEdit,
 };
@@ -132,6 +132,23 @@ pub fn status(path: impl AsRef<Path>) -> Result<StatusSnapshot, Error> {
 ///
 /// Conflicts stay visible. Passing `false` is the same as [`status`].
 pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSnapshot, Error> {
+    status_patterns(path.as_ref(), fakeignore, Vec::new())
+}
+
+/// Read only the given literal paths and their descendants. An empty selection
+/// returns no changes, rather than requesting the entire work tree.
+pub fn status_paths_with(path: impl AsRef<Path>, fakeignore: bool, paths: &[String]) -> Result<StatusSnapshot, Error> {
+    let mut patterns = Vec::with_capacity(paths.len().max(1));
+    for path in paths {
+        cli::check_path(path)?;
+        let path = if cfg!(windows) { path.replace('\\', "/") } else { path.clone() };
+        patterns.push(gix::bstr::BString::from(format!(":(top,literal){path}")));
+    }
+    if patterns.is_empty() { patterns.push(gix::bstr::BString::from(":(top,literal).git/awegit-empty-selection")); }
+    status_patterns(path.as_ref(), fakeignore, patterns)
+}
+
+fn status_patterns(path: &Path, fakeignore: bool, patterns: Vec<gix::bstr::BString>) -> Result<StatusSnapshot, Error> {
     let path = path.as_ref();
     let repo = open_repo(path)?;
     let worktree = repo.workdir().unwrap_or(path).to_path_buf();
@@ -145,7 +162,7 @@ pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSna
     let iter = repo
         .status(gix::progress::Discard)?
         .untracked_files(gix::status::UntrackedFiles::Files)
-        .into_iter(Vec::<gix::bstr::BString>::new())?;
+        .into_iter(patterns)?;
 
     for item in iter {
         match item? {

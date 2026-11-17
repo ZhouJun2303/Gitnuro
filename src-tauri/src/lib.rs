@@ -246,9 +246,16 @@ fn repo_from(path: Option<String>) -> Result<PathBuf, String> {
 }
 
 fn read_status(repo: &Path) -> Result<awegit_git::StatusSnapshot, String> {
+    read_status_paths(repo, None)
+}
+
+fn read_status_paths(repo: &Path, paths: Option<&[String]>) -> Result<awegit_git::StatusSnapshot, String> {
     let _phase = perf::phase("status");
     let revision = changes::revision(repo);
-    let mut status = awegit_git::status_with(repo, use_fakeignore()).map_err(|error| error.to_string())?;
+    let mut status = match paths {
+        Some(paths) => awegit_git::status_paths_with(repo, use_fakeignore(), paths),
+        None => awegit_git::status_with(repo, use_fakeignore()),
+    }.map_err(|error| error.to_string())?;
     status.revision = revision;
     Ok(status)
 }
@@ -290,12 +297,17 @@ fn write_then_status(path: Option<String>, write: impl FnOnce(&Path) -> Result<(
 }
 
 fn write_kind_then_status(path: Option<String>, kind: &str, write: impl FnOnce(&Path) -> Result<(), awegit_git::Error>) -> Result<awegit_git::StatusSnapshot, String> {
+    write_kind_then_status_paths(path, kind, write, None).map(|(status, _)| status)
+}
+
+fn write_kind_then_status_paths(path: Option<String>, kind: &str, write: impl FnOnce(&Path) -> Result<(), awegit_git::Error>, paths: Option<Vec<String>>) -> Result<(awegit_git::StatusSnapshot, Option<Vec<String>>), String> {
     let given = path.clone();
     let repo = repo_from(path)?;
     let _turn = repo_turn(&repo);
     apply_session();
     let report = report_path(given, &repo);
     let flow = flows::begin_kind(&repo, kind, None);
+    let paths = paths.filter(|_| flow.is_none() && !awegit_git::flow::has_pending_restore(&repo));
     let action = || awegit_git::with_operation_repo(&report, || {
         write(&repo)?;
         awegit_git::flow::restore_pending(&repo)
@@ -303,7 +315,7 @@ fn write_kind_then_status(path: Option<String>, kind: &str, write: impl FnOnce(&
     let result = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
     if let Some(flow) = flow { flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), kind); }
     result.map_err(|error| error.to_string())?;
-    read_status(&repo)
+    Ok((read_status_paths(&repo, paths.as_deref())?, paths))
 }
 
 #[tauri::command]
@@ -333,13 +345,40 @@ fn unstage_all(path: Option<String>) -> Result<awegit_git::StatusSnapshot, Strin
 }
 
 #[tauri::command]
-fn stage_path(path: Option<String>, file: String) -> Result<awegit_git::StatusSnapshot, String> {
-    write_then_status(path, |repo| awegit_git::stage_paths(repo, &[file]))
+fn stage_path(path: Option<String>, file: String, files: Option<Vec<String>>, filtered: Option<bool>, incremental: Option<bool>) -> Result<ChangeReport, String> {
+    stage_selection_report(path, file, files, filtered, false, incremental.unwrap_or(false))
 }
 
 #[tauri::command]
-fn unstage_path(path: Option<String>, file: String) -> Result<awegit_git::StatusSnapshot, String> {
-    write_then_status(path, |repo| awegit_git::unstage_paths(repo, &[file]))
+fn unstage_path(path: Option<String>, file: String, files: Option<Vec<String>>, filtered: Option<bool>, incremental: Option<bool>) -> Result<ChangeReport, String> {
+    stage_selection_report(path, file, files, filtered, true, incremental.unwrap_or(false))
+}
+
+fn stage_selection_report(path: Option<String>, file: String, files: Option<Vec<String>>, filtered: Option<bool>, unstage: bool, incremental: bool) -> Result<ChangeReport, String> {
+    let paths = incremental.then(|| vec![file.clone()]);
+    let (result, log) = awegit_git::capture_output(|| {
+        write_kind_then_status_paths(path, "stage", |repo| stage_selection(repo, file, files, filtered.unwrap_or(true), unstage), paths)
+    });
+    let log = perf::redact(&log);
+    let (status, status_paths) = result.map_err(|error| if log.is_empty() { error } else { format!("{error}\n\n{log}") })?;
+    Ok(ChangeReport { status, log, status_paths })
+}
+
+/// A whole-folder gesture can use one pathspec. A filtered view or fake-ignore
+/// rules must keep the exact visible selection instead, including when empty.
+fn stage_selection(repo: &Path, file: String, files: Option<Vec<String>>, filtered: bool, unstage: bool) -> Result<(), awegit_git::Error> {
+    let paths = match files {
+        None => vec![file],
+        Some(files) => {
+            let directory = file.replace('\\', "/");
+            let prefix = format!("{}/", directory.trim_end_matches('/'));
+            let complete = files.len() > 40 && !filtered
+                && (!use_fakeignore() || !repo.join(".fakeignore").try_exists().unwrap_or(true))
+                && files.iter().all(|path| path.replace('\\', "/").starts_with(&prefix));
+            if complete { awegit_git::compact_directory_paths(repo, &file, files)? } else { files }
+        }
+    };
+    if unstage { awegit_git::unstage_paths(repo, &paths) } else { awegit_git::stage_paths(repo, &paths) }
 }
 
 #[tauri::command]
@@ -350,7 +389,7 @@ fn commit_changes(
     amend: bool,
     sign_off: bool,
     skip_hooks: Option<bool>,
-) -> Result<CommitReport, String> {
+) -> Result<ChangeReport, String> {
     let repo = repo_from(path.clone())?;
     let sign_off_format = if sign_off {
         let local = awegit_git::repo_sign_off_format(&repo);
@@ -394,7 +433,7 @@ fn commit_changes(
             )
         })
     });
-    Ok(CommitReport { status: result?, log })
+    Ok(ChangeReport { status: result?, log, status_paths: None })
 }
 
 #[tauri::command]
@@ -502,11 +541,14 @@ struct MutationReport {
 }
 
 #[derive(serde::Serialize)]
-struct CommitReport {
+struct ChangeReport {
     #[serde(flatten)]
     status: awegit_git::StatusSnapshot,
     #[serde(skip_serializing_if = "String::is_empty")]
     log: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "statusPaths")]
+    status_paths: Option<Vec<String>>,
 }
 
 #[tauri::command]

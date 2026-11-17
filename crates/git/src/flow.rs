@@ -65,6 +65,11 @@ pub fn restore_pending(repo: &Path) -> Result<(), Error> {
     crate::autostash::finish_if_settled(repo).map(|_| ())
 }
 
+/// Restoring a saved work tree can change paths outside a stage selection.
+pub fn has_pending_restore(repo: &Path) -> bool {
+    crate::model::pending_autostash(repo).is_some()
+}
+
 pub fn observe<T>(observer: Observer, action: impl FnOnce() -> T) -> T {
     struct Reset(Option<Observer>);
     impl Drop for Reset {

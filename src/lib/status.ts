@@ -8,6 +8,8 @@ export type StatusFile = {
 };
 
 export type StatusSnapshot = {
+  /** A stage response updates only these paths; a later full read reconciles the repository. */
+  statusPaths?: string[];
   revision?: number;
   path: string;
   branch: string | null;

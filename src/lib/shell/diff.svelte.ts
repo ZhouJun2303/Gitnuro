@@ -674,8 +674,15 @@ export function patchOf(shell: ShellState, file: string) {
     return shell.patchCache[file] ?? (shell.historyDiff?.path === file ? shell.historyDiff : null);
   }
 
+const rowPaths = new WeakMap<readonly Row[], Set<string>>();
+
 export function pickedIn(shell: ShellState, rows: Row[]) {
-    const names = new Set(rows.map((file) => file.path));
+    if (shell.picked.length === 0) return [];
+    let names = rowPaths.get(rows);
+    if (!names) {
+      names = new Set(rows.map((file) => file.path));
+      rowPaths.set(rows, names);
+    }
     return shell.picked.filter((path) => names.has(path));
   }
 
@@ -735,10 +742,7 @@ function rowOnSide(shell: ShellState, path: string, side: Side) {
   }
 
 function readingOnly(shell: ShellState) {
-    const job = shell.currentJob;
-    // A double-click selects the file twice, so more than one diff read can be in flight.
-    // Writes refuse to start while the repository is busy, so this label is still only a read.
-    return !shell.switching && job?.label === shell.tr("chrome.readingFile");
+    return shell.onlyDiffReads();
   }
 
 const flipping = new Set<string>();
@@ -873,10 +877,13 @@ export function filesInDir(shell: ShellState, dir: string, side: Side) {
   }
 
 export async function stageFolder(shell: ShellState, dir: string, unstage: boolean) {
+    if (shell.mode !== "live") return;
     const files = shell.filesInDir(dir, unstage ? "staged" : "unstaged");
     if (files.length === 0) return;
-    await shell.mutate({ action: "stagePaths", files, unstage });
-    unpickFiles(shell, files);
+    const result = await shell.runChange(unstage ? "unstage_path" : "stage_path", {
+      file: dir, files, filtered: shell.fileQuery.trim().length > 0 || shell.conflictsOnly,
+    }, readingOnly(shell));
+    if (result) unpickFiles(shell, files);
   }
 
 export function copyText(shell: ShellState, text: string) {
@@ -1125,6 +1132,11 @@ export function fullPath(shell: ShellState, file: string) {
   }
 
 export function selectFile(shell: ShellState, path: string, side: Side, event?: MouseEvent) {
+    // The second click of a double-click must not restart the same preview.
+    if (event && event.detail > 1 && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey
+      && shell.selectedPath === path && shell.selectedSide === side) return;
+    const samePreview = shell.selectedPath === path && shell.selectedSide === side
+      && shell.diff?.path === path && shell.diff.staged === (side === "staged");
     shell.blameGen += 1;
     shell.clearTextSelection();
     shell.conflictView = null;
@@ -1144,7 +1156,7 @@ export function selectFile(shell: ShellState, path: string, side: Side, event?: 
       const at = rows.findIndex((row) => row.path === path);
       if (at >= 0) shell.selectedIndex = at;
     }
-    if (shell.mode === "live") void shell.loadDiff();
+    if (shell.mode === "live" && !samePreview) void shell.loadDiff();
   }
 
 /** A folder click picks every file under it, so discard and stage act on the whole folder. */
@@ -1177,9 +1189,15 @@ export function selectFolder(shell: ShellState, dir: string, side: Side, event?:
     if (shell.mode === "live") void shell.loadDiff();
   }
 
+const liveRows = new WeakMap<StatusFile, Row>();
+
 export function toRow(shell: ShellState, file: StatusFile) {
+    const cached = liveRows.get(file);
+    if (cached) return cached;
     const mark = badge(file.kind);
-    return { path: file.path, letter: mark.letter, tone: mark.tone };
+    const row = { path: file.path, letter: mark.letter, tone: mark.tone };
+    liveRows.set(file, row);
+    return row;
   }
 
 export function fileName(shell: ShellState, path: string) {

@@ -116,23 +116,72 @@ function sameStatusFiles(left: readonly StatusFile[], right: readonly StatusFile
   return true;
 }
 
-/** Directories whose every visible file is picked, keyed by the same `/`-joined path the tree uses. */
+/** Match Rust's UTF-8 path order, including supplementary Unicode characters. */
+function statusPathBefore(left: string, right: string) {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    if (left.charCodeAt(index) !== right.charCodeAt(index)) return left.codePointAt(index)! < right.codePointAt(index)!;
+  }
+  return left.length < right.length;
+}
+
+function mergeStatusFiles(previous: StatusFile[], next: StatusFile[], scopes: Set<string>, touched: Set<string>) {
+  const contains = (path: string) => {
+    path = path.replaceAll("\\", "/");
+    if (touched.has(path) || scopes.has(".") || scopes.has("")) return true;
+    while (path) {
+      if (scopes.has(path)) return true;
+      const slash = path.lastIndexOf("/");
+      if (slash < 0) break;
+      path = path.slice(0, slash);
+    }
+    return false;
+  };
+  const files: StatusFile[] = [];
+  let index = 0;
+  for (const file of previous) {
+    if (contains(file.path) || (file.previousPath && contains(file.previousPath))) continue;
+    while (index < next.length && statusPathBefore(next[index]!.path, file.path)) files.push(next[index++]!);
+    files.push(file);
+  }
+  while (index < next.length) files.push(next[index++]!);
+  return files;
+}
+
+const directoryIndexes = new WeakMap<readonly Row[], { paths: Set<string>; totals: Map<string, number> }>();
+
+/** Directory totals follow the file list; a click only counts the picked paths. */
 function fullyPickedDirs(files: readonly Row[], picked: readonly string[]) {
-  const pickedSet = new Set(picked);
-  const totals = new Map<string, number>();
+  const dirs = new Set<string>();
+  if (picked.length === 0) return dirs;
+  let index = directoryIndexes.get(files);
+  if (!index) {
+    const totals = new Map<string, number>();
+    const paths = new Set<string>();
+    for (const file of files) {
+      paths.add(file.path);
+      const parts = file.path.split(/[/\\]/);
+      let acc = "";
+      for (let part = 0; part < parts.length - 1; part++) {
+        acc = acc ? `${acc}/${parts[part]}` : (parts[part] ?? "");
+        totals.set(acc, (totals.get(acc) ?? 0) + 1);
+      }
+    }
+    index = { paths, totals };
+    directoryIndexes.set(files, index);
+  }
   const hits = new Map<string, number>();
-  for (const file of files) {
-    const parts = file.path.split(/[/\\]/);
+  for (const path of new Set(picked)) {
+    if (!index.paths.has(path)) continue;
+    const parts = path.split(/[/\\]/);
     let acc = "";
-    for (let index = 0; index < parts.length - 1; index += 1) {
-      acc = acc ? `${acc}/${parts[index]}` : (parts[index] ?? "");
-      totals.set(acc, (totals.get(acc) ?? 0) + 1);
-      if (pickedSet.has(file.path)) hits.set(acc, (hits.get(acc) ?? 0) + 1);
+    for (let part = 0; part < parts.length - 1; part++) {
+      acc = acc ? `${acc}/${parts[part]}` : (parts[part] ?? "");
+      hits.set(acc, (hits.get(acc) ?? 0) + 1);
     }
   }
-  const dirs = new Set<string>();
-  for (const [dir, total] of totals) {
-    if (total > 0 && hits.get(dir) === total) dirs.add(dir);
+  for (const [dir, count] of hits) {
+    if (count === index.totals.get(dir)) dirs.add(dir);
   }
   return dirs;
 }
@@ -1447,12 +1496,15 @@ export class ShellState {
   selectedDiff = $derived(this.mode === "sample" && this.selectedPath ? (diffs[this.selectedPath] ?? []) : []);
 
 
+  stagedFiles = $derived(this.snapshot?.staged ?? []);
+  unstagedFiles = $derived(this.snapshot?.unstaged ?? []);
+
   staged = $derived<Row[]>(
-    this.mode === "live" ? (this.snapshot?.staged ?? []).map(this.toRow.bind(this)) : this.mode === "sample" ? sampleStaged.map(this.sampleRow.bind(this)) : [],
+    this.mode === "live" ? this.stagedFiles.map(this.toRow.bind(this)) : this.mode === "sample" ? sampleStaged.map(this.sampleRow.bind(this)) : [],
   );
 
 
-  unstaged = $derived<Row[]>(this.mode === "live" ? (this.snapshot?.unstaged ?? []).map(this.toRow.bind(this)) : sampleUnstaged.map(this.sampleRow.bind(this)));
+  unstaged = $derived<Row[]>(this.mode === "live" ? this.unstagedFiles.map(this.toRow.bind(this)) : sampleUnstaged.map(this.sampleRow.bind(this)));
 
 
   branchLabel = $derived(
@@ -2791,15 +2843,24 @@ export class ShellState {
   writeWaiters: Array<() => void> = [];
 
 
-  async waitForWriteSlot() {
-    while (this.busy) {
+  async waitForWriteSlot(duringRead = false) {
+    while (this.busy && !(duringRead && this.onlyDiffReads())) {
       await new Promise<void>((resolve) => this.writeWaiters.push(resolve));
     }
   }
 
+  /** Preview reads do not own the index, even if an overlapping write set the job label. */
+  diffReads = $state<Record<string, number>>({});
+
+  onlyDiffReads() {
+    const key = this.jobKey(this.repoPath());
+    const depth = this.currentJob?.depth ?? 0;
+    return !this.switching && depth > 0 && this.diffReads[key] === depth;
+  }
+
 
   releaseWriteWaiters() {
-    if (this.busy || this.writeWaiters.length === 0) return;
+    if (this.writeWaiters.length === 0 || (this.busy && !this.onlyDiffReads())) return;
     const waiting = this.writeWaiters;
     this.writeWaiters = [];
     for (const resolve of waiting) resolve();
@@ -2866,6 +2927,25 @@ export class ShellState {
 
 
   applySnapshot(value: StatusSnapshot) {
+    if (value.statusPaths) {
+      // A path-limited read cannot claim to cover external changes elsewhere.
+      if (!this.snapshot || this.snapshot.path !== value.path) return;
+      const { statusPaths, ...partial } = value;
+      const scopes = new Set(statusPaths.map((path) => path.replaceAll("\\", "/").replace(/\/+$/, "")));
+      const touched = new Set<string>();
+      for (const file of [...value.staged, ...value.unstaged]) {
+        touched.add(file.path.replaceAll("\\", "/"));
+        if (file.previousPath) touched.add(file.previousPath.replaceAll("\\", "/"));
+      }
+      value = { ...partial, revision: this.statusRevision,
+        staged: mergeStatusFiles(this.snapshot.staged, value.staged, scopes, touched),
+        unstaged: mergeStatusFiles(this.snapshot.unstaged, value.unstaged, scopes, touched),
+      };
+      this.scheduleStageRefresh();
+    } else if (this.stageRefreshTimer != null) {
+      clearTimeout(this.stageRefreshTimer);
+      this.stageRefreshTimer = null;
+    }
     if (this.snapshot?.path !== value.path) {
       this.contextRevision = 0;
       this.watchQueued = null;
@@ -2873,7 +2953,14 @@ export class ShellState {
     }
     this.statusRevision = value.revision ?? 0;
     this.statusGen += 1;
-    if (!sameSnapshot(this.snapshot, value)) this.snapshot = value;
+    if (!sameSnapshot(this.snapshot, value)) {
+      const previous = this.snapshot?.path === value.path ? this.snapshot : null;
+      this.snapshot = previous ? {
+        ...value,
+        staged: sameStatusFiles(previous.staged, value.staged) ? previous.staged : value.staged,
+        unstaged: sameStatusFiles(previous.unstaged, value.unstaged) ? previous.unstaged : value.unstaged,
+      } : value;
+    }
     this.mode = "live";
     this.loadError = "";
     if (value.path && !this.repos.includes(value.path)) this.repos = [...this.repos, value.path];
@@ -2928,6 +3015,20 @@ export class ShellState {
 
   watchCovered(scope: "status" | "full", revision: number) {
     return revision > 0 && revision <= this.statusRevision && (scope === "status" || revision <= this.contextRevision);
+  }
+
+  stageRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Coalesce full validation after a burst of path-limited stage responses. */
+  scheduleStageRefresh() {
+    if (this.stageRefreshTimer !== null) clearTimeout(this.stageRefreshTimer);
+    const path = this.repoPath(), gen = this.openGen;
+    this.stageRefreshTimer = setTimeout(() => {
+      this.stageRefreshTimer = null;
+      if (gen !== this.openGen || !this.viewing(path)) return;
+      this.queueWatch("status", 0);
+      this.replayWatch();
+    }, 250);
   }
 
   queueWatch(scope: "status" | "full", revision: number) {
@@ -2985,10 +3086,18 @@ export class ShellState {
 
   async withWork<T>(label: string, body: () => Promise<T>): Promise<T> {
     const path = this.repoPath() ?? "";
+    const key = this.jobKey(path);
+    const reading = label === this.tr("chrome.readingFile");
+    if (reading) this.diffReads[key] = (this.diffReads[key] ?? 0) + 1;
     this.startWork(label, path);
     try {
       return await body();
     } finally {
+      if (reading) {
+        const count = (this.diffReads[key] ?? 1) - 1;
+        if (count > 0) this.diffReads[key] = count;
+        else delete this.diffReads[key];
+      }
       this.stopWork(path);
     }
   }
@@ -2997,27 +3106,37 @@ export class ShellState {
 
   async runChange(command: string, extra: Record<string, unknown> = {}, duringRead = false) {
     const path = this.repoPath();
-    const reading = duringRead && !this.switching && this.currentJob?.label === this.tr("chrome.readingFile");
+    const allowReads = duringRead || ["stage_path", "unstage_path", "stage_all", "unstage_all"].includes(command);
+    const reading = allowReads && this.onlyDiffReads();
     if (this.mode !== "live" || !path) return undefined;
     if (this.busy && !reading) {
-      await this.waitForWriteSlot();
+      await this.waitForWriteSlot(allowReads);
       if (this.mode !== "live" || this.repoPath() !== path) return undefined;
     }
     this.actionError = null;
     this.stashRetry = null;
+    const stageRequest = Array.isArray(extra.files) ? { action: "stagePaths", files: extra.files, unstage: command === "unstage_path" } : null;
+    const described = stageRequest ? this.describeRequest(stageRequest) : null;
     this.startWork(this.tr("chrome.working"), path);
+    let refreshDiff = false;
     try {
-      const value = await invoke<StatusSnapshot & { log?: string }>(command, { path, ...extra });
+      const incremental = command === "stage_path" || command === "unstage_path";
+      const value = await invoke<StatusSnapshot & { log?: string }>(command, { path, ...extra, ...(incremental ? { incremental: true } : {}) });
+      if (described) this.recordCommand("stagePaths", described, value.log ?? "", true, "user");
       if (this.viewing(path)) {
         this.applySnapshot(value);
-        await this.loadDiff();
+        if (allowReads) refreshDiff = true;
+        else await this.loadDiff();
       }
       return value;
     } catch (error) {
+      if (described) this.recordCommand("stagePaths", described, this.message(error), false, "user");
+      if (allowReads && this.viewing(path)) this.scheduleStageRefresh();
       if (this.viewing(path)) this.actionError = this.message(error);
       return null;
     } finally {
       this.stopWork(path);
+      if (refreshDiff && this.viewing(path)) void this.loadDiff();
     }
   }
 
@@ -3353,6 +3472,7 @@ export class ShellState {
     if (!this.backend() || !path) return;
     const background = source === "background";
     const action = String(request.action ?? "");
+    let refreshStageDiff = false;
     if (!background && ["fetch", "pull", "pullRef"].includes(action)) this.cancelAutomaticFetch();
     // Menus and shortcuts obey the same restrictions as the sync toolbar.
     if (["fetch", "pull", "pullRef", "push", "pushRef"].includes(action)) {
@@ -3371,9 +3491,9 @@ export class ShellState {
     const startedAt = performance.now();
     let started = false;
     try {
-      if (this.busy) {
+      if (this.busy && !(action === "stagePaths" && this.onlyDiffReads())) {
         if (background) return;
-        await this.waitForWriteSlot();
+        await this.waitForWriteSlot(action === "stagePaths");
         if (this.repoPath() !== path) return;
       }
       if (!background) this.actionError = null;
@@ -3406,7 +3526,10 @@ export class ShellState {
         if (this.viewing(path) && !superseded) {
           this.applySnapshot(value);
           if (refreshContext && value.refreshScope !== "status") await this.loadContext(operation);
-          if (!background && this.viewing(path)) await this.loadDiff();
+          if (!background && this.viewing(path)) {
+            if (action === "stagePaths") refreshStageDiff = true;
+            else await this.loadDiff();
+          }
         }
         // Any write made while other paths stay unmerged reports "conflict" even when it
         // succeeded; only a Git error from this action failed it.
@@ -3485,6 +3608,7 @@ export class ShellState {
       }
     } finally {
       if (!background) this.userWrites -= 1;
+      if (refreshStageDiff && this.viewing(path)) void this.loadDiff();
     }
   }
 

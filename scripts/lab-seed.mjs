@@ -574,7 +574,33 @@ function seedHistoryImagesRepo() {
   write(path, "art/mark.png", preview(false, 240, 288));
 }
 
+function seedStageManyRepo(name = "stage-many", dense = false) {
+  const path = join(repos, name);
+  const text = (count, changed) => Array.from({ length: count }, (_, index) =>
+    `export const value${index} = "${changed ? "working" : "base"}-${index} ${"payload ".repeat(4)}";\n`).join("");
+  wipe(path);
+  initWork(path);
+  git(path, ["config", "core.autocrlf", "false"]);
+  for (let index = 0; index < 5000; index++) write(path, `tracked/file-${String(index).padStart(5, "0")}.txt`, "base\n");
+  if (dense) {
+    write(path, "a-many.ts", text(25_000, false));
+    write(path, "b-large.asset", text(120_000, false));
+  }
+  git(path, ["add", "."]);
+  git(path, ["commit", "-m", "test: many tracked files"]);
+  for (let index = 0; index < 5000; index++) {
+    write(path, `tracked/file-${String(index).padStart(5, "0")}.txt`, "working\n");
+    write(path, `loose/file-${String(index).padStart(5, "0")}.txt`, "untracked\n");
+  }
+  if (dense) {
+    write(path, "a-many.ts", text(25_000, true));
+    write(path, "b-large.asset", text(120_000, true));
+  }
+}
+
 const restore = {
+  "stage-many": seedStageManyRepo,
+  "stage-dense": () => seedStageManyRepo("stage-dense", true),
   "history-images": seedHistoryImagesRepo,
   "checkout-dirty": () => seedCheckoutRepo(),
   "checkout-index": () => seedCheckoutRepo("checkout-index"),
@@ -798,6 +824,8 @@ seedCherryRepo();
 seedRevertRepo();
 seedTagsRepo();
 seedHistoryImagesRepo();
+seedStageManyRepo();
+seedStageManyRepo("stage-dense", true);
 
 const detached = join(repos, "detached");
 initWork(detached);
