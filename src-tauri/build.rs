@@ -42,6 +42,7 @@ fn app_code() -> i64 {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=../src/lib/font-catalog.json");
     println!("cargo:rustc-env=AWE_BUILD_STAMP={}", build_stamp());
     println!("cargo:rustc-env=AWE_APP_CODE={}", app_code());
     let attributes = tauri_build::Attributes::new().app_manifest(
@@ -66,6 +67,13 @@ fn main() {
             "file_history",
             "blame_file",
             "load_settings",
+            "font_data",
+            "download_font",
+            "download_google_font",
+            "recognize_google_font",
+            "font_download_progress",
+            "font_cache_info",
+            "open_font_folder",
             "save_settings",
             "save_window_bounds",
             "settings_path",

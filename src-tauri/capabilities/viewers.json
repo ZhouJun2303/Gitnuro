@@ -31,6 +31,8 @@
     "allow-file-history",
     "allow-blame-file",
     "allow-load-settings",
+    "allow-font-data",
+    "allow-font-cache-info",
     "allow-save-settings",
     "allow-settings-path",
     "allow-external-tools",

@@ -3,6 +3,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { invoke } from "./perf";
+  import { applyFont } from "./fonts";
   import { translate, resolveLocale, type Locale } from "./i18n";
   import { broadcastLocale, onLocaleChange } from "./i18n/sync";
   import { isAppearance, onAppearanceChange, resolveAppearance } from "./appearance";
@@ -26,6 +27,8 @@
   let expanded = $state<Record<string, boolean>>({});
   let locale = $state<Locale>("zh");
   let appearance = $state("apple");
+  let uiFont = $state("");
+  let codeFont = $state("");
   let error = $state("");
   let ready = $state(false);
   let scene = $state("");
@@ -41,6 +44,12 @@
   let height = $state(600);
   const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   const tr = (key: string, vars: Record<string, string> = {}) => translate(locale, `flow.${key}`, vars);
+  function useFonts(settings: Settings) {
+    uiFont = settings.uiFont || "";
+    codeFont = settings.codeFont || "";
+    document.documentElement.style.setProperty("--ui-weight", String(settings.uiFontWeight || 400));
+    document.documentElement.style.setProperty("--code-weight", String(settings.codeFontWeight || 400));
+  }
   const label = (key: string) => { const text = tr(key); return text.startsWith("flow.") ? key : text; };
   const title = (node: FlowNode) => node.kind === "finished" && node.state !== "completed" ? tr("phase-finished") : node.kind === "conflict" ? tr("round", { n: String(node.round) })
     : label(({ "local-saved": "saved", "local-restore": "restore" } as Record<string, string>)[node.kind] ?? node.kind);
@@ -144,6 +153,8 @@
   $effect(() => {
     document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
   });
+  $effect(() => applyFont(uiFont, "ui", desktop || !!scene, () => {}));
+  $effect(() => applyFont(codeFont, "code", desktop || !!scene, () => {}));
 
   $effect(() => {
     if (!ready || !shouldAutoClose || !summary) return;
@@ -193,6 +204,7 @@
       try {
         const settings = await invoke<Settings>("load_settings");
         configureShortcuts(settings.shortcuts);
+        useFonts(settings);
         autoClose = settings.flowAutoClose === true;
         locale = scene ? params.get("locale") === "en" ? "en" : "zh" : resolveLocale(settings.locale);
         appearance = scene && isAppearance(params.get("theme")) ? params.get("theme")! : settings.theme;
@@ -229,7 +241,10 @@
     const refreshAutoClose = () => {
       void refresh();
       void invoke<Settings>("load_settings").then((settings) => {
-        if (!disposed) autoClose = settings.flowAutoClose === true;
+        if (!disposed) {
+          autoClose = settings.flowAutoClose === true;
+          useFonts(settings);
+        }
       }).catch((cause) => { if (!disposed) error = String(cause); });
     };
     window.addEventListener("focus", refreshAutoClose);

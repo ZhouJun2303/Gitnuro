@@ -202,6 +202,48 @@
 
 .pref-control > input[type="number"] { width: 92px; }
 
+.dialog .font-row { flex-wrap: wrap; gap: 8px; }
+.font-row .pref-control { flex-wrap: wrap; justify-content: flex-end; }
+.font-error { margin: 4px 0; color: var(--deleted); overflow-wrap: anywhere; }
+.font-defaults, .font-storage-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.font-defaults .text-button, .font-storage-actions .text-button { flex: none; margin: 0; }
+.dialog .font-defaults p { margin: 0; flex: 1 1 230px; }
+.font-card .font-row { gap: 8px; }
+.font-card .pref-control { flex: 1 1 280px; }
+.font-card .pref-control > select { flex: 1; width: auto; min-width: 140px; }
+.font-card .text-button { margin: 0; min-width: 115px; }
+.dialog .font-file-path { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; font-size: 11px; color: var(--text-secondary); white-space: normal; max-height: none; }
+.font-file-path code, .font-cache-path { user-select: text; overflow-wrap: anywhere; font-family: var(--mono); font-size: 11px; }
+.font-cache-path { display: block; margin: 6px 0 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field); }
+.font-storage .pref-card-body { padding-top: 12px; }
+.font-metrics { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 16px; font-size: 12px; padding: 8px 0 12px; }
+.font-metrics > select { width: 100%; }
+.font-size-control { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.font-size-control input[type="range"] { flex: 1; min-width: 40px; width: 100%; padding: 0; cursor: pointer; }
+.font-size-control input[type="number"] { flex: none; width: 64px; }
+.font-preview-label { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 6px; color: var(--text-secondary); font-size: 11px; }
+.font-preview { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); color: var(--text); line-height: 1.7; overflow: auto; }
+.dialog .font-preview p { margin: 0; max-height: none; white-space: normal; color: inherit; font: inherit; }
+.font-preview pre { margin: 0; font: inherit; white-space: pre; }
+.font-code-keyword { color: var(--accent); }
+.font-code-string { color: var(--added); }
+.font-code-comment { color: var(--text-secondary); }
+.google-font-import .pref-card-body { padding-top: 12px; gap: 8px; }
+.google-font-link { align-self: flex-start; margin: 0; text-decoration: none; }
+.google-font-label { font-size: 12px; }
+.google-font-import input { width: 100%; min-width: 0; }
+.google-font-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+.google-font-actions select { flex: 1; min-width: 120px; }
+.google-font-actions .text-button { margin: 0; }
+.font-recognition { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; min-height: 28px; color: var(--text-secondary); font-size: 12px; }
+.font-recognition .text-button { margin: 0; flex: none; }
+.font-recognition.recognized { color: var(--added); }
+.font-recognition.failed { color: var(--deleted); }
+.font-download-progress { position: sticky; top: 0; z-index: 2; display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--elevated); font-size: 12px; }
+.font-download-progress > div { display: flex; justify-content: space-between; gap: 12px; }
+.font-download-progress progress { width: 100%; height: 8px; accent-color: var(--accent); }
+.font-download-progress .meta { font-variant-numeric: tabular-nums; }
+
 .theme-styles {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -225,6 +225,25 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.showFileHistory("data/sheet.xlsx");
     return;
   }
+  if (id === "file-history-image") {
+    await shell.showFileHistory(new URLSearchParams(window.location.search).get("file") || "art/mark.png");
+    return;
+  }
+  if (id === "commit-image") {
+    await shell.showFileHistory("art/mark.png");
+    shell.historyFilter = "";
+    shell.historyDetailHeight = 480;
+    await shell.openHistoryTab("changes");
+    return;
+  }
+  if (id === "history-branches") {
+    shell.section = "history";
+    shell.collapsedSide = [];
+    shell.graphBranches = ["main", "topic"];
+    shell.allBranches = false;
+    await shell.loadContext();
+    return;
+  }
   if (id === "blob") {
     shell.blobFile = "README.md";
     shell.blobRev = "HEAD";
@@ -638,7 +657,8 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.editorDetecting = false;
       break;
     case "prefs": {
-      const prefTabs: Record<string, "general" | "workspace" | "diff" | "previewFormats" | "shortcuts" | "commit" | "ai" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
+      const prefTabs: Record<string, "general" | "fonts" | "workspace" | "diff" | "previewFormats" | "shortcuts" | "commit" | "ai" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
+        "prefs-fonts": "fonts",
         "prefs-flow": "advanced",
         "prefs-workspace": "workspace",
         "prefs-shortcuts": "shortcuts",

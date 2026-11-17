@@ -182,6 +182,7 @@ fn layout() -> Result<Value, String> {
         "remote": text(root.join("remote.git")),
         "remotePush": text(root.join("remote-push.git")),
         "full": text(repos.join("full")),
+        "history-images": text(repos.join("history-images")),
         "tags": text(repos.join("tags")),
         "conflict": text(repos.join("conflict")),
         "merge": text(repos.join("merge")),
@@ -309,6 +310,13 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "operation_flow" => done_result(super::operation_flow(req(args, "path")?, req(args, "id")?)),
         "operation_history" => done_result(super::operation_history(req(args, "path")?, req(args, "offset")?, req(args, "limit")?)),
         "load_settings" => done_result(super::load_settings()),
+        "font_data" => done_result(super::font_data(req(args, "id")?)),
+        "download_font" => done_result(super::download_font(req(args, "id")?, req(args, "requestId")?)),
+        "download_google_font" => done_result(super::download_google_font(req(args, "name")?, req(args, "requestId")?)),
+        "recognize_google_font" => done_result(super::recognize_google_font(req(args, "name")?)),
+        "font_download_progress" => done(super::font_download_progress(req(args, "requestId")?)),
+        "font_cache_info" => done_result(super::font_cache_info()),
+        "open_font_folder" => Ok(Value::Null),
         "save_settings" => done_result(super::save_settings(req(args, "values")?)),
         "settings_path" => done_result(super::settings_path()),
         "import_fork_settings" => {
@@ -535,13 +543,33 @@ fn serve(stream: &mut TcpStream) -> Result<(), String> {
         write_response(stream, r#"{"ok":true}"#);
         return Ok(());
     }
+    if let Some(id) = route.strip_prefix("/font/") {
+        let _guard = enter();
+        let dir = super::fonts::cache_dir()?;
+        ensure_lab_path(&dir)?;
+        let bytes = super::fonts::cached_bytes(id)?;
+        let header = format!("HTTP/1.1 200 OK\r\nContent-Type: font/ttf\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", bytes.len());
+        stream.write_all(header.as_bytes()).and_then(|_| stream.write_all(&bytes)).map_err(|error| error.to_string())?;
+        return Ok(());
+    }
     if route != "/invoke" {
         return Err(format!("unknown lab route {route}"));
     }
     let request: Value = serde_json::from_slice(&body).map_err(|error| error.to_string())?;
     let command = request.get("cmd").and_then(Value::as_str).unwrap_or("").to_string();
     let args = request.get("args").cloned().unwrap_or_else(|| json!({}));
-    let _span = (!matches!(command.as_str(), "log_client" | "perf_snapshot"))
+    if matches!(command.as_str(), "download_font" | "download_google_font" | "recognize_google_font") {
+        // Keep polling and UI requests available during a slow optional font download.
+        let mut reply = stream.try_clone().map_err(|error| error.to_string())?;
+        std::thread::spawn(move || write_response(&mut reply, &invoke_response(&command, args)));
+    } else {
+        write_response(stream, &invoke_response(&command, args));
+    }
+    Ok(())
+}
+
+fn invoke_response(command: &str, args: Value) -> String {
+    let _span = (!matches!(command, "log_client" | "perf_snapshot"))
         .then(|| super::perf::command_with_id(&command, args.get("__perf").and_then(Value::as_str)));
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lab_invoke(&command, args)));
     let payload = match outcome {
@@ -549,8 +577,7 @@ fn serve(stream: &mut TcpStream) -> Result<(), String> {
         Ok(Err(error)) => json!({ "ok": false, "error": error }),
         Err(_) => json!({ "ok": false, "error": format!("lab command panicked: {command}") }),
     };
-    write_response(stream, &payload.to_string());
-    Ok(())
+    payload.to_string()
 }
 
 fn write_response(stream: &mut TcpStream, body: &str) {

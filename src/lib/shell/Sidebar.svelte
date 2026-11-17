@@ -161,6 +161,8 @@
             <path d="M9 3.5h6v6.2l2.2 2.1v2.2h-4.1L12 20.5l-1.1-6.5H6.8v-2.2L9 9.7z"/>
           {:else if kind === "funnel"}
             <path d="M4 5h16l-6.2 7.2V18l-3.6 2v-7.8z"/>
+          {:else if kind === "clear"}
+            <path d="m6 6 12 12M18 6 6 18"/>
           {:else if kind === "eye"}
             <path d="M2.5 12S6.2 6.5 12 6.5 21.5 12 21.5 12 17.8 17.5 12 17.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.4"/>
           {/if}
@@ -202,7 +204,7 @@
       {#snippet branchSwitches(name: string, canHide: boolean)}
         <div class="side-actions branch-switches">
           <button class="icon-btn" class:on={shell.pinnedHere.has(name)} type="button" title={shell.pinnedHere.has(name) ? shell.tr("menu.unpin") : shell.tr("menu.pin")} aria-pressed={shell.pinnedHere.has(name)} onclick={(event) => { event.stopPropagation(); shell.togglePin(name); }}>{@render glyph("pin")}</button>
-          <button class="icon-btn" class:on={shell.graphSolo === name} type="button" title={shell.tr("menu.showOnly")} aria-pressed={shell.graphSolo === name} onclick={(event) => { event.stopPropagation(); shell.soloBranch(name); }}>{@render glyph("funnel")}</button>
+          <button class="icon-btn history-filter-toggle" data-branch={name} class:on={shell.branchFilterSet.has(name)} type="button" title={shell.tr("chrome.filterBranchHistory")} aria-label={`${shell.tr("chrome.filterBranchHistory")}: ${name}`} aria-pressed={shell.branchFilterSet.has(name)} onclick={(event) => { event.stopPropagation(); shell.soloBranch(name); }}>{@render glyph("funnel")}</button>
           <button class="icon-btn" type="button" disabled={!canHide} title={shell.tr("menu.hide")} aria-label={shell.tr("menu.hide")} onclick={(event) => { event.stopPropagation(); if (canHide) shell.hideRef(name); }}>{@render glyph("eye")}</button>
         </div>
       {/snippet}
@@ -214,9 +216,7 @@
             <span class="name">{label}</span>
             {#if count !== null && count > 0}<span class="count">{count}</span>{/if}
           </button>
-          {#if filter}
-            <button class="icon-btn section-filter" class:on={!shell.allBranches} type="button" title={shell.allBranches ? shell.tr("chrome.checkedOnly") : shell.tr("chrome.allBranches")} aria-pressed={!shell.allBranches} onclick={(event) => { event.stopPropagation(); shell.toggleHistoryScope(); }}>{@render glyph("funnel")}</button>
-          {/if}
+          <div class="section-tools">
           {#if actions.length > 0}
             <div class="side-actions">
               {#each actions as action (action.label)}
@@ -228,6 +228,13 @@
               {/each}
             </div>
           {/if}
+          {#if filter}
+            {#if !shell.allBranches}
+              <button class="icon-btn section-filter section-filter-clear" type="button" title={shell.tr("chrome.clearFilter")} aria-label={shell.tr("chrome.clearFilter")} onclick={(event) => { event.stopPropagation(); shell.clearHistoryFilter(); }}>{@render glyph("clear")}</button>
+            {/if}
+            <button class="icon-btn section-filter" class:on={!shell.allBranches} type="button" title={shell.allBranches ? shell.tr("chrome.checkedOnly") : shell.tr("chrome.allBranches")} aria-pressed={!shell.allBranches} onclick={(event) => { event.stopPropagation(); shell.toggleHistoryScope(); }}>{@render glyph("funnel")}</button>
+          {/if}
+          </div>
         </div>
       {/snippet}
 

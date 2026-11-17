@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-recognize-google-font"
+description = "Enables the recognize_google_font command without any pre-configured scope."
+commands.allow = ["recognize_google_font"]
+
+[[permission]]
+identifier = "deny-recognize-google-font"
+description = "Denies the recognize_google_font command without any pre-configured scope."
+commands.deny = ["recognize_google_font"]

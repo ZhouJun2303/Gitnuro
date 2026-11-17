@@ -5,6 +5,8 @@
   import { invoke } from "../perf";
   import { getShell } from "./context";
   import BinaryDiff from "./BinaryDiff.svelte";
+  import RevisionImages from "./RevisionImages.svelte";
+  import { fileMarkKind } from "../fileType";
   import WrappedRows from "../WrappedRows.svelte";
   import type { DiffLine } from "../status";
   import { onVirtualScroll, windowSlice, gravatarUrl, splitDiff, virtualSplit, type SplitRow } from "../view";
@@ -304,7 +306,11 @@
       {#if !shell.historyDiff}
         <p class="diff-empty">{shell.selectedCommit ? shell.tr("chrome.reading") : shell.tr("chrome.noCommits")}</p>
       {:else if shell.historyDiff.binary}
-        <BinaryDiff path={shell.historyFile ?? ""} oldBytes={shell.historyDiff.oldBytes} newBytes={shell.historyDiff.newBytes} compact />
+        {#if fileMarkKind(shell.historyFile ?? "") === "image"}
+          <RevisionImages file={shell.historyFile ?? ""} diff={shell.historyDiff} />
+        {:else}
+          <BinaryDiff path={shell.historyFile ?? ""} oldBytes={shell.historyDiff.oldBytes} newBytes={shell.historyDiff.newBytes} compact />
+        {/if}
       {:else if shell.historyDiff.lines.length === 0}
         <p class="diff-empty">{shell.tr("chrome.noChanges")}</p>
       {:else if shell.settings.diffStyle === "split"}

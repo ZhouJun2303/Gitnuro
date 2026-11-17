@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-font-folder"
+description = "Enables the open_font_folder command without any pre-configured scope."
+commands.allow = ["open_font_folder"]
+
+[[permission]]
+identifier = "deny-open-font-folder"
+description = "Denies the open_font_folder command without any pre-configured scope."
+commands.deny = ["open_font_folder"]

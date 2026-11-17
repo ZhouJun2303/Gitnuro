@@ -9,6 +9,7 @@ import { commits, diffs, sampleConflictViews, sampleImages, sampleNotices, sampl
 import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, remoteNameFromUrl, repoNameFromUrl, safeFolderName } from "../clonePath";
 import { featuresPageUrl } from "../featuresPage";
+import { applyFont, loadFont, useDownloadedFont, type FontStatus, type FontOption, type FontProgress } from "../fonts";
 import { fileAccessReport } from "../fileAccess";
 import { resolveLocale, translate } from "../i18n";
 import { broadcastLocale, onLocaleChange } from "../i18n/sync";
@@ -189,7 +190,11 @@ export class ShellState {
     swapPanes: false,
     showEntireFile: false,
     linesHeight: "compact",
-    uiScale: 13,
+    uiScale: 14,
+    uiFont: "",
+    codeFont: "",
+    uiFontWeight: 400,
+    codeFontWeight: 400,
     dateRelative: true,
     dateFormat: "dd MMM yyyy",
     date24h: true,
@@ -242,7 +247,7 @@ export class ShellState {
     gitlabToken: "",
     gitlabHost: "",
     showDiffMarks: false,
-    diffFontSize: 13,
+    diffFontSize: 14,
     disableSyntaxHighlight: false,
     commitSort: "date",
     fetchAutomatically: false,
@@ -500,6 +505,78 @@ export class ShellState {
 
   settingsPath = $state("");
 
+  uiFontStatus = $state<FontStatus>("system");
+  codeFontStatus = $state<FontStatus>("system");
+  fontDownloading = $state("");
+  fontError = $state("");
+  fontChoiceGeneration = 0;
+  fontProgress = $state.raw<FontProgress | null>(null);
+
+  beginFontProgress(id: string) {
+    const requestId = traceOperation();
+    let active = true;
+    let reading: Promise<void> | null = null;
+    this.fontProgress = { requestId, id, phase: "resolving", received: 0, total: 0, percent: null };
+    const poll = (): Promise<void> => {
+      if (!active) return Promise.resolve();
+      if (reading) return reading;
+      reading = invoke<FontProgress | null>("font_download_progress", { requestId }).then((next) => {
+        const current = this.fontProgress;
+        if (active && next && current?.requestId === requestId && (current.phase !== next.phase || current.received !== next.received || current.total !== next.total)) this.fontProgress = next;
+      }).catch(() => { /* The download itself reports network errors. */ }).finally(() => { reading = null; });
+      return reading;
+    };
+    const timer = setInterval(() => void poll(), 250);
+    return { requestId, finish: async (success: boolean) => {
+      clearInterval(timer);
+      await poll();
+      active = false;
+      const current = this.fontProgress;
+      if (current?.requestId === requestId) this.fontProgress = { ...current, phase: success ? "ready" : "error", percent: success ? 100 : current.percent, received: success && current.total > 0 ? current.total : current.received };
+    } };
+  }
+
+  async importGoogleFont(name: string, kind: "ui" | "code") {
+    if (this.fontDownloading) return;
+    const generation = this.fontChoiceGeneration;
+    const before = kind === "ui" ? this.settings.uiFont : this.settings.codeFont;
+    this.fontDownloading = "google";
+    this.fontError = "";
+    const progress = this.beginFontProgress("google");
+    let success = false;
+    try {
+      const result = await invoke<{ font: FontOption; dataUrl: string }>("download_google_font", { name, requestId: progress.requestId });
+      await useDownloadedFont(result.font, result.dataUrl);
+      success = true;
+      if (generation === this.fontChoiceGeneration && before === (kind === "ui" ? this.settings.uiFont : this.settings.codeFont)) {
+        if (kind === "ui") this.settings.uiFont = result.font.id;
+        else this.settings.codeFont = result.font.id;
+      }
+    } catch (error) { this.fontError = this.message(error); }
+    finally { await progress.finish(success); this.fontDownloading = ""; }
+  }
+
+  async downloadFont(kind: "ui" | "code") {
+    const id = kind === "ui" ? this.settings.uiFont : this.settings.codeFont;
+    if (!id || this.fontDownloading) return;
+    this.fontDownloading = id;
+    this.fontError = "";
+    const progress = this.beginFontProgress(id);
+    let success = false;
+    try {
+      const face = await loadFont(id, true, progress.requestId);
+      success = !!face;
+      const current = kind === "ui" ? this.settings.uiFont : this.settings.codeFont;
+      if (face && current === id) {
+        document.documentElement.style.setProperty(kind === "ui" ? "--font-user" : "--mono-user", `"AweGit ${id}",`);
+        if (kind === "ui") this.uiFontStatus = "ready";
+        else this.codeFontStatus = "ready";
+      }
+    } catch (error) {
+      this.fontError = this.message(error);
+    } finally { await progress.finish(success); this.fontDownloading = ""; }
+  }
+
 
   forkImportNote = $state("");
 
@@ -754,8 +831,12 @@ export class ShellState {
   allBranches = $state(false);
 
 
-  /** Branch whose history is shown alone. Empty means the current branch and its upstream. */
+  /** A located reference; explicit branch selections take precedence. */
   graphSolo = $state<string | null>(null);
+
+  graphBranches = $state<string[]>([]);
+
+  branchFilterSet = $derived(new Set(this.allBranches ? [] : this.graphBranches.length ? this.graphBranches : this.graphSolo ? [this.graphSolo] : []));
 
 
   commitQuery = $state("");
@@ -2084,6 +2165,7 @@ export class ShellState {
   filterNames = $derived.by(() => {
     if (this.historyFilter) return [this.historyFilter];
     if (this.allBranches) return [];
+    if (this.graphBranches.length) return this.graphBranches;
     if (this.mode === "sample") return this.graphSolo ? [this.graphSolo] : ["main", "origin/main"];
     return this.exactRefs();
   });
@@ -2721,7 +2803,7 @@ export class ShellState {
     if (coded) {
       const code = (coded[1] ?? "").toLowerCase();
       const detail = (coded[2] ?? "").trim();
-      const known = code === "network" || code === "auth" || code === "update" || code === "git" || code === "cancelled" || code === "settings";
+      const known = code === "network" || code === "auth" || code === "update" || code === "git" || code === "cancelled" || code === "settings" || code === "font";
       const sentence = known ? this.tr(`error.${code}`) : raw;
       return detail && known ? `${sentence} ${detail}` : sentence;
     }
@@ -4726,6 +4808,7 @@ export class ShellState {
         this.commitFiles = [];
         this.historyDiff = null;
         this.graphSolo = null;
+        this.graphBranches = [];
         this.drops = [];
         this.contentHits = null;
         this.comparePair = null;
@@ -5026,7 +5109,10 @@ export class ShellState {
 
 
   showOnly(name: string) {
-    this.soloBranch(name);
+    this.graphBranches = [name];
+    this.graphSolo = null;
+    this.allBranches = false;
+    if (this.mode === "live") void this.loadContext();
   }
 
 
@@ -6607,13 +6693,29 @@ export class ShellState {
     };
     paint();
     media?.addEventListener("change", paint);
-    root.style.setProperty("--ui-scale", `${this.settings.uiScale || 13}px`);
+    root.style.setProperty("--ui-scale", `${this.settings.uiScale || 14}px`);
+    root.style.setProperty("--ui-weight", String(this.settings.uiFontWeight || 400));
+    root.style.setProperty("--code-weight", String(this.settings.codeFontWeight || 400));
     root.style.setProperty("--row-file", `${this.rowFile}px`);
     root.style.setProperty("--row-commit", `${this.rowCommit}px`);
     root.style.setProperty("--row-side", `${this.rowSide}px`);
     root.style.setProperty("--row-tree", `${this.rowTree}px`);
     root.style.setProperty("--diff-row", `${this.diffRowHeight}px`);
     return () => media?.removeEventListener("change", paint);
+    });
+    $effect(() => {
+      if (typeof document === "undefined") return;
+      return applyFont(this.settings.uiFont, "ui", this.backend(), (status, error) => {
+        this.uiFontStatus = status;
+        if (error) this.fontError = this.message(error);
+      });
+    });
+    $effect(() => {
+      if (typeof document === "undefined") return;
+      return applyFont(this.settings.codeFont, "code", this.backend(), (status, error) => {
+        this.codeFontStatus = status;
+        if (error) this.fontError = this.message(error);
+      });
     });
     $effect(() => {
     const next = this.snapshotPlace();

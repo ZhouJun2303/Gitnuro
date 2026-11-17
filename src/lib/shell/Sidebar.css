@@ -118,17 +118,20 @@
 .branch-switches .icon-btn.on { color: var(--accent); }
 
 .section-filter {
-    position: absolute;
-    right: 4px;
-    top: 0;
-    height: 100%;
-    width: 28px;
+    height: 22px;
+    width: 22px;
     color: var(--text-secondary);
   }
 
 .section-filter.on { color: var(--accent); }
 
-.side.section:has(.section-filter) .side-actions { right: 32px; }
+.section-tools { flex: none; display: flex; align-items: center; gap: 2px; padding-right: 4px; }
+.section-tools .side-actions { position: static; height: auto; display: none; }
+.side.section:hover .section-tools .side-actions,
+  .side.section:focus-within .section-tools .side-actions { display: flex; }
+.branch-switches:has(.history-filter-toggle[aria-pressed="true"]) { opacity: 1; pointer-events: auto; }
+.side.nested:has(.history-filter-toggle[aria-pressed="true"]) .sync { visibility: hidden; }
+.side.nested:has(.history-filter-toggle[aria-pressed="true"]) .file-select { padding-right: 72px; }
 
 .side.section:hover:has(.side-actions) .count,
   .side.section:focus-within:has(.side-actions) .count {

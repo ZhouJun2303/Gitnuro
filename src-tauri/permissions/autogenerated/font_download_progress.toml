@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-font-download-progress"
+description = "Enables the font_download_progress command without any pre-configured scope."
+commands.allow = ["font_download_progress"]
+
+[[permission]]
+identifier = "deny-font-download-progress"
+description = "Denies the font_download_progress command without any pre-configured scope."
+commands.deny = ["font_download_progress"]

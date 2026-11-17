@@ -151,6 +151,9 @@ export const surfaceScenes: LabScene[] = [
     ready: ".preview-revision",
     href: "/?scene=file-history-excel&view=history&file=data/sheet.xlsx",
   }),
+  scene({ id: "file-history-image", group: "主界面", title: "文件历史 · 图片", repo: "history-images", ready: ".revision-images", href: "/?scene=file-history-image&view=history&file=art/mark.png" }),
+  scene({ id: "commit-image", group: "主界面", title: "提交详情 · 图片变更", repo: "history-images", ready: ".revision-images" }),
+  scene({ id: "history-branches", group: "主界面", title: "自定义分支筛选", repo: "full", ready: ".filter-bar" }),
   scene({
     id: "blob",
     group: "主界面",
@@ -220,6 +223,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "workspace-menu-busy", group: "叠层", title: "工作区菜单：刷新中", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "prefs-flow", group: "弹窗", title: "偏好设置 · 流程窗口自动打开与关闭", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-appearance", group: "弹窗", title: "偏好设置 · Apple Liquid Glass、经典白色与 VS Code 黑色", repo: "full", ready: ".theme-styles", dialog: "prefs" }),
+  scene({ id: "prefs-fonts", group: "弹窗", title: "偏好设置 · 字体下载、存储与即时预览", repo: "full", ready: '[data-pref-tab="fonts"]', dialog: "prefs" }),
   scene({ id: "prefs-shortcuts", group: "弹窗", title: "偏好设置 · 键盘快捷键", repo: "full", ready: '[data-pref-tab="shortcuts"]', dialog: "prefs" }),
   scene({ id: "prefs-language", group: "弹窗", title: "偏好设置 · 语言切换、窗口同步与空白点击", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),
   scene({ id: "prefs-workspace", group: "弹窗", title: "偏好设置 · 工作区与扫描", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),

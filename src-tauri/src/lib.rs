@@ -4,6 +4,7 @@ mod avatars;
 mod changes;
 mod development;
 mod forge;
+mod fonts;
 mod flow_window;
 mod flows;
 mod http;
@@ -16,6 +17,8 @@ mod secrets;
 mod settings;
 mod tools;
 mod updates;
+#[cfg(windows)]
+mod system_http;
 
 pub use lab::run_lab;
 
@@ -798,6 +801,45 @@ fn load_settings() -> Result<settings::Settings, String> {
     let values = settings::load()?;
     remember_fakeignore(values.fake_ignore);
     Ok(values)
+}
+
+#[tauri::command]
+fn font_data(id: String) -> Result<Option<String>, String> {
+    fonts::data(&id, false, "")
+}
+
+#[tauri::command]
+fn download_font(id: String, request_id: String) -> Result<Option<String>, String> {
+    http::with_net(net_options(), || fonts::data(&id, true, &request_id))
+}
+
+#[tauri::command]
+fn download_google_font(name: String, request_id: String) -> Result<fonts::GoogleDownload, String> {
+    http::with_net(net_options(), || fonts::download_google(&name, &request_id))
+}
+
+#[tauri::command]
+fn recognize_google_font(name: String) -> Result<fonts::FontMatch, String> {
+    http::with_net(net_options(), || fonts::recognize_google(&name))
+}
+
+#[tauri::command]
+fn font_download_progress(request_id: String) -> Option<fonts::FontProgress> {
+    fonts::progress(&request_id)
+}
+
+#[tauri::command]
+fn font_cache_info() -> Result<fonts::CacheInfo, String> {
+    fonts::cache_info()
+}
+
+#[tauri::command]
+fn open_font_folder() -> Result<(), String> {
+    let dir = fonts::cache_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    let program = if cfg!(windows) { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    std::process::Command::new(program).arg(&dir).spawn().map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -2572,6 +2614,13 @@ pub fn run() {
             file_history,
             blame_file,
             load_settings,
+            font_data,
+            download_font,
+            download_google_font,
+            recognize_google_font,
+            font_download_progress,
+            font_cache_info,
+            open_font_folder,
             save_settings,
             save_window_bounds,
             settings_path,
@@ -2665,6 +2714,9 @@ pub fn run() {
         ]);
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .register_asynchronous_uri_scheme_protocol("awegit-font", |_context, request, responder| {
+            tauri::async_runtime::spawn_blocking(move || responder.respond(fonts::protocol_response(request)));
+        })
         .manage(RepoWatch(Mutex::new(HashMap::new())))
         .setup(|app| {
             perf::mark("setup");
@@ -2960,7 +3012,7 @@ mod watch_plan_tests {
         let defaults: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
         assert_eq!(observer["windows"], serde_json::json!(["flow-*"]));
         for permission in observer["permissions"].as_array().unwrap() {
-            assert!(matches!(permission.as_str().unwrap(), "core:default" | "core:window:allow-close" | "allow-operation-flow" | "allow-operation-history" | "allow-load-settings" | "allow-save-settings" | "allow-log-client"));
+            assert!(matches!(permission.as_str().unwrap(), "core:default" | "core:window:allow-close" | "allow-operation-flow" | "allow-operation-history" | "allow-load-settings" | "allow-font-data" | "allow-font-cache-info" | "allow-save-settings" | "allow-log-client"));
         }
         for window in defaults["windows"].as_array().unwrap() {
             assert!(matches!(window.as_str().unwrap(), "main" | "desk" | "merge"));
@@ -2976,6 +3028,10 @@ mod watch_plan_tests {
             "allow-open-terminal",
             "allow-write-ssh-config",
             "allow-download-update",
+            "allow-download-font",
+            "allow-download-google-font",
+            "allow-recognize-google-font",
+            "allow-open-font-folder",
             "allow-generate-ssh-key",
             "allow-set-passphrase",
             "allow-approve-credential",
