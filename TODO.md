@@ -8,6 +8,8 @@
 
 ## 已处理
 
+- [x] 分支行区分非悬停信息层和悬停操作层：平时保留分支名、上传 / 下载箭头及数量，已筛选分支常显取消入口；悬停或键盘聚焦时展开带圆角底色和轻边框的操作组。按钮独立占位，不再隐藏或覆盖同步状态。修复：本条所在提交 `fix: 分层展示分支操作并保留同步状态`；回归：`e2e/branch-actions.spec.ts` 的 `branch sync arrows stay visible beside hovered, focused and active filter actions`、`branch action icons and labels follow pin and history filter state`，以及 `e2e/branch-filters.spec.ts`、`e2e/branch-filter-memory.spec.ts`，三套主题相关 UI 共 21 项通过；最终分层样式复验 9 项通过，`pnpm check` 通过。
+
 - [x] 图片历史、提交详情和图片 diff 显示前后像素尺寸、文件大小、精确字节数及宽高 / 大小增减和百分比；尺寸或大小未变时明确提示。并排、洋葱皮、滑动使用同一缩放比例和左上角原点，保留真实长宽比；像素差分持续展示原图信息。修正暂存区预览误读工作区的问题，HEAD / 索引 / 工作区与大小信息对应；沿用 8 MB 预览上限，不新增依赖。修复：本条所在提交 `fix: 显示图片对比的尺寸和文件大小变化`；回归：`index_preview_reads_the_staged_image_and_bounds_missing_and_large_files`、`e2e/image-metadata.spec.ts`、`e2e/history-images.spec.ts`、`e2e/image-diff.spec.ts` 及 `theme panel diff image`，三套主题相关 UI 共 38 项通过；`pnpm check`、`pnpm build` 通过。4K 像素差分探针未记录到主线程像素读取或长任务；说明见 [开发文档](dev-docs/development.md)。
 
 - [x] AI 提交说明只读取已暂存版本，按 fakeignore 开关同时过滤文件列表和差异；过滤为空时不发送请求，生成说明不改变暂存区。重命名两侧分别匹配规则，忽略的大文件不会占用差异限额。修复：本条所在提交 `fix: AI 提交说明按暂存内容过滤 fakeignore`；回归：`crates/git/tests/commit_prompt.rs` 的 6 项，以及 `ai::tests::suggestions_send_only_visible_staged_files_and_diff_for_all_prompt_styles`、`ai::tests::suggestions_do_not_contact_ai_when_all_staged_files_are_fakeignored`；相关 AI 测试共 18 项、`pnpm check` 通过。
