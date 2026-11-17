@@ -123,6 +123,25 @@
     user-select: none;
   }
 
+.stage-pending {
+    width: 10px;
+    height: 10px;
+    flex: none;
+    margin-left: auto;
+    border: 1.5px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: stage-pending-turn 0.8s linear infinite;
+  }
+
+@keyframes stage-pending-turn {
+    to { transform: rotate(360deg); }
+  }
+
+@media (prefers-reduced-motion: reduce) {
+    .stage-pending { animation: none; }
+  }
+
 .file-list > .side {
     user-select: none;
   }

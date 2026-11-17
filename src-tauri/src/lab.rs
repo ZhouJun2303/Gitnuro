@@ -272,6 +272,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "unstage_all" => done_result(super::unstage_all(req(args, "path")?)),
         "stage_path" => done_result(super::stage_path(req(args, "path")?, req(args, "file")?, req(args, "files")?, req(args, "filtered")?, req(args, "incremental")?)),
         "unstage_path" => done_result(super::unstage_path(req(args, "path")?, req(args, "file")?, req(args, "files")?, req(args, "filtered")?, req(args, "incremental")?)),
+        "remove_stale_lock" => done_result(super::remove_stale_lock(req(args, "path")?, req(args, "lock")?)),
         "commit_changes" => done_result(super::commit_changes(
             req(args, "path")?,
             req(args, "summary")?,

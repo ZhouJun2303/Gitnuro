@@ -53,6 +53,8 @@ import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, to
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
+import { statusPathBefore } from "../status";
+import { enqueueStage, projectStages, stageActions, type StageChange } from "./staging";
 
 const initialErrors = readErrorLog();
 
@@ -114,15 +116,6 @@ function sameStatusFiles(left: readonly StatusFile[], right: readonly StatusFile
     if (!sameStatusFile(left[index]!, right[index]!)) return false;
   }
   return true;
-}
-
-/** Match Rust's UTF-8 path order, including supplementary Unicode characters. */
-function statusPathBefore(left: string, right: string) {
-  const length = Math.min(left.length, right.length);
-  for (let index = 0; index < length; index++) {
-    if (left.charCodeAt(index) !== right.charCodeAt(index)) return left.codePointAt(index)! < right.codePointAt(index)!;
-  }
-  return left.length < right.length;
 }
 
 function mergeStatusFiles(previous: StatusFile[], next: StatusFile[], scopes: Set<string>, touched: Set<string>) {
@@ -1496,8 +1489,16 @@ export class ShellState {
   selectedDiff = $derived(this.mode === "sample" && this.selectedPath ? (diffs[this.selectedPath] ?? []) : []);
 
 
-  stagedFiles = $derived(this.snapshot?.staged ?? []);
-  unstagedFiles = $derived(this.snapshot?.unstaged ?? []);
+  pendingStages = $state.raw<StageChange[]>([]);
+  stageView = $derived(projectStages(this.snapshot, this.pendingStages));
+  pendingStageActions = $derived(stageActions(this.pendingStages, this.snapshot?.path ?? ""));
+
+  pendingStage(path: string) {
+    return this.pendingStageActions.get(path.replaceAll("\\", "/"));
+  }
+
+  stagedFiles = $derived(this.stageView.staged);
+  unstagedFiles = $derived(this.stageView.unstaged);
 
   staged = $derived<Row[]>(
     this.mode === "live" ? this.stagedFiles.map(this.toRow.bind(this)) : this.mode === "sample" ? sampleStaged.map(this.sampleRow.bind(this)) : [],
@@ -1575,6 +1576,9 @@ export class ShellState {
 
   /** A user write is running; further clicks must not queue another one. */
   writing = $derived(this.userWrites > 0);
+
+  stageDisabled = $derived(this.mode !== "live" || this.switching || this.writing ||
+    (this.busy && !this.onlyDiffReads() && !this.pendingStages.some((change) => change.repo === this.jobKey(this.repoPath()))));
 
 
   syncDisabled(kind: "fetch" | "pull" | "push") {
@@ -2964,26 +2968,27 @@ export class ShellState {
     this.mode = "live";
     this.loadError = "";
     if (value.path && !this.repos.includes(value.path)) this.repos = [...this.repos, value.path];
-    const sameSide = (this.selectedSide === "staged" ? value.staged : value.unstaged).some(
+    const visible = this.pendingStages?.length ? this.stageView : value;
+    const sameSide = (this.selectedSide === "staged" ? visible.staged : visible.unstaged).some(
       (file) => file.path === this.selectedPath,
     );
     if (this.selectedPath && sameSide) return;
     const otherSide: Side = this.selectedSide === "staged" ? "unstaged" : "staged";
-    const other = otherSide === "staged" ? value.staged : value.unstaged;
+    const other = otherSide === "staged" ? visible.staged : visible.unstaged;
     if (this.selectedPath && other.some((file) => file.path === this.selectedPath)) {
       this.selectedSide = otherSide;
       return;
     }
-    const conflict = value.unstaged.find((file) => file.kind === "conflict");
+    const conflict = visible.unstaged.find((file) => file.kind === "conflict");
     if (conflict) {
       this.selectedSide = "unstaged";
       this.selectedPath = conflict.path;
-    } else if (value.unstaged[0]) {
+    } else if (visible.unstaged[0]) {
       this.selectedSide = "unstaged";
-      this.selectedPath = value.unstaged[0].path;
-    } else if (value.staged[0]) {
+      this.selectedPath = visible.unstaged[0].path;
+    } else if (visible.staged[0]) {
       this.selectedSide = "staged";
-      this.selectedPath = value.staged[0].path;
+      this.selectedPath = visible.staged[0].path;
     } else {
       this.selectedPath = null;
     }
@@ -3105,6 +3110,9 @@ export class ShellState {
 
 
   async runChange(command: string, extra: Record<string, unknown> = {}, duringRead = false) {
+    if (["stage_path", "unstage_path", "stage_all", "unstage_all"].includes(command) && !this.progress && !this.conflicted) {
+      return enqueueStage(this, command, extra);
+    }
     const path = this.repoPath();
     const allowReads = duringRead || ["stage_path", "unstage_path", "stage_all", "unstage_all"].includes(command);
     const reading = allowReads && this.onlyDiffReads();
@@ -3467,6 +3475,10 @@ export class ShellState {
 
 
   async mutate(request: Record<string, unknown>, source: "user" | "background" = "user", retryStash = false) {
+    if (request.action === "stagePaths" && !this.progress && !this.conflicted) {
+      const value = await enqueueStage(this, "mutate", { request }, source);
+      return value ? "completed" as const : "failed" as const;
+    }
     const operation = traceOperation();
     const path = this.repoPath();
     if (!this.backend() || !path) return;
@@ -3574,21 +3586,7 @@ export class ShellState {
           }
           if (report?.staleLock) {
             // A killed Git process left index.lock; offer to remove it and retry.
-            const lock = report.staleLock;
-            this.actionError = null;
-            this.stashRetry = null;
-            this.ask(
-              this.tr("dialog.staleLockBlocked"),
-              this.tr("dialog.staleLockBlockedBody"),
-              () => void this.removeStaleLock(path, lock.path, request, source, retryStash),
-              [],
-              {
-                subject: lock.path,
-                detail: this.tr("dialog.staleLockAge", { seconds: String(lock.ageSecs) }),
-                danger: true,
-                confirmLabel: this.tr("dialog.removeLockAndRetry"),
-              },
-            );
+            this.confirmStaleLock(path, report.staleLock, request, source, retryStash);
           } else if (this.shouldShowMergeConflict(action, text)) {
             this.mergeConflictRestore = false;
             this.commandOutput = text.trim();
@@ -3655,6 +3653,18 @@ export class ShellState {
   }
 
 
+
+  confirmStaleLock(path: string, lock: { path: string; ageSecs: number }, request: Record<string, unknown>, source: "user" | "background", retryStash = false) {
+    this.actionError = null;
+    this.stashRetry = null;
+    this.ask(this.tr("dialog.staleLockBlocked"), this.tr("dialog.staleLockBlockedBody"),
+      () => void this.removeStaleLock(path, lock.path, request, source, retryStash), [], {
+        subject: lock.path,
+        detail: this.tr("dialog.staleLockAge", { seconds: String(lock.ageSecs) }),
+        danger: true,
+        confirmLabel: this.tr("dialog.removeLockAndRetry"),
+      });
+  }
 
   /** Remove the index.lock a killed Git command left, then run the blocked write again. */
   async removeStaleLock(path: string, lock: string, request: Record<string, unknown>, source: "user" | "background", retryStash: boolean) {

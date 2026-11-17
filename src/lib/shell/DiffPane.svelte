@@ -394,7 +394,9 @@
                 {/each}
               </div>
             {/if}
-            {#if shell.diffError}
+            {#if shell.pendingStage(shell.selectedPath) !== undefined}
+              <p class="diff-empty" data-stage-pending aria-live="polite">{shell.tr(shell.pendingStage(shell.selectedPath) ? "chrome.unstagePending" : "chrome.stagePending")}</p>
+            {:else if shell.diffError}
               <p class="diff-empty">{shell.diffError}</p>
             {:else if !shell.diff}
               <p class="diff-empty">{shell.tr("chrome.reading")}</p>

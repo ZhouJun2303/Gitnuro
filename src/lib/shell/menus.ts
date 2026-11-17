@@ -87,7 +87,7 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { label: shell.tr("menu.copyPath"), run: () => shell.copyText(shell.fullPath(file.path)) },
       { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(file.path) },
       { sep: true, label: "" },
-      { label: many ? `${shell.tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected")} (${count})` : shell.tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked, shortcut: shortcutLabel("stageToggle"), run: () => shell.stageChosen(side, targets) },
+      { label: many ? `${shell.tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected")} (${count})` : shell.tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked || shell.stageDisabled, shortcut: shortcutLabel("stageToggle"), run: () => shell.stageChosen(side, targets) },
       { label: many ? shell.tr("menu.discardSelected", { count }) : shell.tr("menu.discard"), disabled: locked || (side === "staged" && many), shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(targets) },
       { label: many ? shell.tr("menu.deleteSelected", { count }) : shell.tr("menu.deleteFile"), disabled: locked, run: () => shell.deleteChosen(targets) },
       { sep: true, label: "" },
@@ -287,7 +287,7 @@ export function dirMenu(shell: ShellState, dir: string, side: Side) {
     return [
       {
         label: shell.tr(unstage ? "menu.unstageFolder" : "menu.stageFolder"),
-        disabled: locked,
+        disabled: locked || shell.stageDisabled,
         run: () => shell.stageFolder(dir, unstage),
       },
       { label: files.length > 1 ? shell.tr("menu.discardSelected", { count }) : shell.tr("menu.discard"), disabled: locked || unstage || files.length === 0, shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(files) },

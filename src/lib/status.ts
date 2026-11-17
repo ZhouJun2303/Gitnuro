@@ -17,6 +17,15 @@ export type StatusSnapshot = {
   unstaged: StatusFile[];
 };
 
+/** Match Rust's UTF-8 path order, including supplementary Unicode characters. */
+export function statusPathBefore(left: string, right: string) {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    if (left.charCodeAt(index) !== right.charCodeAt(index)) return left.codePointAt(index)! < right.codePointAt(index)!;
+  }
+  return left.length < right.length;
+}
+
 export type DiffLineKind = "add" | "delete" | "hunk" | "context" | "meta";
 
 export type DiffLine = {

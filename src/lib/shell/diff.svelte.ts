@@ -245,11 +245,21 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
       return;
     }
     const file = shell.selectedPath;
+    if (shell.pendingStage?.(file) !== undefined) {
+      shell.diffToken += 1;
+      shell.diff = null;
+      shell.diffError = null;
+      shell.conflictView = null;
+      shell.preview = null;
+      shell.imageOld = null;
+      shell.imageNew = null;
+      return;
+    }
     const stagedSide = shell.selectedSide === "staged";
     const path = shell.repoPath();
     const loadKey = `${path}\0${stagedSide ? "staged" : "unstaged"}\0${file}`;
     const load = loadLarge || shell.largeLoaded.has(loadKey);
-    const flightKey = `${loadKey}\0${load ? "large" : "text"}`;
+    const flightKey = `${loadKey}\0${load ? "large" : "text"}\0${shell.statusGen}`;
     const existing = diffFlights.get(shell);
     if (existing?.key === flightKey) {
       await existing.promise;
@@ -701,15 +711,17 @@ export async function discardPicked(shell: ShellState, files = [...shell.picked]
   }
 
 export async function unstagePicked(shell: ShellState, files = [...shell.picked]) {
-    if (files.length === 0 || shell.writing) return;
-    await shell.mutate({ action: "stagePaths", files, unstage: true });
+    if (files.length === 0 || shell.stageDisabled) return;
+    const pending = shell.mutate({ action: "stagePaths", files, unstage: true });
     unpickFiles(shell, files);
+    await pending;
   }
 
 export async function stagePicked(shell: ShellState, files = [...shell.picked]) {
-    if (files.length === 0 || shell.writing) return;
-    await shell.mutate({ action: "stagePaths", files, unstage: false });
+    if (files.length === 0 || shell.stageDisabled) return;
+    const pending = shell.mutate({ action: "stagePaths", files, unstage: false });
     unpickFiles(shell, files);
+    await pending;
   }
 
 /** Conflict files among the picked rows; other picked files are left alone. */
@@ -790,13 +802,14 @@ async function conflictCanStage(shell: ShellState, repo: string, path: string) {
 
 /** Double-click moves one file to the other side. Conflicts are not staged blindly. */
 export async function flipStage(shell: ShellState, path: string, side: Side) {
-    if (shell.mode !== "live" || !path || shell.dialog || shell.menu || shell.launchOpen) return;
+    if (shell.mode !== "live" || shell.stageDisabled || !path || shell.dialog || shell.menu || shell.launchOpen) return;
     const repo = shell.repoPath();
     const file = rowOnSide(shell, path, side);
     if (!repo || !file) return;
     const key = `${shell.jobKey(repo)}\0${side}\0${path}`;
-    if (flipping.has(key)) return;
-    flipping.add(key);
+    const checking = file.letter === "C";
+    if (checking && flipping.has(key)) return;
+    if (checking) flipping.add(key);
     try {
       if (file.letter === "C") {
         const ready = await conflictCanStage(shell, repo, path);
@@ -806,7 +819,7 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
       const reading = readingOnly(shell);
       await shell.runChange(side === "staged" ? "unstage_path" : "stage_path", { file: path }, reading);
     } finally {
-      flipping.delete(key);
+      if (checking) flipping.delete(key);
     }
   }
 
@@ -877,13 +890,14 @@ export function filesInDir(shell: ShellState, dir: string, side: Side) {
   }
 
 export async function stageFolder(shell: ShellState, dir: string, unstage: boolean) {
-    if (shell.mode !== "live") return;
+    if (shell.mode !== "live" || shell.stageDisabled) return;
     const files = shell.filesInDir(dir, unstage ? "staged" : "unstaged");
     if (files.length === 0) return;
-    const result = await shell.runChange(unstage ? "unstage_path" : "stage_path", {
+    const pending = shell.runChange(unstage ? "unstage_path" : "stage_path", {
       file: dir, files, filtered: shell.fileQuery.trim().length > 0 || shell.conflictsOnly,
     }, readingOnly(shell));
-    if (result) unpickFiles(shell, files);
+    unpickFiles(shell, files);
+    await pending;
   }
 
 export function copyText(shell: ShellState, text: string) {

@@ -29,6 +29,8 @@ export type Messages = {
     locating: string;
     readingCommit: string;
     readingFile: string;
+    stagePending: string;
+    unstagePending: string;
     fetch: string;
     pull: string;
     push: string;

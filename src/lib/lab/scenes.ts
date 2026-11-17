@@ -118,6 +118,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "tree", group: "主界面", title: "文件树", repo: "full", ready: ".tree-row" }),
   scene({ id: "sidebar", group: "主界面", title: "侧栏", repo: "full", ready: ".sidebar" }),
   scene({ id: "stage-many", group: "仓库状态", title: "大量修改与新文件 · 双击暂存", repo: "stage-many", ready: ".unstaged-pane .file" }),
+  scene({ id: "stage-queue", group: "仓库状态", title: "暂存与取消暂存 · 即时反馈和后台执行", repo: "stage-many", ready: ".file-list" }),
   scene({ id: "stage-dense", group: "仓库状态", title: "单文件大量改行 · 双击暂存", repo: "stage-dense", ready: ".unstaged-pane .file" }),
   scene({ id: "checkout-dirty", group: "仓库状态", title: "双击分支 · 保留暂存与工作区", repo: "checkout-dirty", ready: '.sidebar .file-select[title="topic"]' }),
   scene({ id: "checkout-index", group: "仓库状态", title: "切换分支 · 暂存补丁与新分支不兼容", repo: "checkout-index", ready: '.sidebar .file-select[title="topic"]' }),

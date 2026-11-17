@@ -79,9 +79,14 @@ for (const theme of ["apple", "light", "dark"]) for (const style of ["split", "u
         await page.locator(".summary-input").fill("still responsive");
         await expect(page.locator(".summary-input")).toHaveValue("still responsive");
         const reset = performance.now();
+        const resetDone = page.waitForResponse((response) => response.url().includes("/__lab/invoke")
+          && response.request().postDataJSON()?.cmd === "unstage_path"
+          && response.request().postDataJSON()?.args.file === file);
         await staged.locator(`.file-select[title="${file}"]`).dblclick();
         await expect(staged.locator(`.file-select[title="${file}"]`)).toHaveCount(0);
         samples.push({ file, stage, unstage: performance.now() - reset });
+        // The row now moves before index confirmation, while the preview remains held.
+        expect((await (await resetDone).json()).ok).toBe(true);
         expect(git("diff", "--cached", "--name-only")).toBe("");
         expect(git("hash-object", "--", file)).toBe(working);
       } finally { release(); }

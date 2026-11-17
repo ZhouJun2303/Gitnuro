@@ -293,13 +293,14 @@
 
 {#snippet dirRow(path: string, side: Side, depth: number)}
       {@const open = !shell.collapsedDirs.includes(path)}
-      <div class="tree-row dir-row" class:picked={side === "staged" ? shell.pickedStagedDirs.has(path) : shell.pickedUnstagedDirs.has(path)} style:padding-left="{8 + depth * 16}px" role="group" oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
+      <div class="tree-row dir-row" aria-busy={shell.pendingStage(path) !== undefined} class:picked={side === "staged" ? shell.pickedStagedDirs.has(path) : shell.pickedUnstagedDirs.has(path)} style:padding-left="{8 + depth * 16}px" role="group" oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
         <button class="twist-btn" type="button" aria-expanded={open} aria-label={shell.fileName(path)} onclick={(event) => onTwistClick(event, path)}>
           {@render disclosure(open)}
         </button>
         <button class="file-select" type="button" title={path} onclick={(event) => onDirClick(event, path, side)} ondblclick={(event) => flipDir(event, path, side)}>
           {@render folderIcon()}
           <span class="name">{shell.fileName(path)}</span>
+          {@render pendingMark(path)}
         </button>
       </div>
     {/snippet}
@@ -325,6 +326,7 @@
             <div class="virtual-row" style:top="{(shell.combinedWindow.start + index) * shell.rowFile}px">
               <button
                 class="side"
+                aria-busy={shell.pendingStage(entry.file.path) !== undefined}
                 type="button"
                 class:selected={shell.selectedPath === entry.file.path && shell.selectedSide === entry.side}
                 class:picked={pickedPaths.has(entry.file.path) && !(shell.selectedPath === entry.file.path && shell.selectedSide === entry.side)}
@@ -334,6 +336,7 @@
                 {#if entry.file.letter === "C"}{@render conflictMark()}{/if}
                 <span class="meta">{shell.tr(entry.side === "staged" ? "chrome.staged" : "chrome.unstaged")}</span>
                 <span class="name">{entry.file.path}</span>
+                {@render pendingMark(entry.file.path)}
               </button>
             </div>
           {/each}
@@ -349,7 +352,7 @@
           <span class="count">{shell.staged.length}</span>
         </div>
         <div class="pane-tools">
-          <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy || shell.staged.length === 0} onclick={() => shell.runChange("unstage_all")}>{shell.tr("chrome.unstageAll")}</button>
+          <button class="pane-chip" type="button" disabled={shell.stageDisabled || shell.staged.length === 0} onclick={() => shell.runChange("unstage_all")}>{shell.tr("chrome.unstageAll")}</button>
         </div>
       </div>
       {@render pickedActions([], stagedPicked)}
@@ -387,7 +390,7 @@
           {@render searchToggle("file", shell.tr("chrome.filterFiles"))}
           {@render fileViewButton()}
           {#if !shell.showIgnored}
-            <button class="pane-chip pane-go" type="button" disabled={shell.mode !== "live" || shell.busy || shell.unstaged.length === 0} onclick={() => shell.runChange("stage_all")}>{shell.tr("chrome.stageAll")}</button>
+            <button class="pane-chip pane-go" type="button" disabled={shell.stageDisabled || shell.unstaged.length === 0} onclick={() => shell.runChange("stage_all")}>{shell.tr("chrome.stageAll")}</button>
           {/if}
         </div>
       </div>
@@ -430,13 +433,13 @@
         <div class="pick-bar">
           <span class="pick-count">{shell.tr("chrome.pickedCount", { count: String(unstagedFiles.length + stagedFiles.length) })}</span>
           {#if unstagedFiles.length > 1}
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => void shell.stagePicked(unstagedFiles)}>{shell.tr("chrome.stageSelected")}</button>
+            <button class="pane-chip" type="button" disabled={shell.stageDisabled} onclick={() => void shell.stagePicked(unstagedFiles)}>{shell.tr("chrome.stageSelected")}</button>
             <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.discardChosen(unstagedFiles)}>{shell.tr("chrome.discardSelected")}</button>
             <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.openStash(unstagedFiles)}>{shell.tr("chrome.stash")}</button>
             <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.deleteChosen(unstagedFiles)}>{shell.tr("chrome.deleteSelected")}</button>
           {/if}
           {#if stagedFiles.length > 1}
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => void shell.unstagePicked(stagedFiles)}>{shell.tr("chrome.unstageSelected")}</button>
+            <button class="pane-chip" type="button" disabled={shell.stageDisabled} onclick={() => void shell.unstagePicked(stagedFiles)}>{shell.tr("chrome.unstageSelected")}</button>
             <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.openStash(stagedFiles)}>{shell.tr("chrome.stash")}</button>
             <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.deleteChosen(stagedFiles)}>{shell.tr("chrome.deleteSelected")}</button>
           {/if}
@@ -447,6 +450,7 @@
 {#snippet fileRow(file: Row, side: Side, depth = 0)}
       <div
         class="file"
+        aria-busy={shell.pendingStage(file.path) !== undefined}
         class:tree-row={shell.fileLayout === "tree"}
         style:padding-left="{shell.fileLayout === "tree" ? 8 + depth * 16 : 8 + depth * 14}px"
         class:selected={shell.selectedPath === file.path && (shell.mode !== "live" || shell.selectedSide === side)}
@@ -467,9 +471,17 @@
             <span class="file-name">{shell.fileName(file.path)}</span>
             {#if file.path.includes("/")}<span class="file-dir" title={file.path}>{file.path.slice(0, file.path.lastIndexOf("/") + 1)}</span>{/if}
           {/if}
+          {@render pendingMark(file.path)}
         </button>
       </div>
     {/snippet}
+
+{#snippet pendingMark(path: string)}
+    {@const unstage = shell.pendingStage(path)}
+    {#if unstage !== undefined}
+      <span class="stage-pending" role="img" aria-label={shell.tr(unstage ? "chrome.unstagePending" : "chrome.stagePending")} title={shell.tr(unstage ? "chrome.unstagePending" : "chrome.stagePending")}></span>
+    {/if}
+  {/snippet}
 
 {#snippet treeLine(path: string, letter: string)}
     <span class="twist"></span>

@@ -312,6 +312,8 @@ export const en: Messages = {
     deleteSelected: "Delete selected",
     unstageSelected: "Unstage selected",
     stageSelected: "Stage selected",
+    stagePending: "Staging…",
+    unstagePending: "Unstaging…",
     pickedCount: "{count} selected",
     mergeRoute: "Merge",
     stageConflictBinary: "This binary conflict cannot be staged by double-click. Use a merge tool.",

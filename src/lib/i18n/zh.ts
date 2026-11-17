@@ -313,6 +313,8 @@ export const zh: Messages = {
     deleteSelected: "删除所选",
     unstageSelected: "取消暂存所选",
     stageSelected: "暂存所选",
+    stagePending: "正在暂存…",
+    unstagePending: "正在取消暂存…",
     pickedCount: "已选 {count} 个文件",
     mergeRoute: "合并",
     stageConflictBinary: "这是二进制冲突，双击不能暂存。请用合并工具处理。",
