@@ -538,11 +538,10 @@ function seedHistoryImagesRepo() {
   const path = join(repos, "history-images");
   wipe(path);
   initWork(path);
-  const preview = (updated) => {
-    const width = 240, height = 144;
+  const preview = (updated, width = updated ? 360 : 240, height = updated ? 216 : 144) => {
     const pixels = Buffer.alloc((width * 4 + 1) * height);
     for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-      const circle = (x - (updated ? 158 : 82)) ** 2 + (y - 72) ** 2 < 35 ** 2;
+      const circle = (x - width * (updated ? 0.66 : 0.34)) ** 2 + (y - height / 2) ** 2 < (Math.min(width, height) * 0.24) ** 2;
       const color = circle ? (updated ? [84, 154, 255] : [250, 182, 68]) : [38, 44, 58];
       const at = y * (width * 4 + 1) + 1 + x * 4;
       pixels.set([...color, 255], at);
@@ -562,7 +561,7 @@ function seedHistoryImagesRepo() {
     };
     const header = Buffer.alloc(13);
     header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 6;
-    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(pixels)), chunk("IEND", Buffer.alloc(0))]);
+    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("tEXt", Buffer.concat([Buffer.from("Comment\0"), Buffer.alloc(width * 4, 65)])), chunk("IDAT", deflateSync(pixels)), chunk("IEND", Buffer.alloc(0))]);
   };
   commit(path, "art/mark.png", preview(false), "add the image");
   commit(path, "art/mark.png", preview(true), "change the image");
@@ -570,6 +569,9 @@ function seedHistoryImagesRepo() {
   git(path, ["rm", "--", "art/deleted.png"]);
   git(path, ["commit", "-m", "delete the image"]);
   commit(path, "art/large.png", Buffer.concat([pngA, Buffer.alloc(8_000_001)]), "add an oversized image");
+  write(path, "art/mark.png", preview(true, 480, 144));
+  git(path, ["add", "--", "art/mark.png"]);
+  write(path, "art/mark.png", preview(false, 240, 288));
 }
 
 const restore = {

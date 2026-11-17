@@ -1599,9 +1599,13 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 }
 
 #[tauri::command]
-fn file_preview(path: Option<String>, file: String) -> Result<Option<awegit_git::FilePreview>, String> {
+fn file_preview(path: Option<String>, file: String, staged: Option<bool>) -> Result<Option<awegit_git::FilePreview>, String> {
     let repo = repo_from(path)?;
-    awegit_git::file_preview(&repo, &file).map_err(|error| error.to_string())
+    if staged.unwrap_or(false) {
+        awegit_git::index_preview(&repo, &file).map_err(|error| error.to_string())
+    } else {
+        awegit_git::file_preview(&repo, &file).map_err(|error| error.to_string())
+    }
 }
 
 #[tauri::command]

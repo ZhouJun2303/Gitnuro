@@ -101,6 +101,8 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "changes-combined", group: "主界面", title: "合并列表", repo: "full", ready: ".status-pane .virtual-row" }),
   scene({ id: "diff-text", group: "主界面", title: "文本差异", repo: "full", ready: ".diff-body" }),
   scene({ id: "diff-image", group: "主界面", title: "图片差异", repo: "full", ready: ".image-stage" }),
+  scene({ id: "diff-image-size", group: "主界面", title: "图片差异 · 尺寸与大小", repo: "history-images", ready: ".image-metadata" }),
+  scene({ id: "diff-image-staged", group: "主界面", title: "图片差异 · 暂存版本", repo: "history-images", ready: ".image-metadata" }),
   scene({ id: "diff-binary", group: "主界面", title: "二进制差异", repo: "full", ready: ".binary-diff" }),
   scene({ id: "diff-binary-large", group: "主界面", title: "超大二进制差异", repo: "full", ready: ".binary-diff" }),
   scene({ id: "diff-rename", group: "主界面", title: "重命名", repo: "full", ready: "text=renamed.txt" }),

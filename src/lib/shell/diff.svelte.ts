@@ -287,12 +287,19 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
         if (!shell.same(shell.diff, value)) shell.diff = value;
         shell.diffError = null;
         if (value.binary) {
-          const preview = await invoke<FilePreview | null>("file_preview", { path, file });
-          const older = await invoke<FilePreview | null>("revision_preview", { path, rev: "HEAD", file }).catch(() => null);
+          // Match the exact sides used by file_diff: HEAD → index, or index → work tree.
+          const read = (bytes: number | null | undefined, old: boolean) => {
+            if (bytes == null || bytes > 8_000_000) return Promise.resolve(null);
+            return (old && stagedSide
+              ? invoke<FilePreview | null>("revision_preview", { path, rev: "HEAD", file })
+              : invoke<FilePreview | null>("file_preview", { path, file, staged: old || stagedSide }))
+              .catch(() => null);
+          };
+          const [older, preview] = await Promise.all([read(value.oldBytes, true), read(value.newBytes, false)]);
           if (token !== shell.diffToken || !shell.viewing(path) || shell.selectedPath !== file) return;
           shell.preview = preview;
-          shell.imageNew = preview?.dataUrl ?? null;
-          shell.imageOld = older?.dataUrl ?? null;
+          shell.imageNew = preview?.mime.startsWith("image/") ? preview.dataUrl : null;
+          shell.imageOld = older?.mime.startsWith("image/") ? older.dataUrl : null;
         } else {
           shell.preview = null;
           shell.imageNew = null;

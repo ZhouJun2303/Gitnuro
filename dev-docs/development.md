@@ -303,6 +303,8 @@ Windows 文件删除、替换或重命名遇到短暂占用时，通过 Git for 
 
 文件历史和提交详情的「变更」页、展开的文件差异共用历史图片组件，只读取当前显示的前后版本；使用重命名前路径读取旧图，新增 / 删除只显示存在的一侧，单个文件超过 8 MB 时保留二进制信息。分支筛选逐个切换，选择本地分支时包含其可见上游，去重后用完整分支引用读取历史；侧栏和历史栏都可清除筛选。历史筛选按规范化仓库路径分别保存在本地视图存储 `awegit.history-filter.<路径>`，包括多选分支和是否显示全部分支；切换仓库或重新打开窗口时，在读取历史前恢复，取消图标不等待后台读取。已删除的分支随引用刷新移出保存的选择，文件历史路径不写入这项分支偏好。相关 UI 回归：`pnpm test:ui -- --reuse e2e/history-images.spec.ts e2e/branch-filters.spec.ts e2e/branch-filter-memory.spec.ts e2e/fonts.spec.ts`，覆盖 Apple、经典白色、VS Code 黑色。
 
+图片历史、提交详情和工作区差异共用 `ImageComparison.svelte`，展示两侧像素尺寸、文件大小及精确字节数，并标注宽高增减、文件大小增减与百分比；尺寸或大小相同时明确标为未变化。并排、洋葱皮和滑动视图使用相同缩放比例、共同画布及左上角原点，保留不同宽高和长宽比；切换到像素差分仍显示原图信息。暂存对比读取 HEAD / 索引，未暂存对比读取索引 / 工作区，与文件大小的来源一致；缺失或超过 8 MB 的版本不读取预览。尺寸通过浏览器已有图像缓存异步获取，不增加图片处理依赖或主线程像素扫描，切换版本后释放旧测量并忽略迟到结果。场景：`diff-image-size`、`diff-image-staged`、`file-history-image`、`commit-image`；回归：`index_preview_reads_the_staged_image_and_bounds_missing_and_large_files`、`e2e/image-metadata.spec.ts`、`e2e/history-images.spec.ts`、`e2e/image-diff.spec.ts` 及三套主题的 `theme panel diff image`。
+
 Windows 更新清单与安装包默认使用 WinHTTP 流式下载，采用系统用户代理 / PAC 和证书存储；显式配置应用代理、CA 或 SSL 选项时沿用已有传输。保持 HTTPS、安装包 SHA-256 校验、部分文件清理与已知长度核对。该实现直接链接系统库，没有增加下载依赖。字体与本地重定向 / HTTP 错误回归在 `fonts::tests`、`http::tests`、`system_http::tests`；实际用户网络的安装包下载仍需上线后观察。
 
 切换语言会立即同步到已打开的独立历史、文件内容、合并和操作流程窗口；也可在独立窗口按相同快捷键切换，其他窗口同步更新。同步只更新语言，保留各窗口正在查看的内容和编辑草稿。验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"`。

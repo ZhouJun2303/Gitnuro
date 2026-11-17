@@ -578,6 +578,17 @@ export type Messages = {
     imageFailed: string;
     imageBefore: string;
     imageAfter: string;
+    imageDimensions: string;
+    imageFileSize: string;
+    imageDimensionsChange: string;
+    imageDimensionsUnchanged: string;
+    imageWidth: string;
+    imageHeight: string;
+    imageSizeChange: string;
+    imageSizeUnchanged: string;
+    imageScale: string;
+    imageUnavailable: string;
+    imageNoFile: string;
     noToken: string;
     tokensMoved: string;
     accountsIntro: string;

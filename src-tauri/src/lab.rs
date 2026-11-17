@@ -344,7 +344,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         }),
         "test_ai_endpoint" => done(1_u32),
         "list_ai_models" => done(vec!["lab-model".to_string()]),
-        "file_preview" => done_result(super::file_preview(req(args, "path")?, req(args, "file")?)),
+        "file_preview" => done_result(super::file_preview(req(args, "path")?, req(args, "file")?, req(args, "staged")?)),
         "cancel_operation" => done_result(super::cancel_operation(req(args, "path")?)),
         "cancel_reads" => Ok(Value::Null),
         "remove_index_lock" => done(false),

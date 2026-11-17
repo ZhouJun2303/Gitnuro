@@ -698,6 +698,31 @@ fn preview_reads_a_png() {
 }
 
 #[test]
+fn index_preview_reads_the_staged_image_and_bounds_missing_and_large_files() {
+    let repo = repo();
+    let image = repo.path.join("图片.png");
+    let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDRstaged";
+    fs::write(&image, png).unwrap();
+    repo.git(&["add", "--", "图片.png"]);
+    let staged = awegit_git::index_preview(&repo.path, "图片.png").unwrap().unwrap();
+    assert_eq!(staged, file_preview(&repo.path, "图片.png").unwrap().unwrap());
+    fs::write(&image, [png.as_slice(), b"work tree"].concat()).unwrap();
+    assert_ne!(staged, file_preview(&repo.path, "图片.png").unwrap().unwrap());
+    assert_eq!(Some(staged.clone()), awegit_git::index_preview(&repo.path, "图片.png").unwrap());
+    fs::remove_file(&image).unwrap();
+    assert_eq!(Some(staged), awegit_git::index_preview(&repo.path, "图片.png").unwrap());
+    assert!(awegit_git::index_preview(&repo.path, "missing.png").unwrap().is_none());
+    assert!(awegit_git::index_preview(&repo.path, "../outside.png").is_err());
+    let large = repo.path.join("large.png");
+    fs::write(&large, png).unwrap();
+    fs::OpenOptions::new().write(true).open(&large).unwrap().set_len(8_000_001).unwrap();
+    repo.git(&["add", "--", "large.png"]);
+    assert!(awegit_git::index_preview(&repo.path, "large.png").unwrap().is_none());
+    repo.git(&["rm", "--cached", "--", "图片.png"]);
+    assert!(awegit_git::index_preview(&repo.path, "图片.png").unwrap().is_none());
+}
+
+#[test]
 fn cancel_stops_a_child_process() {
     let mut command = Command::new(if cfg!(windows) { "ping" } else { "sleep" });
     if cfg!(windows) {

@@ -177,6 +177,8 @@ async function fillSurface(shell: ShellState, id: string) {
   }
   if (id === "diff-text") return showChange(shell, "README.md", "unstaged");
   if (id === "diff-image") return showChange(shell, "art/mark.png", "unstaged");
+  if (id === "diff-image-size") return showChange(shell, "art/mark.png", "unstaged");
+  if (id === "diff-image-staged") return showChange(shell, "art/mark.png", "staged");
   if (id === "diff-binary") return showChange(shell, "data/sheet.xlsx", "unstaged");
   if (id === "diff-binary-large") return showChange(shell, "data/large.pak", "unstaged");
   if (id === "diff-rename") return showChange(shell, "src/renamed.txt", "staged");

@@ -8,6 +8,7 @@
   import type { Row, Side } from "./types";
   import { applyConflictChoice, clearPixel, mergeToolLabel, mergeToolMissing, openConflictTool } from "./diff.svelte";
   import BinaryDiff from "./BinaryDiff.svelte";
+  import ImageComparison from "./ImageComparison.svelte";
   import { formatBytes } from "../format";
   import type { ConflictParty } from "../status";
   import type { DiffLine } from "../status";
@@ -401,7 +402,7 @@
               <embed class="pdf-view" title={shell.selectedPath} src={shell.preview.dataUrl} type="application/pdf" />
             {:else if shell.diff.binary}
               {#if shell.imageOld || shell.imageNew}
-                {@render imageCompare(shell.imageOld, shell.imageNew)}
+                {@render imageCompare(shell.imageOld, shell.imageNew, shell.diff.oldBytes, shell.diff.newBytes)}
               {:else}
                 <BinaryDiff path={shell.selectedPath ?? ""} oldBytes={shell.diff.oldBytes} newBytes={shell.diff.newBytes} />
               {/if}
@@ -558,49 +559,6 @@
   </label>
 {/snippet}
 
-{#snippet imageCompare(before: string | null, after: string | null)}
-    <div class="image-toolbar">
-      <button type="button" class:on={shell.imageMode === "side"} aria-pressed={shell.imageMode === "side"} onclick={() => pickImageMode("side", before, after)}>{shell.tr("dialog.imageSide")}</button>
-      <button type="button" class:on={shell.imageMode === "swipe"} aria-pressed={shell.imageMode === "swipe"} onclick={() => pickImageMode("swipe", before, after)}>{shell.tr("dialog.imageSwipe")}</button>
-      <button type="button" class:on={shell.imageMode === "onion"} aria-pressed={shell.imageMode === "onion"} onclick={() => pickImageMode("onion", before, after)}>{shell.tr("dialog.imageOnion")}</button>
-      <button type="button" class:on={shell.imageMode === "pixel"} aria-pressed={shell.imageMode === "pixel"} disabled={!before || !after} onclick={() => pickImageMode("pixel", before, after)}>{shell.tr("dialog.imagePixel")}</button>
-      {#if shell.imageMode === "swipe" || shell.imageMode === "onion"}
-        <input type="range" min="0" max="100" bind:value={shell.imagePos} aria-label={shell.imageMode} />
-      {/if}
-    </div>
-    <div class="image-stage" class:pair={shell.imageMode === "side"}>
-      {#if shell.imageMode === "pixel"}
-        <figure class="image-frame"><div class="image-box">
-          {#if shell.pixelUrl}
-            <img alt={shell.tr("dialog.imagePixel")} src={shell.pixelUrl} onload={shell.fitImage.bind(shell)} />
-          {:else if shell.pixelStatus !== "idle"}
-            <p class="meta" role="status">{shell.tr(shell.pixelStatus === "working" ? "dialog.imageWorking" : shell.pixelStatus === "too-large" ? "dialog.imageTooLarge" : "dialog.imageFailed")}</p>
-          {/if}
-        </div></figure>
-      {:else if shell.imageMode === "side"}
-        <figure class="image-frame">
-          <figcaption class="del">{shell.tr("dialog.imageBefore")}</figcaption>
-          <div class="image-box">{#if before}<img alt={shell.tr("dialog.imageBefore")} src={before} onload={shell.fitImage.bind(shell)} />{:else}<span class="meta">—</span>{/if}</div>
-        </figure>
-        <figure class="image-frame">
-          <figcaption class="add">{shell.tr("dialog.imageAfter")}</figcaption>
-          <div class="image-box">{#if after}<img alt={shell.tr("dialog.imageAfter")} src={after} onload={shell.fitImage.bind(shell)} />{:else}<span class="meta">—</span>{/if}</div>
-        </figure>
-      {:else}
-        <figure class="image-frame">
-          <div class="image-box">
-            <div class="image-overlay">
-              {#if before}
-                <img alt={shell.tr("dialog.imageBefore")} src={before} onload={shell.fitImage.bind(shell)} />
-                {#if after}
-                  <img class="over" alt={shell.tr("dialog.imageAfter")} src={after} style:opacity={shell.imageMode === "onion" ? shell.imagePos / 100 : 1} style:clip-path={shell.imageMode === "swipe" ? `inset(0 ${100 - shell.imagePos}% 0 0)` : "none"} />
-                {/if}
-              {:else if after}
-                <img alt={shell.tr("dialog.imageAfter")} src={after} onload={shell.fitImage.bind(shell)} />
-              {/if}
-            </div>
-          </div>
-        </figure>
-      {/if}
-    </div>
-  {/snippet}
+{#snippet imageCompare(before: string | null, after: string | null, oldBytes: number | null | undefined = null, newBytes: number | null | undefined = null)}
+  <ImageComparison {before} {after} {oldBytes} {newBytes} mode={shell.imageMode} bind:position={shell.imagePos} pixelUrl={shell.pixelUrl} pixelStatus={shell.pixelStatus} onmodechange={(mode) => pickImageMode(mode, before, after)} />
+{/snippet}

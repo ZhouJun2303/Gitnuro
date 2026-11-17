@@ -1832,6 +1832,20 @@ pub fn blob_preview(repo: &Path, rev: &str, path: &str) -> Result<Option<FilePre
     Ok(preview_from_bytes(&bytes))
 }
 
+/// Image stored in the index, without reading the work tree or requiring HEAD.
+pub fn index_preview(repo: &Path, path: &str) -> Result<Option<FilePreview>, Error> {
+    let path = check_path(path)?;
+    let spec = format!(":{path}");
+    let Some(size) = spec_size(repo, &spec) else {
+        return Ok(None);
+    };
+    if size > MAX_PREVIEW_BYTES {
+        return Ok(None);
+    }
+    let bytes = run(repo, &["cat-file", "-p", &spec])?.stdout;
+    Ok(preview_from_bytes(&bytes))
+}
+
 /// Text or image at `rev:path`. Text is capped so a huge blob does not fill the window.
 pub fn blob_view(repo: &Path, rev: &str, path: &str) -> Result<BlobView, Error> {
     let size = blob_size(repo, rev, path)?;
