@@ -1,12 +1,12 @@
 {
-    "appVersion": "2.0.12",
-    "notes":  "✨ 新功能\n\n· 自动贮藏新增包含未跟踪文件的开关，默认关闭\n\n⚡ 体验优化\n\n· 拉取无更新时跳过自动贮藏\n· 减少操作后的重复刷新，提升界面响应速度\n· 显示 Git 命令的实际执行耗时\n\n🐛 问题修复\n\n· 修复检出后本地修改未正确恢复的问题\n· 修复子模块改动无法正确丢弃的问题\n· 修复更新单个子模块时影响其他子模块的问题",
-    "appCode":  38,
-    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.11/AweGit_2.0.11_x64-setup.exe",
+    "appVersion":  "2.0.12",
+    "notes":  "✨ 新功能\n\n· 文件历史预览支持 Excel 和常见表格格式\n\n⚡ 体验优化\n\n· 文件右键菜单的常用操作移至顶部\n· 内容较多的弹窗滚动更流畅\n· 批量选择文件时操作更流畅\n· 切换分支、拉取更新等操作减少等待",
+    "appCode":  39,
+    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.12/AweGit_2.0.12_x64-setup.exe",
     "downloads":  {
                       "windows":  {
-                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.11/AweGit_2.0.11_x64-setup.exe",
-                                      "sha256":  "152c80e63a7a193935fabaf4f6fe17ca6ca4e60472e030eac7cbeb1e6da1610a"
+                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.12/AweGit_2.0.12_x64-setup.exe",
+                                      "sha256":  "03ac02ac812b242a40068c5d56ece03e5762da957543e946259768f2291f243f"
                                   },
                       "macos":  ""
                   }
