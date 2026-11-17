@@ -1,4 +1,4 @@
-import { onMount, tick } from "svelte";
+import { onMount, tick, untrack } from "svelte";
 import { pushState } from "$app/navigation";
 import { invoke, traceOperation } from "../perf";
 import { listen } from "@tauri-apps/api/event";
@@ -591,7 +591,19 @@ export class ShellState {
   commandSeq = 0;
 
 
-  dialog = $state<Dialog>(null);
+  private activeDialog = $state<Dialog>(null);
+
+  get dialog() {
+    return this.activeDialog;
+  }
+
+  set dialog(value: Dialog) {
+    if (untrack(() => this.activeDialog) === value) return;
+    this.activeDialog = value;
+    // A closed read must stay obsolete even when another command reuses its dialog type.
+    this.dialogLoadGen++;
+    this.dialogLoading = null;
+  }
 
 
   prefsSave = 0;
@@ -975,6 +987,10 @@ export class ShellState {
 
 
   stalePicked = $state<string[]>([]);
+
+  dialogLoading = $state<Dialog>(null);
+
+  dialogLoadGen = 0;
 
 
   compareWith = $state("");

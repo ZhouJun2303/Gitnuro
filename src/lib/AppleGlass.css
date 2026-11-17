@@ -62,7 +62,8 @@
 :root[data-theme="apple"] .tabs { gap: 5px; }
 :root[data-theme="apple"] .tab,
 :root[data-theme="apple"] .tabs .tab:last-child {
-  width: min(var(--tab-width, 220px), 240px);
+  flex: 1 0 96px;
+  width: auto;
   padding: 0 12px;
   border: 1px solid transparent;
   border-radius: 10px;

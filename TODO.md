@@ -1,6 +1,6 @@
 # TODO：项目问题与优化清单
 
-> 最近更新：2026-11-16。性能工作的统一记录见 [项目性能优化计划](dev-docs/performance-plan.md)，包含日志复核、PERF-00—10 的实现、回归结果及 release 测量。
+> 最近更新：2026-11-17。性能工作的统一记录见 [项目性能优化计划](dev-docs/performance-plan.md)，包含日志复核、PERF-00—10 的实现、回归结果及 release 测量。
 
 ## 待处理
 
@@ -8,6 +8,8 @@
 
 ## 已处理
 
+- [x] Apple 主题工作区项目标签随窗口宽度和项目数量弹性均分，过多时保持最小宽度并横向滚动；变更、提交文件、文件树和文件历史的打开操作使用 Windows/macOS 当前文件类型的默认应用。修复：本次工作区改动，待提交 `fix: 修复苹果主题项目标签宽度并使用系统默认应用打开文件`；回归：`e2e/workspace-files.spec.ts`（三主题 24 项），`default_file_targets_accept_any_extension_and_preserve_the_path`、`default_file_targets_require_a_worktree_or_known_root`、`viewer_windows_cannot_run_writes`；`pnpm check`、`pnpm build` 通过。
+- [x] 全部 UI 与弹窗逐项性能复查：178 个场景（49 类弹窗）在三主题下逐项计时，覆盖场景、共用面板与性能/行为回归共 679 项。长变基和已合并分支按可见行挂载，批量选择与贮藏范围判断改为集合扫描；慢读取先显示可关闭弹窗，关闭或切换后旧结果不再覆盖新内容。修复：本次工作区改动，待提交 `perf: 消除长弹窗和批量文件选择的主线程卡顿`（用户已授权，环境仍拒绝写入 `.git`）；回归：`e2e/dialog-performance.spec.ts` 的 `long rebase mounts bounded rows and preserves offscreen edits`、`merged branches opens before a slow read and keeps rows bounded`、`stays closable during a slow read and ignores its late result`，`e2e/ui-performance.spec.ts` 的 `large selections clear completed files and preserve other selections without quadratic work`，以及相关选择、确认与变基交互。首轮 1 项初始化超时在单项及最终相关复验通过；`pnpm check`、`pnpm build` 通过。完整逐项耗时、前后对照和验证边界见 [UI 检查记录](dev-docs/ui-audit.md)。
 - [x] 常用写操作性能：减少共同检查点进程；checkout、快进 pull/merge 对不重叠的本地修改直接携带，跳过自动贮藏与恢复；fetch/push 等成功且上下文不变时复用分支历史。实现：本条所在提交 `perf: 减少写操作检查点并跳过不重叠修改的自动贮藏`；回归：`checkout_carries_disjoint_changes_and_runs_the_native_hook_once`、`fast_forward_pull_carries_many_disjoint_changes_without_rewriting_them`、`fast_forward_merge_carries_disjoint_edits_but_keeps_no_ff_and_squash_protection`、`unchanged_syncs_reuse_context_but_read_local_edits_and_changed_upstreams` 及三主题 `e2e/operation-performance.spec.ts`。完整 `pnpm test`、相关 UI 38 项、`pnpm check`、`pnpm build` 通过。相同 release 二进制入口验证 20 类/35 状态组合，20000 跟踪文件、10000 修改和 1000 新文件下非重叠快进 pull 中位数 17.12 → 0.56 秒、不同树 checkout 15.80 → 0.47 秒；重放/重叠等实际保护成本及短操作复核详见[性能记录第 11 节](dev-docs/performance-plan.md)。
 - [x] 空拉取先获取并判断更新，常规无更新路径跳过自动贮藏/恢复与预览，复用未变的分支和历史；启动自动获取延后并避开前台拉取。特殊配置保留原生处理，包括 `fetch.all` 更新当前分支时的工作区协调。实现：本条所在提交 `perf: 跳过空拉取的自动贮藏并减少重复刷新`；回归：`noop_pull_leaves_the_index_worktree_and_existing_stash_untouched`、`fast_forward_pull_fetches_once_and_restores_local_changes`、`pull_preserves_worktree_when_fetch_all_can_update_the_current_branch`，以及 `e2e/pull.spec.ts`、`e2e/performance-refresh.spec.ts`。Git 203 项、应用 123 项和相关 UI 10 项通过，`pnpm check`、`pnpm build` 通过。小/大仓库 release 对照覆盖两种开关和有/无更新，详见[性能记录第 10 节](dev-docs/performance-plan.md)。
 - [x] 自动贮藏包含未跟踪文件改为设置 → Git → 贮藏中的独立开关，默认关闭，旧设置也按关闭处理；关闭时跳过未跟踪目录遍历，保留已暂存的新文件保护，同名新文件由 Git 阻止覆盖，与手动贮藏选项独立。实现：本条所在提交 `feat: 自动贮藏增加未跟踪文件开关并默认关闭`；回归：`automatic_stash_respects_untracked_setting_and_always_saves_staged_additions`、`default_checkout_with_only_untracked_files_does_not_create_a_stash`、`default_automatic_stash_leaves_colliding_untracked_files_and_restores_tracked_work`、`automatic_stash_untracked_defaults_off_and_keeps_an_explicit_choice`；相关 Git 107 项、设置兼容 1 项和三套主题的 `e2e/autostash-settings.spec.ts`、`e2e/checkout.spec.ts`、`e2e/pull.spec.ts` 共 24 项通过，`pnpm check`、`pnpm build` 通过。行为见[开发文档](dev-docs/development.md#检出与命令记录)。

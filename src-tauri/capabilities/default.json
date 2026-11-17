@@ -120,6 +120,7 @@
     "allow-open-window",
     "allow-reveal-commit",
     "allow-save-revision",
+    "allow-open-file",
     "allow-reveal-path",
     "allow-git-runtime",
     "core:window:allow-inner-size",

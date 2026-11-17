@@ -22,7 +22,7 @@ import {
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
 import type { ShellState } from "./state.svelte";
 import { launchExternal } from "./diff.svelte";
-import { openInEditor } from "./dialogs.svelte";
+import { openFile, openInEditor } from "./dialogs.svelte";
 
 export function branchItems(shell: ShellState) {
     const rows = shell.refs?.branches ?? [];
@@ -99,7 +99,7 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { label: shell.tr("menu.lfsUnlock"), disabled: locked || !shell.lfsAvailable, run: () => void shell.mutate({ action: "lfsUnlock", path: file.path }) },
       { sep: true, label: "" },
       { label: shell.tr("menu.reveal"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file.path)) },
-      { label: shell.tr("menu.openFile"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file.path)) },
+      { label: shell.tr("menu.openFile"), disabled: locked, run: () => void openFile(shell, file.path) },
       { label: shell.tr("menu.copyPath"), run: () => shell.copyText(shell.fullPath(file.path)) },
       { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(file.path) },
       ...(file.letter === "C" ? [
@@ -202,9 +202,20 @@ export function repositoryItems(shell: ShellState) {
       { label: shell.tr("chrome.activity"), run: () => shell.openCommandLog() },
       { label: shell.tr("flow.title"), disabled: locked, run: () => void invoke("open_window", { view: "flow", repo: shell.repoPath(), file: "history" }) },
       { label: shell.tr("chrome.contentSearch"), disabled: locked, run: () => { shell.section = "history"; shell.searchOpen.commit = true; shell.commitQuery = "S:"; } },
-      { label: shell.tr("chrome.stale"), disabled: locked, run: () => void invoke<string[]>("merged_branches", { path: shell.repoPath() }).then((names) => { shell.staleNames = names; shell.stalePicked = []; shell.dialog = "stale"; }) },
-      { label: shell.tr("chrome.mailmap"), disabled: locked, run: () => void invoke<{ text?: string }>("blob_view", { path: shell.repoPath(), rev: "HEAD", file: ".mailmap" }).then((view) => { shell.draft = view.text ?? ""; shell.dialog = "mailmap"; }).catch(() => { shell.draft = ""; shell.dialog = "mailmap"; }) },
-      { label: shell.tr("chrome.review"), disabled: locked, run: () => void invoke<string>("review_branch", { path: shell.repoPath(), base: shell.snapshot?.branch ?? "HEAD~1" }).then((text) => { shell.commandOutput = text; shell.dialog = "output"; }).catch((error) => (shell.actionError = shell.message(error))) },
+      { label: shell.tr("chrome.stale"), disabled: locked, run: () => {
+        shell.staleNames = []; shell.stalePicked = [];
+        readDialog(shell, "stale", (path) => invoke<string[]>("merged_branches", { path }), (names) => { shell.staleNames = names; });
+      } },
+      { label: shell.tr("chrome.mailmap"), disabled: locked, run: () => {
+        shell.draft = "";
+        readDialog(shell, "mailmap", (path) => invoke<{ text?: string }>("blob_view", { path, rev: "HEAD", file: ".mailmap" })
+          .catch(() => ({ text: "" })), (view) => { shell.draft = view.text ?? ""; });
+      } },
+      { label: shell.tr("chrome.review"), disabled: locked, run: () => {
+        shell.commandOutput = "";
+        const base = shell.snapshot?.branch ?? "HEAD~1";
+        readDialog(shell, "output", (path) => invoke<string>("review_branch", { path, base }), (text) => { shell.commandOutput = text; });
+      } },
       { label: shell.tr("menu.bareForce"), disabled: shell.syncDisabled("push"), run: () => shell.ask(shell.tr("menu.bareForce"), shell.tr("dialog.forcePushBody"), () => void shell.mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: false, force: true }), [], { danger: true }) },
       { sep: true, label: "" },
       { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = ""; shell.dialog = "branch"; } },
@@ -218,6 +229,23 @@ export function repositoryItems(shell: ShellState) {
       { label: shell.tr("chrome.terminal"), disabled: locked, run: () => void invoke("open_terminal", { path: shell.repoPath() }) },
       { label: shell.tr("chrome.explorer"), disabled: !shell.snapshot, run: () => shell.snapshot && void shell.openLocal(shell.snapshot.path) },
     ];
+  }
+
+/** Show the surface while Git reads; a dismissed or superseded read cannot reopen it. */
+function readDialog<T>(shell: ShellState, dialog: "stale" | "mailmap" | "output", read: (path: string | undefined) => Promise<T>, apply: (value: T) => void) {
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    shell.dialog = dialog;
+    const gen = ++shell.dialogLoadGen;
+    shell.dialogLoading = dialog;
+    const current = () => gen === shell.dialogLoadGen && shell.dialog === dialog && openGen === shell.openGen && shell.viewing(path);
+    void read(path).then((value) => {
+      if (current()) apply(value);
+    }).catch((error) => {
+      if (current()) shell.actionError = shell.message(error);
+    }).finally(() => {
+      if (gen === shell.dialogLoadGen) shell.dialogLoading = null;
+    });
   }
 
 export function windowItems(shell: ShellState) {
@@ -446,7 +474,7 @@ export function revisionFileMenu(shell: ShellState, file: string): MenuItem[] {
           children: revisionExternalItems(shell, file, parent, rev),
         };
     return [
-      { label: shell.tr("menu.open"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
+      { label: shell.tr("menu.open"), disabled: locked, run: () => void openFile(shell, file) },
       external,
       { label: shell.tr("menu.openInEditor"), disabled: locked, children: editorItems(shell, file, 0) },
       { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
@@ -475,7 +503,7 @@ export function historyFileMenu(shell: ShellState, commit: CommitRow): MenuItem[
     return [
       { label: shell.tr("menu.openSeparate"), disabled: locked, run: () => void invoke("open_window", { view: "blob", repo: shell.repoPath(), file, rev: commit.id }) },
       { label: shell.tr("menu.revealMain"), disabled: locked, run: () => void invoke("reveal_commit", { repo: shell.repoPath(), id: commit.id }).catch((error) => (shell.actionError = shell.message(error))) },
-      { label: shell.tr("menu.open"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
+      { label: shell.tr("menu.open"), disabled: locked, run: () => void openFile(shell, file) },
       { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       { label: shell.tr("menu.externalDiff"), disabled: locked || !parent, children: revisionExternalItems(shell, file, parent, commit.id) },
       { label: shell.tr("menu.resetAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.resetAtCommit"), shell.tr("dialog.restoreFileBody"), () => void shell.mutate({ action: "restoreFile", rev: commit.id, file }), [], { subject: file, danger: true }) },

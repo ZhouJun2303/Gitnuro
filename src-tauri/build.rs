@@ -150,6 +150,7 @@ fn main() {
             "open_window",
             "reveal_commit",
             "save_revision",
+            "open_file",
             "reveal_path",
             "git_runtime",
         ]),

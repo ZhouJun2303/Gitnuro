@@ -2432,6 +2432,21 @@ fn git_runtime() -> awegit_git::GitRuntime {
     awegit_git::git_runtime()
 }
 
+/// Resolve a real work-tree file before handing it to the OS default application.
+fn default_file_target(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, String> {
+    let full = std::fs::canonicalize(path).map_err(|error| error.to_string())?;
+    if !full.is_file() || !path_is_revealable(&full, roots) {
+        return Err("awegit:git:file cannot be opened".into());
+    }
+    Ok(full)
+}
+
+#[tauri::command]
+fn open_file(path: String) -> Result<(), String> {
+    let full = default_file_target(Path::new(&path), &reveal_roots())?;
+    tauri_plugin_opener::open_path(full, None::<&str>).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
     let path = path.trim();
@@ -2644,6 +2659,7 @@ pub fn run() {
             perf_snapshot,
             diagnostics,
             open_log_folder,
+            open_file,
             reveal_path,
             git_runtime
         ]);
@@ -2911,6 +2927,34 @@ mod watch_plan_tests {
     }
 
     #[test]
+    fn default_file_targets_accept_any_extension_and_preserve_the_path() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("awegit-open-file-{nanos}"));
+        fs::create_dir_all(root.join(".git")).unwrap();
+        for name in ["预算 & 2026 (修订).xlsx", "note.txt", "image.png", "custom.unknown"] {
+            let file = root.join(name);
+            fs::write(&file, "test").unwrap();
+            assert_eq!(super::default_file_target(&file, &[]).unwrap(), fs::canonicalize(&file).unwrap());
+        }
+        assert!(super::default_file_target(&root, &[]).is_err());
+        assert!(super::default_file_target(&root.join("missing.txt"), &[]).is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn default_file_targets_require_a_worktree_or_known_root() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|duration| duration.as_nanos()).unwrap_or(0);
+        let root = std::env::temp_dir().join(format!("awegit-open-root-{nanos}"));
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("note.txt");
+        fs::write(&file, "test").unwrap();
+        assert!(super::default_file_target(&file, &[]).is_err());
+        assert!(super::default_file_target(&file, &[root.clone()]).is_ok());
+        assert!(super::default_file_target(&file, &[root.join("other")]).is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn operation_observer_has_only_read_permissions() {
         let observer: serde_json::Value = serde_json::from_str(include_str!("../capabilities/flows.json")).unwrap();
         let defaults: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
@@ -2950,6 +2994,8 @@ mod watch_plan_tests {
         }
         assert!(viewers.contains("allow-stage-all"));
         assert!(viewers.contains("allow-reveal-path"));
+        assert!(viewers.contains("allow-open-file"));
+        assert!(defaults.contains("allow-open-file"));
         assert!(viewers.contains("allow-git-runtime"));
         assert!(!viewers.contains("**"));
         assert!(!defaults.contains("**"));

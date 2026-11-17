@@ -134,7 +134,9 @@ pnpm test:ui -- --reuse e2e/merge-layout.spec.ts
 
 试验台用浏览器看界面：`pnpm dev`，默认在 http://localhost:1420 。场景清单在 `src/lib/lab/scenes.ts`，新弹窗必须记入，否则 `pnpm check` 会失败。`.lab/` 不提交，种子脚本 `scripts/lab-seed.mjs` 和场景清单要提交。
 
-用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts` 和 `pnpm test:ui -- --reuse e2e/theme-panels.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。当前是 162 个场景、三种主题共 486 项。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
+用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts` 和 `pnpm test:ui -- --reuse e2e/theme-panels.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。当前是 180 个场景（49 类弹窗）、三种主题共 540 项。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
+
+UI 性能记录按 `AWEGIT_UI_AUDIT_RUN` 环境变量指定的批次名存入 `.lab/ui-audit/<批次>/`，未指定时为 `current`。场景 JSON 分别记录导航至就绪的 `readyMs`、主线程长任务、DOM 节点和各命令的请求等待；`loadMs` 含截图检查时间，不作为打开耗时。长弹窗与批量文件选择回归运行 `pnpm test:ui -- --reuse e2e/dialog-performance.spec.ts e2e/ui-performance.spec.ts`，覆盖 4,000 条变基/分支、滚动后编辑与勾选保留、拖动排序、读取中关闭和 20,000 文件的选择清理。只在采集旧实现时设置 `AWEGIT_UI_AUDIT_BASELINE=1`，会跳过新实现的 DOM 上限和立即显示断言；正常回归不设置它。耗时输出用于对照，不设依赖机器速度的绝对毫秒断言。
 
 改了页面、弹窗或其中的面板后，相关界面要在三套主题下都测到：Apple Liquid Glass（`apple`）、经典白色（`light`）、VS Code 黑色（`dark`）。场景检查按主题分组，`--grep` 场景名会把三组一起跑到，例如 `pnpm test:ui -- --reuse e2e/scenes.spec.ts --grep "scene history$"`。面板是否还在，以及主题合同，在 `e2e/theme-panels.spec.ts`：Apple 选中提交的字重是 500，未选中的本地提交是 400、已推送提交是 600；独立合并窗在 Apple 下每边内收 10px，另外两套主题铺满窗口；Apple 侧栏圆角 20、偏好设置弹窗圆角 24，经典白色弹窗圆角 14，VS Code 黑色弹窗圆角 8。用面板名而不是主题名做 `--grep`，三套主题会一起跑：
 

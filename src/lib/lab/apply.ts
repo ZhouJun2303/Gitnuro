@@ -242,6 +242,14 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.settings = { ...shell.settings, verticalTabs: true };
     return;
   }
+  if (id === "workspace-tabs" || id === "workspace-tabs-many") {
+    const layout = await invoke<{ full: string; even: string; ahead: string; behind: string; unity: string; recentList: string }>("lab_layout");
+    shell.settings.verticalTabs = false;
+    shell.repos = id === "workspace-tabs"
+      ? [layout.full, layout.even, layout.ahead, layout.behind, layout.unity]
+      : [...new Set([layout.full, ...layout.recentList.split(/\r?\n/).filter(Boolean)])];
+    return;
+  }
   if (id === "tab-copy-path" || id === "tab-repo-info") {
     const layout = await invoke<{ full: string; even: string }>("lab_layout");
     shell.settings.verticalTabs = false;
