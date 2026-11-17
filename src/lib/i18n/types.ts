@@ -230,6 +230,7 @@ export type Messages = {
     filteredBy: string;
     clearFilter: string;
     filterBranchHistory: string;
+    unfilterBranchHistory: string;
     author: string;
     committer: string;
     refsLabel: string;

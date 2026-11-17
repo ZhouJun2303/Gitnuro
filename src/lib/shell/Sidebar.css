@@ -113,9 +113,15 @@
     height: 22px;
   }
 
-.branch-switches .line-icon { width: 14px; height: 14px; }
+.branch-switches .line-icon { width: 14px; height: 14px; color: inherit; }
 
-.branch-switches .icon-btn.on { color: var(--accent); }
+.branch-switches .icon-btn[aria-pressed] .line-icon { width: 18px; height: 18px; }
+
+.branch-switches .icon-btn.on,
+  .branch-switches .icon-btn.on:hover:not(:disabled) {
+    color: var(--on-accent);
+    background: var(--accent);
+  }
 
 .section-filter {
     height: 22px;

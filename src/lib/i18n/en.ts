@@ -289,6 +289,7 @@ export const en: Messages = {
     filteredBy: "Filtered by {name}",
     clearFilter: "Clear filter",
     filterBranchHistory: "Include branch in history filter (multiple selection)",
+    unfilterBranchHistory: "Remove branch from history filter",
     author: "Author",
     committer: "Committer",
     refsLabel: "Refs",

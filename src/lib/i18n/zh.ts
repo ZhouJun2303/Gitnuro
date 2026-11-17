@@ -290,6 +290,7 @@ export const zh: Messages = {
     filteredBy: "已按 {name} 过滤",
     clearFilter: "清除过滤",
     filterBranchHistory: "将分支加入历史筛选（可多选）",
+    unfilterBranchHistory: "将分支移出历史筛选",
     author: "作者",
     committer: "提交者",
     refsLabel: "引用",

@@ -157,14 +157,19 @@
             <path d="M12 5v14M5 12h14"/>
           {:else if kind === "gear"}
             <circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3V20.5M3.5 12h2.2M18.3 12h2.2M5.8 5.8l1.6 1.6M16.6 16.6l1.6 1.6M18.2 5.8l-1.6 1.6M7.4 16.6l-1.6 1.6"/>
-          {:else if kind === "pin"}
-            <path d="M9 3.5h6v6.2l2.2 2.1v2.2h-4.1L12 20.5l-1.1-6.5H6.8v-2.2L9 9.7z"/>
-          {:else if kind === "funnel"}
-            <path d="M4 5h16l-6.2 7.2V18l-3.6 2v-7.8z"/>
+          {:else if kind === "pin" || kind === "unpin"}
+            <path d="M9 3.5h6v6.2l2.2 2.1v2.2h-4.1L12 20.5l-1.1-6.5H6.8v-2.2L9 9.7z" fill={kind === "unpin" ? "currentColor" : "none"}/>
+          {:else if kind === "funnel" || kind === "funnel-plus" || kind === "funnel-off"}
+            <path d="M4 5h16l-6.2 7.2V18l-3.6 2v-7.8z" fill={kind === "funnel-off" ? "currentColor" : "none"}/>
+            {#if kind === "funnel-plus"}<path d="M16 17h6M19 14v6"/>{/if}
           {:else if kind === "clear"}
             <path d="m6 6 12 12M18 6 6 18"/>
           {:else if kind === "eye"}
             <path d="M2.5 12S6.2 6.5 12 6.5 21.5 12 21.5 12 17.8 17.5 12 17.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.4"/>
+          {/if}
+          {#if kind === "unpin" || kind === "funnel-off"}
+            <path d="M3 3l18 18" stroke="var(--accent)" stroke-width="5.5"/>
+            <path d="M3 3l18 18" stroke-width="2.5"/>
           {/if}
         </svg>
       {/snippet}
@@ -202,9 +207,13 @@
       </div>
 
       {#snippet branchSwitches(name: string, canHide: boolean)}
-        <div class="side-actions branch-switches">
-          <button class="icon-btn" class:on={shell.pinnedHere.has(name)} type="button" title={shell.pinnedHere.has(name) ? shell.tr("menu.unpin") : shell.tr("menu.pin")} aria-pressed={shell.pinnedHere.has(name)} onclick={(event) => { event.stopPropagation(); shell.togglePin(name); }}>{@render glyph("pin")}</button>
-          <button class="icon-btn history-filter-toggle" data-branch={name} class:on={shell.branchFilterSet.has(name)} type="button" title={shell.tr("chrome.filterBranchHistory")} aria-label={`${shell.tr("chrome.filterBranchHistory")}: ${name}`} aria-pressed={shell.branchFilterSet.has(name)} onclick={(event) => { event.stopPropagation(); shell.soloBranch(name); }}>{@render glyph("funnel")}</button>
+        {@const pinned = shell.pinnedHere.has(name)}
+        {@const filtered = shell.branchFilterSet.has(name)}
+        {@const pinLabel = pinned ? shell.tr("menu.unpin") : shell.tr("menu.pin")}
+        {@const filterLabel = filtered ? shell.tr("chrome.unfilterBranchHistory") : shell.tr("chrome.filterBranchHistory")}
+        <div class="side-actions branch-switches" data-branch={name}>
+          <button class="icon-btn" class:on={pinned} type="button" title={pinLabel} aria-label={`${pinLabel}: ${name}`} aria-pressed={pinned} onclick={(event) => { event.stopPropagation(); shell.togglePin(name); }}>{@render glyph(pinned ? "unpin" : "pin")}</button>
+          <button class="icon-btn history-filter-toggle" data-branch={name} class:on={filtered} type="button" title={filterLabel} aria-label={`${filterLabel}: ${name}`} aria-pressed={filtered} onclick={(event) => { event.stopPropagation(); shell.soloBranch(name); }}>{@render glyph(filtered ? "funnel-off" : "funnel-plus")}</button>
           <button class="icon-btn" type="button" disabled={!canHide} title={shell.tr("menu.hide")} aria-label={shell.tr("menu.hide")} onclick={(event) => { event.stopPropagation(); if (canHide) shell.hideRef(name); }}>{@render glyph("eye")}</button>
         </div>
       {/snippet}
