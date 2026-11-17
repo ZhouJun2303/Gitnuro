@@ -1,12 +1,12 @@
 {
-    "appVersion": "2.0.13",
-    "notes":  "✨ 新功能\n\n· 文件历史预览支持 Excel 和常见表格格式\n\n⚡ 体验优化\n\n· 文件右键菜单的常用操作移至顶部\n· 内容较多的弹窗滚动更流畅\n· 批量选择文件时操作更流畅\n· 切换分支、拉取更新等操作减少等待",
-    "appCode":  39,
-    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.12/AweGit_2.0.12_x64-setup.exe",
+    "appVersion":  "2.0.13",
+    "notes":  "✨ 新功能\n\n· 支持查看历史提交中的图片。\n· 支持在设置中选择字体。\n· 支持自动识别外部差异工具。\n· 支持自动识别外部合并工具。\n\n⚡ 体验优化\n\n· 图片对比显示修改前后的尺寸变化。\n· 图片对比显示修改前后的文件大小变化。\n· 按仓库记住历史筛选条件。\n· 分支操作按钮分层展示，更易辨认。\n· 显示分支操作按钮时仍保留同步状态。\n· 分支筛选与取消筛选使用不同图标。\n· 固定与取消固定分支使用不同图标。\n\n🐛 问题修复\n\n· 修复历史筛选操作图标更新不及时的问题。\n· 修复 AI 提交说明未按暂存内容正确应用忽略规则的问题。\n· 修复应用更新下载异常的问题。",
+    "appCode":  40,
+    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.13/AweGit_2.0.13_x64-setup.exe",
     "downloads":  {
                       "windows":  {
-                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.12/AweGit_2.0.12_x64-setup.exe",
-                                      "sha256":  "03ac02ac812b242a40068c5d56ece03e5762da957543e946259768f2291f243f"
+                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.13/AweGit_2.0.13_x64-setup.exe",
+                                      "sha256":  "fb81299380814eae8a6bc309c6ae06c2451cd2e563e14310cd89076590ff5b2c"
                                   },
                       "macos":  ""
                   }
