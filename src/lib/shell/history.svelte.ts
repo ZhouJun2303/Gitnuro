@@ -128,7 +128,7 @@ async function readContext(shell: ShellState, operation?: string) {
     if (shell.graphBranches?.length) {
       const available = new Set([
         ...nextRefs.branches.map((branch) => branch.name),
-        ...nextRefs.remotes.flatMap((remote) => remote.branches),
+        ...nextRefs.remotes.flatMap((remote) => remote.branches.map((branch) => `${remote.name}/${branch}`)),
         ...nextRefs.tags.map((tag) => tag.name),
       ]);
       const remaining = shell.graphBranches.filter((name) => available.has(name));
@@ -337,7 +337,7 @@ export function exactRefs(shell: ShellState): string[] {
     if (shell.graphBranches?.length) {
       const names = new Set(shell.graphBranches);
       const locals = new Set<string>();
-      const remotes = new Set((shell.refs?.remotes ?? []).flatMap((remote) => remote.branches));
+      const remotes = new Set((shell.refs?.remotes ?? []).flatMap((remote) => remote.branches.map((branch) => `${remote.name}/${branch}`)));
       for (const branch of shell.refs?.branches ?? []) {
         locals.add(branch.name);
         if (names.has(branch.name) && branch.upstream && !shell.refHidden(branch.upstream)) names.add(branch.upstream);

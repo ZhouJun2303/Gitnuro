@@ -838,6 +838,43 @@ export class ShellState {
 
   branchFilterSet = $derived(new Set(this.allBranches ? [] : this.graphBranches.length ? this.graphBranches : this.graphSolo ? [this.graphSolo] : []));
 
+  storedHistoryFilter = "";
+
+  historyFilterKey(path: string) {
+    return `awegit.history-filter.${this.jobKey(path)}`;
+  }
+
+  restoreHistoryFilter(path: string) {
+    let allBranches = false;
+    let branches: string[] = [];
+    try {
+      const raw = localStorage.getItem(this.historyFilterKey(path));
+      const saved = raw ? JSON.parse(raw) : null;
+      if (saved && typeof saved.allBranches === "boolean" && Array.isArray(saved.branches)
+        && saved.branches.every((name: unknown) => typeof name === "string")) {
+        allBranches = saved.allBranches;
+        if (!allBranches) branches = [...new Set<string>(saved.branches.filter((name: string) => name.length > 0))];
+      }
+    } catch { /* Missing or damaged view state keeps the default history scope. */ }
+    this.allBranches = allBranches;
+    this.graphBranches = branches;
+    this.graphSolo = null;
+  }
+
+  rememberHistoryFilter() {
+    const path = this.repoPath();
+    if (!path || this.mode !== "live") return;
+    const key = this.historyFilterKey(path);
+    const branches = this.allBranches ? [] : this.graphBranches.length ? this.graphBranches : this.graphSolo ? [this.graphSolo] : [];
+    const value = JSON.stringify({ allBranches: this.allBranches, branches });
+    const stored = `${key}\n${value}`;
+    if (stored === this.storedHistoryFilter) return;
+    try {
+      localStorage.setItem(key, value);
+      this.storedHistoryFilter = stored;
+    } catch { /* Storage availability must not prevent changing the filter. */ }
+  }
+
 
   commitQuery = $state("");
 
@@ -4807,8 +4844,7 @@ export class ShellState {
         this.commitDetail = null;
         this.commitFiles = [];
         this.historyDiff = null;
-        this.graphSolo = null;
-        this.graphBranches = [];
+        this.restoreHistoryFilter(value.path);
         this.drops = [];
         this.contentHits = null;
         this.comparePair = null;
@@ -6595,6 +6631,14 @@ export class ShellState {
   }
 
   constructor() {
+    $effect(() => {
+      const path = this.repoPath();
+      if (this.mode !== "live" || !path || (this.focusPath && !this.viewing(this.focusPath))) return;
+      this.allBranches;
+      this.graphBranches;
+      this.graphSolo;
+      untrack(() => this.rememberHistoryFilter());
+    });
     $effect(() => {
       if (!this.busy) this.releaseWriteWaiters();
     });
