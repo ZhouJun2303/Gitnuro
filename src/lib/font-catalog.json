@@ -1,0 +1,19 @@
+[
+  { "id": "noto-sans-sc", "name": "Noto Sans SC · 思源黑体", "kind": "ui", "script": "cjk", "bytes": 17772300, "variable": true, "family": "notosanssc", "filename": "NotoSansSC[wght].ttf" },
+  { "id": "noto-serif-sc", "name": "Noto Serif SC · 思源宋体", "kind": "ui", "script": "cjk", "bytes": 25165824, "variable": true, "family": "notoserifsc" },
+  { "id": "lxgw-wenkai-tc", "name": "LXGW WenKai TC · 霞鹜文楷", "kind": "ui", "script": "cjk", "bytes": 12582912, "variable": false, "family": "lxgwwenkaitc" },
+  { "id": "zcool-xiaowei", "name": "ZCOOL XiaoWei · 站酷小薇体", "kind": "ui", "script": "cjk", "bytes": 6291456, "variable": false, "family": "zcoolxiaowei" },
+  { "id": "inter", "name": "Inter", "kind": "ui", "script": "latin", "bytes": 876576, "variable": true, "family": "inter", "filename": "Inter[opsz,wght].ttf" },
+  { "id": "source-sans-3", "name": "Source Sans 3", "kind": "ui", "script": "latin", "bytes": 646340, "variable": true, "family": "sourcesans3", "filename": "SourceSans3[wght].ttf" },
+  { "id": "roboto", "name": "Roboto", "kind": "ui", "script": "latin", "bytes": 524288, "variable": true, "family": "roboto" },
+  { "id": "open-sans", "name": "Open Sans", "kind": "ui", "script": "latin", "bytes": 524288, "variable": true, "family": "opensans" },
+  { "id": "nunito", "name": "Nunito", "kind": "ui", "script": "latin", "bytes": 393216, "variable": true, "family": "nunito" },
+  { "id": "manrope", "name": "Manrope", "kind": "ui", "script": "latin", "bytes": 196608, "variable": true, "family": "manrope" },
+  { "id": "work-sans", "name": "Work Sans", "kind": "ui", "script": "latin", "bytes": 393216, "variable": true, "family": "worksans" },
+  { "id": "jetbrains-mono", "name": "JetBrains Mono", "kind": "code", "script": "mono", "bytes": 187208, "variable": true, "family": "jetbrainsmono", "filename": "JetBrainsMono[wght].ttf" },
+  { "id": "noto-sans-mono", "name": "Noto Sans Mono", "kind": "code", "script": "mono", "bytes": 1708408, "variable": true, "family": "notosansmono", "filename": "NotoSansMono[wdth,wght].ttf" },
+  { "id": "fira-code", "name": "Fira Code", "kind": "code", "script": "mono", "bytes": 262144, "variable": true, "family": "firacode" },
+  { "id": "source-code-pro", "name": "Source Code Pro", "kind": "code", "script": "mono", "bytes": 262144, "variable": true, "family": "sourcecodepro" },
+  { "id": "roboto-mono", "name": "Roboto Mono", "kind": "code", "script": "mono", "bytes": 196608, "variable": true, "family": "robotomono" },
+  { "id": "ibm-plex-mono", "name": "IBM Plex Mono", "kind": "code", "script": "mono", "bytes": 196608, "variable": false, "family": "ibmplexmono" }
+]

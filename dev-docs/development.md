@@ -10,7 +10,7 @@
 
 `release` 受 GitHub 规则集 “Protect Release branch” 保护：不能删除、不能强制推送，改动必须走 Pull Request，只有仓库所有者 `ZhouJun2303` 可以直接绕过规则。
 
-发布在 `feat/dev` 上运行 `publish.bat`。脚本提交版本号，切到 `release` 合并，打包上传，最后回到 `feat/dev`。
+发布在 `feat/dev` 上运行 `publish.bat`。完整流程见下方“打包”部分。
 
 协作者这样提交：
 
@@ -295,7 +295,17 @@ Windows 文件删除、替换或重命名遇到短暂占用时，通过 Git for 
 
 语言快捷键在首选项和输入框中也可使用，从当前显示语言切换到另一种语言并保存；也可在“外观”菜单中选择“切换语言”。首选项点击面板外空白处保持打开，通过右上角关闭按钮、“完成”或 `Escape` 关闭。试验台场景：`prefs-language`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "language shortcut|preferences backdrop|appearance menu"`。
 
-首选项左侧按「常规 / 工作流 / 系统」分组导航，共 11 个页签：通用、工作区、差异、提交、AI、Git、集成、命令、网络、账户、高级；每个页签内按功能卡片分区。试验台按页签提供 `prefs-language`、`prefs-workspace`、`prefs-diff`、`prefs-commit`、`prefs-ai`、`prefs-git`、`prefs-integration`、`prefs-commands`、`prefs-network`、`prefs-accounts`、`prefs-advanced`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts`。
+首选项左侧按「常规 / 工作流 / 系统」分组导航，提供通用、字体、工作区、差异、预览格式、快捷键、提交、AI、Git、集成、命令、网络、账户、高级；每个页签内按功能卡片分区。试验台场景以 `prefs-` 开头，完整清单在 `src/lib/lab/scenes.ts`；相关验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts`。
+
+字体页（`prefs-fonts`）默认使用系统无衬线 / 等宽字体，界面与差异字号均为 14 px、字重 400；已有明确保存的字号保留。界面和代码可分别选择字体、字号、400 / 500 / 600 字重，实时预览中英文和代码，恢复默认保留下载文件。页面的 Google Fonts 链接打开官网；粘贴字体名称或 `https://fonts.google.com/specimen/…` 链接后，防抖 600 ms 读取官方目录，显示「已识别，可下载」才启用「下载并添加」，可用于两个字体选择器。过期识别结果不影响新输入，最近 16 个识别结果在页面内复用。常用快捷选项由前后端共享的 `src/lib/font-catalog.json` 维护。
+
+字体保存在设置文件同目录的 `fonts/`，通常为 Windows `%APPDATA%\AweGit\fonts`、macOS `~/Library/Application Support/AweGit/fonts`；页面显示实际路径并提供打开目录按钮。自定义字体的名称、ID、大小与字重信息写入该目录的 `google-fonts.json`。识别仅读目录，点击下载后才获取 Google Fonts 官方 GitHub 仓库的常规字体文件，支持 OFL、Apache、UFL 目录，不需要 API key。单个字体最多 32 MiB，目录响应最多 64 KiB。下载按 64 KiB 分块读取，界面仅在下载期间每 250 ms 查询当前请求进度，显示进度条、百分比与已下载 / 总大小；没有总大小时显示不定进度，结束后停止查询。字体通过只读 `awegit-font` 协议传入 WebView，不通过 IPC 发送大段 Base64 JSON；只允许已登记 ID 和应用来源，不接受任意路径。仅选用时读取并解码字体，保留最多四个最近使用的字体及当前界面 / 代码字体；启动和重新打开窗口只读本地缓存，不自动联网补下载。常用选项的下载前大小为估算，缓存后显示实际大小；缺少中文的字体回退到系统字库。
+
+文件历史和提交详情的「变更」页、展开的文件差异共用历史图片组件，只读取当前显示的前后版本；使用重命名前路径读取旧图，新增 / 删除只显示存在的一侧，单个文件超过 8 MB 时保留二进制信息。分支筛选逐个切换，选择本地分支时包含其可见上游，去重后用完整分支引用读取历史；侧栏和历史栏都可清除筛选。历史筛选按规范化仓库路径分别保存在本地视图存储 `awegit.history-filter.<路径>`，包括多选分支和是否显示全部分支；切换仓库或重新打开窗口时，在读取历史前恢复，取消图标不等待后台读取。已删除的分支随引用刷新移出保存的选择，文件历史路径不写入这项分支偏好。相关 UI 回归：`pnpm test:ui -- --reuse e2e/history-images.spec.ts e2e/branch-filters.spec.ts e2e/branch-filter-memory.spec.ts e2e/fonts.spec.ts`，覆盖 Apple、经典白色、VS Code 黑色。
+
+图片历史、提交详情和工作区差异共用 `ImageComparison.svelte`，展示两侧像素尺寸、文件大小及精确字节数，并标注宽高增减、文件大小增减与百分比；尺寸或大小相同时明确标为未变化。并排、洋葱皮和滑动视图使用相同缩放比例、共同画布及左上角原点，保留不同宽高和长宽比；切换到像素差分仍显示原图信息。暂存对比读取 HEAD / 索引，未暂存对比读取索引 / 工作区，与文件大小的来源一致；缺失或超过 8 MB 的版本不读取预览。尺寸通过浏览器已有图像缓存异步获取，不增加图片处理依赖或主线程像素扫描，切换版本后释放旧测量并忽略迟到结果。场景：`diff-image-size`、`diff-image-staged`、`file-history-image`、`commit-image`；回归：`index_preview_reads_the_staged_image_and_bounds_missing_and_large_files`、`e2e/image-metadata.spec.ts`、`e2e/history-images.spec.ts`、`e2e/image-diff.spec.ts` 及三套主题的 `theme panel diff image`。
+
+Windows 更新清单与安装包默认使用 WinHTTP 流式下载，采用系统用户代理 / PAC 和证书存储；显式配置应用代理、CA 或 SSL 选项时沿用已有传输。保持 HTTPS、安装包 SHA-256 校验、部分文件清理与已知长度核对。该实现直接链接系统库，没有增加下载依赖。字体与本地重定向 / HTTP 错误回归在 `fonts::tests`、`http::tests`、`system_http::tests`；实际用户网络的安装包下载仍需上线后观察。
 
 切换语言会立即同步到已打开的独立历史、文件内容、合并和操作流程窗口；也可在独立窗口按相同快捷键切换，其他窗口同步更新。同步只更新语言，保留各窗口正在查看的内容和编辑草稿。验证：`pnpm test:ui -- --reuse e2e/preferences.spec.ts --grep "independent windows"`。
 
@@ -329,9 +339,11 @@ node scripts/release-notes.mjs generate --tool codex --version 2.0.11 --md notes
 
 先在本机试用时选第 8 项：不改版本号、不上传，打包后用安装包静默替换本机已安装的 AweGit，保留原来的安装目录和卸载项。替换后用构建标记核对本机文件和刚打包的包是否一致，标记也显示在关于面板。本机没有安装、或不是用 NSIS 安装包装的，就只留下安装包。这个模式不要求工作区干净。试完没问题，再按正常流程发布。
 
-在 `feat/dev` 上发布时，脚本会先提交版本号，再切到 `release` 合并这个分支，打包上传后回到 `feat/dev`。从其他分支发布也走同一条合并路径。工作区要是干净的，并且 `gh` 已经登录。
+在 `feat/dev` 上发布时，脚本会先提交版本号并推送开发分支到 `origin`，再切到 `release` 合并这个分支，打包上传后回到 `feat/dev`，避免版本号提交只留在本地。开发分支推送失败会在切换分支和打包前停止。从其他分支发布也走同一条合并路径。工作区要是干净的，并且 `gh` 已经登录。只打包或替换本机安装的模式不推送分支。
 
-发布过程中的顺序是：提交 `latest.json`，在这个清单提交上打 `v版本号` 标签并推送，上传安装包，最后推送 `release`。标签和 GitHub release 指向同一个提交；清单最后推送，避免更新检查拿到还没上传完的安装包。
+发布过程中的顺序是：提交 `latest.json`，在这个清单提交上打 `v版本号` 标签并推送，创建 GitHub release 草稿，逐个上传安装包，附件齐全后公开 release，最后推送 `release`。标签和 GitHub release 指向同一个提交；清单最后推送，避免更新检查拿到还没上传完的安装包。关键步骤输出时间和耗时，GitHub 请求和 Git 推送等待期间每 10 秒输出一次状态；附件日志包含文件名、大小和当前上传序号。失败时显示重试次数，重新发布当前版本会跳过已有附件，补传剩余安装包；上传失败的草稿不会提前公开。
+
+发布脚本的离线回归运行 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/publish.test.ps1`，只在 `.lab` 内创建临时仓库并模拟构建和 GitHub 上传，覆盖等待日志、重试、开发分支同步和失败续传。
 
 已经在 `release` 分支、并且不想改版本号时，仍可以用 `pnpm publish:windows`。
 

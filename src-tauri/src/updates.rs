@@ -92,13 +92,10 @@ pub fn download_and_open(url: &str, sha256: Option<&str>, silent: bool, mut prog
     let dest = dir.join(&name);
     let partial = dir.join(format!("{name}.partial"));
     progress(UpdateProgress { phase: "connecting", percent: None, received: 0, total: 0 });
-    let response = match crate::http::agent(600, true)?.get(url).call() {
-        Ok(response) => response,
-        Err(error) => return Err(crate::http::coded("network", &error.to_string())),
-    };
-    let total = response.header("content-length").and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
+    let response = crate::http::download(url, 30)?;
+    let total = response.total;
     progress(UpdateProgress { phase: "downloading", percent: percent_of(0, total), received: 0, total });
-    let mut reader = response.into_reader();
+    let mut reader = response.reader;
     let mut file = match std::fs::File::create(&partial) {
         Ok(file) => file,
         Err(error) => return Err(crate::http::coded("update", &error.to_string())),
@@ -138,7 +135,7 @@ pub fn download_and_open(url: &str, sha256: Option<&str>, silent: bool, mut prog
         }
     }
     drop(file);
-    if got == 0 {
+    if got == 0 || (total > 0 && got != total) {
         let _ = std::fs::remove_file(&partial);
         return Err(crate::http::coded("network", "update download failed"));
     }
@@ -309,12 +306,13 @@ fn installer_name(url: &str) -> Result<String, String> {
 }
 
 fn http_get(url: &str) -> Result<String, String> {
-    crate::http::agent(20, true)?
-        .get(url)
-        .call()
-        .map_err(|error| crate::http::coded("network", &error.to_string()))?
-        .into_string()
-        .map_err(|error| crate::http::coded("network", &error.to_string()))
+    const LIMIT: u64 = 512 * 1024;
+    let response = crate::http::download(url, 20)?;
+    let mut text = String::new();
+    response.reader.take(LIMIT + 1).read_to_string(&mut text)
+        .map_err(|error| crate::http::coded("network", &error.to_string()))?;
+    if text.len() as u64 > LIMIT { return Err(crate::http::coded("update", "update manifest is too large")); }
+    Ok(text)
 }
 
 /// `remote` is newer than the version compiled into this build.

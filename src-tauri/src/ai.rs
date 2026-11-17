@@ -15,11 +15,11 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
     if !settings.ai_enabled {
         return Err("AI commit messages are turned off.".into());
     }
-    let (files, branch, recent) = awegit_git::prompt_facts(repo);
+    let (files, branch, recent, mut diff) =
+        awegit_git::prompt_facts(repo, settings.fake_ignore).map_err(|error| error.to_string())?;
     if files.trim().is_empty() {
         return Err("Stage changes before asking for a message.".into());
     }
-    let mut diff = awegit_git::staged_diff(repo).map_err(|error| error.to_string())?;
     if diff.trim().is_empty() {
         return Err("Stage changes before asking for a message.".into());
     }
@@ -635,6 +635,100 @@ fn limit_diff(diff: &mut String, limit: usize) {
 mod tests {
     use super::*;
 
+    struct SuggestRepo(std::path::PathBuf);
+
+    impl SuggestRepo {
+        fn new() -> Self {
+            let id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent().unwrap().join(".lab/ai-tests").join(format!("{id}"));
+            std::fs::create_dir_all(&path).unwrap();
+            let repo = Self(path);
+            repo.git(&["init", "-b", "main"]);
+            repo.git(&["config", "core.autocrlf", "false"]);
+            std::fs::write(repo.0.join("visible.txt"), "STAGED_VISIBLE\n").unwrap();
+            std::fs::write(repo.0.join("local.txt"), "STAGED_HIDDEN\n").unwrap();
+            repo.git(&["add", "visible.txt", "local.txt"]);
+            std::fs::write(repo.0.join("visible.txt"), "LATER_UNSTAGED\n").unwrap();
+            std::fs::write(repo.0.join("untracked.txt"), "UNTRACKED\n").unwrap();
+            std::fs::write(repo.0.join(".fakeignore"), "local.txt\n").unwrap();
+            repo
+        }
+
+        fn git(&self, args: &[&str]) {
+            let output = std::process::Command::new(awegit_git::git_program())
+                .current_dir(&self.0).args(args)
+                .env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_CONFIG_GLOBAL", "")
+                .output().unwrap();
+            assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        }
+    }
+
+    impl Drop for SuggestRepo {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn suggestions_send_only_visible_staged_files_and_diff_for_all_prompt_styles() {
+        let repo = SuggestRepo::new();
+        let index = std::fs::read(repo.0.join(".git/index")).unwrap();
+        for (style, custom, fake_ignore) in [
+            ("short", "", true),
+            ("long", "", true),
+            ("short", "Files:\n{files}\nDiff:\n{diff}", true),
+            ("short", "", false),
+        ] {
+            let (port, request) = serve_captured("200 OK", r#"{"choices":[{"message":{"content":"fix: describe staged changes"}}]}"#);
+            let settings = Settings {
+                ai_enabled: true,
+                ai_api_key: "fixture-key".into(),
+                ai_base_url: format!("http://127.0.0.1:{port}/v1"),
+                ai_language: "en".into(),
+                ai_prompt_style: style.into(),
+                ai_prompt: custom.into(),
+                fake_ignore,
+                ..Settings::default()
+            };
+            assert_eq!(suggest(&repo.0, &settings).unwrap().summary, "fix: describe staged changes");
+            let body = request.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+            let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+            let prompt = body.pointer("/messages/1/content").unwrap().as_str().unwrap();
+            assert!(prompt.contains("visible.txt"), "{prompt}");
+            assert!(prompt.contains("+STAGED_VISIBLE"), "{prompt}");
+            assert!(!prompt.contains("UNSTAGED"), "{prompt}");
+            assert!(!prompt.contains("untracked.txt") && !prompt.contains("UNTRACKED"), "{prompt}");
+            assert_eq!(prompt.contains("local.txt"), !fake_ignore, "{prompt}");
+            assert_eq!(prompt.contains("STAGED_HIDDEN"), !fake_ignore, "{prompt}");
+        }
+        assert_eq!(std::fs::read(repo.0.join(".git/index")).unwrap(), index);
+        assert_eq!(std::fs::read_to_string(repo.0.join("visible.txt")).unwrap(), "LATER_UNSTAGED\n");
+    }
+
+    #[test]
+    fn suggestions_do_not_contact_ai_when_all_staged_files_are_fakeignored() {
+        let repo = SuggestRepo::new();
+        std::fs::write(repo.0.join(".fakeignore"), "*.txt\n").unwrap();
+        let index = std::fs::read(repo.0.join(".git/index")).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let settings = Settings {
+            ai_enabled: true,
+            ai_api_key: "fixture-key".into(),
+            ai_base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+            fake_ignore: true,
+            ..Settings::default()
+        };
+        let error = crate::http::with_net(
+            crate::http::NetOptions { timeout_secs: 1, ..crate::http::NetOptions::direct() },
+            || suggest(&repo.0, &settings),
+        ).unwrap_err();
+        assert_eq!(error, "Stage changes before asking for a message.");
+        assert_eq!(listener.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
+        assert_eq!(std::fs::read(repo.0.join(".git/index")).unwrap(), index);
+    }
+
     fn builtin_types() -> Vec<String> {
         COMMIT_TYPES.iter().map(|item| item.to_string()).collect()
     }
@@ -810,8 +904,13 @@ mod tests {
     }
 
     fn serve_once(status: &str, body: &str) -> u16 {
+        serve_captured(status, body).0
+    }
+
+    fn serve_captured(status: &str, body: &str) -> (u16, std::sync::mpsc::Receiver<String>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
+        let (send, receive) = std::sync::mpsc::channel();
         let status = status.to_string();
         let body = body.to_string();
         std::thread::spawn(move || {
@@ -825,6 +924,17 @@ mod tests {
                     Ok(n) => buf.extend_from_slice(&tmp[..n]),
                 }
             }
+            let end = buf.windows(4).position(|item| item == b"\r\n\r\n").unwrap() + 4;
+            let length = String::from_utf8_lossy(&buf[..end]).lines().find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse::<usize>().unwrap())
+            }).unwrap_or(0);
+            while buf.len() < end + length {
+                let read = std::io::Read::read(&mut stream, &mut tmp).unwrap();
+                assert!(read > 0, "request body ended early");
+                buf.extend_from_slice(&tmp[..read]);
+            }
+            let _ = send.send(String::from_utf8_lossy(&buf[end..end + length]).into_owned());
             let header = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
@@ -832,7 +942,7 @@ mod tests {
             let _ = std::io::Write::write_all(&mut stream, header.as_bytes());
             let _ = std::io::Write::write_all(&mut stream, body.as_bytes());
         });
-        port
+        (port, receive)
     }
 
     #[test]

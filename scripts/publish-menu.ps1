@@ -561,7 +561,10 @@ function Invoke-ReleaseFlow {
     $releaseBefore = $null
     try {
         if ($Publish -and $branch -ne "release") {
-            Write-Host "切换到 release，并合并 $branch"
+            # Include the version commit before switching branches. A rejected
+            # push stops here, before packaging or changing release.
+            Push-PublishRef $root "refs/heads/${branch}:refs/heads/${branch}" "推送开发分支 $branch 到 origin"
+            Write-PublishLog "切换到 release，并合并 $branch"
             Invoke-Git checkout release
             $switched = $true
             $releaseBefore = (& git -C $root rev-parse HEAD).Trim()
@@ -603,7 +606,7 @@ function Invoke-ReleaseFlow {
                         Write-Host "发布没有完成，已撤回 release 上这次合并。"
                     }
                 } elseif ($stage -eq "released") {
-                    Write-Host "GitHub release 和标签已经创建，版本清单还没有推到 release。再发布一次当前版本即可，不要改版本号。"
+                    Write-Host "GitHub release（可能仍是草稿）和标签已经创建，版本清单还没有推到 release。再发布一次当前版本即可，不要改版本号。"
                 }
                 throw
             } finally {
@@ -616,12 +619,14 @@ function Invoke-ReleaseFlow {
         }
     } finally {
         if ($switched) {
+            Write-PublishLog "返回开发分支 $branch"
             & git -C $root checkout $branch
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "没有回到 $branch。请先看一下当前分支。"
             }
         }
     }
+    if ($Publish) { Write-PublishLog "发布流程完成（版本 $target，当前分支 $(Get-CurrentBranch)）" }
     return $true
 }
 

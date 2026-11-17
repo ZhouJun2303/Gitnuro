@@ -102,33 +102,73 @@
     background: var(--added);
   }
 
-.side.nested:hover:has(.branch-switches) .sync,
-  .side.nested:focus-within:has(.branch-switches) .sync { visibility: hidden; }
+.branch-switches {
+    position: relative;
+    right: auto;
+    top: auto;
+    flex: none;
+    display: none;
+    margin-right: -4px;
+    isolation: isolate;
+  }
 
-.side.nested:hover:has(.branch-switches) .file-select,
-  .side.nested:focus-within:has(.branch-switches) .file-select { padding-right: 72px; }
+.branch-switches::before {
+    content: "";
+    position: absolute;
+    inset: 1px -2px;
+    z-index: -1;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--elevated);
+    box-shadow: 0 1px 3px #00000012;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+.side.nested:hover .branch-switches,
+  .side.nested:focus-within .branch-switches,
+  .branch-switches:has(.history-filter-toggle[aria-pressed="true"]) {
+    display: flex;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+.side.nested:not(:hover):not(:focus-within) .branch-switches .icon-btn:not(.history-filter-toggle) {
+    display: none;
+  }
+
+.side.nested:hover .branch-switches::before,
+  .side.nested:focus-within .branch-switches::before {
+    opacity: 1;
+  }
 
 .branch-switches .icon-btn {
     width: 22px;
     height: 22px;
   }
 
-.branch-switches .line-icon { width: 14px; height: 14px; }
+.branch-switches .line-icon { width: 14px; height: 14px; color: inherit; }
 
-.branch-switches .icon-btn.on { color: var(--accent); }
+.branch-switches .icon-btn[aria-pressed] .line-icon { width: 18px; height: 18px; }
+
+.branch-switches .icon-btn.on,
+  .branch-switches .icon-btn.on:hover:not(:disabled) {
+    color: var(--on-accent);
+    background: var(--accent);
+  }
 
 .section-filter {
-    position: absolute;
-    right: 4px;
-    top: 0;
-    height: 100%;
-    width: 28px;
+    height: 22px;
+    width: 22px;
     color: var(--text-secondary);
   }
 
 .section-filter.on { color: var(--accent); }
 
-.side.section:has(.section-filter) .side-actions { right: 32px; }
+.section-tools { flex: none; display: flex; align-items: center; gap: 2px; padding-right: 4px; }
+.section-tools .side-actions { position: static; height: auto; display: none; }
+.side.section:hover .section-tools .side-actions,
+  .side.section:focus-within .section-tools .side-actions { display: flex; }
 
 .side.section:hover:has(.side-actions) .count,
   .side.section:focus-within:has(.side-actions) .count {

@@ -177,6 +177,8 @@ async function fillSurface(shell: ShellState, id: string) {
   }
   if (id === "diff-text") return showChange(shell, "README.md", "unstaged");
   if (id === "diff-image") return showChange(shell, "art/mark.png", "unstaged");
+  if (id === "diff-image-size") return showChange(shell, "art/mark.png", "unstaged");
+  if (id === "diff-image-staged") return showChange(shell, "art/mark.png", "staged");
   if (id === "diff-binary") return showChange(shell, "data/sheet.xlsx", "unstaged");
   if (id === "diff-binary-large") return showChange(shell, "data/large.pak", "unstaged");
   if (id === "diff-rename") return showChange(shell, "src/renamed.txt", "staged");
@@ -223,6 +225,25 @@ async function fillSurface(shell: ShellState, id: string) {
   }
   if (id === "file-history-excel") {
     await shell.showFileHistory("data/sheet.xlsx");
+    return;
+  }
+  if (id === "file-history-image") {
+    await shell.showFileHistory(new URLSearchParams(window.location.search).get("file") || "art/mark.png");
+    return;
+  }
+  if (id === "commit-image") {
+    await shell.showFileHistory("art/mark.png");
+    shell.historyFilter = "";
+    shell.historyDetailHeight = 480;
+    await shell.openHistoryTab("changes");
+    return;
+  }
+  if (id === "history-branches") {
+    shell.section = "history";
+    shell.collapsedSide = [];
+    shell.graphBranches = ["main", "topic"];
+    shell.allBranches = false;
+    await shell.loadContext();
     return;
   }
   if (id === "blob") {
@@ -624,16 +645,22 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       fillSourceRoots(shell);
       break;
     case "editorImport":
-      shell.editorCandidates = [
+      shell.toolImportKind = sceneId === "detect-diff-tools" ? "diff" : sceneId === "detect-merge-tools" ? "merge" : "editor";
+      shell.editorCandidates = shell.toolImportKind === "editor" ? [
         { name: "Visual Studio Code", path: "C:\\Program Files\\Microsoft VS Code\\Code.exe", args: "-g \"{file}:{line}\"" },
         { name: "Cursor", path: "C:\\Users\\lab\\AppData\\Local\\Programs\\cursor\\Cursor.exe", args: "-g \"{file}:{line}\"" },
         { name: "Sublime Text", path: "C:\\Program Files\\Sublime Text\\sublime_text.exe", args: "\"{file}:{line}\"" },
+      ] : [
+        { name: "Beyond Compare", path: "C:\\Program Files\\Beyond Compare 5\\BComp.exe", args: shell.toolImportKind === "diff" ? '"{left}" "{right}"' : '"{ours}" "{theirs}" "{base}" "{working}"' },
+        { name: "WinMerge", path: "C:\\Program Files\\WinMerge\\WinMergeU.exe", args: shell.toolImportKind === "diff" ? '"{left}" "{right}"' : '-e -u -o "{working}" "{ours}" "{base}" "{theirs}"' },
+        { name: "VS Code", path: "C:\\Program Files\\Microsoft VS Code\\Code.exe", args: shell.toolImportKind === "diff" ? '--wait --diff "{left}" "{right}"' : '--wait --merge "{ours}" "{theirs}" "{base}" "{working}"' },
       ];
       shell.editorPicked = [];
       shell.editorDetecting = false;
       break;
     case "prefs": {
-      const prefTabs: Record<string, "general" | "workspace" | "diff" | "previewFormats" | "shortcuts" | "commit" | "ai" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
+      const prefTabs: Record<string, "general" | "fonts" | "workspace" | "diff" | "previewFormats" | "shortcuts" | "commit" | "ai" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
+        "prefs-fonts": "fonts",
         "prefs-flow": "advanced",
         "prefs-workspace": "workspace",
         "prefs-shortcuts": "shortcuts",

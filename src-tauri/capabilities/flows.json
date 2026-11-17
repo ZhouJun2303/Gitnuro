@@ -9,6 +9,8 @@
     "allow-operation-flow",
     "allow-operation-history",
     "allow-load-settings",
+    "allow-font-data",
+    "allow-font-cache-info",
     "allow-save-settings",
     "allow-log-client"
   ]

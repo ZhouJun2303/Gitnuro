@@ -365,16 +365,16 @@
         {#if shell.dialog === "prefs"}
           <PrefsDialog />
         {:else if shell.dialog === "editorImport"}
-          <h2>{shell.tr("dialog.detectEditors")}</h2>
+          <h2>{shell.tr(shell.toolImportKind === "editor" ? "dialog.detectEditors" : shell.toolImportKind === "diff" ? "dialog.detectDiffTools" : "dialog.detectMergeTools")}</h2>
           {#if shell.editorDetecting}
             <p class="empty">{shell.tr("dialog.detectingEditors")}</p>
           {:else if shell.editorCandidates.length === 0}
-            <p class="empty">{shell.tr("dialog.noEditorsFound")}</p>
+            <p class="empty">{shell.tr(shell.toolImportKind === "editor" ? "dialog.noEditorsFound" : "dialog.noToolsFound")}</p>
           {:else}
-            <p class="empty">{shell.tr("dialog.editorImportHint")}</p>
+            <p class="empty">{shell.tr(shell.toolImportKind === "editor" ? "dialog.editorImportHint" : "dialog.toolImportHint")}</p>
             <div class="editor-candidates">
               {#each shell.editorCandidates as item (item.path)}
-                {@const added = shell.toolsOf("editor").some((tool) => shell.pathsMatch(tool.path, item.path))}
+                {@const added = shell.toolsOf(shell.toolImportKind).some((tool) => shell.pathsMatch(tool.path, item.path))}
                 <label class="check editor-candidate">
                   <input type="checkbox" disabled={added} checked={added || shell.editorPicked.some((path) => shell.pathsMatch(path, item.path))} onchange={() => shell.toggleEditorCandidate(item.path)} />
                   <span class="editor-candidate-name">{item.name}</span>
@@ -387,7 +387,7 @@
             <button class="text-button" type="button" disabled={shell.editorDetecting} onclick={() => void shell.detectEditors()}>{shell.tr("dialog.detectAgain")}</button>
             <span class="grow"></span>
             <button class="text-button" type="button" onclick={() => shell.closeEditorImport()}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="submit" disabled={shell.writing || shell.editorPicked.length === 0}>{shell.tr("dialog.importSelected")}</button>
+            <button class="commit" type="submit" disabled={shell.writing || shell.editorDetecting || shell.editorPicked.length === 0}>{shell.tr("dialog.importSelected")}</button>
           </div>
         {:else if shell.dialog === "update"}
           <UpdatePanel />

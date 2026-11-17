@@ -40,11 +40,11 @@
   --ref-stash-bg: color-mix(in srgb, var(--ref-stash) 16%, transparent);
   /* Typography */
   /* Explicit CJK fallbacks prevent browser defaults from using a serif face. */
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", var(--font);
-  --mono: "Cascadia Mono", "SFMono-Regular", "Consolas", "Liberation Mono", "PingFang SC", "Microsoft YaHei UI", monospace;
-  --ui-scale: 13px;
-  --diff-font: 13px;
+  --font: var(--font-user,) "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-display: var(--font);
+  --mono: var(--mono-user,) "Cascadia Mono", "SFMono-Regular", "Consolas", "Liberation Mono", "PingFang SC", "Microsoft YaHei UI", monospace;
+  --ui-scale: 14px;
+  --diff-font: 14px;
   /* Rows */
   --row-file: 28px;
   --row-commit: 28px;
@@ -116,7 +116,7 @@
   --field: rgba(255, 255, 255, 0.04);
   --control-edge: rgba(255, 255, 255, 0.14);
   --highlight: rgba(255, 255, 255, 0.055);
-  --font: "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font: var(--font-user,) "Segoe UI", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
   --font-display: var(--font);
   --radius-sm: 3px;
   --radius: 4px;
@@ -216,14 +216,15 @@ body {
 
 body {
   font-family: var(--font);
-  font-size: 13px;
+  font-size: var(--ui-scale);
+  font-weight: var(--ui-weight, 400);
   color: var(--text);
   background: var(--canvas);
   letter-spacing: 0;
   line-height: 1.5;
   font-kerning: normal;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: auto;
+  text-rendering: auto;
 }
 
 button, input, select, textarea { font-family: inherit; }

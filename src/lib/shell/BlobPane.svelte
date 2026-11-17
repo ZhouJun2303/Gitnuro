@@ -99,6 +99,7 @@
     overflow: auto;
     font-family: var(--mono);
     font-size: 12.5px;
+    font-weight: var(--code-weight, 400);
   }
 
   .blob-row {

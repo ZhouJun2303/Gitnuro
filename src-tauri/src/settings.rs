@@ -48,6 +48,14 @@ pub struct Settings {
     pub lines_height: String,
     #[serde(default = "scale_default")]
     pub ui_scale: u32,
+    #[serde(default)]
+    pub ui_font: String,
+    #[serde(default)]
+    pub code_font: String,
+    #[serde(default = "font_weight")]
+    pub ui_font_weight: u32,
+    #[serde(default = "font_weight")]
+    pub code_font_weight: u32,
     #[serde(default = "default_true")]
     pub date_relative: bool,
     #[serde(default)]
@@ -445,7 +453,7 @@ fn compact() -> String {
     "compact".into()
 }
 fn scale_default() -> u32 {
-    13
+    14
 }
 fn sign_off_format() -> String {
     "Signed-off-by: %user <%email>".into()
@@ -479,8 +487,9 @@ fn locale_default() -> String {
 }
 fn flow_days() -> u32 { 3 }
 fn diff_font() -> u32 {
-    13
+    14
 }
+fn font_weight() -> u32 { 400 }
 fn date_sort() -> String {
     "date".into()
 }
@@ -537,6 +546,10 @@ impl Default for Settings {
             show_entire_file: false,
             lines_height: compact(),
             ui_scale: scale_default(),
+            ui_font: String::new(),
+            code_font: String::new(),
+            ui_font_weight: font_weight(),
+            code_font_weight: font_weight(),
             date_relative: true,
             date_format: String::new(),
             date_24h: true,
@@ -1517,6 +1530,24 @@ fn slug(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fonts_default_to_system_and_keep_existing_sizes_and_choices() {
+        let defaults: super::Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults.ui_font, "");
+        assert_eq!(defaults.code_font, "");
+        assert_eq!(defaults.ui_scale, 14);
+        assert_eq!(defaults.diff_font_size, 14);
+        assert_eq!(defaults.ui_font_weight, 400);
+        assert_eq!(defaults.code_font_weight, 400);
+        let saved: super::Settings = serde_json::from_str(r#"{"uiScale":13,"diffFontSize":16,"uiFont":"inter","codeFont":"jetbrains-mono","uiFontWeight":500,"codeFontWeight":600}"#).unwrap();
+        assert_eq!(saved.ui_scale, 13);
+        assert_eq!(saved.diff_font_size, 16);
+        assert_eq!(saved.ui_font, "inter");
+        assert_eq!(saved.code_font, "jetbrains-mono");
+        assert_eq!(saved.ui_font_weight, 500);
+        assert_eq!(saved.code_font_weight, 600);
+    }
+
     use super::*;
 
     fn sample() -> (serde_json::Value, String) {

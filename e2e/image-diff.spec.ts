@@ -183,6 +183,9 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await expect(preview).toHaveCount(1);
     await expect(preview).toHaveAttribute("src", /^blob:/);
     await expect(preview).toBeVisible();
+    await expect(page.locator(".image-dimensions")).toHaveText(["1 × 1 px", "1 × 1 px"]);
+    await expect(page.locator(".image-dimension-change")).toHaveText(locale === "zh" ? "尺寸未变化" : "Dimensions unchanged");
+    await expect(page.locator(".image-byte-change")).toHaveText(locale === "zh" ? "文件大小未变化" : "File size unchanged");
     mkdirSync(".lab/fix-audit", { recursive: true });
     await page.screenshot({ path: `.lab/fix-audit/pixel-${theme}.png` });
     await page.getByRole("button", { name: side, exact: true }).click();
@@ -213,7 +216,8 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await page.getByRole("button", { name: pixel, exact: true }).click();
     await expect(page.locator(".image-stage img")).toHaveAttribute("src", /^blob:/);
     const reloaded = page.waitForResponse((response) => response.url().endsWith("/__lab/invoke")
-      && response.request().postDataJSON()?.cmd === "revision_preview");
+      && response.request().postDataJSON()?.cmd === "file_preview"
+      && response.request().postDataJSON()?.args?.staged === true);
     await page.keyboard.press("F5");
     await reloaded;
     await expect(page.getByRole("button", { name: side, exact: true })).toHaveAttribute("aria-pressed", "true", { timeout: 3000 });
@@ -225,11 +229,11 @@ for (const theme of ["apple", "light", "dark"] as const) {
   test(`image panel ${theme} rejects excessive combined dimensions before allocating pixels`, async ({ page }) => {
     let bitmaps = 0;
     await page.route("**/__lab/invoke", async (route) => {
-      const { cmd } = route.request().postDataJSON();
+      const { cmd, args } = route.request().postDataJSON();
       if (cmd !== "file_preview" && cmd !== "revision_preview") return route.continue();
       const response = await route.fetch();
       const payload = await response.json();
-      const [width, height] = cmd === "file_preview" ? [8000, 2000] : [2000, 8000];
+      const [width, height] = cmd === "file_preview" && !args?.staged ? [8000, 2000] : [2000, 8000];
       const dataUrl = `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"></svg>`)}`;
       return route.fulfill({ json: { ...payload, value: { ...payload.value, dataUrl } } });
     });

@@ -12,8 +12,15 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $repo = "ZhouJun2303/Gitnuro"
 $stagePath = Join-Path $root ".git\awegit-publish-stage"
 . (Join-Path $PSScriptRoot "gh-retry.ps1")
+$publishWatch = [System.Diagnostics.Stopwatch]::StartNew()
 
 function Set-PublishStage([string]$name) {
+    $message = switch ($name) {
+        "packaging" { "开始构建 Windows 安装包" }
+        "released" { "GitHub release 已就绪，检查附件并准备推送版本清单" }
+        "pushed" { "release 与版本清单已推送到 origin" }
+    }
+    if ($message) { Write-PublishLog $message }
     if (-not (Test-Path (Split-Path $stagePath))) { return }
     [System.IO.File]::WriteAllText($stagePath, $name)
 }
@@ -55,6 +62,7 @@ function Get-NextAppCode {
 }
 
 function Write-LatestManifest([string]$version, [string]$notes, [string]$nsisPath, [int]$appCode) {
+    Write-PublishLog "计算安装包 SHA-256 并生成 latest.json（版本 $version，appCode $appCode）"
     $latestPath = Join-Path $root "latest.json"
     $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $nsisPath).Hash.ToLower()
     $fileName = [IO.Path]::GetFileName($nsisPath)
@@ -78,9 +86,11 @@ function Write-LatestManifest([string]$version, [string]$notes, [string]$nsisPat
     if ([string]$written.appVersion -ne $version) {
         throw "latest.json version is $($written.appVersion), expected $version"
     }
+    Write-PublishLog "latest.json 已写入并回读核对，SHA-256：$sha256"
 }
 
 function Commit-Manifest([string]$version) {
+    Write-PublishLog "提交 latest.json（版本 $version）"
     Push-Location $root
     try {
         git add -- latest.json | Out-Null
@@ -91,7 +101,9 @@ function Commit-Manifest([string]$version) {
                 throw "Could not commit latest.json"
             }
         }
-        return (& git -C $root rev-parse HEAD).Trim()
+        $commit = (& git -C $root rev-parse HEAD).Trim()
+        Write-PublishLog "版本清单提交：$commit"
+        return $commit
     }
     finally {
         Pop-Location
@@ -113,28 +125,43 @@ function Sync-ReleaseAssets([string]$tag, [string[]]$assets) {
     $listed = Invoke-GhRetry @("release", "view", $tag, "--repo", $repo, "--json", "assets", "--jq", ".assets[].name") "读取 release $tag 的附件"
     $have = @($listed -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     $missing = @($assets | Where-Object { $have -notcontains [IO.Path]::GetFileName($_) })
-    if ($missing.Count -gt 0) {
-        Invoke-GhRetry (@("release", "upload", $tag) + $missing + @("--repo", $repo, "--clobber")) "上传 release 附件" | Out-Null
+    Write-PublishLog "附件检查完成：本地 $($assets.Count) 个，待上传 $($missing.Count) 个"
+    for ($i = 0; $i -lt $missing.Count; $i++) {
+        $asset = Get-Item -LiteralPath $missing[$i]
+        $what = "上传附件 $($i + 1)/$($missing.Count)：$($asset.Name)（{0:N1} MiB）" -f ($asset.Length / 1MB)
+        Invoke-GhRetry @("release", "upload", $tag, $asset.FullName, "--repo", $repo, "--clobber") $what | Out-Null
     }
+    Write-PublishLog "GitHub release $tag 的安装包附件已就绪"
+}
+
+function Publish-GitHubRelease([string]$tag) {
+    $draft = Invoke-GhRetry @("release", "view", $tag, "--repo", $repo, "--json", "isDraft", "--jq", ".isDraft") "检查 release $tag 的公开状态"
+    if ($draft.Trim() -eq "true") {
+        Invoke-GhRetry @("release", "edit", $tag, "--repo", $repo, "--draft=false") "安装包已上传，公开 GitHub release $tag" | Out-Null
+    } elseif ($draft.Trim() -ne "false") {
+        throw "无法确认 GitHub release $tag 是否为草稿：$draft"
+    }
+    Write-PublishLog "GitHub release $tag 已公开"
 }
 
 # An earlier publish can leave the tag on a commit that never reached release.
 # No GitHub release exists for that tag at this point, so it is safe to replace.
 # A tag already inside release history is not ours to move.
 function Reset-StaleTag([string]$tag) {
+    Write-PublishLog "检查并清理上次未完成的标签 $tag"
     Push-Location $root
     $previous = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     try {
         & git -C $root tag -d $tag 2>$null | Out-Null
-        $remote = (& git -C $root ls-remote --tags --refs origin "refs/tags/$tag" 2>$null | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0) { throw "Could not read tag $tag from origin" }
-        if (-not $remote) { return }
-        & git -C $root fetch --quiet origin release 2>$null
-        if ($LASTEXITCODE -ne 0) { throw "Could not fetch origin release" }
+        $remote = Invoke-PublishProcess -Command git -Arguments @("-C", $root, "ls-remote", "--tags", "--refs", "origin", "refs/tags/$tag") -What "检查 origin 上的标签 $tag"
+        if ($remote.Code -ne 0) { throw "Could not read tag $tag from origin：$($remote.Text)" }
+        if (-not $remote.Stdout) { return }
+        $fetched = Invoke-PublishProcess -Command git -Arguments @("-C", $root, "fetch", "--quiet", "origin", "release") -What "读取 origin/release，核对未完成的标签"
+        if ($fetched.Code -ne 0) { throw "Could not fetch origin release：$($fetched.Text)" }
         $peek = "refs/awegit-stale/$tag"
-        & git -C $root fetch --quiet --force origin "refs/tags/${tag}:${peek}" 2>$null
-        if ($LASTEXITCODE -ne 0) { throw "Could not fetch tag $tag" }
+        $fetched = Invoke-PublishProcess -Command git -Arguments @("-C", $root, "fetch", "--quiet", "--force", "origin", "refs/tags/${tag}:${peek}") -What "读取标签 $tag，核对其发布历史"
+        if ($fetched.Code -ne 0) { throw "Could not fetch tag $tag：$($fetched.Text)" }
         & git -C $root merge-base --is-ancestor $peek origin/release 2>$null
         $inRelease = $LASTEXITCODE -eq 0
         & git -C $root update-ref -d $peek
@@ -143,9 +170,8 @@ function Reset-StaleTag([string]$tag) {
         if ($inRelease) {
             throw "标签 $tag 指向 release 上已有的提交，但 GitHub 上没有对应的 release。先手动确认这个标签。"
         }
-        & git -c lfs.locksverify=false push origin ":refs/tags/$tag" 2>$null
-        if ($LASTEXITCODE -ne 0) { throw "Could not remove stale tag $tag from origin" }
-        Write-Host "清理上次没有完成的标签 $tag"
+        Push-PublishRef $root ":refs/tags/$tag" "清理 origin 上未完成的标签 $tag"
+        Write-PublishLog "已清理上次没有完成的标签 $tag"
     }
     finally {
         $ErrorActionPreference = $previous
@@ -154,6 +180,7 @@ function Reset-StaleTag([string]$tag) {
 }
 
 function New-ReleaseTag([string]$tag, [string]$commit, [string]$version) {
+    Write-PublishLog "在版本清单提交 $commit 上创建标签 $tag"
     Push-Location $root
     try {
         & git -C $root tag -a $tag $commit -m "AweGit $version"
@@ -165,49 +192,12 @@ function New-ReleaseTag([string]$tag, [string]$commit, [string]$version) {
 }
 
 function Push-ReleaseTag([string]$tag) {
-    Push-Location $root
-    try {
-        $pushed = $false
-        foreach ($attempt in 1..3) {
-            git -c lfs.locksverify=false push origin "refs/tags/$tag"
-            if ($LASTEXITCODE -eq 0) { $pushed = $true; break }
-            if ($attempt -lt 3) {
-                Write-Host "推送标签 $tag 没有成功，正在重试 ($attempt)"
-                Start-Sleep -Seconds (5 * $attempt)
-            }
-        }
-        if (-not $pushed) {
-            throw "Could not push tag $tag"
-        }
-    }
-    finally {
-        Pop-Location
-    }
+    Push-PublishRef $root "refs/tags/$tag" "推送发布标签 $tag 到 origin"
 }
 
 function Push-Release {
-    Push-Location $root
-    try {
-        # Nothing in this repo is stored in Git LFS. The pre-push hook still
-        # POSTs /info/lfs/locks/verify, and GitHub often closes that call with
-        # EOF, which rejects the push after the installer is already uploaded.
-        $pushed = $false
-        foreach ($attempt in 1..3) {
-            git -c lfs.locksverify=false push origin release
-            if ($LASTEXITCODE -eq 0) { $pushed = $true; break }
-            if ($attempt -lt 3) {
-                Write-Host "推送 release 没有成功，正在重试 ($attempt)"
-                Start-Sleep -Seconds (5 * $attempt)
-            }
-        }
-        if (-not $pushed) {
-            throw "Could not push latest.json"
-        }
-        Set-PublishStage "pushed"
-    }
-    finally {
-        Pop-Location
-    }
+    Push-PublishRef $root "refs/heads/release:refs/heads/release" "推送 release 与 latest.json 到 origin"
+    Set-PublishStage "pushed"
 }
 
 $tauriPath = Join-Path $root "src-tauri\tauri.conf.json"
@@ -239,6 +229,7 @@ if ($version -ne [string]$package.version -or $version -ne $cargoVersion -or $ve
 }
 
 Assert-GhAuthenticated
+Write-PublishLog "版本校验通过，准备发布 AweGit $version"
 
 $bundle = Join-Path $root "target\release\bundle"
 $nsis = Join-Path $bundle "nsis\AweGit_${version}_x64-setup.exe"
@@ -246,7 +237,7 @@ $tag = "v$version"
 $releaseExists = Test-GitHubRelease -Tag $tag -Repo $repo
 
 if ($releaseExists) {
-    Write-Host "GitHub 上已经有 $tag，改为推送版本清单"
+    Write-PublishLog "GitHub 上已经有 $tag，补齐安装包并推送版本清单"
     Set-PublishStage "released"
     $assets = @(Get-InstallerAssets $version $nsis)
     if ($assets.Count -gt 0) {
@@ -270,7 +261,12 @@ if ($releaseExists) {
     if (-not (Test-Path $nsis)) {
         throw "Missing installer $nsis"
     }
+    Write-PublishLog "Windows 安装包构建完成"
     $assets = @(Get-InstallerAssets $version $nsis)
+    foreach ($assetPath in $assets) {
+        $asset = Get-Item -LiteralPath $assetPath
+        Write-PublishLog ("待发布附件：$($asset.Name)（{0:N1} MiB）" -f ($asset.Length / 1MB))
+    }
     $releaseNotes = if ($Notes) { $Notes } else { "AweGit $version" }
     # latest.json shows the plain lines in the app; GitHub renders the Markdown.
     $releaseBody = if ($NotesMarkdown) { $NotesMarkdown } else { $releaseNotes }
@@ -288,17 +284,19 @@ if ($releaseExists) {
         New-ReleaseTag $tag $commit $version
         Push-ReleaseTag $tag
         $tagPushed = $true
-        $createArgs = @("release", "create", $tag) + $assets + @("--verify-tag", "--repo", $repo, "--title", "AweGit $version", "--notes-file", $notesFile)
+        # Keep incomplete uploads in a draft; publish only after all installers
+        # are ready. Each file has its own progress and retry logs.
+        $createArgs = @("release", "create", $tag, "--draft", "--verify-tag", "--repo", $repo, "--title", "AweGit $version", "--notes-file", $notesFile)
         $created = $false
         $lastText = ""
         for ($attempt = 1; $attempt -le 6 -and -not $created; $attempt++) {
-            $result = Invoke-GhOnce $createArgs
+            $result = Invoke-GhOnce $createArgs "创建 GitHub release $tag（第 $attempt/6 次）"
             if ($result.Code -eq 0) { $created = $true; break }
             $lastText = $result.Text
             # The request can time out after GitHub created the release.
             if (Test-GitHubRelease -Tag $tag -Repo $repo) { $created = $true; break }
             if ($attempt -lt 6) {
-                Write-Host "创建 GitHub release $tag 没有成功，正在重试 ($attempt)"
+                Write-PublishLog "创建 GitHub release $tag 没有成功，正在重试 ($attempt)"
                 Start-Sleep -Seconds ([Math]::Min(3 * $attempt, 15))
             }
         }
@@ -309,8 +307,7 @@ if ($releaseExists) {
         # commit so a retry pushes the same commit and the tag stays on release.
         Set-PublishStage "released"
         $tagPushed = $false
-        # A create that timed out midway can leave the release without its
-        # installers; upload whatever is still missing.
+        # Also resumes an earlier upload that only completed some installers.
         Sync-ReleaseAssets $tag $assets
     }
     catch {
@@ -326,7 +323,8 @@ if ($releaseExists) {
     }
 }
 
+Publish-GitHubRelease $tag
 Push-Release
 $published = Read-JsonFile (Join-Path $root "latest.json")
-Write-Host "Published v$version"
+Write-PublishLog ("AweGit v$version 发布完成，总耗时 {0:N1} 秒" -f $publishWatch.Elapsed.TotalSeconds)
 Write-Host ([string]$published.downloadUrl)

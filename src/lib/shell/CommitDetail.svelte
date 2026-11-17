@@ -3,6 +3,8 @@
   import StashPlates from "./StashPlates.svelte";
   import RefChip from "./RefChip.svelte";
   import BinaryDiff from "./BinaryDiff.svelte";
+  import RevisionImages from "./RevisionImages.svelte";
+  import { fileMarkKind } from "../fileType";
   import "./CommitDetail.css";
   import SplitHandle from "../SplitHandle.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -353,7 +355,11 @@
       {#if !live}
         <p class="diff-empty slim">{shell.tr("chrome.reading")}</p>
       {:else if live.binary}
-        <BinaryDiff path={file} oldBytes={live.oldBytes} newBytes={live.newBytes} compact />
+        {#if fileMarkKind(file) === "image"}
+          <RevisionImages {file} diff={live} compact />
+        {:else}
+          <BinaryDiff path={file} oldBytes={live.oldBytes} newBytes={live.newBytes} compact />
+        {/if}
       {:else if live.lines.length === 0}
         <p class="diff-empty slim">{shell.tr("chrome.noChanges")}</p>
       {:else if shell.settings.diffStyle === "split"}

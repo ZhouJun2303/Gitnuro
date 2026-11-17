@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-font-cache-info"
+description = "Enables the font_cache_info command without any pre-configured scope."
+commands.allow = ["font_cache_info"]
+
+[[permission]]
+identifier = "deny-font-cache-info"
+description = "Denies the font_cache_info command without any pre-configured scope."
+commands.deny = ["font_cache_info"]

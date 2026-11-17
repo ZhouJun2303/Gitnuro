@@ -1322,12 +1322,10 @@ pub fn compare_files(repo: &Path, from: &str, to: &str) -> Result<Vec<FileChange
     Ok(parse_name_status(&output.stdout))
 }
 
-/// Diff of one path between two revisions.
-/// Staged file names, the current branch, and the last five subjects. Used to fill a prompt.
-pub fn prompt_facts(repo: &Path) -> (String, String, String) {
-    let files = run(repo, &["diff", "--cached", "--name-only"])
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .unwrap_or_default();
+/// Staged file names and diff, the current branch, and the last five subjects.
+/// Fake-ignored paths are filtered before reading diff text, without changing the index.
+pub fn prompt_facts(repo: &Path, fakeignore: bool) -> Result<(String, String, String, String), Error> {
+    let (files, diff) = prompt_changes(repo, fakeignore)?;
     let branch = run(repo, &["rev-parse", "--abbrev-ref", "HEAD"])
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .unwrap_or_default();
@@ -1339,7 +1337,43 @@ pub fn prompt_facts(repo: &Path) -> (String, String, String) {
     let recent = run(repo, &["log", "-5", "--format=%s"])
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
         .unwrap_or_default();
-    (files, branch, recent)
+    Ok((files, branch, recent, diff))
+}
+
+fn prompt_changes(repo: &Path, fakeignore: bool) -> Result<(String, String), Error> {
+    with_read(|| {
+        let root = crate::discover(repo).unwrap_or_else(|| repo.to_path_buf());
+        // Treat both sides of a rename separately so an ignored source or destination
+        // cannot enter the prompt through the other side's diff.
+        let output = run(
+            &root,
+            &["diff", "--cached", "--name-status", "-z", "--no-renames", "--no-relative", "--"],
+        )?;
+        let mut changes = parse_name_status(&output.stdout);
+        crate::hide_scratch(&mut changes);
+        if fakeignore {
+            let opened = crate::open_repo(&root)?;
+            crate::fakeignore::conceal(&root, &opened, &mut changes, &mut Vec::new());
+        }
+
+        let files = changes.iter().map(|change| change.path.as_str()).collect::<Vec<_>>().join("\n");
+        let mut diff = Vec::new();
+        const LIMIT: usize = 1_000_000;
+        // Bound command-line length on Windows and share the output limit across batches.
+        for chunk in changes.chunks(32) {
+            if diff.len() >= LIMIT {
+                break;
+            }
+            let mut args = vec![
+                "--literal-pathspecs", "diff", "--cached", "--no-color", "--no-ext-diff",
+                "--no-textconv", "--no-renames", "--no-relative", "--",
+            ];
+            args.extend(chunk.iter().map(|change| change.path.as_str()));
+            let (output, _) = run_capped(&root, &args, LIMIT - diff.len())?;
+            diff.extend_from_slice(&output.stdout);
+        }
+        Ok((files, String::from_utf8_lossy(&diff).into_owned()))
+    })
 }
 
 pub fn compare_file(

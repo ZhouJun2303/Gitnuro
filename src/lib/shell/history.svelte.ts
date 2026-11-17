@@ -94,7 +94,8 @@ export async function loadCommits(shell: ShellState, path: string | undefined, o
     if (!shell.allBranches && revs.length > 0) {
       try {
         return await invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, order, revs }, undefined, operation);
-      } catch {
+      } catch (error) {
+        if (shell.graphBranches?.length) throw error;
         return invoke<CommitRow[]>("commit_log", { path, limit: shell.logLimit, all: false, order }, undefined, operation);
       }
     }
@@ -124,6 +125,18 @@ async function readContext(shell: ShellState, operation?: string) {
     if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
     const { revision, ...visibleRefs } = nextRefs;
     if (!shell.same(shell.refs, visibleRefs)) shell.refs = visibleRefs;
+    if (shell.graphBranches?.length) {
+      const available = new Set([
+        ...nextRefs.branches.map((branch) => branch.name),
+        ...nextRefs.remotes.flatMap((remote) => remote.branches.map((branch) => `${remote.name}/${branch}`)),
+        ...nextRefs.tags.map((tag) => tag.name),
+      ]);
+      const remaining = shell.graphBranches.filter((name) => available.has(name));
+      if (remaining.length !== shell.graphBranches.length) {
+        shell.graphBranches = remaining;
+        if (!remaining.length) shell.allBranches = true;
+      }
+    }
     const [rows, state, merge] = await Promise.all([
       shell.loadCommits(path, operation),
       invoke<InProgress | null>("in_progress", { path }, undefined, operation),
@@ -321,6 +334,16 @@ export function activeLaneColor(shell: ShellState): number | null {
 
 /** Revisions the history should walk while “checked branches only” is on. */
 export function exactRefs(shell: ShellState): string[] {
+    if (shell.graphBranches?.length) {
+      const names = new Set(shell.graphBranches);
+      const locals = new Set<string>();
+      const remotes = new Set((shell.refs?.remotes ?? []).flatMap((remote) => remote.branches.map((branch) => `${remote.name}/${branch}`)));
+      for (const branch of shell.refs?.branches ?? []) {
+        locals.add(branch.name);
+        if (names.has(branch.name) && branch.upstream && !shell.refHidden(branch.upstream)) names.add(branch.upstream);
+      }
+      return [...names].map((name) => locals.has(name) ? `refs/heads/${name}` : remotes.has(name) ? `refs/remotes/${name}` : name);
+    }
     const visible = (name: string, forced: boolean) => forced || !shell.refHidden(name);
     if (shell.graphSolo) {
       const names = [shell.graphSolo];
@@ -332,20 +355,26 @@ export function exactRefs(shell: ShellState): string[] {
   }
 
 export function soloBranch(shell: ShellState, name: string) {
-    shell.graphSolo = shell.graphSolo === name ? null : name;
-    shell.allBranches = false;
+    const selected = shell.allBranches ? [] : shell.graphBranches?.length ? shell.graphBranches : shell.graphSolo ? [shell.graphSolo] : [];
+    shell.graphBranches = selected.includes(name) ? selected.filter((item) => item !== name) : [...selected, name];
+    shell.graphSolo = null;
+    shell.allBranches = shell.graphBranches.length === 0;
     if (shell.mode === "live") void shell.loadContext();
   }
 
 export function toggleHistoryScope(shell: ShellState) {
     shell.allBranches = !shell.allBranches;
-    if (shell.allBranches) shell.graphSolo = null;
+    if (shell.allBranches) {
+      shell.graphSolo = null;
+      shell.graphBranches = [];
+    }
     if (shell.mode === "live") void shell.loadContext();
   }
 
 export function clearHistoryFilter(shell: ShellState) {
     shell.allBranches = true;
     shell.graphSolo = null;
+    shell.graphBranches = [];
     shell.historyFilter = "";
     if (shell.mode === "live") void shell.loadContext();
   }
@@ -823,7 +852,9 @@ export async function locateRef(shell: ShellState, name: string) {
       (shell.refs?.remotes.some((remote) => name === remote.name || name.startsWith(`${remote.name}/`)) ?? false);
     if (!shell.allBranches || namedRef) {
       shell.allBranches = false;
-      shell.graphSolo = name;
+      if (shell.graphBranches?.length) {
+        if (!shell.graphBranches.includes(name)) shell.graphBranches = [...shell.graphBranches, name];
+      } else shell.graphSolo = name;
       await shell.withWork(shell.tr("chrome.locating", { name }), async () => {
         try {
           const rows = await invoke<CommitRow[]>("commit_log", {

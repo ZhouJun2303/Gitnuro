@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deflateSync } from "node:zlib";
 
 if (process.argv.includes("--performance")) {
   await import("./perf-seed.mjs");
@@ -533,7 +534,48 @@ function seedUnityRepo() {
   commit(path, "Assets/Prefabs/UIChapter.prefab", "%YAML 1.1\n%TAG !u! tag:unity3d.com,2011:\n--- !u!1 &1\nGameObject:\n  m_Name: UIChapter\n  m_IsActive: 1\n", "activate the chapter prefab");
 }
 
+function seedHistoryImagesRepo() {
+  const path = join(repos, "history-images");
+  wipe(path);
+  initWork(path);
+  const preview = (updated, width = updated ? 360 : 240, height = updated ? 216 : 144) => {
+    const pixels = Buffer.alloc((width * 4 + 1) * height);
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+      const circle = (x - width * (updated ? 0.66 : 0.34)) ** 2 + (y - height / 2) ** 2 < (Math.min(width, height) * 0.24) ** 2;
+      const color = circle ? (updated ? [84, 154, 255] : [250, 182, 68]) : [38, 44, 58];
+      const at = y * (width * 4 + 1) + 1 + x * 4;
+      pixels.set([...color, 255], at);
+    }
+    const chunk = (type, data) => {
+      const body = Buffer.concat([Buffer.from(type), data]);
+      let crc = 0xffffffff;
+      for (const byte of body) {
+        crc ^= byte;
+        for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+      }
+      const result = Buffer.alloc(body.length + 8);
+      result.writeUInt32BE(data.length, 0);
+      body.copy(result, 4);
+      result.writeUInt32BE((crc ^ 0xffffffff) >>> 0, result.length - 4);
+      return result;
+    };
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 6;
+    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("tEXt", Buffer.concat([Buffer.from("Comment\0"), Buffer.alloc(width * 4, 65)])), chunk("IDAT", deflateSync(pixels)), chunk("IEND", Buffer.alloc(0))]);
+  };
+  commit(path, "art/mark.png", preview(false), "add the image");
+  commit(path, "art/mark.png", preview(true), "change the image");
+  commit(path, "art/deleted.png", preview(false), "add an image to delete");
+  git(path, ["rm", "--", "art/deleted.png"]);
+  git(path, ["commit", "-m", "delete the image"]);
+  commit(path, "art/large.png", Buffer.concat([pngA, Buffer.alloc(8_000_001)]), "add an oversized image");
+  write(path, "art/mark.png", preview(true, 480, 144));
+  git(path, ["add", "--", "art/mark.png"]);
+  write(path, "art/mark.png", preview(false, 240, 288));
+}
+
 const restore = {
+  "history-images": seedHistoryImagesRepo,
   "checkout-dirty": () => seedCheckoutRepo(),
   "checkout-index": () => seedCheckoutRepo("checkout-index"),
   "checkout-conflict": () => seedCheckoutRepo("checkout-conflict"),
@@ -755,6 +797,7 @@ seedPullNoopRepo("pull-disjoint");
 seedCherryRepo();
 seedRevertRepo();
 seedTagsRepo();
+seedHistoryImagesRepo();
 
 const detached = join(repos, "detached");
 initWork(detached);

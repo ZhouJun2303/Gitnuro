@@ -4,6 +4,7 @@
   import AccountsPage from "./AccountsPage.svelte";
   import ShortcutPage from "./ShortcutPage.svelte";
   import RevisionPreviewFormats from "./RevisionPreviewFormats.svelte";
+  import FontSettings from "./FontSettings.svelte";
   import type { MenuItem, PrefTab } from "./types";
 
   const shell = getShell();
@@ -23,6 +24,7 @@
       label: shell.tr("dialog.prefGroupGeneral"),
       tabs: [
         { id: "general" as PrefTab, label: shell.tr("dialog.general"), hint: shell.tr("dialog.prefHintGeneral") },
+        { id: "fonts" as PrefTab, label: shell.tr("dialog.fonts"), hint: shell.tr("dialog.fontsHint") },
         { id: "workspace" as PrefTab, label: shell.tr("dialog.workspacePage"), hint: shell.tr("dialog.prefHintWorkspace") },
         { id: "diff" as PrefTab, label: shell.tr("dialog.diff"), hint: shell.tr("dialog.prefHintDiff") },
         { id: "previewFormats" as PrefTab, label: shell.tr("dialog.previewFormatsPage"), hint: shell.tr("dialog.prefHintPreviewFormats") },
@@ -74,6 +76,8 @@
       <circle cx="5.4" cy="4.4" r="1.3" fill="var(--elevated)" />
       <circle cx="10.2" cy="8" r="1.3" fill="var(--elevated)" />
       <circle cx="6.6" cy="11.6" r="1.3" fill="var(--elevated)" />
+    {:else if id === "fonts"}
+      <path d="M2 12.5 6 3.5l4 9M3.5 9h5M10 7h4M12 7v5.5" />
     {:else if id === "workspace"}
       <path d="M1.9 4.3c0-.7.6-1.3 1.3-1.3h3l1.2 1.3h5.4c.7 0 1.3.6 1.3 1.3v6.2c0 .7-.6 1.3-1.3 1.3H3.2c-.7 0-1.3-.6-1.3-1.3z" />
     {:else if id === "diff"}
@@ -264,6 +268,8 @@
             </label>
           </div>
         </section>
+      {:else if shell.prefTab === "fonts"}
+        <FontSettings />
       {:else if shell.prefTab === "shortcuts"}
         <ShortcutPage />
       {:else if shell.prefTab === "previewFormats"}
@@ -664,9 +670,8 @@
                 <div class="tool-actions">
                   <button class="text-button" type="button" onclick={() => shell.addTool(kind)}>{shell.tr("dialog.toolAdd")}</button>
                   <button class="text-button" type="button" disabled={!picked} onclick={() => picked && shell.removeTool(kind, picked.id)}>{shell.tr("dialog.toolRemove")}</button>
-                  {#if kind === "editor"}
-                    <button class="text-button tool-import" type="button" onclick={() => shell.openEditorImport()}>{shell.tr("dialog.detect")}</button>
-                  {:else}
+                  <button class="text-button tool-detect" type="button" onclick={() => shell.openEditorImport(kind)}>{shell.tr("dialog.detect")}</button>
+                  {#if kind !== "editor"}
                     <button class="text-button tool-import" type="button" onclick={(event) => shell.openMenu(event, toolImportItems(kind))}>{shell.tr("dialog.toolImport")}</button>
                   {/if}
                   <span class="grow"></span>

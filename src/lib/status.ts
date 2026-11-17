@@ -177,6 +177,10 @@ export type Settings = {
   showEntireFile: boolean;
   linesHeight: string;
   uiScale: number;
+  uiFont: string;
+  codeFont: string;
+  uiFontWeight: number;
+  codeFontWeight: number;
   dateRelative: boolean;
   dateFormat: string;
   date24h: boolean;

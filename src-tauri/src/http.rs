@@ -213,6 +213,29 @@ pub fn agent(read_secs: u64, https_only: bool) -> Result<ureq::Agent, String> {
     build_agent(read_secs, https_only)
 }
 
+pub struct Download {
+    pub reader: Box<dyn Read>,
+    pub total: u64,
+}
+
+/// Stream public downloads through Windows' system network settings by default.
+/// Explicit app proxy/CA/SSL settings retain the existing cross-platform transport.
+pub fn download(url: &str, read_secs: u64) -> Result<Download, String> {
+    if !url.starts_with("https://") { return Err(coded("network", "downloads require HTTPS")); }
+    #[cfg(windows)]
+    {
+        let net = current();
+        if net.proxy.trim().is_empty() && net.ssl_ca_file.trim().is_empty() && net.ssl_verify {
+            let response = crate::system_http::Response::get(url, read_secs)?;
+            let total = response.total;
+            return Ok(Download { reader: Box::new(response), total });
+        }
+    }
+    let response = agent(read_secs, true)?.get(url).call().map_err(|error| coded("network", &error.to_string()))?;
+    let total = response.header("content-length").and_then(|value| value.parse().ok()).unwrap_or(0);
+    Ok(Download { reader: response.into_reader(), total })
+}
+
 fn build_agent(read_secs: u64, https_only: bool) -> Result<ureq::Agent, String> {
     build_agent_redirects(read_secs, https_only, if https_only { 10 } else { 5 })
 }
@@ -421,6 +444,14 @@ fn http_response(status: u16, body: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn downloads_require_https_and_respect_an_explicit_ca() {
+        assert!(super::download("http://example.com/asset", 1).err().unwrap().contains("require HTTPS"));
+        let options = super::NetOptions { ssl_ca_file: "awegit-missing-download-ca.pem".into(), ..super::NetOptions::direct() };
+        let error = super::with_net(options, || super::download("https://example.com/asset", 1).err().unwrap());
+        assert!(error.contains("CA file:"), "{error}");
+    }
+
     use super::*;
 
     #[test]

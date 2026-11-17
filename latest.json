@@ -1,5 +1,5 @@
 {
-    "appVersion":  "2.0.12",
+    "appVersion": "2.0.13",
     "notes":  "✨ 新功能\n\n· 文件历史预览支持 Excel 和常见表格格式\n\n⚡ 体验优化\n\n· 文件右键菜单的常用操作移至顶部\n· 内容较多的弹窗滚动更流畅\n· 批量选择文件时操作更流畅\n· 切换分支、拉取更新等操作减少等待",
     "appCode":  39,
     "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.12/AweGit_2.0.12_x64-setup.exe",
