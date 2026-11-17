@@ -1,10 +1,60 @@
 import { expect, test } from "@playwright/test";
 import { pinLabSettings } from "./helpers";
+import { mkdirSync, writeFileSync } from "node:fs";
 
 test.beforeEach(async ({ page }) => {
   await pinLabSettings(page, { fetchAutomatically: false, statusInterval: 0 });
   await page.goto("/?scene=clean");
   await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();
+});
+
+test("large selections clear completed files and preserve other selections without quadratic work", async ({ page }) => {
+  test.setTimeout(90_000);
+  const result = await page.evaluate(async () => {
+    const modulePath = "/src/lib/shell/diff.svelte.ts";
+    const actions = await import(/* @vite-ignore */ modulePath);
+    const files = Array.from({ length: 20_000 }, (_, index) => `Assets/Generated/file-${index}.asset`);
+    const samples: { action: string; ms: number; remaining: string[]; sent: number }[] = [];
+    for (const action of ["stagePicked", "unstagePicked", "discardPicked", "deletePicked", "resolvePicked"]) {
+      let sent = 0;
+      const shell: any = { mode: "live", busy: false, writing: false, actionError: null, picked: [...files, "retained.txt"],
+        mutate: async (request: { files: string[] }) => { sent = request.files.length; },
+      };
+      const start = performance.now();
+      if (action === "resolvePicked") await actions[action](shell, "ours", files);
+      else await actions[action](shell, files);
+      samples.push({ action, ms: performance.now() - start, remaining: shell.picked, sent });
+    }
+    const rows = files.map((path) => ({ path, letter: "M", tone: "modified" }));
+    const shell: any = { mode: "sample", picked: [...files, "retained.txt"], settings: {}, staged: [], unstaged: rows,
+      shownUnstaged: rows, filesInDir: () => files, clearTextSelection() {}, selectedIndex: 0,
+    };
+    const stashStart = performance.now();
+    actions.openStash(shell, files);
+    const stashMs = performance.now() - stashStart;
+    const stash = { included: shell.includeUntracked, count: shell.stashFiles.length };
+    const folderStart = performance.now();
+    actions.selectFolder(shell, "Assets", "unstaged", { ctrlKey: true });
+    const folderMs = performance.now() - folderStart;
+    shell.staged = [{ path: "staged-new.txt", letter: "A" }];
+    shell.unstaged = [...rows, { path: "other-new.txt", letter: "?" }];
+    const scopes: boolean[] = [];
+    for (const selected of [[files[0]], ["other-new.txt"], ["staged-new.txt"]]) {
+      actions.openStash(shell, selected);
+      scopes.push(shell.includeUntracked);
+    }
+    shell.settings.stashIncludeUntracked = true;
+    actions.openStash(shell, []);
+    scopes.push(shell.includeUntracked);
+    return { samples, stashMs, stash, folderMs, folderRemaining: shell.picked, scopes };
+  });
+  for (const sample of result.samples) expect(sample).toMatchObject({ sent: 20_000, remaining: ["retained.txt"] });
+  expect(result.stash).toEqual({ included: false, count: 20_000 });
+  expect(result.folderRemaining).toEqual(["retained.txt"]);
+  expect(result.scopes).toEqual([false, true, true, true]);
+  const directory = `.lab/ui-audit/${process.env.AWEGIT_UI_AUDIT_RUN || "current"}`;
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(`${directory}/selections.json`, JSON.stringify(result, null, 2));
 });
 
 test("virtual lists keep their last rows when a deep list shrinks", async ({ page }) => {

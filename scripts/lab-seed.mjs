@@ -444,12 +444,22 @@ function seedPullDeletedRepo() {
   write(path, ".fakeignore", "local-only\n");
 }
 
-function seedPullNoopRepo() {
-  const path = join(repos, "pull-noop");
-  const upstream = join(repos, "pull-noop-upstream");
+function seedPullNoopRepo(name = "pull-noop") {
+  const path = join(repos, name);
+  const upstream = join(repos, `${name}-upstream`);
   wipe(path); wipe(upstream); initWork(upstream);
+  git(upstream, ["config", "core.autocrlf", "false"]);
   commit(upstream, "note.txt", "base\n", "base");
+  if (name === "pull-disjoint") {
+    for (let index = 0; index < 1000; index++) write(upstream, `tracked/file-${index}.txt`, "base\n");
+    git(upstream, ["add", "."]); git(upstream, ["commit", "-m", "many tracked files"]);
+  }
   cloneFrom(fileUrl(upstream), path);
+  git(path, ["config", "core.autocrlf", "false"]);
+  if (name === "pull-disjoint") {
+    commit(upstream, "incoming.txt", "incoming\n", "incoming without overlapping local work");
+    for (let index = 0; index < 1000; index++) write(path, `tracked/file-${index}.txt`, "working\n");
+  }
   write(path, "note.txt", "staged\n");
   git(path, ["add", "note.txt"]);
   write(path, "note.txt", "working\n");
@@ -531,6 +541,7 @@ const restore = {
   "stage-conflict-paths": seedStageConflictPathsRepo,
   "pull-deleted": seedPullDeletedRepo,
   "pull-noop": seedPullNoopRepo,
+  "pull-disjoint": () => seedPullNoopRepo("pull-disjoint"),
   tags: seedTagsRepo,
   unity: seedUnityRepo,
   operation: seedOperationRepo,
@@ -740,6 +751,7 @@ seedUnstageInitialRepo();
 seedStageConflictPathsRepo();
 seedPullDeletedRepo();
 seedPullNoopRepo();
+seedPullNoopRepo("pull-disjoint");
 seedCherryRepo();
 seedRevertRepo();
 seedTagsRepo();

@@ -9,6 +9,7 @@
   import type { CommitType } from "./commitMessage";
 
   const shell = getShell();
+  const pickedPaths = $derived(new Set(shell.picked));
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const onStagedScroll = onVirtualScroll((top) => (shell.stagedTop = top));
   const onFileScroll = onVirtualScroll((top) => (shell.fileTop = top));
@@ -326,7 +327,7 @@
                 class="side"
                 type="button"
                 class:selected={shell.selectedPath === entry.file.path && shell.selectedSide === entry.side}
-                class:picked={shell.picked.includes(entry.file.path) && !(shell.selectedPath === entry.file.path && shell.selectedSide === entry.side)}
+                class:picked={pickedPaths.has(entry.file.path) && !(shell.selectedPath === entry.file.path && shell.selectedSide === entry.side)}
                 onclick={(event) => shell.selectFile(entry.file.path, entry.side, event)}
                 ondblclick={(event) => flipFile(event, entry.file.path, entry.side)}
               >
@@ -449,7 +450,7 @@
         class:tree-row={shell.fileLayout === "tree"}
         style:padding-left="{shell.fileLayout === "tree" ? 8 + depth * 16 : 8 + depth * 14}px"
         class:selected={shell.selectedPath === file.path && (shell.mode !== "live" || shell.selectedSide === side)}
-        class:picked={shell.picked.includes(file.path) && !(shell.selectedPath === file.path && (shell.mode !== "live" || shell.selectedSide === side))}
+        class:picked={pickedPaths.has(file.path) && !(shell.selectedPath === file.path && (shell.mode !== "live" || shell.selectedSide === side))}
         role="group"
         oncontextmenu={(event) => shell.openMenu(event, shell.fileMenu(file, side))}
         ondblclick={(event) => flipFile(event, file.path, side)}

@@ -672,24 +672,30 @@ export function pickedIn(shell: ShellState, rows: Row[]) {
     return shell.picked.filter((path) => names.has(path));
   }
 
+/** Batch completion must not scan the entire batch once per selected file. */
+export function unpickFiles(shell: ShellState, files: readonly string[]) {
+    const removed = new Set(files);
+    shell.picked = shell.picked.filter((path) => !removed.has(path));
+  }
+
 export async function discardPicked(shell: ShellState, files = [...shell.picked]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
     if (names.length === 0 || shell.busy || shell.writing) return;
     if (names.length === 1) await shell.mutate({ action: "discard", file: names[0] });
     else await shell.mutate({ action: "discardPaths", files: names });
-    if (!shell.actionError) shell.picked = shell.picked.filter((path) => !names.includes(path));
+    if (!shell.actionError) unpickFiles(shell, names);
   }
 
 export async function unstagePicked(shell: ShellState, files = [...shell.picked]) {
     if (files.length === 0 || shell.writing) return;
     await shell.mutate({ action: "stagePaths", files, unstage: true });
-    shell.picked = shell.picked.filter((path) => !files.includes(path));
+    unpickFiles(shell, files);
   }
 
 export async function stagePicked(shell: ShellState, files = [...shell.picked]) {
     if (files.length === 0 || shell.writing) return;
     await shell.mutate({ action: "stagePaths", files, unstage: false });
-    shell.picked = shell.picked.filter((path) => !files.includes(path));
+    unpickFiles(shell, files);
   }
 
 /** Conflict files among the picked rows; other picked files are left alone. */
@@ -703,7 +709,7 @@ export async function resolvePicked(shell: ShellState, side: "ours" | "theirs", 
     const names = [...new Set(files.filter((path) => path.length > 0))];
     if (names.length === 0 || shell.mode !== "live" || shell.writing) return;
     await shell.mutate({ action: "resolvePaths", files: names, side });
-    if (!shell.actionError) shell.picked = shell.picked.filter((path) => !names.includes(path));
+    if (!shell.actionError) unpickFiles(shell, names);
   }
 
 export function stageChosen(shell: ShellState, side: Side, files: string[]) {
@@ -798,7 +804,7 @@ export async function deletePicked(shell: ShellState, files = [...shell.picked])
     if (names.length === 0 || shell.writing) return;
     if (names.length === 1) await shell.mutate({ action: "delete", file: names[0] });
     else await shell.mutate({ action: "deletePaths", files: names });
-    shell.picked = shell.picked.filter((path) => !names.includes(path));
+    unpickFiles(shell, names);
   }
 
 export function confirmPicked(shell: ShellState, files: string[], title: string, run: (files: string[]) => Promise<void>) {
@@ -826,8 +832,9 @@ export function deleteChosen(shell: ShellState, files: string[]) {
 export function openStash(shell: ShellState, files: string[]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
     shell.draft = "";
-    const rows = [...shell.unstaged, ...shell.staged];
-    const selectedUntracked = names.some((path) => rows.some((file) => file.path === path && (file.letter === "A" || file.letter === "?")));
+    const selected = new Set(names);
+    const untracked = (file: Row) => (file.letter === "A" || file.letter === "?") && selected.has(file.path);
+    const selectedUntracked = shell.unstaged.some(untracked) || shell.staged.some(untracked);
     shell.includeUntracked = shell.settings.stashIncludeUntracked || selectedUntracked;
     shell.stashFiles = names;
     shell.dialog = "stash";
@@ -848,7 +855,7 @@ export async function addIgnore(shell: ShellState, paths: string[], fake: boolea
       await shell.savePrefs(false);
     }
     await shell.mutate({ action: "appendIgnore", files, fake, directory });
-    shell.picked = shell.picked.filter((path) => !files.includes(path));
+    unpickFiles(shell, files);
   }
 
 export function filesInDir(shell: ShellState, dir: string, side: Side) {
@@ -862,7 +869,7 @@ export async function stageFolder(shell: ShellState, dir: string, unstage: boole
     const files = shell.filesInDir(dir, unstage ? "staged" : "unstaged");
     if (files.length === 0) return;
     await shell.mutate({ action: "stagePaths", files, unstage });
-    shell.picked = shell.picked.filter((path) => !files.includes(path));
+    unpickFiles(shell, files);
   }
 
 export function copyText(shell: ShellState, text: string) {
@@ -1088,7 +1095,8 @@ export function selectAllHere(shell: ShellState) {
     }
     if (shell.section !== "changes") return;
     const { rows } = shell.fileTargetRows();
-    if (rows.length > 1 && rows.every((file) => shell.picked.includes(file.path))) {
+    const picked = new Set(shell.picked);
+    if (rows.length > 1 && rows.every((file) => picked.has(file.path))) {
       shell.collapseFileSelection(rows);
       return;
     }
@@ -1141,10 +1149,9 @@ export function selectFolder(shell: ShellState, dir: string, side: Side, event?:
     shell.conflictView = null;
     if (files.includes(shell.mergeFile ?? "")) shell.textMerge = false;
     if (event?.shiftKey || event?.ctrlKey || event?.metaKey) {
-      const every = files.every((path) => shell.picked.includes(path));
-      shell.picked = every
-        ? shell.picked.filter((path) => !files.includes(path))
-        : [...new Set([...shell.picked, ...files])];
+      const picked = new Set(shell.picked);
+      if (files.every((path) => picked.has(path))) unpickFiles(shell, files);
+      else shell.picked = [...new Set([...shell.picked, ...files])];
     } else {
       shell.picked = files;
     }

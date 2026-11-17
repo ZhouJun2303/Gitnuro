@@ -406,8 +406,9 @@ export type RebaseStep = { verb: string; rev: string; summary: string; message: 
 /** Only checked commits are sent to the backend; unchecked rows are excluded. */
 export function buildRebaseSteps(steps: RebaseStep[], picked: string[]): RebaseStep[] {
     if (picked.length === 0) return [];
+    const included = new Set(picked);
     return steps
-      .filter((step) => picked.includes(step.rev))
+      .filter((step) => included.has(step.rev))
       .map((step) => ({ ...step, message: step.verb === "reword" || step.verb === "squash" || step.verb === "exec" ? step.message : "" }));
   }
 
@@ -1062,6 +1063,16 @@ export async function browseSourceRoot(shell: ShellState) {
     if (!folder) return;
     shell.addSourceRoot(folder);
     void shell.savePrefs(false);
+  }
+
+/** Open a work-tree file using the current operating system's file association. */
+export async function openFile(shell: ShellState, file: string) {
+    if (!shell.backend()) return;
+    try {
+      await invoke("open_file", { path: shell.fullPath(file) });
+    } catch (error) {
+      shell.actionError = shell.message(error);
+    }
   }
 
 export async function openLocal(shell: ShellState, path: string) {

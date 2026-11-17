@@ -39,6 +39,9 @@ pub fn refresh_state(path: &Path) -> Option<RefreshState> {
     };
     let mut metadata = Vec::new();
     for name in ["awegit", "gitnuro"] { metadata.push((name.into(), read(&repo.git_dir().join(name))?)); }
+    // Stash entries are reflog records: dropping a duplicate can leave refs/stash
+    // at the same commit while changing the list the UI must display.
+    metadata.push(("stash-reflog".into(), read(&repo.common_dir().join("logs/refs/stash"))?));
     match std::fs::read_dir(repo.common_dir().join("worktrees")) {
         Ok(entries) => for entry in entries {
             let entry = entry.ok()?;

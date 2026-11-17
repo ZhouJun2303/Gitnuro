@@ -189,6 +189,7 @@ fn layout() -> Result<Value, String> {
         "operation": text(repos.join("operation")),
         "pull-deleted": text(repos.join("pull-deleted")),
         "pull-noop": text(repos.join("pull-noop")),
+        "pull-disjoint": text(repos.join("pull-disjoint")),
         "checkout-dirty": text(repos.join("checkout-dirty")),
         "checkout-index": text(repos.join("checkout-index")),
         "checkout-conflict": text(repos.join("checkout-conflict")),
@@ -436,6 +437,11 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "read_ssh_config" => done_result(read_lab_ssh()),
         "write_ssh_config" => done_result(write_lab_ssh(req(args, "text")?)),
         "open_editor" => Ok(Value::Null),
+        "open_file" => {
+            let path: String = req(args, "path")?;
+            ensure_lab_path(Path::new(&path))?;
+            done_result(super::default_file_target(Path::new(&path), &[]).map(|_| ()))
+        }
         "open_window" => Ok(Value::Null),
         "reveal_commit" => Ok(Value::Null),
         "save_revision" => done_result(save_revision_lab(req(args, "path")?, req(args, "rev")?, req(args, "file")?)),

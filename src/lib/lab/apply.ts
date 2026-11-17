@@ -158,7 +158,7 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.sideQuery = "";
     return;
   }
-  if (["changes", "pull-deleted", "pull-noop", "unstage-initial", "stage-conflict-paths"].includes(id)) {
+  if (["changes", "pull-deleted", "pull-noop", "pull-disjoint", "unstage-initial", "stage-conflict-paths"].includes(id)) {
     shell.section = "changes";
     return;
   }
@@ -221,6 +221,10 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.showFileHistory(file);
     return;
   }
+  if (id === "file-history-excel") {
+    await shell.showFileHistory("data/sheet.xlsx");
+    return;
+  }
   if (id === "blob") {
     shell.blobFile = "README.md";
     shell.blobRev = "HEAD";
@@ -240,6 +244,14 @@ async function fillSurface(shell: ShellState, id: string) {
   }
   if (id === "vertical-tabs") {
     shell.settings = { ...shell.settings, verticalTabs: true };
+    return;
+  }
+  if (id === "workspace-tabs" || id === "workspace-tabs-many") {
+    const layout = await invoke<{ full: string; even: string; ahead: string; behind: string; unity: string; recentList: string }>("lab_layout");
+    shell.settings.verticalTabs = false;
+    shell.repos = id === "workspace-tabs"
+      ? [layout.full, layout.even, layout.ahead, layout.behind, layout.unity]
+      : [...new Set([layout.full, ...layout.recentList.split(/\r?\n/).filter(Boolean)])];
     return;
   }
   if (id === "tab-copy-path" || id === "tab-repo-info") {
@@ -538,6 +550,14 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.jobs[key] = { label: "刷新中", percent: null, depth: 1 };
     shell.menu = { x: 72, y: 96, items: () => shell.workspaceItems() };
     window.setTimeout(() => { delete shell.jobs[key]; }, 2000);
+    return;
+  }
+  if (id === "file-menu") {
+    const file = shell.shownUnstaged[0] ?? shell.shownStaged[0];
+    if (file) {
+      const side = shell.shownUnstaged.includes(file) ? "unstaged" : "staged";
+      shell.menu = { x: 72, y: 96, items: shell.fileMenu(file, side) };
+    }
     return;
   }
   if (id === "external-tool-menu") {

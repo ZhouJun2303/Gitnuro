@@ -134,7 +134,9 @@ pnpm test:ui -- --reuse e2e/merge-layout.spec.ts
 
 试验台用浏览器看界面：`pnpm dev`，默认在 http://localhost:1420 。场景清单在 `src/lib/lab/scenes.ts`，新弹窗必须记入，否则 `pnpm check` 会失败。`.lab/` 不提交，种子脚本 `scripts/lab-seed.mjs` 和场景清单要提交。
 
-用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts` 和 `pnpm test:ui -- --reuse e2e/theme-panels.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。当前是 162 个场景、三种主题共 486 项。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
+用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts` 和 `pnpm test:ui -- --reuse e2e/theme-panels.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。当前是 180 个场景（49 类弹窗）、三种主题共 540 项。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
+
+UI 性能记录按 `AWEGIT_UI_AUDIT_RUN` 环境变量指定的批次名存入 `.lab/ui-audit/<批次>/`，未指定时为 `current`。场景 JSON 分别记录导航至就绪的 `readyMs`、主线程长任务、DOM 节点和各命令的请求等待；`loadMs` 含截图检查时间，不作为打开耗时。长弹窗与批量文件选择回归运行 `pnpm test:ui -- --reuse e2e/dialog-performance.spec.ts e2e/ui-performance.spec.ts`，覆盖 4,000 条变基/分支、滚动后编辑与勾选保留、拖动排序、读取中关闭和 20,000 文件的选择清理。只在采集旧实现时设置 `AWEGIT_UI_AUDIT_BASELINE=1`，会跳过新实现的 DOM 上限和立即显示断言；正常回归不设置它。耗时输出用于对照，不设依赖机器速度的绝对毫秒断言。
 
 改了页面、弹窗或其中的面板后，相关界面要在三套主题下都测到：Apple Liquid Glass（`apple`）、经典白色（`light`）、VS Code 黑色（`dark`）。场景检查按主题分组，`--grep` 场景名会把三组一起跑到，例如 `pnpm test:ui -- --reuse e2e/scenes.spec.ts --grep "scene history$"`。面板是否还在，以及主题合同，在 `e2e/theme-panels.spec.ts`：Apple 选中提交的字重是 500，未选中的本地提交是 400、已推送提交是 600；独立合并窗在 Apple 下每边内收 10px，另外两套主题铺满窗口；Apple 侧栏圆角 20、偏好设置弹窗圆角 24，经典白色弹窗圆角 14，VS Code 黑色弹窗圆角 8。用面板名而不是主题名做 `--grep`，三套主题会一起跑：
 
@@ -184,6 +186,13 @@ pnpm perf:seed --tracked=1000 --modified=100 --untracked=1000 --history=0 --conf
 pnpm perf:backend --release --pull-only --samples=30 --manifest=.lab/performance/run-实际目录/manifest.json
 ```
 
+常用写操作用 `--operations-only`，覆盖 fetch/push 的空操作与有更新、同树/不同树 checkout、空/有更新 pull（含两种自动保护范围）、暂存/取消暂存、提交、贮藏、快进 merge/rebase、cherry-pick、revert、原位 soft reset、创建分支与标签。分别测量干净和混合本地修改，包含完整后端写请求及最新状态；不包含 IPC、前端刷新和贮藏弹出时间。默认每项预热一次、采样 5 次，`--cases=fetch-noop,push-updated,checkout-same,pull-updated` 可筛选。修改规模由种子的 `--modified` 指定，计时外核对内容与状态。前后对照仍需保留相同入口的旧、新二进制。
+
+```powershell
+pnpm perf:seed --tracked=20000 --modified=10000 --untracked=1000 --history=0 --conflicts=1
+pnpm perf:backend --release --operations-only --samples=3 --manifest=.lab/performance/run-实际目录/manifest.json
+```
+
 对照旧实现时，在旧代码加入相同基准入口并编译后，把应用测试可执行文件另存为 `target/release/deps/baseline_pull.exe`，保留在原目录以便 Windows 找到运行库。新实现同样保留为 `optimized_pull.exe`，通过 `node scripts/with-rust-path.mjs node scripts/perf-bench.mjs --release --pull-only --samples=30 --manifest=... --executable=target/release/deps/baseline_pull.exe` 选择二进制；优化后换用对应文件。JSON 中的 revision 是启动器当前工作区版本，另需记录二进制对应的源码基线；失败或空结果不参与比较。同一数据集按顺序运行，避免还原与计时相互干扰。
 
 10 万文件的数据集可显式减少样本，结果中保留实际样本数：
@@ -226,7 +235,9 @@ pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.
 
 ## 检出与命令记录
 
-双击本地、远程分支和右键检出统一调用一次后端写操作。后端保存本地修改，按贮藏提交 ID 恢复暂存与未暂存内容；前端不再额外执行 `stash push` 或固定弹出 `stash@{0}`。鼠标单击延后 280ms 定位历史，双击取消该定位并使旧定位失效，避免先读取两次历史再等待检出；键盘定位立即执行。重复双击沿用前台写操作保护，不会再保存或弹出另一份贮藏。
+双击本地、远程分支和右键检出统一调用一次后端写操作。后端按需保存本地修改，按贮藏提交 ID 恢复暂存与未暂存内容；前端不再额外执行 `stash push` 或固定弹出 `stash@{0}`。鼠标单击延后 280ms 定位历史，双击取消该定位并使旧定位失效，避免先读取两次历史再等待检出；键盘定位立即执行。重复双击沿用前台写操作保护，不会再保存或弹出另一份贮藏。
+
+可确认目标树的检出、常规快进 pull 和普通快进 merge 会先比较目标改动路径。目标树不变时跳过工作区扫描；本地暂存/未暂存路径与目标改动不重叠时，由原生 Git 直接携带修改，保留删除状态，避免重写大量本地文件。重命名两端、父子目录和 ASCII 大小写别名都计入重叠判断；特殊索引、子模块、附加工作树、替换对象及无法确认的目标仍走原保护流程。大小写不敏感且路径包含非 ASCII 字符时保守回退。实际 checkout/merge 仍执行一次，保留原生命令与 hooks；失败后不重试可能已部分写入的命令。非快进、no-ff、squash 和需要重放的操作仍按原流程保护索引。
 
 设置 → Git → 贮藏中的“自动贮藏包含未跟踪文件”（`autostashIncludeUntracked`）默认关闭，旧设置未包含该字段时也按关闭处理。关闭时只保存已跟踪的暂存与工作区修改，保护检查跳过未跟踪目录遍历；未跟踪文件留在原地，只有这类文件时不创建自动贮藏。已 `git add` 的新文件属于暂存内容，仍会保存。未跟踪文件与目标分支路径重名时，由 Git 阻止覆盖并报告原因，原有暂存/未暂存内容恢复。开启后自动贮藏添加 `--include-untracked`，仍排除未跟踪的根 `.fakeignore` 和被 Git 忽略的未跟踪文件。该开关适用于检出、Pull、合并、变基等自动保护流程，与手动贮藏的“包含未跟踪文件”设置独立；恢复已有贮藏时始终按原备份内容处理。
 
@@ -236,7 +247,9 @@ pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.
 
 开启自动贮藏的常规拉取先执行一次 `git fetch --update-head-ok`。当前分支与原跟踪分支一致、上游和配置符合条件时，以本次 `FETCH_HEAD` 判断更新：目标仍是 HEAD 就直接完成，不检查/保存/恢复本地修改，也不启动整合预览；快进才保护修改并执行 `git merge --ff-only --no-autostash <目标>`。分叉、本地领先、浅仓库、子模块、附加工作树、特殊 refspec、`fetch.all`、no-ff/签名/策略设置等保留原生 `git pull --no-autostash --rebase` 或 `--no-rebase`。获取后发现上游历史重写或配置变化也回退原生 pull，异常路径可能再获取一次。获取失败直接返回，不先贮藏本地内容。
 
-拉取返回前始终重新读取工作区状态；仅当 HEAD、全部 refs、配置与工作树元数据都没变化时，前端复用分支和历史，仍刷新当前差异。标签变化或无法可靠比较时完整刷新。启动自动获取延后 1 秒，在空闲时执行；打开拉取框或明确获取/拉取会取消尚未开始的定时任务，后台获取也会避开前台写入和拉取框。已经开始的获取仍按仓库排队，网络等待单独观察。
+fetch、push、pull、checkout 及相关整合/贮藏写操作返回前始终重新读取工作区状态；成功且 HEAD、全部 refs、配置、贮藏 reflog 与工作树元数据都没变化时，前端复用分支和历史，仍刷新当前差异。新远程分支、标签、上游配置、贮藏列表变化或无法可靠比较时完整刷新；不以此推进前端上下文版本，外部事件仍可刷新。启动自动获取延后 1 秒，在空闲时执行；打开拉取框或明确获取/拉取会取消尚未开始的定时任务，后台获取也会避开前台写入和拉取框。已经开始的获取仍按仓库排队，网络等待单独观察。
+
+相关回归：`e2e/operation-performance.spec.ts` 在三套主题下验证空 fetch/push 不重复读分支历史、远程更新完整刷新，以及 `pull-disjoint` 场景的 1000 个跟踪修改和等待期间虚拟列表滚动。检出场景额外验证不重叠时没有贮藏，重叠、失败和冲突仍恢复并保留原有备份。
 
 空拉取回归：`crates/git/tests/pull.rs` 覆盖索引字节及时间不变、暂存/未暂存和删除状态、已有贮藏、两种模式与开关、单次获取、快进、获取失败和原生回退；`pull-noop` 场景包含 1000 个新文件。运行 `pnpm test:ui -- --reuse e2e/pull.spec.ts e2e/performance-refresh.spec.ts` 验证三套主题、无重复状态/分支/历史请求、自动获取取消与外部变化处理。
 

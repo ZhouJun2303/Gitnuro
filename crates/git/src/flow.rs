@@ -420,9 +420,52 @@ pub fn checkpoint(repo: &Path) -> Result<Checkpoint, Error> {
             commit(repo, &id)
         }
     });
+    let files = unmerged(repo)?;
+    let branch = crate::open_repo(repo).ok().and_then(|repo| {
+        let head = repo.head().ok()?;
+        let name = head.referent_name().map(|name| name.shorten().to_string()).unwrap_or_default();
+        // Git disambiguates --short when a tag has the same name as a branch.
+        if !name.is_empty() {
+            for candidate in [format!("refs/{name}"), format!("refs/tags/{name}"), format!("refs/remotes/{name}"), format!("refs/remotes/{name}/HEAD")] {
+                if repo.try_find_reference(candidate.as_str()).ok()?.is_some() { return None; }
+            }
+        }
+        Some(name)
+    }).unwrap_or_else(|| text(repo, &["symbolic-ref", "--short", "-q", "HEAD"]).unwrap_or_default());
+    let done = std::fs::read_to_string(dir.join("rebase-merge/done"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.split_whitespace().nth(1).map(str::to_string))
+        .collect();
+    Ok(Checkpoint {
+        head, branch, progress, replay, incoming, base, files, done,
+        pending_stash: crate::model::pending_autostash(repo).unwrap_or_default(),
+    })
+}
+
+/// Read only index metadata; ordinary flow checkpoints never scan worktree files.
+pub(crate) fn unmerged(path: &Path) -> Result<Vec<File>, Error> {
+    if let Ok(repo) = crate::open_repo(path) {
+        if let Ok(index) = repo.index_or_empty() {
+            let mut files: Vec<File> = Vec::new();
+            for entry in index.entries().iter().filter(|entry| entry.stage_raw() != 0) {
+                let path = entry.path(&index).to_string();
+                if files.last().is_none_or(|file| file.path != path) { files.push(File { path, ..Default::default() }); }
+                let file = files.last_mut().unwrap();
+                match entry.stage_raw() {
+                    1 => file.base = entry.id.to_string(),
+                    2 => file.ours = entry.id.to_string(),
+                    3 => file.theirs = entry.id.to_string(),
+                    _ => unreachable!(),
+                }
+            }
+            return Ok(files);
+        }
+    }
+    // Preserve support for index extensions/formats the embedded reader cannot parse.
     let mut files: Vec<File> = Vec::new();
     let mut positions = HashMap::new();
-    let output = run(repo, &["ls-files", "--unmerged", "-z"])?;
+    let output = run(path, &["ls-files", "--unmerged", "-z"])?;
     for entry in output
         .stdout
         .split(|byte| *byte == 0)
@@ -451,22 +494,7 @@ pub fn checkpoint(repo: &Path) -> Result<Checkpoint, Error> {
             _ => {}
         }
     }
-    let done = std::fs::read_to_string(dir.join("rebase-merge/done"))
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|line| line.split_whitespace().nth(1).map(str::to_string))
-        .collect();
-    Ok(Checkpoint {
-        head,
-        branch: text(repo, &["symbolic-ref", "--short", "-q", "HEAD"]).unwrap_or_default(),
-        progress,
-        replay,
-        incoming,
-        base,
-        files,
-        done,
-        pending_stash: crate::model::pending_autostash(repo).unwrap_or_default(),
-    })
+    Ok(files)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

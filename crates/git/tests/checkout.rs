@@ -190,6 +190,82 @@ fn automatic_stash_respects_untracked_setting_and_always_saves_staged_additions(
 }
 
 #[test]
+fn checkout_carries_disjoint_changes_and_runs_the_native_hook_once() {
+    for include in [false, true] {
+        let _settings = AutostashSettings::new(include);
+        for remote in [false, true] {
+            let repo = repo(false);
+            repo.git(&["reset", "--hard", "main"]);
+            // topic differs only in note.txt; keep the original staged/unstaged
+            // split on keep.txt and an index-only addition missing from disk.
+            fs::write(repo.path.join("keep.txt"), "staged\n").unwrap();
+            fs::write(repo.path.join("new-staged.txt"), "staged addition\n").unwrap();
+            repo.git(&["add", "keep.txt", "new-staged.txt"]);
+            fs::write(repo.path.join("keep.txt"), "working\n").unwrap();
+            fs::remove_file(repo.path.join("new-staged.txt")).unwrap();
+            let before = repo.output(&["status", "--porcelain", "-z"]);
+            let stash = repo.output(&["stash", "list", "--format=%H"]);
+            let time = fs::metadata(repo.path.join("keep.txt")).unwrap().modified().unwrap();
+            fs::create_dir_all(repo.path.join(".git/perf-hooks")).unwrap();
+            fs::write(repo.path.join(".git/perf-hooks/post-checkout"), "#!/bin/sh\nprintf 'called\\n' >> .git/checkout-hook-calls\n").unwrap();
+            #[cfg(unix)] {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(repo.path.join(".git/perf-hooks/post-checkout"), fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            repo.git(&["config", "core.hooksPath", ".git/perf-hooks"]);
+            let request = if remote {
+                repo.git(&["remote", "add", "origin", "."]); repo.git(&["fetch", "origin"]);
+                repo.git(&["branch", "-D", "topic"]);
+                Mutation::CheckoutRemote { remote: "origin".into(), branch: "topic".into() }
+            } else { Mutation::Checkout { name: "topic".into() } };
+            let (result, log) = capture_output(|| perform(&repo.path, request));
+            result.unwrap();
+            assert!(!log.contains("$ git stash "), "{log}");
+            assert_eq!(repo.output(&["status", "--porcelain", "-z"]), before);
+            assert_eq!(repo.output(&["stash", "list", "--format=%H"]), stash);
+            assert_eq!(fs::metadata(repo.path.join("keep.txt")).unwrap().modified().unwrap(), time);
+            assert_eq!(repo.output(&["show", ":keep.txt"]), "staged\n");
+            assert_eq!(repo.output(&["show", ":new-staged.txt"]), "staged addition\n");
+            assert!(!repo.path.join("new-staged.txt").exists());
+            assert_eq!(fs::read_to_string(repo.path.join(".git/checkout-hook-calls")).unwrap(), "called\n");
+            assert_eq!(repo.output(&["branch", "--show-current"]), "topic\n");
+        }
+    }
+}
+
+#[test]
+fn fast_forward_merge_carries_disjoint_edits_but_keeps_no_ff_and_squash_protection() {
+    for policy in ["ff", "config-no-ff", "branch-no-ff", "flag-no-ff", "squash", "annotated-tag"] {
+        let _settings = AutostashSettings::new(false);
+        let repo = repo(false);
+        repo.git(&["reset", "--hard", "main"]);
+        fs::write(repo.path.join("keep.txt"), "staged\n").unwrap();
+        repo.git(&["add", "keep.txt"]);
+        fs::write(repo.path.join("keep.txt"), "working\n").unwrap();
+        match policy {
+            "config-no-ff" => repo.git(&["config", "merge.ff", "false"]),
+            "branch-no-ff" => repo.git(&["config", "branch.main.mergeOptions", "--no-ff"]),
+            "annotated-tag" => repo.git(&["tag", "-a", "tagged", "-m", "tagged", "topic"]),
+            _ => {},
+        }
+        let before = repo.output(&["status", "--porcelain", "-z"]);
+        let stashes = repo.output(&["stash", "list", "--format=%H"]);
+        let (result, log) = capture_output(|| perform(&repo.path, Mutation::Merge {
+            name: if policy == "annotated-tag" { "tagged" } else { "topic" }.into(),
+            squash: policy == "squash", no_ff: policy == "flag-no-ff", autostash: true,
+            summary: String::new(), description: String::new(),
+        }));
+        result.unwrap();
+        assert_eq!(log.contains("$ git stash push "), policy != "ff", "{policy}: {log}");
+        assert_eq!(repo.output(&["status", "--porcelain", "-z"]), before);
+        assert_eq!(repo.output(&["show", ":keep.txt"]), "staged\n");
+        assert_eq!(fs::read_to_string(repo.path.join("keep.txt")).unwrap(), "working\n");
+        assert_eq!(repo.output(&["stash", "list", "--format=%H"]), stashes);
+        if policy.contains("no-ff") { assert_eq!(repo.output(&["log", "-1", "--format=%P"]).split_whitespace().count(), 2); }
+    }
+}
+
+#[test]
 fn default_checkout_with_only_untracked_files_does_not_create_a_stash() {
     let _settings = AutostashSettings::new(false);
     let repo = repo(false);

@@ -86,6 +86,7 @@
     "allow-read-ssh-config",
     "allow-open-window",
     "allow-reveal-commit",
+    "allow-open-file",
     "allow-reveal-path",
     "allow-git-runtime",
     "core:window:allow-inner-size",

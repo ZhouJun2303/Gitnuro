@@ -58,6 +58,17 @@ const COMMON: &[(&str, &str)] = &[
     ("bmp", "image"),
     ("psd", "image"),
     ("svg", "image"),
+    ("xls", "sheet"),
+    ("xlsx", "sheet"),
+    ("xlsm", "sheet"),
+    ("xlsb", "sheet"),
+    ("xlt", "sheet"),
+    ("xltx", "sheet"),
+    ("xltm", "sheet"),
+    ("csv", "sheet"),
+    ("tsv", "sheet"),
+    ("ods", "sheet"),
+    ("numbers", "sheet"),
     ("cs", "script"),
     ("java", "script"),
     ("kt", "script"),
@@ -380,6 +391,19 @@ mod tests {
             })
         );
         assert_eq!(support(&root, "Assets/item.unknown"), None);
+        for ext in [
+            "xls", "xlsx", "xlsm", "xlsb", "xlt", "xltx", "xltm", "csv", "tsv", "ods", "numbers",
+        ] {
+            for folder in ["", "data/", "Assets/", "nested/Assets/", "表格\\"] {
+                assert_eq!(
+                    support(&root, &format!("{folder}预算表.{}", ext.to_ascii_uppercase())),
+                    Some(Support {
+                        tool: "common",
+                        kind: "sheet"
+                    })
+                );
+            }
+        }
         assert_eq!(support(&root, "Assets/../secrets.png"), None);
         assert_eq!(support(&root, ".git/config.txt"), None);
         std::fs::remove_dir_all(root).unwrap();

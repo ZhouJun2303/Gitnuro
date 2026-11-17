@@ -1539,6 +1539,60 @@ mod tests {
     }
 
     #[test]
+    fn unchanged_syncs_reuse_context_but_read_local_edits_and_changed_upstreams() {
+        let repo = Repo::new();
+        struct SettingsEnv(Option<std::ffi::OsString>, Option<std::ffi::OsString>);
+        impl Drop for SettingsEnv {
+            fn drop(&mut self) {
+                for (name, old) in [("AWEGIT_SETTINGS", &self.0), ("AWEGIT_SECRET_DIR", &self.1)] {
+                    if let Some(old) = old { std::env::set_var(name, old); } else { std::env::remove_var(name); }
+                }
+            }
+        }
+        let _env = SettingsEnv(std::env::var_os("AWEGIT_SETTINGS"), std::env::var_os("AWEGIT_SECRET_DIR"));
+        std::env::set_var("AWEGIT_SETTINGS", repo.0.join(".git/settings.json"));
+        std::env::set_var("AWEGIT_SECRET_DIR", repo.0.join(".git/secrets"));
+        super::super::settings::save(&Default::default()).unwrap();
+        repo.git(&["remote", "add", "origin", "."]);
+        let run = |request| super::super::mutate(Some(repo.0.display().to_string()), request, None).unwrap();
+        let fetch = || Mutation::Fetch { remote: None, prune: false, tags: false };
+        let first = run(fetch()); assert_eq!(first.refresh_scope, None);
+        fs::write(repo.0.join("note"), "external edit\n").unwrap();
+        let second = run(fetch()); assert_eq!(second.refresh_scope, Some("status"));
+        assert!(second.status.unstaged.iter().any(|file| file.path == "note"));
+        let push = |set_upstream| Mutation::Push { remote: Some("origin".into()), set_upstream, tags: false, force_with_lease: false, force: false };
+        assert_eq!(run(push(true)).refresh_scope, None, "setting an upstream changes context");
+        assert_eq!(run(push(false)).refresh_scope, Some("status"));
+        assert_eq!(run(Mutation::Checkout { name: "main".into() }).refresh_scope, Some("status"));
+        repo.git(&["branch", "new-remote-branch"]);
+        assert_eq!(run(fetch()).refresh_scope, None, "new tracking refs require context");
+        repo.git(&["remote", "set-url", "origin", "missing-remote"]);
+        let failed = run(fetch()); assert_eq!(failed.outcome, "failed"); assert_eq!(failed.refresh_scope, None);
+        repo.git(&["stash", "push", "-m", "saved"]);
+        let path = repo.0.join(".git/logs/refs/stash");
+        let line = fs::read(&path).unwrap();
+        fs::write(&path, [line.clone(), line].concat()).unwrap();
+        assert_eq!(repo.git(&["stash", "list", "--format=%H"]).lines().count(), 2);
+        let tip = repo.git(&["rev-parse", "refs/stash"]);
+        assert_eq!(run(Mutation::StashDrop { name: "stash@{0}".into() }).refresh_scope, None);
+        assert_eq!(repo.git(&["rev-parse", "refs/stash"]), tip);
+        assert_eq!(repo.git(&["stash", "list", "--format=%H"]).lines().count(), 1);
+    }
+
+    #[test]
+    fn checkpoints_read_index_metadata_and_preserve_ambiguous_and_detached_branches() {
+        let repo = Repo::new();
+        flow::git_dir(&repo.0).unwrap();
+        let (point, calls) = count_git_calls(|| flow::checkpoint(&repo.0).unwrap());
+        assert_eq!(point.branch, "main"); assert!(point.files.is_empty());
+        assert_eq!(calls, 1, "only native commit metadata needs a Git process");
+        repo.git(&["tag", "main"]);
+        assert_eq!(flow::checkpoint(&repo.0).unwrap().branch, repo.git(&["symbolic-ref", "--short", "HEAD"]));
+        repo.git(&["checkout", "--detach"]);
+        assert_eq!(flow::checkpoint(&repo.0).unwrap().branch, "");
+    }
+
+    #[test]
     fn commit_metadata_does_not_walk_merge_trees() {
         let repo = Repo::new();
         let parent = repo.git(&["rev-parse", "HEAD"]);
@@ -2279,6 +2333,118 @@ mod tests {
                         println!("PERF {}", serde_json::json!({ "label": format!("pull {} {label} {layer} include={include}", if updated { "updated" } else { "noop" }), "samples": samples, "rawMs": raw, "p50Ms": times[(samples-1)/2], "p95Ms": times[(samples*95).div_ceil(100)-1], "maxMs": times[samples-1], "gitProcesses": calls }));
                     }
                 }
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "common-operation benchmark; set AWEGIT_PERF_MANIFEST"]
+    fn seeded_operation_timings() {
+        thread_local! { static PHASES: std::cell::RefCell<HashMap<String, Vec<f64>>> = std::cell::RefCell::new(HashMap::new()); }
+        awegit_git::set_timing_trace(|name, elapsed| PHASES.with(|phases| phases.borrow_mut().entry(name.into()).or_default().push(elapsed.as_secs_f64()*1000.0)));
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(std::env::var("AWEGIT_PERF_MANIFEST").expect("manifest required")).unwrap()).unwrap();
+        let workspace = PathBuf::from(value["workspace"].as_str().unwrap());
+        let allowed = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join(".lab/performance").canonicalize().unwrap();
+        assert!(workspace.canonicalize().unwrap().starts_with(&allowed));
+        let repo = std::mem::ManuallyDrop::new(Repo(workspace.clone()));
+        let remote = value["remote"].as_str().unwrap();
+        let base = value["base"].as_str().unwrap();
+        let incoming = value["incoming"].as_str().unwrap();
+        let modified = value["modified"].as_u64().unwrap() as usize;
+        let untracked = value["untracked"].as_u64().unwrap() as usize;
+        let selected = std::env::var("AWEGIT_PERF_CASES").unwrap_or_default();
+        let samples = benchmark_samples(5);
+        std::env::set_var("AWEGIT_SETTINGS", Path::new(value["run"].as_str().unwrap()).join("settings-operations.json"));
+        assert!(repo.git(&["stash", "list"]).is_empty(), "seed must have no saved user work");
+        let cases = ["fetch-noop", "fetch-updated", "push-noop", "push-updated", "checkout-same", "checkout-updated", "pull-noop", "pull-updated", "pull-untracked", "stage", "unstage", "commit", "stash", "merge", "rebase", "cherry-pick", "revert", "reset", "branch", "tag"];
+        assert!(selected.is_empty() || selected.split(',').all(|case| cases.contains(&case)), "unknown benchmark case: {selected}");
+        for case in cases {
+            if !selected.is_empty() && !selected.split(',').any(|name| name == case) { continue; }
+            let include = case == "pull-untracked";
+            let mut settings = super::super::settings::Settings::default();
+            settings.autostash_include_untracked = include;
+            super::super::settings::save(&settings).unwrap();
+            for dirty in [false, true] {
+                if !dirty && matches!(case, "stage" | "unstage" | "commit" | "stash" | "pull-untracked") { continue; }
+                let mut times = Vec::new();
+                let mut calls = 0;
+                let mut phases: HashMap<String, Vec<f64>> = HashMap::new();
+                for iteration in 0..=samples {
+                    // All setup and assertions are outside the measured interval.
+                    repo.git(&["checkout", "--force", "main"]);
+                    let head = if matches!(case, "push-updated" | "pull-noop" | "revert") { incoming } else { base };
+                    repo.git(&["reset", "--hard", head]);
+                    repo.git(&["--git-dir", remote, "update-ref", "refs/heads/main", if case.starts_with("push-") { base } else { incoming }]);
+                    repo.git(&["update-ref", "refs/remotes/origin/main", if case == "fetch-noop" { incoming } else { head }]);
+                    repo.git(&["update-ref", "refs/heads/perf-target", if case == "checkout-same" { head } else { incoming }]);
+                    repo.git(&["update-ref", "-d", "refs/heads/perf-created"]);
+                    repo.git(&["update-ref", "-d", "refs/tags/perf-created"]);
+                    let loose = workspace.join("untracked");
+                    if !dirty && loose.exists() { fs::remove_dir_all(&loose).unwrap(); }
+                    if dirty {
+                        fs::create_dir_all(&loose).unwrap();
+                        for index in 0..untracked { if !loose.join(format!("{index}.txt")).exists() { fs::write(loose.join(format!("{index}.txt")), "local\n").unwrap(); } }
+                        for index in 0..modified { fs::write(workspace.join(format!("tracked/{}/file-{index}.txt", index / 500)), "working\n").unwrap(); }
+                        fs::write(workspace.join("tracked/0/file-0.txt"), "staged\n").unwrap();
+                        repo.git(&["add", "tracked/0/file-0.txt"]);
+                        fs::write(workspace.join("tracked/0/file-0.txt"), "working\n").unwrap();
+                    }
+                    let before = repo.git(&["status", "--porcelain", "-z"]);
+                    PHASES.with(|slot| slot.borrow_mut().clear());
+                    let start = Instant::now();
+                    let (_, processes) = count_git_calls(|| {
+                        if case == "commit" {
+                            super::super::write_kind_then_status(Some(workspace.display().to_string()), "commit", |path| awegit_git::commit(path, awegit_git::CommitRequest { summary: "perf: benchmark".into(), description: String::new(), amend: false, sign_off: false, sign_off_format: String::new(), skip_hooks: false, convention: true, types: vec![] })).unwrap();
+                            return;
+                        }
+                        let request = match case {
+                            "fetch-noop" | "fetch-updated" => Mutation::Fetch { remote: None, prune: true, tags: false },
+                            "push-noop" | "push-updated" => Mutation::Push { remote: Some("origin".into()), set_upstream: false, tags: false, force_with_lease: false, force: false },
+                            "checkout-same" | "checkout-updated" => Mutation::Checkout { name: "perf-target".into() },
+                            "pull-noop" | "pull-updated" | "pull-untracked" => Mutation::Pull { rebase: true, autostash: true },
+                            "stage" | "unstage" => Mutation::StagePaths { files: vec!["tracked".into()], unstage: case == "unstage" },
+                            "stash" => Mutation::Stash { message: "performance".into(), include_untracked: false },
+                            "merge" => Mutation::Merge { name: incoming.into(), squash: false, no_ff: false, autostash: true, summary: String::new(), description: String::new() },
+                            "rebase" => Mutation::Rebase { onto: incoming.into(), autostash: true },
+                            "cherry-pick" => Mutation::CherryPick { rev: incoming.into(), record: false },
+                            "revert" => Mutation::Revert { rev: incoming.into(), no_commit: false, message: String::new() },
+                            "reset" => Mutation::Reset { rev: head.into(), mode: awegit_git::ResetMode::Soft },
+                            "branch" => Mutation::CreateBranch { name: "perf-created".into(), start: None },
+                            "tag" => Mutation::Tag { name: "perf-created".into(), rev: head.into(), message: String::new() },
+                            _ => unreachable!(),
+                        };
+                        let report = super::super::mutate(Some(workspace.display().to_string()), request, None).unwrap();
+                        assert_eq!(report.outcome, "completed", "{case}: {}", report.error);
+                    });
+                    let elapsed = start.elapsed().as_secs_f64()*1000.0;
+                    if iteration > 0 {
+                        times.push(elapsed); calls += processes;
+                        PHASES.with(|slot| for (name, values) in slot.borrow().iter() { phases.entry(name.clone()).or_default().push(values.iter().sum()); });
+                    }
+                    if !matches!(case, "stage" | "unstage" | "commit" | "stash") { assert_eq!(repo.git(&["status", "--porcelain", "-z"]), before, "{case}"); }
+                    if dirty && case != "stash" {
+                        for index in 0..modified { assert_eq!(fs::read_to_string(workspace.join(format!("tracked/{}/file-{index}.txt", index / 500))).unwrap(), "working\n", "{case}"); }
+                        if !matches!(case, "stage" | "unstage") { assert_eq!(repo.git(&["show", ":tracked/0/file-0.txt"]), "staged", "{case}"); }
+                    }
+                    if dirty { for index in 0..untracked { assert_eq!(fs::read_to_string(loose.join(format!("{index}.txt"))).unwrap(), "local\n"); } }
+                    let after = repo.git(&["rev-parse", "HEAD"]);
+                    match case {
+                        "checkout-updated" | "pull-updated" | "pull-untracked" | "merge" | "rebase" => assert_eq!(after, incoming),
+                        "cherry-pick" | "commit" | "revert" => assert_ne!(after, head),
+                        _ => assert_eq!(after, head),
+                    }
+                    if case.starts_with("push-") { assert_eq!(repo.git(&["--git-dir", remote, "rev-parse", "refs/heads/main"]), head); }
+                    if case.starts_with("fetch-") { assert_eq!(repo.git(&["rev-parse", "refs/remotes/origin/main"]), incoming); }
+                    if case == "stage" { assert_eq!(repo.git(&["diff", "--cached", "--name-only"]).lines().count(), modified); assert_eq!(repo.git(&["show", ":tracked/0/file-0.txt"]), "working"); }
+                    if case == "unstage" { assert!(repo.git(&["diff", "--cached", "--name-only"]).is_empty()); }
+                    if case == "commit" { assert_eq!(repo.git(&["show", "HEAD:tracked/0/file-0.txt"]), "staged"); assert_eq!(repo.git(&["rev-parse", "HEAD^"]), head); }
+                    if case == "branch" { assert_eq!(repo.git(&["rev-parse", "refs/heads/perf-created"]), head); }
+                    if case == "tag" { assert_eq!(repo.git(&["rev-parse", "refs/tags/perf-created"]), head); }
+                    if case == "stash" { assert!(!repo.git(&["stash", "list"]).is_empty()); repo.git(&["stash", "pop", "--index"]); assert_eq!(repo.git(&["status", "--porcelain", "-z"]), before); }
+                    assert!(repo.git(&["stash", "list"]).is_empty(), "{case}");
+                }
+                let raw = times.clone(); times.sort_by(f64::total_cmp);
+                println!("PERF {}", serde_json::json!({ "label": format!("{case} {} mutation", if dirty { "modified" } else { "clean" }), "samples": samples, "rawMs": raw, "p50Ms": times[(samples-1)/2], "p95Ms": times[(samples*95).div_ceil(100)-1], "maxMs": times[samples-1], "gitProcesses": calls, "phasesMs": phases }));
             }
         }
     }

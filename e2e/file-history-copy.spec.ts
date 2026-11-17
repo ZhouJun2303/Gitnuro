@@ -1,7 +1,33 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { expect, test } from "@playwright/test";
-import { openLabScene } from "./helpers";
+import { openLabScene, pinLabSettings } from "./helpers";
+
+for (const theme of ["apple", "light", "dark"] as const) {
+  test(`${theme}: Excel history previews preserve the extension and historical bytes`, async ({ page, context }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await pinLabSettings(page, { theme });
+    await openLabScene(page, "file-history-excel", ".preview-revision", { locale: "en" });
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await expect(page.locator(".history-file")).toContainText("data/sheet.xlsx");
+    const repo = process.cwd() + "/.lab/repos/full";
+    const original = readFileSync(`${repo}/data/sheet.xlsx`);
+    const row = page.locator(".history-item").first();
+    const sha = (await row.getAttribute("data-rev"))!;
+    await row.locator(".preview-revision").click();
+    await expect(page.locator(".copy-result")).toContainText(`sheet.awegit-${sha.slice(0, 12)}.xlsx`);
+    const path = (await page.locator(".copy-result").getAttribute("title"))!;
+    expect(path).toMatch(/\.xlsx$/);
+    expect(readFileSync(path)).toEqual(execFileSync("git", ["-C", repo, "show", `${sha}:data/sheet.xlsx`]));
+    expect(readFileSync(`${repo}/data/sheet.xlsx`)).toEqual(original);
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(path.split(/[\\/]/).pop());
+    await page.screenshot({ path: `.lab/screenshots/file-history-excel-${theme}.png`, fullPage: true });
+    await row.getByRole("button", { name: "Cancel preview and delete temporary files" }).click();
+    await expect(row.locator(".preview-revision")).toBeVisible();
+    expect(existsSync(path)).toBe(false);
+    expect(readFileSync(`${repo}/data/sheet.xlsx`)).toEqual(original);
+  });
+}
 
 test("file history previews each revision, copies its filename, and cancels safely", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);

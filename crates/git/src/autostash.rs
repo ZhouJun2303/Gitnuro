@@ -28,12 +28,28 @@ pub(crate) enum Restored {
 
 /// Stash tracked changes, optionally including untracked files except the root
 /// `.fakeignore` that only AweGit reads. `None` when there is nothing to stash.
-pub(crate) fn push(repo: &Path, label: &str) -> Result<Option<String>, Error> {
+/// A native two-tree checkout/fast-forward carries disjoint local changes itself.
+/// Decide before writing anything; never retry a partially failed checkout/merge.
+pub(crate) fn push_for_tree(repo: &Path, label: &str, target: Option<&str>) -> Result<Option<String>, Error> {
     let include_untracked = crate::cli::session_snapshot().0.autostash_include_untracked;
-    let Changes { paths, exclude_fakeignore, index_only } = {
+    let incoming = target.and_then(|target| tree_paths(repo, target));
+    if incoming.as_ref().is_some_and(Vec::is_empty) { return Ok(None); }
+    let changes = {
         let _phase = crate::timing_phase("autostash-check");
         changed_paths(repo, include_untracked)?
     };
+    if let Some(incoming) = incoming {
+        // Include both sides of renames and parent/child collisions. Git still
+        // performs the write and enforces untracked/ignored-file protection.
+        // Case aliases can otherwise hide a collision on Windows/macOS. Native
+        // Git remains the authority for non-ASCII filesystem case mappings.
+        let ignore_case = crate::open_repo(repo).ok().and_then(|repo| repo.config_snapshot().boolean("core.ignoreCase")).unwrap_or(true);
+        let ascii = changes.paths.iter().chain(&incoming).all(|path| path.is_ascii());
+        let local: Vec<_> = changes.paths.iter().map(|path| if ignore_case { path.to_ascii_lowercase() } else { path.clone() }).collect();
+        let incoming: Vec<_> = incoming.into_iter().map(|path| if ignore_case { path.to_ascii_lowercase() } else { path }).collect();
+        if (!ignore_case || ascii) && disjoint(&local, &incoming) { return Ok(None); }
+    }
+    let Changes { paths, exclude_fakeignore, index_only } = changes;
     if paths.is_empty() {
         return Ok(None);
     }
@@ -213,9 +229,50 @@ pub(crate) fn settle_before(repo: &Path) -> Result<(), Error> {
 }
 
 pub(crate) fn has_unmerged(repo: &Path) -> bool {
-    run(repo, &["ls-files", "--unmerged"])
-        .map(|output| !output.stdout.is_empty())
-        .unwrap_or(false)
+    crate::flow::unmerged(repo).map(|files| !files.is_empty()).unwrap_or(true)
+}
+
+fn tree_paths(path: &Path, target: &str) -> Option<Vec<String>> {
+    crate::cli::check_rev(target).ok()?;
+    let repo = crate::open_repo(path).ok()?;
+    // Sparse indexes, replacements and submodules require their native protection.
+    if repo.git_dir() != repo.common_dir() || path.join(".gitmodules").exists()
+        || repo.git_dir().join("info/grafts").exists()
+        || repo.config_snapshot().boolean("core.sparseCheckout").unwrap_or(false)
+        || repo.config_snapshot().boolean("submodule.recurse").unwrap_or(false) { return None; }
+    let index = repo.index_or_empty().ok()?;
+    if index.entries().iter().any(|entry| entry.mode == gix::index::entry::Mode::COMMIT || entry.stage_raw() != 0) { return None; }
+    for reference in repo.references().ok()?.all().ok()? {
+        if reference.ok()?.name().as_bstr().starts_with(b"refs/replace/") { return None; }
+    }
+    let output = run(path, &["diff", "--raw", "-z", "--no-renames", "--no-ext-diff", "--no-textconv", "HEAD", target, "--"]).ok()?;
+    let mut fields = output.stdout.split(|byte| *byte == 0).filter(|field| !field.is_empty());
+    let mut paths = Vec::new();
+    while let Some(record) = fields.next() {
+        let record = std::str::from_utf8(record).ok()?;
+        let mut modes = record.strip_prefix(':')?.split_whitespace();
+        if modes.next()? == "160000" || modes.next()? == "160000" { return None; }
+        let path = std::str::from_utf8(fields.next()?).ok()?;
+        if path == ".gitmodules" { return None; }
+        paths.push(path.to_string());
+    }
+    Some(paths)
+}
+
+fn disjoint(local: &[String], incoming: &[String]) -> bool {
+    let mut paths: Vec<_> = local.iter().map(|path| (path.trim_end_matches('/'), false))
+        .chain(incoming.iter().map(|path| (path.as_str(), true))).collect();
+    paths.sort_unstable();
+    // Remember every ancestor of the opposite origin; an interleaved child must
+    // not hide a directory/file collision from a later sibling.
+    let mut local_paths = std::collections::HashSet::new();
+    let mut incoming_paths = std::collections::HashSet::new();
+    for (path, incoming) in paths {
+        let other = if incoming { &local_paths } else { &incoming_paths };
+        if other.contains(path) || path.match_indices('/').any(|(at, _)| other.contains(&path[..at])) { return false; }
+        if incoming { incoming_paths.insert(path); } else { local_paths.insert(path); }
+    }
+    true
 }
 
 /// Files held by one stash commit, ready for a stash message.
@@ -278,7 +335,7 @@ fn changed_paths(repo: &Path, include_untracked: bool) -> Result<Changes, Error>
         }
         if status.contains(['R', 'C']) {
             // A rename or copy prints its source path as the next entry.
-            entries.next();
+            if let Some(source) = entries.next() { paths.push(source.to_string()); }
         }
     }
     Ok(Changes { paths, exclude_fakeignore: include_untracked && fakeignore_is_untracked(repo), index_only })
@@ -306,7 +363,8 @@ fn changed_paths_native(path: &Path, include_untracked: bool) -> Result<Changes,
     let index_only = staged.iter().filter(|change| {
         matches!(change.kind, crate::ChangeKind::Added | crate::ChangeKind::Renamed) && deleted.contains(&change.path)
     }).map(|change| change.path.clone()).collect();
-    let mut paths: Vec<_> = staged.into_iter().chain(unstaged).map(|change| change.path).collect();
+    let mut paths: Vec<_> = staged.into_iter().chain(unstaged)
+        .flat_map(|change| std::iter::once(change.path).chain(change.previous_path)).collect();
     paths.sort();
     paths.dedup();
     Ok(Changes { paths, exclude_fakeignore, index_only })
@@ -354,4 +412,23 @@ fn stash_index(repo: &Path, oid: &str) -> Option<usize> {
     String::from_utf8_lossy(&listed.stdout)
         .lines()
         .position(|line| line.trim() == oid)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::disjoint;
+
+    #[test]
+    fn carry_check_catches_both_rename_sides_and_interleaved_directory_collisions() {
+        let paths = |items: &[&str]| items.iter().map(|item| item.to_string()).collect::<Vec<_>>();
+        for (local, target, expected) in [
+            (vec!["a", "z"], vec!["b", "c"], true),
+            (vec!["a", "b"], vec!["b"], false),
+            (vec!["folder/"], vec!["folder/a", "folder/b"], false),
+            (vec!["folder/a", "folder/b"], vec!["folder"], false),
+            (vec!["folder/a"], vec!["folder-b"], true),
+            (vec!["old", "new"], vec!["old"], false),
+            (vec!["a", "a/b"], vec!["a/c"], false),
+        ] { assert_eq!(disjoint(&paths(&local), &paths(&target)), expected, "{local:?} {target:?}"); }
+    }
 }

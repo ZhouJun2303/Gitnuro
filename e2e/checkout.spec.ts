@@ -85,7 +85,7 @@ for (const theme of ["apple", "light", "dark"]) {
       await expect(checkout).toContainText(kind === "failed" ? "missing-branch" : "topic");
       await expect(checkout).toContainText(/\[\d+ ms, exit \d+\]/);
       await expect(checkout).toHaveCSS("font-weight", "700");
-      await expect(detail.locator("strong.git-command").filter({ hasText: /\$ git stash push/ })).toHaveCount(1);
+      await expect(detail.locator("strong.git-command").filter({ hasText: /\$ git stash push/ })).toHaveCount(["local", "remote"].includes(kind) ? 0 : 1);
       await expect(detail.locator("strong.git-command").filter({ hasText: /\$ git stash pop/ })).toHaveCount(0);
       await page.screenshot({ path: `.lab/checkout-${kind}-${theme}.png` });
     });

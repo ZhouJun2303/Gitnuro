@@ -514,6 +514,17 @@
     white-space: nowrap;
 }
 
+.rebase-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 8px;
+}
+
+.stale-entry {
+    padding-bottom: 2px;
+}
+
 .editor-candidates {
     display: flex;
     flex-direction: column;

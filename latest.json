@@ -1,5 +1,5 @@
 {
-    "appVersion":  "2.0.11",
+    "appVersion": "2.0.12",
     "notes":  "✨ 新功能\n\n· 自动贮藏新增包含未跟踪文件的开关，默认关闭\n\n⚡ 体验优化\n\n· 拉取无更新时跳过自动贮藏\n· 减少操作后的重复刷新，提升界面响应速度\n· 显示 Git 命令的实际执行耗时\n\n🐛 问题修复\n\n· 修复检出后本地修改未正确恢复的问题\n· 修复子模块改动无法正确丢弃的问题\n· 修复更新单个子模块时影响其他子模块的问题",
     "appCode":  38,
     "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.11/AweGit_2.0.11_x64-setup.exe",

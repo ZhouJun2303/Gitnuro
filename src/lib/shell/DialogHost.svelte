@@ -7,13 +7,20 @@
   import { flushClientLog, invoke } from "../perf";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { cloneTarget, cloneUrl } from "../clonePath";
-  import { buildRebaseSteps } from "./dialogs.svelte";
+  import { buildRebaseSteps, type RebaseStep } from "./dialogs.svelte";
   import { recentWorkspaceId, type Account } from "../status";
   import { resolveRemoteAccount } from "./remoteAccount";
   import RepoInfoPanel from "./RepoInfoPanel.svelte";
   import AccountAvatar from "./AccountAvatar.svelte";
+  import WrappedRows from "../WrappedRows.svelte";
+  import { unpickFiles } from "./diff.svelte";
 
   const shell = getShell();
+  const rebaseEntries = $derived(shell.rebaseSteps.map((step) => ({ text: "", step })));
+  const rebasePicked = $derived(new Set(shell.rebasePicked));
+  const staleEntries = $derived(shell.staleNames.map((name) => ({ text: "", name })));
+  const stalePicked = $derived(new Set(shell.stalePicked));
+  const loading = $derived(shell.dialogLoading !== null && shell.dialogLoading === shell.dialog);
   let remoteAccountPick = $state("");
   let remoteDialogKey = "";
   let remoteLoadedOverride = "";
@@ -163,6 +170,28 @@
   const focusWhen = (node: HTMLInputElement, on: boolean) => shell.focusWhen(node, on);
 </script>
 
+{#snippet rebaseStep(step: RebaseStep, index: number)}
+  <div class="composer-row" role="listitem" draggable="true" ondragstart={() => (shell.dragStep = index)} ondragover={(event) => event.preventDefault()} ondrop={() => { if (shell.dragStep == null || shell.dragStep === index) return; const copy = [...shell.rebaseSteps]; const [item] = copy.splice(shell.dragStep, 1); copy.splice(index, 0, item); shell.rebaseSteps = copy; shell.dragStep = null; }}>
+    <input type="checkbox" checked={rebasePicked.has(step.rev)} aria-label={`${shell.tr("dialog.rebaseVerb")} ${step.summary}`} title={step.summary} onchange={() => { shell.rebasePicked = rebasePicked.has(step.rev) ? shell.rebasePicked.filter((rev) => rev !== step.rev) : [...shell.rebasePicked, step.rev]; }} />
+    <select aria-label={`${shell.tr("dialog.rebaseVerb")} ${step.summary}`} value={step.verb} onchange={(event) => shell.setRebaseVerb(step.rev, event.currentTarget.value)}>
+      <option value="pick">pick</option>
+      <option value="reword">reword</option>
+      <option value="squash">squash</option>
+      <option value="fixup">fixup</option>
+      <option value="drop">drop</option>
+      <option value="edit">edit</option>
+    </select>
+    <span>{step.summary}</span>
+  </div>
+  {#if step.verb === "reword" || step.verb === "squash" || step.verb === "exec"}
+    <input placeholder={shell.tr("dialog.message")} aria-label={shell.tr("dialog.message")} bind:value={step.message} />
+  {/if}
+{/snippet}
+
+{#snippet staleBranch(name: string)}
+  <label class="check"><input type="checkbox" checked={stalePicked.has(name)} onchange={() => { shell.stalePicked = stalePicked.has(name) ? shell.stalePicked.filter((item) => item !== name) : [...shell.stalePicked, name]; }} /> {name}</label>
+{/snippet}
+
 {#if shell.dialog}
     <div class="scrim" role="presentation" onclick={() => { if (shell.busy || shell.dialog === "prefs") return; closeDialog(); }}>
       <div class="dialog {dialogSize(shell.dialog ?? "")}" class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} data-dialog={shell.dialog} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={trapTab}>
@@ -171,7 +200,7 @@
         onchange={() => { if (shell.dialog === "prefs") void shell.savePrefs(false); }}
         onsubmit={async (event) => {
           event.preventDefault();
-          if (shell.writing) return;
+          if (shell.writing || loading) return;
           if (shell.dialog === "branch") {
             const name = shell.branchName(shell.draft);
             await shell.mutate({ action: "createBranch", name, start: shell.draftExtra || null });
@@ -237,7 +266,7 @@
             shell.stashFiles = [];
             if (files.length > 0) {
               await shell.mutate({ action: "stashPaths", files, message: shell.draft, includeUntracked: shell.includeUntracked });
-              if (!shell.actionError) shell.picked = shell.picked.filter((path) => !files.includes(path));
+              if (!shell.actionError) unpickFiles(shell, files);
             } else await shell.mutate({ action: "stash", message: shell.draft, includeUntracked: shell.includeUntracked });
           }
           else if (shell.dialog === "rename") void shell.mutate({ action: "renameBranch", name: shell.draft, to: shell.draftExtra });
@@ -627,23 +656,13 @@
           <p class="empty">{shell.tr("dialog.rebaseInclude")}</p>
           <label class="check"><input type="checkbox" bind:checked={shell.updateRefs} /> {shell.tr("dialog.updateRefs")}</label>
           <div class="dialog-scroll">
-          {#each shell.rebaseSteps as step, index (step.rev)}
-            <div class="composer-row" role="listitem" draggable="true" ondragstart={() => (shell.dragStep = index)} ondragover={(event) => event.preventDefault()} ondrop={() => { if (shell.dragStep == null || shell.dragStep === index) return; const copy = [...shell.rebaseSteps]; const [item] = copy.splice(shell.dragStep, 1); copy.splice(index, 0, item); shell.rebaseSteps = copy; shell.dragStep = null; }}>
-              <input type="checkbox" checked={shell.rebasePicked.includes(step.rev)} aria-label={`${shell.tr("dialog.rebaseVerb")} ${step.summary}`} title={step.summary} onchange={() => { shell.rebasePicked = shell.rebasePicked.includes(step.rev) ? shell.rebasePicked.filter((rev) => rev !== step.rev) : [...shell.rebasePicked, step.rev]; }} />
-              <select aria-label={`${shell.tr("dialog.rebaseVerb")} ${step.summary}`} value={step.verb} onchange={(event) => shell.setRebaseVerb(step.rev, event.currentTarget.value)}>
-                <option value="pick">pick</option>
-                <option value="reword">reword</option>
-                <option value="squash">squash</option>
-                <option value="fixup">fixup</option>
-                <option value="drop">drop</option>
-                <option value="edit">edit</option>
-              </select>
-              <span>{step.summary}</span>
-            </div>
-            {#if step.verb === "reword" || step.verb === "squash" || step.verb === "exec"}
-              <input placeholder={shell.tr("dialog.message")} aria-label={shell.tr("dialog.message")} bind:value={step.message} />
-            {/if}
-          {/each}
+          {#if rebaseEntries.length > 100}
+            <WrappedRows items={rebaseEntries} rowHeight={40}>
+              {#snippet children(entry, index)}<div class="rebase-entry">{@render rebaseStep(entry.step, index)}</div>{/snippet}
+            </WrappedRows>
+          {:else}
+            {#each shell.rebaseSteps as step, index (step.rev)}{@render rebaseStep(step, index)}{/each}
+          {/if}
           </div>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={() => { shell.rebaseSteps = [...shell.rebaseSteps, { verb: "break", rev: `break-${Date.now()}`, summary: "break", message: "" }]; }}>break</button>
@@ -785,7 +804,7 @@
           </div>
         {:else if shell.dialog === "output"}
           <h2>{shell.tr("dialog.commandOutput")}</h2>
-          <pre class="diff-body">{shell.commandOutput}</pre>
+          {#if loading}<p class="empty" role="status">{shell.tr("chrome.reading")}</p>{:else}<pre class="diff-body">{shell.commandOutput}</pre>{/if}
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={() => (shell.dialog = null)}>{shell.tr("chrome.close")}</button>
           </div>
@@ -884,10 +903,11 @@
           </div>
         {:else if shell.dialog === "mailmap"}
           <h2>{shell.tr("chrome.mailmap")}</h2>
-          <textarea rows="8" aria-label={shell.tr("chrome.mailmap")} placeholder="Name <email> <alias>" bind:value={shell.draft}></textarea>
+          {#if loading}<p class="empty" role="status">{shell.tr("chrome.reading")}</p>{/if}
+          <textarea rows="8" aria-label={shell.tr("chrome.mailmap")} placeholder="Name <email> <alias>" bind:value={shell.draft} disabled={loading}></textarea>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="submit" disabled={shell.writing}>{shell.tr("dialog.save")}</button>
+            <button class="commit" type="submit" disabled={shell.writing || loading}>{shell.tr("dialog.save")}</button>
           </div>
         {:else if shell.dialog === "ssh"}
           <h2>{shell.tr("chrome.sshConfig")}</h2>
@@ -898,10 +918,15 @@
           </div>
         {:else if shell.dialog === "stale"}
           <h2>{shell.tr("chrome.stale")}</h2>
+          {#if loading}<p class="empty" role="status">{shell.tr("chrome.reading")}</p>{/if}
           <div class="branch-pick-list">
-            {#each shell.staleNames as name (name)}
-              <label class="check"><input type="checkbox" checked={shell.stalePicked.includes(name)} onchange={() => { shell.stalePicked = shell.stalePicked.includes(name) ? shell.stalePicked.filter((item) => item !== name) : [...shell.stalePicked, name]; }} /> {name}</label>
-            {/each}
+            {#if staleEntries.length > 100}
+              <WrappedRows items={staleEntries} rowHeight={26}>
+                {#snippet children(entry)}<div class="stale-entry">{@render staleBranch(entry.name)}</div>{/snippet}
+              </WrappedRows>
+            {:else}
+              {#each shell.staleNames as name (name)}{@render staleBranch(name)}{/each}
+            {/if}
           </div>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>

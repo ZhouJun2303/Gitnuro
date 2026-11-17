@@ -559,8 +559,17 @@ fn with_autostash(
     label: &str,
     action: impl FnOnce() -> Result<(), Error>,
 ) -> Result<(), Error> {
+    with_tree_autostash(repo, label, None, action)
+}
+
+fn with_tree_autostash(
+    repo: &Path,
+    label: &str,
+    target: Option<&str>,
+    action: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
     autostash::settle_before(repo)?;
-    let pending = autostash::push(repo, label)?;
+    let pending = autostash::push_for_tree(repo, label, target)?;
     let result = action();
     if pending.is_some() {
         match autostash::finish_if_settled(repo) {
@@ -733,10 +742,15 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             message,
             include_untracked,
         } => stash_paths(repo, &files, &message, include_untracked),
-        Mutation::Checkout { name } => with_autostash(repo, &format!("checkout {name}"), || {
-            // A missing ref must not fall back to checking out a same-named file.
-            run(repo, &["checkout", check_rev(&name)?, "--"]).map(|_| ())
-        }),
+        Mutation::Checkout { name } => {
+            check_rev(&name)?;
+            // Only a proven local branch enters the carry path; guessing remote
+            // branches and detached revisions retain native checkout semantics.
+            let target = local_checkout_target(repo, &name);
+            with_tree_autostash(repo, &format!("checkout {name}"), target.as_deref(), || {
+                run(repo, &["checkout", &name, "--"]).map(|_| ())
+            })
+        },
         Mutation::CreateBranch { name, start } => create_branch(repo, &name, start.as_deref()),
         Mutation::DeleteBranch { name, force } => {
             if force {
@@ -759,7 +773,8 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
                 format!("merge {name}")
             };
             if autostash {
-                with_autostash(repo, &label, || {
+                let target = if !squash && !no_ff { fast_forward_merge_target(repo, &name) } else { None };
+                with_tree_autostash(repo, &label, target.as_deref(), || {
                     merge(repo, &name, squash, no_ff, &summary, &description)
                 })
             } else {
@@ -913,7 +928,16 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         )
         .map(|_| ()),
         Mutation::CheckoutRemote { remote, branch } => {
-            with_autostash(repo, &format!("checkout {remote}/{branch}"), || {
+            check_name(&remote)?; check_name(&branch)?;
+            let target = (|| {
+                let opened = crate::open_repo(repo).ok()?;
+                if opened.try_find_reference(format!("refs/heads/{branch}").as_str()).ok()?.is_some() {
+                    return local_checkout_target(repo, &branch);
+                }
+                opened.find_reference(format!("refs/remotes/{remote}/{branch}").as_str()).ok()?
+                    .peel_to_id_in_place().ok().map(|id| id.to_string())
+            })();
+            with_tree_autostash(repo, &format!("checkout {remote}/{branch}"), target.as_deref(), || {
                 checkout_remote(repo, &remote, &branch)
             })
         }
@@ -1088,7 +1112,7 @@ fn pull_autostashed(repo: &Path, rebase: bool, explicit: Option<(&str, &str)>) -
                 return Ok(());
             }
             if is_ancestor(repo, &prepared.head, &target) {
-                return with_autostash(repo, &label, || {
+                return with_tree_autostash(repo, &label, Some(&target), || {
                     let _phase = crate::timing_phase("pull-integrate");
                     surface(with_editor_mode(repo, &["merge", "--ff-only", "--no-autostash", &target],
                         if rebase { AuthorMode::CommitterOnly } else { AuthorMode::Both }))
@@ -2776,6 +2800,36 @@ fn set_upstream(repo: &Path, branch: &str, upstream: &str) -> Result<(), Error> 
         )
         .map(|_| ())
     }
+}
+
+fn fast_forward_merge_target(path: &Path, name: &str) -> Option<String> {
+    check_rev(name).ok()?;
+    let repo = crate::open_repo(path).ok()?;
+    let config = repo.config_snapshot();
+    if config.string("merge.ff").is_some() && config.boolean("merge.ff") != Some(true)
+        && config.string("merge.ff")?.as_ref() != gix::bstr::BStr::new(b"only") { return None; }
+    let head = repo.head().ok()?;
+    if let Some(name) = head.referent_name() {
+        let name = name.as_bstr().to_string();
+        if let Some(branch) = name.strip_prefix("refs/heads/") {
+            if config.string(format!("branch.{branch}.mergeOptions")).is_some() { return None; }
+        }
+    }
+    // Annotated tags can request a merge commit even when their commit is ahead.
+    // Resolve only local branches or an explicit commit object, never a tag.
+    let target = local_checkout_target(path, name).or_else(|| {
+        let id = gix::hash::ObjectId::from_hex(name.as_bytes()).ok()?;
+        repo.find_object(id).ok()?.try_into_commit().ok().map(|commit| commit.id.to_string())
+    })?;
+    is_ancestor(path, "HEAD", &target).then_some(target)
+}
+
+fn local_checkout_target(path: &Path, name: &str) -> Option<String> {
+    let repo = crate::open_repo(path).ok()?;
+    // An ambiguous tag can change how native checkout resolves this spelling.
+    if repo.try_find_reference(format!("refs/tags/{name}").as_str()).ok()?.is_some() { return None; }
+    repo.find_reference(format!("refs/heads/{name}").as_str()).ok()?
+        .peel_to_id_in_place().ok().map(|id| id.to_string())
 }
 
 fn checkout_remote(repo: &Path, remote: &str, branch: &str) -> Result<(), Error> {
