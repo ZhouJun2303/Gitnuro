@@ -4,11 +4,15 @@
 
 ## 待处理
 
-- [ ] Windows 占用进程识别需在允许 Restart Manager 查询的环境复验：`locks::tests::writes_name_the_process_and_explain_how_to_release_the_file` 中 `RmStartSession` 返回 29（系统无法写入指定设备），未进入 PID 查询。保留 PID 断言；真实获取进程列表后，已处理列表在两次调用间增长的情况。
-
 - [ ] 发布后的真实性能观测：用新的关联计时核对安装包从点击到刷新完成的等待、实际远端网络长尾和系统峰值内存。当前 release 基准为独立本地种子，不能宣称历史 TLS 失败已消失或得到完整桌面提速比例，见 [性能计划第 8、10 节](dev-docs/performance-plan.md)。
 
 ## 已处理
+
+- [x] 桌面端放弃或删除大批文件时，操作入队前的校验按仓库隔离，不再让其他仓库的读写等待读盘；同仓库的校验、写入和随后的状态读取保持顺序。修复：本条所在提交 `fix: 修复队列校验隔离与暂存失败恢复`。回归 `slow_admission_only_delays_its_own_repository`，挂起一个仓库的校验并确认另一仓库仍可完成 Git 写入和引用读取。
+
+- [x] 暂存或取消暂存失败时，撤掉依赖同批预览状态的后续意图并回读真实状态；其他普通写入仍独立排队。修复同上。回归 `e2e/stage-queue.spec.ts` 的 `a failed write restores confirmed state, cancels dependent intents and allows retry`，覆盖三主题。当前复验：Git 237 项（Windows PID 项单独在普通权限下通过），应用 177 项、6 项按配置跳过；三主题全量场景及面板 738 项通过，修复后相关行为回归 66 项、场景和面板复验 33 项通过。
+
+- [x] Windows 文件占用进程识别：`296533fd` 改善错误提示、保留每个文件对应的进程，并处理 Restart Manager 两次查询间列表增长。回归 `locks::tests::writes_name_the_process_and_explain_how_to_release_the_file` 在普通 Windows 权限下保留 PID 断言通过；受限环境的 `RmStartSession` 错误 29 在进入 PID 查询前发生。
 
 - [x] 操作队列按仓库保序，普通写入不因上一任务失败而被阻塞；提交、提交后推送及放弃/删除文件核对原意图，取消已推进 HEAD 的提交不提示盲目重试。随本条提交 `fix: 修复 Git 操作队列与状态竞态`。回归 `queued_discard_preserves_later_disk_and_index_changes`、`queued_commit_does_not_include_paths_staged_after_confirmation`、`dependent_push_uses_the_confirmed_commit_and_rejects_a_moved_head`、`cancelling_a_commit_from_a_subdirectory_reports_existing_head`。
 

@@ -5,6 +5,7 @@ import { statusPathBefore, type StatusFile, type StatusSnapshot } from "../statu
 import type { ShellState } from "./state.svelte";
 
 export type StageChange = { id: number; repo: string; files: string[]; unstage: boolean };
+export type PendingStage = StageChange & { taskId: string; batch: string };
 type StageReport = StatusSnapshot & Partial<MutationResult>;
 let nextId = 0;
 
@@ -98,7 +99,10 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
   const files = [...new Set(selected ?? (command.endsWith("_all") ? rows.map((row) => row.path) : rows.filter((row) => row.path === file || row.path.startsWith(`${file}/`)).map((row) => row.path)))];
   if (files.length === 0) return undefined;
   const operation = traceOperation();
-  const change = { id: ++nextId, repo, files, unstage };
+  // Only stages chosen from the same speculative list require a previous write to succeed.
+  const pending = shell.pendingStages ?? [];
+  const predecessor = pending.findLast((item) => item.repo === repo);
+  const change: PendingStage = { id: ++nextId, repo, files, unstage, taskId: operation, batch: predecessor?.batch ?? operation };
   const args = request ? { ...extra, request: { ...request, files } } :
     file ? { ...extra, files, filtered: extra.filtered ?? true } : extra;
   const openGen = shell.openGen;
@@ -107,7 +111,7 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
   const current = () => openGen === shell.openGen && shell.viewing(path) && (!shell.focusPath || shell.jobKey(shell.focusPath) === repo);
   shell.actionError = null;
   shell.stashRetry = null;
-  shell.pendingStages = [...(shell.pendingStages ?? []), change];
+  shell.pendingStages = [...pending, change];
   shell.statusGen += 1;
   shell.startWork(shell.tr(unstage ? "chrome.unstagePending" : "chrome.stagePending"), path);
   if (shell.selectedPath && files.includes(shell.selectedPath)) {
@@ -136,7 +140,9 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
     };
     try {
       const incremental = command === "stage_path" || command === "unstage_path";
-      const value = await invoke<StageReport>(command, { path, ...args, __task: operation, __selection: files, __taskLabel: shell.tr(unstage ? "chrome.unstagePending" : "chrome.stagePending"), ...(incremental ? { incremental: true } : {}) }, undefined, operation);
+      const value = await invoke<StageReport>(command, { path, ...args, __task: operation,
+        __dependsOn: predecessor ? [predecessor.taskId] : [], __selection: files,
+        __taskLabel: shell.tr(unstage ? "chrome.unstagePending" : "chrome.stagePending"), ...(incremental ? { incremental: true } : {}) }, undefined, operation);
       report = value;
       backendFinished = performance.now();
       if (value.outcome === "failed" || value.error) throw new Error([value.error, value.log || value.output].filter(Boolean).join("\n\n") || "Git stage failed");
@@ -146,7 +152,12 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
       if (described) shell.recordCommand("stagePaths", described, executionLog(value.log || value.output || ""), true, source);
       return value;
     } catch (error) {
-      remove();
+      if (!shell.pendingStages.some((item) => item.id === change.id)) return null;
+      const affected = (item: PendingStage) => item.batch === change.batch && item.id >= change.id;
+      const later = shell.pendingStages.filter((item) => affected(item) && item.id !== change.id);
+      shell.pendingStages = shell.pendingStages.filter((item) => !affected(item));
+      // Native dependencies stop Git failures. Also cancel when the first IPC never reached it.
+      const cancellations = later.map((item) => invoke("cancel_task", { id: item.taskId }).catch(() => {}));
       if (current()) {
         if (report?.path && report.staged && report.unstaged) shell.applySnapshot(report);
         else shell.scheduleStageRefresh();
@@ -156,6 +167,7 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
         shell.scheduleStageRefresh();
       }
       if (described) shell.recordCommand("stagePaths", described, executionLog(shell.message(error)), false, source);
+      await Promise.all(cancellations);
       return null;
     }
   } finally {

@@ -94,10 +94,9 @@ pub fn terminal(state: &str) -> bool { matches!(state, "completed" | "conflict" 
 
 fn touch(snapshot: &mut Snapshot) { snapshot.sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed); }
 
-/// Admit desktop submissions off the IPC thread, in arrival order. Park work until
-/// runnable so waiting writes cannot exhaust the runtime's blocking pool.
-pub fn submit(command: String, args: Value, complete: impl FnOnce(Result<Value, String>) + Send + 'static) {
-    let sender = ADMISSIONS.get_or_init(|| {
+// Route IPC arrivals in order without doing file verification on the router.
+fn admissions() -> &'static std::sync::mpsc::Sender<Job> {
+    ADMISSIONS.get_or_init(|| {
         let (send, receive) = std::sync::mpsc::channel::<Job>();
         std::thread::Builder::new().name("awegit-admissions".into()).spawn(move || loop {
             match receive.recv_timeout(Duration::from_millis(250)) {
@@ -107,37 +106,82 @@ pub fn submit(command: String, args: Value, complete: impl FnOnce(Result<Value, 
             }
         }).expect("start repository admission worker");
         send
-    });
-    let admit = Box::new(move || {
-        let trace = args.get("__perf").and_then(Value::as_str);
-        let prepared = { let _span = super::perf::command_with_id("enqueue_operation", trace); enqueue(&command, &args) };
-        match prepared {
-            Ok(id) => {
-                let job_id = id.clone();
-                let job: Job = Box::new(move || {
-                    let _span = super::perf::command_with_id(&command, args.get("__perf").and_then(Value::as_str));
-                    complete(run(&job_id, || execute(&command, &args), |value| outcome(&command, &args, value)));
-                });
-                let mut state = registry().0.lock().unwrap_or_else(|error| error.into_inner());
-                if state.tasks[&id].cancelled.load(Ordering::Acquire) {
-                    drop(state);
-                    tauri::async_runtime::spawn_blocking(job);
-                } else {
-                    state.jobs.insert(id, job);
-                    drop(state);
-                    dispatch_ready();
-                }
-            }
-            Err(error) => complete(Err(error)),
-        }
-    });
-    if let Err(error) = sender.send(admit) { (error.0)(); }
+    })
 }
 
-fn await_admissions() {
+fn admission_lanes() -> &'static Mutex<HashMap<String, VecDeque<Job>>> {
+    static LANES: OnceLock<Mutex<HashMap<String, VecDeque<Job>>>> = OnceLock::new();
+    LANES.get_or_init(Default::default)
+}
+
+fn queue_admission(lane: String, job: Job) {
+    use std::collections::hash_map::Entry;
+    {
+        let mut lanes = admission_lanes().lock().unwrap_or_else(|error| error.into_inner());
+        match lanes.entry(lane.clone()) {
+            Entry::Occupied(mut active) => { active.get_mut().push_back(job); return; }
+            Entry::Vacant(idle) => { idle.insert(VecDeque::from([job])); }
+        }
+    }
+    // The entry stays present while its worker runs, even with no pending jobs.
+    tauri::async_runtime::spawn_blocking(move || loop {
+        let job = {
+            let mut lanes = admission_lanes().lock().unwrap_or_else(|error| error.into_inner());
+            match lanes.get_mut(&lane).and_then(VecDeque::pop_front) {
+                Some(job) => job,
+                None => { lanes.remove(&lane); return; }
+            }
+        };
+        job();
+    });
+}
+
+/// Admit requests in repository order and park writes until they are runnable.
+pub fn submit(command: String, args: Value, complete: impl FnOnce(Result<Value, String>) + Send + 'static) {
+    let route = Box::new(move || {
+        let (target, lane) = match task_repository(&args) {
+            Ok(repository) => repository,
+            Err(error) => { complete(Err(error)); return; }
+        };
+        queue_admission(lane.clone(), Box::new(move || {
+            let prepared = {
+                let _span = super::perf::command_with_id("enqueue_operation", args.get("__perf").and_then(Value::as_str));
+                awegit_git::timing_repository(&target);
+                enqueue_in_lane(&command, &args, target, lane)
+            };
+            let id = match prepared {
+                Ok(id) => id,
+                Err(error) => { complete(Err(error)); return; }
+            };
+            let job_id = id.clone();
+            let job: Job = Box::new(move || {
+                let _span = super::perf::command_with_id(&command, args.get("__perf").and_then(Value::as_str));
+                complete(run(&job_id, || execute(&command, &args), |value| outcome(&command, &args, value)));
+            });
+            let mut state = registry().0.lock().unwrap_or_else(|error| error.into_inner());
+            if state.tasks[&id].cancelled.load(Ordering::Acquire) {
+                drop(state);
+                tauri::async_runtime::spawn_blocking(job);
+            } else {
+                state.jobs.insert(id, job);
+                drop(state);
+                dispatch_ready();
+            }
+        }));
+    });
+    if let Err(error) = admissions().send(route) { (error.0)(); }
+}
+
+fn await_admissions(lane: &str) {
     let Some(sender) = ADMISSIONS.get() else { return };
     let (done, admitted) = std::sync::mpsc::channel();
-    if sender.send(Box::new(move || { let _ = done.send(()); })).is_ok() { let _ = admitted.recv(); }
+    let lane = lane.to_string();
+    if sender.send(Box::new(move || {
+        let mut lanes = admission_lanes().lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(queue) = lanes.get_mut(&lane) {
+            queue.push_back(Box::new(move || { let _ = done.send(()); }));
+        } // Dropping the sender also releases a reader of an idle lane.
+    })).is_ok() { let _ = admitted.recv(); }
 }
 
 fn dispatch_ready() {
@@ -217,7 +261,7 @@ pub fn handles(command: &str) -> bool {
         | "save_hidden_refs" | "save_expanded_groups" | "save_sign_off" | "set_repo_author" | "save_remote_account" | "approve_credential" | "remove_index_lock" | "remove_stale_lock")
 }
 
-pub fn enqueue(command: &str, args: &Value) -> Result<String, String> {
+fn task_repository(args: &Value) -> Result<(PathBuf, String), String> {
     let path = args.get("path").and_then(Value::as_str).unwrap_or("");
     let request = args.get("request").unwrap_or(args);
     let target = match request.get("destination").and_then(Value::as_str).filter(|_| matches!(request.get("action").and_then(Value::as_str), Some("clone" | "init"))) {
@@ -226,6 +270,16 @@ pub fn enqueue(command: &str, args: &Value) -> Result<String, String> {
     };
     super::lab::ensure_lab_path(&target)?;
     let lane = awegit_git::common_repo_key(&target);
+    Ok((target, lane))
+}
+
+pub fn enqueue(command: &str, args: &Value) -> Result<String, String> {
+    let (target, lane) = task_repository(args)?;
+    enqueue_in_lane(command, args, target, lane)
+}
+
+fn enqueue_in_lane(command: &str, args: &Value, target: PathBuf, lane: String) -> Result<String, String> {
+    let request = args.get("request").unwrap_or(args);
     let id = args.get("__task").and_then(Value::as_str).map(str::to_string)
         .unwrap_or_else(|| format!("task-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     let action = request.get("action").and_then(Value::as_str).unwrap_or(command).to_string();
@@ -413,8 +467,8 @@ pub fn snapshot(id: &str) -> Option<Snapshot> {
 /// Mutable reads wait for writes already submitted, without delaying later writes.
 pub fn wait_for_writes(repo: &Path) {
     if CURRENT.with(|current| current.borrow().is_some()) { return; }
-    await_admissions();
     let lane = awegit_git::common_repo_key(repo);
+    await_admissions(&lane);
     let (lock, ready) = registry();
     let mut registry = lock.lock().unwrap_or_else(|error| error.into_inner());
     let pending = registry.lanes.get(&lane).cloned().unwrap_or_default();
@@ -618,6 +672,55 @@ mod tests {
     }
     impl Drop for Repo { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
     fn ok(_: &Value) -> &str { "completed" }
+
+    #[test]
+    fn slow_admission_only_delays_its_own_repository() {
+        let slow = Repo::new();
+        let fast = Repo::new();
+        for repo in [&slow, &fast] { repo.git(&["commit", "--allow-empty", "-qm", "test: seed"]); }
+        let slow_lane = awegit_git::common_repo_key(&slow.0);
+        let timeout = Duration::from_secs(10);
+        let (started, preparing) = mpsc::channel();
+        let (release, held) = mpsc::channel();
+        // Hold admission at the point where a file intent hashes disk contents.
+        assert!(admissions().send(Box::new(move || queue_admission(slow_lane, Box::new(move || {
+            let _ = started.send(());
+            let _ = held.recv();
+        })))).is_ok());
+        preparing.recv_timeout(timeout).unwrap();
+
+        let (first_done, first) = mpsc::channel();
+        submit("mutate".into(), json!({ "path": slow.0, "request": { "action": "createBranch", "name": "before" } }),
+            move |result| { let _ = first_done.send(result); });
+        let (second_done, second) = mpsc::channel();
+        submit("mutate".into(), json!({ "path": slow.0, "request": { "action": "renameBranch", "name": "before", "to": "after" } }),
+            move |result| { let _ = second_done.send(result); });
+        let (fast_done, fast_write) = mpsc::channel();
+        submit("mutate".into(), json!({ "path": fast.0, "request": { "action": "createBranch", "name": "unrelated" } }),
+            move |result| { let _ = fast_done.send(result); });
+
+        let read = |repo: &Repo| {
+            let path = repo.0.to_string_lossy().into_owned();
+            let (done, result) = mpsc::channel();
+            std::thread::spawn(move || { let _ = done.send(super::super::repository_refs(Some(path))); });
+            result
+        };
+        let slow_read = read(&slow);
+        let fast_read = read(&fast);
+        let refs = fast_read.recv_timeout(timeout).expect("unrelated read blocked on admission").unwrap();
+        assert!(refs.branches.iter().any(|branch| branch.name == "unrelated"));
+        assert_eq!(fast_write.recv_timeout(timeout).unwrap().unwrap()["outcome"], "completed");
+        assert!(slow_read.try_recv().is_err());
+        assert!(first.try_recv().is_err());
+        assert!(second.try_recv().is_err());
+
+        release.send(()).unwrap();
+        assert_eq!(first.recv_timeout(timeout).unwrap().unwrap()["outcome"], "completed");
+        assert_eq!(second.recv_timeout(timeout).unwrap().unwrap()["outcome"], "completed");
+        let refs = slow_read.recv_timeout(timeout).unwrap().unwrap();
+        assert!(refs.branches.iter().any(|branch| branch.name == "after"));
+        assert!(!refs.branches.iter().any(|branch| branch.name == "before"));
+    }
 
     #[test]
     fn real_fetch_commands_report_phase_progress_without_transfer_output() {

@@ -156,9 +156,9 @@ for (const theme of ["apple", "light", "dark"]) {
   });
 }
 
-test("a failed write restores confirmed state, cancels dependent intents and allows retry", async ({ page }) => {
+for (const theme of ["apple", "light", "dark"]) test(`a failed write restores confirmed state, cancels dependent intents and allows retry (${theme})`, async ({ page }) => {
   test.setTimeout(60_000);
-  const errors = await open(page, "apple", "list");
+  const errors = await open(page, theme, "list");
   await row(page, "list", "unstaged", a).dblclick();
   await idle(page);
   const held = await holdWrites(page, b);

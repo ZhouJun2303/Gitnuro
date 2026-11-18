@@ -55,7 +55,7 @@ import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, sa
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 import { statusPathBefore } from "../status";
-import { enqueueStage, projectStages, stageActions, type StageChange } from "./staging";
+import { enqueueStage, projectStages, stageActions, type PendingStage } from "./staging";
 import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../operation-policy";
 import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
 import { watchOperationTasks } from "./task-monitor";
@@ -1518,7 +1518,7 @@ export class ShellState {
   selectedDiff = $derived(this.mode === "sample" && this.selectedPath ? (diffs[this.selectedPath] ?? []) : []);
 
 
-  pendingStages = $state.raw<StageChange[]>([]);
+  pendingStages = $state.raw<PendingStage[]>([]);
   stageStatusUnverified = $state(false);
   repoStagePending = $derived(this.pendingStages.some((stage) => stage.repo === this.jobKey(this.repoPath())));
   stageView = $derived(projectStages(this.snapshot, this.pendingStages));
