@@ -9,6 +9,7 @@ import { commits, diffs, sampleConflictViews, sampleImages, sampleNotices, sampl
 import { highlight } from "../highlight";
 import { clipboardRemote, cloneTarget, cloneUrl, remoteFromText, remoteNameFromUrl, repoNameFromUrl, safeFolderName } from "../clonePath";
 import { featuresPageUrl } from "../featuresPage";
+import { CommitSelection, type CommitSelectionEvent } from "./commitSelection.svelte";
 import { applyFont, loadFont, useDownloadedFont, type FontStatus, type FontOption, type FontProgress } from "../fonts";
 import { fileAccessReport } from "../fileAccess";
 import { resolveLocale, translate } from "../i18n";
@@ -495,6 +496,8 @@ export class ShellState {
 
 
   selectedCommit = $state<string | null>(null);
+
+  commitSelection = new CommitSelection();
 
 
   selectedCommitRow = $derived(this.mode === "live" && this.selectedCommit ? (this.commitsLive.find((row) => row.id === this.selectedCommit) ?? null) : null);
@@ -5083,7 +5086,7 @@ export class ShellState {
 
 
 
-  async selectCommit(id: string, event?: MouseEvent) {
+  async selectCommit(id: string, event?: CommitSelectionEvent) {
     window.clearTimeout(this.commitNavTimer);
     this.commitNavTimer = 0;
     return selectCommit(this, id, event);
@@ -5092,6 +5095,7 @@ export class ShellState {
   /** Move the highlight now, load the expensive detail once the key repeat settles. */
   selectCommitSoon(id: string) {
     const path = this.repoPath();
+    this.commitSelection.clear();
     this.comparePair = null;
     this.selectedCommit = id;
     const rowAt = this.historyItems.findIndex((row) => row.id === id);
@@ -5192,6 +5196,7 @@ export class ShellState {
 
   async openRepo(path: string) {
     if (!this.backend() || !path.trim()) return;
+    if (!this.viewing(path)) this.commitSelection.clear();
     const stayingOnRepo = this.viewing(path);
     if (!stayingOnRepo) this.rememberRepositoryView();
     this.dialog = null;
@@ -5901,8 +5906,8 @@ export class ShellState {
 
 
 
-  selectSample(id: string) {
-    return selectSample(this, id);
+  selectSample(id: string, event?: CommitSelectionEvent) {
+    return selectSample(this, id, event);
   }
 
 

@@ -18,6 +18,8 @@
 
 - [x] 后台任务调度与界面响应完整清单九类全部实施：共用仓库写入队列、依赖与取消，分离即时反馈、真实核验及辅助读取，引用与文件等待状态、按影响刷新、增量历史 / 搜索 / Blame / 目录扫描、设置三方合并、账户 / AI / 更新迟到结果保护均已接入。实现：本条所在提交 `perf: 完善后台任务调度与操作响应`；回归：`tasks::tests`、`settings_merge::tests`、`crates/git/tests/responsiveness.rs`、`e2e/operation-scheduler.spec.ts`、`e2e/operation-responsiveness.spec.ts`，以及暂存队列、同步、历史、弹窗、设置、Reset、更新与三主题相关场景。`pnpm test`、`pnpm check`、`pnpm build` 通过。实现边界见[完整清单](dev-docs/operation-responsiveness.md)，验收与测量限制见[性能记录第 14 节](dev-docs/performance-plan.md#14-2026-11-17-全部操作的后台调度与响应对照-31e52132)。
 
+- [x] 全部提交面板支持 Ctrl / Command 切换多选、Shift 范围选择，右键保留已选集合并显示数量，可批量拣选或注明来源；按提交依赖顺序应用，冲突后保留剩余队列。修复键盘定位后筛选会带回隐藏选择的问题。实现：本条所在提交 `feat: 支持提交多选与批量拣选`；回归：`crates/git/tests/cherry_pick.rs` 的 6 项（非连续提交顺序、去重、来源说明、预先校验、继续 / 跳过 / 中止及本地修改恢复），`e2e/history-multiselect.spec.ts`、新增 `history-multiselect` / `cherry-many-confirm` 场景与 `theme panel history` 共 18 项 UI，覆盖 Apple、经典白色、VS Code 黑色。
+
 - [x] 普通文件、目录、多选和全部暂存/取消暂存先移动列表并显示等待标记，真实索引按仓库顺序写入；支持连续反向操作，失败时回读真实状态并取消后续暂存请求，保留残留锁文件移除/重试，旧差异不覆盖新选择。实现：本条所在提交 `perf: 暂存和取消暂存立即反馈并按仓库排队`；回归：`e2e/stage-queue.spec.ts` 的 20 项，覆盖三主题、三布局、失败/重试、部分暂存、重命名、删除和迟到预览；与 `stage-performance`、`stage-dense`、`common-operations`、`performance-refresh`、相关主题面板和锁文件确认共 53 项通过，重命名用例核对原生单路径语义并滚动到虚拟列表目标后单项复验通过。`pnpm check`、`pnpm build` 通过；验证边界和一次 59ms 目录刷新长任务见[性能记录第 13 节](dev-docs/performance-plan.md#13-2026-11-17-暂存与取消暂存的先行反馈对照-06121756)。
 
 - [x] 顶部扫光统一为 0.3 秒一趟，移除“减少动态效果”将时长覆盖成 3 秒的规则。修复：本条所在提交 `fix: 将顶部扫光统一为 0.3 秒一趟`；回归：`e2e/sync-toolbar.spec.ts` 的 `busy toolbar sweep keeps its 300ms duration across motion preferences`，三套主题下切换系统偏好后，浏览器计算样式及运行中的动画周期均为 300ms，三项通过；`pnpm check` 通过。旧规则已复现为 3 秒。

@@ -23,6 +23,7 @@ import {
   } from "../status";
 import type { StoredError } from "./types";
 import type { ShellState } from "./state.svelte";
+import type { CommitSelectionEvent } from "./commitSelection.svelte";
 
 const ERROR_KEY = "awegit-errors";
 const PATCH_CACHE_LIMIT = 100;
@@ -512,16 +513,20 @@ export async function compareDrops(shell: ShellState) {
     });
   }
 
-export async function selectCommit(shell: ShellState, id: string, event?: MouseEvent) {
-    if (event?.shiftKey && shell.selectedCommit) {
-      const ids = shell.shownCommits.map((commit) => commit.id);
-      const start = ids.indexOf(shell.selectedCommit);
-      const end = ids.indexOf(id);
-      if (start >= 0 && end >= 0) {
-        const [from, to] = start < end ? [start, end] : [end, start];
-        shell.drops = ids.slice(from, to + 1);
-      }
+export async function selectCommit(shell: ShellState, id: string, event?: CommitSelectionEvent) {
+    const next = shell.commitSelection.select(id, shell.selectedCommit, shell.historyItems, event);
+    if (event?.shiftKey) shell.drops = [...(shell.commitSelection.ids ?? [])];
+    if (!next) {
+      shell.selectedCommit = null;
+      shell.comparePair = null;
+      shell.commitDetail = null;
+      shell.commitFiles = [];
+      shell.blameLines = null;
+      shell.resetCommitView();
+      return;
     }
+    if ((event?.ctrlKey || event?.metaKey) && next === shell.selectedCommit) return;
+    id = next;
     shell.comparePair = null;
     shell.selectedCommit = id;
     const rowAt = shell.historyItems.findIndex((row) => row.id === id);
@@ -850,7 +855,17 @@ export async function openHistoryTab(shell: ShellState, tab: "commit" | "changes
     shell.revealSelectedRow();
   }
 
-export function selectSample(shell: ShellState, id: string) {
+export function selectSample(shell: ShellState, id: string, event?: CommitSelectionEvent) {
+    const next = shell.commitSelection.select(id, shell.selectedCommit, shell.sampleShown, event);
+    if (!next) {
+      shell.selectedCommit = null;
+      shell.selectedPath = null;
+      shell.commitDetail = null;
+      shell.commitFiles = [];
+      shell.resetCommitView();
+      return;
+    }
+    id = next;
     const commit = shell.sampleRows.find((row) => row.id === id);
     shell.selectedCommit = id;
     shell.selectedPath = id;

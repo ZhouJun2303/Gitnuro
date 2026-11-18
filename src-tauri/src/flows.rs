@@ -1109,8 +1109,8 @@ pub fn begin_kind(repo: &Path, kind: &str, request: Option<&Mutation>) -> Option
             | Mutation::StashBranch { name, .. } => {
                 flow::commit(repo, if name.is_empty() { "refs/stash" } else { name })
             }
-            Mutation::CherryPick { rev, .. }
-            | Mutation::Revert { rev, .. }
+            Mutation::CherryPick { rev, revs, .. } => flow::commit(repo, revs.last().map(String::as_str).unwrap_or(rev)),
+            Mutation::Revert { rev, .. }
             | Mutation::Reset { rev, .. } => flow::commit(repo, rev),
             Mutation::Merge { name, .. } => flow::commit(repo, name),
             Mutation::Rebase { onto, .. } | Mutation::RebaseInteractive { onto, .. } => {
@@ -2472,7 +2472,7 @@ mod tests {
                             "stash" => Mutation::Stash { message: "performance".into(), include_untracked: false },
                             "merge" => Mutation::Merge { name: incoming.into(), squash: false, no_ff: false, autostash: true, summary: String::new(), description: String::new() },
                             "rebase" => Mutation::Rebase { onto: incoming.into(), autostash: true },
-                            "cherry-pick" => Mutation::CherryPick { rev: incoming.into(), record: false },
+                            "cherry-pick" => Mutation::CherryPick { rev: incoming.into(), revs: Vec::new(), record: false },
                             "revert" => Mutation::Revert { rev: incoming.into(), no_commit: false, message: String::new() },
                             "reset" => Mutation::Reset { rev: head.into(), mode: awegit_git::ResetMode::Soft },
                             "branch" => Mutation::CreateBranch { name: "perf-created".into(), start: None },

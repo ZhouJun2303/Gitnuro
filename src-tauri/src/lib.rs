@@ -812,7 +812,10 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
             join([scrub(onto), format!("drop={}", drop.len()), format!("steps={}", steps.len()), flag("autostash", *autostash), flag("updateRefs", *update_refs)])
         }
         Mutation::Reset { rev, mode } => join([scrub(rev), format!("{mode:?}")]),
-        Mutation::CherryPick { rev, record } => join([scrub(rev), flag("record", *record)]),
+        Mutation::CherryPick { rev, revs, record } => {
+            let sources = if revs.is_empty() { scrub(rev) } else { revs.iter().map(|rev| scrub(rev)).collect::<Vec<_>>().join(" ") };
+            join([sources, flag("record", *record)])
+        }
         Mutation::Revert { rev, no_commit, message } => join([scrub(rev), flag("noCommit", *no_commit), bytes("message", message)]),
         Mutation::Reword { rev, summary } => join([scrub(rev), bytes("summary", summary)]),
         Mutation::Tag { name, rev, message } => join([scrub(name), scrub(rev), bytes("message", message)]),

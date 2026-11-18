@@ -22,6 +22,7 @@ import {
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
 import type { ShellState } from "./state.svelte";
 import { launchExternal } from "./diff.svelte";
+import { previewCherrySelection } from "./cherrySelection";
 import { loadMoreHistory } from "./history.svelte";
 import { openFile, openInEditor } from "./dialogs.svelte";
 
@@ -114,7 +115,27 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
 
 export function commitMenu(shell: ShellState, commit: { id: string; summary: string }) {
     const locked = shell.mode !== "live";
+    if (!shell.commitSelection.has(commit.id, shell.selectedCommit)) {
+      if (shell.mode === "sample") shell.selectSample(commit.id);
+      else void shell.selectCommit(commit.id);
+    }
+    const rows = shell.mode === "sample" ? shell.sampleShown : shell.historyItems;
+    const selected = rows.filter((row) => shell.commitSelection.has(row.id, shell.selectedCommit));
+    const count = String(selected.length || 1);
+    const selection: MenuItem[] = [
+      { label: shell.tr("menu.selectedCommits", { count }), disabled: true },
+      { label: "", sep: true },
+    ];
+    if (selected.length > 1) {
+      return [
+        ...selection,
+        { label: shell.tr("menu.cherryPickSelected", { count }), disabled: locked || !!shell.progress, run: () => previewCherrySelection(shell, selected, false) },
+        { label: shell.tr("menu.cherryPickSelectedRecord", { count }), disabled: locked || !!shell.progress, run: () => previewCherrySelection(shell, selected, true) },
+        { label: shell.tr("menu.copySha"), run: () => shell.copyText(selected.map((row) => row.id).join("\n")) },
+      ];
+    }
     return [
+      ...selection,
       { label: shell.tr("menu.checkout"), disabled: locked || !!shell.progress, run: () => shell.requestCheckout(commit.id) },
       { label: shell.tr("menu.cherryPick"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, false, commit.summary) },
       { label: shell.tr("menu.cherryPickRecord"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, true, commit.summary) },

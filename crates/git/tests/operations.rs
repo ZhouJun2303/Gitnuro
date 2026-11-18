@@ -502,6 +502,7 @@ fn resets_cherry_pick_and_revert() {
         &repo.path,
         Mutation::CherryPick {
             rev: "side".into(),
+            revs: Vec::new(),
             record: false,
         },
     )
@@ -3175,6 +3176,7 @@ fn another_flow_is_refused_while_a_rebase_is_paused() {
         &repo.path,
         Mutation::CherryPick {
             rev: "main".into(),
+            revs: Vec::new(),
             record: false,
         },
     )

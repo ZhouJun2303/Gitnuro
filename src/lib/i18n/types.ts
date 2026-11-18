@@ -400,6 +400,9 @@ export type Messages = {
     deleteRemoteTag: string;
     restoreFile: string;
     cherryPickRecord: string;
+    selectedCommits: string;
+    cherryPickSelected: string;
+    cherryPickSelectedRecord: string;
     renameStash: string;
     stashPatch: string;
     stashBranch: string;
@@ -525,6 +528,7 @@ export type Messages = {
     revertNoCommitNote: string;
     revertMessage: string;
     cherryPickBody: string;
+    cherryPickSelectedBody: string;
     cherryPickRecordNote: string;
     deleteRemoteBody: string;
     deleteRemoteTagBody: string;

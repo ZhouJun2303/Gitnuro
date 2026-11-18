@@ -157,7 +157,10 @@ pub enum Mutation {
         mode: ResetMode,
     },
     CherryPick {
+        #[serde(default)]
         rev: String,
+        #[serde(default)]
+        revs: Vec<String>,
         /// Pass `-x`, which records the source commit in the message.
         #[serde(default)]
         record: bool,
@@ -530,6 +533,51 @@ fn short_rev(rev: &str) -> String {
     }
 }
 
+fn cherry_pick(repo: &Path, rev: &str, revs: &[String], record: bool) -> Result<(), Error> {
+    let requested: Vec<&str> = if revs.is_empty() {
+        vec![rev]
+    } else {
+        revs.iter().map(String::as_str).collect()
+    };
+    let mut resolved = Vec::new();
+    let mut seen = HashSet::new();
+    for rev in requested {
+        let rev = check_rev(rev)?;
+        let output = run(repo, &["rev-parse", "--verify", &format!("{rev}^{{commit}}")])?;
+        let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if seen.insert(id.clone()) {
+            resolved.push(id);
+        }
+    }
+    if resolved.len() > 1 {
+        // A revision walk orders non-adjacent selections by ancestry, regardless of
+        // click order, the history sort setting, or skewed commit timestamps.
+        let mut args = vec!["rev-list", "--topo-order", "--reverse"];
+        args.extend(resolved.iter().map(String::as_str));
+        let output = run(repo, &args)?;
+        let selected: HashSet<_> = resolved.iter().map(String::as_str).collect();
+        resolved = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|id| selected.contains(id))
+            .map(str::to_string)
+            .collect();
+    }
+    let label = if resolved.len() == 1 {
+        format!("cherry-pick {}", short_rev(&resolved[0]))
+    } else {
+        format!("cherry-pick {} commits", resolved.len())
+    };
+    with_autostash(repo, &label, || {
+        let mut args = vec!["cherry-pick", "--no-edit"];
+        if record {
+            args.push("-x");
+        }
+        args.extend(resolved.iter().map(String::as_str));
+        // One sequencer retains remaining commits across conflicts/continue/skip.
+        with_editor_committer_only(repo, &args)
+    })
+}
+
 /// Operations that can leave unmerged paths behind and have no stash of their own.
 /// A pull, merge, or rebase with autostash already keeps one visible entry, so it
 /// must never get a second backup.
@@ -841,16 +889,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::Continue { message } => settle_after_flow(repo, || continue_with(repo, &message)),
         Mutation::Skip => settle_after_flow(repo, || flow(repo, "skip")),
         Mutation::Reset { rev, mode } => reset(repo, &rev, mode),
-        Mutation::CherryPick { rev, record } => {
-            with_autostash(repo, &format!("cherry-pick {}", short_rev(&rev)), || {
-                let rev = check_rev(&rev)?;
-                if record {
-                    with_editor_committer_only(repo, &["cherry-pick", "-x", "--no-edit", rev])
-                } else {
-                    with_editor_committer_only(repo, &["cherry-pick", "--no-edit", rev])
-                }
-            })
-        }
+        Mutation::CherryPick { rev, revs, record } => cherry_pick(repo, &rev, &revs, record),
         Mutation::Revert {
             rev,
             no_commit,

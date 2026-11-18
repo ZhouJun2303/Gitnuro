@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { getShell } from "./context";
   import StashPlates from "./StashPlates.svelte";
   import RefChip from "./RefChip.svelte";
@@ -15,6 +16,11 @@
   const onHistoryScroll = onVirtualScroll((top) => (shell.historyTop = top));
   const activeColor = $derived(shell.activeLaneColor());
   const reflogWindow = $derived(windowSlice(shell.reflogRows, shell.historyTop, shell.rowCommit, 80, shell.windowRows(shell.historyHeight, shell.rowCommit)));
+
+  $effect(() => {
+    const rows = shell.mode === "sample" ? shell.sampleShown : shell.historyItems;
+    untrack(() => shell.commitSelection.retain(rows, shell.selectedCommit));
+  });
 
   function focusSelectionSoon() {
     requestAnimationFrame(() => shell.historyEl?.querySelector<HTMLElement>(".commit-row.selected")?.focus());
@@ -83,7 +89,9 @@
                 {@const plate = shell.stashParts(commit.summary, commit.refs)}
                   <div
                     class="commit-row virtual"
-                    class:selected={shell.selectedCommit === commit.id}
+                    class:selected={shell.commitSelection.has(commit.id, shell.selectedCommit)}
+                    aria-pressed={shell.commitSelection.has(commit.id, shell.selectedCommit)}
+                    data-commit-id={commit.id}
                     class:head={shell.refs?.head === commit.id}
                     class:unpushed={shell.isCommitUnpushed(commit)}
                     class:pushed={(shell.refs?.remotes.length ?? 0) > 0 && !shell.isCommitUnpushed(commit) && commit.remoteOnly !== true}
@@ -107,7 +115,7 @@
                       if (event.key !== "Enter" && event.key !== " ") return;
                       event.preventDefault();
                       event.stopPropagation();
-                      void shell.selectCommit(commit.id);
+                      void shell.selectCommit(commit.id, event);
                     }}
                     oncontextmenu={(event) => shell.openMenu(event, shell.commitMenu(commit))}
                   >
@@ -162,7 +170,7 @@
                 {@const graphRow = shell.sampleShownGraph.rows[index] ?? []}
                 {@const tone = shell.laneTone(graphRow)}
                 {@const plate = shell.stashParts(commit.summary, commit.badges)}
-                <button class="commit-row" class:selected={shell.selectedCommit === commit.id || shell.selectedPath === commit.id} class:unpushed={shell.isCommitUnpushed(commit)} class:pushed={(shell.refs?.remotes.length ?? 0) > 0 && !shell.isCommitUnpushed(commit) && commit.remoteOnly !== true} class:remote-only={commit.remoteOnly === true} type="button" onclick={() => shell.selectSample(commit.id)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
+                <button class="commit-row" class:selected={shell.commitSelection.has(commit.id, shell.selectedCommit)} class:unpushed={shell.isCommitUnpushed(commit)} class:pushed={(shell.refs?.remotes.length ?? 0) > 0 && !shell.isCommitUnpushed(commit) && commit.remoteOnly !== true} class:remote-only={commit.remoteOnly === true} type="button" onclick={(event) => shell.selectSample(commit.id, event)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
                   {@render laneGraph(graphRow, commit.id)}
                   <span class="commit-copy">
                     {@render branchChips(shell.branchRefLabels(commit.badges), tone, activeColor)}

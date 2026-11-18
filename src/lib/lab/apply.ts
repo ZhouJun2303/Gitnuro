@@ -3,6 +3,7 @@ import { acceptTask } from "../tasks";
 import type { CommandRecord, ToolRecord } from "../status";
 import type { ShellState } from "../shell/state.svelte";
 import type { LabDialog, LabScene } from "./scenes";
+import { previewCherrySelection } from "../shell/cherrySelection";
 
 const FILL = 24;
 
@@ -211,6 +212,13 @@ async function fillSurface(shell: ShellState, id: string) {
     return showChange(shell, "notes/wrap.txt", "unstaged");
   }
   if (id === "history" || id === "commit" || id === "history-remote") return showHistory(shell);
+  if (id === "history-multiselect" || id === "cherry-many-confirm") {
+    await showHistory(shell);
+    const commits = shell.commitsLive.slice(0, 3);
+    shell.commitSelection.ids = new Set(commits.map((commit) => commit.id));
+    if (id === "cherry-many-confirm") previewCherrySelection(shell, commits, false);
+    return;
+  }
   if (id === "commit-binary") {
     await showCommitBySummary(shell, "add the large pak");
     await shell.openHistoryTab("changes");
