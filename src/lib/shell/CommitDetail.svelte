@@ -123,13 +123,16 @@
                         </button>
                       </div>
                     {:else}
+                      {@const path = entry.path}
+                      <!-- Image rows grow after their previews load. -->
+                      {@const fixedHeight = shell.settings.diffWordWrap || fileMarkKind(path) === "image" ? undefined : shell.patchHeights[path]}
                       <div
                         class="commit-patch"
-                        style:height={!shell.settings.diffWordWrap && shell.patchHeights[entry.path] ? `${shell.patchHeights[entry.path]}px` : undefined}
-                        use:measureCommitPatch={entry.path}
-                        use:loadCommitPatch={entry.path}
+                        style:height={fixedHeight ? `${fixedHeight}px` : undefined}
+                        use:measureCommitPatch={path}
+                        use:loadCommitPatch={path}
                       >
-                        {@render filePatch(entry.path, false)}
+                        {@render filePatch(path, false)}
                       </div>
                     {/if}
                   {/each}

@@ -10,6 +10,8 @@
 
 ## 已处理
 
+- [x] 提交详情的图片差异在预览加载后按内容调整高度。随本条提交 `fix: 修复提交详情图片预览被裁切`。`e2e/history-images.spec.ts` 的 `commit Changes and expanded patches display images directly` 在三套主题下通过。
+
 - [x] 项目标签右键的终端子菜单可以在所选项目目录启动 Codex、Grok、Cursor Agent 和 Claude。偏好设置的「集成」页手动检测并保存可用项，检测失败时保留上次结果。随本条提交 `feat: 完善侧栏和项目终端菜单`。三套主题回归 `project terminal menu uses only manually detected CLIs`，后端回归 `terminal_cli_detection_accepts_launchers_and_skips_missing_or_removed_files` 和 `windows_terminal_cli_runs_batch_shims_in_the_project_directory`。
 
 - [x] 分支按钮按隐藏、固定、历史筛选排列，顶部进度条下移 3 px，标签和贮藏每批显示 10 条。随本条提交 `feat: 完善侧栏和项目终端菜单`。三套主题回归 `branch actions show hide, pin and history filter in order`、`command progress scene` 和 `tags and stashes show ten more results independently`。

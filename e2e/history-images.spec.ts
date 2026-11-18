@@ -3,20 +3,40 @@ import { openLabScene, pinLabSettings } from "./helpers";
 
 for (const theme of ["apple", "light", "dark"] as const) {
   test(`${theme}: commit Changes and expanded patches display images directly`, async ({ page }) => {
-    await pinLabSettings(page, { theme });
+    await pinLabSettings(page, { theme, diffWordWrap: false });
     await openLabScene(page, "commit-image", ".detail-pane .revision-images", { locale: "en" });
     const images = page.locator(".detail-pane .revision-images img");
     await expect(images).toHaveCount(2);
     await expect.poll(() => images.evaluateAll((items) => items.every((item) => (item as HTMLImageElement).naturalWidth > 0))).toBe(true);
     await expect(page.locator(".detail-pane .binary-summary")).toHaveCount(0);
     await page.screenshot({ path: `.lab/screenshots/commit-image-${theme}.png`, fullPage: true });
-    // The added image has only the new side, including in the exact panel from the report.
-    await page.locator(".history .commit-row").last().click();
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    // Hold the added image until the expanded patch has measured its loading state.
+    let releasePreview!: () => void;
+    const delayedPreview = new Promise<void>((resolve) => { releasePreview = resolve; });
+    await page.route("**/__lab/invoke", async (route) => {
+      if (route.request().postDataJSON()?.cmd === "revision_preview") await delayedPreview;
+      return route.fallback();
+    });
+    const patch = page.locator(".commit-patch");
+    try {
+      await page.locator(".history .commit-row").last().click();
+      await page.getByRole("tab", { name: "Changes", exact: true }).click();
+      await expect(page.locator(".detail-pane").getByRole("status")).toBeVisible();
+      await page.getByRole("tab", { name: "Commit", exact: true }).click();
+      await page.locator(".patch-toggle").first().click();
+      await expect(patch.getByRole("status")).toBeVisible();
+    } finally {
+      releasePreview();
+    }
+    const image = patch.locator(".revision-images img");
+    await expect(image).toHaveAttribute("alt", "After");
+    await image.scrollIntoViewIfNeeded();
+    await expect(image).toBeInViewport({ ratio: 0.95, timeout: 5_000 });
     await page.getByRole("tab", { name: "Changes", exact: true }).click();
     await expect(page.locator(".detail-pane .revision-images img")).toHaveCount(1);
-    await page.getByRole("tab", { name: "Commit", exact: true }).click();
-    await page.locator(".patch-toggle").first().click();
-    await expect(page.locator(".commit-patch .revision-images img")).toHaveCount(1);
+    expect(errors).toEqual([]);
   });
 
   test(`${theme}: file history displays historical image pairs and added images`, async ({ page }) => {
