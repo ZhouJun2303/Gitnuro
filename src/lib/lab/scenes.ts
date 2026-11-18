@@ -229,6 +229,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "stale-lock-confirm", group: "叠层", title: "残留 index.lock 确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "menu", group: "叠层", title: "菜单", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "file-menu", group: "叠层", title: "文件右键菜单 · 常用操作置顶", repo: "full", ready: "[data-layer=\"menu\"]" }),
+  scene({ id: "folder-menu", group: "叠层", title: "文件夹右键菜单 · 打开与复制路径", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "external-tool-menu", group: "叠层", title: "外部工具子菜单", repo: "conflict", ready: "[data-layer=\"submenu\"]" }),
   scene({ id: "workspace-menu-busy", group: "叠层", title: "工作区菜单：刷新中", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "prefs-flow", group: "弹窗", title: "偏好设置 · 流程窗口自动打开与关闭", repo: "full", ready: '[data-dialog="prefs"]', dialog: "prefs" }),

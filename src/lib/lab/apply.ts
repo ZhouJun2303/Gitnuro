@@ -592,6 +592,12 @@ async function fillSurface(shell: ShellState, id: string) {
     window.setTimeout(() => { delete shell.jobs[key]; }, 2000);
     return;
   }
+  if (id === "folder-menu") {
+    shell.section = "changes";
+    shell.settings = { ...shell.settings, fileLayout: "tree" };
+    shell.menu = { x: 72, y: 96, items: shell.dirMenu("pending", "unstaged") };
+    return;
+  }
   if (id === "file-menu") {
     const file = shell.shownUnstaged[0] ?? shell.shownStaged[0];
     if (file) {

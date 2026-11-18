@@ -2647,7 +2647,7 @@ fn open_file(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn reveal_path(path: String) -> Result<(), String> {
+fn reveal_path(path: String, open_directory: Option<bool>) -> Result<(), String> {
     let path = path.trim();
     if path.is_empty() {
         return Err("awegit:git:path cannot be revealed".into());
@@ -2657,6 +2657,12 @@ fn reveal_path(path: String) -> Result<(), String> {
         return Err("awegit:git:path cannot be revealed".into());
     }
     let full = std::fs::canonicalize(&target).unwrap_or(target);
+    if open_directory.unwrap_or(false) {
+        if !full.is_dir() {
+            return Err("awegit:git:folder cannot be opened".into());
+        }
+        return tauri_plugin_opener::open_path(full, None::<&str>).map_err(|error| error.to_string());
+    }
     reveal_in_file_manager(&full)
 }
 

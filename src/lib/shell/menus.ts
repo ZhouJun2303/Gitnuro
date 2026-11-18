@@ -286,6 +286,11 @@ export function dirMenu(shell: ShellState, dir: string, side: Side) {
     const files = fullyPicked ? shell.pickedIn(source) : shell.filesInDir(dir, side);
     const count = String(files.length);
     return [
+      { label: shell.tr("menu.openFolder"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(dir), true) },
+      { label: shell.tr("menu.reveal"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(dir)) },
+      { label: shell.tr("menu.copyAbsolutePath"), run: () => shell.copyText(shell.fullPath(dir)) },
+      { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(dir) },
+      { sep: true, label: "" },
       {
         label: shell.tr(unstage ? "menu.unstageFolder" : "menu.stageFolder"),
         disabled: locked || shell.stageDisabled,

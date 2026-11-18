@@ -5447,8 +5447,8 @@ export class ShellState {
 
 
 
-  async openLocal(path: string) {
-    return openLocal(this, path);
+  async openLocal(path: string, openDirectory = false) {
+    return openLocal(this, path, openDirectory);
   }
 
 

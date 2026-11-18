@@ -1138,10 +1138,10 @@ export async function openFile(shell: ShellState, file: string) {
     }
   }
 
-export async function openLocal(shell: ShellState, path: string) {
+export async function openLocal(shell: ShellState, path: string, openDirectory = false) {
     if (!shell.backend()) return;
     try {
-      await invoke("reveal_path", { path });
+      await invoke("reveal_path", { path, openDirectory });
     } catch (error) {
       shell.actionError = shell.message(error);
     }

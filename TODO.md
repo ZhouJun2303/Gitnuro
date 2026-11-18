@@ -10,6 +10,8 @@
 
 ## 已处理
 
+- [x] 文件夹右键菜单顶部增加「打开文件夹」「在文件管理器中显示」「复制绝对路径」「复制相对路径」，暂存区与未暂存区共用；打开文件夹进入目录，显示操作仍在父目录选中目标。修复：本条所在提交 `feat: 为文件夹右键菜单补齐打开和复制路径操作`；回归：`e2e/folder-menu.spec.ts`、`scene folder-menu`、`a folder menu counts every picked file, not just the folder's` 及文件菜单相关回归，Apple、经典白色、VS Code 黑色共 19 项通过；`pnpm check`、`default_file_targets` 两项后端回归通过。
+
 - [x] 提交、继续变基编辑说明和改写说明显示标题为空、当前字数、上限及需删减字数；提交面板补齐未暂存、冲突与等待状态，快捷键校验失败也提示，修正输入后清除提示，继续失败的报错不会被流程状态遮住。修复：本条所在提交 `fix: 补齐提交和继续变基的校验提示`；回归：`e2e/commit-validation.spec.ts` 的 21 项，连同四个新增场景、原继续 / 改写弹窗、`theme panel changes` 和原继续变基用例共 43 项通过，覆盖 Apple、经典白色、VS Code 黑色；`pnpm check`、`pnpm build` 通过。
 
 - [x] 两个并行任务结束后依次完成当前工作区可执行范围的全量回归，修复账户同步遗漏后端删除与冗余保存、远程检出重复排队、补丁文件名和正文误识别，以及开发服务遍历 Rust 产物的问题；稳定试验台初始历史和未提交仓库种子。修复：本条所在提交 `fix: 修复全量回归发现的同步、补丁预览与监听问题`；回归：`e2e/account-sync.spec.ts`、`e2e/patch-preview.spec.ts`、`e2e/checkout.spec.ts`、`e2e/scenes.spec.ts` 及受影响旧用例。累计 1,205 个不同 UI 用例最终均通过；Git 226 项、应用 159 项、4 项 release 性能基准、1 项真实字体源专项、12 项 Node 脚本和 6 项离线发布回归通过，最终类型检查、前端构建与桌面编译通过。Windows 权限项单独保留在待处理；独立批次和验证限制见 [回归记录](dev-docs/ui-audit.md#2026-11-17-并行任务结束后的全量回归对照-0d6a85f0-及当时工作区)、[性能记录第 15 节](dev-docs/performance-plan.md#15-2026-11-17-全量回归的性能复核对照-0d6a85f0-及当时工作区)。

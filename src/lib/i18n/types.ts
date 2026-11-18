@@ -361,7 +361,9 @@ export type Messages = {
     history: string;
     reveal: string;
     openFile: string;
+    openFolder: string;
     copyPath: string;
+    copyAbsolutePath: string;
     copyRelative: string;
     resolve: string;
     keepSideCount: string;
