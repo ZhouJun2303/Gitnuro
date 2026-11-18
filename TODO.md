@@ -1,12 +1,16 @@
 # TODO：项目问题与优化清单
 
-> 最近更新：2026-11-17。性能工作的统一记录见 [项目性能优化计划](dev-docs/performance-plan.md)，包含日志复核、PERF-00—10 的实现、回归结果及 release 测量。
+> 最近更新：2026-11-18。性能工作的统一记录见 [项目性能优化计划](dev-docs/performance-plan.md)，包含日志复核、PERF-00—10 的实现、回归结果及 release 测量。
 
 ## 待处理
+
+- [ ] Windows 占用进程识别需在允许 Restart Manager 查询的环境复验：`locks::tests::writes_name_the_process_and_explain_how_to_release_the_file` 在当前沙箱未取得占用进程，提升权限复跑两次被自动审批拒绝；不修改断言掩盖失败。其余全量结果及权限边界见 [本轮回归记录](dev-docs/ui-audit.md#2026-11-17-并行任务结束后的全量回归对照-0d6a85f0-及当时工作区)。
 
 - [ ] 发布后的真实性能观测：用新的关联计时核对安装包从点击到刷新完成的等待、实际远端网络长尾和系统峰值内存。当前 release 基准为独立本地种子，不能宣称历史 TLS 失败已消失或得到完整桌面提速比例，见 [性能计划第 8、10 节](dev-docs/performance-plan.md)。
 
 ## 已处理
+
+- [x] 两个并行任务结束后依次完成当前工作区可执行范围的全量回归，修复账户同步遗漏后端删除与冗余保存、远程检出重复排队、补丁文件名和正文误识别，以及开发服务遍历 Rust 产物的问题；稳定试验台初始历史和未提交仓库种子。修复：本条所在提交 `fix: 修复全量回归发现的同步、补丁预览与监听问题`；回归：`e2e/account-sync.spec.ts`、`e2e/patch-preview.spec.ts`、`e2e/checkout.spec.ts`、`e2e/scenes.spec.ts` 及受影响旧用例。累计 1,205 个不同 UI 用例最终均通过；Git 226 项、应用 159 项、4 项 release 性能基准、1 项真实字体源专项、12 项 Node 脚本和 6 项离线发布回归通过，最终类型检查、前端构建与桌面编译通过。Windows 权限项单独保留在待处理；独立批次和验证限制见 [回归记录](dev-docs/ui-audit.md#2026-11-17-并行任务结束后的全量回归对照-0d6a85f0-及当时工作区)、[性能记录第 15 节](dev-docs/performance-plan.md#15-2026-11-17-全量回归的性能复核对照-0d6a85f0-及当时工作区)。
 
 - [x] 后台任务调度与界面响应完整清单九类全部实施：共用仓库写入队列、依赖与取消，分离即时反馈、真实核验及辅助读取，引用与文件等待状态、按影响刷新、增量历史 / 搜索 / Blame / 目录扫描、设置三方合并、账户 / AI / 更新迟到结果保护均已接入。实现：本条所在提交 `perf: 完善后台任务调度与操作响应`；回归：`tasks::tests`、`settings_merge::tests`、`crates/git/tests/responsiveness.rs`、`e2e/operation-scheduler.spec.ts`、`e2e/operation-responsiveness.spec.ts`，以及暂存队列、同步、历史、弹窗、设置、Reset、更新与三主题相关场景。`pnpm test`、`pnpm check`、`pnpm build` 通过。实现边界见[完整清单](dev-docs/operation-responsiveness.md)，验收与测量限制见[性能记录第 14 节](dev-docs/performance-plan.md#14-2026-11-17-全部操作的后台调度与响应对照-31e52132)。
 

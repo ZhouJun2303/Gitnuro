@@ -45,8 +45,9 @@ export default defineConfig(() => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**", "**/.lab/**"],
+      // Generated Rust artifacts and the local package store can contain tens
+      // of thousands of files; watching them delays startup and wastes memory.
+      ignored: ["**/src-tauri/**", "**/target/**", "**/.pnpm-store/**", "**/.lab/**"],
     },
   },
 }));

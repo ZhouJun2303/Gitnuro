@@ -507,10 +507,10 @@ export function requestCheckout(shell: ShellState, name: string) {
   }
 
 export async function quickCheckout(shell: ShellState, name: string, remote?: { remote: string; branch: string }) {
-    if (shell.mode !== "live") return;
+    if (shell.mode !== "live" || shell.pendingReference(name) || (remote && shell.pendingReference(remote.branch))) return;
     shell.locateSeq += 1;
     // One backend write owns saving, checkout and restoration by stash commit id.
-    // The normal mutation guard also absorbs repeated double-clicks.
+    // Pending references absorb repeated double-clicks while other writes can queue.
     if (remote) await shell.mutate({ action: "checkoutRemote", remote: remote.remote, branch: remote.branch });
     else await shell.mutate({ action: "checkout", name });
   }

@@ -132,12 +132,15 @@ async function showChange(shell: ShellState, path: string, side: "staged" | "uns
 
 async function showHistory(shell: ShellState) {
   shell.section = "history";
+  // An opening read may have been superseded as the repository scope settled.
+  await shell.loadContext();
   const first = shell.commitsLive[0];
   if (first) await shell.selectCommit(first.id);
 }
 
 async function showCommitBySummary(shell: ShellState, summary: string) {
   shell.section = "history";
+  await shell.loadContext();
   const target = shell.commitsLive.find((row) => row.summary === summary);
   if (target) await shell.selectCommit(target.id);
 }

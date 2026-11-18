@@ -18,7 +18,7 @@ async function lab(cmd: string, args: Record<string, unknown> = {}) {
 
 test("home lists a scene", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "变更" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "变更", exact: true })).toBeVisible();
 });
 
 test("binary diffs show both sides by size", async ({ page }) => {
@@ -871,9 +871,9 @@ test("context menu arrows stay in the menu and restore focus", async ({ page }) 
   const row = page.locator(".history .commit-row").nth(2);
   await row.focus();
   const selected = () => page.evaluate(() => [...document.querySelectorAll(".history .commit-row")].findIndex((node) => node.classList.contains("selected")));
-  const before = await selected();
   await page.keyboard.press("Shift+F10");
   await expect(page.locator('[data-layer="menu"]')).toBeVisible();
+  const before = await selected();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("ArrowDown");
   expect(await selected()).toBe(before);
@@ -976,11 +976,12 @@ test("returning to changes reloads a diff cleared by a history refresh", async (
 
 test("switching repositories clears the previous commit detail", async ({ page }) => {
   const layout = (await lab("lab_layout")) as { even: string };
+  await pinLabSettings(page, { tabLabels: [] });
   await openLabScene(page, "history", ".commit-row");
   await page.locator(".commit-row").nth(1).click();
   await expect(page.locator(".detail").getByText("AweGit Lab").first()).toBeVisible();
   await page.locator(".tab-add").click();
-  await page.locator(".repo-row", { hasText: "even" }).first().click();
+  await page.locator(".repo-row").and(page.getByTitle(layout.even, { exact: true })).click();
   await expect(page.locator(".chrome-side .tab.active")).toContainText("even", { timeout: 30_000 });
   await expect(page.locator(".detail .empty")).toContainText(/Select a file|选择/, { timeout: 20_000 });
   expect(layout.even).not.toBe("");

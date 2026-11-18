@@ -124,6 +124,7 @@ test("folder staging starts while an obsolete diff is still reading", async ({ p
       describeRequest: () => ({ title: "stage" }), startWork() {}, stopWork() {}, settings: {},
       noteActivity() {}, recordCommand() {}, replayWatch() {}, message: String,
       contextActions: new Set(), quietGit: new Set(), cancelAutomaticFetch() {},
+      patchExpectation: () => undefined, statusGen: 0,
     };
     shell.onlyDiffReads = ShellState.prototype.onlyDiffReads.bind(shell);
     const original = window.fetch;
@@ -189,6 +190,7 @@ test("status refresh retains unchanged panes and selection lookup reuses the fil
     const { pickedIn } = await import(/* @vite-ignore */ diffPath);
     const unstaged = Array.from({ length: 20_000 }, (_, i) => ({ path: `loose/${i}.txt`, kind: "untracked" }));
     const shell: any = { snapshot: null, repos: [], statusGen: 0, selectedPath: null };
+    for (const method of ["viewing", "jobKey"]) shell[method] = ShellState.prototype[method].bind(shell);
     ShellState.prototype.applySnapshot.call(shell, { path: "repo", staged: [], unstaged, revision: 1 });
     ShellState.prototype.applySnapshot.call(shell, { path: "repo", staged: [{ path: "tracked.txt", kind: "modified" }], unstaged: structuredClone(unstaged), revision: 2 });
     const retained = shell.snapshot.unstaged === unstaged;
@@ -214,6 +216,7 @@ test("partial status merges directory and rename boundaries without covering ext
     const shell: any = { snapshot: null, repos: [], statusGen: 0, selectedPath: "dir/a.txt", selectedSide: "unstaged",
       scheduleStageRefresh: () => { scheduled++; }, contextRevision: 0,
     };
+    for (const method of ["viewing", "jobKey"]) shell[method] = ShellState.prototype[method].bind(shell);
     const apply = ShellState.prototype.applySnapshot.bind(shell);
     apply({ path: "repo", revision: 7,
       staged: [{ path: "kept.txt", kind: "modified" }, { path: "renamed.txt", kind: "renamed", previousPath: "old.txt" }],
@@ -264,6 +267,7 @@ test("partial status keeps native Git ordering for supplementary Unicode paths",
     const path = "/src/lib/shell/state.svelte.ts";
     const { ShellState } = await import(/* @vite-ignore */ path);
     const shell: any = { snapshot: null, repos: [], statusGen: 0, selectedPath: null, scheduleStageRefresh() {} };
+    for (const method of ["viewing", "jobKey"]) shell[method] = ShellState.prototype[method].bind(shell);
     const file = (path: string) => ({ path, kind: "added" });
     const apply = ShellState.prototype.applySnapshot.bind(shell);
     apply({ path: "repo", staged: [file("\uE000.txt"), file("😀.txt")], unstaged: [] });

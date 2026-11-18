@@ -126,6 +126,7 @@ for (const kind of ["compare", "reflog", "branch", "locate", "commit", "patch"] 
             openGen: 0, patchGen: 0, reflogGen: 0, locateSeq: 0, reflogOn: false, reflogRows: [], actionError: null,
             drops: ["base", "old"], comparePair: null, commitFiles: [], selectedCommit: "old", historyFile: "old.txt",
             historyItems: [], commitsLive: [], settings: {}, patchCache: {}, patchVersion: 0, patchHeights: {}, openPatchSet: new Set(),
+            commitSelection: { select: (id: string) => id },
             allBranches: true, refs: { branches: kind === "branch" ? [{ name: "main" }] : [], remotes: [], tags: [] },
             commitQuery: "", historyFilter: "", logLimit: 500, tr: String, message: (error: unknown) => error instanceof Error ? error.message : String(error),
             withWork: (_label: string, body: () => Promise<void>) => body(),

@@ -56,8 +56,14 @@ test("shortcut editor detects collisions and persists overrides across reloads",
   await launch.locator(".shortcut-key").first().click();
   await page.keyboard.press("Control+f");
   await expect(launch.getByRole("alert")).toContainText("Search commits");
+  const saved = page.waitForResponse((response) => {
+    if (!response.url().endsWith("/__lab/invoke") || response.request().method() !== "POST") return false;
+    const body = response.request().postDataJSON();
+    return body.cmd === "save_settings" && body.args?.values?.shortcuts?.launch?.includes("Ctrl+J");
+  });
   await page.keyboard.press("Control+j");
   await expect(launch.locator(".shortcut-key")).toHaveText(["Ctrl+J", "Ctrl+P"]);
+  await saved;
   await page.reload();
   await expect(page.locator('[data-shortcut="launch"] .shortcut-key')).toHaveText(["Ctrl+J", "Ctrl+P"]);
   await expect(page.locator(".chrome-tools .tool-btn.stack").first()).toHaveAttribute("title", /Ctrl\+J/);
