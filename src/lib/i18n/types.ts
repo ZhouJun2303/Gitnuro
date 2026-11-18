@@ -101,6 +101,14 @@ export type Messages = {
     unstageAll: string;
     description: string;
     commitConvention: string;
+    commitSubjectRequired: string;
+    commitSubjectTooLong: string;
+    commitSubjectCount: string;
+    commitNeedRepository: string;
+    commitNeedStaged: string;
+    commitResolveConflicts: string;
+    commitWaitForStage: string;
+    commitWait: string;
     commitType: string;
     typeFeat: string;
     typeFix: string;

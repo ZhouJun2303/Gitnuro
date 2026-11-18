@@ -596,15 +596,16 @@ export function quick(shell: ShellState, event: MouseEvent, dialogName: Dialog, 
   }
 
 export async function submitCommit(shell: ShellState, pushAfter = false) {
-    if (shell.mode !== "live") return;
     if (shell.progress) {
       // A rebase, merge, cherry-pick, or revert owns the next commit.
       void shell.continueFlow();
       return;
     }
-    if (!shell.canCommit) return;
+    if (!shell.canCommit) {
+      shell.reportComposerBlock(shell.commitBlockReason);
+      return;
+    }
     const messageText = shell.fullSummary.trim();
-    if (!messageText) return;
     const description = isCommentary(shell.description) ? "" : shell.description;
     const path = shell.repoPath();
     const draft = { summary: shell.summary, description: shell.description, commitType: shell.commitType, amend: shell.amend, skipHooks: shell.skipHooks };

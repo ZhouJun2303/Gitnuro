@@ -175,6 +175,12 @@ async function fillSurface(shell: ShellState, id: string) {
     if (id === "stage-many") shell.settings = { ...shell.settings, fileLayout: "tree" };
     return;
   }
+  if (id === "commit-too-long" || id === "commit-no-staged") {
+    shell.section = "changes";
+    shell.settings = { ...shell.settings, messageHigh: 70 };
+    shell.applySubject(`feat: ${id === "commit-too-long" ? "x".repeat(80) : "ready to commit"}`);
+    return;
+  }
   if (id.startsWith("suggest-")) {
     shell.section = "changes";
     shell.prefTab = "ai";
@@ -981,6 +987,11 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       break;
     default:
       break;
+  }
+  if (sceneId === "continue-too-long" || sceneId === "reword-too-long") {
+    shell.settings = { ...shell.settings, messageHigh: 70 };
+    shell.draft = `feat: ${"x".repeat(80)}`;
+    if (dialog === "continue") shell.editContinue = true;
   }
   shell.dialog = dialog;
 }

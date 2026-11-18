@@ -1484,6 +1484,17 @@ export class ShellState {
 
   summaryFitsConvention = $derived(subjectFitsConvention(this.fullSummary));
 
+  commitMessageError = $derived(this.commitSubjectError(this.fullSummary) || (!this.skipHooks && !this.summaryFitsConvention ? this.tr("chrome.commitConvention") : ""));
+
+  commitSubjectError(value: string) {
+    const subject = value.trim();
+    if (!subject) return this.tr("chrome.commitSubjectRequired");
+    if (subject.length > this.messageHigh) return this.tr("chrome.commitSubjectTooLong", {
+      count: String(subject.length), limit: String(this.messageHigh), excess: String(subject.length - this.messageHigh),
+    });
+    return "";
+  }
+
 
   descriptionIsGuide = $derived(isCommentary(this.description));
 
@@ -1834,15 +1845,40 @@ export class ShellState {
   }
 
 
-  canCommit = $derived(
-    this.summary.trim().length > 0 &&
-      (this.skipHooks || this.summaryFitsConvention) &&
-      !this.summaryTooLong &&
-      !this.commitPending && this.pendingStages.length === 0 &&
-      !this.conflicted &&
-      !this.progress &&
-      (this.mode !== "live" || this.staged.length > 0 || this.amend),
-  );
+  commitBlockReason = $derived.by(() => {
+    if (this.writeBlocked) return this.tr(this.switching ? "chrome.commitWait" : "chrome.commitNeedRepository");
+    if (this.commitMessageError) return this.commitMessageError;
+    if (this.commitPending) return this.tr("chrome.commitWait");
+    if (this.pendingStages.length > 0) return this.tr("chrome.commitWaitForStage");
+    if (this.conflicted) return this.tr("chrome.commitResolveConflicts");
+    if (this.progress) return this.tr("chrome.finishFlowFirst");
+    if (this.staged.length === 0 && !this.amend) return this.tr("chrome.commitNeedStaged");
+    return "";
+  });
+
+  continueBlockReason = $derived.by(() => {
+    if (this.writeBlocked) return this.tr(this.switching ? "chrome.commitWait" : "chrome.commitNeedRepository");
+    if (this.flowPending || this.commitPending) return this.tr("chrome.commitWait");
+    if (this.pendingStages.length > 0) return this.tr("chrome.commitWaitForStage");
+    if (this.conflicted) return this.tr("chrome.commitResolveConflicts");
+    return "";
+  });
+
+  composerBlockReason = $derived(this.progress ? this.continueBlockReason : this.commitBlockReason);
+
+  composerValidationError = $state("");
+
+  reportComposerBlock(reason: string) {
+    this.composerValidationError = reason;
+    this.actionError = reason;
+  }
+
+  clearComposerValidation() {
+    if (this.composerValidationError && this.actionError === this.composerValidationError) this.actionError = null;
+    this.composerValidationError = "";
+  }
+
+  canCommit = $derived(!this.commitBlockReason);
 
 
   rowCommit = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 36 : 28, 2.1));
@@ -3882,6 +3918,10 @@ export class ShellState {
   /** Continue the paused operation instead of creating a separate commit. */
   continueFlow() {
     if (!this.progress) return;
+    if (this.continueBlockReason) {
+      this.reportComposerBlock(this.continueBlockReason);
+      return;
+    }
     if (this.progress === "rebase") return this.openContinue();
     return this.mutate({ action: "continue" });
   }
@@ -3889,6 +3929,10 @@ export class ShellState {
 
   /** Show which commit the paused rebase is replaying before asking for a message. */
   async openContinue() {
+    if (this.continueBlockReason) {
+      this.reportComposerBlock(this.continueBlockReason);
+      return;
+    }
     this.draft = "";
     this.editContinue = false;
     this.continueDetail = null;

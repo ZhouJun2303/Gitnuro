@@ -197,6 +197,10 @@
     min-height: 0;
   }
 
+.composer.has-feedback {
+    min-height: 160px;
+  }
+
 textarea:focus,
   .summary-input:focus {
     outline: none;
@@ -457,6 +461,21 @@ textarea:focus,
     color: var(--text-secondary);
     font-size: 12px;
     line-height: 16px;
+    max-height: 48px;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+  }
+
+.convention-hint.validation-error,
+.summary-count.over {
+    color: var(--deleted);
+  }
+
+.summary-count {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
 .composer-row .more { margin-left: auto; }

@@ -22,6 +22,8 @@
   const staleEntries = $derived(shell.staleNames.map((name) => ({ text: "", name })));
   const stalePicked = $derived(new Set(shell.stalePicked));
   const loading = $derived(shell.dialogLoading !== null && shell.dialogLoading === shell.dialog);
+  const subjectError = $derived(shell.dialog === "reword" || (shell.dialog === "continue" && shell.editContinue) ? shell.commitSubjectError(shell.draft) : "");
+  const messageBlockReason = $derived(subjectError || (shell.dialog === "continue" ? shell.continueBlockReason : ""));
   const patchTargets = $derived(shell.dialog === "patch" ? patchFiles(shell.draft) : []);
   let remoteAccountPick = $state("");
   let remoteDialogKey = "";
@@ -202,7 +204,7 @@
         onchange={() => { if (shell.dialog === "prefs") void shell.savePrefs(false); }}
         onsubmit={async (event) => {
           event.preventDefault();
-          if (loading) return;
+          if (loading || messageBlockReason) return;
           if (shell.dialog === "branch") {
             const name = shell.branchName(shell.draft);
             const path = shell.repoPath(), checkout = shell.checkoutNewBranch;
@@ -649,10 +651,11 @@
           </div>
         {:else if shell.dialog === "reword"}
           <h2>{shell.tr("dialog.rewordTitle", { name: shell.draftExtra.slice(0, 7) })}</h2>
-          <label>{shell.tr("dialog.message")}<input bind:value={shell.draft} /></label>
+          <label>{shell.tr("dialog.message")}<input bind:value={shell.draft} aria-invalid={!!subjectError} aria-describedby={subjectError ? "dialog-subject-error" : undefined} /></label>
+          {#if messageBlockReason}<p class="dialog-error" id="dialog-subject-error" role="status">{messageBlockReason}</p>{/if}
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="submit" disabled={loading}>{shell.tr("dialog.rewordAction")}</button>
+            <button class="commit" type="submit" title={messageBlockReason || undefined} disabled={loading || !!messageBlockReason}>{shell.tr("dialog.rewordAction")}</button>
           </div>
         {:else if shell.dialog === "rebase"}
           <h2>{shell.tr("dialog.rebase")}</h2>
@@ -769,10 +772,11 @@
           {/if}
           <p class="empty">{shell.tr("dialog.continueHint")}</p>
           <label class="check"><input type="checkbox" bind:checked={shell.editContinue} /> {shell.tr("dialog.continueEdit")}</label>
-          {#if shell.editContinue}<label>{shell.tr("dialog.continueMessage")}<input bind:value={shell.draft} /></label>{/if}
+          {#if shell.editContinue}<label>{shell.tr("dialog.continueMessage")}<input bind:value={shell.draft} aria-invalid={!!subjectError} aria-describedby={subjectError ? "dialog-subject-error" : undefined} /></label>{/if}
+          {#if messageBlockReason}<p class="dialog-error" id="dialog-subject-error" role="status">{messageBlockReason}</p>{/if}
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="submit" disabled={loading}>{shell.tr("dialog.continueAction")}</button>
+            <button class="commit" type="submit" title={messageBlockReason || undefined} disabled={loading || !!messageBlockReason}>{shell.tr("dialog.continueAction")}</button>
           </div>
         {:else if shell.dialog === "features"}
           <div class="dialog-lead">

@@ -75,6 +75,7 @@
   function pickType(type: CommitType) {
     shell.rememberCommitType(type);
     shell.fitSummary();
+    shell.clearComposerValidation();
     typeOpen = false;
     queueMicrotask(() => document.querySelector<HTMLInputElement>(".composer .summary-input")?.focus());
   }
@@ -86,6 +87,7 @@
     if (!next) return;
     shell.rememberCommitType(next.name);
     shell.fitSummary();
+    shell.clearComposerValidation();
     await tick();
     document.querySelector<HTMLElement>(".type-option.selected")?.scrollIntoView({ block: "nearest" });
   }
@@ -221,7 +223,7 @@
           onchange={shell.handleLayoutChange.bind(shell)}
         />
 
-        <form class="composer" style:height="{shell.composerHeight}px" onsubmit={(event) => { event.preventDefault(); if (shell.progress) void shell.continueFlow(); else void shell.submitCommit(false); }}>
+        <form class="composer" class:has-feedback={!!shell.composerBlockReason || !!shell.progress} style:height="{shell.composerHeight}px" onsubmit={(event) => { event.preventDefault(); if (shell.progress) void shell.continueFlow(); else void shell.submitCommit(false); }}>
           <div class="summary-line">
             <div class="type-picker" class:open={typeOpen}>
               <button
@@ -241,7 +243,7 @@
                 <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
             </div>
-            <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} aria-label={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength={shell.summaryRoom} aria-invalid={shell.summaryTooLong || (!shell.skipHooks && shell.summary.trim().length > 0 && !shell.summaryFitsConvention)} spellcheck={shell.settings.spellChecking === "enable"} oninput={() => shell.normalizeSummary()} />
+            <input class="summary-input {shell.progress ? '' : shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} aria-label={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength={shell.summaryRoom} aria-invalid={!shell.progress && shell.summary.trim().length > 0 && !!shell.commitMessageError} aria-describedby={shell.composerBlockReason || shell.progress ? "commit-feedback" : undefined} spellcheck={shell.settings.spellChecking === "enable"} oninput={() => { shell.clearComposerValidation(); shell.normalizeSummary(); }} />
             <button
               class="suggest-message"
               class:long={shell.settings.aiPromptStyle === "long"}
@@ -256,16 +258,17 @@
               <span>{shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}</span>
             </button>
           </div>
-          {#if shell.progress}
-            <p class="convention-hint">{shell.tr("chrome.flowHint")}</p>
-          {:else if shell.summary.trim() && !shell.skipHooks && !shell.summaryFitsConvention}
-            <p class="convention-hint">{shell.tr("chrome.commitConvention")}</p>
+          {#if shell.progress && shell.actionError}
+            <p id="commit-feedback" class="convention-hint validation-error" role="alert">{shell.actionError}</p>
+          {:else if shell.composerBlockReason || shell.progress}
+            <p id="commit-feedback" class="convention-hint" class:validation-error={!shell.progress && shell.summary.trim().length > 0 && !!shell.commitMessageError} role="status">{shell.composerBlockReason || shell.tr("chrome.flowHint")}</p>
           {/if}
           <textarea class="guided composer-desc flex-fill" class:guide-only={shell.descriptionIsGuide} placeholder={shell.tr("chrome.description")} aria-label={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
           <div class="composer-row">
-            <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { shell.clearComposerValidation(); if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
+            {#if !shell.progress}<span class="summary-count" class:over={shell.summaryTooLong} title={shell.tr("chrome.commitSubjectCount")}>{shell.fullSummary.length}/{shell.messageHigh}</span>{/if}
             <button class="text-button more" type="button" aria-label={shell.tr("chrome.more")} title={shell.tr("chrome.more")} onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>
-            <button class="commit" type="submit" disabled={shell.mode !== "live" || (shell.progress ? shell.writeBlocked || shell.conflicted : !shell.canCommit)}>{shell.commitPending ? shell.tr("chrome.working") : shell.progress ? shell.flowLabel() : shell.tr("chrome.commit")}</button>
+            <button class="commit" type="submit" title={shell.composerBlockReason || undefined} aria-describedby={shell.composerBlockReason ? "commit-feedback" : undefined} disabled={!!shell.composerBlockReason}>{shell.commitPending ? shell.tr("chrome.working") : shell.progress ? shell.flowLabel() : shell.tr("chrome.commit")}</button>
           </div>
         </form>
       </div>
