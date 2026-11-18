@@ -22,6 +22,8 @@ import {
 import type { Mode, Side, Row, Dialog, MergePiece, RepoFacts, MenuItem, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, RepoJob, PrefTab, LaunchItem, Place, SearchKey } from "./types";
 import type { ShellState } from "./state.svelte";
 import { launchExternal } from "./diff.svelte";
+import { previewCherrySelection } from "./cherrySelection";
+import { loadMoreHistory } from "./history.svelte";
 import { openFile, openInEditor } from "./dialogs.svelte";
 
 export function branchItems(shell: ShellState) {
@@ -30,7 +32,7 @@ export function branchItems(shell: ShellState) {
     return rows.slice(0, 30).map((branch) => ({
       label: branch.name,
       checked: branch.current,
-      disabled: branch.current || shell.busy,
+      disabled: branch.current || shell.writeBlocked,
       run: () => void shell.mutate({ action: "checkout", name: branch.name }),
     }));
   }
@@ -49,11 +51,11 @@ export function fileViewMenu(shell: ShellState) {
     const picked = shell.pickedIn(shell.shownUnstaged);
     const selection: MenuItem[] = picked.length > 1
       ? [
-          { label: shell.tr("menu.discardSelected", { count: String(picked.length) }), disabled: shell.mode !== "live" || shell.busy, shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(picked) },
-          { label: shell.tr("menu.deleteSelected", { count: String(picked.length) }), disabled: shell.mode !== "live" || shell.busy, run: () => shell.deleteChosen(picked) },
-          { label: shell.tr("menu.stashFiles", { count: String(picked.length) }), disabled: shell.mode !== "live" || shell.busy, run: () => shell.openStash(picked) },
-          { label: shell.tr("menu.addGitignoreSelected", { count: String(picked.length) }), disabled: shell.mode !== "live" || shell.busy, run: () => void shell.addIgnore(picked, false, false) },
-          { label: shell.tr("menu.addFakeignoreSelected", { count: String(picked.length) }), disabled: shell.mode !== "live" || shell.busy, run: () => void shell.addIgnore(picked, true, false) },
+          { label: shell.tr("menu.discardSelected", { count: String(picked.length) }), disabled: shell.mode !== "live" || shell.writeBlocked, shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(picked) },
+          { label: shell.tr("menu.deleteSelected", { count: String(picked.length) }), disabled: shell.mode !== "live" || shell.writeBlocked, run: () => shell.deleteChosen(picked) },
+          { label: shell.tr("menu.stashFiles", { count: String(picked.length) }), disabled: shell.mode !== "live" || shell.writeBlocked, run: () => shell.openStash(picked) },
+          { label: shell.tr("menu.addGitignoreSelected", { count: String(picked.length) }), disabled: shell.mode !== "live" || shell.writeBlocked, run: () => void shell.addIgnore(picked, false, false) },
+          { label: shell.tr("menu.addFakeignoreSelected", { count: String(picked.length) }), disabled: shell.mode !== "live" || shell.writeBlocked, run: () => void shell.addIgnore(picked, true, false) },
           { sep: true, label: "" },
         ]
       : [];
@@ -87,7 +89,7 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { label: shell.tr("menu.copyPath"), run: () => shell.copyText(shell.fullPath(file.path)) },
       { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(file.path) },
       { sep: true, label: "" },
-      { label: many ? `${shell.tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected")} (${count})` : shell.tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked, shortcut: shortcutLabel("stageToggle"), run: () => shell.stageChosen(side, targets) },
+      { label: many ? `${shell.tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected")} (${count})` : shell.tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked || shell.stageDisabled, shortcut: shortcutLabel("stageToggle"), run: () => shell.stageChosen(side, targets) },
       { label: many ? shell.tr("menu.discardSelected", { count }) : shell.tr("menu.discard"), disabled: locked || (side === "staged" && many), shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(targets) },
       { label: many ? shell.tr("menu.deleteSelected", { count }) : shell.tr("menu.deleteFile"), disabled: locked, run: () => shell.deleteChosen(targets) },
       { sep: true, label: "" },
@@ -113,7 +115,27 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
 
 export function commitMenu(shell: ShellState, commit: { id: string; summary: string }) {
     const locked = shell.mode !== "live";
+    if (!shell.commitSelection.has(commit.id, shell.selectedCommit)) {
+      if (shell.mode === "sample") shell.selectSample(commit.id);
+      else void shell.selectCommit(commit.id);
+    }
+    const rows = shell.mode === "sample" ? shell.sampleShown : shell.historyItems;
+    const selected = rows.filter((row) => shell.commitSelection.has(row.id, shell.selectedCommit));
+    const count = String(selected.length || 1);
+    const selection: MenuItem[] = [
+      { label: shell.tr("menu.selectedCommits", { count }), disabled: true },
+      { label: "", sep: true },
+    ];
+    if (selected.length > 1) {
+      return [
+        ...selection,
+        { label: shell.tr("menu.cherryPickSelected", { count }), disabled: locked || !!shell.progress, run: () => previewCherrySelection(shell, selected, false) },
+        { label: shell.tr("menu.cherryPickSelectedRecord", { count }), disabled: locked || !!shell.progress, run: () => previewCherrySelection(shell, selected, true) },
+        { label: shell.tr("menu.copySha"), run: () => shell.copyText(selected.map((row) => row.id).join("\n")) },
+      ];
+    }
     return [
+      ...selection,
       { label: shell.tr("menu.checkout"), disabled: locked || !!shell.progress, run: () => shell.requestCheckout(commit.id) },
       { label: shell.tr("menu.cherryPick"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, false, commit.summary) },
       { label: shell.tr("menu.cherryPickRecord"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, true, commit.summary) },
@@ -145,9 +167,9 @@ export function viewItems(shell: ShellState) {
       { label: shell.tr("chrome.allCommits"), run: () => (shell.section = "history") },
       { label: shell.tr("chrome.fileTree"), disabled: !shell.selectedCommit, run: () => { shell.section = "history"; void shell.openHistoryTab("tree"); } },
       { label: shell.tr("chrome.reflog"), run: () => { shell.section = "history"; void shell.showReflog(); } },
-      { label: shell.tr("chrome.loadMore"), disabled: shell.mode !== "live", run: () => { shell.section = "history"; shell.logLimit += 200; void shell.loadContext(); } },
-      { label: shell.tr("menu.drop"), disabled: shell.mode !== "live" || shell.drops.length === 0 || shell.busy || !!shell.progress, run: () => shell.dropCommits() },
-      { label: shell.tr("dialog.squash"), disabled: shell.mode !== "live" || !shell.selectedCommit || shell.busy || !!shell.progress, run: () => { shell.draft = ""; shell.dialog = "squash"; } },
+      { label: shell.tr("chrome.loadMore"), disabled: shell.mode !== "live", run: () => { shell.section = "history"; void loadMoreHistory(shell); } },
+      { label: shell.tr("menu.drop"), disabled: shell.mode !== "live" || shell.drops.length === 0 || shell.writeBlocked || !!shell.progress, run: () => shell.dropCommits() },
+      { label: shell.tr("dialog.squash"), disabled: shell.mode !== "live" || !shell.selectedCommit || shell.writeBlocked || !!shell.progress, run: () => { shell.draft = ""; shell.dialog = "squash"; } },
       { label: shell.tr("chrome.compare"), disabled: shell.mode !== "live" || shell.drops.length !== 2, run: () => shell.compareDrops() },
       { label: shell.tr("chrome.refresh"), shortcut: shortcutLabel("refresh"), run: () => void shell.refresh() },
       { label: shell.tr("chrome.preferences"), shortcut: shortcutLabel("settings"), run: () => (shell.dialog = "prefs") },
@@ -155,7 +177,7 @@ export function viewItems(shell: ShellState) {
   }
 
 export function stashItems(shell: ShellState) {
-    const locked = shell.mode !== "live" || shell.busy;
+    const locked = shell.mode !== "live" || shell.writeBlocked;
     return [
       { label: shell.tr("chrome.stash"), disabled: locked, run: () => shell.openStash([]) },
       { label: shell.tr("chrome.pop"), disabled: locked || (shell.refs?.stashes ?? []).length === 0, run: () => shell.confirmPopStash() },
@@ -172,8 +194,7 @@ export function appearanceItems(shell: ShellState) {
     const systemTheme = resolveAppearance("system", window.matchMedia("(prefers-color-scheme: dark)").matches);
     const systemLabel = shell.tr(systemTheme === "dark" ? "dialog.dark" : "dialog.light");
     const pick = (value: string) => () => {
-      shell.settings.theme = value;
-      void shell.savePrefs(false);
+      shell.changeAppearance(value);
     };
     return [
       { label: `${mark("system")}${shell.tr("dialog.followSystem")}`, shortcut: systemLabel, run: pick("system") },
@@ -193,8 +214,8 @@ export function repositoryItems(shell: ShellState) {
       { label: shell.tr("chrome.fetch"), disabled: shell.syncDisabled("fetch"), run: () => shell.confirmSync("fetch") },
       { label: shell.tr("chrome.pull"), disabled: shell.syncDisabled("pull"), run: () => shell.confirmSync("pull") },
       { label: shell.tr("chrome.push"), disabled: shell.syncDisabled("push"), run: () => shell.confirmSync("push") },
-      { label: shell.tr("chrome.stash"), disabled: locked || shell.busy, run: () => shell.openStash([]) },
-      { label: shell.tr("chrome.bisect"), disabled: locked || shell.busy, run: () => void shell.mutate({ action: "bisect", verb: shell.facts?.bisectActive ? "reset" : "start", rev: "" }).then(() => shell.loadFacts(true)) },
+      { label: shell.tr("chrome.stash"), disabled: locked || shell.writeBlocked, run: () => shell.openStash([]) },
+      { label: shell.tr("chrome.bisect"), disabled: locked || shell.writeBlocked, run: () => void shell.mutate({ action: "bisect", verb: shell.facts?.bisectActive ? "reset" : "start", rev: "" }).then(() => shell.loadFacts(true)) },
       { label: shell.tr("dialog.gitignore"), disabled: locked, run: () => { shell.draft = "node_modules/\ntarget/\n"; shell.dialog = "gitignore"; } },
       { label: shell.tr("chrome.stats"), disabled: locked, run: () => { void shell.loadFacts(true, true); shell.dialog = "stats"; } },
       { label: shell.tr("chrome.lfsFiles"), disabled: locked, run: () => { void shell.loadFacts(true, true); shell.dialog = "lfs"; } },
@@ -216,7 +237,7 @@ export function repositoryItems(shell: ShellState) {
         const base = shell.snapshot?.branch ?? "HEAD~1";
         readDialog(shell, "output", (path) => invoke<string>("review_branch", { path, base }), (text) => { shell.commandOutput = text; });
       } },
-      { label: shell.tr("menu.bareForce"), disabled: shell.syncDisabled("push"), run: () => shell.ask(shell.tr("menu.bareForce"), shell.tr("dialog.forcePushBody"), () => void shell.mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: false, force: true }), [], { danger: true }) },
+      { label: shell.tr("menu.bareForce"), disabled: shell.syncDisabled("push"), run: () => shell.ask(shell.tr("menu.bareForce"), shell.tr("dialog.forcePushBody"), shell.bindMutation({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: false, force: true }), [], { danger: true }) },
       { sep: true, label: "" },
       { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = ""; shell.dialog = "branch"; } },
       { label: shell.tr("menu.createTag"), run: () => { shell.draft = ""; shell.draftExtra = "HEAD"; shell.draftUser = ""; shell.dialog = "tag"; } },
@@ -270,7 +291,7 @@ export function commitExtras(shell: ShellState) {
     return [
       { label: `${shell.signOff ? "✓ " : ""}${shell.tr("chrome.signOff")}`, run: () => { shell.signOff = !shell.signOff; if (shell.mode === "live") void shell.mutate({ action: "setSignOff", enabled: shell.signOff, format: shell.refs?.signOffFormat || shell.settings.signOffFormat }); } },
       { label: `${shell.skipHooks ? "✓ " : ""}${shell.tr("chrome.skipHooks")}`, run: () => (shell.skipHooks = !shell.skipHooks) },
-      { label: shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") }), disabled: shell.busy || shell.staged.length === 0, run: () => void shell.suggestMessage() },
+      { label: shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") }), disabled: shell.writeBlocked || shell.staged.length === 0, run: () => void shell.suggestMessage() },
       { label: shell.tr("chrome.commitAndPush"), disabled: !shell.canCommit, run: () => void shell.submitCommit(true) },
     ];
   }
@@ -285,9 +306,14 @@ export function dirMenu(shell: ShellState, dir: string, side: Side) {
     const files = fullyPicked ? shell.pickedIn(source) : shell.filesInDir(dir, side);
     const count = String(files.length);
     return [
+      { label: shell.tr("menu.openFolder"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(dir), true) },
+      { label: shell.tr("menu.reveal"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(dir)) },
+      { label: shell.tr("menu.copyAbsolutePath"), run: () => shell.copyText(shell.fullPath(dir)) },
+      { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(dir) },
+      { sep: true, label: "" },
       {
         label: shell.tr(unstage ? "menu.unstageFolder" : "menu.stageFolder"),
-        disabled: locked,
+        disabled: locked || shell.stageDisabled,
         run: () => shell.stageFolder(dir, unstage),
       },
       { label: files.length > 1 ? shell.tr("menu.discardSelected", { count }) : shell.tr("menu.discard"), disabled: locked || unstage || files.length === 0, shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(files) },
@@ -316,15 +342,18 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
     const discardable = shell.discardableEntries(indexes);
     const hunks = new Set(indexes.map(shell.hunkOf.bind(shell)).filter((hunk): hunk is number => hunk != null));
     const oneHunk = hunks.size === 1 ? [...hunks][0] : null;
-    const locked = shell.busy || shell.mode !== "live";
     const file = shell.selectedPath;
+    const unstage = shell.selectedSide === "staged";
+    const locked = shell.writeBlocked || !!file && shell.pathPending(file);
+    const stage = shell.bindLineOps("stageLine", stageable);
+    const discard = shell.bindLineOps("discardLine", discardable);
     const items: MenuItem[] = [];
     if (stageable.length > 0) {
       const many = stageable.length > 1;
       items.push({
         label: shell.selectedSide === "staged" ? shell.tr(many ? "menu.unstageLines" : "menu.unstageLine") : shell.tr(many ? "menu.stageLines" : "menu.stageLine"),
         disabled: locked,
-        run: () => void shell.applyLineOps("stageLine", stageable),
+        run: () => void stage(),
       });
     }
     if (discardable.length > 0) {
@@ -334,21 +363,23 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
         disabled: locked,
         run: () => {
           if (!many) {
-            void shell.applyLineOps("discardLine", discardable);
+            void discard();
             return;
           }
-          shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(discardable.length) }), () => void shell.applyLineOps("discardLine", discardable), [], { danger: true });
+          shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(discardable.length) }), () => void discard(), [], { danger: true });
         },
       });
     }
     if (oneHunk != null) {
       const hunkIndex = oneHunk;
+      const stageHunk = shell.bindMutation({ action: "stageHunk", file, index: hunkIndex, unstage, ignoreSpace: shell.settings.ignoreSpace });
+      const discardHunk = shell.bindMutation({ action: "discardHunk", file, index: hunkIndex, ignoreSpace: shell.settings.ignoreSpace });
       items.push({
         label: shell.selectedSide === "staged" ? shell.tr("menu.unstageHunk") : shell.tr("menu.stageHunk"),
         disabled: locked,
         run: () => {
           shell.diffSelected = [];
-          void shell.mutate({ action: "stageHunk", file, index: hunkIndex, unstage: shell.selectedSide === "staged", ignoreSpace: shell.settings.ignoreSpace });
+          void stageHunk();
         },
       });
       if (shell.selectedSide === "unstaged") {
@@ -357,7 +388,7 @@ export function diffLineMenu(shell: ShellState, clicked: number) {
           disabled: locked,
           run: () => {
             shell.diffSelected = [];
-            void shell.mutate({ action: "discardHunk", file, index: hunkIndex, ignoreSpace: shell.settings.ignoreSpace });
+            void discardHunk();
           },
         });
       }
@@ -482,8 +513,8 @@ export function revisionFileMenu(shell: ShellState, file: string): MenuItem[] {
         label: shell.tr("menu.resetFileTo"),
         disabled: locked,
         children: [
-          { label: shell.tr("menu.stateAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.stateAtCommit"), shell.tr("dialog.restoreFileBody"), () => void shell.mutate({ action: "restoreFile", rev, file }), [], { subject: file, danger: true }) },
-          { label: shell.tr("menu.stateBeforeCommit"), disabled: locked || !parent || added, run: () => shell.ask(shell.tr("menu.stateBeforeCommit"), shell.tr("dialog.restoreFileBody"), () => void shell.mutate({ action: "restoreFile", rev: parent, file }), [], { subject: file, danger: true }) },
+          { label: shell.tr("menu.stateAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.stateAtCommit"), shell.tr("dialog.restoreFileBody"), shell.bindMutation({ action: "restoreFile", rev, file }), [], { subject: file, danger: true }) },
+          { label: shell.tr("menu.stateBeforeCommit"), disabled: locked || !parent || added, run: () => shell.ask(shell.tr("menu.stateBeforeCommit"), shell.tr("dialog.restoreFileBody"), shell.bindMutation({ action: "restoreFile", rev: parent, file }), [], { subject: file, danger: true }) },
         ],
       },
       { label: shell.tr("menu.blameTimeline"), disabled: locked, run: () => { shell.section = "changes"; shell.selectedPath = file; void shell.showBlame(file); } },
@@ -506,7 +537,7 @@ export function historyFileMenu(shell: ShellState, commit: CommitRow): MenuItem[
       { label: shell.tr("menu.open"), disabled: locked, run: () => void openFile(shell, file) },
       { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       { label: shell.tr("menu.externalDiff"), disabled: locked || !parent, children: revisionExternalItems(shell, file, parent, commit.id) },
-      { label: shell.tr("menu.resetAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.resetAtCommit"), shell.tr("dialog.restoreFileBody"), () => void shell.mutate({ action: "restoreFile", rev: commit.id, file }), [], { subject: file, danger: true }) },
+      { label: shell.tr("menu.resetAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.resetAtCommit"), shell.tr("dialog.restoreFileBody"), shell.bindMutation({ action: "restoreFile", rev: commit.id, file }), [], { subject: file, danger: true }) },
       { label: shell.tr("menu.saveAs"), disabled: locked, run: () => void invoke("save_revision", { path: shell.repoPath(), rev: commit.id, file }).catch((error) => (shell.actionError = shell.message(error))) },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },
       { label: shell.tr("menu.copyCommitInfo"), run: () => shell.copyText(info) },
@@ -518,7 +549,7 @@ export function workspaceItems(shell: ShellState) {
       ...shell.settings.workspaces.map((item) => ({
         label: shell.workspaceName(item),
         checked: item.id === shell.settings.currentWorkspace,
-        disabled: shell.busy,
+        disabled: shell.writeBlocked,
         run: () => void shell.switchWorkspace(item.id),
       })),
       ...(shell.settings.workspaces.length > 0 ? [{ label: "", sep: true }] : []),

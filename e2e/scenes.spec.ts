@@ -10,8 +10,16 @@ for (const variant of [
 ]) {
   test.describe(variant.name, () => {
     test.use({ viewport: { width: variant.width, height: variant.height } });
-    for (const scene of scenes) test(`scene ${scene.id}`, async ({ page }, info) => {
+    for (const scene of scenes) test(`scene ${scene.id}`, async ({ page, request }, info) => {
       test.setTimeout(100_000);
+      if (scene.id === "unstage-initial") {
+        // Functional staging tests intentionally empty this disposable index.
+        // Reusing .lab must still capture the staged-before-first-commit scene.
+        const restored = await request.post("http://127.0.0.1:1429/invoke", {
+          data: { cmd: "lab_restore", args: { name: "unstage-initial" } },
+        });
+        expect(await restored.json()).toMatchObject({ ok: true });
+      }
       const errors: string[] = [];
       const reads: { command: string; startMs: number; ms: number }[] = [];
       page.on("pageerror", (error) => errors.push(error.message));

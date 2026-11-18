@@ -34,6 +34,22 @@ pub fn stage_paths(repo: &Path, paths: &[String]) -> Result<(), Error> {
     run_paths(repo, &["add"], paths).map(|_| ())
 }
 
+/// Replace a complete file selection with its directory only after checking
+/// Git's tracked and non-ignored paths. Hidden scratch files and unselected
+/// children keep the original, literal selection.
+pub fn compact_directory_paths(repo: &Path, directory: &str, files: Vec<String>) -> Result<Vec<String>, Error> {
+    check_path(directory)?;
+    for file in &files { check_path(file)?; }
+    let output = run(repo, &["--literal-pathspecs", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", directory])?;
+    let listed: std::collections::HashSet<String> = porcelain_z_paths(&output.stdout)?.into_iter().collect();
+    let selected: std::collections::HashSet<&str> = files.iter().map(String::as_str).collect();
+    if !selected.is_empty() && listed.len() == selected.len() && listed.iter().all(|path| selected.contains(path.as_str())) {
+        Ok(vec![directory.to_string()])
+    } else {
+        Ok(files)
+    }
+}
+
 /// Stage every change in the work tree. Ignored files stay ignored, and unresolved conflicts are left alone.
 pub fn stage_all(repo: &Path) -> Result<(), Error> {
     let unmerged = unmerged_paths(repo)?;
@@ -126,12 +142,14 @@ pub fn unstage_paths(repo: &Path, paths: &[String]) -> Result<(), Error> {
     }
     // Path-limited reset only changes the index. Its implicit HEAD also handles
     // an unborn branch without a failing restore/rm fallback or touching files.
-    run_paths(repo, &["reset", "--quiet"], paths).map(|_| ())
+    // The caller reads status after the write. Reset's default refresh would
+    // stat/hash unrelated work-tree files before that second scan.
+    run_paths(repo, &["reset", "--quiet", "--no-refresh"], paths).map(|_| ())
 }
 
 /// Unstage everything that is currently in the index relative to `HEAD`.
 pub fn unstage_all(repo: &Path) -> Result<(), Error> {
-    run(repo, &["reset", "--quiet", "--", "."]).map(|_| ())
+    run(repo, &["reset", "--quiet", "--no-refresh", "--", "."]).map(|_| ())
 }
 
 /// Create a commit from the index. An empty summary is rejected before `git` runs.

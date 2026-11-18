@@ -9,6 +9,7 @@
   import BlobPane from "./shell/BlobPane.svelte";
   import DialogHost from "./shell/DialogHost.svelte";
   import MergePanel from "./shell/MergePanel.svelte";
+  import TaskQueue from "./shell/TaskQueue.svelte";
   import "./shell/common.css";
   import { ShellState } from "./shell/state.svelte";
   import { invoke } from "./perf";
@@ -1011,6 +1012,7 @@
           <button type="button" class:on={shell.commandFilter === "background"} onclick={() => shell.showCommandFilter("background")}>{shell.tr("chrome.commandBackground")}</button>
           <button type="button" class:on={shell.commandFilter === "errors"} class:alert={shell.recentErrors.length > 0} onclick={() => shell.showCommandFilter("errors")}>{shell.tr("chrome.commandErrors")}{#if shell.recentErrors.length > 0}<em>{shell.recentErrors.length}</em>{/if}</button>
           <button type="button" class:on={shell.commandFilter === "notices"} onclick={() => shell.showCommandFilter("notices")}>{shell.tr("chrome.commandNotices")}{#if shell.statusNotices.length > 0}<em>{shell.statusNotices.length}</em>{/if}</button>
+          <TaskQueue />
         </div>
         <div class="command-items">
           {#each shell.visibleCommands() as item (item.id)}
@@ -1162,11 +1164,11 @@
         {#if shell.forgeOpen === "notes"}
           {#if shell.notices.length === 0}<p class="empty">{signedIn || shell.mode !== "live" ? shell.tr("dialog.noNotifications") : shell.tr("dialog.noToken")}</p>{/if}
           {#each shell.notices as notice (notice.id)}
-            <div class="composer-row"><span>{notice.title}</span><span class="grow"></span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => { if (shell.mode === "live") void invoke("mark_notification", { id: notice.id }).then(() => (shell.notices = shell.notices.filter((item) => item.id !== notice.id))); else shell.notices = shell.notices.filter((item) => item.id !== notice.id); }}>{shell.tr("dialog.markRead")}</button></div>
+            <div class="composer-row"><span>{notice.title}</span><span class="grow"></span><button class="text-button" type="button" onclick={() => openUrl(notice.url)}>{shell.tr("dialog.openBrowser")}</button><button class="text-button" type="button" onclick={() => void shell.markNotifications([notice.id])}>{shell.tr("dialog.markRead")}</button></div>
           {/each}
           {#if shell.notices.length > 0}
             <div class="composer-row">
-              <button class="text-button" type="button" onclick={() => { const ids = shell.notices.map((item) => item.id); if (shell.mode === "live") void Promise.all(ids.map((id) => invoke("mark_notification", { id }))).then(() => (shell.notices = [])).catch((error) => (shell.actionError = shell.message(error))); else shell.notices = []; }}>{shell.tr("dialog.markAllRead")}</button>
+              <button class="text-button" type="button" onclick={() => void shell.markNotifications(shell.notices.map((item) => item.id))}>{shell.tr("dialog.markAllRead")}</button>
             </div>
           {/if}
         {:else}

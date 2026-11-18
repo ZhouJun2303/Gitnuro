@@ -119,13 +119,15 @@ for (const kind of ["blame", "content"] as const) {
           const original = window.fetch;
           const response = (value: unknown, error = false) => new Response(JSON.stringify(error ? { ok: false, error: "old error" } : { ok: true, value }));
           let release!: () => void;
-          const pending = new Promise<Response>((resolve) => { release = () => resolve(response([{ id: "old" }], fail)); });
+          const source = (id: string) => ({ text: `${id}\n`, version: id, truncated: false });
+          const pending = new Promise<Response>((resolve) => { release = () => resolve(response(kind === "blame" ? source("old") : [{ id: "old" }], fail)); });
           let first = true;
           window.fetch = (input, init) => {
             const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
             if (!body?.args?.path?.startsWith("D:/async-review/")) return original(input, init);
+            if (body.cmd === "blame_file") return Promise.resolve(response([{ id: body.args.version, line: 1 }]));
             if (first) { first = false; return pending; }
-            return Promise.resolve(response([{ id: "new" }]));
+            return Promise.resolve(response(kind === "blame" ? source("new") : [{ id: "new" }]));
           };
           const shell: any = {
             path: "D:/async-review/old", repoPath() { return this.path; },
@@ -143,19 +145,59 @@ for (const kind of ["blame", "content"] as const) {
             if (change === "repository") { shell.path = "D:/async-review/new"; shell.openGen++; }
             if (change === "reopened") shell.openGen++;
             if (change === "selection") { shell.selectedPath = "new.txt"; shell.commitQuery = "S:new"; }
-            if (change === "newer") await read();
+            if (change === "newer") {
+              const schedulerPath = "/src/lib/read-scheduler.ts";
+              const { invalidateReads } = await import(/* @vite-ignore */ schedulerPath);
+              invalidateReads(shell.path);
+              await read(); await new Promise((resolve) => setTimeout(resolve, 0));
+            }
             release();
             await task;
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            if (kind === "blame" && shell.blameLines?.length) shell.blameLines = shell.blameLines.map((line: any) => ({ id: line.id }));
             return { value: shell[field], error: shell.actionError };
           } finally { window.fetch = original; }
         }, { kind, change, fail });
         expect(result).toEqual(change !== "current" ? { value: [{ id: "new" }], error: null }
-          : fail ? { value: kind === "blame" ? null : [], error: "old error" }
+          : fail ? { value: [], error: "old error" }
           : { value: [{ id: "old" }], error: null });
       });
     }
   }
 }
+
+test("Blame shows source before attribution and only reads visible ranges", async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const modulePath = "/src/lib/shell/diff.svelte.ts";
+    const { showBlame, loadBlameRange } = await import(/* @vite-ignore */ modulePath);
+    const original = window.fetch;
+    const response = (value: unknown) => new Response(JSON.stringify({ ok: true, value }));
+    let sourceReady!: () => void, firstReady!: () => void;
+    const source = new Promise<Response>((resolve) => { sourceReady = () => resolve(response({ text: Array.from({ length: 600 }, (_, i) => `line ${i + 1}`).join("\n"), version: "v", truncated: false })); });
+    const first = new Promise<Response>((resolve) => { firstReady = () => resolve(response([{ id: "v", line: 1 }])); });
+    const ranges: number[][] = [];
+    window.fetch = (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      if (body?.args?.path !== "D:/async-range") return original(input, init);
+      if (body.cmd === "blame_source") return source;
+      ranges.push([body.args.start, body.args.end]);
+      return body.args.start === 1 ? first : Promise.resolve(response([{ id: "v", line: body.args.start, text: `line ${body.args.start}` }]));
+    };
+    const shell: any = { repoPath: () => "D:/async-range", openGen: 0, blameGen: 0, selectedPath: "file", selectedSide: "unstaged", section: "changes", patchGen: 0, selectedCommit: null, historyFile: null,
+      blameLines: null, blameTop: 0, diffRowHeight: 20, tr: String, message: String, withWork: (_: string, body: () => Promise<void>) => body() };
+    try {
+      const reading = showBlame(shell, "file");
+      const opened = Array.isArray(shell.blameLines) && shell.blameLines.length === 0;
+      sourceReady(); await reading;
+      const sourceCount = shell.blameLines.length;
+      shell.blameTop = 5000; await loadBlameRange(shell);
+      const visible = shell.blameLines[200].id;
+      shell.selectedPath = "another"; firstReady(); await new Promise((done) => setTimeout(done, 0));
+      return { opened, sourceCount, visible, ranges, staleIgnored: shell.blameLines[0].id === "" };
+    } finally { sourceReady(); firstReady(); window.fetch = original; }
+  });
+  expect(result).toEqual({ opened: true, sourceCount: 600, visible: "v", ranges: [[1, 200], [201, 400]], staleIgnored: true });
+});
 
 for (const stage of ["file_history", "commit_tree"] as const) {
   for (const change of ["repository", "selection", "newer", "current"] as const) {

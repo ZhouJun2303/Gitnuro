@@ -2,9 +2,11 @@ import type { ShellState } from "./state.svelte";
 import { branchGroup, orderRefNames } from "../view";
 
 export type SideAdd = "branch" | "remote" | "submodule" | "worktree";
+type PagedSection = "tags" | "stashes";
 
 export type SideRow =
   | { key: string; kind: "section"; id: string; label: string; count: number | null; filter: boolean; add: SideAdd | null; showAll: boolean; empty: boolean }
+  | { key: string; kind: "more"; section: PagedSection }
   | { key: string; kind: "folder"; folderKey: string; label: string; deep: boolean }
   | { key: string; kind: "local"; name: string; current: boolean; ahead: number; behind: number; upstream: string; group: string; deep: boolean }
   | { key: string; kind: "remote"; name: string; url: string; empty: boolean }
@@ -16,8 +18,8 @@ export type SideRow =
   | { key: string; kind: "worktree"; path: string; branch: string | null };
 
 /** Flat sidebar rows. The view draws only the ones inside the scroll window. */
-export function liveSideRows(shell: ShellState): SideRow[] {
-  const refs = shell.refs;
+export function liveSideRows(shell: ShellState, limits: Record<PagedSection, number>): SideRow[] {
+  const refs = shell.refView;
   if (!refs) return [];
   const rows: SideRow[] = [];
   const query = shell.sideQuery;
@@ -129,14 +131,23 @@ export function liveSideRows(shell: ShellState): SideRow[] {
   });
   if (shell.sideOpen("tags")) {
     let previous = "";
+    let folderOpen = true;
+    let shown = 0;
     for (const tag of shell.visibleTags) {
       const group = branchGroup(tag.name);
-      const folderKey = group ? `tag:${group}` : "";
-      if (group && group !== previous) {
-        rows.push({ key: `tag-folder:${group}`, kind: "folder", folderKey, label: group, deep: false });
+      const newFolder = group !== previous;
+      if (newFolder) {
+        folderOpen = shell.folderOpen(group ? `tag:${group}` : "");
+        previous = group;
       }
-      previous = group;
-      if (!shell.folderOpen(folderKey)) continue;
+      if (folderOpen && shown === limits.tags) {
+        rows.push({ key: "more:tags", kind: "more", section: "tags" });
+        break;
+      }
+      if (group && newFolder) {
+        rows.push({ key: `tag-folder:${group}`, kind: "folder", folderKey: `tag:${group}`, label: group, deep: false });
+      }
+      if (!folderOpen) continue;
       rows.push({
         key: `tag:${tag.name}`,
         kind: "tag",
@@ -144,6 +155,7 @@ export function liveSideRows(shell: ShellState): SideRow[] {
         label: group ? tag.name.slice(group.length + 1) : tag.name,
         deep: group.length > 0,
       });
+      shown++;
     }
   }
 
@@ -159,9 +171,15 @@ export function liveSideRows(shell: ShellState): SideRow[] {
     empty: refs.stashes.length === 0,
   });
   if (shell.sideOpen("stashes")) {
+    let shown = 0;
     for (const stash of refs.stashes) {
       if (!shell.matchesQuery(stash.summary, query) && !shell.matchesQuery(stash.name, query)) continue;
+      if (shown === limits.stashes) {
+        rows.push({ key: "more:stashes", kind: "more", section: "stashes" });
+        break;
+      }
       rows.push({ key: `stash:${stash.name}`, kind: "stash", name: stash.name, summary: stash.summary, id: stash.id });
+      shown++;
     }
   }
 

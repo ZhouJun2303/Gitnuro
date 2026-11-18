@@ -105,6 +105,25 @@ fn unstage_large_selection_is_literal_and_keeps_head_and_worktree() {
 }
 
 #[test]
+fn directory_stage_compacts_only_complete_selections_and_keeps_hidden_scratch_out() {
+    let repo = repo();
+    save(&repo, "keep.txt", "base\n");
+    fs::create_dir(repo.path.join("new [files]")).unwrap();
+    let files: Vec<String> = (0..64).map(|i| format!("new [files]/file-{i}.txt")).collect();
+    for file in &files { fs::write(repo.path.join(file), "new\n").unwrap(); }
+    let compact = || awegit_git::compact_directory_paths(&repo.path, "new [files]", files.clone()).unwrap();
+    assert_eq!(compact(), vec!["new [files]"]);
+    assert_eq!(awegit_git::compact_directory_paths(&repo.path, "new [files]", files[..63].to_vec()).unwrap(), files[..63]);
+    fs::create_dir(repo.path.join("new [files]/.tmp_artifact2")).unwrap();
+    fs::write(repo.path.join("new [files]/.tmp_artifact2/hidden.txt"), "scratch\n").unwrap();
+    assert_eq!(compact(), files);
+    awegit_git::stage_paths(&repo.path, &compact()).unwrap();
+    assert_eq!(repo.output(&["diff", "--cached", "--name-only"]).lines().count(), 64);
+    assert!(!repo.output(&["ls-files"]).contains("hidden.txt"));
+    assert!(awegit_git::compact_directory_paths(&repo.path, "new [files]", Vec::new()).unwrap().is_empty());
+}
+
+#[test]
 fn stage_all_during_conflict_keeps_staged_renames_and_deletions() {
     let repo = repo();
     save(&repo, "conflict.txt", "base\n");
@@ -179,6 +198,7 @@ fn push_ref_disambiguates_branch_and_tag_names_on_both_sides() {
         Mutation::PushRef {
             remote: "origin".into(),
             branch: "main".into(),
+            source_commit: None,
             remote_branch: "published".into(),
             set_upstream: true,
             tags: false,

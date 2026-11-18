@@ -75,6 +75,7 @@
   function pickType(type: CommitType) {
     shell.rememberCommitType(type);
     shell.fitSummary();
+    shell.clearComposerValidation();
     typeOpen = false;
     queueMicrotask(() => document.querySelector<HTMLInputElement>(".composer .summary-input")?.focus());
   }
@@ -86,6 +87,7 @@
     if (!next) return;
     shell.rememberCommitType(next.name);
     shell.fitSummary();
+    shell.clearComposerValidation();
     await tick();
     document.querySelector<HTMLElement>(".type-option.selected")?.scrollIntoView({ block: "nearest" });
   }
@@ -141,7 +143,7 @@
   }
 
   $effect(() => {
-    if (shell.busy) typeOpen = false;
+    if (shell.writeBlocked) typeOpen = false;
   });
 
   $effect(() => {
@@ -221,7 +223,7 @@
           onchange={shell.handleLayoutChange.bind(shell)}
         />
 
-        <form class="composer" style:height="{shell.composerHeight}px" onsubmit={(event) => { event.preventDefault(); if (shell.progress) void shell.continueFlow(); else void shell.submitCommit(false); }}>
+        <form class="composer" class:has-feedback={!!shell.composerBlockReason || !!shell.progress} style:height="{shell.composerHeight}px" onsubmit={(event) => { event.preventDefault(); if (shell.progress) void shell.continueFlow(); else void shell.submitCommit(false); }}>
           <div class="summary-line">
             <div class="type-picker" class:open={typeOpen}>
               <button
@@ -232,7 +234,7 @@
                 aria-haspopup="listbox"
                 aria-expanded={typeOpen}
                 title={shell.commitTypeLabel(shell.commitType) ? `${shell.commitType}: ${shell.commitTypeLabel(shell.commitType)}` : shell.commitType}
-                disabled={shell.busy}
+                disabled={shell.writeBlocked}
                 onclick={() => (typeOpen = !typeOpen)}
                 onkeydown={onTypeKey}
               >
@@ -241,14 +243,14 @@
                 <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 6.25 8 9.75l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
               </button>
             </div>
-            <input class="summary-input {shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} aria-label={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength={shell.summaryRoom} aria-invalid={shell.summaryTooLong || (!shell.skipHooks && shell.summary.trim().length > 0 && !shell.summaryFitsConvention)} spellcheck={shell.settings.spellChecking === "enable"} oninput={() => shell.normalizeSummary()} />
+            <input class="summary-input {shell.progress ? '' : shell.summaryTone} guided" placeholder={shell.tr("chrome.commitSubject")} aria-label={shell.tr("chrome.commitSubject")} bind:value={shell.summary} maxlength={shell.summaryRoom} aria-invalid={!shell.progress && shell.summary.trim().length > 0 && !!shell.commitMessageError} aria-describedby={shell.composerBlockReason || shell.progress ? "commit-feedback" : undefined} spellcheck={shell.settings.spellChecking === "enable"} oninput={() => { shell.clearComposerValidation(); shell.normalizeSummary(); }} />
             <button
               class="suggest-message"
               class:long={shell.settings.aiPromptStyle === "long"}
               type="button"
               title={shell.staged.length === 0 ? shell.tr("chrome.suggestNeedStaged") : shell.tr("chrome.suggestTitle", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}
               aria-label={shell.staged.length === 0 ? shell.tr("chrome.suggestNeedStaged") : shell.tr("chrome.suggestTitle", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}
-              disabled={shell.busy || shell.staged.length === 0}
+              disabled={shell.aiPending || shell.staged.length === 0}
               onclick={() => void shell.suggestMessage()}
               oncontextmenu={(event) => shell.togglePromptStyle(event)}
             >
@@ -256,16 +258,17 @@
               <span>{shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") })}</span>
             </button>
           </div>
-          {#if shell.progress}
-            <p class="convention-hint">{shell.tr("chrome.flowHint")}</p>
-          {:else if shell.summary.trim() && !shell.skipHooks && !shell.summaryFitsConvention}
-            <p class="convention-hint">{shell.tr("chrome.commitConvention")}</p>
+          {#if shell.progress && shell.actionError}
+            <p id="commit-feedback" class="convention-hint validation-error" role="alert">{shell.actionError}</p>
+          {:else if shell.composerBlockReason || shell.progress}
+            <p id="commit-feedback" class="convention-hint" class:validation-error={!shell.progress && shell.summary.trim().length > 0 && !!shell.commitMessageError} role="status">{shell.composerBlockReason || shell.tr(shell.progress === "cherryPick" ? "chrome.cherryPickHint" : "chrome.flowHint")}</p>
           {/if}
           <textarea class="guided composer-desc flex-fill" class:guide-only={shell.descriptionIsGuide} placeholder={shell.tr("chrome.description")} aria-label={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
           <div class="composer-row">
-            <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
+            <label class="check"><input type="checkbox" bind:checked={shell.amend} onchange={() => { shell.clearComposerValidation(); if (shell.amend) void shell.loadFacts().then((value) => { if (value?.headMessage && !shell.summary.trim()) void shell.fillFromMessage(value.headMessage); }); }} /> {shell.tr("chrome.amend")}</label>
+            {#if !shell.progress}<span class="summary-count" class:over={shell.summaryTooLong} title={shell.tr("chrome.commitSubjectCount")}>{shell.fullSummary.length}/{shell.messageHigh}</span>{/if}
             <button class="text-button more" type="button" aria-label={shell.tr("chrome.more")} title={shell.tr("chrome.more")} onclick={(event) => shell.openBar(event, shell.commitExtras())}>⋯</button>
-            <button class="commit" type="submit" disabled={shell.mode !== "live" || (shell.progress ? shell.busy || shell.conflicted : !shell.canCommit)}>{shell.busy ? shell.tr("chrome.working") : shell.progress ? shell.flowLabel() : shell.tr("chrome.commit")}</button>
+            <button class="commit" type="submit" title={shell.composerBlockReason || undefined} aria-describedby={shell.composerBlockReason ? "commit-feedback" : undefined} disabled={!!shell.composerBlockReason}>{shell.commitPending ? shell.tr("chrome.working") : shell.progress ? shell.flowLabel() : shell.tr("chrome.commit")}</button>
           </div>
         </form>
       </div>
@@ -293,13 +296,14 @@
 
 {#snippet dirRow(path: string, side: Side, depth: number)}
       {@const open = !shell.collapsedDirs.includes(path)}
-      <div class="tree-row dir-row" class:picked={side === "staged" ? shell.pickedStagedDirs.has(path) : shell.pickedUnstagedDirs.has(path)} style:padding-left="{8 + depth * 16}px" role="group" oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
+      <div class="tree-row dir-row" aria-busy={shell.pendingStage(path) !== undefined || shell.pathPending(path)} class:picked={side === "staged" ? shell.pickedStagedDirs.has(path) : shell.pickedUnstagedDirs.has(path)} style:padding-left="{8 + depth * 16}px" role="group" oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
         <button class="twist-btn" type="button" aria-expanded={open} aria-label={shell.fileName(path)} onclick={(event) => onTwistClick(event, path)}>
           {@render disclosure(open)}
         </button>
         <button class="file-select" type="button" title={path} onclick={(event) => onDirClick(event, path, side)} ondblclick={(event) => flipDir(event, path, side)}>
           {@render folderIcon()}
           <span class="name">{shell.fileName(path)}</span>
+          {@render pendingMark(path)}
         </button>
       </div>
     {/snippet}
@@ -325,6 +329,7 @@
             <div class="virtual-row" style:top="{(shell.combinedWindow.start + index) * shell.rowFile}px">
               <button
                 class="side"
+                aria-busy={shell.pendingStage(entry.file.path) !== undefined || shell.pathPending(entry.file.path)}
                 type="button"
                 class:selected={shell.selectedPath === entry.file.path && shell.selectedSide === entry.side}
                 class:picked={pickedPaths.has(entry.file.path) && !(shell.selectedPath === entry.file.path && shell.selectedSide === entry.side)}
@@ -334,6 +339,7 @@
                 {#if entry.file.letter === "C"}{@render conflictMark()}{/if}
                 <span class="meta">{shell.tr(entry.side === "staged" ? "chrome.staged" : "chrome.unstaged")}</span>
                 <span class="name">{entry.file.path}</span>
+                {@render pendingMark(entry.file.path)}
               </button>
             </div>
           {/each}
@@ -349,7 +355,7 @@
           <span class="count">{shell.staged.length}</span>
         </div>
         <div class="pane-tools">
-          <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy || shell.staged.length === 0} onclick={() => shell.runChange("unstage_all")}>{shell.tr("chrome.unstageAll")}</button>
+          <button class="pane-chip" type="button" disabled={shell.stageDisabled || shell.staged.length === 0} onclick={() => shell.runChange("unstage_all")}>{shell.tr("chrome.unstageAll")}</button>
         </div>
       </div>
       {@render pickedActions([], stagedPicked)}
@@ -387,7 +393,7 @@
           {@render searchToggle("file", shell.tr("chrome.filterFiles"))}
           {@render fileViewButton()}
           {#if !shell.showIgnored}
-            <button class="pane-chip pane-go" type="button" disabled={shell.mode !== "live" || shell.busy || shell.unstaged.length === 0} onclick={() => shell.runChange("stage_all")}>{shell.tr("chrome.stageAll")}</button>
+            <button class="pane-chip pane-go" type="button" disabled={shell.stageDisabled || shell.unstaged.length === 0} onclick={() => shell.runChange("stage_all")}>{shell.tr("chrome.stageAll")}</button>
           {/if}
         </div>
       </div>
@@ -430,15 +436,15 @@
         <div class="pick-bar">
           <span class="pick-count">{shell.tr("chrome.pickedCount", { count: String(unstagedFiles.length + stagedFiles.length) })}</span>
           {#if unstagedFiles.length > 1}
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => void shell.stagePicked(unstagedFiles)}>{shell.tr("chrome.stageSelected")}</button>
-            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.discardChosen(unstagedFiles)}>{shell.tr("chrome.discardSelected")}</button>
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.openStash(unstagedFiles)}>{shell.tr("chrome.stash")}</button>
-            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.deleteChosen(unstagedFiles)}>{shell.tr("chrome.deleteSelected")}</button>
+            <button class="pane-chip" type="button" disabled={shell.stageDisabled} onclick={() => void shell.stagePicked(unstagedFiles)}>{shell.tr("chrome.stageSelected")}</button>
+            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.discardChosen(unstagedFiles)}>{shell.tr("chrome.discardSelected")}</button>
+            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.openStash(unstagedFiles)}>{shell.tr("chrome.stash")}</button>
+            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.deleteChosen(unstagedFiles)}>{shell.tr("chrome.deleteSelected")}</button>
           {/if}
           {#if stagedFiles.length > 1}
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => void shell.unstagePicked(stagedFiles)}>{shell.tr("chrome.unstageSelected")}</button>
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.openStash(stagedFiles)}>{shell.tr("chrome.stash")}</button>
-            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.busy} onclick={() => shell.deleteChosen(stagedFiles)}>{shell.tr("chrome.deleteSelected")}</button>
+            <button class="pane-chip" type="button" disabled={shell.stageDisabled} onclick={() => void shell.unstagePicked(stagedFiles)}>{shell.tr("chrome.unstageSelected")}</button>
+            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.openStash(stagedFiles)}>{shell.tr("chrome.stash")}</button>
+            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.deleteChosen(stagedFiles)}>{shell.tr("chrome.deleteSelected")}</button>
           {/if}
         </div>
       {/if}
@@ -447,6 +453,7 @@
 {#snippet fileRow(file: Row, side: Side, depth = 0)}
       <div
         class="file"
+        aria-busy={shell.pendingStage(file.path) !== undefined || shell.pathPending(file.path)}
         class:tree-row={shell.fileLayout === "tree"}
         style:padding-left="{shell.fileLayout === "tree" ? 8 + depth * 16 : 8 + depth * 14}px"
         class:selected={shell.selectedPath === file.path && (shell.mode !== "live" || shell.selectedSide === side)}
@@ -467,9 +474,19 @@
             <span class="file-name">{shell.fileName(file.path)}</span>
             {#if file.path.includes("/")}<span class="file-dir" title={file.path}>{file.path.slice(0, file.path.lastIndexOf("/") + 1)}</span>{/if}
           {/if}
+          {@render pendingMark(file.path)}
         </button>
       </div>
     {/snippet}
+
+{#snippet pendingMark(path: string)}
+    {@const unstage = shell.pendingStage(path)}
+    {#if unstage !== undefined}
+      <span class="stage-pending" role="img" aria-label={shell.tr(unstage ? "chrome.unstagePending" : "chrome.stagePending")} title={shell.tr(unstage ? "chrome.unstagePending" : "chrome.stagePending")}></span>
+    {:else if shell.pathPending(path)}
+      <span class="stage-pending" role="img" aria-label={shell.tr("chrome.working")} title={shell.tr("chrome.working")}></span>
+    {/if}
+  {/snippet}
 
 {#snippet treeLine(path: string, letter: string)}
     <span class="twist"></span>

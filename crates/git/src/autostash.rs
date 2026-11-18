@@ -121,6 +121,11 @@ pub(crate) fn push_for_tree(repo: &Path, label: &str, target: Option<&str>) -> R
 /// unmerged paths. A conflicting apply leaves Git's conflict markers in place and
 /// keeps the entry for the user to drop after resolving.
 pub(crate) fn finish_if_settled(repo: &Path) -> Result<Restored, Error> {
+    // Cancelling the primary operation must still permit recovery of saved work.
+    crate::cli::without_cancellation(|| finish_saved(repo))
+}
+
+fn finish_saved(repo: &Path) -> Result<Restored, Error> {
     let Some(oid) = pending_autostash(repo) else {
         return Ok(Restored::None);
     };

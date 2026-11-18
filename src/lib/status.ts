@@ -8,12 +8,24 @@ export type StatusFile = {
 };
 
 export type StatusSnapshot = {
+  /** A stage response updates only these paths; a later full read reconciles the repository. */
+  statusPaths?: string[];
   revision?: number;
   path: string;
   branch: string | null;
+  commitIntent?: { head: string | null; index: string };
   staged: StatusFile[];
   unstaged: StatusFile[];
 };
+
+/** Match Rust's UTF-8 path order, including supplementary Unicode characters. */
+export function statusPathBefore(left: string, right: string) {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    if (left.charCodeAt(index) !== right.charCodeAt(index)) return left.codePointAt(index)! < right.codePointAt(index)!;
+  }
+  return left.length < right.length;
+}
 
 export type DiffLineKind = "add" | "delete" | "hunk" | "context" | "meta";
 
@@ -25,6 +37,8 @@ export type DiffLine = {
 };
 
 export type FileDiff = {
+  /** Backend fingerprint used by queued line and hunk edits. */
+  version?: string;
   path: string;
   staged: boolean;
   binary: boolean;
@@ -107,6 +121,7 @@ export type SubmoduleRow = { path: string; id: string; ready: boolean };
 export type WorktreeRow = { path: string; branch: string | null; detached: boolean };
 
 export type RefSnapshot = {
+  labels?: Record<string, string[]>;
   revision?: number;
   head?: string | null;
   branches: BranchRow[];
@@ -162,6 +177,9 @@ export type ToolRecord = {
   fallback: boolean;
 };
 
+export const terminalCliNames = ["codex", "grok", "cursor-agent", "claude"] as const;
+export type TerminalCli = (typeof terminalCliNames)[number];
+
 export type Settings = {
   theme: string;
   pullRebase: boolean;
@@ -215,6 +233,8 @@ export type Settings = {
   aiTemperature: number;
   logDirectory: string;
   recent: string[];
+  recentWorkspaceLimit: number;
+  recentRepoPins: { id: string; path: string }[];
   workspaces: WorkspaceRecord[];
   currentWorkspace: string;
   commands: CommandRecord[];
@@ -255,6 +275,7 @@ export type Settings = {
   shellKind: string;
   shellPath: string;
   shellArgs: string;
+  terminalClis: TerminalCli[] | null;
   diffToolName: string;
   diffToolPath: string;
   diffToolArgs: string;
@@ -339,9 +360,9 @@ export type WorkspaceRecord = {
   tabWidth?: number;
 };
 
-/** Built-in workspace that always holds the most recently opened repositories. */
+/** Built-in workspace for pinned and recently opened repositories. */
 export const recentWorkspaceId = "awegit-recent";
-export const recentWorkspaceLimit = 5;
+export const defaultRecentWorkspaceLimit = 5;
 
 /** Narrowest project tab. Past this, the strip scrolls instead of shrinking further. */
 export const workspaceTabFloor = 96;
@@ -383,6 +404,7 @@ export type CommandRecord = {
 };
 
 export type ConflictSides = {
+  version?: string;
   ours: string;
   theirs: string;
   working: string;
@@ -454,6 +476,7 @@ export type GitRuntime = {
 };
 
 export type RepoScan = {
+  cursor?: string | null;
   paths: string[];
   truncated: boolean;
 };

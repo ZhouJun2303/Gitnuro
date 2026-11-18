@@ -1,4 +1,35 @@
 import { expect, test } from "@playwright/test";
+import { pinLabSettings } from "./helpers";
+
+for (const theme of ["apple", "light", "dark"] as const) {
+  test(`busy toolbar sweep keeps its 300ms duration across motion preferences (${theme})`, async ({ page }) => {
+    await pinLabSettings(page, { theme, locale: "zh", fetchAutomatically: false });
+    await page.goto(`/?scene=sync-busy&theme=${theme}&locale=zh`);
+    await expect(page.locator('[data-lab-scene="sync-busy"]')).toBeVisible();
+    const sweep = page.locator(".identity-sweep");
+    await expect(sweep).toBeVisible();
+
+    for (const reducedMotion of ["no-preference", "reduce", "no-preference"] as const) {
+      await page.emulateMedia({ reducedMotion });
+      const timing = await sweep.evaluate((node) => {
+        const style = getComputedStyle(node, "::before");
+        const animation = node.getAnimations({ subtree: true }).find((item) => item instanceof CSSAnimation && item.animationName === "busy-flow");
+        return {
+          reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+          duration: style.animationDuration,
+          activeDuration: animation?.effect?.getTiming().duration,
+          playState: animation?.playState,
+        };
+      });
+      expect(timing.reducedMotion).toBe(reducedMotion === "reduce");
+      expect(timing.duration, `${theme}: ${reducedMotion}`).toBe("0.3s");
+      expect(timing.activeDuration).toBe(300);
+      expect(timing.playState).toBe("running");
+    }
+
+    await page.screenshot({ path: `.lab/sweep-duration-${theme}.png` });
+  });
+}
 
 for (const scene of ["rebase-progress", "sync-stash-conflict", "sync-busy"]) {
   test(`sync toolbar respects ${scene} in buttons, menus and shortcuts`, async ({ page }) => {
@@ -15,8 +46,20 @@ for (const scene of ["rebase-progress", "sync-stash-conflict", "sync-busy"]) {
     const pull = toolbar.getByTitle(/^(拉取|Pull)$/);
     const push = toolbar.getByTitle(/^(推送|Push)$/);
     const busy = scene === "sync-busy";
-    if (busy) await expect(fetch).toBeDisabled();
-    else await expect(fetch).toBeEnabled();
+    await expect(fetch).toBeEnabled();
+    if (busy) {
+      // A task's activity indicator does not lock unrelated controls or browsing.
+      await expect(pull).toBeEnabled();
+      await expect(push).toBeEnabled();
+      await pull.click();
+      await expect(page.locator('[data-dialog="pull"]')).toBeVisible();
+      await page.keyboard.press("Escape");
+      await push.click();
+      await expect(page.locator('[data-dialog="push"]')).toBeVisible();
+      await page.keyboard.press("Escape");
+      expect(mutations).toEqual([]);
+      return;
+    }
     await expect(pull).toBeDisabled();
     await expect(push).toBeDisabled();
 

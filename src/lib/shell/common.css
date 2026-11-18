@@ -150,7 +150,6 @@ textarea:focus-visible,
   }
 
 @media (prefers-reduced-motion: reduce) {
-    .identity-sweep::before { animation-duration: 3s; }
     .identity-bar > span { transition: none; }
   }
 

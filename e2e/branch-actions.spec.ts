@@ -56,6 +56,7 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await openLabScene(page, "branch-badges", '.side.nested:has(.branch-switches[data-branch="main"])', { locale: "en" });
     const row = page.locator(".side.nested").filter({ has: page.locator('.branch-switches[data-branch="main"]') });
     const select = row.locator(".file-select");
+    const pin = row.getByRole("button", { name: "Pin: main", exact: true });
     const filter = row.locator(".history-filter-toggle");
     const search = page.locator(".side-filter input");
 
@@ -69,10 +70,10 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await select.focus();
     await expectSyncBesideActions(row);
     await page.keyboard.press("Tab");
-    await expect(row.locator(".branch-switches button").first()).toBeFocused();
+    await expect(pin).toBeFocused();
     await expectSyncBesideActions(row);
 
-    await row.locator(".branch-switches button").first().click();
+    await pin.click();
     await row.hover();
     await filter.click();
     await expect(filter).toHaveAttribute("aria-pressed", "true");
@@ -97,18 +98,25 @@ for (const theme of ["apple", "light", "dark"] as const) {
   });
 
   for (const locale of ["zh", "en"] as const) {
-    test(`${theme} ${locale}: branch action icons and labels follow pin and history filter state`, async ({ page }) => {
+    test(`${theme} ${locale}: branch actions show hide, pin and history filter in order`, async ({ page }) => {
       await pinLabSettings(page, { theme, pinnedRefs: [] });
       await openLabScene(page, "history", '.side.nested:has(.branch-switches[data-branch="main"])', { locale });
 
       const actions = page.locator('.branch-switches[data-branch="main"]');
-      const pin = actions.locator("button").nth(0);
-      const filter = actions.locator("button").nth(1);
+      const buttons = actions.locator("button");
+      const hide = buttons.nth(0);
+      const pin = buttons.nth(1);
+      const filter = buttons.nth(2);
       const labels = locale === "zh"
-        ? { pin: "固定", unpin: "取消固定", include: "将分支加入历史筛选（可多选）", remove: "将分支移出历史筛选" }
-        : { pin: "Pin", unpin: "Unpin", include: "Include branch in history filter (multiple selection)", remove: "Remove branch from history filter" };
+        ? { hide: "隐藏", pin: "固定", unpin: "取消固定", include: "将分支加入历史筛选（可多选）", remove: "将分支移出历史筛选" }
+        : { hide: "Hide", pin: "Pin", unpin: "Unpin", include: "Include branch in history filter (multiple selection)", remove: "Remove branch from history filter" };
 
       await actions.locator("..").hover();
+      await expect(hide).toBeDisabled();
+      await expect(hide).toHaveAccessibleName(labels.hide);
+      const [hideX, pinX, filterX] = await buttons.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().left));
+      expect(hideX).toBeLessThan(pinX);
+      expect(pinX).toBeLessThan(filterX);
       await expect(pin).toHaveAttribute("aria-pressed", "false");
       await expect(pin).toHaveAttribute("title", labels.pin);
       await expect(pin).toHaveAccessibleName(`${labels.pin}: main`);

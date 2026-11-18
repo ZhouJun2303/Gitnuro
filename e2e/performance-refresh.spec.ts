@@ -40,7 +40,7 @@ test("covered write events reuse snapshots while external and unversioned change
       watchQueued: null, watchRevision: 0, refreshing: false, busy: false,
       backgroundFetch: new Set(),
     };
-    for (const method of ["applySnapshot", "queueWatch", "replayWatch", "watchCovered", "jobKey", "repoPath"] as const) shell[method] = ShellState.prototype[method].bind(shell);
+    for (const method of ["applySnapshot", "queueWatch", "replayWatch", "watchCovered", "jobKey", "repoPath", "viewing"] as const) shell[method] = ShellState.prototype[method].bind(shell);
     const value = { path: "D:/perf/one", branch: "main", staged: [], unstaged: [], revision: 10 };
     shell.applySnapshot(value);
     const retained = shell.snapshot;

@@ -1,4 +1,7 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
+import { runTask } from "./tasks";
+import { invalidateReads, scheduleRead } from "./read-scheduler";
+import { repositoryWrites } from "./operation-policy";
 
 type Args = Parameters<typeof rawInvoke>[1];
 type Options = Parameters<typeof rawInvoke>[2];
@@ -74,8 +77,9 @@ export async function invoke<T>(cmd: string, args?: Args, options?: Options, ope
   const at = Date.now();
   const trace = operation ? `${operation}-${++traceSequence}` : traceOperation();
   const tracedArgs = { ...args, __perf: trace };
+  if (repositoryWrites.has(cmd)) invalidateReads(String((tracedArgs as Record<string, unknown>).path ?? ""));
   try {
-    const value = await call<T>(cmd, tracedArgs, options);
+    const value = await runTask<T>(cmd, tracedArgs, trace, (taskArgs) => scheduleRead(cmd, taskArgs, () => call<T>(cmd, taskArgs, options)));
     const ms = performance.now() - start;
     record(cmd, ms, true);
     if (ms >= SLOW_INVOKE_MS || ["mutate", "workspace_status", "repository_refs", "commit_log", "operation_flow", "conflict_view"].includes(cmd)) push({ level: ms >= SLOW_INVOKE_MS ? "slow" : "info", kind: "invoke", name: cmd, ms, at, trace });
@@ -85,7 +89,15 @@ export async function invoke<T>(cmd: string, args?: Args, options?: Options, ope
     record(cmd, ms, false);
     push({ level: "error", kind: "invoke", name: cmd, ms, detail: String(error), at, trace });
     throw error;
+  } finally {
+    if (repositoryWrites.has(cmd)) invalidateReads(String((tracedArgs as Record<string, unknown>).path ?? ""));
   }
+}
+
+/** Only stable local objects may be speculatively loaded by callers. */
+export function prefetch(cmd: string, args: Record<string, unknown>) {
+  if (!["commit_detail", "commit_files", "show_commit_file", "blob_view", "revision_preview"].includes(cmd)) return;
+  void invoke(cmd, { ...args, __prefetch: true }).catch(() => {});
 }
 
 let flushChain: Promise<void> = Promise.resolve();

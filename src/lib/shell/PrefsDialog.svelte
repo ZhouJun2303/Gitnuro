@@ -5,6 +5,7 @@
   import ShortcutPage from "./ShortcutPage.svelte";
   import RevisionPreviewFormats from "./RevisionPreviewFormats.svelte";
   import FontSettings from "./FontSettings.svelte";
+  import { terminalCliNames } from "../status";
   import type { MenuItem, PrefTab } from "./types";
 
   const shell = getShell();
@@ -167,7 +168,7 @@
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.theme")}</span>
               <span class="pref-control">
-                <select aria-label={shell.tr("dialog.theme")} bind:value={shell.settings.theme}>
+                <select aria-label={shell.tr("dialog.theme")} value={shell.settings.theme} onchange={(event) => shell.changeAppearance(event.currentTarget.value)}>
                   <option value="system">{shell.tr("dialog.followSystem")}</option>
                   <option value="apple">{shell.tr("dialog.apple")}</option>
                   <option value="light">{shell.tr("dialog.light")}</option>
@@ -182,7 +183,7 @@
           <h3 class="pref-card-title">{shell.tr("dialog.themeStyles")}</h3>
           <div class="theme-styles" role="group" aria-label={shell.tr("dialog.themeStyles")}>
             {#each ["apple", "light", "dark"] as theme}
-              <button class="theme-style" class:on={shell.appliedTheme === theme} type="button" aria-pressed={shell.appliedTheme === theme} onclick={() => { shell.settings.theme = theme; void shell.savePrefs(false); }}>
+              <button class="theme-style" class:on={shell.appliedTheme === theme} type="button" aria-pressed={shell.appliedTheme === theme} onclick={() => shell.changeAppearance(theme)}>
                 <span class="theme-preview" class:code={theme === "dark"} class:apple={theme === "apple"} class:classic={theme === "light"} aria-hidden="true">
                   <span class="theme-preview-bar"><i></i><i></i><i></i></span>
                   <span class="theme-preview-body"><span class="theme-preview-side"><i></i><i></i><i></i></span><span class="theme-preview-content"><i></i><i></i><i></i><i></i></span></span>
@@ -275,6 +276,21 @@
       {:else if shell.prefTab === "previewFormats"}
         <RevisionPreviewFormats />
       {:else if shell.prefTab === "workspace"}
+        <section class="pref-card">
+          <h3 class="pref-card-title">{shell.tr("chrome.recentWorkspace")}</h3>
+          <div class="pref-card-body">
+            <label class="pref-row">
+              <span class="pref-label">{shell.tr("dialog.recentWorkspaceLimit")}</span>
+              <span class="pref-control">
+                <input type="number" min={shell.minimumRecentWorkspaceLimit()} value={shell.settings.recentWorkspaceLimit} onchange={(event) => {
+                  shell.setRecentWorkspaceLimit(event.currentTarget.valueAsNumber);
+                  event.currentTarget.value = String(shell.settings.recentWorkspaceLimit);
+                }} />
+              </span>
+            </label>
+          </div>
+        </section>
+
         <section class="pref-card">
           <h3 class="pref-card-title">{shell.tr("dialog.sourceFolder")}</h3>
           <div class="pref-card-body">
@@ -636,6 +652,24 @@
         {@const tools = shell.toolsOf(kind)}
         {@const picked = shell.selectedTool(kind)}
         {@const pickedAt = picked ? tools.findIndex((tool) => tool.id === picked.id) : -1}
+        <section class="pref-card" aria-labelledby="terminal-clis-title">
+          <h3 class="pref-card-title" id="terminal-clis-title">{shell.tr("dialog.terminalClis")}</h3>
+          <div class="pref-card-body" aria-busy={shell.detectingTerminalClis}>
+            {#each terminalCliNames as cli (cli)}
+              <div class="pref-row" data-cli={cli}>
+                <span class="pref-label">{cli}</span>
+                <span class="pref-control">
+                  {shell.tr(shell.settings.terminalClis == null ? "dialog.terminalCliUnchecked" : shell.settings.terminalClis.includes(cli) ? "dialog.terminalCliFound" : "dialog.terminalCliMissing")}
+                </span>
+              </div>
+            {/each}
+            <div class="pref-row">
+              <button class="text-button" type="button" disabled={shell.detectingTerminalClis} onclick={() => void shell.detectTerminalClis()}>
+                {shell.tr(shell.detectingTerminalClis ? "dialog.detectingTerminalClis" : "dialog.detectTerminalClis")}
+              </button>
+            </div>
+          </div>
+        </section>
         <section class="pref-card">
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecLinks")}</h3>
           <div class="pref-card-body">

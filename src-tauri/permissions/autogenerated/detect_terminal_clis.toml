@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-detect-terminal-clis"
+description = "Enables the detect_terminal_clis command without any pre-configured scope."
+commands.allow = ["detect_terminal_clis"]
+
+[[permission]]
+identifier = "deny-detect-terminal-clis"
+description = "Denies the detect_terminal_clis command without any pre-configured scope."
+commands.deny = ["detect_terminal_clis"]

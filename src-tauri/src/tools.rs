@@ -3,9 +3,10 @@
 //! A built-in Fork type is kept only when the file on disk is that program.
 //! A path that is missing, or a Beyond Compare entry that points at another executable, is dropped.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -41,6 +42,139 @@ pub struct EditorTool {
     pub name: String,
     pub path: String,
     pub args: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TerminalCli {
+    Codex,
+    Grok,
+    CursorAgent,
+    Claude,
+}
+
+impl TerminalCli {
+    const ALL: [Self; 4] = [Self::Codex, Self::Grok, Self::CursorAgent, Self::Claude];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Codex => "codex",
+            Self::Grok => "grok",
+            Self::CursorAgent => "cursor-agent",
+            Self::Claude => "claude",
+        }
+    }
+
+    fn resolve(self, paths: &[PathBuf]) -> Option<PathBuf> {
+        #[cfg(windows)]
+        let extensions = ["exe", "cmd", "bat"];
+        #[cfg(not(windows))]
+        let extensions = [""];
+        paths.iter().filter(|dir| dir.is_absolute()).find_map(|dir| {
+            extensions.iter().find_map(|extension| {
+                let path = dir.join(self.name()).with_extension(extension);
+                executable_file(&path).then_some(path)
+            })
+        })
+    }
+}
+
+fn executable_file(path: &Path) -> bool {
+    let Ok(metadata) = path.metadata() else { return false };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    metadata.is_file()
+}
+
+fn terminal_cli_paths() -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    #[cfg(windows)]
+    {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            paths.push(PathBuf::from(appdata).join("npm"));
+        }
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            paths.push(PathBuf::from(profile).join(".local").join("bin"));
+        }
+    }
+    #[cfg(unix)]
+    {
+        if let Some(home) = std::env::var_os("HOME") {
+            paths.push(PathBuf::from(home).join(".local/bin"));
+        }
+        paths.push(PathBuf::from("/usr/local/bin"));
+    }
+    #[cfg(target_os = "macos")]
+    paths.push(PathBuf::from("/opt/homebrew/bin"));
+    paths
+}
+
+pub fn detected_terminal_clis() -> Vec<TerminalCli> {
+    let paths = terminal_cli_paths();
+    TerminalCli::ALL.into_iter().filter(|cli| cli.resolve(&paths).is_some()).collect()
+}
+
+#[cfg(windows)]
+fn windows_terminal_cli(tool: &Path, repo: &Path) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Stdio;
+
+    let system_dir = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "SystemRoot is missing"))?
+        .join("System32");
+    let shell = system_dir.join("cmd.exe");
+    let mut command = Command::new(&shell);
+    // START allocates the console. The inner cmd expands the project and tool paths once.
+    command.args(["/D", "/E:ON", "/V:OFF", "/C"])
+        .raw_arg(r#"start "" "%AWEGIT_TERMINAL_SHELL%" /D /E:ON /V:OFF /S /K "%AWEGIT_TERMINAL_COMMAND%""#)
+        .env("AWEGIT_TERMINAL_SHELL", &shell)
+        .env("AWEGIT_TERMINAL_COMMAND", r#"pushd "%AWEGIT_TERMINAL_PROJECT%" && "%AWEGIT_TERMINAL_CLI%""#)
+        .env("AWEGIT_TERMINAL_PROJECT", repo)
+        .env("AWEGIT_TERMINAL_CLI", tool)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .current_dir(system_dir);
+    awegit_git::hide_console(&mut command);
+    let status = command.status()?;
+    if !status.success() {
+        return Err(std::io::Error::other(format!("cmd.exe {status}")));
+    }
+    Ok(())
+}
+
+pub fn open_terminal_cli(cli: TerminalCli, repo: &Path) -> Result<(), String> {
+    let tool = cli.resolve(&terminal_cli_paths()).ok_or_else(|| "terminal-cli-missing".to_string())?;
+    #[cfg(windows)]
+    windows_terminal_cli(&tool, repo).map_err(|error| error.to_string())?;
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("/usr/bin/osascript")
+            .args([
+                "-e", "on run argv",
+                "-e", "tell application \"Terminal\"",
+                "-e", "do script (\"cd -- \" & quoted form of item 1 of argv & \" && exec \" & quoted form of item 2 of argv)",
+                "-e", "activate",
+                "-e", "end tell",
+                "-e", "end run",
+            ])
+            .arg(repo).arg(tool).output().map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    Command::new("x-terminal-emulator").arg("-e").arg(tool).current_dir(repo)
+        .spawn().map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -743,6 +877,78 @@ fn translate(kind: Kind, raw: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{pick_tool, tools_from_fork_json};
+
+    #[test]
+    fn terminal_cli_detection_accepts_launchers_and_skips_missing_or_removed_files() {
+        use super::TerminalCli;
+        use std::fs;
+
+        let directory = std::env::temp_dir().join(format!("awegit-cli detection-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        #[cfg(windows)]
+        let launcher = directory.join("codex.cmd");
+        #[cfg(not(windows))]
+        let launcher = directory.join("codex");
+        fs::write(&launcher, "").unwrap();
+        let paths = std::slice::from_ref(&directory);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&launcher, fs::Permissions::from_mode(0o644)).unwrap();
+            assert_eq!(TerminalCli::Codex.resolve(paths), None);
+            fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(TerminalCli::Codex.resolve(paths), Some(launcher.clone()));
+        assert_eq!(TerminalCli::Grok.resolve(paths), None);
+        assert_eq!(serde_json::to_string(&TerminalCli::CursorAgent).unwrap(), "\"cursor-agent\"");
+        fs::remove_file(launcher).unwrap();
+        assert_eq!(TerminalCli::Codex.resolve(paths), None);
+        fs::remove_dir(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "opens a console and requires a Windows desktop session"]
+    fn windows_terminal_cli_runs_batch_shims_in_the_project_directory() {
+        use super::windows_terminal_cli;
+        use std::fs;
+        use std::time::{Duration, Instant};
+
+        let directory = std::env::temp_dir().join(format!("awegit CLI launch-{}", std::process::id()));
+        let repo = directory.join("project with spaces & %TEMP% !");
+        let launcher = directory.join("grok %TEMP% & !.cmd");
+        let marker = repo.join("cli-marker.txt");
+        let released = repo.join("launcher-returned.txt");
+        fs::create_dir_all(&repo).unwrap();
+        fs::write(&launcher, concat!(
+            "@echo off\r\n",
+            "powershell.exe -NoProfile -NonInteractive -Command \"",
+            "$deadline = [DateTime]::UtcNow.AddSeconds(5); ",
+            "while (-not [IO.File]::Exists('launcher-returned.txt') -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 20 }; ",
+            "$attached = -not ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected -or [Console]::IsErrorRedirected); ",
+            "[IO.File]::WriteAllText('cli-marker.txt', [string]($attached -and [IO.File]::Exists('launcher-returned.txt')))\"\r\n",
+            "popd\r\n",
+            "exit\r\n",
+        )).unwrap();
+        windows_terminal_cli(&launcher, &repo).unwrap();
+        fs::write(&released, "").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let contents = loop {
+            if let Ok(text) = fs::read_to_string(&marker) {
+                if !text.is_empty() {
+                    break text;
+                }
+            }
+            assert!(Instant::now() < deadline, "launcher did not write to {}", repo.display());
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(contents, "True");
+        let _ = fs::remove_file(released);
+        let _ = fs::remove_file(marker);
+        let _ = fs::remove_file(launcher);
+        let _ = fs::remove_dir(repo);
+        let _ = fs::remove_dir(directory);
+    }
 
     const FORK: &str = r#"{
       "ExternalMergeTools": [

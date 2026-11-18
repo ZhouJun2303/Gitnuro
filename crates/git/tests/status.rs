@@ -110,6 +110,33 @@ fn status_splits_staged_and_unstaged_changes() {
 }
 
 #[test]
+fn scoped_status_is_literal_and_keeps_unrelated_directories_out() {
+    let repo = common::TempRepo::new();
+    repo.git(&["init", "-b", "main"]);
+    repo.git(&["config", "core.autocrlf", "false"]);
+    for dir in ["selected [1]", "selected 1", "unrelated"] { fs::create_dir(repo.path.join(dir)).unwrap(); }
+    for path in ["selected [1]/tracked.txt", "selected 1/tracked.txt", "unrelated/tracked.txt"] { fs::write(repo.path.join(path), "base\n").unwrap(); }
+    repo.git(&["add", "."]);
+    repo.git(&["commit", "-m", "base"]);
+    for path in ["selected [1]/tracked.txt", "selected 1/tracked.txt", "unrelated/tracked.txt"] { fs::write(repo.path.join(path), "working\n").unwrap(); }
+    fs::write(repo.path.join("selected [1]/loose.txt"), "new\n").unwrap();
+    repo.git(&["--literal-pathspecs", "add", "--", "selected [1]/tracked.txt"]);
+    let scoped = awegit_git::status_paths_with(&repo.path, false, &["selected [1]".into()]).unwrap();
+    assert_eq!(scoped.staged.len(), 1);
+    assert_has(&scoped.staged, "selected [1]/tracked.txt", ChangeKind::Modified);
+    assert_eq!(scoped.unstaged.len(), 1);
+    assert_has(&scoped.unstaged, "selected [1]/loose.txt", ChangeKind::Untracked);
+    fs::write(repo.path.join(".fakeignore"), "loose.txt\n").unwrap();
+    assert!(awegit_git::status_paths_with(&repo.path, true, &["selected [1]".into()]).unwrap().unstaged.is_empty());
+    let single = awegit_git::status_paths_with(&repo.path, true, &["selected [1]/tracked.txt".into()]).unwrap();
+    assert_eq!(single.staged.len(), 1);
+    assert!(single.unstaged.is_empty());
+    let empty = awegit_git::status_paths_with(&repo.path, false, &[]).unwrap();
+    assert!(empty.staged.is_empty() && empty.unstaged.is_empty());
+    assert!(awegit_git::status_paths_with(&repo.path, false, &["../outside".into()]).is_err());
+}
+
+#[test]
 fn fakeignore_hides_the_same_paths_git_would_and_keeps_them_out_of_the_index() {
     let repo = common::TempRepo::new();
     repo.git(&["init", "-b", "main"]);

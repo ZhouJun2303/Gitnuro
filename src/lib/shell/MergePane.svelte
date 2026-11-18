@@ -80,7 +80,7 @@
       {#if side !== "result" && block.kind === "hunk"}
         <div class="merge-cell hunk" class:on={selected} data-merge-hunk={block.piece} role="group">
           <pre class:empty={block.empty}>{block.text}</pre>
-          <button class="merge-hover-btn" class:remove={selected} type="button" disabled={shell.busy}
+          <button class="merge-hover-btn" class:remove={selected} type="button" disabled={shell.mergeApplying}
             aria-pressed={selected} onclick={() => onpick(block.piece, side === "theirs" ? "theirs" : "ours")}>
             {shell.tr(selected ? side === "theirs" ? "dialog.removeLeft" : "dialog.removeRight" : side === "theirs" ? "dialog.selectLeft" : "dialog.selectRight")}
           </button>

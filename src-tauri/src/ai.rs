@@ -23,6 +23,7 @@ pub fn suggest(repo: &std::path::Path, settings: &Settings) -> Result<Suggestion
     if diff.trim().is_empty() {
         return Err("Stage changes before asking for a message.".into());
     }
+    let input_version = prompt_version(&files, &branch, &diff);
     let limit = if settings.ai_max_chars == 0 {
         12_000
     } else {
@@ -122,7 +123,18 @@ The first line must match type: description. type is {}. No scope. Reply with th
             ));
         }
     }
+    let (files, branch, _, diff) = awegit_git::prompt_facts(repo, settings.fake_ignore).map_err(|error| error.to_string())?;
+    if prompt_version(&files, &branch, &diff) != input_version {
+        return Err("The staged changes changed during generation. Generate a new message. / 暂存内容已变化，请重新生成提交说明。".into());
+    }
     Ok(suggestion)
+}
+
+fn prompt_version(files: &str, branch: &str, diff: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    (files, branch, diff).hash(&mut hash);
+    hash.finish()
 }
 
 /// Whether a reply is written in the configured language. Chinese needs a CJK character;
@@ -164,6 +176,7 @@ pub fn review(repo: &std::path::Path, settings: &Settings, base: &str) -> Result
     } else {
         settings.ai_max_chars as usize
     };
+    let input_version = prompt_version(base, "HEAD", &output);
     let mut diff = output;
     limit_diff(&mut diff, limit);
     let key = ai_key(settings)?;
@@ -206,6 +219,10 @@ pub fn review(repo: &std::path::Path, settings: &Settings, base: &str) -> Result
     let answer = extract_text(&value);
     if answer.trim().is_empty() {
         return Err("The model returned an empty review.".into());
+    }
+    let actual = awegit_git::range_diff(repo, base).map_err(|error| error.to_string())?;
+    if prompt_version(base, "HEAD", &actual) != input_version {
+        return Err("The reviewed range changed. Start a new review. / 审查范围已变化，请重新审查。".into());
     }
     Ok(answer)
 }

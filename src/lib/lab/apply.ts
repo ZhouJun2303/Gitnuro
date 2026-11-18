@@ -1,7 +1,9 @@
 import { invoke } from "../perf";
-import type { CommandRecord, ToolRecord } from "../status";
+import { acceptTask } from "../tasks";
+import { recentWorkspaceId, type CommandRecord, type ToolRecord } from "../status";
 import type { ShellState } from "../shell/state.svelte";
 import type { LabDialog, LabScene } from "./scenes";
+import { previewCherrySelection } from "../shell/cherrySelection";
 
 const FILL = 24;
 
@@ -131,20 +133,43 @@ async function showChange(shell: ShellState, path: string, side: "staged" | "uns
 
 async function showHistory(shell: ShellState) {
   shell.section = "history";
+  // An opening read may have been superseded as the repository scope settled.
+  await shell.loadContext();
   const first = shell.commitsLive[0];
   if (first) await shell.selectCommit(first.id);
 }
 
 async function showCommitBySummary(shell: ShellState, summary: string) {
   shell.section = "history";
+  await shell.loadContext();
   const target = shell.commitsLive.find((row) => row.summary === summary);
   if (target) await shell.selectCommit(target.id);
 }
 
 async function fillSurface(shell: ShellState, id: string) {
+  if (id === "operation-tasks") {
+    for (const [index, state] of (["running", "queued", "verifying", "completed", "conflict", "failed", "cancelled", "blocked"] as const).entries()) {
+      acceptTask({ id: `lab-task-${index}`, path: shell.repoPath() ?? "", action: "fetch", label: `git fetch origin · ${index + 1}`, targets: ["origin"], state,
+        dependsOn: index === 1 ? ["lab-task-0"] : [], revision: 0, queuedMs: 12, executeMs: 240, verifyMs: 8 });
+    }
+    shell.openCommandLog("all");
+    requestAnimationFrame(() => document.querySelector<HTMLDetailsElement>(".command-filters .task-queue")?.setAttribute("open", ""));
+    return;
+  }
   if (id === "sync-busy") {
     const path = shell.repoPath() ?? "";
     shell.jobs = { ...shell.jobs, [shell.jobKey(path)]: { label: "pull", percent: 42, depth: 1 } };
+    return;
+  }
+  if (["fetch-progress", "pull-progress", "push-progress", "checkout-progress", "fetch-background-progress"].includes(id)) {
+    const path = shell.repoPath() ?? "";
+    const action = id.split("-")[0];
+    const job = { label: shell.taskLabel(action), percent: action === "push" ? 42 : null, depth: 1 };
+    if (id === "fetch-background-progress") shell.backgroundJobs[shell.jobKey(path)] = job;
+    else shell.jobs[shell.jobKey(path)] = job;
+    acceptTask({ id: `lab-${id}`, path, action, label: job.label, targets: [], state: "running", dependsOn: [], revision: 0, queuedMs: 0, executeMs: 0, verifyMs: 0,
+      phase: action === "fetch" ? "fetch" : ["pull", "checkout"].includes(action) ? "integration" : "operation",
+      percent: action === "pull" ? 50 : action === "checkout" ? 20 : action === "push" ? 42 : 33 });
     return;
   }
   if (id === "sync-stash-conflict") {
@@ -158,8 +183,20 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.sideQuery = "";
     return;
   }
-  if (["changes", "pull-deleted", "pull-noop", "pull-disjoint", "unstage-initial", "stage-conflict-paths"].includes(id)) {
+  if (["changes", "stage-many", "stage-queue", "stage-dense", "pull-deleted", "pull-noop", "pull-disjoint", "unstage-initial", "stage-conflict-paths"].includes(id)) {
     shell.section = "changes";
+    if (id === "stage-many") shell.settings = { ...shell.settings, fileLayout: "tree" };
+    return;
+  }
+  if (id === "commit-too-long" || id === "commit-no-staged") {
+    shell.section = "changes";
+    shell.settings = { ...shell.settings, messageHigh: 70 };
+    shell.applySubject(`feat: ${id === "commit-too-long" ? "x".repeat(80) : "ready to commit"}`);
+    return;
+  }
+  if (id === "cherry-pick-paused") {
+    shell.section = "changes";
+    shell.progress = "cherryPick";
     return;
   }
   if (id.startsWith("suggest-")) {
@@ -192,6 +229,13 @@ async function fillSurface(shell: ShellState, id: string) {
     return showChange(shell, "notes/wrap.txt", "unstaged");
   }
   if (id === "history" || id === "commit" || id === "history-remote") return showHistory(shell);
+  if (id === "history-multiselect" || id === "cherry-many-confirm") {
+    await showHistory(shell);
+    const commits = shell.commitsLive.slice(0, 3);
+    shell.commitSelection.ids = new Set(commits.map((commit) => commit.id));
+    if (id === "cherry-many-confirm") previewCherrySelection(shell, commits, false);
+    return;
+  }
   if (id === "commit-binary") {
     await showCommitBySummary(shell, "add the large pak");
     await shell.openHistoryTab("changes");
@@ -265,6 +309,11 @@ async function fillSurface(shell: ShellState, id: string) {
   }
   if (id === "vertical-tabs") {
     shell.settings = { ...shell.settings, verticalTabs: true };
+    return;
+  }
+  if (id === "workspace-recent") {
+    shell.settings.verticalTabs = false;
+    await shell.switchWorkspace(recentWorkspaceId);
     return;
   }
   if (id === "workspace-tabs" || id === "workspace-tabs-many") {
@@ -431,11 +480,12 @@ async function fillSurface(shell: ShellState, id: string) {
     if (!shell.reflogOn) await shell.showReflog();
     return;
   }
-  if (id === "clone-progress") {
+  if (id === "clone-progress" || id === "clone-waiting") {
     const repo = shell.repoPath() ?? "";
     const destination = `${repo.replace(/[\\/][^\\/]+$/, "")}/lab-clone`;
     shell.cloneJob = { name: "lab-clone", destination, workspace: shell.settings.currentWorkspace || "" };
-    shell.jobs = { ...shell.jobs, [shell.jobKey(destination)]: { label: "clone", percent: 42, depth: 1 } };
+    shell.jobs = { ...shell.jobs, [shell.jobKey(destination)]: { label: "clone", percent: id === "clone-waiting" ? null : 42, depth: 1 } };
+    if (id === "clone-waiting") acceptTask({ id: "lab-clone-waiting", path: destination, action: "clone", label: "clone", targets: [], state: "running", dependsOn: [], revision: 0, queuedMs: 0, executeMs: 0, verifyMs: 0, phase: "operation", percent: 33 });
     return;
   }
   if (id === "clone-done") {
@@ -571,6 +621,12 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.jobs[key] = { label: "刷新中", percent: null, depth: 1 };
     shell.menu = { x: 72, y: 96, items: () => shell.workspaceItems() };
     window.setTimeout(() => { delete shell.jobs[key]; }, 2000);
+    return;
+  }
+  if (id === "folder-menu") {
+    shell.section = "changes";
+    shell.settings = { ...shell.settings, fileLayout: "tree" };
+    shell.menu = { x: 72, y: 96, items: shell.dirMenu("pending", "unstaged") };
     return;
   }
   if (id === "file-menu") {
@@ -968,6 +1024,11 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       break;
     default:
       break;
+  }
+  if (sceneId === "continue-too-long" || sceneId === "reword-too-long") {
+    shell.settings = { ...shell.settings, messageHigh: 70 };
+    shell.draft = `feat: ${"x".repeat(80)}`;
+    if (dialog === "continue") shell.editContinue = true;
   }
   shell.dialog = dialog;
 }

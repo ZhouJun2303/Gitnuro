@@ -101,7 +101,9 @@ for (const theme of ["apple", "light", "dark"] as const) {
       await confirm.getByRole("button", { name: "Confirm", exact: true }).click();
       await expect.poll(() => requests.length).toBe(index + 1);
       expect(requests[index]).toEqual({ action: "reset", rev, mode });
-      await expect(panel.locator(".dialog-error")).toContainText("Reset request captured in UI test");
+      await expect(panel).toHaveCount(0);
+      await expect(page.locator(".identity-floor")).toContainText("Reset request captured in UI test");
+      if (index < 2) await openScene(page, scenes.find((scene) => scene.id === "dialog-reset")!, `&locale=en&theme=${theme}`);
     }
   });
 }

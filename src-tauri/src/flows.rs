@@ -329,7 +329,11 @@ impl Session {
 
     pub fn observer(self: &Arc<Self>) -> Observer {
         let session = self.clone();
+        let task = crate::tasks::current_id();
         Arc::new(move |mut event| {
+            if let Some(task) = &task {
+                crate::tasks::observe(task, &event);
+            }
             let fetched = event.detail == "git-child"
                 && event.state == "running"
                 && matches!(event.kind.as_str(), "rebase" | "merge");
@@ -1099,8 +1103,8 @@ pub fn begin_kind(repo: &Path, kind: &str, request: Option<&Mutation>) -> Option
             | Mutation::StashBranch { name, .. } => {
                 flow::commit(repo, if name.is_empty() { "refs/stash" } else { name })
             }
-            Mutation::CherryPick { rev, .. }
-            | Mutation::Revert { rev, .. }
+            Mutation::CherryPick { rev, revs, .. } => flow::commit(repo, revs.last().map(String::as_str).unwrap_or(rev)),
+            Mutation::Revert { rev, .. }
             | Mutation::Reset { rev, .. } => flow::commit(repo, rev),
             Mutation::Merge { name, .. } => flow::commit(repo, name),
             Mutation::Rebase { onto, .. } | Mutation::RebaseInteractive { onto, .. } => {
@@ -1539,7 +1543,61 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_syncs_reuse_context_but_read_local_edits_and_changed_upstreams() {
+    fn stage_responses_scope_normal_writes_and_fully_refresh_conflict_flows() {
+        let repo = Repo::new();
+        fs::write(repo.0.join("note"), "working\n").unwrap();
+        fs::write(repo.0.join("outside.txt"), "outside\n").unwrap();
+        let report = super::super::stage_selection_report(Some(repo.0.display().to_string()), "note".into(), None, None, false, true).unwrap();
+        assert_eq!(report.status_paths, Some(vec!["note".into()]));
+        assert_eq!(report.status.staged.len(), 1);
+        assert!(report.status.unstaged.is_empty());
+        assert!(super::super::read_status(&repo.0).unwrap().unstaged.iter().any(|file| file.path == "outside.txt"));
+
+        let repo = merge_conflict();
+        fs::write(repo.0.join("note"), "resolved\n").unwrap();
+        let report = super::super::stage_selection_report(Some(repo.0.display().to_string()), "note".into(), None, None, false, true).unwrap();
+        assert!(report.status_paths.is_none());
+        assert!(report.status.unstaged.iter().any(|file| file.path == "global-config"));
+    }
+
+    #[test]
+    fn folder_staging_keeps_filtered_fakeignored_and_empty_selections_exact() {
+        let repo = Repo::new();
+        fs::create_dir_all(repo.0.join("folder")).unwrap();
+        let files = vec!["folder/a[1].txt".to_string(), "folder/b.txt".to_string()];
+        for path in &files { fs::write(repo.0.join(path), "new\n").unwrap(); }
+        fs::write(repo.0.join("outside.txt"), "outside\n").unwrap();
+        let select = |files: Vec<String>, filtered, unstage| super::super::stage_selection(&repo.0, "folder".into(), Some(files), filtered, unstage).unwrap();
+
+        select(files.clone(), false, false);
+        assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "folder/a[1].txt\nfolder/b.txt");
+        fs::write(repo.0.join(&files[0]), "edited after staging\n").unwrap();
+        select(files.clone(), false, true);
+        assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), "");
+        assert_eq!(fs::read_to_string(repo.0.join(&files[0])).unwrap(), "edited after staging\n");
+
+        select(vec![files[0].clone()], true, false);
+        assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), files[0]);
+        select(Vec::new(), false, true);
+        assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), files[0]);
+        select(vec![files[0].clone()], true, true);
+
+        struct FakeIgnore(bool);
+        impl Drop for FakeIgnore {
+            fn drop(&mut self) { super::super::remember_fakeignore(self.0); }
+        }
+        let _fakeignore = FakeIgnore(super::super::use_fakeignore());
+        super::super::remember_fakeignore(true);
+        fs::write(repo.0.join(".fakeignore"), "folder/b.txt\n").unwrap();
+        select(vec![files[0].clone()], false, false);
+        assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), files[0]);
+        repo.git(&["add", "--", &files[1]]);
+        select(vec![files[0].clone()], false, true);
+        assert_eq!(repo.git(&["diff", "--cached", "--name-only"]), files[1]);
+    }
+
+    #[test]
+    fn metadata_syncs_skip_workspace_scans_and_keep_changed_upstreams_and_external_edits_readable() {
         let repo = Repo::new();
         struct SettingsEnv(Option<std::ffi::OsString>, Option<std::ffi::OsString>);
         impl Drop for SettingsEnv {
@@ -1559,7 +1617,9 @@ mod tests {
         let first = run(fetch()); assert_eq!(first.refresh_scope, None);
         fs::write(repo.0.join("note"), "external edit\n").unwrap();
         let second = run(fetch()); assert_eq!(second.refresh_scope, Some("status"));
-        assert!(second.status.unstaged.iter().any(|file| file.path == "note"));
+        assert!(second.status.is_none(), "fetch only changes references");
+        let status = super::super::workspace_status(Some(repo.0.display().to_string())).unwrap();
+        assert!(status.unstaged.iter().any(|file| file.path == "note"), "independent status reconciliation retains external edits");
         let push = |set_upstream| Mutation::Push { remote: Some("origin".into()), set_upstream, tags: false, force_with_lease: false, force: false };
         assert_eq!(run(push(true)).refresh_scope, None, "setting an upstream changes context");
         assert_eq!(run(push(false)).refresh_scope, Some("status"));
@@ -2406,7 +2466,7 @@ mod tests {
                             "stash" => Mutation::Stash { message: "performance".into(), include_untracked: false },
                             "merge" => Mutation::Merge { name: incoming.into(), squash: false, no_ff: false, autostash: true, summary: String::new(), description: String::new() },
                             "rebase" => Mutation::Rebase { onto: incoming.into(), autostash: true },
-                            "cherry-pick" => Mutation::CherryPick { rev: incoming.into(), record: false },
+                            "cherry-pick" => Mutation::CherryPick { rev: incoming.into(), revs: Vec::new(), record: false },
                             "revert" => Mutation::Revert { rev: incoming.into(), no_commit: false, message: String::new() },
                             "reset" => Mutation::Reset { rev: head.into(), mode: awegit_git::ResetMode::Soft },
                             "branch" => Mutation::CreateBranch { name: "perf-created".into(), start: None },

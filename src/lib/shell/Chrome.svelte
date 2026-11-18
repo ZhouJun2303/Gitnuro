@@ -1,12 +1,42 @@
 <script lang="ts">
   import { getShell } from "./context";
-  import { fillWorkspaceTabs } from "../status";
+  import { fillWorkspaceTabs, terminalCliNames, type TerminalCli } from "../status";
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
+  import type { MenuItem } from "./types";
 
   const shell = getShell();
   const launchShortcut = $derived.by(() => { shell.settings.shortcuts; return shortcutLabel("launch"); });
+
+  async function openTerminal(path: string, cli?: TerminalCli) {
+    try {
+      await invoke("open_terminal", { path, cli });
+    } catch (error) {
+      const message = shell.message(error);
+      if (cli && message === "terminal-cli-missing") {
+        shell.settings.terminalClis = shell.settings.terminalClis?.filter((name) => name !== cli) ?? [];
+        shell.actionError = shell.tr("dialog.terminalCliLaunchMissing", { cli });
+        void shell.savePrefs(false);
+      } else {
+        shell.actionError = message;
+      }
+    }
+  }
+
+  function terminalMenu(path: string): MenuItem {
+    const plain = { label: shell.tr("chrome.terminal"), disabled: shell.mode !== "live", run: () => openTerminal(path) };
+    if (plain.disabled) return plain;
+    const installed = terminalCliNames.filter((cli) => shell.settings.terminalClis?.includes(cli));
+    if (installed.length === 0) return plain;
+    return {
+      label: plain.label,
+      children: [
+        { label: shell.tr("shortcuts.terminal"), run: plain.run },
+        ...installed.map((cli) => ({ label: cli, run: () => openTerminal(path, cli) })),
+      ],
+    };
+  }
 
   $effect(() => {
     const path = shell.meterPath ?? shell.snapshot?.path ?? "";
@@ -108,11 +138,11 @@
           { label: shell.tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: shell.syncDisabled("push"), run: () => void shell.doPush() },
           { label: shell.tr("chrome.pushTags"), disabled: shell.syncDisabled("push"), run: () => void shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease }) },
         ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg><span>{shell.tr("chrome.push")}</span>{#if shell.currentBranch && shell.currentBranch.ahead > 0}<em class="sync-count">{shell.currentBranch.ahead > 99 ? "99+" : shell.currentBranch.ahead}</em>{/if}</button>
-        <button class="tool-btn stack" type="button" title={shell.tr("chrome.stash")} disabled={shell.busy || shell.mode !== "live"} onclick={() => shell.openStash([])} oncontextmenu={(event) => shell.openMenu(event, shell.stashItems())}>
+        <button class="tool-btn stack" type="button" title={shell.tr("chrome.stash")} disabled={shell.writeBlocked || shell.mode !== "live"} onclick={() => shell.openStash([])} oncontextmenu={(event) => shell.openMenu(event, shell.stashItems())}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
           <span>{shell.tr("chrome.stash")}</span>
         </button>
-        <button class="tool-btn caret-only" type="button" disabled={shell.busy || shell.mode !== "live"} aria-label={shell.tr("chrome.stash")} aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.stashItems())}>
+        <button class="tool-btn caret-only" type="button" disabled={shell.writeBlocked || shell.mode !== "live"} aria-label={shell.tr("chrome.stash")} aria-haspopup="menu" onclick={(event) => shell.openBar(event, shell.stashItems())}>
           <svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
         </button>
       </div>
@@ -144,16 +174,16 @@
                 {#if notice}
                   <em class="identity-branch">{notice.title}</em>
                 {:else if shell.showingClone && shell.cloneJob}
-                  <em class="identity-branch" data-layer="clone">{shell.tr("chrome.cloning", { name: shell.cloneJob.name })}</em>
+                  <em class="identity-branch" data-layer="clone">{shell.tr("chrome.cloning", { name: shell.cloneJob.name })}{shell.workPhaseLabel ? ` · ${shell.workPhaseLabel}` : ""}</em>
                 {:else if shell.workDepth > 0}
-                  <em class="identity-branch">{shell.busyLabel ? `${shell.tr("chrome.working")} ${shell.busyLabel}` : shell.tr("chrome.working")}</em>
+                  <em class="identity-branch">{shell.busyLabel ? `${shell.tr("chrome.working")} ${shell.busyLabel}` : shell.tr("chrome.working")}{shell.workPhaseLabel ? ` · ${shell.workPhaseLabel}` : ""}</em>
                 {:else if shell.snapshot || shell.mode === "sample"}
                   <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
                   <em class="identity-branch" data-branch={shell.branchLabel}>{shell.branchLabel}</em>
                 {:else}
                   {shell.tr("chrome.openRepo")}
                 {/if}
-                {#if !notice && shell.workPercent != null}<em class="identity-pct">{shell.workPercent}%</em>{/if}
+                {#if shell.workPercent != null}<em class="identity-pct">{shell.workPercent}%</em>{/if}
               </span>
             </button>
             {#if notice && primary}
@@ -165,9 +195,9 @@
               <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
               <span>{shell.tr("dialog.branch")}<svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
             </button>
-            {#if shell.workDepth > 0 && !notice && shell.workPercent != null}
-              <div class="identity-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={shell.workPercent} aria-valuetext="{shell.workPercent}%">
-                <span style:width="{shell.workPercent}%"></span>
+            {#if shell.workDepth > 0}
+              <div class="identity-bar" role="progressbar" aria-label={shell.showingClone && shell.cloneJob ? shell.tr("chrome.cloning", { name: shell.cloneJob.name }) : shell.busyLabel || shell.tr("chrome.working")} aria-valuemin="0" aria-valuemax="100" aria-valuenow={shell.workPercent ?? 0} aria-valuetext={`${shell.workPhaseLabel ? `${shell.workPhaseLabel} · ` : ""}${shell.workPercent ?? 0}%`}>
+                <span style:width="{shell.workPercent ?? 0}%"></span>
               </div>
             {/if}
             {#if tone}
@@ -198,17 +228,27 @@
     <div class="chrome-tabs">
       <div class="chrome-side tabs" use:fillTabs={shell.repos.length}>
       {#each shell.repos as repo (repo)}
-        {@const job = shell.jobs[shell.jobKey(repo)]}
+        {@const job = shell.jobs[shell.jobKey(repo)] ?? shell.backgroundJobs[shell.jobKey(repo)]}
         <div class="tab" role="group" class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("repoInfo.title"), run: () => { shell.repoInfoPath = repo; shell.dialog = "repoInfo"; } },
-          { label: shell.tr("chrome.terminal"), disabled: shell.mode !== "live", run: () => void invoke("open_terminal", { path: repo }) },
+          terminalMenu(repo),
           { label: shell.tr("chrome.explorer"), run: () => void shell.openLocal(repo) },
           { label: shell.tr("menu.copyProjectPath"), run: () => shell.copyText(repo) },
+          shell.recentRepoPinItem(repo),
           { label: shell.tr("menu.renameTab"), run: () => { shell.draft = shell.tabText(repo); shell.draftExtra = repo; shell.dialog = "renameTab"; } },
           { label: shell.tr("menu.tabColor"), run: () => { shell.draft = shell.tabColor(repo); shell.draftExtra = repo; shell.dialog = "colorTab"; } },
           { label: shell.tr("chrome.close"), run: () => shell.closeTab(repo) },
         ])}>
-          <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabDisplay(repo)} onclick={() => shell.openRepo(repo)}>{#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}{shell.tabDisplay(repo)}</button>
+          <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabDisplay(repo)} onclick={() => shell.openRepo(repo)}>
+            {#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}
+            {#if shell.isRecentRepoPinned(repo)}
+              <svg class="line-icon tab-pin" viewBox="0 0 24 24" role="img" aria-label={shell.tr("chrome.pinnedInRecent")}>
+                <title>{shell.tr("chrome.pinnedInRecent")}</title>
+                <path d="M9 3.5h6v6.2l2.2 2.1v2.2h-4.1L12 20.5l-1.1-6.5H6.8v-2.2L9 9.7z" fill="currentColor" />
+              </svg>
+            {/if}
+            {shell.tabDisplay(repo)}
+          </button>
           <button class="text-button row-action tab-close" type="button" onclick={() => shell.closeTab(repo)} aria-label={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`} title={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`}>×</button>
         </div>
       {:else}

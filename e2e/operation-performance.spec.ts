@@ -31,7 +31,9 @@ for (const theme of ["apple", "light", "dark"]) {
       await expect(dialog).toHaveCount(0);
       await expect(button).toBeEnabled();
       expect(calls.filter((cmd) => cmd === "repository_refs")).toHaveLength(kind === "updated-fetch" ? 1 : 0);
-      expect(calls.filter((cmd) => cmd === "commit_log")).toHaveLength(kind === "updated-fetch" ? 1 : 0);
+      // The new remote branch points at an already loaded commit: only decorations change.
+      expect(calls.filter((cmd) => cmd === "commit_log")).toHaveLength(0);
+      if (kind === "updated-fetch") await expect(page.locator('.sidebar .file-select[title="origin/fresh-remote"]')).toBeVisible();
       expect(calls.filter((cmd) => cmd === "workspace_status")).toHaveLength(0);
       await expect(page.locator(".staged-pane")).toContainText("note.txt");
     }

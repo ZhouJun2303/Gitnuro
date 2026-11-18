@@ -157,7 +157,10 @@ pub enum Mutation {
         mode: ResetMode,
     },
     CherryPick {
+        #[serde(default)]
         rev: String,
+        #[serde(default)]
+        revs: Vec<String>,
         /// Pass `-x`, which records the source commit in the message.
         #[serde(default)]
         record: bool,
@@ -293,6 +296,8 @@ pub enum Mutation {
     PushRef {
         remote: String,
         branch: String,
+        #[serde(default)]
+        source_commit: Option<String>,
         #[serde(default)]
         force_with_lease: bool,
         #[serde(default)]
@@ -446,7 +451,39 @@ pub struct RebaseStep {
     pub message: String,
 }
 
+impl Mutation {
+    /// Independent invalidation domains; metadata-only operations do not scan files.
+    pub fn refresh_areas(&self) -> &'static [&'static str] {
+        use Mutation::*;
+        match self {
+            Fetch { .. } | Push { .. } | PushRef { .. } | CreateBranch { .. } | DeleteBranch { .. }
+                | Tag { .. } | DeleteTag { .. } | DeleteRemoteTag { .. } | DeleteRemoteBranch { .. } => &["refs"],
+            RenameBranch { .. } | SetUpstream { .. } | AddRemote { .. } | RemoveRemote { .. } | SetRemoteUrl { .. }
+                | AddWorktree { .. } | RemoveWorktree { .. } => &["refs", "config"],
+            StashDrop { .. } | StashRename { .. } => &["stashes"],
+            Stash { .. } | StashPop { .. } | StashPaths { .. } => &["worktree", "index", "stashes"],
+            StashApply { .. } | RestoreFile { .. } | Discard { .. } | DiscardPaths { .. } | Delete { .. } | DeletePaths { .. }
+                | ApplyPatch { .. } | SubmoduleUpdate | SubmoduleUpdatePath { .. } => &["worktree", "index"],
+            StageHunk { .. } | StageLine { .. } | StageLines { .. } | StagePaths { .. } => &["index"],
+            DiscardHunk { .. } | DiscardLine { .. } | DiscardLines { .. } | LfsPull => &["worktree"],
+            Resolve { .. } | ResolvePaths { .. } => &["worktree", "index", "flow"],
+            WriteGitignore { .. } | AppendIgnore { .. } | SubmoduleAdd { .. } | SubmoduleRemove { .. } => &["worktree", "index", "config"],
+            WriteMailmap { .. } => &["worktree", "config", "history"],
+            SubmoduleInit { .. } | SubmoduleSync { .. } | GitFlowInit { .. } | LfsLock { .. } | LfsUnlock { .. }
+                | SetHidden { .. } | SetExpanded { .. } | SetSignOff { .. } => &["config"],
+            StashPatch { .. } | LfsPush => &[],
+            Reset { mode: ResetMode::Soft, .. } => &["refs", "history", "flow"],
+            Pull { .. } | PullRef { .. } | Checkout { .. } | CheckoutRemote { .. } | Merge { .. } | Rebase { .. }
+                | RebaseInteractive { .. } | Abort | Continue { .. } | Skip | Reset { .. } | CherryPick { .. }
+                | Revert { .. } | Reword { .. } | Bisect { .. } | GitFlowStart { .. } | GitFlowFinish { .. }
+                | Squash { .. } | Clone { .. } | Init { .. } | Custom { .. } => &["worktree", "index", "refs", "history", "flow"],
+            StashBranch { .. } => &["worktree", "index", "refs", "history", "stashes", "flow"],
+        }
+    }
+}
+
 pub fn perform(repo: &Path, mutation: Mutation) -> Result<String, Error> {
+    crate::cli::check_cancelled()?;
     if let Mutation::Custom {
         command,
         repo: marked,
@@ -495,6 +532,87 @@ fn short_rev(rev: &str) -> String {
         rev[..7].to_string()
     } else {
         rev.to_string()
+    }
+}
+
+fn cherry_pick(repo: &Path, rev: &str, revs: &[String], record: bool) -> Result<(), Error> {
+    let requested: Vec<&str> = if revs.is_empty() {
+        vec![rev]
+    } else {
+        revs.iter().map(String::as_str).collect()
+    };
+    let mut resolved = Vec::new();
+    let mut seen = HashSet::new();
+    for rev in requested {
+        let rev = check_rev(rev)?;
+        let output = run(repo, &["rev-parse", "--verify", &format!("{rev}^{{commit}}")])?;
+        let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if seen.insert(id.clone()) {
+            resolved.push(id);
+        }
+    }
+    if resolved.len() > 1 {
+        // A revision walk orders non-adjacent selections by ancestry, regardless of
+        // click order, the history sort setting, or skewed commit timestamps.
+        let mut args = vec!["rev-list", "--topo-order", "--reverse"];
+        args.extend(resolved.iter().map(String::as_str));
+        let output = run(repo, &args)?;
+        let selected: HashSet<_> = resolved.iter().map(String::as_str).collect();
+        resolved = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|id| selected.contains(id))
+            .map(str::to_string)
+            .collect();
+    }
+    let label = if resolved.len() == 1 {
+        format!("cherry-pick {}", short_rev(&resolved[0]))
+    } else {
+        format!("cherry-pick {} commits", resolved.len())
+    };
+    with_autostash(repo, &label, || {
+        let mut args = vec!["cherry-pick", "--no-edit"];
+        if record {
+            args.push("-x");
+        }
+        args.extend(resolved.iter().map(String::as_str));
+        // One sequencer retains remaining commits across conflicts/continue/skip.
+        cherry_pick_dropping_empty(repo, &args)
+    })
+}
+
+/// Git 2.38 has no `--empty=drop`. Only skip after Git explicitly reports an
+/// empty pick and both tracked trees are clean; other failures keep the queue.
+fn cherry_pick_dropping_empty(repo: &Path, args: &[&str]) -> Result<(), Error> {
+    let editor = SequenceEditor::noop_only()?;
+    let env = [
+        ("GIT_EDITOR", editor.editor.as_str()),
+        ("LC_ALL", "C"),
+        ("LANGUAGE", "C"),
+    ];
+    let mut result = run_env_committer_only(repo, args, &env).map(|_| ());
+    let mut previous = None;
+    loop {
+        let empty = matches!(&result, Err(Error::Git(detail))
+            if detail.contains("The previous cherry-pick is now empty"));
+        if !empty
+            || in_progress(repo)? != Some(InProgress::CherryPick)
+            || autostash::has_unmerged(repo)
+            || run(repo, &["diff", "--cached", "--quiet", "--no-ext-diff", "HEAD", "--"]).is_err()
+            || run(repo, &["diff", "--quiet", "--no-ext-diff", "--"]).is_err()
+        {
+            return result;
+        }
+        // A failed skip must not retry the same paused step forever. Include
+        // todo so an external queue may legitimately pick the same id twice.
+        let paused = (
+            rev_parse(repo, "CHERRY_PICK_HEAD")?,
+            std::fs::read(crate::flow::git_dir(repo)?.join("sequencer/todo")).ok(),
+        );
+        if previous.as_ref() == Some(&paused) {
+            return result;
+        }
+        previous = Some(paused);
+        result = run_env_committer_only(repo, &["cherry-pick", "--skip"], &env).map(|_| ());
     }
 }
 
@@ -809,16 +927,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::Continue { message } => settle_after_flow(repo, || continue_with(repo, &message)),
         Mutation::Skip => settle_after_flow(repo, || flow(repo, "skip")),
         Mutation::Reset { rev, mode } => reset(repo, &rev, mode),
-        Mutation::CherryPick { rev, record } => {
-            with_autostash(repo, &format!("cherry-pick {}", short_rev(&rev)), || {
-                let rev = check_rev(&rev)?;
-                if record {
-                    with_editor_committer_only(repo, &["cherry-pick", "-x", "--no-edit", rev])
-                } else {
-                    with_editor_committer_only(repo, &["cherry-pick", "--no-edit", rev])
-                }
-            })
-        }
+        Mutation::CherryPick { rev, revs, record } => cherry_pick(repo, &rev, &revs, record),
         Mutation::Revert {
             rev,
             no_commit,
@@ -944,6 +1053,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::PushRef {
             remote,
             branch,
+            source_commit,
             force_with_lease,
             force,
             remote_branch,
@@ -954,6 +1064,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             PushRefOptions {
                 remote: &remote,
                 branch: &branch,
+                source_commit: source_commit.as_deref(),
                 remote_branch: &remote_branch,
                 force_with_lease,
                 force,
@@ -1783,7 +1894,9 @@ fn abort(repo: &Path) -> Result<(), Error> {
 }
 
 fn flow(repo: &Path, verb: &str) -> Result<(), Error> {
-    if verb == "continue" && in_progress(repo)? == Some(InProgress::Revert) {
+    if verb == "continue" && in_progress(repo)? == Some(InProgress::Revert)
+        && crate::model::revert_no_commit(repo).is_some()
+    {
         let source = rev_parse(repo, "REVERT_HEAD")?;
         if crate::model::revert_no_commit(repo).as_deref() == Some(source.as_str()) {
             if autostash::has_unmerged(repo) {
@@ -1809,6 +1922,9 @@ fn flow(repo: &Path, verb: &str) -> Result<(), Error> {
         None => return Err(Error::Git("nothing in progress".into())),
     };
     let flag = format!("--{verb}");
+    if command == "cherry-pick" && matches!(verb, "continue" | "skip") {
+        return cherry_pick_dropping_empty(repo, &[command, &flag]);
+    }
     with_editor_mode(repo, &[command, &flag], mode)
 }
 
@@ -2105,6 +2221,7 @@ fn delete_path(repo: &Path, file: &str) -> Result<(), Error> {
 }
 
 fn remove_worktree_file(repo: &Path, file: &str) -> Result<(), Error> {
+    crate::cli::check_cancelled()?;
     let full = repo.join(file);
     if !full.starts_with(repo) {
         return Err(Error::Path(file.to_string()));
@@ -2742,15 +2859,14 @@ fn custom(
         process.arg("-c").arg(expanded);
         process
     };
-    let output = process
+    process
         .current_dir(repo)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("AWEGIT_REPO", &repo_text)
         .env("AWEGIT_SHA", sha)
         .env("AWEGIT_BRANCH", branch)
-        .env("AWEGIT_FILE", file)
-        .output()
-        .map_err(|source| Error::Git(format!("could not start the custom command: {source}")))?;
+        .env("AWEGIT_FILE", file);
+    let output = crate::cli::run_external(repo, &mut process)?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
     if output.status.success() {
@@ -2855,11 +2971,28 @@ fn checkout_remote(repo: &Path, remote: &str, branch: &str) -> Result<(), Error>
 struct PushRefOptions<'a> {
     remote: &'a str,
     branch: &'a str,
+    source_commit: Option<&'a str>,
     remote_branch: &'a str,
     force_with_lease: bool,
     force: bool,
     set_upstream: bool,
     tags: bool,
+}
+
+/// The confirmed branch, not a potentially stale UI refs snapshot, owns this route.
+pub fn push_commit_target(path: &Path, branch: &str) -> Result<(String, String, bool), Error> {
+    let repo = crate::open_repo(path)?;
+    let config = repo.config_snapshot();
+    let stored = config.string(format!("branch.{branch}.remote")).map(|value| value.to_string());
+    let merge = config.string(format!("branch.{branch}.merge")).map(|value| value.to_string());
+    if let (Some(remote), Some(target)) = (stored.as_deref(), merge.as_deref().and_then(|value| value.strip_prefix("refs/heads/"))) {
+        if remote != "." { return Ok((remote.into(), target.into(), false)); }
+    }
+    let remotes = crate::cli::remote_list(path);
+    let remote = stored.filter(|remote| remotes.iter().any(|(name, _)| name == remote))
+        .or_else(|| remotes.iter().find(|(name, _)| name == "origin").or(remotes.first()).map(|(name, _)| name.clone()))
+        .ok_or_else(|| Error::Git("No configured remote for this branch. / 当前分支没有可用的远程仓库。".into()))?;
+    Ok((remote, branch.into(), true))
 }
 
 fn push_ref(repo: &Path, options: PushRefOptions<'_>) -> Result<(), Error> {
@@ -2872,9 +3005,14 @@ fn push_ref(repo: &Path, options: PushRefOptions<'_>) -> Result<(), Error> {
         check_name(remote_branch)?
     };
     // The branch selector must keep working when a tag has the same name.
-    let spec = format!("refs/heads/{branch}:refs/heads/{target}");
+    let source = match options.source_commit {
+        Some(id) if matches!(id.len(), 40 | 64) && id.bytes().all(|byte| byte.is_ascii_hexdigit()) => id.to_string(),
+        Some(id) => return Err(Error::Rev(id.into())),
+        None => format!("refs/heads/{branch}"),
+    };
+    let spec = format!("{source}:refs/heads/{target}");
     let mut args = vec!["push"];
-    if options.set_upstream {
+    if options.set_upstream && options.source_commit.is_none() {
         args.push("--set-upstream");
     }
     if options.tags {
@@ -2888,7 +3026,13 @@ fn push_ref(repo: &Path, options: PushRefOptions<'_>) -> Result<(), Error> {
     }
     args.push(remote);
     args.push(&spec);
-    surface(run(repo, &args).map(|_| ()))
+    surface(run(repo, &args).map(|_| ()))?;
+    if options.set_upstream && options.source_commit.is_some() {
+        // Git cannot infer the local branch when the refspec uses an object ID.
+        config_local(repo, &format!("branch.{branch}.remote"), remote)?;
+        config_local(repo, &format!("branch.{branch}.merge"), &format!("refs/heads/{target}"))?;
+    }
+    Ok(())
 }
 
 fn pull_ref(repo: &Path, remote: &str, branch: &str, rebase: bool) -> Result<(), Error> {
@@ -3378,6 +3522,52 @@ pub struct ScanResult {
 }
 
 const SCAN_CAP: usize = 300;
+
+/// Keep directory iterators between pages so even a single large source root yields results.
+pub struct RepositoryScan {
+    stack: Vec<(PathBuf, usize, Option<std::fs::ReadDir>)>,
+    limit: usize,
+    found: usize,
+}
+
+impl RepositoryScan {
+    pub fn new(root: &Path, depth: usize) -> Result<Self, Error> {
+        if !root.is_dir() { return Err(Error::Git(format!("{} is not a directory", root.display()))); }
+        Ok(Self { stack: vec![(root.to_path_buf(), 0, None)], limit: if depth == 0 { 5 } else { depth }, found: 0 })
+    }
+
+    pub fn next_page(&mut self) -> (ScanResult, bool) {
+        let started = std::time::Instant::now();
+        let mut result = ScanResult { paths: Vec::new(), truncated: false };
+        for _ in 0..128 {
+            let Some((dir, depth, entries)) = self.stack.last_mut() else { break };
+            if entries.is_none() {
+                if dir.join(".git").exists() {
+                    if self.found == SCAN_CAP { result.truncated = true; self.stack.clear(); break; }
+                    result.paths.push(dir.display().to_string()); self.found += 1;
+                    self.stack.pop();
+                    if result.paths.len() >= 16 { break; }
+                    continue;
+                }
+                if *depth > self.limit { self.stack.pop(); continue; }
+                *entries = std::fs::read_dir(dir).ok();
+            }
+            let entry = entries.as_mut().and_then(Iterator::next);
+            match entry {
+                Some(Ok(entry)) if *depth < self.limit && entry.file_type().is_ok_and(|kind| kind.is_dir()) => {
+                    if !matches!(entry.file_name().to_string_lossy().as_ref(), "node_modules" | "target" | "dist" | "vendor" | ".git" | ".next" | "out") {
+                        let next_depth = *depth + 1; self.stack.push((entry.path(), next_depth, None));
+                    }
+                }
+                None => { self.stack.pop(); }
+                _ => {}
+            }
+            if started.elapsed().as_millis() >= 20 { break; }
+        }
+        let more = !self.stack.is_empty();
+        (result, more)
+    }
+}
 
 /// Find git work trees under `root`, without entering a repository or common build folders.
 pub fn scan_repositories(root: &Path, depth_limit: usize) -> Result<ScanResult, Error> {

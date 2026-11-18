@@ -123,6 +123,25 @@
     user-select: none;
   }
 
+.stage-pending {
+    width: 10px;
+    height: 10px;
+    flex: none;
+    margin-left: auto;
+    border: 1.5px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: stage-pending-turn 0.8s linear infinite;
+  }
+
+@keyframes stage-pending-turn {
+    to { transform: rotate(360deg); }
+  }
+
+@media (prefers-reduced-motion: reduce) {
+    .stage-pending { animation: none; }
+  }
+
 .file-list > .side {
     user-select: none;
   }
@@ -176,6 +195,10 @@
 .composer-desc {
     resize: none !important;
     min-height: 0;
+  }
+
+.composer.has-feedback {
+    min-height: 160px;
   }
 
 textarea:focus,
@@ -438,6 +461,21 @@ textarea:focus,
     color: var(--text-secondary);
     font-size: 12px;
     line-height: 16px;
+    max-height: 48px;
+    overflow-y: auto;
+    overflow-wrap: anywhere;
+  }
+
+.convention-hint.validation-error,
+.summary-count.over {
+    color: var(--deleted);
+  }
+
+.summary-count {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
 .composer-row .more { margin-left: auto; }

@@ -23,7 +23,7 @@ pub use change::{
     blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line,
     discard_lines, file_diff, file_diff_with, file_preview, index_preview, launch_diff_pair, launch_diff_tool,
     launch_editor, launch_merge_tool, porcelain_z_paths, range_diff, resolve_conflict,
-    resolve_conflicts, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths,
+    compact_directory_paths, resolve_conflicts, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths,
     staged_diff, unstage_all, unstage_paths, workspace_diff, BlobView, CommitRequest,
     ConflictSides, ConflictView, DiffLine, DiffLineKind, FileDiff, FilePreview, LineEdit,
 };
@@ -31,23 +31,24 @@ pub use cli::{
     cancel_reads, cancel_repo, cancel_running, capture_output, configure, git_program, git_runtime,
     hide_console, ls_remote_head, origin_url, parse_git_version, remote_list, repo_key, set_http_proxy,
     set_https_credentials, set_passphrase, set_progress, set_trace, stop_process_tree, use_bundled_git,
-    with_operation_repo, GitRuntime, HttpsCredential, Session, Trace,
+    common_repo_key, check_cancelled, cancel_token, check_path, with_cancellation, without_cancellation, with_operation_repo, GitRuntime, HttpsCredential, Session, Trace,
 };
 pub use model::{
-    blame_file, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log,
+    blame_file, blame_source, blame_file_range, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log,
     commit_log_sorted, commit_tree, commits_from, compare_file, compare_files, file_history,
     ignored_paths, in_progress, index_lock_path, lfs_available, lfs_locks, locate_ref,
     prompt_facts, rebase_conflicts, reflog, remove_stale_index_lock, repo_sign_off_format,
     repository_refs, repository_summary, search_log, show_commit_file, show_commit_file_with,
     remote_account_overrides, stale_index_lock, write_expanded_groups, write_hidden_refs, write_remote_account, write_sign_off, BlameLine,
-    BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, LocatedRef, RefSnapshot,
+    BlameSource, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, LocatedRef, RefSnapshot,
+    commit_log_page, file_history_page, search_log_page, reflog_page,
     ReflogRow, RemoteRow, RepoSummary, StaleIndexLock, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
 pub use ops::{
     approve_credential, cherry_preview, merge_preview, merge_state, merged_branches, perform, perform_stashed,
-    pick_history, repo_facts, repo_facts_brief, scan_repositories, search_commits, set_repo_author,
+    pick_history, push_commit_target, repo_facts, repo_facts_brief, scan_repositories, search_commits, set_repo_author,
     tracked_directories, HotPath, MergeFile, MergePreview, MergeState, Mutation, RebaseStep,
-    RepoFacts, ResetMode, ScanResult, SearchHit, TrackedDirs,
+    RepoFacts, RepositoryScan, ResetMode, ScanResult, SearchHit, TrackedDirs,
 };
 
 use gix::bstr::BStr;
@@ -82,8 +83,53 @@ pub struct StatusSnapshot {
     pub revision: u64,
     pub path: String,
     pub branch: Option<String>,
+    pub commit_intent: CommitIntent,
     pub staged: Vec<FileChange>,
     pub unstaged: Vec<FileChange>,
+}
+
+/// Ignore cache-only index updates. A commit depends on the staged paths, modes and object IDs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitIntent {
+    pub head: Option<String>,
+    pub index: String,
+}
+
+pub fn commit_intent(path: &Path) -> Result<CommitIntent, Error> {
+    let repo = open_repo(path)?;
+    let head = repo.head()?.id().map(|id| id.to_string());
+    index_intent(&repo, head, None)
+}
+
+pub fn worktree_intent(path: &Path, paths: &[String]) -> Result<CommitIntent, Error> {
+    let repo = open_repo(path)?;
+    let head = repo.head()?.id().map(|id| id.to_string());
+    let paths = paths.iter().map(|path| path.as_str()).collect();
+    index_intent(&repo, head, Some(&paths))
+}
+
+fn index_intent(repo: &gix::Repository, head: Option<String>, paths: Option<&std::collections::HashSet<&str>>) -> Result<CommitIntent, Error> {
+    use std::hash::{Hash, Hasher};
+    let index = repo.index_or_empty().map_err(|error| Error::Git(error.to_string()))?;
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    for entry in index.entries() {
+        if let Some(paths) = paths {
+            let Ok(mut path) = std::str::from_utf8(entry.path(&index)) else { continue; };
+            loop {
+                if paths.contains(path) { break; }
+                path = path.rsplit_once('/').map_or("", |(parent, _)| parent);
+                if path.is_empty() { break; }
+            }
+            if path.is_empty() { continue; }
+        }
+        entry.path(&index).hash(&mut hash);
+        entry.id.hash(&mut hash);
+        entry.mode.bits().hash(&mut hash);
+        entry.stage().hash(&mut hash);
+        entry.flags.contains(gix::index::entry::Flags::INTENT_TO_ADD).hash(&mut hash);
+    }
+    Ok(CommitIntent { head, index: format!("{:016x}", hash.finish()) })
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -132,20 +178,42 @@ pub fn status(path: impl AsRef<Path>) -> Result<StatusSnapshot, Error> {
 ///
 /// Conflicts stay visible. Passing `false` is the same as [`status`].
 pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSnapshot, Error> {
+    status_patterns(path.as_ref(), fakeignore, Vec::new())
+}
+
+/// Read only the given literal paths and their descendants. An empty selection
+/// returns no changes, rather than requesting the entire work tree.
+pub fn status_paths_with(path: impl AsRef<Path>, fakeignore: bool, paths: &[String]) -> Result<StatusSnapshot, Error> {
+    let mut patterns = Vec::with_capacity(paths.len().max(1));
+    for path in paths {
+        cli::check_path(path)?;
+        let path = if cfg!(windows) { path.replace('\\', "/") } else { path.clone() };
+        patterns.push(gix::bstr::BString::from(format!(":(top,literal){path}")));
+    }
+    if patterns.is_empty() { patterns.push(gix::bstr::BString::from(":(top,literal).git/awegit-empty-selection")); }
+    status_patterns(path.as_ref(), fakeignore, patterns)
+}
+
+pub fn current_branch(path: &Path) -> Result<Option<String>, Error> {
+    Ok(open_repo(path)?.head()?.referent_name().map(|name| name.shorten().to_string()))
+}
+
+fn status_patterns(path: &Path, fakeignore: bool, patterns: Vec<gix::bstr::BString>) -> Result<StatusSnapshot, Error> {
     let path = path.as_ref();
     let repo = open_repo(path)?;
     let worktree = repo.workdir().unwrap_or(path).to_path_buf();
-    let branch = repo
-        .head()?
+    let head = repo.head()?;
+    let branch = head
         .referent_name()
         .map(|name| name.shorten().to_string());
+    let commit_intent = index_intent(&repo, head.id().map(|id| id.to_string()), None)?;
 
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
     let iter = repo
         .status(gix::progress::Discard)?
         .untracked_files(gix::status::UntrackedFiles::Files)
-        .into_iter(Vec::<gix::bstr::BString>::new())?;
+        .into_iter(patterns)?;
 
     for item in iter {
         match item? {
@@ -165,6 +233,7 @@ pub fn status_with(path: impl AsRef<Path>, fakeignore: bool) -> Result<StatusSna
         revision: 0,
         path: worktree.display().to_string(),
         branch,
+        commit_intent,
         staged,
         unstaged,
     })

@@ -485,3 +485,5 @@
   }
 
 .side.nav.selected .count { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.reference-pending { width: 11px; height: 11px; flex: 0 0 11px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: reference-spin 1s linear infinite; opacity: .7; }
+@keyframes reference-spin { to { transform: rotate(360deg); } }

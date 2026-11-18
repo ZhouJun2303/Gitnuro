@@ -39,6 +39,29 @@ test("merge preview preserves the manual draft and guards replacing it with side
   await expect(page.locator(".merge-result-edit")).toHaveValue(draft);
 });
 
+test("a late conflict read does not overwrite a draft typed while loading", async ({ page }) => {
+  let release!: () => void;
+  const gate = new Promise<void>((done) => { release = done; });
+  await page.route("**/__lab/invoke", async (route) => {
+    if (route.request().postDataJSON().cmd !== "conflict_sides") return route.continue();
+    const response = await route.fetch();
+    await gate;
+    await route.fulfill({ response });
+  });
+  try {
+    await page.goto("/?scene=text-merge-window&view=merge&theme=dark");
+    await page.locator(".merge-edit-entry").click();
+    const draft = page.locator(".merge-result-edit");
+    await draft.fill("My draft before Git replied\n");
+    const loaded = page.waitForResponse((response) => response.url().endsWith("/__lab/invoke")
+      && response.request().postDataJSON().cmd === "conflict_sides");
+    release();
+    await loaded;
+    await expect(page.locator('[data-lab-scene="text-merge-window"]')).toBeVisible();
+    await expect(draft).toHaveValue("My draft before Git replied\n");
+  } finally { release(); }
+});
+
 for (const kind of ["text", "file"]) test(`failed ${kind} merge keeps the draft or selection and can retry`, async ({ page }) => {
   let attempt = 0;
   const requests: Record<string, unknown>[] = [];
