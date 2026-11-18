@@ -121,21 +121,40 @@ pub fn detected_terminal_clis() -> Vec<TerminalCli> {
 }
 
 #[cfg(windows)]
-fn windows_terminal_cli(tool: &Path, repo: &Path) -> Command {
+fn windows_terminal_cli(tool: &Path, repo: &Path) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
-    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-    let mut command = Command::new(tool);
-    command.current_dir(repo).creation_flags(CREATE_NEW_CONSOLE);
-    command
+    use std::process::Stdio;
+
+    let system_dir = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "SystemRoot is missing"))?
+        .join("System32");
+    let shell = system_dir.join("cmd.exe");
+    let mut command = Command::new(&shell);
+    // START allocates the console. The inner cmd expands the project and tool paths once.
+    command.args(["/D", "/E:ON", "/V:OFF", "/C"])
+        .raw_arg(r#"start "" "%AWEGIT_TERMINAL_SHELL%" /D /E:ON /V:OFF /S /K "%AWEGIT_TERMINAL_COMMAND%""#)
+        .env("AWEGIT_TERMINAL_SHELL", &shell)
+        .env("AWEGIT_TERMINAL_COMMAND", r#"pushd "%AWEGIT_TERMINAL_PROJECT%" && "%AWEGIT_TERMINAL_CLI%""#)
+        .env("AWEGIT_TERMINAL_PROJECT", repo)
+        .env("AWEGIT_TERMINAL_CLI", tool)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .current_dir(system_dir);
+    awegit_git::hide_console(&mut command);
+    let status = command.status()?;
+    if !status.success() {
+        return Err(std::io::Error::other(format!("cmd.exe {status}")));
+    }
+    Ok(())
 }
 
 pub fn open_terminal_cli(cli: TerminalCli, repo: &Path) -> Result<(), String> {
     let tool = cli.resolve(&terminal_cli_paths()).ok_or_else(|| "terminal-cli-missing".to_string())?;
     #[cfg(windows)]
-    {
-        windows_terminal_cli(&tool, repo)
-            .spawn().map_err(|error| error.to_string())?;
-    }
+    windows_terminal_cli(&tool, repo).map_err(|error| error.to_string())?;
     #[cfg(target_os = "macos")]
     {
         let output = Command::new("/usr/bin/osascript")
@@ -889,26 +908,46 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    #[ignore = "opens a console and requires a Windows desktop session"]
     fn windows_terminal_cli_runs_batch_shims_in_the_project_directory() {
         use super::windows_terminal_cli;
         use std::fs;
+        use std::time::{Duration, Instant};
 
         let directory = std::env::temp_dir().join(format!("awegit CLI launch-{}", std::process::id()));
-        let repo = directory.join("project with spaces");
-        let launcher = directory.join("codex.cmd");
+        let repo = directory.join("project with spaces & %TEMP% !");
+        let launcher = directory.join("grok %TEMP% & !.cmd");
         let marker = repo.join("cli-marker.txt");
+        let released = repo.join("launcher-returned.txt");
         fs::create_dir_all(&repo).unwrap();
-        fs::write(&launcher, "@echo started>cli-marker.txt\r\n").unwrap();
-        let mut command = windows_terminal_cli(&launcher, &repo);
-        awegit_git::hide_console(&mut command);
-        let status = command.status().unwrap();
-        let contents = fs::read_to_string(&marker).unwrap();
-        fs::remove_file(marker).unwrap();
-        fs::remove_file(launcher).unwrap();
-        fs::remove_dir(repo).unwrap();
-        fs::remove_dir(directory).unwrap();
-        assert!(status.success());
-        assert_eq!(contents.trim(), "started");
+        fs::write(&launcher, concat!(
+            "@echo off\r\n",
+            "powershell.exe -NoProfile -NonInteractive -Command \"",
+            "$deadline = [DateTime]::UtcNow.AddSeconds(5); ",
+            "while (-not [IO.File]::Exists('launcher-returned.txt') -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 20 }; ",
+            "$attached = -not ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected -or [Console]::IsErrorRedirected); ",
+            "[IO.File]::WriteAllText('cli-marker.txt', [string]($attached -and [IO.File]::Exists('launcher-returned.txt')))\"\r\n",
+            "popd\r\n",
+            "exit\r\n",
+        )).unwrap();
+        windows_terminal_cli(&launcher, &repo).unwrap();
+        fs::write(&released, "").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let contents = loop {
+            if let Ok(text) = fs::read_to_string(&marker) {
+                if !text.is_empty() {
+                    break text;
+                }
+            }
+            assert!(Instant::now() < deadline, "launcher did not write to {}", repo.display());
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        assert_eq!(contents, "True");
+        let _ = fs::remove_file(released);
+        let _ = fs::remove_file(marker);
+        let _ = fs::remove_file(launcher);
+        let _ = fs::remove_dir(repo);
+        let _ = fs::remove_dir(directory);
     }
 
     const FORK: &str = r#"{
