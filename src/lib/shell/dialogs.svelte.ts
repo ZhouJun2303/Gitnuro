@@ -595,6 +595,16 @@ export function quick(shell: ShellState, event: MouseEvent, dialogName: Dialog, 
     }
   }
 
+function pushNeedsFetch(output: string) {
+  const text = output.toLowerCase().replace(/\s+/g, " ");
+  return text.includes("fetch first")
+    || text.includes("non-fast-forward")
+    || text.includes("tip of your current branch is behind")
+    || text.includes("remote contains work that you do not have locally")
+    || text.includes("stale info")
+    || /非快进|远程包含本地没有的提交|当前分支落后于远程/.test(text);
+}
+
 export async function submitCommit(shell: ShellState, pushAfter = false) {
     if (shell.progress) {
       // A rebase, merge, cherry-pick, or revert owns the next commit.
@@ -655,6 +665,7 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
         shell.scheduleAuxiliary(areasFor("push"));
         if (!ok && value) shell.actionError = output;
       }
+      if (!ok && value && pushNeedsFetch(output) && shell.viewing(path) && shell.openGen === openGen) void shell.doFetch("background");
     }
   }
 

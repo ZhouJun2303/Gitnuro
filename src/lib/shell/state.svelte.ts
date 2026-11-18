@@ -76,6 +76,13 @@ function standaloneView(): "" | "history" | "blob" | "merge" {
   return view === "history" || view === "blob" || view === "merge" ? view : "";
 }
 
+type HistoryActionRequest = {
+  action: "restore" | "save";
+  repo: string;
+  file: string;
+  rev: string;
+};
+
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   if (left === right) return true;
   if (left.length !== right.length) return false;
@@ -2650,6 +2657,55 @@ export class ShellState {
 
   historyFileMenu(commit: CommitRow): MenuItem[] {
     return historyFileMenu(this, commit);
+  }
+
+
+  requestHistoryAction(action: HistoryActionRequest["action"], rev: string, file: string) {
+    const repo = this.repoPath();
+    if (!repo || !file || !rev) return;
+    const request = { action, repo, file, rev } satisfies HistoryActionRequest;
+    if (this.standalone === "history" && this.inApp()) {
+      if (action === "restore") {
+        this.ask(this.tr("menu.resetAtCommit"), this.tr("dialog.restoreFileBody"), () => void this.sendHistoryAction(request), [], { subject: file, danger: true });
+      } else {
+        void this.sendHistoryAction(request);
+      }
+      return;
+    }
+    if (action === "restore") {
+      this.ask(this.tr("menu.resetAtCommit"), this.tr("dialog.restoreFileBody"), this.bindMutation({ action: "restoreFile", rev, file }), [], { subject: file, danger: true });
+      return;
+    }
+    void invoke("save_revision", { path: repo, rev, file }).catch((error) => (this.actionError = this.message(error)));
+  }
+
+
+  private async sendHistoryAction(request: HistoryActionRequest) {
+    try {
+      await invoke("request_history_action", request);
+    } catch (error) {
+      this.actionError = this.message(error);
+    }
+  }
+
+
+  private async applyHistoryAction(request: HistoryActionRequest) {
+    if (this.standalone || !request?.repo || !request.file || !request.rev) return;
+    if (!this.viewing(request.repo)) await this.openRepo(request.repo);
+    if (!this.viewing(request.repo) || this.mode !== "live") return;
+    try {
+      const window = getCurrentWindow();
+      await window.show();
+      await window.setFocus();
+    } catch {
+      /* Focusing the main window is best effort before a native dialog or write. */
+    }
+    if (request.action === "restore") {
+      void this.bindMutation({ action: "restoreFile", rev: request.rev, file: request.file })();
+    } else {
+      void invoke("save_revision", { path: request.repo, rev: request.rev, file: request.file })
+        .catch((error) => (this.actionError = this.message(error)));
+    }
   }
 
 
@@ -7432,6 +7488,7 @@ export class ShellState {
     let unnav = () => {};
     let unreveal = () => {};
     let ukept = () => {};
+    let unhistoryAction = () => {};
     let unupdate = () => {};
     let placeTimer = 0;
     let stopped = false;
@@ -7529,6 +7586,9 @@ export class ShellState {
       const files = (event.payload?.files ?? []).filter((file) => typeof file === "string" && file);
       if (files.length) this.actionError = this.tr("chrome.previewKept", { files: files.join(", ") });
     });
+    unhistoryAction = await listen<HistoryActionRequest>("awegit-history-action", (event) => {
+      void this.applyHistoryAction(event.payload);
+    });
     } catch {
     /* navigation events are optional outside the desktop shell */
     }
@@ -7595,6 +7655,7 @@ export class ShellState {
     unreveal();
     ukept();
     unupdate();
+    unhistoryAction();
     };
     });
   }

@@ -2455,9 +2455,30 @@ struct RevealCommit {
     id: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryActionRequest {
+    action: String,
+    repo: String,
+    file: String,
+    rev: String,
+}
+
 #[tauri::command]
 fn reveal_commit(app: tauri::AppHandle, repo: String, id: String) -> Result<(), String> {
     app.emit("awegit-reveal", RevealCommit { repo, id }).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn request_history_action(app: tauri::AppHandle, action: String, repo: String, file: String, rev: String) -> Result<(), String> {
+    if !matches!(action.as_str(), "restore" | "save") {
+        return Err("Unknown history action".into());
+    }
+    if repo.trim().is_empty() || file.trim().is_empty() || rev.trim().is_empty() {
+        return Err("History action is missing its target".into());
+    }
+    app.emit_to("main", "awegit-history-action", HistoryActionRequest { action, repo, file, rev })
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2901,6 +2922,7 @@ pub fn run() {
             open_editor,
             open_window,
             reveal_commit,
+            request_history_action,
             save_revision,
             log_client,
             perf_snapshot,
@@ -3274,7 +3296,7 @@ mod watch_plan_tests {
         assert_eq!(history["windows"], serde_json::json!(["history"]));
         assert!(main["permissions"].as_array().unwrap().contains(&serde_json::json!("allow-revision-copy-formats")));
         assert_eq!(history["permissions"], serde_json::json!([
-            "allow-revision-copy-support", "allow-create-revision-copy", "allow-remove-revision-copy"
+            "allow-revision-copy-support", "allow-create-revision-copy", "allow-remove-revision-copy", "allow-request-history-action"
         ]));
         for other in [
             include_str!("../capabilities/default.json"),
@@ -3286,6 +3308,7 @@ mod watch_plan_tests {
                 assert_ne!(permission.as_str(), Some("allow-revision-copy-support"));
                 assert_ne!(permission.as_str(), Some("allow-create-revision-copy"));
                 assert_ne!(permission.as_str(), Some("allow-remove-revision-copy"));
+                assert_ne!(permission.as_str(), Some("allow-request-history-action"));
             }
         }
     }

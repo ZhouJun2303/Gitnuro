@@ -12,7 +12,7 @@ fn main_window_can_invoke_registered_commands() {
     let handler = include_str!("lib.rs")
         .split_once("tauri::generate_handler![").unwrap().1
         .split_once("]);").unwrap().0;
-    let history_only = ["revision_copy_support", "create_revision_copy", "remove_revision_copy"];
+    let history_only = ["revision_copy_support", "create_revision_copy", "remove_revision_copy", "request_history_action"];
     let mut missing = Vec::new();
     for command in handler.split(',').map(str::trim).filter(|name| !name.is_empty()) {
         let command = command.rsplit("::").next().unwrap();

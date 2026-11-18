@@ -537,8 +537,8 @@ export function historyFileMenu(shell: ShellState, commit: CommitRow): MenuItem[
       { label: shell.tr("menu.open"), disabled: locked, run: () => void openFile(shell, file) },
       { label: shell.tr("menu.showInExplorer"), disabled: locked, run: () => void shell.openLocal(shell.fullPath(file)) },
       { label: shell.tr("menu.externalDiff"), disabled: locked || !parent, children: revisionExternalItems(shell, file, parent, commit.id) },
-      { label: shell.tr("menu.resetAtCommit"), disabled: locked, run: () => shell.ask(shell.tr("menu.resetAtCommit"), shell.tr("dialog.restoreFileBody"), shell.bindMutation({ action: "restoreFile", rev: commit.id, file }), [], { subject: file, danger: true }) },
-      { label: shell.tr("menu.saveAs"), disabled: locked, run: () => void invoke("save_revision", { path: shell.repoPath(), rev: commit.id, file }).catch((error) => (shell.actionError = shell.message(error))) },
+      { label: shell.tr("menu.resetAtCommit"), disabled: locked, run: () => shell.requestHistoryAction("restore", commit.id, file) },
+      { label: shell.tr("menu.saveAs"), disabled: locked, run: () => shell.requestHistoryAction("save", commit.id, file) },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },
       { label: shell.tr("menu.copyCommitInfo"), run: () => shell.copyText(info) },
     ];
