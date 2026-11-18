@@ -2,6 +2,8 @@ mod accounts;
 mod ai;
 mod avatars;
 mod changes;
+#[cfg(test)]
+mod command_acl;
 mod development;
 mod forge;
 mod fonts;

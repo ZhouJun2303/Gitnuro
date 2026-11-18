@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-blame-source"
+description = "Enables the blame_source command without any pre-configured scope."
+commands.allow = ["blame_source"]
+
+[[permission]]
+identifier = "deny-blame-source"
+description = "Denies the blame_source command without any pre-configured scope."
+commands.deny = ["blame_source"]
