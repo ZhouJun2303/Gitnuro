@@ -1,12 +1,12 @@
 {
-    "appVersion": "2.0.14",
-    "notes":  "✨ 新功能\n\n· 支持查看历史提交中的图片。\n· 支持在设置中选择字体。\n· 支持自动识别外部差异工具。\n· 支持自动识别外部合并工具。\n\n⚡ 体验优化\n\n· 图片对比显示修改前后的尺寸变化。\n· 图片对比显示修改前后的文件大小变化。\n· 按仓库记住历史筛选条件。\n· 分支操作按钮分层展示，更易辨认。\n· 显示分支操作按钮时仍保留同步状态。\n· 分支筛选与取消筛选使用不同图标。\n· 固定与取消固定分支使用不同图标。\n\n🐛 问题修复\n\n· 修复历史筛选操作图标更新不及时的问题。\n· 修复 AI 提交说明未按暂存内容正确应用忽略规则的问题。\n· 修复应用更新下载异常的问题。",
-    "appCode":  40,
-    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.13/AweGit_2.0.13_x64-setup.exe",
+    "appVersion":  "2.0.14",
+    "notes":  "✨ 新功能\n\n· 侧栏和项目终端菜单新增打开终端等操作\n· 设置中可自动检测并选择终端工具\n· 支持管理最近工作区并固定常用项目\n· 历史列表支持多选和 Shift 范围选择\n· 支持批量拣选提交，冲突后可继续、跳过或中止\n· 文件夹右键支持打开和复制路径\n· 耗时 Git 操作显示百分比进度\n\n⚡ 体验优化\n\n· 暂存和取消暂存立即反馈，无需等待\n· 大量文件改动时暂存和取消暂存明显更快\n· Git 操作按仓库排队，减少相互干扰\n· 耗时操作改为后台执行，界面保持可操作\n· 任务队列可查看后台任务进度\n· 任务入口位置调整，更方便找到\n· 统一顶部进度扫光动画节奏\n\n🐛 问题修复\n\n· 修复 Windows 项目终端无法启动 Grok\n· 修复提交详情图片预览被裁切\n· 修复空提交导致批量拣选无法继续\n· 修复拉取后分支仍显示等待标记\n· 修复提交和继续变基时缺少校验提示\n· 修复暂存失败后状态无法恢复\n· 修复连续操作时状态显示错乱\n· 修复账号同步状态未及时更新\n· 修复补丁预览显示不正确\n· 修复文件变化后界面未及时刷新",
+    "appCode":  41,
+    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.14/AweGit_2.0.14_x64-setup.exe",
     "downloads":  {
                       "windows":  {
-                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.13/AweGit_2.0.13_x64-setup.exe",
-                                      "sha256":  "fb81299380814eae8a6bc309c6ae06c2451cd2e563e14310cd89076590ff5b2c"
+                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.14/AweGit_2.0.14_x64-setup.exe",
+                                      "sha256":  "81d08ed01b0e9a06b7cfb44785c1e3149bffd359da5cb797cdb9f51402dabde0"
                                   },
                       "macos":  ""
                   }
