@@ -311,6 +311,7 @@ fn write_kind_then_status_paths(path: Option<String>, kind: &str, write: impl Fn
     let given = path.clone();
     let repo = repo_from(path)?;
     let _turn = repo_turn(&repo);
+    tasks::validate_intent(&repo)?;
     apply_session();
     let report = report_path(given, &repo);
     let flow = flows::begin_kind(&repo, kind, None);
@@ -371,7 +372,8 @@ fn unstage_path(path: Option<String>, file: String, files: Option<Vec<String>>, 
 }
 
 fn stage_selection_report(path: Option<String>, file: String, files: Option<Vec<String>>, filtered: Option<bool>, unstage: bool, incremental: bool) -> Result<ChangeReport, String> {
-    let paths = incremental.then(|| vec![file.clone()]);
+    let paths = incremental.then(|| files.as_deref().unwrap_or(std::slice::from_ref(&file)).to_vec())
+        .filter(|paths| paths.len() <= 512);
     let (result, log) = awegit_git::capture_output(|| {
         write_kind_then_status_paths(path, "stage", |repo| stage_selection(repo, file, files, filtered.unwrap_or(true), unstage), paths)
     });
@@ -468,12 +470,12 @@ struct DiffReport {
 }
 
 #[tauri::command]
-fn operation_tasks() -> Vec<tasks::Snapshot> { tasks::list() }
+fn operation_tasks(after: Option<u64>, session: Option<String>) -> tasks::TaskFeed { tasks::feed(after, session.as_deref()) }
 
 #[tauri::command]
 fn cancel_task(id: String) -> Result<Option<tasks::Snapshot>, String> {
     tasks::cancel(&id)?;
-    Ok(tasks::list().into_iter().find(|task| task.id == id))
+    Ok(tasks::snapshot(&id))
 }
 
 #[tauri::command]
@@ -575,6 +577,8 @@ fn blame_source(path: Option<String>, file: String) -> Result<awegit_git::BlameS
 struct MutationReport {
     #[serde(flatten)]
     status: Option<awegit_git::StatusSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status_paths: Option<Vec<String>>,
     refresh_areas: Vec<&'static str>,
     #[serde(skip_serializing_if = "String::is_empty")]
     output: String,
@@ -619,6 +623,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         _ => repo.clone(),
     };
     let _turn = repo_turn(&next);
+    tasks::validate_intent(&repo)?;
     let refresh_areas = request.refresh_areas().to_vec();
     let (result, log) = awegit_git::capture_output(|| -> Result<MutationReport, String> {
         development::check_delete(&repo, &request)?;
@@ -632,6 +637,11 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             | "stash" | "stashPop" | "stashApply" | "stashDrop" | "stashPaths"
         ).then(|| awegit_git::pull_refresh_state(&repo)).flatten();
         let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
+        let stage_paths = match &request {
+            awegit_git::Mutation::StagePaths { files, .. }
+                if files.len() <= 512 && flow.is_none() && !awegit_git::flow::has_pending_restore(&repo) => Some(files.clone()),
+            _ => None,
+        };
         let report = if creation { next.clone() } else { report_path(given, &repo) };
         let action = || awegit_git::with_operation_repo(&report, || {
             let _phase = perf::phase("perform");
@@ -646,17 +656,21 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         // without a usable stderr. Report the file so the UI can offer to remove it.
         let stale_lock = if result.is_err() { awegit_git::stale_index_lock(&next) } else { None };
         let flow = flow.map(|flow| { let _phase = perf::phase("flow-finish"); flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name) });
+        let status_paths = if result.is_ok() { stage_paths } else { None };
         let status = if result.is_err() || refresh_areas.iter().any(|area| matches!(*area, "worktree" | "index" | "flow")) {
-            Some(awegit_git::without_cancellation(|| read_status(&next))?)
+            Some(awegit_git::without_cancellation(|| read_status_paths(&next, status_paths.as_deref()))?)
         } else { None };
         let refresh_scope = if result.is_ok() && before_refs.is_some()
             && before_refs == awegit_git::pull_refresh_state(&repo) { Some("status") } else { None };
-        let conflicted = status.as_ref().is_some_and(|status| status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict));
+        let conflict_capable = matches!(action_name, "pull" | "pullRef" | "merge" | "rebase" | "rebaseInteractive" | "revert" | "cherryPick"
+            | "checkout" | "checkoutRemote" | "stashPop" | "stashApply" | "stashBranch" | "continue" | "skip" | "abort" | "gitFlowFinish");
+        let conflicted = conflict_capable && status.as_ref().is_some_and(|status| status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict));
         let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
         let error = result.as_ref().err().map(ToString::to_string).unwrap_or_default();
         let output = result.unwrap_or_default();
         Ok(MutationReport {
             status,
+            status_paths,
             refresh_areas,
             output,
             log: String::new(),
@@ -2933,7 +2947,14 @@ pub fn run() {
                 tauri::ipc::InvokeBody::Json(value) => value.clone(),
                 _ => serde_json::Value::Null,
             };
-            let task = if tasks::handles(&name) { Some(tasks::enqueue(&name, &args)) } else { None };
+            if tasks::handles(&name) {
+                let resolver = invoke.resolver;
+                tasks::submit(name, args, move |result| match result {
+                    Ok(value) => resolver.resolve(value),
+                    Err(error) => resolver.reject(error),
+                });
+                return true;
+            }
             let trace = match invoke.message.payload() {
                 tauri::ipc::InvokeBody::Json(value) => value.get("__perf").and_then(serde_json::Value::as_str).map(str::to_string),
                 _ => None,
@@ -2942,11 +2963,6 @@ pub fn run() {
             let resolver = invoke.resolver.clone();
             dispatch(&name.clone(), Box::new(move || {
                 let _span = (!matches!(name.as_str(), "log_client" | "perf_snapshot")).then(|| perf::command_with_id(&name, trace.as_deref()));
-                if let Some(task) = task {
-                    let result = task.and_then(|id| tasks::run(&id, || tasks::execute(&name, &args), |value| tasks::outcome(&name, &args, value)));
-                    match result { Ok(value) => resolver.resolve(value), Err(error) => resolver.reject(error) }
-                    return;
-                }
                 match std::panic::catch_unwind(AssertUnwindSafe(|| handler(invoke))) {
                     Ok(true) => {}
                     Ok(false) => resolver.reject(format!("Command {name} not found")),

@@ -8,20 +8,21 @@ for (const command of ["workspace_status_paths", "search_commits", "search_log",
 const flights = new Map<string, Promise<unknown>>();
 const cache = new Map<string, { value: unknown; bytes: number }>();
 let bytes = 0, active = 0, background = 0, mutableActive = 0;
-type Job = { key: string; lane: string; start: () => void; prefetch: boolean; mutable: boolean; countedBackground?: boolean; cancel: () => void };
+type Job = { key: string; repo: string; lane: string; start: () => void; prefetch: boolean; mutable: boolean; countedBackground?: boolean; cancel: () => void };
 const waiting: Job[] = [];
+const mutableRepositories = new Set<string>();
 const versions = new Map<string, number>();
 export function invalidateReads(path: string) { const key = repositoryKey(path); versions.set(key, (versions.get(key) ?? 0) + 1); }
 const MAX_BYTES = 24 * 1024 * 1024;
 
 function pump() {
   while (active < 4) {
-    const eligible = (job: Job) => (!job.mutable || mutableActive < 2) && (!job.prefetch || background < 1);
+    const eligible = (job: Job) => (!job.mutable || mutableActive < 2 && !mutableRepositories.has(job.repo)) && (!job.prefetch || background < 1);
     let index = waiting.findIndex((job) => !job.prefetch && eligible(job));
     if (index < 0) index = waiting.findIndex(eligible);
     const next = index >= 0 ? waiting.splice(index, 1)[0] : undefined;
     if (!next) return;
-    active++; if (next.mutable) mutableActive++;
+    active++; if (next.mutable) { mutableActive++; mutableRepositories.add(next.repo); }
     next.countedBackground = next.prefetch; if (next.countedBackground) background++;
     next.start();
   }
@@ -46,7 +47,8 @@ export function scheduleRead<T>(command: string, args: Record<string, unknown>, 
   const { __perf, __task, __prefetch, ...parameters } = args;
   prefetch ||= __prefetch === true;
   const stable = immutable(command, args);
-  const key = `${command}:${stable ? "object" : versions.get(repositoryKey(String(args.path ?? ""))) ?? 0}:${JSON.stringify(parameters)}`;
+  const repo = repositoryKey(String(args.path ?? args.repo ?? ""));
+  const key = `${command}:${stable ? "object" : versions.get(repo) ?? 0}:${JSON.stringify(parameters)}`;
   const cached = cache.get(key);
   if (cached) { cache.delete(key); cache.set(key, cached); return Promise.resolve(cached.value as T); }
   const flight = flights.get(key);
@@ -54,14 +56,15 @@ export function scheduleRead<T>(command: string, args: Record<string, unknown>, 
     if (!prefetch) { const queued = waiting.find((job) => job.key === key); if (queued) queued.prefetch = false; pump(); }
     return flight as Promise<T>;
   }
-  const lane = ["file_diff", "conflict_view", "blob_view", "search_log", "search_commits", "cherry_preview", "merge_preview", "rebase_conflicts"].includes(command) ? `${command}:${args.path}` : "";
+  const lane = ["file_diff", "conflict_view", "blob_view", "search_log", "search_commits", "cherry_preview", "merge_preview", "rebase_conflicts"].includes(command) ? `${command}:${repo}` : "";
   if (lane) for (let index = waiting.length - 1; index >= 0; index--) {
     if (waiting[index].lane === lane) waiting.splice(index, 1)[0].cancel();
   }
   const promise = new Promise<T>((resolve, reject) => {
-    const job: Job = { key, lane, prefetch, mutable: !stable, cancel: () => { flights.delete(key); reject(new Error("Preview superseded")); }, start: () => {
-      void read().then((value) => {
-        if (immutable(command, args)) {
+    const job: Job = { key, repo, lane, prefetch, mutable: !stable, cancel: () => { flights.delete(key); reject(new Error("Preview superseded")); }, start: () => {
+      const execute = async () => read();
+      void execute().then((value) => {
+        if (stable) {
           const size = weight(value);
           if (size < MAX_BYTES / 2) {
             cache.set(key, { value, bytes: size }); bytes += size;
@@ -71,7 +74,7 @@ export function scheduleRead<T>(command: string, args: Record<string, unknown>, 
           }
         }
         resolve(value);
-      }, reject).finally(() => { active--; if (job.mutable) mutableActive--; if (job.countedBackground) background--; flights.delete(key); pump(); });
+      }, reject).finally(() => { active--; if (job.mutable) { mutableActive--; mutableRepositories.delete(job.repo); } if (job.countedBackground) background--; flights.delete(key); pump(); });
     } };
     waiting.push(job);
   });

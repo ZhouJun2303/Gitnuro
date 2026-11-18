@@ -23,6 +23,7 @@ struct Tracked {
     pid: u32,
     generation: u64,
     read: bool,
+    token: Option<Arc<AtomicBool>>,
     group: crate::proc::Group,
 }
 
@@ -551,9 +552,19 @@ fn track(key: String, pid: u32, read: bool, group: crate::proc::Group) -> u64 {
         pid,
         generation,
         read,
+        token: CANCELLATION.with(|slot| slot.borrow().clone()),
         group,
     });
     generation
+}
+
+/// Stop only processes owned by this task, irrespective of path aliases.
+pub fn cancel_token(token: &Arc<AtomicBool>) {
+    token.store(true, Ordering::Release);
+    let entries: Vec<_> = lock_tracked().iter()
+        .filter(|item| item.token.as_ref().is_some_and(|owner| Arc::ptr_eq(owner, token)))
+        .map(|item| item.generation).collect();
+    for generation in entries { stop_generation(generation); }
 }
 
 fn stop_generation(generation: u64) {
@@ -955,6 +966,7 @@ fn run_prepared_capped(
         hook(args, elapsed, succeeded || allow_failure, &note);
     }
     note_captured(&progressed, elapsed, output.status.code(), &output.stdout, &output.stderr);
+    if !succeeded { check_cancelled()?; }
     if succeeded || allow_failure {
         return Ok((output, false));
     }

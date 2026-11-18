@@ -3,7 +3,7 @@ import { invoke, traceOperation } from "../perf";
 import { areasFor } from "../operation-policy";
 import { mergeResponse } from "../reconcile";
 import { broadcastLocale } from "../i18n/sync";
-import { broadcastAppearance } from "../appearance";
+import { broadcastAppearance, confirmAppearance } from "../appearance";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { commits, diffs, sampleConflictText, sampleConflictViews, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
@@ -317,7 +317,7 @@ export async function loadTextMerge(shell: ShellState) {
       shell.conflict = sides;
       shell.mergePieces = piecesFromSides(shell, sides);
       shell.mergeSource = shell.mergePieces;
-      shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+      if (!shell.mergeEdited) shell.mergeResult = shell.joinedPieces(shell.mergePieces);
       shell.mergeLarge = false;
     } catch (error) {
       if (shell.mergeGeneration === generation) shell.mergeError = shell.message(error);
@@ -391,7 +391,7 @@ async function readTextMerge(shell: ShellState, file: string, generation: number
       shell.mergeLarge = sidesNeedLoad(sides);
       shell.mergePieces = shell.mergeLarge ? [] : piecesFromSides(shell, sides);
       shell.mergeSource = shell.mergePieces;
-      shell.mergeResult = shell.mergeLarge ? "" : shell.joinedPieces(shell.mergePieces);
+      if (!shell.mergeEdited) shell.mergeResult = shell.mergeLarge ? "" : shell.joinedPieces(shell.mergePieces);
       shell.textMerge = true;
     } catch (error) {
       if (stillOpen()) shell.mergeError = shell.message(error);
@@ -610,17 +610,12 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
     const path = shell.repoPath();
     const draft = { summary: shell.summary, description: shell.description, commitType: shell.commitType, amend: shell.amend, skipHooks: shell.skipHooks };
     const openGen = shell.openGen;
-    const current = shell.refs?.branches.find((branch) => branch.current);
-    const remote = shell.refs?.remotes.find((remote) => current?.upstream?.startsWith(`${remote.name}/`))?.name ?? shell.refs?.remotes[0]?.name ?? null;
     const shouldPush = pushAfter || shell.settings.pushOnCommit;
-    const pushRequest = remote && current?.name
-      ? { action: "pushRef", remote, branch: current.name, remoteBranch: current.upstream?.startsWith(`${remote}/`) ? current.upstream.slice(remote.length + 1) : current.name, setUpstream: !current.upstream, forceWithLease: shell.settings.forceWithLease }
-      : { action: "push", remote, setUpstream: !current?.upstream, forceWithLease: shell.settings.forceWithLease };
     const commitId = traceOperation();
-    const commit = shell.runChange("commit_changes", { summary: messageText, description, amend: shell.amend, signOff: shell.signOff, skipHooks: shell.skipHooks, __task: commitId, __branch: shell.snapshot?.branch });
-    // Submit both stages now; the backend gates Push on the actual commit outcome.
-    const pushing = shouldPush ? invoke<import("../operation-flow").MutationResult>("mutate", {
-      path, request: pushRequest, __dependsOn: [commitId], __taskLabel: shell.tr("chrome.push"),
+    const commit = shell.runChange("commit_changes", { summary: messageText, description, amend: shell.amend, signOff: shell.signOff,
+      skipHooks: shell.skipHooks, __task: commitId, __branch: shell.snapshot?.branch, __expectedCommit: shell.snapshot?.commitIntent });
+    const pushing = shouldPush ? invoke<import("../operation-flow").MutationResult & { pushTarget?: { remote: string; branch: string; remoteBranch: string } }>("mutate", {
+      path, request: { action: "push", forceWithLease: shell.settings.forceWithLease }, __pushCommit: commitId, __dependsOn: [commitId], __taskLabel: shell.tr("chrome.push"),
     }).then((value) => ({ value, error: "" }), (error) => ({ value: null, error: shell.message(error) })) : null;
     const value = await commit;
     if (value === undefined) return;
@@ -654,7 +649,8 @@ export async function submitCommit(shell: ShellState, pushAfter = false) {
       const result = await pushing;
       const ok = !!result.value && result.value.outcome === "completed" && !result.value.error;
       const output = result.error || result.value?.error || result.value?.log || result.value?.output || "";
-      shell.recordCommand("push", { title: shell.tr("chrome.push"), command: shell.gitLine(["push", remote ?? "", current?.name ?? "HEAD"]) }, output, ok, "user");
+      const target = result.value?.pushTarget;
+      shell.recordCommand("push", { title: shell.tr("chrome.push"), command: shell.gitLine(target ? ["push", target.remote, target.branch === target.remoteBranch ? target.branch : `${target.branch}:${target.remoteBranch}`] : ["push"]) }, output, ok, "user");
       if (shell.viewing(path) && shell.openGen === openGen) {
         shell.scheduleAuxiliary(areasFor("push"));
         if (!ok && value) shell.actionError = output;
@@ -825,7 +821,7 @@ export function applyToolSettings(shell: ShellState) {
 type PreferenceLane = { latest: Settings; waiters: Array<() => void>; running: boolean; timer?: ReturnType<typeof setTimeout> };
 const preferenceLanes = new WeakMap<ShellState, PreferenceLane>();
 
-export function savePrefs(shell: ShellState, close = true): Promise<void> {
+export function savePrefs(shell: ShellState, close = true, immediate = close): Promise<void> {
     shell.applyToolSettings();
     if (close) shell.dialog = null;
     if (!shell.backend()) return Promise.resolve();
@@ -845,15 +841,18 @@ export function savePrefs(shell: ShellState, close = true): Promise<void> {
         const baseline = shell.prefsBaseline;
         const fields = baseline ? Object.keys(values).filter((key) => !shell.same(values[key as keyof Settings], baseline[key as keyof Settings])) : undefined;
         const saved = await invoke<Settings>("save_settings", { values, fields, before: baseline });
-        shell.prefsBaseline = saved;
+        const savedTheme = !fields || fields.includes("theme");
+        if (savedTheme) confirmAppearance(saved.theme);
+        shell.prefsBaseline = savedTheme ? saved : { ...saved, theme: shell.prefsBaseline?.theme ?? values.theme };
         shell.settings = mergeResponse(shell.settings, values, {
           ...saved,
+          theme: savedTheme ? saved.theme : shell.settings.theme,
           recentWorkspaceLimit: saved.recentWorkspaceLimit ?? values.recentWorkspaceLimit,
           recentRepoPins: saved.recentRepoPins ?? values.recentRepoPins,
         }, (a, b) => shell.same(a, b));
         shell.syncRecentWorkspace();
         broadcastLocale(shell.settings.locale);
-        broadcastAppearance(shell.settings.theme);
+        if (savedTheme && baseline?.theme !== saved.theme) broadcastAppearance(saved.theme);
         applyCommitTypes(shell);
       } catch (error) { shell.actionError = shell.message(error); }
       finally {
@@ -863,7 +862,10 @@ export function savePrefs(shell: ShellState, close = true): Promise<void> {
         else preferenceLanes.delete(shell);
       }
     };
-    if (!lane.running) lane.timer = setTimeout(() => void flush(), 80);
+    if (!lane.running) {
+      if (immediate) void flush();
+      else lane.timer = setTimeout(() => void flush(), 80);
+    }
     return waiting;
   }
 

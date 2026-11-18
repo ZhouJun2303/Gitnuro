@@ -3,7 +3,8 @@ import { expect, test } from "@playwright/test";
 import { operationAreas, repositoryKey } from "../src/lib/operation-policy";
 import { scheduleRead, invalidateReads } from "../src/lib/read-scheduler";
 import { mergeFields, mergeRecords, mergeResponse } from "../src/lib/reconcile";
-import { projectRefs, runTask, type OperationTask } from "../src/lib/tasks";
+import { acceptTask, projectRefs, runTask, subscribeTasks, type OperationTask } from "../src/lib/tasks";
+import { projectStages, stageActions } from "../src/lib/shell/staging";
 import type { RefSnapshot } from "../src/lib/status";
 import { patchFiles } from "../src/lib/patch-preview";
 
@@ -54,6 +55,16 @@ test("reads waiting for repository writes leave capacity to browse immutable com
   gate.resolve(7); expect(await Promise.all(jobs)).toEqual([7, 7, 7, 7]); await tick();
 });
 
+test("mutable reads waiting in one repository leave a slot for another", async () => {
+  const gate = deferred<number>(), started: string[] = [];
+  const first = scheduleRead("workspace_status", { path: "D:/repo-a" }, () => { started.push("A status"); return gate.promise; });
+  const next = scheduleRead("repository_refs", { path: "d:\\repo-a" }, async () => { started.push("A refs"); return 2; });
+  expect(await scheduleRead("workspace_status", { path: "D:/repo-b" }, async () => { started.push("B status"); return 3; })).toBe(3);
+  expect(started).toEqual(["A status", "B status"]);
+  gate.resolve(1);
+  expect(await Promise.all([first, next])).toEqual([1, 2]);
+});
+
 test("foreground reads pass queued prefetch and only the latest queued preview runs", async () => {
   const gate = deferred<number>(), started: string[] = [];
   const active = [0, 1, 2, 3].map((index) => scheduleRead("commit_files", { path: "priority", id: String(index).repeat(40) }, () => gate.promise));
@@ -92,12 +103,39 @@ test("settings responses merge nested edits without resurrecting removed records
   expect(mergeResponse(current, before, incoming, same)).toEqual({ theme: "dark", shortcuts: { commit: "edited", refresh: "server" }, accounts: [{ id: "a", label: "edited", token: "refreshed" }, current.accounts[1], incoming.accounts[2]] });
 });
 
-test("writes capture dependency identity; recovery and services remain independent", async () => {
-  const gate = deferred<number>(); let dependency: unknown;
+test("write order is independent from success dependencies", async () => {
+  const gate = deferred<number>();
   const first = runTask("mutate", { path: "chain", request: { action: "fetch" } }, "chain-first", () => gate.promise);
-  const second = runTask("mutate", { path: "chain", request: { action: "push" } }, "chain-second", async (args) => { dependency = args.__dependsOn; return 1; });
-  await second; expect(dependency).toEqual(["chain-first"]);
-  await runTask("mutate", { path: "chain", request: { action: "abort" } }, "chain-recovery", async (args) => { expect(args.__dependsOn).toEqual([]); });
-  await runTask("suggest_commit_message", { path: "chain" }, "chain-ai", async (args) => { expect(args.__dependsOn).toEqual([]); });
+  await runTask("mutate", { path: "chain", request: { action: "push" } }, "chain-second", async (args) => {
+    expect(args.__after).toBe("chain-first");
+    expect(args.__dependsOn).toEqual([]);
+  });
+  await runTask("mutate", { path: "chain", request: { action: "push" }, __dependsOn: ["chain-first"] }, "chain-dependent", async (args) => {
+    expect(args.__dependsOn).toEqual(["chain-first"]);
+  });
+  await runTask("suggest_commit_message", { path: "chain" }, "chain-ai", async (args) => { expect(args.__after).toBeUndefined(); });
   gate.resolve(1); await first;
+});
+
+test("stale task events cannot move a task backwards", () => {
+  const id = "late-event", task = { id, path: "D:/repo", action: "stagePath", label: "", targets: [],
+    dependsOn: [], state: "running", revision: 2, queuedMs: 1, executeMs: 0, verifyMs: 0, percent: 61, sequence: 10 } as const;
+  const seen: OperationTask[] = [];
+  const stop = subscribeTasks((tasks) => { const entry = tasks.find((task) => task.id === id); if (entry) seen.push(entry); });
+  try {
+    expect(acceptTask({ ...task, targets: [], dependsOn: [] })).toBe(true);
+    expect(acceptTask({ ...task, targets: [], dependsOn: [], state: "queued", percent: 0, sequence: 9 })).toBe(false);
+    expect(seen.map((item) => [item.state, item.percent])).toEqual([["running", 61]]);
+  } finally { stop(); }
+});
+
+test("stage projection preserves sorted paths and collapses repeated intents", () => {
+  const file = (path: string, kind: "added" | "untracked" | "modified" | "deleted" | "conflict") => ({ path, kind, previousPath: null });
+  const snapshot = { path: "/repo", branch: "main", staged: [file("a", "added"), file("c", "modified")],
+    unstaged: [file("a", "deleted"), file("b", "untracked"), file("c", "modified"), file("folder/d", "conflict")] };
+  const files = ["a", "b", "c", "folder/d"];
+  const changes = Array.from({ length: 24 }, (_, id) => ({ id, files, repo: "/repo", unstage: id % 2 === 1 }));
+  expect(projectStages(snapshot, changes)).toEqual({ staged: [], unstaged: [snapshot.unstaged[1], snapshot.unstaged[2], snapshot.unstaged[3]] });
+  expect(stageActions(changes, "/repo").get("folder")).toBe(true);
+  expect(projectStages(snapshot, [{ ...changes[0], repo: "/Repo" }])).toBe(snapshot);
 });

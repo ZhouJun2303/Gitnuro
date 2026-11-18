@@ -205,6 +205,31 @@ test("status refresh retains unchanged panes and selection lookup reuses the fil
   expect(result).toEqual({ retained: true, revision: 2, initialReads: 20_000, repeatedReads: 0 });
 });
 
+test("large stage projections retain the last intent across a burst", async ({ page }) => {
+  await page.goto("/?scene=clean");
+  await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();
+  const samples = await page.evaluate(async () => {
+    const path = "/src/lib/shell/staging.ts";
+    const { projectStages } = await import(/* @vite-ignore */ path);
+    const files = Array.from({ length: 10_000 }, (_, index) => `file-${String(index).padStart(5, "0")}.txt`);
+    const snapshot = { path: "/repo", branch: "main", staged: [], unstaged: files.map((path) => ({ path, kind: "untracked", previousPath: null })) };
+    return [1, 4, 12, 24].map((pending) => {
+      const changes = Array.from({ length: pending }, (_, id) => ({ id, repo: "/repo", files: files.slice(), unstage: id % 2 === 1 }));
+      let staged = -1, count = -1;
+      const times = Array.from({ length: 20 }, () => {
+        const start = performance.now();
+        const result = projectStages(snapshot, changes);
+        staged = result.staged.length;
+        count = staged + result.unstaged.length;
+        return performance.now() - start;
+      }).sort((a, b) => a - b);
+      return { pending, p95Ms: times[18], staged, count };
+    });
+  });
+  expect(samples.map(({ staged, count }) => [staged, count])).toEqual([[10_000, 10_000], [0, 10_000], [0, 10_000], [0, 10_000]]);
+  console.log("stage projection 10k:", JSON.stringify(samples));
+});
+
 test("partial status merges directory and rename boundaries without covering external events", async ({ page }) => {
   await page.goto("/?scene=clean");
   await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();
@@ -231,10 +256,11 @@ test("partial status merges directory and rename boundaries without covering ext
     const coveredExternal = ShellState.prototype.watchCovered.call(shell, "status", 8);
     const partialRevision = shell.statusRevision;
     apply({ path: "repo", revision: 22, staged: [], unstaged: [{ ...outside, kind: "deleted" }] });
+    apply({ path: "repo", revision: 20, statusPaths: ["dir/a.txt"], staged: [{ path: "dir/a.txt", kind: "modified" }], unstaged: [] });
     return { directory, renameRemoved, coveredExternal, partialRevision, scheduled, fullRevision: shell.statusRevision, externalKind: shell.snapshot.unstaged[0].kind };
   });
   expect(result).toEqual({ directory: { staged: ["dir/a.txt", "kept.txt", "renamed.txt"], unstaged: ["dir/sub/b.txt", "dir2/c.txt", "outside.txt"], outsideRetained: true, side: "staged" },
-    renameRemoved: true, coveredExternal: false, partialRevision: 7, scheduled: 2, fullRevision: 22, externalKind: "deleted" });
+    renameRemoved: true, coveredExternal: false, partialRevision: 7, scheduled: 3, fullRevision: 22, externalKind: "deleted" });
 });
 
 test("stage validation coalesces bursts and cancels after a repository switch or full snapshot", async ({ page }) => {

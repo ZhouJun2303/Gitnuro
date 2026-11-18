@@ -168,7 +168,7 @@
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.theme")}</span>
               <span class="pref-control">
-                <select aria-label={shell.tr("dialog.theme")} bind:value={shell.settings.theme}>
+                <select aria-label={shell.tr("dialog.theme")} value={shell.settings.theme} onchange={(event) => shell.changeAppearance(event.currentTarget.value)}>
                   <option value="system">{shell.tr("dialog.followSystem")}</option>
                   <option value="apple">{shell.tr("dialog.apple")}</option>
                   <option value="light">{shell.tr("dialog.light")}</option>
@@ -183,7 +183,7 @@
           <h3 class="pref-card-title">{shell.tr("dialog.themeStyles")}</h3>
           <div class="theme-styles" role="group" aria-label={shell.tr("dialog.themeStyles")}>
             {#each ["apple", "light", "dark"] as theme}
-              <button class="theme-style" class:on={shell.appliedTheme === theme} type="button" aria-pressed={shell.appliedTheme === theme} onclick={() => { shell.settings.theme = theme; void shell.savePrefs(false); }}>
+              <button class="theme-style" class:on={shell.appliedTheme === theme} type="button" aria-pressed={shell.appliedTheme === theme} onclick={() => shell.changeAppearance(theme)}>
                 <span class="theme-preview" class:code={theme === "dark"} class:apple={theme === "apple"} class:classic={theme === "light"} aria-hidden="true">
                   <span class="theme-preview-bar"><i></i><i></i><i></i></span>
                   <span class="theme-preview-body"><span class="theme-preview-side"><i></i><i></i><i></i></span><span class="theme-preview-content"><i></i><i></i><i></i><i></i></span></span>

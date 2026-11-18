@@ -31,7 +31,7 @@ pub use cli::{
     cancel_reads, cancel_repo, cancel_running, capture_output, configure, git_program, git_runtime,
     hide_console, ls_remote_head, origin_url, parse_git_version, remote_list, repo_key, set_http_proxy,
     set_https_credentials, set_passphrase, set_progress, set_trace, stop_process_tree, use_bundled_git,
-    common_repo_key, check_cancelled, with_cancellation, without_cancellation, with_operation_repo, GitRuntime, HttpsCredential, Session, Trace,
+    common_repo_key, check_cancelled, cancel_token, check_path, with_cancellation, without_cancellation, with_operation_repo, GitRuntime, HttpsCredential, Session, Trace,
 };
 pub use model::{
     blame_file, blame_source, blame_file_range, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log,
@@ -46,7 +46,7 @@ pub use model::{
 };
 pub use ops::{
     approve_credential, cherry_preview, merge_preview, merge_state, merged_branches, perform, perform_stashed,
-    pick_history, repo_facts, repo_facts_brief, scan_repositories, search_commits, set_repo_author,
+    pick_history, push_commit_target, repo_facts, repo_facts_brief, scan_repositories, search_commits, set_repo_author,
     tracked_directories, HotPath, MergeFile, MergePreview, MergeState, Mutation, RebaseStep,
     RepoFacts, RepositoryScan, ResetMode, ScanResult, SearchHit, TrackedDirs,
 };
@@ -83,8 +83,53 @@ pub struct StatusSnapshot {
     pub revision: u64,
     pub path: String,
     pub branch: Option<String>,
+    pub commit_intent: CommitIntent,
     pub staged: Vec<FileChange>,
     pub unstaged: Vec<FileChange>,
+}
+
+/// Ignore cache-only index updates. A commit depends on the staged paths, modes and object IDs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitIntent {
+    pub head: Option<String>,
+    pub index: String,
+}
+
+pub fn commit_intent(path: &Path) -> Result<CommitIntent, Error> {
+    let repo = open_repo(path)?;
+    let head = repo.head()?.id().map(|id| id.to_string());
+    index_intent(&repo, head, None)
+}
+
+pub fn worktree_intent(path: &Path, paths: &[String]) -> Result<CommitIntent, Error> {
+    let repo = open_repo(path)?;
+    let head = repo.head()?.id().map(|id| id.to_string());
+    let paths = paths.iter().map(|path| path.as_str()).collect();
+    index_intent(&repo, head, Some(&paths))
+}
+
+fn index_intent(repo: &gix::Repository, head: Option<String>, paths: Option<&std::collections::HashSet<&str>>) -> Result<CommitIntent, Error> {
+    use std::hash::{Hash, Hasher};
+    let index = repo.index_or_empty().map_err(|error| Error::Git(error.to_string()))?;
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    for entry in index.entries() {
+        if let Some(paths) = paths {
+            let Ok(mut path) = std::str::from_utf8(entry.path(&index)) else { continue; };
+            loop {
+                if paths.contains(path) { break; }
+                path = path.rsplit_once('/').map_or("", |(parent, _)| parent);
+                if path.is_empty() { break; }
+            }
+            if path.is_empty() { continue; }
+        }
+        entry.path(&index).hash(&mut hash);
+        entry.id.hash(&mut hash);
+        entry.mode.bits().hash(&mut hash);
+        entry.stage().hash(&mut hash);
+        entry.flags.contains(gix::index::entry::Flags::INTENT_TO_ADD).hash(&mut hash);
+    }
+    Ok(CommitIntent { head, index: format!("{:016x}", hash.finish()) })
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -157,10 +202,11 @@ fn status_patterns(path: &Path, fakeignore: bool, patterns: Vec<gix::bstr::BStri
     let path = path.as_ref();
     let repo = open_repo(path)?;
     let worktree = repo.workdir().unwrap_or(path).to_path_buf();
-    let branch = repo
-        .head()?
+    let head = repo.head()?;
+    let branch = head
         .referent_name()
         .map(|name| name.shorten().to_string());
+    let commit_intent = index_intent(&repo, head.id().map(|id| id.to_string()), None)?;
 
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
@@ -187,6 +233,7 @@ fn status_patterns(path: &Path, fakeignore: bool, patterns: Vec<gix::bstr::BStri
         revision: 0,
         path: worktree.display().to_string(),
         branch,
+        commit_intent,
         staged,
         unstaged,
     })

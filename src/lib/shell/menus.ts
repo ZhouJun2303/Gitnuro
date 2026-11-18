@@ -194,8 +194,7 @@ export function appearanceItems(shell: ShellState) {
     const systemTheme = resolveAppearance("system", window.matchMedia("(prefers-color-scheme: dark)").matches);
     const systemLabel = shell.tr(systemTheme === "dark" ? "dialog.dark" : "dialog.light");
     const pick = (value: string) => () => {
-      shell.settings.theme = value;
-      void shell.savePrefs(false);
+      shell.changeAppearance(value);
     };
     return [
       { label: `${mark("system")}${shell.tr("dialog.followSystem")}`, shortcut: systemLabel, run: pick("system") },

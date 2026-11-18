@@ -159,7 +159,7 @@ fn access_reason(reason: &str) -> bool {
 
 #[cfg(windows)]
 fn holders(path: &Path) -> Vec<String> {
-    windows_rm::holders(path)
+    windows_rm::holders(path).unwrap_or_default()
 }
 
 #[cfg(not(windows))]
@@ -211,52 +211,49 @@ mod windows_rm {
         fn RmEndSession(handle: u32) -> u32;
     }
 
-    pub(super) fn holders(path: &Path) -> Vec<String> {
+    struct Session(u32);
+    impl Drop for Session {
+        fn drop(&mut self) { unsafe { RmEndSession(self.0) }; }
+    }
+
+    pub(super) fn holders(path: &Path) -> Result<Vec<String>, (&'static str, u32)> {
+        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-        // CCH_RM_SESSION_KEY is 32 characters, plus the terminator.
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|elapsed| elapsed.as_nanos())
-            .unwrap_or(0);
-        let mut key: Vec<u16> = format!("{nanos:032x}").encode_utf16().collect();
-        key.push(0);
+        // Restart Manager writes a 32-character key and its terminator.
+        let mut key = [0u16; 33];
         let mut handle = 0u32;
-        if unsafe { RmStartSession(&mut handle, 0, key.as_mut_ptr()) } != 0 {
-            return Vec::new();
-        }
-        let mut apps = Vec::new();
+        let started = unsafe { RmStartSession(&mut handle, 0, key.as_mut_ptr()) };
+        if started != 0 { return Err(("RmStartSession", started)); }
+        let _session = Session(handle);
         let files = [wide.as_ptr()];
         let registered = unsafe {
             RmRegisterResources(handle, 1, files.as_ptr(), 0, std::ptr::null(), 0, std::ptr::null())
         };
-        if registered == 0 {
+        if registered != 0 { return Err(("RmRegisterResources", registered)); }
+        let mut infos = Vec::<ProcessInfo>::new();
+        // A new process can open the file between the probe and the fetch.
+        for _ in 0..4 {
             let mut needed = 0u32;
-            let mut count = 0u32;
+            let mut count = infos.len() as u32;
             let mut reasons = 0u32;
-            let mut result = unsafe {
-                RmGetList(handle, &mut needed, &mut count, std::ptr::null_mut(), &mut reasons)
+            let result = unsafe {
+                RmGetList(handle, &mut needed, &mut count,
+                    if infos.is_empty() { std::ptr::null_mut() } else { infos.as_mut_ptr() }, &mut reasons)
             };
-            if (result == 0 || result == ERROR_MORE_DATA) && needed > 0 {
-                let mut infos: Vec<ProcessInfo> = (0..needed).map(|_| unsafe { std::mem::zeroed() }).collect();
-                count = needed;
-                result = unsafe { RmGetList(handle, &mut needed, &mut count, infos.as_mut_ptr(), &mut reasons) };
-                if result == 0 {
-                    for info in infos.iter().take(count as usize) {
-                        let pid = info.process.process_id;
-                        if pid == 0 {
-                            continue;
-                        }
-                        let name = wide_text(&info.app_name);
-                        let label = if name.is_empty() { format!("process {pid}") } else { format!("{name} (PID {pid})") };
-                        if !apps.contains(&label) {
-                            apps.push(label);
-                        }
-                    }
+            if result == 0 {
+                let mut apps = Vec::new();
+                for info in infos.iter().take(count as usize).filter(|info| info.process.process_id != 0) {
+                    let pid = info.process.process_id;
+                    let name = wide_text(&info.app_name);
+                    let label = if name.is_empty() { format!("PID {pid}") } else { format!("{name} (PID {pid})") };
+                    if !apps.contains(&label) { apps.push(label); }
                 }
+                return Ok(apps);
             }
+            if result != ERROR_MORE_DATA || needed <= count { return Err(("RmGetList", result)); }
+            infos.resize_with(needed as usize, || unsafe { std::mem::zeroed() });
         }
-        unsafe { RmEndSession(handle) };
-        apps
+        Err(("RmGetList", ERROR_MORE_DATA))
     }
 
     fn wide_text(buffer: &[u16]) -> String {
@@ -384,10 +381,11 @@ mod tests {
         git(&["update-index", "--refresh"]);
 
         let lock = test_lock::FileLock::exclusive(&repo.join("held.txt"));
+        let attribution = windows_rm::holders(&repo.join("held.txt"));
         for args in [&["merge", "--ff-only", "other"][..], &["checkout", "other"][..]] {
             let message = crate::cli::run(&repo, args).unwrap_err().to_string();
             assert!(message.contains("File: held.txt"), "{message}");
-            assert!(message.contains("Cause: File is in use (locked by another process)."), "{message}");
+            assert!(message.contains("Cause: File is in use (locked by another process)."), "{message}\nRestart Manager: {attribution:?}");
             assert!(message.contains(&format!("PID {}", std::process::id())), "{message}");
             assert!(message.contains("Task Manager > Details"), "{message}");
             assert!(message.contains("unable to unlink"), "{message}");

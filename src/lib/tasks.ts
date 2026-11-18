@@ -7,6 +7,7 @@ export type OperationTask = {
   revision: number; queuedMs: number; executeMs: number; verifyMs: number;
   kind?: "repository" | "service"; cancelCommand?: string;
   preview?: Record<string, string>; phase?: string; percent?: number;
+  sequence?: number; targetCount?: number;
   refreshScope?: "status" | "full";
 };
 const independentCommands = new Set(["suggest_commit_message", "review_branch", "test_ai_endpoint", "list_ai_models", "sync_accounts", "test_account", "browser_login", "generate_ssh_key", "create_github_repo", "create_hosted_repo", "download_font", "download_google_font", "recognize_google_font", "check_for_update", "download_update", "scan_repositories", "repository_inspection", "launch_tool", "create_revision_copy", "remove_revision_copy", "save_revision", "external_tools", "editor_tools", "remote_matches", "forge_notifications", "forge_pulls"]);
@@ -19,20 +20,51 @@ const lastWrites = new Map<string, string>();
 const localTasks = new Set<string>();
 const clientId = `client-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 export const ownsTask = (id: string) => localTasks.has(id);
+export const taskRecord = (id: string) => records.get(id);
 export const taskDone = (task: OperationTask) => ["completed", "conflict", "failed", "cancelled", "blocked"].includes(task.state);
 export const taskRefsPending = (task: OperationTask, revision: number) => task.kind !== "service"
   && (!taskDone(task) || (task.state === "completed" && task.refreshScope !== "status" && task.revision > revision));
 
-export function acceptTask(task: OperationTask) {
+const order: Record<TaskState, number> = { queued: 0, running: 1, verifying: 2, cancelling: 3, completed: 4, conflict: 4, failed: 4, cancelled: 4, blocked: 4 };
+
+function publish() {
+  const all = [...records.values()];
+  for (const listener of listeners) listener(all);
+}
+
+export function clearRemoteTasks() {
+  for (const id of records.keys()) if (!localTasks.has(id)) records.delete(id);
+  publish();
+}
+
+export function acceptTask(task: OperationTask, native = true, notify = true) {
   const previous = records.get(task.id);
-  if (previous && taskDone(previous) && !taskDone(task)) return;
-  records.set(task.id, { ...previous, ...task });
+  if (previous) {
+    if (taskDone(previous) && !taskDone(task)) return false;
+    if (native && task.sequence != null && previous.sequence != null && task.sequence <= previous.sequence) return false;
+    if (task.sequence == null && (order[task.state] < order[previous.state]
+        || (task.state === previous.state && (task.percent ?? 0) < (previous.percent ?? 0)))) return false;
+  }
+  const merged = { ...previous, ...task };
+  // Keep exact paths for this window's optimistic writes while they are active.
+  if (!taskDone(merged) && previous && localTasks.has(task.id) && previous.targets.length > task.targets.length) merged.targets = previous.targets;
+  if (taskDone(merged) && merged.targets.length > 16) {
+    merged.targetCount = merged.targets.length;
+    merged.targets = merged.targets.slice(0, 16);
+  }
+  records.set(task.id, merged);
   if (records.size > 256) for (const [id, entry] of records) {
     if (records.size <= 200) break;
     if (taskDone(entry)) { records.delete(id); localTasks.delete(id); }
   }
-  const all = [...records.values()];
-  for (const listener of listeners) listener(all);
+  if (notify) publish();
+  return true;
+}
+
+export function acceptTasks(tasks: readonly OperationTask[]) {
+  const changed = tasks.filter((task) => acceptTask(task, true, false));
+  if (changed.length) publish();
+  return changed;
 }
 
 export function subscribeTasks(listener: (tasks: OperationTask[]) => void) {
@@ -43,7 +75,7 @@ export function subscribeTasks(listener: (tasks: OperationTask[]) => void) {
 export function pendingFor(path: string, file?: string) {
   const repo = repositoryKey(path);
   return [...records.values()].filter((task) => !taskDone(task) && repositoryKey(task.path) === repo
-    && (!file || task.targets.length === 0 || task.targets.some((target) => target === file || file.startsWith(`${target}/`))));
+    && (!file || task.targets.length === 0 || (task.targetCount ?? 0) > task.targets.length || task.targets.some((target) => target === file || file.startsWith(`${target}/`))));
 }
 
 /** Freeze a task's identity and inputs before the first asynchronous boundary. */
@@ -60,8 +92,8 @@ export async function runTask<T>(command: string, args: Record<string, unknown>,
   const key = repositoryKey(path);
   const prior = lastWrites.get(key);
   const previous = prior ? records.get(prior) : undefined;
-  const recovery = ["resolve", "resolvePaths", "abort", "continue", "skip"].includes(action);
-  const dependsOn = Array.isArray(args.__dependsOn) ? [...args.__dependsOn] as string[] : write && !recovery && previous && !taskDone(previous) ? [previous.id] : [];
+  const after = write && previous && !taskDone(previous) ? previous.id : undefined;
+  const dependsOn = Array.isArray(args.__dependsOn) ? [...args.__dependsOn] as string[] : [];
   const task: OperationTask = { id, path, action, label: String(args.__taskLabel ?? ""), targets: requestTargets(args), state: "queued", dependsOn,
     revision: 0, queuedMs: 0, executeMs: 0, verifyMs: 0 };
   task.kind = write ? "repository" : "service";
@@ -73,16 +105,16 @@ export async function runTask<T>(command: string, args: Record<string, unknown>,
   acceptTask(task);
   const started = performance.now();
   try {
-    const value = await execute({ ...args, __task: id, __client: clientId, __dependsOn: dependsOn });
+    const value = await execute({ ...args, __task: id, __client: clientId, __after: after, __dependsOn: dependsOn });
     const report = value as { outcome?: TaskState; refreshScope?: "status" | "full" } | null;
     const outcome = report?.outcome ?? "completed";
     const current = records.get(id) ?? task;
     acceptTask({ ...current, state: taskDone(current) ? current.state : outcome,
-      ...(report?.refreshScope ? { refreshScope: report.refreshScope } : {}), executeMs: current.executeMs || performance.now() - started });
+      ...(report?.refreshScope ? { refreshScope: report.refreshScope } : {}), executeMs: current.executeMs || performance.now() - started }, false);
     return value;
   } catch (error) {
     const current = records.get(id) ?? task;
-    acceptTask({ ...current, state: taskDone(current) ? current.state : /cancelled/i.test(String(error)) ? "cancelled" : "failed", executeMs: current.executeMs || performance.now() - started });
+    acceptTask({ ...current, state: taskDone(current) ? current.state : String(error).includes("awegit:cancelled:") ? "cancelled" : "failed", executeMs: current.executeMs || performance.now() - started }, false);
     throw error;
   }
 }

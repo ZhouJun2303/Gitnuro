@@ -269,7 +269,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         return super::tasks::run(&id, || super::tasks::execute(command, args), |value| super::tasks::outcome(command, args, value));
     }
     match command {
-        "operation_tasks" => Ok(json!(super::operation_tasks())),
+        "operation_tasks" => Ok(json!(super::operation_tasks(req(args, "after")?, req(args, "session")?))),
         "cancel_task" => done_result(super::cancel_task(req(args, "id")?)),
         "lab_layout" => layout(),
         "lab_restore" => done_result(restore_repo(req(args, "name")?)),

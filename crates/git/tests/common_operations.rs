@@ -198,6 +198,7 @@ fn push_ref_disambiguates_branch_and_tag_names_on_both_sides() {
         Mutation::PushRef {
             remote: "origin".into(),
             branch: "main".into(),
+            source_commit: None,
             remote_branch: "published".into(),
             set_upstream: true,
             tags: false,

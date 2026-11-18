@@ -14,7 +14,7 @@ import { applyFont, loadFont, useDownloadedFont, type FontStatus, type FontOptio
 import { fileAccessReport } from "../fileAccess";
 import { resolveLocale, translate } from "../i18n";
 import { broadcastLocale, onLocaleChange } from "../i18n/sync";
-import { isAppearance, onAppearanceChange, resolveAppearance, type Appearance } from "../appearance";
+import { confirmAppearance, isAppearance, onAppearanceChange, pendingAppearance, rememberAppearance, resolveAppearance, type Appearance } from "../appearance";
 import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
 import { configureShortcuts, shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
@@ -56,7 +56,7 @@ import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuIte
 import { STATUS_NOTICE_ENTRY } from "./types";
 import { statusPathBefore } from "../status";
 import { enqueueStage, projectStages, stageActions, type StageChange } from "./staging";
-import { areasFor, patchActions, type RefreshArea } from "../operation-policy";
+import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../operation-policy";
 import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
 import { watchOperationTasks } from "./task-monitor";
 import { invalidateReads } from "../read-scheduler";
@@ -188,7 +188,8 @@ function fullyPickedDirs(files: readonly Row[], picked: readonly string[]) {
 function sameSnapshot(left: StatusSnapshot | null, right: StatusSnapshot | null): boolean {
   if (left === right) return true;
   if (!left || !right) return false;
-  return left.path === right.path && left.branch === right.branch && sameStatusFiles(left.staged, right.staged) && sameStatusFiles(left.unstaged, right.unstaged);
+  return left.path === right.path && left.branch === right.branch && left.commitIntent?.head === right.commitIntent?.head
+    && left.commitIntent?.index === right.commitIntent?.index && sameStatusFiles(left.staged, right.staged) && sameStatusFiles(left.unstaged, right.unstaged);
 }
 
 function sameValue(left: unknown, right: unknown): boolean {
@@ -489,6 +490,7 @@ export class ShellState {
   watchRevision = 0;
   watchPaths: string[] | null = null;
   statusRevision = 0;
+  statusObservedRevision = 0;
   contextRevision = $state(0);
 
 
@@ -1517,6 +1519,8 @@ export class ShellState {
 
 
   pendingStages = $state.raw<StageChange[]>([]);
+  stageStatusUnverified = $state(false);
+  repoStagePending = $derived(this.pendingStages.some((stage) => stage.repo === this.jobKey(this.repoPath())));
   stageView = $derived(projectStages(this.snapshot, this.pendingStages));
   pendingStageActions = $derived(stageActions(this.pendingStages, this.snapshot?.path ?? ""));
 
@@ -1575,7 +1579,7 @@ export class ShellState {
 
 
   jobKey(path: string | null | undefined) {
-    return (path ?? "").replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "").replaceAll("\\", "/").toLowerCase();
+    return repositoryKey(path ?? "");
   }
 
 
@@ -1614,7 +1618,7 @@ export class ShellState {
     for (const task of this.operationTasks) {
       if (task.kind === "service" || taskDone(task) || this.jobKey(task.path) !== this.jobKey(this.repoPath())) continue;
       if (!areasFor(task.action).some((area) => area === "worktree" || area === "index")) continue;
-      if (!task.targets.length || ["checkout", "checkoutRemote", "pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "reset", "abort", "continue", "skip", "stash", "stashPop", "stashApply", "stashBranch", "gitFlowStart", "gitFlowFinish", "custom", "lfsPull"].includes(task.action)) all = true;
+      if (!task.targets.length || (task.targetCount ?? 0) > task.targets.length || ["checkout", "checkoutRemote", "pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "reset", "abort", "continue", "skip", "stash", "stashPop", "stashApply", "stashBranch", "gitFlowStart", "gitFlowFinish", "custom", "lfsPull"].includes(task.action)) all = true;
       for (const target of task.targets) {
         let parent = target.replaceAll("\\", "/");
         targets.add(parent);
@@ -1883,7 +1887,7 @@ export class ShellState {
     if (this.writeBlocked) return this.tr(this.switching ? "chrome.commitWait" : "chrome.commitNeedRepository");
     if (this.commitMessageError) return this.commitMessageError;
     if (this.commitPending) return this.tr("chrome.commitWait");
-    if (this.pendingStages.length > 0) return this.tr("chrome.commitWaitForStage");
+    if (this.repoStagePending || this.stageStatusUnverified) return this.tr("chrome.commitWaitForStage");
     if (this.conflicted) return this.tr("chrome.commitResolveConflicts");
     if (this.progress) return this.tr("chrome.finishFlowFirst");
     if (this.staged.length === 0 && !this.amend) return this.tr("chrome.commitNeedStaged");
@@ -1893,7 +1897,7 @@ export class ShellState {
   continueBlockReason = $derived.by(() => {
     if (this.writeBlocked) return this.tr(this.switching ? "chrome.commitWait" : "chrome.commitNeedRepository");
     if (this.flowPending || this.commitPending) return this.tr("chrome.commitWait");
-    if (this.pendingStages.length > 0) return this.tr("chrome.commitWaitForStage");
+    if (this.repoStagePending || this.stageStatusUnverified) return this.tr("chrome.commitWaitForStage");
     if (this.conflicted) return this.tr("chrome.commitResolveConflicts");
     return "";
   });
@@ -2967,6 +2971,7 @@ export class ShellState {
       }
       const runtime = await invoke<GitRuntime>("git_runtime").catch(() => null);
       if (runtime) this.gitRuntime = runtime;
+      if (!isAppearance(params.get("theme"))) this.restoreAppearance(settings.theme);
       await applyLabScene(this, item);
       if (params.get("locale") === "en") this.settings.locale = "en";
       this.labSceneId = item.id;
@@ -3113,7 +3118,13 @@ export class ShellState {
 
 
   applySnapshot(value: StatusSnapshot) {
-    if (!value.statusPaths && this.viewing(value.path) && (value.revision ?? 0) > 0 && (value.revision ?? 0) < this.statusRevision) return;
+    const revision = value.revision ?? 0;
+    const partialUpdate = !!value.statusPaths;
+    if (this.viewing(value.path) && value.revision != null && revision < Math.max(this.statusRevision, this.statusObservedRevision)) {
+      // A late delta can cover an unrelated path; reconcile without rolling the list backward.
+      this.scheduleStageRefresh();
+      return;
+    }
     if (value.statusPaths) {
       // A path-limited read cannot claim to cover external changes elsewhere.
       if (!this.snapshot || this.snapshot.path !== value.path) return;
@@ -3124,7 +3135,7 @@ export class ShellState {
         touched.add(file.path.replaceAll("\\", "/"));
         if (file.previousPath) touched.add(file.previousPath.replaceAll("\\", "/"));
       }
-      value = { ...partial, revision: this.statusRevision,
+      value = { ...partial, revision: this.statusRevision, commitIntent: this.snapshot.commitIntent,
         staged: mergeStatusFiles(this.snapshot.staged, value.staged, scopes, touched),
         unstaged: mergeStatusFiles(this.snapshot.unstaged, value.unstaged, scopes, touched),
       };
@@ -3135,10 +3146,13 @@ export class ShellState {
     }
     if (this.snapshot?.path !== value.path) {
       this.contextRevision = 0;
+      this.statusObservedRevision = 0;
       this.watchQueued = null;
       this.watchRevision = 0;
     }
-    this.statusRevision = value.revision ?? 0;
+    if (!partialUpdate) this.statusRevision = revision;
+    this.stageStatusUnverified = partialUpdate;
+    if (revision > 0) this.statusObservedRevision = revision;
     this.statusGen += 1;
     if (!sameSnapshot(this.snapshot, value)) {
       const previous = this.snapshot?.path === value.path ? this.snapshot : null;
@@ -3244,7 +3258,7 @@ export class ShellState {
   async refresh(scope: "status" | "full" = "full", silent = false, paths: string[] | null = null) {
     const path = this.repoPath();
     if (!this.backend() || !path) return;
-    if (this.writing || this.pendingStages.length > 0 || this.backgroundFetch.has(this.jobKey(path))) {
+    if (this.writing || this.repoStagePending || this.backgroundFetch.has(this.jobKey(path))) {
       this.queueWatch(scope, 0, paths); return;
     }
     if (this.refreshing) {
@@ -3327,11 +3341,15 @@ export class ShellState {
     } catch (error) {
       if (described) this.recordCommand("stagePaths", described, this.message(error), false, "user");
       if (allowReads && this.viewing(path)) this.scheduleStageRefresh();
-      if (openGen === this.openGen && this.viewing(path)) this.actionError = this.message(error);
+      if (openGen === this.openGen && this.viewing(path)) {
+        this.actionError = this.message(error);
+        if (command === "commit_changes") this.queueWatch("full", 0);
+      }
       return null;
     } finally {
       this.stopWork(path);
       if (refreshDiff && this.viewing(path)) void this.loadDiff();
+      if (this.viewing(path)) this.replayWatch();
     }
   }
 
@@ -3774,8 +3792,7 @@ export class ShellState {
             else refreshStageDiff = areasFor(action).some((area) => area === "worktree" || area === "index");
           }
         }
-        // Any write made while other paths stay unmerged reports "conflict" even when it
-        // succeeded; only a Git error from this action failed it.
+        // Only a Git error from this action fails it.
         if (value.outcome === "failed" || (value.outcome === "conflict" && value.error)) throw new Error(value.error || value.log || "Git conflict");
         if (followSubmodules) {
           const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } }, undefined, operation);
@@ -5227,7 +5244,7 @@ export class ShellState {
 
 
 
-  repositoryViews = new Map<string, Pick<ShellState, "snapshot" | "refs" | "commitsLive" | "progress" | "selectedPath" | "selectedSide" | "selectedCommit" | "commitDetail" | "commitFiles" | "historyFile" | "historyFilter" | "sideTop" | "historyTop" | "fileTop" | "stagedTop" | "combinedTop" | "commitScrollTop" | "commitListTop" | "diffTop" | "historyDiffTop" | "selectedIndex" | "statusRevision" | "contextRevision">>();
+  repositoryViews = new Map<string, Pick<ShellState, "snapshot" | "refs" | "commitsLive" | "progress" | "selectedPath" | "selectedSide" | "selectedCommit" | "commitDetail" | "commitFiles" | "historyFile" | "historyFilter" | "sideTop" | "historyTop" | "fileTop" | "stagedTop" | "combinedTop" | "commitScrollTop" | "commitListTop" | "diffTop" | "historyDiffTop" | "selectedIndex" | "statusRevision" | "statusObservedRevision" | "stageStatusUnverified" | "contextRevision">>();
 
   rememberRepositoryView() {
     if (!this.snapshot || this.mode !== "live") return;
@@ -5239,7 +5256,7 @@ export class ShellState {
       commitDetail: this.commitDetail, commitFiles: this.commitFiles, historyFile: this.historyFile, historyFilter: this.historyFilter,
       sideTop: this.sideTop, historyTop: this.historyTop, fileTop: this.fileTop, stagedTop: this.stagedTop, combinedTop: this.combinedTop,
       commitScrollTop: this.commitScrollTop, commitListTop: this.commitListTop, diffTop: this.diffTop, historyDiffTop: this.historyDiffTop,
-      selectedIndex: this.selectedIndex, statusRevision: this.statusRevision, contextRevision: this.contextRevision,
+      selectedIndex: this.selectedIndex, statusRevision: this.statusRevision, statusObservedRevision: this.statusObservedRevision, stageStatusUnverified: this.stageStatusUnverified, contextRevision: this.contextRevision,
     });
     let rows = [...this.repositoryViews.values()].reduce((sum, view) => sum + view.commitsLive.length + (view.snapshot?.staged.length ?? 0) + (view.snapshot?.unstaged.length ?? 0), 0);
     while (this.repositoryViews.size > 8 || (rows > 100_000 && this.repositoryViews.size > 1)) {
@@ -5276,7 +5293,7 @@ export class ShellState {
       else {
         this.snapshot = null; this.refs = null; this.commitsLive = []; this.mode = "loading";
         this.selectedPath = null; this.selectedCommit = null; this.commitDetail = null; this.commitFiles = [];
-        this.progress = null; this.statusRevision = 0; this.contextRevision = 0;
+        this.progress = null; this.statusRevision = 0; this.statusObservedRevision = 0; this.stageStatusUnverified = false; this.contextRevision = 0;
       }
       this.diff = null; this.diffError = null; this.conflictView = null; this.historyDiff = null;
       this.preview = null; this.imageOld = null; this.imageNew = null; this.blameLines = null;
@@ -5394,6 +5411,25 @@ export class ShellState {
 
   async savePrefs(close = true) {
     return savePrefs(this, close);
+  }
+
+  changeAppearance(theme: string) {
+    if (!isAppearance(theme) && theme !== "system") return;
+    this.settings.theme = theme;
+    if (this.backend()) rememberAppearance(theme);
+    void savePrefs(this, false, true);
+  }
+
+  restoreAppearance(saved: string) {
+    const pending = pendingAppearance();
+    if (!pending) return;
+    if (pending === saved) confirmAppearance(saved);
+    else {
+      this.settings.theme = pending;
+      // Lab URL overrides are presentation-only and are not the saved baseline.
+      if (this.prefsBaseline) this.prefsBaseline = { ...this.prefsBaseline, theme: saved };
+      void savePrefs(this, false, true);
+    }
   }
 
   switchLanguage() {
@@ -7355,7 +7391,10 @@ export class ShellState {
     };
     const onShortcut = this.onShortcut.bind(this);
     const stopLocale = onLocaleChange((locale) => { this.settings.locale = locale; });
-    const stopAppearance = onAppearanceChange((theme) => { this.settings.theme = theme; });
+    const stopAppearance = onAppearanceChange((theme) => {
+      if (this.prefsBaseline) this.prefsBaseline = { ...this.prefsBaseline, theme };
+      if (!pendingAppearance()) this.settings.theme = theme;
+    });
     const onRememberPointer = this.rememberPointer.bind(this);
     window.addEventListener("keydown", onShortcut);
     window.addEventListener("mousedown", onMouseNav);
@@ -7422,6 +7461,7 @@ export class ShellState {
     const value = await invoke<Settings>("load_settings");
     if (stopped) return;
     this.adoptSettings(value);
+    this.restoreAppearance(value.theme);
     introduce = this.takeFeaturesIntro();
     if (introduce) void this.savePrefs(false);
     void invoke<string>("settings_path").then((path) => (this.settingsPath = path)).catch(() => {});

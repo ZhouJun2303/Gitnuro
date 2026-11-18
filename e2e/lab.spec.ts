@@ -249,7 +249,7 @@ test("a paused rebase turns the composer into continue", async ({ page }) => {
   await openLabScene(page, "rebase-progress", '.identity-floor[data-layer="progress"]');
   const button = page.locator(".composer button.commit");
   await expect(button).toContainText(/Continue Rebase|继续变基/);
-  await expect(page.locator(".composer .convention-hint")).toContainText(/continue here|点这里继续/);
+  await expect(page.locator(".composer .convention-hint")).toContainText(/operation is paused|当前操作已暂停/);
   await expect(page.locator('.tool-btn[title="Pull"], .tool-btn[title="拉取"]')).toBeDisabled();
   await button.click();
   const dialog = page.locator('[data-dialog="continue"]');
@@ -850,7 +850,10 @@ test("remote-only commits stay dimmed and regular", async ({ page }) => {
 
 test("tags render as chips after branch refs and before the subject", async ({ page }) => {
   await openLabScene(page, "history", ".history .commit-row");
-  await page.locator('.sidebar button[title="v2.0.0"]').click();
+  const tag = page.locator('.sidebar button[title="v2.0.0"]');
+  const more = page.getByRole("button", { name: /show more tags|显示更多标签/i });
+  while (!(await tag.isVisible()) && await more.isVisible()) await more.click();
+  await tag.click();
   const row = page.locator(".history .commit-row").filter({ has: page.locator(".ref.tag") }).first();
   await expect(row.locator(".ref.tag .ref-icon").first()).toBeVisible();
   const layout = await row.evaluate((node) => {

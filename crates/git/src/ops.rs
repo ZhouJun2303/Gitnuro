@@ -297,6 +297,8 @@ pub enum Mutation {
         remote: String,
         branch: String,
         #[serde(default)]
+        source_commit: Option<String>,
+        #[serde(default)]
         force_with_lease: bool,
         #[serde(default)]
         force: bool,
@@ -1051,6 +1053,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         Mutation::PushRef {
             remote,
             branch,
+            source_commit,
             force_with_lease,
             force,
             remote_branch,
@@ -1061,6 +1064,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             PushRefOptions {
                 remote: &remote,
                 branch: &branch,
+                source_commit: source_commit.as_deref(),
                 remote_branch: &remote_branch,
                 force_with_lease,
                 force,
@@ -2967,11 +2971,28 @@ fn checkout_remote(repo: &Path, remote: &str, branch: &str) -> Result<(), Error>
 struct PushRefOptions<'a> {
     remote: &'a str,
     branch: &'a str,
+    source_commit: Option<&'a str>,
     remote_branch: &'a str,
     force_with_lease: bool,
     force: bool,
     set_upstream: bool,
     tags: bool,
+}
+
+/// The confirmed branch, not a potentially stale UI refs snapshot, owns this route.
+pub fn push_commit_target(path: &Path, branch: &str) -> Result<(String, String, bool), Error> {
+    let repo = crate::open_repo(path)?;
+    let config = repo.config_snapshot();
+    let stored = config.string(format!("branch.{branch}.remote")).map(|value| value.to_string());
+    let merge = config.string(format!("branch.{branch}.merge")).map(|value| value.to_string());
+    if let (Some(remote), Some(target)) = (stored.as_deref(), merge.as_deref().and_then(|value| value.strip_prefix("refs/heads/"))) {
+        if remote != "." { return Ok((remote.into(), target.into(), false)); }
+    }
+    let remotes = crate::cli::remote_list(path);
+    let remote = stored.filter(|remote| remotes.iter().any(|(name, _)| name == remote))
+        .or_else(|| remotes.iter().find(|(name, _)| name == "origin").or(remotes.first()).map(|(name, _)| name.clone()))
+        .ok_or_else(|| Error::Git("No configured remote for this branch. / 当前分支没有可用的远程仓库。".into()))?;
+    Ok((remote, branch.into(), true))
 }
 
 fn push_ref(repo: &Path, options: PushRefOptions<'_>) -> Result<(), Error> {
@@ -2984,9 +3005,14 @@ fn push_ref(repo: &Path, options: PushRefOptions<'_>) -> Result<(), Error> {
         check_name(remote_branch)?
     };
     // The branch selector must keep working when a tag has the same name.
-    let spec = format!("refs/heads/{branch}:refs/heads/{target}");
+    let source = match options.source_commit {
+        Some(id) if matches!(id.len(), 40 | 64) && id.bytes().all(|byte| byte.is_ascii_hexdigit()) => id.to_string(),
+        Some(id) => return Err(Error::Rev(id.into())),
+        None => format!("refs/heads/{branch}"),
+    };
+    let spec = format!("{source}:refs/heads/{target}");
     let mut args = vec!["push"];
-    if options.set_upstream {
+    if options.set_upstream && options.source_commit.is_none() {
         args.push("--set-upstream");
     }
     if options.tags {
@@ -3000,7 +3026,13 @@ fn push_ref(repo: &Path, options: PushRefOptions<'_>) -> Result<(), Error> {
     }
     args.push(remote);
     args.push(&spec);
-    surface(run(repo, &args).map(|_| ()))
+    surface(run(repo, &args).map(|_| ()))?;
+    if options.set_upstream && options.source_commit.is_some() {
+        // Git cannot infer the local branch when the refspec uses an object ID.
+        config_local(repo, &format!("branch.{branch}.remote"), remote)?;
+        config_local(repo, &format!("branch.{branch}.merge"), &format!("refs/heads/{target}"))?;
+    }
+    Ok(())
 }
 
 fn pull_ref(repo: &Path, remote: &str, branch: &str, rebase: bool) -> Result<(), Error> {

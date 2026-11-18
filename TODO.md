@@ -4,11 +4,17 @@
 
 ## 待处理
 
-- [ ] Windows 占用进程识别需在允许 Restart Manager 查询的环境复验：`locks::tests::writes_name_the_process_and_explain_how_to_release_the_file` 在当前沙箱未取得占用进程，提升权限复跑两次被自动审批拒绝；不修改断言掩盖失败。其余全量结果及权限边界见 [本轮回归记录](dev-docs/ui-audit.md#2026-11-17-并行任务结束后的全量回归对照-0d6a85f0-及当时工作区)。
+- [ ] Windows 占用进程识别需在允许 Restart Manager 查询的环境复验：`locks::tests::writes_name_the_process_and_explain_how_to_release_the_file` 中 `RmStartSession` 返回 29（系统无法写入指定设备），未进入 PID 查询。保留 PID 断言；真实获取进程列表后，已处理列表在两次调用间增长的情况。
 
 - [ ] 发布后的真实性能观测：用新的关联计时核对安装包从点击到刷新完成的等待、实际远端网络长尾和系统峰值内存。当前 release 基准为独立本地种子，不能宣称历史 TLS 失败已消失或得到完整桌面提速比例，见 [性能计划第 8、10 节](dev-docs/performance-plan.md)。
 
 ## 已处理
+
+- [x] 操作队列按仓库保序，普通写入不因上一任务失败而被阻塞；提交、提交后推送及放弃/删除文件核对原意图，取消已推进 HEAD 的提交不提示盲目重试。随本条提交 `fix: 修复 Git 操作队列与状态竞态`。回归 `queued_discard_preserves_later_disk_and_index_changes`、`queued_commit_does_not_include_paths_staged_after_confirmation`、`dependent_push_uses_the_confirmed_commit_and_rejects_a_moved_head`、`cancelling_a_commit_from_a_subdirectory_reports_existing_head`。
+
+- [x] 局部暂存结果拒绝旧修订，任务轮询只取变化，单任务最多回传 16 个目标样本；读槽按仓库隔离。浏览器试验台 1 万行、24 个待处理意图的列表投影 p95 从审计基线 128.6 ms 降到 4.4 ms（各 20 次；不含 Git 和渲染）。同上提交。回归 `stage_verification_is_scoped_and_does_not_fail_for_unrelated_conflicts`、`task_deltas_bound_targets_and_omit_unchanged_entries`、`operation-scheduler.spec.ts`、`stage-performance.spec.ts`。
+
+- [x] 主题立即选择后重载仍保留，普通设置保存不覆盖主题；延迟到达的冲突内容不覆盖手写草稿。忽略本地 `.pnpm-store/`。同上提交。回归 `three independent themes default to Apple and the selection survives reload`、`a late conflict read does not overwrite a draft typed while loading`、`a paused rebase turns the composer into continue`。
 
 - [x] Windows 项目终端通过系统 `cmd.exe` 在所选项目目录启动 Grok。随本条提交 `fix: 修复 Windows 项目终端启动 Grok`。回归 `windows_terminal_cli_runs_batch_shims_in_the_project_directory` 覆盖特殊字符路径、独立控制台和启动后立即返回。本机 `grok.cmd`、`grok.exe` 均实测启动成功。
 

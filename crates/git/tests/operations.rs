@@ -210,6 +210,7 @@ fn push_ref_same_name_pushes_the_chosen_branch() {
         Mutation::PushRef {
             remote: "origin".into(),
             branch: "work".into(),
+            source_commit: None,
             force_with_lease: false,
             force: false,
             remote_branch: String::new(),

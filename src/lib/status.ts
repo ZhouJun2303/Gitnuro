@@ -13,6 +13,7 @@ export type StatusSnapshot = {
   revision?: number;
   path: string;
   branch: string | null;
+  commitIntent?: { head: string | null; index: string };
   staged: StatusFile[];
   unstaged: StatusFile[];
 };
