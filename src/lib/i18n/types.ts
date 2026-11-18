@@ -185,6 +185,7 @@ export type Messages = {
     continueCherryPick: string;
     continueRevert: string;
     flowHint: string;
+    cherryPickHint: string;
     skip: string;
     updateAvailable: string;
     checkUpdate: string;

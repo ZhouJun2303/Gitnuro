@@ -3904,6 +3904,9 @@ export class ShellState {
     if (!ops.has(action)) return false;
     if (this.conflictCount > 0) return true;
     const lower = text.toLowerCase();
+    // Git mentions "conflict resolution" when a pick becomes empty. That is
+    // guidance about a possible cause, not evidence of an unmerged index.
+    if (lower.includes("the previous cherry-pick is now empty")) return false;
     return /conflict|fix conflicts|merge failed|could not apply|needs merge|unmerged (paths|files)|merging is not possible|自动合并失败/.test(lower);
   }
 

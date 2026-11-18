@@ -261,7 +261,7 @@
           {#if shell.progress && shell.actionError}
             <p id="commit-feedback" class="convention-hint validation-error" role="alert">{shell.actionError}</p>
           {:else if shell.composerBlockReason || shell.progress}
-            <p id="commit-feedback" class="convention-hint" class:validation-error={!shell.progress && shell.summary.trim().length > 0 && !!shell.commitMessageError} role="status">{shell.composerBlockReason || shell.tr("chrome.flowHint")}</p>
+            <p id="commit-feedback" class="convention-hint" class:validation-error={!shell.progress && shell.summary.trim().length > 0 && !!shell.commitMessageError} role="status">{shell.composerBlockReason || shell.tr(shell.progress === "cherryPick" ? "chrome.cherryPickHint" : "chrome.flowHint")}</p>
           {/if}
           <textarea class="guided composer-desc flex-fill" class:guide-only={shell.descriptionIsGuide} placeholder={shell.tr("chrome.description")} aria-label={shell.tr("chrome.description")} bind:value={shell.description} spellcheck={shell.settings.spellChecking === "enable"}></textarea>
           <div class="composer-row">

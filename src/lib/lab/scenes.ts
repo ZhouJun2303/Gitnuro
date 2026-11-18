@@ -98,6 +98,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "changes", group: "主界面", title: "变更", repo: "full", ready: ".file-list" }),
   scene({ id: "commit-too-long", group: "主界面", title: "提交校验 · 标题超长", repo: "full", ready: ".composer .validation-error" }),
   scene({ id: "commit-no-staged", group: "主界面", title: "提交校验 · 没有暂存更改", repo: "even", ready: "#commit-feedback" }),
+  scene({ id: "cherry-pick-paused", group: "仓库状态", title: "拣选暂停 · 空提交与继续队列", repo: "even", ready: "#commit-feedback" }),
   scene({ id: "suggest-unconfigured", group: "主界面", title: "生成提交说明 · 未配置密钥", repo: "full", ready: ".suggest-message" }),
   scene({ id: "suggest-no-url", group: "主界面", title: "生成提交说明 · 未配置接口", repo: "full", ready: ".suggest-message" }),
   scene({ id: "suggest-disabled", group: "主界面", title: "生成提交说明 · 未启用 AI", repo: "full", ready: ".suggest-message" }),

@@ -1489,6 +1489,23 @@ pub fn in_progress(repo: &Path) -> Result<Option<InProgress>, Error> {
     if exists("REVERT_HEAD") {
         return Ok(Some(InProgress::Revert));
     }
+    // An external `git commit` clears *_HEAD but leaves the remaining queue.
+    // Keep Continue/Skip/Abort available until Git finishes the sequencer.
+    let todo_path = dir.join("sequencer/todo");
+    match std::fs::read_to_string(&todo_path) {
+        Ok(todo) => {
+            for line in todo.lines() {
+                match line.split_whitespace().next() {
+                    Some("pick") => return Ok(Some(InProgress::CherryPick)),
+                    Some("revert") => return Ok(Some(InProgress::Revert)),
+                    _ => {}
+                }
+            }
+            return Err(Error::Git("Git sequencer is still present, but its todo list has no supported operation".into()));
+        }
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound && !exists("sequencer") => {}
+        Err(source) => return Err(Error::Read { path: todo_path.display().to_string(), source }),
+    }
     Ok(None)
 }
 

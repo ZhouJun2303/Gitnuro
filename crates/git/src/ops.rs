@@ -574,8 +574,44 @@ fn cherry_pick(repo: &Path, rev: &str, revs: &[String], record: bool) -> Result<
         }
         args.extend(resolved.iter().map(String::as_str));
         // One sequencer retains remaining commits across conflicts/continue/skip.
-        with_editor_committer_only(repo, &args)
+        cherry_pick_dropping_empty(repo, &args)
     })
+}
+
+/// Git 2.38 has no `--empty=drop`. Only skip after Git explicitly reports an
+/// empty pick and both tracked trees are clean; other failures keep the queue.
+fn cherry_pick_dropping_empty(repo: &Path, args: &[&str]) -> Result<(), Error> {
+    let editor = SequenceEditor::noop_only()?;
+    let env = [
+        ("GIT_EDITOR", editor.editor.as_str()),
+        ("LC_ALL", "C"),
+        ("LANGUAGE", "C"),
+    ];
+    let mut result = run_env_committer_only(repo, args, &env).map(|_| ());
+    let mut previous = None;
+    loop {
+        let empty = matches!(&result, Err(Error::Git(detail))
+            if detail.contains("The previous cherry-pick is now empty"));
+        if !empty
+            || in_progress(repo)? != Some(InProgress::CherryPick)
+            || autostash::has_unmerged(repo)
+            || run(repo, &["diff", "--cached", "--quiet", "--no-ext-diff", "HEAD", "--"]).is_err()
+            || run(repo, &["diff", "--quiet", "--no-ext-diff", "--"]).is_err()
+        {
+            return result;
+        }
+        // A failed skip must not retry the same paused step forever. Include
+        // todo so an external queue may legitimately pick the same id twice.
+        let paused = (
+            rev_parse(repo, "CHERRY_PICK_HEAD")?,
+            std::fs::read(crate::flow::git_dir(repo)?.join("sequencer/todo")).ok(),
+        );
+        if previous.as_ref() == Some(&paused) {
+            return result;
+        }
+        previous = Some(paused);
+        result = run_env_committer_only(repo, &["cherry-pick", "--skip"], &env).map(|_| ());
+    }
 }
 
 /// Operations that can leave unmerged paths behind and have no stash of their own.
@@ -1854,7 +1890,9 @@ fn abort(repo: &Path) -> Result<(), Error> {
 }
 
 fn flow(repo: &Path, verb: &str) -> Result<(), Error> {
-    if verb == "continue" && in_progress(repo)? == Some(InProgress::Revert) {
+    if verb == "continue" && in_progress(repo)? == Some(InProgress::Revert)
+        && crate::model::revert_no_commit(repo).is_some()
+    {
         let source = rev_parse(repo, "REVERT_HEAD")?;
         if crate::model::revert_no_commit(repo).as_deref() == Some(source.as_str()) {
             if autostash::has_unmerged(repo) {
@@ -1880,6 +1918,9 @@ fn flow(repo: &Path, verb: &str) -> Result<(), Error> {
         None => return Err(Error::Git("nothing in progress".into())),
     };
     let flag = format!("--{verb}");
+    if command == "cherry-pick" && matches!(verb, "continue" | "skip") {
+        return cherry_pick_dropping_empty(repo, &[command, &flag]);
+    }
     with_editor_mode(repo, &[command, &flag], mode)
 }
 

@@ -182,6 +182,11 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.applySubject(`feat: ${id === "commit-too-long" ? "x".repeat(80) : "ready to commit"}`);
     return;
   }
+  if (id === "cherry-pick-paused") {
+    shell.section = "changes";
+    shell.progress = "cherryPick";
+    return;
+  }
   if (id.startsWith("suggest-")) {
     shell.section = "changes";
     shell.prefTab = "ai";
