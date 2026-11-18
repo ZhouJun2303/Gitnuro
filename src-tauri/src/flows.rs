@@ -332,13 +332,7 @@ impl Session {
         let task = crate::tasks::current_id();
         Arc::new(move |mut event| {
             if let Some(task) = &task {
-                let phase = match event.kind.as_str() {
-                    "stash-push" | "local-saved" => "saved",
-                    "local-restore" => "restore",
-                    "fetch" => "fetch",
-                    _ => "integration",
-                };
-                if event.state == "running" || event.kind == "local-saved" { crate::tasks::phase(task, phase); }
+                crate::tasks::observe(task, &event);
             }
             let fetched = event.detail == "git-child"
                 && event.state == "running"

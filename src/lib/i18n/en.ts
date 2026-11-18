@@ -27,6 +27,7 @@ export const en: Messages = {
     autoClose: "Automatically close the flow window after resolving all conflicts", staysOpen: "Workflow completed. This window stays open",
     overview: "Complete pipeline", pipelineHint: "Runs from left to right · Select a phase to view its steps", progress: "Completed {done} / {total} steps", executionDetails: "Commands and observations",
     "phase-saved": "Save local changes", "phase-fetch": "Fetch remote commits", "phase-integration": "Integrate commits", "phase-restore": "Restore local changes", "phase-finished": "Finish",
+    "phase-preparing": "Prepare operation", "phase-operation": "Execute command",
     "fetch-inferred": "Commit integration has started; no separate fetch command was recorded.",
     "not-run": "Not run (workflow ended)",
     leftLane: "Current branch / accumulated result", rightLane: "Incoming commit / local changes", timeAxis: "Timeline", observing: "Observing",

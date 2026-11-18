@@ -58,6 +58,7 @@ import { statusPathBefore } from "../status";
 import { enqueueStage, projectStages, stageActions, type StageChange } from "./staging";
 import { areasFor, patchActions, type RefreshArea } from "../operation-policy";
 import { projectRefs, runTask, subscribeTasks, taskDone, type OperationTask } from "../tasks";
+import { watchOperationTasks } from "./task-monitor";
 import { invalidateReads } from "../read-scheduler";
 import { mergeResponse } from "../reconcile";
 
@@ -430,6 +431,8 @@ export class ShellState {
 
 
   jobs = $state<Record<string, RepoJob>>({});
+
+  backgroundJobs = $state<Record<string, RepoJob>>({});
 
 
   /** Repositories with an automatic fetch in flight. This does not count as busy. */
@@ -1589,7 +1592,7 @@ export class ShellState {
   meterPath = $derived(this.switching ? this.focusPath : (this.snapshot?.path ?? null));
 
 
-  currentJob = $derived(this.meterPath ? this.jobs[this.jobKey(this.meterPath)] : undefined);
+  currentJob = $derived(this.meterPath ? this.jobs[this.jobKey(this.meterPath)] ?? this.backgroundJobs[this.jobKey(this.meterPath)] : undefined);
 
 
   busy = $derived(this.switching || (this.jobs[this.jobKey(this.snapshot?.path)]?.depth ?? 0) > 0);
@@ -1695,28 +1698,53 @@ export class ShellState {
   }
 
 
-  busyLabel = $derived(this.currentJob?.label ?? "");
+  repositoryTask(path: string | null | undefined) {
+    if (!path) return undefined;
+    const key = this.jobKey(path);
+    const tasks = this.operationTasks.filter((task) => task.kind !== "service" && !taskDone(task) && this.jobKey(task.path) === key);
+    return tasks.find((task) => task.state !== "queued") ?? tasks[0];
+  }
+
+  currentTask = $derived(this.repositoryTask(this.meterPath));
+
+  busyLabel = $derived(this.currentJob?.label ?? (this.currentTask ? this.currentTask.label || this.taskLabel(this.currentTask.action) : ""));
 
 
   showingClone = $derived(
     !!this.cloneJob &&
       (this.cloneJob.workspace || "") === (this.settings.currentWorkspace || "") &&
-      (this.currentJob?.depth ?? 0) === 0,
+      (this.currentJob?.depth ?? 0) === 0 && !this.currentTask,
   );
 
 
   workDepth = $derived.by(() => {
     if ((this.currentJob?.depth ?? 0) > 0) return this.currentJob?.depth ?? 0;
+    if (this.currentTask) return 1;
     if (!this.showingClone || !this.cloneJob) return 0;
     const depth = this.jobs[this.jobKey(this.cloneJob.destination)]?.depth ?? 0;
     return depth > 0 ? depth : 1;
   });
 
 
+  workTask = $derived.by(() => {
+    return this.currentTask ?? (this.showingClone ? this.repositoryTask(this.cloneJob?.destination) : undefined);
+  });
+
   workPercent = $derived.by(() => {
-    if ((this.currentJob?.depth ?? 0) > 0) return this.currentJob?.percent ?? null;
-    if (!this.showingClone || !this.cloneJob) return null;
-    return this.jobs[this.jobKey(this.cloneJob.destination)]?.percent ?? null;
+    if (this.workDepth <= 0) return null;
+    if (this.workTask?.percent != null) return this.workTask.percent;
+    if (this.workTask?.state === "queued") return 0;
+    if ((this.currentJob?.depth ?? 0) > 0) return this.currentJob?.percent ?? 0;
+    return this.jobs[this.jobKey(this.cloneJob?.destination)]?.percent ?? 0;
+  });
+
+  workPhaseLabel = $derived.by(() => {
+    const task = this.workTask;
+    if (!task) return "";
+    if (task.state === "queued") return this.tr("chrome.taskQueued");
+    if (task.state === "verifying") return this.tr("chrome.taskVerifying");
+    if (task.state === "cancelling") return this.tr("chrome.taskCancelling");
+    return task.phase ? this.tr(`flow.phase-${task.phase}`) : "";
   });
 
 
@@ -3020,7 +3048,14 @@ export class ShellState {
 
 
   noteProgress(path: string, percent: number) {
+    // Task snapshots already map Git transfer progress into the whole command.
+    if (this.repositoryTask(path)?.percent != null) return;
     const key = this.jobKey(path);
+    const background = this.backgroundJobs[key];
+    if (background) {
+      if (background.percent !== percent) this.backgroundJobs[key] = { ...background, percent };
+      return;
+    }
     const current = this.jobs[key];
     if (current) {
       if (current.percent !== percent) this.jobs[key] = { ...current, percent };
@@ -3030,6 +3065,15 @@ export class ShellState {
     const dest = this.jobKey(this.cloneJob.destination);
     const cloning = this.jobs[dest];
     if (cloning && cloning.percent !== percent) this.jobs[dest] = { ...cloning, percent };
+  }
+
+  noteTaskProgress(task: OperationTask) {
+    if (task.percent == null || task.state === "queued") return;
+    const key = this.jobKey(task.path);
+    const job = this.jobs[key];
+    const background = this.backgroundJobs[key];
+    if (background) this.backgroundJobs[key] = { ...background, percent: task.percent };
+    else if (job) this.jobs[key] = { ...job, percent: task.percent };
   }
 
 
@@ -3697,6 +3741,8 @@ export class ShellState {
       if (!background) {
         this.startWork(described.title, path);
         started = true;
+      } else {
+        this.backgroundJobs[this.jobKey(path)] = { label: described.title, percent: null, depth: 1 };
       }
       let report: (StatusSnapshot & import("../operation-flow").MutationResult) | null = null;
       const backendStarted = performance.now();
@@ -3787,6 +3833,7 @@ export class ShellState {
         return this.conflictCount > 0 ? "conflict" as const : "failed" as const;
       } finally {
         if (started) this.stopWork(path);
+        if (background) delete this.backgroundJobs[this.jobKey(path)];
       }
     } finally {
       if (!background) this.userWrites -= 1;
@@ -7223,6 +7270,7 @@ export class ShellState {
     });
     onMount(() => {
     const stopTasks = subscribeTasks((tasks) => { this.operationTasks = tasks; });
+    const stopTaskMonitor = watchOperationTasks(this);
     const onMouseNav = (event: MouseEvent) => {
     if (event.button !== 3 && event.button !== 4) return;
     event.preventDefault();
@@ -7247,6 +7295,7 @@ export class ShellState {
     window.addEventListener("popstate", onPop);
     const detachNav = () => {
     stopTasks();
+    stopTaskMonitor();
     stopLocale();
     stopAppearance();
     window.clearTimeout(historyTimer);

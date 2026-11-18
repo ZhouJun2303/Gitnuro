@@ -126,6 +126,13 @@ impl CommandSpan {
                         | "add"
                         | "rm"
                         | "apply"
+                        | "clone"
+                        | "init"
+                        | "switch"
+                        | "restore"
+                        | "submodule"
+                        | "worktree"
+                        | "lfs"
                 )
             })
             .map(|_| position);

@@ -6,7 +6,7 @@ export type OperationTask = {
   id: string; path: string; action: string; label: string; targets: string[]; state: TaskState; dependsOn: string[];
   revision: number; queuedMs: number; executeMs: number; verifyMs: number;
   kind?: "repository" | "service"; cancelCommand?: string;
-  preview?: Record<string, string>; phase?: string;
+  preview?: Record<string, string>; phase?: string; percent?: number;
 };
 const independentCommands = new Set(["suggest_commit_message", "review_branch", "test_ai_endpoint", "list_ai_models", "sync_accounts", "test_account", "browser_login", "generate_ssh_key", "create_github_repo", "create_hosted_repo", "download_font", "download_google_font", "recognize_google_font", "check_for_update", "download_update", "scan_repositories", "repository_inspection", "launch_tool", "create_revision_copy", "remove_revision_copy", "save_revision", "external_tools", "editor_tools", "remote_matches", "forge_notifications", "forge_pulls"]);
 const cancellation: Record<string, string> = { download_update: "cancel_update", browser_login: "cancel_browser_login" };

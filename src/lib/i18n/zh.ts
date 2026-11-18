@@ -27,6 +27,7 @@ export const zh: Messages = {
     autoClose: "解决所有冲突后自动关闭流程窗口", staysOpen: "流程已完成，窗口保持打开",
     overview: "完整流水线", pipelineHint: "从左到右依次执行 · 点击阶段查看步骤", progress: "已完成 {done} / {total} 步", executionDetails: "执行命令与记录",
     "phase-saved": "保存本地修改", "phase-fetch": "获取远程提交", "phase-integration": "整合提交", "phase-restore": "恢复本地修改", "phase-finished": "结束",
+    "phase-preparing": "准备操作", "phase-operation": "执行命令",
     "fetch-inferred": "已进入提交整合阶段；未记录单独的获取命令。",
     "not-run": "未执行（流程已结束）",
     leftLane: "当前分支 / 累积结果", rightLane: "传入提交 / 本地修改", timeAxis: "时间轴", observing: "正在观察",

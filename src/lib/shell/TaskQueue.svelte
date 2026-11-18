@@ -1,11 +1,8 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { listen } from "@tauri-apps/api/event";
   import { getShell } from "./context";
   import { invoke } from "../perf";
-  import { acceptTask, ownsTask, taskDone, type OperationTask } from "../tasks";
+  import { acceptTask, taskDone, type OperationTask } from "../tasks";
   import { onVirtualScroll, windowSlice } from "../view";
-  import { areasFor } from "../operation-policy";
 
   const shell = getShell();
   const active = $derived(shell.operationTasks.filter((task) => !taskDone(task)));
@@ -23,36 +20,6 @@
       if (!task.cancelCommand) acceptTask(result ?? { ...task, state: "cancelled" });
     }
     catch (failure) { acceptTask(task); error = shell.message(failure); }
-  }
-
-  onMount(() => {
-    if (!shell.backend()) return;
-    let stopped = false, unlisten = () => {}, timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        const tasks = await invoke<OperationTask[]>("operation_tasks");
-        if (stopped) return;
-        for (const task of tasks) accept(task);
-      } catch { /* A reconnect retains local tasks and retries. */ }
-      if (!stopped && !shell.inApp()) timer = setTimeout(poll, active.length ? 250 : 1500);
-    };
-    void poll();
-    if (shell.inApp()) void listen<OperationTask>("operation-task", (event) => {
-      if (stopped) return;
-      accept(event.payload);
-    }).then((stop) => { if (stopped) stop(); else unlisten = stop; });
-    return () => { stopped = true; clearTimeout(timer); unlisten(); };
-  });
-
-  function accept(task: OperationTask) {
-    const previous = shell.operationTasks.find((entry) => entry.id === task.id);
-    acceptTask(task);
-    if (ownsTask(task.id) || previous && taskDone(previous) || !taskDone(task) || !shell.viewing(task.path)) return;
-    const areas = areasFor(task.action);
-    shell.scheduleAuxiliary(areas);
-    if (areas.some((area) => area === "worktree" || area === "index") || task.state !== "completed") {
-      shell.queueWatch("status", task.revision); shell.replayWatch();
-    }
   }
 </script>
 

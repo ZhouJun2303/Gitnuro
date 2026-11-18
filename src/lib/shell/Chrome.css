@@ -149,7 +149,7 @@
     padding: 0 8px;
   }
 
-/* Determinate transfer bar. It sits inside the fixed 40px floor, so the pill does not grow. */
+/* Command phase progress stays inside the fixed 40px floor. */
   .identity-bar {
     position: absolute;
     left: 14px;

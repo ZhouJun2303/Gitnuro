@@ -499,6 +499,7 @@ pub fn run_lab() {
     crate::perf::init();
     awegit_git::set_trace(crate::perf::git);
     awegit_git::set_timing_trace(crate::perf::stage);
+    crate::tasks::install_progress();
     let listener = TcpListener::bind("127.0.0.1:1429").unwrap_or_else(|error| {
         eprintln!("awegit-lab could not listen on 127.0.0.1:1429: {error}");
         std::process::exit(1);

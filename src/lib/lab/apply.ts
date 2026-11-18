@@ -160,6 +160,17 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.jobs = { ...shell.jobs, [shell.jobKey(path)]: { label: "pull", percent: 42, depth: 1 } };
     return;
   }
+  if (["fetch-progress", "pull-progress", "push-progress", "checkout-progress", "fetch-background-progress"].includes(id)) {
+    const path = shell.repoPath() ?? "";
+    const action = id.split("-")[0];
+    const job = { label: shell.taskLabel(action), percent: action === "push" ? 42 : null, depth: 1 };
+    if (id === "fetch-background-progress") shell.backgroundJobs[shell.jobKey(path)] = job;
+    else shell.jobs[shell.jobKey(path)] = job;
+    acceptTask({ id: `lab-${id}`, path, action, label: job.label, targets: [], state: "running", dependsOn: [], revision: 0, queuedMs: 0, executeMs: 0, verifyMs: 0,
+      phase: action === "fetch" ? "fetch" : ["pull", "checkout"].includes(action) ? "integration" : "operation",
+      percent: action === "pull" ? 50 : action === "checkout" ? 20 : action === "push" ? 42 : 33 });
+    return;
+  }
   if (id === "sync-stash-conflict") {
     // Stash restoration can leave conflicts after Git's merge/rebase has ended.
     shell.progress = null;
@@ -463,11 +474,12 @@ async function fillSurface(shell: ShellState, id: string) {
     if (!shell.reflogOn) await shell.showReflog();
     return;
   }
-  if (id === "clone-progress") {
+  if (id === "clone-progress" || id === "clone-waiting") {
     const repo = shell.repoPath() ?? "";
     const destination = `${repo.replace(/[\\/][^\\/]+$/, "")}/lab-clone`;
     shell.cloneJob = { name: "lab-clone", destination, workspace: shell.settings.currentWorkspace || "" };
-    shell.jobs = { ...shell.jobs, [shell.jobKey(destination)]: { label: "clone", percent: 42, depth: 1 } };
+    shell.jobs = { ...shell.jobs, [shell.jobKey(destination)]: { label: "clone", percent: id === "clone-waiting" ? null : 42, depth: 1 } };
+    if (id === "clone-waiting") acceptTask({ id: "lab-clone-waiting", path: destination, action: "clone", label: "clone", targets: [], state: "running", dependsOn: [], revision: 0, queuedMs: 0, executeMs: 0, verifyMs: 0, phase: "operation", percent: 33 });
     return;
   }
   if (id === "clone-done") {

@@ -2912,9 +2912,6 @@ pub fn run() {
             flows::install(handle.clone());
             tasks::install(handle.clone());
             perf::watch_main_thread(handle.clone());
-            awegit_git::set_progress(move |path, percent| {
-                let _ = handle.emit("git-progress", GitProgress { path: path.to_string(), percent });
-            });
             Ok(())
         })
         .on_page_load(|_, payload| {

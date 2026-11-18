@@ -12,6 +12,8 @@
 
 - [x] 修复桌面端 `workspace_status_paths` 被 ACL 拒绝的错误，补齐后台任务、Blame、贮藏补丁、锁恢复和分页扫描等已有命令的构建清单与窗口权限；查看窗口只补只读接口，取消任务和移除锁仍限普通仓库窗口。修复：本条所在提交 `fix: 补齐桌面命令的 ACL 授权`；回归：`command_acl` 的 3 项直接校验编译后的 Tauri ACL、全部注册命令和窗口 / 来源边界，修复前成功复现 8 个命令缺失；原观察窗口、查看窗口和历史副本权限、局部状态与暂存流程合计 5 项回归通过；`pnpm check`、`cargo build -p awegit --bin awegit` 通过。
 
+- [x] fetch、pull、push、克隆、检出及其他仓库写操作统一显示百分比和当前阶段，后台自动获取、提交后自动推送也可见。无传输输出时按实际命令阶段推进，有输出时细化当前阶段，不随等待时间虚增，只有成功结束才到 100%；排队任务不覆盖执行进度，失败、取消后清理。修复：本条所在提交 `feat: 为耗时 Git 操作补齐命令阶段百分比进度`；回归：`tasks::tests` 与 `tasks::progress::tests` 共 19 项、`flows::tests` 21 项、Git `flow` 9 项；`e2e/operation-progress.spec.ts`、`e2e/sync-toolbar.spec.ts` 三主题共 49 项，新增排队覆盖复验 3 项通过；`pnpm check`、`pnpm build` 通过。计算方式见 [开发文档](dev-docs/development.md#检出与命令记录)。
+
 - [x] 空提交不再把批量拣选卡在冲突提示：首次拣选、继续和跳过均能跳过无改动提交并保留剩余队列；真实冲突、提交钩子和未暂存编辑仍会保留暂停状态。兼容外部提交后只剩 sequencer 的拣选与还原，异常元数据不会触发提前恢复本地贮藏。修复：本条所在提交 `fix: 修复空提交导致批量拣选无法继续`；回归：`crates/git/tests/cherry_pick.rs` 的 16 项分别在 Git 2.38.1、MinGit 2.56.0 上通过，单提交拣选 / Reset / Revert 及原还原逻辑 5 项通过；`e2e/cherry-pick-empty.spec.ts`、新增 `cherry-pick-paused` 与原冲突场景、三主题变更面板和多选交互共 24 项通过；`pnpm check`、`pnpm build`、`cargo check -p awegit --tests` 通过。
 
 - [x] 文件夹右键菜单顶部增加「打开文件夹」「在文件管理器中显示」「复制绝对路径」「复制相对路径」，暂存区与未暂存区共用；打开文件夹进入目录，显示操作仍在父目录选中目标。修复：本条所在提交 `feat: 为文件夹右键菜单补齐打开和复制路径操作`；回归：`e2e/folder-menu.spec.ts`、`scene folder-menu`、`a folder menu counts every picked file, not just the folder's` 及文件菜单相关回归，Apple、经典白色、VS Code 黑色共 19 项通过；`pnpm check`、`default_file_targets` 两项后端回归通过。

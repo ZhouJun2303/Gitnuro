@@ -145,16 +145,16 @@
                 {#if notice}
                   <em class="identity-branch">{notice.title}</em>
                 {:else if shell.showingClone && shell.cloneJob}
-                  <em class="identity-branch" data-layer="clone">{shell.tr("chrome.cloning", { name: shell.cloneJob.name })}</em>
+                  <em class="identity-branch" data-layer="clone">{shell.tr("chrome.cloning", { name: shell.cloneJob.name })}{shell.workPhaseLabel ? ` · ${shell.workPhaseLabel}` : ""}</em>
                 {:else if shell.workDepth > 0}
-                  <em class="identity-branch">{shell.busyLabel ? `${shell.tr("chrome.working")} ${shell.busyLabel}` : shell.tr("chrome.working")}</em>
+                  <em class="identity-branch">{shell.busyLabel ? `${shell.tr("chrome.working")} ${shell.busyLabel}` : shell.tr("chrome.working")}{shell.workPhaseLabel ? ` · ${shell.workPhaseLabel}` : ""}</em>
                 {:else if shell.snapshot || shell.mode === "sample"}
                   <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
                   <em class="identity-branch" data-branch={shell.branchLabel}>{shell.branchLabel}</em>
                 {:else}
                   {shell.tr("chrome.openRepo")}
                 {/if}
-                {#if !notice && shell.workPercent != null}<em class="identity-pct">{shell.workPercent}%</em>{/if}
+                {#if shell.workPercent != null}<em class="identity-pct">{shell.workPercent}%</em>{/if}
               </span>
             </button>
             {#if notice && primary}
@@ -166,9 +166,9 @@
               <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3v12a3 3 0 1 0 3 3"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="6" r="2.2"/><path d="M18 8.2A6 6 0 0 1 9 12"/></svg>
               <span>{shell.tr("dialog.branch")}<svg class="line-icon caret" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span>
             </button>
-            {#if shell.workDepth > 0 && !notice && shell.workPercent != null}
-              <div class="identity-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={shell.workPercent} aria-valuetext="{shell.workPercent}%">
-                <span style:width="{shell.workPercent}%"></span>
+            {#if shell.workDepth > 0}
+              <div class="identity-bar" role="progressbar" aria-label={shell.showingClone && shell.cloneJob ? shell.tr("chrome.cloning", { name: shell.cloneJob.name }) : shell.busyLabel || shell.tr("chrome.working")} aria-valuemin="0" aria-valuemax="100" aria-valuenow={shell.workPercent ?? 0} aria-valuetext={`${shell.workPhaseLabel ? `${shell.workPhaseLabel} · ` : ""}${shell.workPercent ?? 0}%`}>
+                <span style:width="{shell.workPercent ?? 0}%"></span>
               </div>
             {/if}
             {#if tone}
@@ -200,7 +200,7 @@
     <div class="chrome-tabs">
       <div class="chrome-side tabs" use:fillTabs={shell.repos.length}>
       {#each shell.repos as repo (repo)}
-        {@const job = shell.jobs[shell.jobKey(repo)]}
+        {@const job = shell.jobs[shell.jobKey(repo)] ?? shell.backgroundJobs[shell.jobKey(repo)]}
         <div class="tab" role="group" class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("repoInfo.title"), run: () => { shell.repoInfoPath = repo; shell.dialog = "repoInfo"; } },
           { label: shell.tr("chrome.terminal"), disabled: shell.mode !== "live", run: () => void invoke("open_terminal", { path: repo }) },

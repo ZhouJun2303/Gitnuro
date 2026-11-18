@@ -243,6 +243,10 @@ pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.
 
 ## 检出与命令记录
 
+fetch、pull、push、克隆、检出及其他仓库写操作从排队开始显示百分比进度条，后台自动获取和提交后自动推送也使用同一入口。百分比按准备、实际命令、状态核验等阶段等权计算；需要保护本地修改的操作另计保存、整合与恢复，拉取另计获取。Git 提供传输百分比时用于细化当前阶段；没有输出时保留该命令阶段的百分比，不按时间增长。进入核验时把未执行的条件阶段视为跳过，只有任务成功完成才显示 100%，失败、冲突与取消不会伪装为完成。不同仓库分别显示进度，排队任务不会覆盖正在执行的任务，浏览、滚动和输入保持可用。
+
+回归：`tasks::progress::tests`、`tasks::tests::real_fetch_commands_report_phase_progress_without_transfer_output`、`tasks::tests::a_noop_pull_reports_its_command_phases_and_finishes_after_verification` 和 `e2e/operation-progress.spec.ts`。试验台包含 `fetch-progress`、`pull-progress`、`push-progress`、`fetch-background-progress`、`checkout-progress`、`clone-waiting` 与原 `clone-progress` 场景，覆盖 Apple、经典白色和 VS Code 黑色。
+
 双击本地、远程分支和右键检出统一调用一次后端写操作。后端按需保存本地修改，按贮藏提交 ID 恢复暂存与未暂存内容；前端不再额外执行 `stash push` 或固定弹出 `stash@{0}`。鼠标单击延后 280ms 定位历史，双击取消该定位并使旧定位失效，避免先读取两次历史再等待检出；键盘定位立即执行。重复双击沿用前台写操作保护，不会再保存或弹出另一份贮藏。
 
 可确认目标树的检出、常规快进 pull 和普通快进 merge 会先比较目标改动路径。目标树不变时跳过工作区扫描；本地暂存/未暂存路径与目标改动不重叠时，由原生 Git 直接携带修改，保留删除状态，避免重写大量本地文件。重命名两端、父子目录和 ASCII 大小写别名都计入重叠判断；特殊索引、子模块、附加工作树、替换对象及无法确认的目标仍走原保护流程。大小写不敏感且路径包含非 ASCII 字符时保守回退。实际 checkout/merge 仍执行一次，保留原生命令与 hooks；失败后不重试可能已部分写入的命令。非快进、no-ff、squash 和需要重放的操作仍按原流程保护索引。

@@ -10,6 +10,9 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::Emitter;
 
+mod progress;
+use progress::Progress;
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -21,6 +24,7 @@ pub struct Snapshot {
     pub targets: Vec<String>,
     pub state: String,
     pub phase: String,
+    pub percent: u8,
     pub depends_on: Vec<String>,
     pub revision: u64,
     pub queued_ms: u64,
@@ -30,6 +34,7 @@ pub struct Snapshot {
 
 struct Task {
     snapshot: Snapshot,
+    progress: Progress,
     client: String,
     lane: String,
     queued: Instant,
@@ -54,7 +59,20 @@ static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 static NEXT: AtomicU64 = AtomicU64::new(1);
 thread_local! { static CURRENT: RefCell<Option<String>> = const { RefCell::new(None) }; }
 
-pub fn install(app: tauri::AppHandle) { let _ = APP.set(app); }
+pub fn install(app: tauri::AppHandle) { let _ = APP.set(app); install_progress(); }
+
+pub fn install_progress() {
+    awegit_git::set_progress(|path, percent| {
+        let key = awegit_git::repo_key(Path::new(path));
+        let id = {
+            let registry = registry().0.lock().unwrap_or_else(|error| error.into_inner());
+            registry.tasks.values().find(|task| matches!(task.snapshot.state.as_str(), "running" | "cancelling")
+                && awegit_git::repo_key(Path::new(&task.snapshot.path)) == key).map(|task| task.snapshot.id.clone())
+        };
+        if let Some(id) = id { update_progress(&id, |progress| progress.transfer(percent)); }
+        if let Some(app) = APP.get() { let _ = app.emit("git-progress", super::GitProgress { path: path.into(), percent }); }
+    });
+}
 fn emit(snapshot: &Snapshot) { if let Some(app) = APP.get() { let _ = app.emit("operation-task", snapshot); } }
 pub fn terminal(state: &str) -> bool { matches!(state, "completed" | "conflict" | "failed" | "cancelled" | "blocked") }
 
@@ -118,7 +136,7 @@ pub fn enqueue(command: &str, args: &Value) -> Result<String, String> {
     let mut preview: HashMap<String, String> = ["name", "to", "branch", "rev", "start", "remote", "path"].into_iter().filter_map(|key| request.get(key).and_then(Value::as_str).map(|value| (key.to_string(), value.chars().take(1024).collect()))).collect();
     if action == "stashRename" { if let Some(message) = request.get("message").and_then(Value::as_str) { preview.insert("message".into(), message.chars().take(1024).collect()); } }
     let mut snapshot = Snapshot { id: id.clone(), path: target.to_string_lossy().into_owned(), action, label, preview, targets,
-        state: "queued".into(), phase: String::new(), depends_on, revision: super::changes::revision(&target), queued_ms: 0, execute_ms: 0, verify_ms: 0 };
+        state: "queued".into(), phase: String::new(), percent: 0, depends_on, revision: super::changes::revision(&target), queued_ms: 0, execute_ms: 0, verify_ms: 0 };
     {
         let mut registry = registry().0.lock().unwrap_or_else(|error| error.into_inner());
         if registry.tasks.contains_key(&id) { return Err("Duplicate task identity".into()); }
@@ -138,7 +156,7 @@ pub fn enqueue(command: &str, args: &Value) -> Result<String, String> {
         registry.order.push_back(id.clone());
         registry.lanes.entry(lane.clone()).or_default().push_back(id.clone());
         let cancelled = registry.cancelled_before_enqueue.remove(&id);
-        registry.tasks.insert(id.clone(), Task { snapshot: snapshot.clone(), client, lane: lane.clone(), queued: Instant::now(), started: None, verifying: None, cancelled: Arc::new(AtomicBool::new(cancelled)) });
+        registry.tasks.insert(id.clone(), Task { progress: Progress::new(&snapshot.action), snapshot: snapshot.clone(), client, lane: lane.clone(), queued: Instant::now(), started: None, verifying: None, cancelled: Arc::new(AtomicBool::new(cancelled)) });
         order_lane(&mut registry, &lane);
         self::registry().1.notify_all();
     }
@@ -171,7 +189,10 @@ pub fn run<T>(id: &str, body: impl FnOnce() -> Result<T, String>, outcome: impl 
     struct Scope(Option<String>);
     impl Drop for Scope { fn drop(&mut self) { CURRENT.with(|current| *current.borrow_mut() = self.0.take()); } }
     let _scope = Scope(CURRENT.with(|current| current.replace(Some(id.to_string()))));
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| awegit_git::with_cancellation(token.clone(), body)))
+    update_progress(id, Progress::prepared);
+    let task_id = id.to_string();
+    let observer = Arc::new(move |event: awegit_git::flow::Event| observe(&task_id, &event));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| awegit_git::flow::observe(observer, || awegit_git::with_cancellation(token.clone(), body))))
         .unwrap_or_else(|_| Err("Task stopped unexpectedly".into()));
     let state = if token.load(Ordering::Acquire) { "cancelled" } else { result.as_ref().map(outcome).unwrap_or("failed") };
     finish(id, state);
@@ -183,6 +204,8 @@ fn finish(id: &str, state: &str) {
     let mut registry = lock.lock().unwrap_or_else(|error| error.into_inner());
     let Some(task) = registry.tasks.get_mut(id) else { return };
     task.snapshot.state = state.to_string();
+    task.progress.finish(state == "completed");
+    task.snapshot.percent = task.progress.percent;
     if task.started.is_none() { task.snapshot.queued_ms = task.queued.elapsed().as_millis() as u64; }
     task.snapshot.revision = super::changes::revision(Path::new(&task.snapshot.path));
     if let Some(start) = task.started { task.snapshot.execute_ms = task.verifying.unwrap_or_else(Instant::now).duration_since(start).as_millis() as u64; }
@@ -197,16 +220,26 @@ pub fn verifying() {
     let mut registry = registry().0.lock().unwrap_or_else(|error| error.into_inner());
     let Some(task) = registry.tasks.get_mut(&id) else { return };
     if task.verifying.is_none() { task.verifying = Some(Instant::now()); }
+    task.progress.verifying();
+    task.snapshot.percent = task.progress.percent;
+    task.snapshot.phase = task.progress.phase.into();
     task.snapshot.state = if task.cancelled.load(Ordering::Acquire) { "cancelling" } else { "verifying" }.into(); let snapshot = task.snapshot.clone(); drop(registry); emit(&snapshot);
 }
 
 pub fn current_id() -> Option<String> { CURRENT.with(|current| current.borrow().clone()) }
 
-pub fn phase(id: &str, phase: &str) {
+pub fn observe(id: &str, event: &awegit_git::flow::Event) {
+    update_progress(id, |progress| progress.observe(event));
+}
+
+fn update_progress(id: &str, update: impl FnOnce(&mut Progress)) {
     let mut registry = registry().0.lock().unwrap_or_else(|error| error.into_inner());
     let Some(task) = registry.tasks.get_mut(id) else { return };
-    if terminal(&task.snapshot.state) || task.snapshot.phase == phase { return; }
-    task.snapshot.phase = phase.into();
+    if terminal(&task.snapshot.state) { return; }
+    update(&mut task.progress);
+    if task.snapshot.phase == task.progress.phase && task.snapshot.percent == task.progress.percent { return; }
+    task.snapshot.phase = task.progress.phase.into();
+    task.snapshot.percent = task.progress.percent;
     let snapshot = task.snapshot.clone(); drop(registry); emit(&snapshot);
 }
 
@@ -355,6 +388,57 @@ mod tests {
     }
     impl Drop for Repo { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
     fn ok(_: &Value) -> &str { "completed" }
+
+    #[test]
+    fn real_fetch_commands_report_phase_progress_without_transfer_output() {
+        let repo = Repo::new();
+        std::fs::write(repo.0.join("note.txt"), "one\n").unwrap();
+        repo.git(&["add", "note.txt"]);
+        repo.git(&["commit", "-qm", "test: seed command progress"]);
+        // Fetch from the same local object store: Git has no objects to transfer.
+        repo.git(&["remote", "add", "origin", repo.0.to_str().unwrap()]);
+        for (remote, succeeds) in [("origin", true), ("missing", false)] {
+            let args = json!({ "path": repo.0, "request": { "action": "fetch", "remote": remote, "prune": false, "tags": false } });
+            let id = enqueue("mutate", &args).unwrap();
+            let result = run(&id, || {
+                assert_eq!(list().iter().find(|task| task.id == id).unwrap().percent, 33);
+                let value = execute("mutate", &args)?;
+                let snapshot = list().into_iter().find(|task| task.id == id).unwrap();
+                assert_eq!(snapshot.phase, if succeeds { "fetch" } else { "finished" });
+                assert_eq!(snapshot.percent, 66);
+                Ok(value)
+            }, |value| outcome("mutate", &args, value));
+            assert!(result.is_ok());
+            let snapshot = list().into_iter().find(|task| task.id == id).unwrap();
+            assert_eq!(snapshot.state, if succeeds { "completed" } else { "failed" });
+            assert_eq!(snapshot.percent, if succeeds { 100 } else { 66 });
+        }
+    }
+
+    #[test]
+    fn a_noop_pull_reports_its_command_phases_and_finishes_after_verification() {
+        let repo = Repo::new();
+        std::fs::write(repo.0.join("note.txt"), "one\n").unwrap();
+        repo.git(&["add", "note.txt"]);
+        repo.git(&["commit", "-qm", "test: seed pull progress"]);
+        repo.git(&["remote", "add", "origin", repo.0.to_str().unwrap()]);
+        repo.git(&["fetch", "origin"]);
+        repo.git(&["branch", "--set-upstream-to=origin/main", "main"]);
+        std::fs::write(repo.0.join("note.txt"), "local work\n").unwrap();
+        let args = json!({ "path": repo.0, "request": { "action": "pull", "rebase": false, "autostash": true } });
+        let id = enqueue("mutate", &args).unwrap();
+        let result = run(&id, || {
+            assert_eq!(list().iter().find(|task| task.id == id).unwrap().percent, 16);
+            let value = execute("mutate", &args)?;
+            let snapshot = list().into_iter().find(|task| task.id == id).unwrap();
+            assert_eq!(snapshot.state, "verifying");
+            assert_eq!(snapshot.percent, 83);
+            Ok(value)
+        }, |value| outcome("mutate", &args, value)).unwrap();
+        assert_eq!(result["outcome"], "completed");
+        assert_eq!(list().iter().find(|task| task.id == id).unwrap().percent, 100);
+        assert_eq!(std::fs::read_to_string(repo.0.join("note.txt")).unwrap(), "local work\n");
+    }
 
     #[test]
     fn later_arrival_of_a_prerequisite_does_not_form_a_dependency_cycle() {
