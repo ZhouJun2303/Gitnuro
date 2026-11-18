@@ -101,7 +101,7 @@ pnpm start
 
 ## 测试
 
-项目性能工作的实施记录、测量结果与限制见 [项目性能优化计划](performance-plan.md)；上一轮检查保存在 [后端性能检查](backend-performance.md)。性能复测命令见下方“性能复测”。
+项目性能工作的实施记录、测量结果与限制见 [性能记录](performance-plan.md)，包括第一轮后端检查。性能复测命令见下方“性能复测”。
 
 ```powershell
 pnpm check
@@ -134,7 +134,7 @@ pnpm test:ui -- --reuse e2e/merge-layout.spec.ts
 
 试验台用浏览器看界面：`pnpm dev`，默认在 http://localhost:1420 。场景清单在 `src/lib/lab/scenes.ts`，新弹窗必须记入，否则 `pnpm check` 会失败。`.lab/` 不提交，种子脚本 `scripts/lab-seed.mjs` 和场景清单要提交。
 
-用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts` 和 `pnpm test:ui -- --reuse e2e/theme-panels.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。当前是 180 个场景（49 类弹窗）、三种主题共 540 项。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。旧的 `dialog-resolve` 已删除，文本和二进制合并统一使用独立合并窗口。检查结果见 [界面检查记录](ui-audit.md)。
+用户明确要求全面检查或共享主题修改覆盖全部页面时，运行 `pnpm test:ui -- --reuse e2e/scenes.spec.ts` 和 `pnpm test:ui -- --reuse e2e/theme-panels.spec.ts`。每个有效场景分别检查中文 Apple Liquid Glass / 经典白色 1440×900、英文 VS Code 黑色 960×640，验证初始化、脚本异常和主界面边界，截图与启动性能记录保存在 `.lab/ui-audit/`。场景的偏好设置读写在浏览器测试中隔离；共享试验仓库的行为测试按顺序运行，避免重建仓库时另一个页面正在读取。文本和二进制合并统一使用独立合并窗口。各批场景数量与结果见 [界面检查记录](ui-audit.md)。
 
 UI 性能记录按 `AWEGIT_UI_AUDIT_RUN` 环境变量指定的批次名存入 `.lab/ui-audit/<批次>/`，未指定时为 `current`。场景 JSON 分别记录导航至就绪的 `readyMs`、主线程长任务、DOM 节点和各命令的请求等待；`loadMs` 含截图检查时间，不作为打开耗时。长弹窗与批量文件选择回归运行 `pnpm test:ui -- --reuse e2e/dialog-performance.spec.ts e2e/ui-performance.spec.ts`，覆盖 4,000 条变基/分支、滚动后编辑与勾选保留、拖动排序、读取中关闭和 20,000 文件的选择清理。只在采集旧实现时设置 `AWEGIT_UI_AUDIT_BASELINE=1`，会跳过新实现的 DOM 上限和立即显示断言；正常回归不设置它。耗时输出用于对照，不设依赖机器速度的绝对毫秒断言。
 
@@ -210,7 +210,7 @@ node scripts/with-rust-path.mjs cargo test -p awegit --lib flows::tests::backend
 
 后端优化完成后运行上方“测试”部分的类型检查与完整功能回归。
 
-Windows 上，`locks::tests::writes_name_the_process_and_explain_how_to_release_the_file` 需要系统进程查询权限；沙箱内可能无法识别占用进程或遇到 Git unlink 返回异常。2026-11-16 完整回归在正常系统权限下通过。遇到环境失败先保留原始记录并检查权限；必要时可显式跳过它补查其他测试，跳过不能据此宣称全量通过：
+Windows 上，`locks::tests::writes_name_the_process_and_explain_how_to_release_the_file` 需要系统进程查询权限；沙箱内可能无法识别占用进程或遇到 Git unlink 返回异常。遇到环境失败先保留原始记录并检查权限；必要时可显式跳过它补查其他测试，跳过不能据此宣称全量通过。普通权限复验记录见 [队列验收](ui-audit.md#2026-11-18-操作队列修复复验对照-bd9eba6e)：
 
 ```powershell
 node scripts/with-rust-path.mjs cargo test -p awegit-git --offline --no-fail-fast -- --test-threads=1 --skip writes_name_the_process_and_explain_how_to_release_the_file
@@ -231,7 +231,7 @@ pnpm test:ui -- --reuse e2e/performance-refresh.spec.ts e2e/operation-flow.spec.
 
 目录选择超过 40 项、没有搜索/冲突过滤且没有生效的 `.fakeignore` 文件时，先用 Git 核对目录内的已跟踪及未忽略文件；与所选集合完全一致才改用一个目录路径。其他情况保留精确文件列表，包括隐藏试验文件、部分选择和空选择。目录操作继续保留命令记录。
 
-大批量场景为 `stage-many`（5,000 个修改和 5,000 个未跟踪文件），`stage-dense` 还增加 25,000 行和 120,000 行全部修改的文件。运行 `pnpm test:ui -- --reuse e2e/stage-performance.spec.ts e2e/stage-dense.spec.ts` 会单独重建这些场景，检查三套主题、并排/统一差异、旧预览挂起时的双击与滚动/输入、写队列、局部状态合并及整仓校验合并。`stage-queue` 复用万条改动，运行 `pnpm test:ui -- --reuse e2e/stage-queue.spec.ts` 会在发送第一条写入前挂起请求，核对三套主题和三种布局下的先行反馈、连续反向操作、批量/全部操作、失败恢复、锁文件重试、部分暂存、重命名和删除边界。耗时与截图保存在 `.lab/ui-audit/`，既有后端测量与本次界面反馈验证分别见[性能记录第 12 节](performance-plan.md#12-2026-11-17-大量修改与未跟踪文件下的暂存响应对照-aaf0c347)和[第 13 节](performance-plan.md#13-2026-11-17-暂存与取消暂存的先行反馈对照-06121756)。
+大批量场景为 `stage-many`（5,000 个修改和 5,000 个未跟踪文件），`stage-dense` 还增加 25,000 行和 120,000 行全部修改的文件。运行 `pnpm test:ui -- --reuse e2e/stage-performance.spec.ts e2e/stage-dense.spec.ts` 会单独重建这些场景，检查三套主题、并排/统一差异、旧预览挂起时的双击与滚动/输入、写队列、局部状态合并及整仓校验合并。`stage-queue` 复用万条改动，运行 `pnpm test:ui -- --reuse e2e/stage-queue.spec.ts` 会在发送第一条写入前挂起请求，核对三套主题和三种布局下的先行反馈、连续反向操作、批量/全部操作、失败恢复、锁文件重试、部分暂存、重命名和删除边界。耗时与截图保存在 `.lab/ui-audit/`，测量见 [大批量暂存](performance-plan.md#8-2026-11-17-大量修改与未跟踪文件下的暂存响应对照-aaf0c347)和[先行反馈](performance-plan.md#9-2026-11-17-暂存与取消暂存的先行反馈对照-06121756)记录。
 
 取消暂存统一使用限定路径的 `git reset --quiet --no-refresh -- <路径>`，只更新索引，不移动分支、不改工作区，并避免在后续状态读取前额外扫描工作区。首次提交前、暂存后继续修改、目录选择和重复取消均可直接完成；大量路径继续通过 NUL 分隔的标准输入传入，避免 Windows 命令行长度限制。无需先执行一次必然失败的 `restore` 再根据错误文本补救。
 
