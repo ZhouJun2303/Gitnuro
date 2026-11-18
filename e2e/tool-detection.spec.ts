@@ -30,6 +30,111 @@ async function openTools(page: Page, kind: Kind, theme: typeof themes[number]) {
 }
 
 for (const theme of themes) {
+  test(`${theme.name}: project terminal menu uses only manually detected CLIs`, async ({ page }) => {
+    await pinLabSettings(page, { terminalClis: null });
+    let scans = 0;
+    let fail = false;
+    let finishDetection = () => {};
+    const initialDetection = new Promise<void>((resolve) => { finishDetection = resolve; });
+    let installed = ["codex", "grok", "cursor-agent"];
+    let layout: { even: string } | undefined;
+    const launches: Array<{ path: string; cli?: string }> = [];
+    await page.route("**/__lab/invoke", async (route) => {
+      const { cmd, args } = route.request().postDataJSON();
+      if (cmd === "detect_terminal_clis") {
+        scans++;
+        if (scans === 1) await initialDetection;
+        return route.fulfill({ json: fail
+          ? { ok: false, error: "CLI detection failed" }
+          : { ok: true, value: installed } });
+      }
+      if (cmd === "open_terminal") {
+        launches.push({ path: args.path, cli: args.cli });
+        return route.fulfill({ json: args.cli === "cursor-agent"
+          ? { ok: false, error: "terminal-cli-missing" }
+          : { ok: true, value: null } });
+      }
+      if (cmd === "lab_layout") {
+        const response = await route.fetch();
+        const payload = await response.json();
+        layout = payload.value;
+        return route.fulfill({ json: payload });
+      }
+      return route.fallback();
+    });
+
+    const tabScene = "tab-copy-path";
+    const otherTab = page.locator(".chrome-tabs .tab", { hasText: "MyTest" });
+    const menu = page.locator('[data-layer="menu"]');
+    const terminal = menu.getByRole("menuitem", { name: /^(终端|Terminal)( ›)?$/ });
+    const submenu = page.locator('[data-layer="submenu"]');
+    const openTabs = async () => {
+      await page.goto(`/?scene=${tabScene}&theme=${theme.name}&locale=${theme.locale}`);
+      await expect(page.locator(`[data-lab-scene="${tabScene}"]`)).toBeVisible();
+      await expect(otherTab).not.toHaveClass(/active/);
+    };
+
+    await openTabs();
+    await otherTab.click({ button: "right" });
+    await terminal.click();
+    await expect.poll(() => launches[0]).toEqual({ path: layout!.even, cli: undefined });
+    await expect(submenu).toHaveCount(0);
+    expect(scans).toBe(0);
+
+    await openTools(page, "diff", theme);
+    const clis = page.getByRole("region", { name: /终端 CLI|Terminal CLIs/ });
+    const detect = clis.getByRole("button", { name: /^(检测 CLI|Detect CLIs)$/ });
+    await expect(clis.locator('[data-cli="codex"]')).toContainText(/未检测|Unchecked/);
+    expect(scans).toBe(0);
+    await detect.click();
+    try {
+      await expect(clis.getByRole("button", { name: /正在检测 CLI|Detecting CLIs/ })).toBeDisabled();
+    } finally {
+      finishDetection();
+    }
+    await expect(clis.locator('[data-cli="codex"]')).toContainText(/已找到|Found/);
+    await expect(clis.locator('[data-cli="claude"]')).toContainText(/未找到|Missing/);
+    await expect(detect).toBeEnabled();
+    expect(scans).toBe(1);
+
+    await openTabs();
+    await otherTab.click({ button: "right" });
+    await terminal.hover();
+    await expect(submenu.getByRole("menuitem")).toHaveText([/打开终端|Open terminal/, "codex", "grok", "cursor-agent"]);
+    await submenu.getByRole("menuitem", { name: "codex" }).click();
+    await expect.poll(() => launches[1]).toEqual({ path: layout!.even, cli: "codex" });
+    await otherTab.click({ button: "right" });
+    await terminal.hover();
+    await submenu.getByRole("menuitem", { name: "cursor-agent" }).click();
+    await expect.poll(() => launches[2]).toEqual({ path: layout!.even, cli: "cursor-agent" });
+    await expect(page.locator(".identity-branch")).toContainText(/找不到 cursor-agent|cursor-agent could not be found/);
+    await otherTab.click({ button: "right" });
+    await terminal.hover();
+    await expect(submenu.getByRole("menuitem")).toHaveText([/打开终端|Open terminal/, "codex", "grok"]);
+    expect(scans).toBe(1);
+
+    fail = true;
+    await openTools(page, "diff", theme);
+    await detect.click();
+    await expect(page.locator('[data-dialog="prefs"]').getByRole("alert")).toHaveText("CLI detection failed");
+    await expect(detect).toBeEnabled();
+    await expect(clis.locator('[data-cli="codex"]')).toContainText(/已找到|Found/);
+    expect(scans).toBe(2);
+
+    fail = false;
+    installed = ["claude"];
+    await detect.click();
+    await expect(clis.locator('[data-cli="claude"]')).toContainText(/已找到|Found/);
+    await expect(detect).toBeEnabled();
+    await openTabs();
+    await otherTab.click({ button: "right" });
+    await terminal.hover();
+    await expect(submenu.getByRole("menuitem")).toHaveText([/打开终端|Open terminal/, "claude"]);
+    expect(scans).toBe(3);
+  });
+}
+
+for (const theme of themes) {
   test.describe(theme.name, () => {
     for (const kind of ["diff", "merge", "editor"] as const) {
       test(`tool detection imports only selected ${kind} tools and preserves existing configuration`, async ({ page }) => {

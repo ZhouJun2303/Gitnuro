@@ -51,6 +51,7 @@
     "allow-import-fork-settings",
     "allow-external-tools",
     "allow-common-tools",
+    "allow-detect-terminal-clis",
     "allow-editor-tools",
     "allow-program-exists",
     "allow-watch-repository",

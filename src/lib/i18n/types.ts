@@ -78,6 +78,8 @@ export type Messages = {
     new: string;
     add: string;
     showAll: string;
+    showMore: string;
+    showMoreSection: string;
     allBranches: string;
     checkedOnly: string;
     fetchAll: string;
@@ -754,6 +756,13 @@ export type Messages = {
     prefSecGitStash: string;
     prefSecLinks: string;
     prefSecTools: string;
+    terminalClis: string;
+    detectTerminalClis: string;
+    detectingTerminalClis: string;
+    terminalCliUnchecked: string;
+    terminalCliFound: string;
+    terminalCliMissing: string;
+    terminalCliLaunchMissing: string;
     prefSecShell: string;
     prefSecProxy: string;
     prefSecCertificate: string;

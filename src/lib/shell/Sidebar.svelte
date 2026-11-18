@@ -7,7 +7,9 @@
   import { liveSideRows, type SideRow } from "./sideRows";
 
   const shell = getShell();
-  const sideRows = $derived(shell.mode === "live" && shell.refs ? liveSideRows(shell) : []);
+  const pageSize = 10;
+  let limits = $state({ tags: pageSize, stashes: pageSize });
+  const sideRows = $derived(shell.mode === "live" && shell.refs ? liveSideRows(shell, limits) : []);
   const sideWindow = $derived(windowSlice(sideRows, shell.sideTop, shell.rowSide, 60, 80));
   const onSideScroll = onVirtualScroll((top) => (shell.sideTop = top));
   let sideScroll = $state<HTMLDivElement | null>(null);
@@ -112,6 +114,7 @@
     if (path === sideRepo && query === sideQuerySeen) return;
     sideRepo = path;
     sideQuerySeen = query;
+    limits = { tags: pageSize, stashes: pageSize };
     shell.sideTop = 0;
     if (sideScroll) sideScroll.scrollTop = 0;
   });
@@ -214,9 +217,9 @@
         {@const pinLabel = pinned ? shell.tr("menu.unpin") : shell.tr("menu.pin")}
         {@const filterLabel = filtered ? shell.tr("chrome.unfilterBranchHistory") : shell.tr("chrome.filterBranchHistory")}
         <div class="side-actions branch-switches" data-branch={name}>
+          <button class="icon-btn" type="button" disabled={!canHide} title={shell.tr("menu.hide")} aria-label={shell.tr("menu.hide")} onclick={(event) => { event.stopPropagation(); if (canHide) shell.hideRef(name); }}>{@render glyph("eye")}</button>
           <button class="icon-btn" class:on={pinned} type="button" title={pinLabel} aria-label={`${pinLabel}: ${name}`} aria-pressed={pinned} onclick={(event) => { event.stopPropagation(); shell.togglePin(name); }}>{@render glyph(pinned ? "unpin" : "pin")}</button>
           <button class="icon-btn history-filter-toggle" data-branch={name} class:on={filtered} type="button" title={filterLabel} aria-label={`${filterLabel}: ${name}`} aria-pressed={filtered} onclick={(event) => { event.stopPropagation(); shell.soloBranch(name); }}>{@render glyph(filtered ? "funnel-off" : "funnel-plus")}</button>
-          <button class="icon-btn" type="button" disabled={!canHide} title={shell.tr("menu.hide")} aria-label={shell.tr("menu.hide")} onclick={(event) => { event.stopPropagation(); if (canHide) shell.hideRef(name); }}>{@render glyph("eye")}</button>
         </div>
       {/snippet}
 
@@ -252,6 +255,11 @@
       {#snippet sideRow(row: SideRow)}
         {#if row.kind === "section"}
           {@render sideHead(row.id, row.label, row.count, sectionActions(row), row.empty, row.filter)}
+        {:else if row.kind === "more"}
+          <button class="side nested" type="button" aria-label={shell.tr("chrome.showMoreSection", { section: shell.tr(`chrome.${row.section}`) })} onclick={() => (limits[row.section] += pageSize)}>
+            <span class="twist"></span>
+            <span class="name">{shell.tr("chrome.showMore")}</span>
+          </button>
         {:else if row.kind === "folder"}
           <button class="side nested" class:deep={row.deep} type="button" aria-expanded={shell.folderOpen(row.folderKey)} onclick={() => shell.toggleFolder(row.folderKey)}>
             <span class="twist">{@render chevron(shell.folderOpen(row.folderKey))}</span>

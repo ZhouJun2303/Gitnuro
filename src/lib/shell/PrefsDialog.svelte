@@ -5,6 +5,7 @@
   import ShortcutPage from "./ShortcutPage.svelte";
   import RevisionPreviewFormats from "./RevisionPreviewFormats.svelte";
   import FontSettings from "./FontSettings.svelte";
+  import { terminalCliNames } from "../status";
   import type { MenuItem, PrefTab } from "./types";
 
   const shell = getShell();
@@ -651,6 +652,24 @@
         {@const tools = shell.toolsOf(kind)}
         {@const picked = shell.selectedTool(kind)}
         {@const pickedAt = picked ? tools.findIndex((tool) => tool.id === picked.id) : -1}
+        <section class="pref-card" aria-labelledby="terminal-clis-title">
+          <h3 class="pref-card-title" id="terminal-clis-title">{shell.tr("dialog.terminalClis")}</h3>
+          <div class="pref-card-body" aria-busy={shell.detectingTerminalClis}>
+            {#each terminalCliNames as cli (cli)}
+              <div class="pref-row" data-cli={cli}>
+                <span class="pref-label">{cli}</span>
+                <span class="pref-control">
+                  {shell.tr(shell.settings.terminalClis == null ? "dialog.terminalCliUnchecked" : shell.settings.terminalClis.includes(cli) ? "dialog.terminalCliFound" : "dialog.terminalCliMissing")}
+                </span>
+              </div>
+            {/each}
+            <div class="pref-row">
+              <button class="text-button" type="button" disabled={shell.detectingTerminalClis} onclick={() => void shell.detectTerminalClis()}>
+                {shell.tr(shell.detectingTerminalClis ? "dialog.detectingTerminalClis" : "dialog.detectTerminalClis")}
+              </button>
+            </div>
+          </div>
+        </section>
         <section class="pref-card">
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecLinks")}</h3>
           <div class="pref-card-body">

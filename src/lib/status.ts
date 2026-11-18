@@ -176,6 +176,9 @@ export type ToolRecord = {
   fallback: boolean;
 };
 
+export const terminalCliNames = ["codex", "grok", "cursor-agent", "claude"] as const;
+export type TerminalCli = (typeof terminalCliNames)[number];
+
 export type Settings = {
   theme: string;
   pullRebase: boolean;
@@ -271,6 +274,7 @@ export type Settings = {
   shellKind: string;
   shellPath: string;
   shellArgs: string;
+  terminalClis: TerminalCli[] | null;
   diffToolName: string;
   diffToolPath: string;
   diffToolArgs: string;

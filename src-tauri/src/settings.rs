@@ -223,6 +223,8 @@ pub struct Settings {
     #[serde(default)]
     pub shell_args: String,
     #[serde(default)]
+    pub terminal_clis: Option<Vec<crate::tools::TerminalCli>>,
+    #[serde(default)]
     pub diff_tool_name: String,
     #[serde(default)]
     pub diff_tool_path: String,
@@ -639,6 +641,7 @@ impl Default for Settings {
             shell_kind: shell_default(),
             shell_path: String::new(),
             shell_args: String::new(),
+            terminal_clis: None,
             diff_tool_name: String::new(),
             diff_tool_path: String::new(),
             diff_tool_args: String::new(),

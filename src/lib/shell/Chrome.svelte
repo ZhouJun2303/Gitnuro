@@ -1,12 +1,42 @@
 <script lang="ts">
   import { getShell } from "./context";
-  import { fillWorkspaceTabs } from "../status";
+  import { fillWorkspaceTabs, terminalCliNames, type TerminalCli } from "../status";
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
+  import type { MenuItem } from "./types";
 
   const shell = getShell();
   const launchShortcut = $derived.by(() => { shell.settings.shortcuts; return shortcutLabel("launch"); });
+
+  async function openTerminal(path: string, cli?: TerminalCli) {
+    try {
+      await invoke("open_terminal", { path, cli });
+    } catch (error) {
+      const message = shell.message(error);
+      if (cli && message === "terminal-cli-missing") {
+        shell.settings.terminalClis = shell.settings.terminalClis?.filter((name) => name !== cli) ?? [];
+        shell.actionError = shell.tr("dialog.terminalCliLaunchMissing", { cli });
+        void shell.savePrefs(false);
+      } else {
+        shell.actionError = message;
+      }
+    }
+  }
+
+  function terminalMenu(path: string): MenuItem {
+    const plain = { label: shell.tr("chrome.terminal"), disabled: shell.mode !== "live", run: () => openTerminal(path) };
+    if (plain.disabled) return plain;
+    const installed = terminalCliNames.filter((cli) => shell.settings.terminalClis?.includes(cli));
+    if (installed.length === 0) return plain;
+    return {
+      label: plain.label,
+      children: [
+        { label: shell.tr("shortcuts.terminal"), run: plain.run },
+        ...installed.map((cli) => ({ label: cli, run: () => openTerminal(path, cli) })),
+      ],
+    };
+  }
 
   $effect(() => {
     const path = shell.meterPath ?? shell.snapshot?.path ?? "";
@@ -201,7 +231,7 @@
         {@const job = shell.jobs[shell.jobKey(repo)] ?? shell.backgroundJobs[shell.jobKey(repo)]}
         <div class="tab" role="group" class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("repoInfo.title"), run: () => { shell.repoInfoPath = repo; shell.dialog = "repoInfo"; } },
-          { label: shell.tr("chrome.terminal"), disabled: shell.mode !== "live", run: () => void invoke("open_terminal", { path: repo }) },
+          terminalMenu(repo),
           { label: shell.tr("chrome.explorer"), run: () => void shell.openLocal(repo) },
           { label: shell.tr("menu.copyProjectPath"), run: () => shell.copyText(repo) },
           shell.recentRepoPinItem(repo),

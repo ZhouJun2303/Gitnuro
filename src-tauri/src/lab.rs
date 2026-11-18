@@ -340,6 +340,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         }
         "external_tools" => done(super::external_tools()),
         "common_tools" => done(crate::tools::common_tools()),
+        "detect_terminal_clis" => done(Vec::<crate::tools::TerminalCli>::new()),
         "editor_tools" => done(super::editor_tools()),
         "program_exists" => done(super::program_exists(req(args, "path")?)),
         "watch_repository" => Ok(Value::Null),

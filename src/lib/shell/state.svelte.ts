@@ -319,6 +319,7 @@ export class ShellState {
     shellKind: "default",
     shellPath: "",
     shellArgs: "",
+    terminalClis: null,
     diffToolName: "",
     diffToolPath: "",
     diffToolArgs: "",
@@ -5374,6 +5375,22 @@ export class ShellState {
   }
 
 
+
+  detectingTerminalClis = $state(false);
+
+  async detectTerminalClis() {
+    if (this.detectingTerminalClis) return;
+    this.detectingTerminalClis = true;
+    this.actionError = null;
+    try {
+      this.settings.terminalClis = await invoke<NonNullable<Settings["terminalClis"]>>("detect_terminal_clis");
+      await this.savePrefs(false);
+    } catch (error) {
+      this.actionError = this.message(error);
+    } finally {
+      this.detectingTerminalClis = false;
+    }
+  }
 
   async savePrefs(close = true) {
     return savePrefs(this, close);

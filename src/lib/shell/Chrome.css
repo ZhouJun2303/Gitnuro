@@ -154,7 +154,7 @@
     position: absolute;
     left: 14px;
     right: 14px;
-    bottom: 4px;
+    bottom: 1px;
     height: 3px;
     border-radius: 99px;
     background: color-mix(in srgb, var(--accent) 16%, transparent);

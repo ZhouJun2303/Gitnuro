@@ -63,6 +63,11 @@ for (const theme of ["apple", "light", "dark"] as const) {
         const track = node.getBoundingClientRect(), fill = node.firstElementChild!.getBoundingClientRect();
         return Math.round(fill.width / track.width * 100);
       })).toBe(percent);
+      const track = (await bar.boundingBox())!;
+      for (const selector of [".identity-branch", ".identity-pct", ".branch-chip > span"]) {
+        const label = (await page.locator(selector).boundingBox())!;
+        expect(track.y, selector).toBeGreaterThanOrEqual(label.y + label.height);
+      }
       await expect(page.locator('.chrome-left [title="获取"]')).toBeEnabled();
       await page.screenshot({ path: `.lab/${scene}-${theme}.png` });
     });

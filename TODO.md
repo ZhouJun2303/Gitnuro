@@ -10,6 +10,10 @@
 
 ## 已处理
 
+- [x] 项目标签右键的终端子菜单可以在所选项目目录启动 Codex、Grok、Cursor Agent 和 Claude。偏好设置的「集成」页手动检测并保存可用项，检测失败时保留上次结果。随本条提交 `feat: 完善侧栏和项目终端菜单`。三套主题回归 `project terminal menu uses only manually detected CLIs`，后端回归 `terminal_cli_detection_accepts_launchers_and_skips_missing_or_removed_files` 和 `windows_terminal_cli_runs_batch_shims_in_the_project_directory`。
+
+- [x] 分支按钮按隐藏、固定、历史筛选排列，顶部进度条下移 3 px，标签和贮藏每批显示 10 条。随本条提交 `feat: 完善侧栏和项目终端菜单`。三套主题回归 `branch actions show hide, pin and history filter in order`、`command progress scene` 和 `tags and stashes show ten more results independently`。
+
 - [x] 最近工作区的项目上限可在偏好设置中调整，默认 5。项目右键可固定或取消固定；固定项目占用名额并随设置保存。修复：本条所在提交 `feat: 支持配置最近工作区并固定项目`。回归：`e2e/recent-workspace.spec.ts` 覆盖三套主题，`recent_workspace_settings_default_and_round_trip` 验证旧设置默认值和保存回读。
 
 - [x] 修复桌面端 `workspace_status_paths` 被 ACL 拒绝的错误，补齐后台任务、Blame、贮藏补丁、锁恢复和分页扫描等已有命令的构建清单与窗口权限；查看窗口只补只读接口，取消任务和移除锁仍限普通仓库窗口。修复：本条所在提交 `fix: 补齐桌面命令的 ACL 授权`；回归：`command_acl` 的 3 项直接校验编译后的 Tauri ACL、全部注册命令和窗口 / 来源边界，修复前成功复现 8 个命令缺失；原观察窗口、查看窗口和历史副本权限、局部状态与暂存流程合计 5 项回归通过；`pnpm check`、`cargo build -p awegit --bin awegit` 通过。

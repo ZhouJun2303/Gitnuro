@@ -1001,6 +1001,11 @@ async fn common_tools() -> Result<Vec<tools::CommonTool>, String> {
 }
 
 #[tauri::command]
+async fn detect_terminal_clis() -> Result<Vec<tools::TerminalCli>, String> {
+    tauri::async_runtime::spawn_blocking(tools::detected_terminal_clis).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn editor_tools() -> Vec<tools::EditorTool> {
     tools::editor_tools()
 }
@@ -1475,7 +1480,11 @@ fn watch_relevant(repo: &Path, path: &Path) -> bool {
 }
 
 #[tauri::command]
-fn open_terminal(path: Option<String>) -> Result<(), String> {
+async fn open_terminal(path: Option<String>, cli: Option<tools::TerminalCli>) -> Result<(), String> {
+    if let Some(cli) = cli {
+        return tauri::async_runtime::spawn_blocking(move || tools::open_terminal_cli(cli, &repo_from(path)?))
+            .await.map_err(|error| error.to_string())?;
+    }
     let repo = repo_from(path)?;
     let loaded = settings::load().ok();
     if let Some(values) = loaded.as_ref() {
@@ -2799,6 +2808,7 @@ pub fn run() {
             import_fork_settings,
             external_tools,
             common_tools,
+            detect_terminal_clis,
             editor_tools,
             program_exists,
             watch_repository,
