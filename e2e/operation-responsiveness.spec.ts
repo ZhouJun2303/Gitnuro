@@ -79,8 +79,9 @@ for (const theme of ["apple", "light", "dark"]) {
       await expect.poll(() => pushStarted).toBe(true);
       await page.locator(".summary-input").fill("next draft while committing");
       await expect.poll(() => git("rev-parse", "HEAD") === git("rev-parse", "origin/main")).toBe(true);
-      await expect(page.locator(".task-queue summary")).toBeVisible();
-      await page.locator(".task-queue summary").click();
+      await expect(page.locator(".chrome-right .task-queue")).toHaveCount(0);
+      await page.locator(".history-btn").click();
+      await page.locator(".command-filters .task-queue summary").click();
       await expect(page.locator(".task-popover")).toBeVisible();
       await expect(page.locator('.task-row[data-task-state="completed"]').first()).toBeVisible();
       releaseCommit();
@@ -120,7 +121,8 @@ for (const theme of ["apple", "light", "dark"]) {
       const pending = page.locator(`.sidebar .file-select[title="${name}"]`);
       await expect(pending.locator(".reference-pending")).toBeVisible();
       expect(git("branch", "--list", name)).toBe("");
-      await page.locator(".task-queue summary").click();
+      await page.locator(".history-btn").click();
+      await page.locator(".command-filters .task-queue summary").click();
       await page.locator('.task-row[data-task-state="queued"]').filter({ hasText: name }).getByRole("button", { name: "取消", exact: true }).click();
       await expect(page.locator('.task-row[data-task-state="cancelled"]').filter({ hasText: name })).toBeVisible();
       await expect(pending).toHaveCount(0);

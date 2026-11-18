@@ -9,6 +9,7 @@
   import BlobPane from "./shell/BlobPane.svelte";
   import DialogHost from "./shell/DialogHost.svelte";
   import MergePanel from "./shell/MergePanel.svelte";
+  import TaskQueue from "./shell/TaskQueue.svelte";
   import "./shell/common.css";
   import { ShellState } from "./shell/state.svelte";
   import { invoke } from "./perf";
@@ -1011,6 +1012,7 @@
           <button type="button" class:on={shell.commandFilter === "background"} onclick={() => shell.showCommandFilter("background")}>{shell.tr("chrome.commandBackground")}</button>
           <button type="button" class:on={shell.commandFilter === "errors"} class:alert={shell.recentErrors.length > 0} onclick={() => shell.showCommandFilter("errors")}>{shell.tr("chrome.commandErrors")}{#if shell.recentErrors.length > 0}<em>{shell.recentErrors.length}</em>{/if}</button>
           <button type="button" class:on={shell.commandFilter === "notices"} onclick={() => shell.showCommandFilter("notices")}>{shell.tr("chrome.commandNotices")}{#if shell.statusNotices.length > 0}<em>{shell.statusNotices.length}</em>{/if}</button>
+          <TaskQueue />
         </div>
         <div class="command-items">
           {#each shell.visibleCommands() as item (item.id)}

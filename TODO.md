@@ -16,6 +16,10 @@
 
 - [x] 空提交不再把批量拣选卡在冲突提示：首次拣选、继续和跳过均能跳过无改动提交并保留剩余队列；真实冲突、提交钩子和未暂存编辑仍会保留暂停状态。兼容外部提交后只剩 sequencer 的拣选与还原，异常元数据不会触发提前恢复本地贮藏。修复：本条所在提交 `fix: 修复空提交导致批量拣选无法继续`；回归：`crates/git/tests/cherry_pick.rs` 的 16 项分别在 Git 2.38.1、MinGit 2.56.0 上通过，单提交拣选 / Reset / Revert 及原还原逻辑 5 项通过；`e2e/cherry-pick-empty.spec.ts`、新增 `cherry-pick-paused` 与原冲突场景、三主题变更面板和多选交互共 24 项通过；`pnpm check`、`pnpm build`、`cargo check -p awegit --tests` 通过。
 
+- [x] 后台任务入口移入命令记录筛选栏，展开样式与筛选项一致，关闭面板时仍持续接收任务状态。修复：本条所在提交 `fix: 调整任务入口并清除拉取后的分支等待标记`；回归：`scene operation-tasks`、`theme panel command log` 及 `e2e/operation-responsiveness.spec.ts` 的提交推送和排队取消用例，覆盖 Apple、经典白色、VS Code 黑色。
+
+- [x] Pull 完成后，引用未变化的任务不再等待被跳过的引用回读；引用版本改为响应式更新，即使快照内容相同也会清除分支等待标记，重复任务通知不会重新转圈。修复：本条所在提交 `fix: 调整任务入口并清除拉取后的分支等待标记`；回归：`e2e/pull-pending.spec.ts` 的 6 项、`e2e/pull.spec.ts` 的三主题拉取用例，以及引用投影、版本覆盖和上下文回读回归；连同任务入口共 28 项通过。`pnpm check`、`pnpm build` 通过。
+
 - [x] 文件夹右键菜单顶部增加「打开文件夹」「在文件管理器中显示」「复制绝对路径」「复制相对路径」，暂存区与未暂存区共用；打开文件夹进入目录，显示操作仍在父目录选中目标。修复：本条所在提交 `feat: 为文件夹右键菜单补齐打开和复制路径操作`；回归：`e2e/folder-menu.spec.ts`、`scene folder-menu`、`a folder menu counts every picked file, not just the folder's` 及文件菜单相关回归，Apple、经典白色、VS Code 黑色共 19 项通过；`pnpm check`、`default_file_targets` 两项后端回归通过。
 
 - [x] 提交、继续变基编辑说明和改写说明显示标题为空、当前字数、上限及需删减字数；提交面板补齐未暂存、冲突与等待状态，快捷键校验失败也提示，修正输入后清除提示，继续失败的报错不会被流程状态遮住。修复：本条所在提交 `fix: 补齐提交和继续变基的校验提示`；回归：`e2e/commit-validation.spec.ts` 的 21 项，连同四个新增场景、原继续 / 改写弹窗、`theme panel changes` 和原继续变基用例共 43 项通过，覆盖 Apple、经典白色、VS Code 黑色；`pnpm check`、`pnpm build` 通过。

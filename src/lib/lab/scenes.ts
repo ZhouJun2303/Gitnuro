@@ -81,7 +81,7 @@ export const dialogScenes = {
 } satisfies Record<LabDialog, LabScene>;
 
 export const surfaceScenes: LabScene[] = [
-  scene({ id: "operation-tasks", group: "仓库状态", title: "后台任务 · 排队、核验、取消和失败", repo: "full", ready: '.task-queue[open] .task-row' }),
+  scene({ id: "operation-tasks", group: "仓库状态", title: "后台任务 · 排队、核验、取消和失败", repo: "full", ready: '.command-filters .task-queue[open] .task-row' }),
   scene({ id: "unstage-initial", group: "仓库状态", title: "首次提交前 · 暂存后继续修改", repo: "unstage-initial", ready: ".staged-pane .file-list" }),
   scene({ id: "stage-conflict-paths", group: "仓库状态", title: "冲突中 · 重命名与删除后全部暂存", repo: "stage-conflict-paths", ready: ".unstaged-pane .file-list" }),
   scene({ id: "pull-deleted", group: "仓库状态", title: "拉取 · 本地删除和暂存后删除", repo: "pull-deleted", ready: ".file-list" }),

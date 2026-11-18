@@ -152,7 +152,8 @@ async function fillSurface(shell: ShellState, id: string) {
       acceptTask({ id: `lab-task-${index}`, path: shell.repoPath() ?? "", action: "fetch", label: `git fetch origin · ${index + 1}`, targets: ["origin"], state,
         dependsOn: index === 1 ? ["lab-task-0"] : [], revision: 0, queuedMs: 12, executeMs: 240, verifyMs: 8 });
     }
-    requestAnimationFrame(() => document.querySelector<HTMLDetailsElement>(".task-queue")?.setAttribute("open", ""));
+    shell.openCommandLog("all");
+    requestAnimationFrame(() => document.querySelector<HTMLDetailsElement>(".command-filters .task-queue")?.setAttribute("open", ""));
     return;
   }
   if (id === "sync-busy") {

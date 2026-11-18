@@ -42,10 +42,11 @@
 {/if}
 
 <style>
-  .task-queue { position: relative; flex: 0 0 auto; font-size: 11px; }
-  summary { cursor: pointer; padding: 5px 8px; border-radius: 6px; background: var(--elevated); }
-  summary span { margin-left: 5px; font-variant-numeric: tabular-nums; }
-  .task-popover { position: absolute; right: 0; top: 100%; z-index: 100; width: min(440px, 80vw); max-height: min(360px, 60vh); overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--elevated); box-shadow: 0 8px 24px #0003; padding: 8px; }
+  .task-queue { position: relative; flex: 0 0 auto; color: var(--text-secondary); }
+  summary { cursor: pointer; padding: 8px 0; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .task-queue[open] summary { color: var(--accent); border-bottom-color: var(--accent); font-weight: 650; }
+  summary span { margin-left: 4px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .task-popover { position: absolute; left: 0; top: 100%; z-index: 100; width: min(440px, 80vw); max-height: min(360px, 60vh); overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--elevated); color: var(--text); box-shadow: 0 8px 24px #0003; padding: 8px; }
   .task-window { position: relative; }
   .task-row { position: absolute; left: 0; right: 0; height: 56px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
   .task-row div { flex: 1; min-width: 0; }

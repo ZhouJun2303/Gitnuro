@@ -57,7 +57,7 @@ import { STATUS_NOTICE_ENTRY } from "./types";
 import { statusPathBefore } from "../status";
 import { enqueueStage, projectStages, stageActions, type StageChange } from "./staging";
 import { areasFor, patchActions, type RefreshArea } from "../operation-policy";
-import { projectRefs, runTask, subscribeTasks, taskDone, type OperationTask } from "../tasks";
+import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
 import { watchOperationTasks } from "./task-monitor";
 import { invalidateReads } from "../read-scheduler";
 import { mergeResponse } from "../reconcile";
@@ -486,7 +486,7 @@ export class ShellState {
   watchRevision = 0;
   watchPaths: string[] | null = null;
   statusRevision = 0;
-  contextRevision = 0;
+  contextRevision = $state(0);
 
 
   refs = $state<RefSnapshot | null>(null);
@@ -1624,7 +1624,7 @@ export class ShellState {
   pendingReferences = $derived.by(() => {
     const names = new Set<string>();
     for (const task of this.operationTasks) {
-      if (task.kind === "service" || this.jobKey(task.path) !== this.jobKey(this.repoPath()) || (taskDone(task) && !(task.state === "completed" && task.revision > this.contextRevision))) continue;
+      if (this.jobKey(task.path) !== this.jobKey(this.repoPath()) || !taskRefsPending(task, this.contextRevision)) continue;
       for (const name of [...task.targets, ...Object.values(task.preview ?? {})]) names.add(name);
     }
     return names;

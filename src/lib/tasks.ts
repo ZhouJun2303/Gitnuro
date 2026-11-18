@@ -7,6 +7,7 @@ export type OperationTask = {
   revision: number; queuedMs: number; executeMs: number; verifyMs: number;
   kind?: "repository" | "service"; cancelCommand?: string;
   preview?: Record<string, string>; phase?: string; percent?: number;
+  refreshScope?: "status" | "full";
 };
 const independentCommands = new Set(["suggest_commit_message", "review_branch", "test_ai_endpoint", "list_ai_models", "sync_accounts", "test_account", "browser_login", "generate_ssh_key", "create_github_repo", "create_hosted_repo", "download_font", "download_google_font", "recognize_google_font", "check_for_update", "download_update", "scan_repositories", "repository_inspection", "launch_tool", "create_revision_copy", "remove_revision_copy", "save_revision", "external_tools", "editor_tools", "remote_matches", "forge_notifications", "forge_pulls"]);
 const cancellation: Record<string, string> = { download_update: "cancel_update", browser_login: "cancel_browser_login" };
@@ -18,6 +19,8 @@ const localTasks = new Set<string>();
 const clientId = `client-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 export const ownsTask = (id: string) => localTasks.has(id);
 export const taskDone = (task: OperationTask) => ["completed", "conflict", "failed", "cancelled", "blocked"].includes(task.state);
+export const taskRefsPending = (task: OperationTask, revision: number) => task.kind !== "service"
+  && (!taskDone(task) || (task.state === "completed" && task.refreshScope !== "status" && task.revision > revision));
 
 export function acceptTask(task: OperationTask) {
   const previous = records.get(task.id);
@@ -70,9 +73,11 @@ export async function runTask<T>(command: string, args: Record<string, unknown>,
   const started = performance.now();
   try {
     const value = await execute({ ...args, __task: id, __client: clientId, __dependsOn: dependsOn });
-    const outcome = (value as { outcome?: TaskState } | null)?.outcome ?? "completed";
+    const report = value as { outcome?: TaskState; refreshScope?: "status" | "full" } | null;
+    const outcome = report?.outcome ?? "completed";
     const current = records.get(id) ?? task;
-    acceptTask({ ...current, state: taskDone(current) ? current.state : outcome, executeMs: current.executeMs || performance.now() - started });
+    acceptTask({ ...current, state: taskDone(current) ? current.state : outcome,
+      ...(report?.refreshScope ? { refreshScope: report.refreshScope } : {}), executeMs: current.executeMs || performance.now() - started });
     return value;
   } catch (error) {
     const current = records.get(id) ?? task;
@@ -90,8 +95,7 @@ function capture(value: unknown): unknown {
 /** Display intentions independently of the refs used for Git decisions. */
 export function projectRefs(snapshot: RefSnapshot | null, tasks: readonly OperationTask[], path: string, revision: number): RefSnapshot | null {
   if (!snapshot) return snapshot;
-  const pending = tasks.filter((task) => task.kind !== "service" && repositoryKey(task.path) === repositoryKey(path)
-    && (!taskDone(task) || (task.state === "completed" && task.revision > revision)));
+  const pending = tasks.filter((task) => repositoryKey(task.path) === repositoryKey(path) && taskRefsPending(task, revision));
   if (!pending.length) return snapshot;
   let branches = snapshot.branches, tags = snapshot.tags, remotes = snapshot.remotes, stashes = snapshot.stashes, worktrees = snapshot.worktrees, submodules = snapshot.submodules;
   for (const task of pending) {
