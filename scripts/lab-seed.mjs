@@ -598,6 +598,19 @@ function seedStageManyRepo(name = "stage-many", dense = false) {
   }
 }
 
+function seedSubmoduleDiffRepo() {
+  const path = join(repos, "submodule-diff");
+  wipe(path);
+  initWork(path);
+  const initial = git(subBare, ["rev-list", "--max-parents=0", "main"]).stdout.trim();
+  const latest = git(subBare, ["rev-parse", "main"]).stdout.trim();
+  git(path, ["-c", "protocol.file.allow=always", "submodule", "add", fileUrl(subBare), "vendor"]);
+  git(join(path, "vendor"), ["checkout", "--detach", initial]);
+  git(path, ["add", "vendor"]);
+  git(path, ["commit", "-m", "add submodule"]);
+  if (latest !== initial) git(join(path, "vendor"), ["checkout", "--detach", latest]);
+}
+
 const restore = {
   "stage-many": seedStageManyRepo,
   "stage-dense": () => seedStageManyRepo("stage-dense", true),
@@ -607,6 +620,7 @@ const restore = {
   "checkout-conflict": () => seedCheckoutRepo("checkout-conflict"),
   "unstage-initial": seedUnstageInitialRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
+  "submodule-diff": seedSubmoduleDiffRepo,
   "pull-deleted": seedPullDeletedRepo,
   "pull-noop": seedPullNoopRepo,
   "pull-disjoint": () => seedPullNoopRepo("pull-disjoint"),
@@ -650,6 +664,9 @@ commit(subSrc, "lib.txt", "library\n", "lib");
 git(subSrc, ["remote", "add", "origin", fileUrl(subBare)]);
 git(subSrc, ["push", "-u", "origin", "HEAD:main"]);
 const subSha = git(subSrc, ["rev-parse", "HEAD"]).stdout.trim();
+commit(subSrc, "lib.txt", "library update\n", "lib update");
+git(subSrc, ["push", "origin", "HEAD:main"]);
+seedSubmoduleDiffRepo();
 
 const writer = join(repos, "writer");
 initWork(writer);

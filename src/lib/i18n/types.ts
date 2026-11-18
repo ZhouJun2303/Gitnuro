@@ -246,6 +246,12 @@ export type Messages = {
     toolPathEmpty: string;
     toolPathMissing: string;
     externalDiff: string;
+    submoduleChange: string;
+    submoduleChangeHint: string;
+    submoduleNotReady: string;
+    submoduleOld: string;
+    submoduleNew: string;
+    openSubmodule: string;
     blameOf: string;
     view: string;
     window: string;

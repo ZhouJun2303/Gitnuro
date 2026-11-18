@@ -67,7 +67,27 @@
     if (mode === "pixel" && before && after) void shell.paintPixel(before, after);
   }
 
-  const hunkList = $derived(shell.mode === "live" && shell.section === "changes" ? shell.hunkRanges() : []);
+  const selectedSubmodule = $derived.by(() => {
+    const path = shell.selectedPath;
+    if (shell.mode !== "live" || shell.section !== "changes" || !path) return null;
+    const row = shell.refs?.submodules.find((item) => item.path === path);
+    if (row) return row;
+    // A refs read can arrive after the diff read. Gitlink text still identifies the path.
+    return shell.diff?.lines.some((line) => line.text.startsWith("-Subproject commit ") || line.text.startsWith("+Subproject commit "))
+      ? { path, id: "", ready: false }
+      : null;
+  });
+  const submoduleCommits = $derived.by(() => {
+    if (!selectedSubmodule) return { oldId: "", newId: "" };
+    let oldId = "";
+    let newId = "";
+    for (const line of shell.diff?.lines ?? []) {
+      if (line.text.startsWith("-Subproject commit ")) oldId = line.text.slice("-Subproject commit ".length).trim();
+      if (line.text.startsWith("+Subproject commit ")) newId = line.text.slice("+Subproject commit ".length).trim();
+    }
+    return { oldId, newId };
+  });
+  const hunkList = $derived(shell.mode === "live" && shell.section === "changes" && !selectedSubmodule ? shell.hunkRanges() : []);
   let wrapped = $state<{ scrollTo: (index: number) => Promise<void> }>();
   const conflictSelection = $derived(shell.section === "changes" ? shell.pickedConflicts() : []);
   const activeAt = $derived(hunkList.findIndex((range) => range.index === activeHunk));
@@ -228,7 +248,12 @@
 
   function stageActive() {
     const file = shell.selectedPath;
-    if (!file || shell.writeBlocked || shell.pathPending(file) || activeHunk == null) return;
+    if (!file || shell.writeBlocked || shell.pathPending(file)) return;
+    if (selectedSubmodule) {
+      void shell.runChange(shell.selectedSide === "staged" ? "unstage_path" : "stage_path", { file });
+      return;
+    }
+    if (activeHunk == null) return;
     void shell.mutate({ action: "stageHunk", file, index: activeHunk, unstage: shell.selectedSide === "staged", ignoreSpace: shell.settings.ignoreSpace });
   }
 
@@ -243,6 +268,11 @@
   function stageHovered() {
     const file = shell.selectedPath;
     if (!file || shell.writeBlocked || shell.pathPending(file)) return;
+    if (selectedSubmodule) {
+      void shell.runChange(shell.selectedSide === "staged" ? "unstage_path" : "stage_path", { file });
+      hoveredHunk = null;
+      return;
+    }
     const index = hoveredHunk;
     const lineMode = useLineOps;
     const lineOps = hoveredLineOps;
@@ -286,6 +316,10 @@
         : shell.tr(many ? "menu.stageLines" : "menu.stageLine");
     }
     return shell.selectedSide === "staged" ? shell.tr("menu.unstageHunk") : shell.tr("menu.stage");
+  }
+
+  function submoduleActionLabel() {
+    return shell.selectedSide === "staged" ? "menu.unstage" : "menu.stage";
   }
 
   function discardLabel() {
@@ -368,10 +402,15 @@
               <p class="diff-empty">{shell.tr("chrome.reading")}</p>
             {/if}
           {:else if shell.mode === "live" && shell.section === "changes" && shell.selectedPath}
+            {@const submodule = selectedSubmodule}
             <header class="diff-head">
               <span title={shell.selectedPath}>{shell.selectedPath}</span>
-              <button class="pane-chip" type="button" disabled={shell.writeBlocked} title={shell.tr("menu.externalDiff")} onclick={(event) => shell.openExternalToolMenu(event, "diff", shell.selectedPath ?? "")}>{shell.tr("chrome.externalDiff")}</button>
-              {#if hunkList.length > 0}
+              {#if !submodule}
+                <button class="pane-chip" type="button" disabled={shell.writeBlocked} title={shell.tr("menu.externalDiff")} onclick={(event) => shell.openExternalToolMenu(event, "diff", shell.selectedPath ?? "")}>{shell.tr("chrome.externalDiff")}</button>
+              {/if}
+              {#if submodule}
+                <button class="pane-chip" data-submodule-stage type="button" disabled={shell.stageDisabled || shell.pathPending(shell.selectedPath)} title={shell.tr(submoduleActionLabel())} onclick={stageActive}>{shell.tr(submoduleActionLabel())}</button>
+              {:else if hunkList.length > 0}
                 <div class="hunk-tools" role="group" aria-label={shell.tr("chrome.hunkActions")}>
                   <button class="hunk-step" type="button" disabled={shell.writeBlocked} aria-label={shell.tr("menu.prevHunk")} title={shell.tr("menu.prevHunk")} onclick={() => stepHunk(-1)}>‹</button>
                   <span class="hunk-pos" aria-live="polite">{activeAt >= 0 ? activeAt + 1 : "–"}/{hunkList.length}</span>
@@ -382,11 +421,11 @@
                   {/if}
                 </div>
               {/if}
-              {#if shell.discardableSelected.length > 1}
+              {#if !submodule && shell.discardableSelected.length > 1}
                 <button class="pane-chip danger" type="button" disabled={shell.writeBlocked || !!shell.selectedPath && shell.pathPending(shell.selectedPath)} onclick={() => { const discard = shell.bindLineOps("discardLine", shell.discardableSelected); shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(shell.discardableSelected.length) }), () => void discard(), [], { danger: true }); }}>{shell.tr("menu.discardLines")}</button>
               {/if}
             </header>
-            {#if shell.diff && shell.diff.lines.length > 0}
+            {#if shell.diff && shell.diff.lines.length > 0 && !submodule}
               <div class="minimap" role="presentation">
                 {#each shell.minimapMarks as mark (`m-${mark.index}`)}
                   <button class="mark {mark.kind}" type="button" aria-label={`${shell.tr("menu.nextHunk")} ${mark.index + 1}`} title={`${shell.tr("menu.nextHunk")} ${mark.index + 1}`} style:left="{mark.top}%" onclick={() => goMark(mark.index)}></button>
@@ -395,6 +434,20 @@
             {/if}
             {#if shell.pendingStage(shell.selectedPath) !== undefined}
               <p class="diff-empty" data-stage-pending aria-live="polite">{shell.tr(shell.pendingStage(shell.selectedPath) ? "chrome.unstagePending" : "chrome.stagePending")}</p>
+            {:else if submodule}
+              <div class="submodule-diff" data-submodule-diff>
+                <div class="submodule-diff-title">
+                  <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M3 3.5h10M3 8h10M3 12.5h6"/><circle cx="12.2" cy="12.5" r="1.3" fill="currentColor"/></svg>
+                  <strong>{shell.tr("chrome.submoduleChange")}</strong>
+                </div>
+                <p class="submodule-diff-path" title={submodule.path}>{submodule.path}</p>
+                <dl class="submodule-commits">
+                  <div data-submodule-old><dt>{shell.tr("chrome.submoduleOld")}</dt><dd><code>{submoduleCommits.oldId || "—"}</code></dd></div>
+                  <div data-submodule-new><dt>{shell.tr("chrome.submoduleNew")}</dt><dd><code>{submoduleCommits.newId || "—"}</code></dd></div>
+                </dl>
+                <p class="submodule-diff-hint">{shell.tr(submodule.ready ? "chrome.submoduleChangeHint" : "chrome.submoduleNotReady")}</p>
+                <button class="pane-chip submodule-open" data-submodule-open type="button" disabled={!submodule.ready} title={shell.tr("chrome.openSubmodule")} onclick={() => void shell.openRepo(shell.fullPath(submodule.path))}>{shell.tr("chrome.openSubmodule")}</button>
+              </div>
             {:else if shell.diffError}
               <p class="diff-empty">{shell.diffError}</p>
             {:else if !shell.diff}

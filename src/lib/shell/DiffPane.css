@@ -250,6 +250,98 @@ section.diff > .diff-viewport {
 
 .conflict-pane > * { flex-shrink: 0; }
 
+.submodule-diff {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  gap: 10px;
+  padding: 28px 20px 64px;
+  text-align: center;
+}
+
+.submodule-diff > * { flex-shrink: 0; }
+
+.submodule-diff-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.submodule-diff-title svg {
+  width: 18px;
+  height: 18px;
+  color: var(--accent);
+}
+
+.submodule-diff-path {
+  max-width: min(680px, 100%);
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+  font: 12px var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.submodule-commits {
+  display: grid;
+  gap: 8px;
+  width: min(680px, 100%);
+  margin: 0;
+  text-align: left;
+}
+
+.submodule-commits > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--elevated);
+}
+
+.submodule-commits dt {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.submodule-commits dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.submodule-commits code {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font: 12px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.submodule-diff-hint {
+  max-width: 520px;
+  margin: 4px 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.submodule-open {
+  margin-top: 2px;
+}
+
 .conflict-title {
     display: flex;
     align-items: center;

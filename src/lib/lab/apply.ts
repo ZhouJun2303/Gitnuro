@@ -465,6 +465,9 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.sideQuery = "vendor";
     return;
   }
+  if (id === "submodule-diff") {
+    return showChange(shell, "vendor", "unstaged");
+  }
   if (id === "worktree") {
     shell.collapsedSide = [];
     shell.sideQuery = "extra";
