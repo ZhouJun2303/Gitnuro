@@ -229,6 +229,8 @@ export type Settings = {
   aiTemperature: number;
   logDirectory: string;
   recent: string[];
+  recentWorkspaceLimit: number;
+  recentRepoPins: { id: string; path: string }[];
   workspaces: WorkspaceRecord[];
   currentWorkspace: string;
   commands: CommandRecord[];
@@ -353,9 +355,9 @@ export type WorkspaceRecord = {
   tabWidth?: number;
 };
 
-/** Built-in workspace that always holds the most recently opened repositories. */
+/** Built-in workspace for pinned and recently opened repositories. */
 export const recentWorkspaceId = "awegit-recent";
-export const recentWorkspaceLimit = 5;
+export const defaultRecentWorkspaceLimit = 5;
 
 /** Narrowest project tab. Past this, the strip scrolls instead of shrinking further. */
 export const workspaceTabFloor = 96;

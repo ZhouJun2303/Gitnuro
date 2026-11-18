@@ -276,6 +276,21 @@
         <RevisionPreviewFormats />
       {:else if shell.prefTab === "workspace"}
         <section class="pref-card">
+          <h3 class="pref-card-title">{shell.tr("chrome.recentWorkspace")}</h3>
+          <div class="pref-card-body">
+            <label class="pref-row">
+              <span class="pref-label">{shell.tr("dialog.recentWorkspaceLimit")}</span>
+              <span class="pref-control">
+                <input type="number" min={shell.minimumRecentWorkspaceLimit()} value={shell.settings.recentWorkspaceLimit} onchange={(event) => {
+                  shell.setRecentWorkspaceLimit(event.currentTarget.valueAsNumber);
+                  event.currentTarget.value = String(shell.settings.recentWorkspaceLimit);
+                }} />
+              </span>
+            </label>
+          </div>
+        </section>
+
+        <section class="pref-card">
           <h3 class="pref-card-title">{shell.tr("dialog.sourceFolder")}</h3>
           <div class="pref-card-body">
             <div class="pref-list">

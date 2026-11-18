@@ -128,6 +128,10 @@ pub struct Settings {
     pub log_directory: String,
     #[serde(default)]
     pub recent: Vec<String>,
+    #[serde(default = "recent_workspace_limit")]
+    pub recent_workspace_limit: u32,
+    #[serde(default)]
+    pub recent_repo_pins: Vec<RecentRepoPin>,
     #[serde(default)]
     pub workspaces: Vec<WorkspaceRecord>,
     #[serde(default)]
@@ -348,6 +352,12 @@ pub struct CommitTypeRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecentRepoPin {
+    pub id: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceRecord {
     pub id: String,
@@ -486,6 +496,9 @@ fn locale_default() -> String {
     "system".into()
 }
 fn flow_days() -> u32 { 3 }
+fn recent_workspace_limit() -> u32 {
+    5
+}
 fn diff_font() -> u32 {
     14
 }
@@ -584,6 +597,8 @@ impl Default for Settings {
             ai_temperature: 0.0,
             log_directory: String::new(),
             recent: Vec::new(),
+            recent_workspace_limit: recent_workspace_limit(),
+            recent_repo_pins: Vec::new(),
             workspaces: Vec::new(),
             current_workspace: String::new(),
             commands: Vec::new(),
@@ -1942,6 +1957,25 @@ mod tests {
         let loaded = load_at(&dir.path).unwrap();
         assert_eq!(loaded.commit_type, "fix");
         assert_eq!(loaded.recovery_notice, "recovered-backup");
+    }
+
+    #[test]
+    fn recent_workspace_settings_default_and_round_trip() {
+        let legacy: super::Settings = serde_json::from_str(r#"{"recent":["repo-a"]}"#).unwrap();
+        assert_eq!(legacy.recent_workspace_limit, 5);
+        assert!(legacy.recent_repo_pins.is_empty());
+        assert_eq!(legacy.recent, ["repo-a"]);
+
+        let dir = TempSettings::new();
+        let mut settings = legacy;
+        settings.recent_workspace_limit = 14;
+        settings.recent_repo_pins.push(super::RecentRepoPin { id: "repo-b".into(), path: "Repo-B".into() });
+        save_at(&dir.path, &settings).unwrap();
+        let saved = load_at(&dir.path).unwrap();
+        assert_eq!(saved.recent_workspace_limit, 14);
+        assert_eq!(saved.recent_repo_pins.len(), 1);
+        assert_eq!(saved.recent_repo_pins[0].id, "repo-b");
+        assert_eq!(saved.recent_repo_pins[0].path, "Repo-B");
     }
 
     #[test]

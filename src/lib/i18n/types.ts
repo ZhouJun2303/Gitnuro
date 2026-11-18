@@ -8,6 +8,7 @@ export type Messages = {
     open: string;
     workspace: string;
     recentWorkspace: string;
+    pinnedInRecent: string;
     workspaceConfigure: string;
     workspaceName: string;
     workspaceCreate: string;
@@ -409,6 +410,7 @@ export type Messages = {
     stashBranch: string;
     pin: string;
     unpin: string;
+    recentWorkspaceFull: string;
     createPr: string;
     prevHunk: string;
     nextHunk: string;
@@ -932,6 +934,7 @@ export type Messages = {
     showWorktrees: string;
     maxCommits: string;
     scanDepth: string;
+    recentWorkspaceLimit: string;
     workspaceTitle: string;
     rebaseUpdateRefs: string;
     applyStashDelete: string;

@@ -204,11 +204,21 @@
           { label: shell.tr("chrome.terminal"), disabled: shell.mode !== "live", run: () => void invoke("open_terminal", { path: repo }) },
           { label: shell.tr("chrome.explorer"), run: () => void shell.openLocal(repo) },
           { label: shell.tr("menu.copyProjectPath"), run: () => shell.copyText(repo) },
+          shell.recentRepoPinItem(repo),
           { label: shell.tr("menu.renameTab"), run: () => { shell.draft = shell.tabText(repo); shell.draftExtra = repo; shell.dialog = "renameTab"; } },
           { label: shell.tr("menu.tabColor"), run: () => { shell.draft = shell.tabColor(repo); shell.draftExtra = repo; shell.dialog = "colorTab"; } },
           { label: shell.tr("chrome.close"), run: () => shell.closeTab(repo) },
         ])}>
-          <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabDisplay(repo)} onclick={() => shell.openRepo(repo)}>{#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}{shell.tabDisplay(repo)}</button>
+          <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabDisplay(repo)} onclick={() => shell.openRepo(repo)}>
+            {#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}
+            {#if shell.isRecentRepoPinned(repo)}
+              <svg class="line-icon tab-pin" viewBox="0 0 24 24" role="img" aria-label={shell.tr("chrome.pinnedInRecent")}>
+                <title>{shell.tr("chrome.pinnedInRecent")}</title>
+                <path d="M9 3.5h6v6.2l2.2 2.1v2.2h-4.1L12 20.5l-1.1-6.5H6.8v-2.2L9 9.7z" fill="currentColor" />
+              </svg>
+            {/if}
+            {shell.tabDisplay(repo)}
+          </button>
           <button class="text-button row-action tab-close" type="button" onclick={() => shell.closeTab(repo)} aria-label={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`} title={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`}>×</button>
         </div>
       {:else}

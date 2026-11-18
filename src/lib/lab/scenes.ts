@@ -132,6 +132,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "branch-badges", group: "主界面", title: "分支角标", repo: "full", ready: ".sidebar .track-dot.missing" }),
   scene({ id: "vertical-tabs", group: "主界面", title: "垂直标签", repo: "full", ready: ".vertical-tabs" }),
   scene({ id: "workspace-tabs", group: "主界面", title: "工作区项目标签 · 弹性宽度", repo: "full", ready: ".chrome-tabs .tab" }),
+  scene({ id: "workspace-recent", group: "主界面", title: "最近工作区 · 固定项目", repo: "full", ready: ".chrome-tabs .tab .file-select" }),
   scene({ id: "workspace-tabs-many", group: "主界面", title: "工作区项目标签 · 横向滚动", repo: "full", ready: ".chrome-tabs .tab" }),
   scene({ id: "tab-copy-path", group: "主界面", title: "项目标签 · 拷贝项目路径", repo: "full", ready: ".chrome-tabs .tab" }),
   scene({ id: "tab-repo-info", group: "主界面", title: "项目标签 · 仓库信息", repo: "full", ready: ".chrome-tabs .tab" }),

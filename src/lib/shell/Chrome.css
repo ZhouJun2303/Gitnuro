@@ -438,6 +438,12 @@
     text-overflow: ellipsis;
   }
 
+.tab .tab-pin {
+    width: 12px;
+    height: 12px;
+    flex: none;
+  }
+
 .tab-job {
     width: 6px;
     height: 6px;

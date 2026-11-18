@@ -1,6 +1,6 @@
 import { invoke } from "../perf";
 import { acceptTask } from "../tasks";
-import type { CommandRecord, ToolRecord } from "../status";
+import { recentWorkspaceId, type CommandRecord, type ToolRecord } from "../status";
 import type { ShellState } from "../shell/state.svelte";
 import type { LabDialog, LabScene } from "./scenes";
 import { previewCherrySelection } from "../shell/cherrySelection";
@@ -309,6 +309,11 @@ async function fillSurface(shell: ShellState, id: string) {
   }
   if (id === "vertical-tabs") {
     shell.settings = { ...shell.settings, verticalTabs: true };
+    return;
+  }
+  if (id === "workspace-recent") {
+    shell.settings.verticalTabs = false;
+    await shell.switchWorkspace(recentWorkspaceId);
     return;
   }
   if (id === "workspace-tabs" || id === "workspace-tabs-many") {

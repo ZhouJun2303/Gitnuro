@@ -846,7 +846,12 @@ export function savePrefs(shell: ShellState, close = true): Promise<void> {
         const fields = baseline ? Object.keys(values).filter((key) => !shell.same(values[key as keyof Settings], baseline[key as keyof Settings])) : undefined;
         const saved = await invoke<Settings>("save_settings", { values, fields, before: baseline });
         shell.prefsBaseline = saved;
-        shell.settings = mergeResponse(shell.settings, values, saved, (a, b) => shell.same(a, b));
+        shell.settings = mergeResponse(shell.settings, values, {
+          ...saved,
+          recentWorkspaceLimit: saved.recentWorkspaceLimit ?? values.recentWorkspaceLimit,
+          recentRepoPins: saved.recentRepoPins ?? values.recentRepoPins,
+        }, (a, b) => shell.same(a, b));
+        shell.syncRecentWorkspace();
         broadcastLocale(shell.settings.locale);
         broadcastAppearance(shell.settings.theme);
         applyCommitTypes(shell);

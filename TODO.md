@@ -10,6 +10,8 @@
 
 ## 已处理
 
+- [x] 最近工作区的项目上限可在偏好设置中调整，默认 5。项目右键可固定或取消固定；固定项目占用名额并随设置保存。修复：本条所在提交 `feat: 支持配置最近工作区并固定项目`。回归：`e2e/recent-workspace.spec.ts` 覆盖三套主题，`recent_workspace_settings_default_and_round_trip` 验证旧设置默认值和保存回读。
+
 - [x] 修复桌面端 `workspace_status_paths` 被 ACL 拒绝的错误，补齐后台任务、Blame、贮藏补丁、锁恢复和分页扫描等已有命令的构建清单与窗口权限；查看窗口只补只读接口，取消任务和移除锁仍限普通仓库窗口。修复：本条所在提交 `fix: 补齐桌面命令的 ACL 授权`；回归：`command_acl` 的 3 项直接校验编译后的 Tauri ACL、全部注册命令和窗口 / 来源边界，修复前成功复现 8 个命令缺失；原观察窗口、查看窗口和历史副本权限、局部状态与暂存流程合计 5 项回归通过；`pnpm check`、`cargo build -p awegit --bin awegit` 通过。
 
 - [x] fetch、pull、push、克隆、检出及其他仓库写操作统一显示百分比和当前阶段，后台自动获取、提交后自动推送也可见。无传输输出时按实际命令阶段推进，有输出时细化当前阶段，不随等待时间虚增，只有成功结束才到 100%；排队任务不覆盖执行进度，失败、取消后清理。修复：本条所在提交 `feat: 为耗时 Git 操作补齐命令阶段百分比进度`；回归：`tasks::tests` 与 `tasks::progress::tests` 共 19 项、`flows::tests` 21 项、Git `flow` 9 项；`e2e/operation-progress.spec.ts`、`e2e/sync-toolbar.spec.ts` 三主题共 49 项，新增排队覆盖复验 3 项通过；`pnpm check`、`pnpm build` 通过。计算方式见 [开发文档](dev-docs/development.md#检出与命令记录)。

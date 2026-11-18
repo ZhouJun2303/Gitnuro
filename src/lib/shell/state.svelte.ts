@@ -45,7 +45,7 @@ import {
     type UpdateProgress,
     type WorkspaceRecord,
     recentWorkspaceId,
-    recentWorkspaceLimit,
+    defaultRecentWorkspaceLimit,
     workspaceTabWidth,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
@@ -277,6 +277,8 @@ export class ShellState {
     aiTemperature: 0,
     logDirectory: "",
     recent: [],
+    recentWorkspaceLimit: defaultRecentWorkspaceLimit,
+    recentRepoPins: [],
     workspaces: [],
     currentWorkspace: "",
     commands: [],
@@ -4096,6 +4098,7 @@ export class ShellState {
       ...this.defaultSettings,
       ...value,
       recent: value.recent ?? [],
+      recentRepoPins: value.recentRepoPins ?? [],
       workspaces: (value.workspaces ?? []).map((item) => ({
         ...item,
         tabWidth: item.tabWidth || workspaceTabWidth(item.repositories?.length || item.openTabs?.length || 0),
@@ -5007,10 +5010,11 @@ export class ShellState {
 
 
   async rememberRepo(path: string) {
-    const recent = [path, ...this.settings.recent.filter((item) => item !== path)].slice(0, 12);
+    const historySize = Math.max(12, this.settings.recentWorkspaceLimit, this.settings.recent.length);
+    const recent = this.dedupeRepos([path, ...this.settings.recent]).slice(0, historySize);
     const currentId = this.settings.currentWorkspace;
     const workspaces = this.settings.workspaces.map((workspace) => {
-      if (!currentId || workspace.id !== currentId) return workspace;
+      if (!currentId || currentId === recentWorkspaceId || workspace.id !== currentId) return workspace;
       const openTabs = workspace.openTabs.includes(path) ? workspace.openTabs : [...workspace.openTabs, path];
       const repositories = workspace.repositories.includes(path) ? workspace.repositories : [...workspace.repositories, path];
       return {
@@ -5022,8 +5026,8 @@ export class ShellState {
       };
     });
     this.settings = { ...this.settings, recent, workspaces };
-    this.syncRecentWorkspace();
-    await invoke("save_settings", { values: this.settings }).catch(() => {});
+    this.syncRecentWorkspace(currentId === recentWorkspaceId ? path : undefined);
+    await this.savePrefs(false);
   }
 
   /** Path inside `could not open repository at {path}: missing`. Other open errors stay put. */
@@ -5060,6 +5064,7 @@ export class ShellState {
     this.settings = {
       ...this.settings,
       recent,
+      recentRepoPins: this.settings.recentRepoPins.filter((pin) => !match(pin.path)),
       workspaces,
       tabLabels: dropKeyed(this.settings.tabLabels),
       tabColors: dropKeyed(this.settings.tabColors),
@@ -6721,36 +6726,85 @@ export class ShellState {
 
 
 
-  /** Keep the built-in recent workspace on the newest five repositories, without reshuffling an unchanged set. */
-  syncRecentWorkspace() {
-    const recent = this.dedupeRepos(this.settings.recent).slice(0, recentWorkspaceLimit);
+  private recentRepoPinKeys = $derived(new Set(this.settings.recentRepoPins.map((pin) => pin.id)));
+
+  minimumRecentWorkspaceLimit() {
+    return Math.max(1, this.recentRepoPinKeys.size);
+  }
+
+  setRecentWorkspaceLimit(value: number) {
+    if (!Number.isFinite(value)) return;
+    this.settings.recentWorkspaceLimit = Math.min(0xffffffff, Math.max(this.minimumRecentWorkspaceLimit(), Math.trunc(value)));
+    this.syncRecentWorkspace();
+  }
+
+  isRecentRepoPinned(path: string) {
+    return this.recentRepoPinKeys.has(this.normalPath(path));
+  }
+
+  recentRepoPinItem(path: string): MenuItem {
+    const pinned = this.isRecentRepoPinned(path);
+    const full = !pinned && this.recentRepoPinKeys.size >= this.settings.recentWorkspaceLimit;
+    return {
+      label: this.tr(pinned ? "menu.unpin" : full ? "menu.recentWorkspaceFull" : "menu.pin"),
+      disabled: full,
+      run: () => this.toggleRecentRepoPin(path),
+    };
+  }
+
+  private toggleRecentRepoPin(path: string) {
+    const id = this.normalPath(path);
+    const pins = this.settings.recentRepoPins;
+    if (this.recentRepoPinKeys.has(id)) {
+      this.settings.recentRepoPins = pins.filter((pin) => pin.id !== id);
+    } else {
+      if (!id || this.recentRepoPinKeys.size >= this.settings.recentWorkspaceLimit) return;
+      this.settings.recentRepoPins = [...pins, { id, path }];
+    }
+    this.syncRecentWorkspace();
+    void this.savePrefs(false);
+  }
+
+  syncRecentWorkspace(opened?: string) {
+    const limit = Math.max(this.minimumRecentWorkspaceLimit(), this.settings.recentWorkspaceLimit || defaultRecentWorkspaceLimit);
     const workspaces = this.settings.workspaces;
     const fixed = workspaces.find((item) => item.id === recentWorkspaceId);
-    const same = !!fixed
+    const recent = this.dedupeRepos([
+      ...this.settings.recentRepoPins.map((pin) => pin.path),
+      ...this.settings.recent,
+    ]).slice(0, limit);
+    const keys = new Set(recent.map((path) => this.normalPath(path)));
+    const sameMembers = fixed
       && fixed.repositories.length === recent.length
-      && recent.every((path) => fixed.repositories.some((item) => this.pathsMatch(item, path)));
-    if (same) {
-      if (workspaces[0]?.id !== recentWorkspaceId) {
-        this.settings = { ...this.settings, workspaces: [fixed, ...workspaces.filter((item) => item.id !== recentWorkspaceId)] };
-      }
-      return;
-    }
-    const selected = fixed?.openTabs[fixed.selectedTab] ?? "";
-    const selectedIndex = selected ? recent.findIndex((path) => this.pathsMatch(path, selected)) : -1;
+      && fixed.repositories.every((path) => keys.has(this.normalPath(path)));
+    const repositories = sameMembers ? [
+      ...fixed.repositories.filter((path) => this.isRecentRepoPinned(path)),
+      ...fixed.repositories.filter((path) => !this.isRecentRepoPinned(path)),
+    ] : recent;
+    const openKeys = new Set(fixed?.openTabs.map((path) => this.normalPath(path)));
+    if (opened) openKeys.add(this.normalPath(opened));
+    const openTabs = sameMembers ? repositories.filter((path) => openKeys.has(this.normalPath(path))) : repositories;
+    const previous = fixed?.openTabs[fixed.selectedTab] ?? "";
+    const selected = opened && keys.has(this.normalPath(opened)) ? opened : previous;
     const next: WorkspaceRecord = {
       id: recentWorkspaceId,
       name: fixed?.name || this.tr("chrome.recentWorkspace"),
-      repositories: recent,
-      openTabs: recent,
-      selectedTab: selectedIndex >= 0 ? selectedIndex : 0,
+      repositories,
+      openTabs,
+      selectedTab: Math.max(0, openTabs.findIndex((path) => this.pathsMatch(path, selected))),
       tabsSeeded: true,
-      tabWidth: workspaceTabWidth(recent.length),
+      tabWidth: workspaceTabWidth(repositories.length),
     };
-    this.settings = {
-      ...this.settings,
-      workspaces: [next, ...workspaces.filter((item) => item.id !== recentWorkspaceId)],
-    };
-    if (this.settings.currentWorkspace === recentWorkspaceId) this.repos = [...recent];
+    if (this.settings.recentWorkspaceLimit !== limit) this.settings.recentWorkspaceLimit = limit;
+    if (workspaces[0]?.id !== recentWorkspaceId || !this.same(fixed, next)) {
+      this.settings.workspaces = [next, ...workspaces.filter((item) => item.id !== recentWorkspaceId)];
+    }
+    if (this.settings.currentWorkspace === recentWorkspaceId) {
+      const active = opened || this.snapshot?.path;
+      // When pins take every slot, the current repository can still be used until it is left.
+      const tabs = active && !keys.has(this.normalPath(active)) ? [...openTabs, active] : openTabs;
+      if (!this.same(this.repos, tabs)) this.repos = tabs;
+    }
   }
 
 
