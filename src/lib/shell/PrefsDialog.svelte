@@ -575,6 +575,11 @@
               <input type="checkbox" bind:checked={shell.settings.forceWithLease} />
               <span class="pref-label">{shell.tr("dialog.forceWithLease")}</span>
             </label>
+            <label class="pref-row pref-toggle">
+              <input type="checkbox" bind:checked={shell.settings.killerPush} />
+              <span class="pref-label">{shell.tr("dialog.killerPush")}</span>
+            </label>
+            <p class="pref-setting-hint">{shell.tr("dialog.killerPushHint")}</p>
           </div>
         </section>
 

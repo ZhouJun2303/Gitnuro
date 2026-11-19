@@ -194,6 +194,8 @@ fn fetch_push_and_fast_forward() {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         },
     )
     .unwrap();
@@ -233,6 +235,8 @@ fn fetch_push_and_fast_forward() {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         },
     )
     .unwrap();
@@ -276,6 +280,8 @@ fn push_ref_same_name_pushes_the_chosen_branch() {
             source_commit: None,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
             remote_branch: String::new(),
             set_upstream: true,
             tags: false,
@@ -312,6 +318,8 @@ fn marks_commits_that_exist_only_on_a_remote() {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         },
     )
     .unwrap();
@@ -1308,6 +1316,8 @@ fn deletes_a_remote_branch() {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         },
     )
     .unwrap();
@@ -2966,6 +2976,8 @@ fn pull_rebase_uses_one_visible_autostash() {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         },
     )
     .unwrap();

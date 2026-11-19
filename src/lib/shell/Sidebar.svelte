@@ -338,7 +338,7 @@
             oncontextmenu={(event) => shell.openMenu(event, [
               { label: shell.tr("menu.checkout"), run: () => shell.mutate({ action: "checkoutRemote", remote: row.remote, branch: row.name }) },
               { label: shell.tr("menu.pullInto"), run: () => shell.mutate({ action: "pullRef", remote: row.remote, branch: row.name, rebase: shell.settings.pullRebase, autostash: true }) },
-              { label: shell.tr("menu.pushHere"), run: () => shell.mutate({ action: "pushRef", remote: row.remote, branch: row.name, forceWithLease: shell.settings.forceWithLease }) },
+              { label: shell.tr("menu.pushHere"), run: () => shell.mutate({ action: "pushRef", remote: row.remote, branch: row.name, forceWithLease: shell.settings.forceWithLease, killerPush: shell.settings.killerPush, rebase: shell.settings.pullRebase }) },
               { label: shell.tr("menu.deleteRemote"), run: () => shell.ask(shell.tr("menu.deleteRemote"), shell.tr("dialog.deleteRemoteBody"), shell.bindMutation({ action: "deleteRemoteBranch", remote: row.remote, branch: row.name }), [], { subject: `${row.remote}/${row.name}`, danger: true, confirmLabel: shell.tr("menu.deleteRemote") }) },
               { label: shell.tr("menu.copyName"), run: () => shell.copyText(`${row.remote}/${row.name}`) },
             ])}

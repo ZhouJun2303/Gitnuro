@@ -283,6 +283,8 @@ export type Messages = {
     collapseFirstLevel: string;
     commitSubject: string;
     pushTags: string;
+    /** Badge title on the push button while killer push is enabled. */
+    killerPushBadge: string;
     treeView: string;
     viewAsList: string;
     viewAsTree: string;
@@ -893,6 +895,8 @@ export type Messages = {
     pruneOnFetch: string;
     pullWithRebase: string;
     forceWithLease: string;
+    killerPush: string;
+    killerPushHint: string;
     checkoutAfter: string;
     includeUntracked: string;
     autostashIncludeUntracked: string;

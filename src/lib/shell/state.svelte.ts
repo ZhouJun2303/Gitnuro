@@ -291,6 +291,7 @@ export class ShellState {
     signOff: false,
     signOffFormat: "Signed-off-by: %user <%email>",
     forceWithLease: true,
+    killerPush: false,
     aiEnabled: true,
     aiLanguage: "zh",
     aiMaxChars: 12000,
@@ -2562,7 +2563,7 @@ export class ShellState {
       cmd("dialog.fastForward", () => { this.settings.pullRebase = false; void this.doPull(); }),
       cmd("chrome.push", () => void this.doPush()),
       cmd("menu.createTag", () => { this.draft = ""; this.draftExtra = "HEAD"; this.draftUser = ""; this.dialog = "tag"; }),
-      cmd("chrome.pushTags", () => void this.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: this.settings.forceWithLease })),
+      cmd("chrome.pushTags", () => void this.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: this.settings.forceWithLease, killerPush: this.settings.killerPush, rebase: this.settings.pullRebase })),
       cmd("chrome.stash", () => this.openStash([])),
       cmd("chrome.pop", () => this.confirmPopStash()),
       cmd("chrome.refresh", () => void this.refresh()),
@@ -4300,6 +4301,8 @@ export class ShellState {
       setUpstream: !current?.upstream,
       tags: this.settings.pushAllTags,
       forceWithLease: this.settings.forceWithLease,
+      killerPush: this.settings.killerPush,
+      rebase: this.settings.pullRebase,
     });
   }
 

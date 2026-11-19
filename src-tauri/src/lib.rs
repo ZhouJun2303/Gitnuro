@@ -630,7 +630,9 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
     };
     let _turn = repo_turn(&next);
     tasks::validate_intent(&repo)?;
-    let refresh_areas = request.refresh_areas().to_vec();
+    let killer_push = matches!(&request,
+        awegit_git::Mutation::Push { killer_push: true, .. } | awegit_git::Mutation::PushRef { killer_push: true, .. });
+    let mut refresh_areas = request.refresh_areas().to_vec();
     let (result, log) = awegit_git::capture_output(|| -> Result<MutationReport, String> {
         development::check_delete(&repo, &request)?;
         apply_session();
@@ -642,6 +644,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             | "merge" | "rebase" | "rebaseInteractive" | "reset" | "cherryPick" | "revert"
             | "stash" | "stashPop" | "stashApply" | "stashDrop" | "stashPaths"
         ).then(|| awegit_git::pull_refresh_state(&repo)).flatten();
+        let before_head = before_refs.as_ref().map(|state| state.head().to_string());
         let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
         let stage_paths = match &request {
             awegit_git::Mutation::StagePaths { files, .. }
@@ -658,6 +661,12 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             Ok::<_, awegit_git::Error>(output)
         });
         let result = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
+        // Killer recovery integrated remote history in a push, so the work tree,
+        // index, and history changed with HEAD. A plain push never moves HEAD.
+        if killer_push && result.is_ok() && before_head.as_deref().is_some_and(|head|
+            awegit_git::pull_refresh_state(&repo).map(|state| state.head() != head).unwrap_or(false)) {
+            refresh_areas = vec!["worktree", "index", "refs", "history", "flow"];
+        }
         // A killed Git process can leave index.lock behind and make the write fail
         // without a usable stderr. Report the file so the UI can offer to remove it.
         let stale_lock = if result.is_err() { awegit_git::stale_index_lock(&next) } else { None };
@@ -812,7 +821,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
     let text = match request {
         Mutation::Fetch { remote, prune, tags } => join([opt(remote), flag("prune", *prune), flag("tags", *tags)]),
         Mutation::Pull { rebase, autostash } => join([flag("rebase", *rebase), flag("autostash", *autostash)]),
-        Mutation::Push { remote, set_upstream, tags, force_with_lease, force } => {
+        Mutation::Push { remote, set_upstream, tags, force_with_lease, force, .. } => {
             join([opt(remote), flag("setUpstream", *set_upstream), flag("tags", *tags), flag("forceWithLease", *force_with_lease), flag("force", *force)])
         }
         Mutation::Stash { message, include_untracked } => join([bytes("message", message), flag("untracked", *include_untracked)]),

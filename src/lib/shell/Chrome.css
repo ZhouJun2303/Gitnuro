@@ -454,6 +454,25 @@
     pointer-events: none;
 }
 
+.killer-badge {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 11px;
+    height: 11px;
+    border-radius: 3px;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-style: normal;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 11px;
+    text-align: center;
+    pointer-events: none;
+}
+
+.tool-btn.stack.killer .sync-count { right: 16px; }
+
 .tool-btn.caret-only { width: 16px; min-width: 0; height: 42px; padding: 0; justify-content: center; margin-left: -6px; }
 
 .tool-btn.caret-only svg { width: 11px; height: 11px; }

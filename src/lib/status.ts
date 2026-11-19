@@ -225,6 +225,8 @@ export type Settings = {
   signOff: boolean;
   signOffFormat: string;
   forceWithLease: boolean;
+  /** A rejected push pulls the remote branch and retries once, aborting on conflict. */
+  killerPush: boolean;
   aiEnabled: boolean;
   aiLanguage: string;
   aiMaxChars: number;
