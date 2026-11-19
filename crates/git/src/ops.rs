@@ -62,6 +62,14 @@ pub enum Mutation {
         /// Bare `--force`. Lease stays the default when this is false.
         #[serde(default)]
         force: bool,
+        /// A rejected push fetches and integrates the remote branch, then
+        /// retries once. Conflicts abort the integration and leave the local
+        /// branch and work tree as they were.
+        #[serde(default)]
+        killer_push: bool,
+        /// Integrate with a rebase instead of a merge during killer recovery.
+        #[serde(default)]
+        rebase: bool,
     },
     Stash {
         #[serde(default)]
@@ -309,6 +317,11 @@ pub enum Mutation {
         set_upstream: bool,
         #[serde(default)]
         tags: bool,
+        /// See `Push::killer_push`.
+        #[serde(default)]
+        killer_push: bool,
+        #[serde(default)]
+        rebase: bool,
     },
     PullRef {
         remote: String,
@@ -831,7 +844,18 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             tags,
             force_with_lease,
             force,
-        } => push(repo, remote, set_upstream, tags, force_with_lease, force),
+            killer_push,
+            rebase,
+        } => push(
+            repo,
+            remote,
+            set_upstream,
+            tags,
+            force_with_lease,
+            force,
+            killer_push,
+            rebase,
+        ),
         Mutation::Stash {
             message,
             include_untracked,
@@ -1059,6 +1083,8 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             remote_branch,
             set_upstream,
             tags,
+            killer_push,
+            rebase,
         } => push_ref(
             repo,
             PushRefOptions {
@@ -1070,6 +1096,8 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
                 force,
                 set_upstream,
                 tags,
+                killer_push,
+                rebase,
             },
         ),
         Mutation::PullRef {
@@ -1251,27 +1279,226 @@ fn push(
     tags: bool,
     force_with_lease: bool,
     force: bool,
+    killer_push: bool,
+    rebase: bool,
 ) -> Result<(), Error> {
     let remote = optional_name(remote)?;
-    let mut args = vec!["push"];
+    let target = || integration_target(repo, None, remote.as_deref(), None, set_upstream);
+    let mut args = vec!["push".to_string()];
     if set_upstream {
-        args.push("--set-upstream");
+        args.push("--set-upstream".into());
     }
     if tags {
-        args.push("--tags");
+        args.push("--tags".into());
     }
     if force {
-        args.push("--force");
+        args.push("--force".into());
     } else if force_with_lease {
-        args.push("--force-with-lease");
+        args.push("--force-with-lease".into());
     }
     if let Some(remote) = remote.as_deref() {
-        args.push(remote);
+        args.push(remote.into());
         if set_upstream {
-            args.push("HEAD");
+            args.push("HEAD".into());
         }
     }
-    surface(run(repo, &args).map(|_| ()))
+    push_with_killer(repo, args, None, killer_push, rebase, force_with_lease, force, target)
+}
+
+/// The remote branch a rejected push would have updated. Recovery only
+/// integrates when that target is unambiguous.
+struct KillerPushTarget {
+    remote: String,
+    branch: String,
+}
+
+/// Resolve the branch `git push` was about to update, mirroring its own
+/// `push.default` rules. Custom refspecs and multi-branch modes return `None`:
+/// pulling could then merge the wrong branch.
+fn integration_target(
+    repo: &Path,
+    push_branch: Option<&str>,
+    explicit_remote: Option<&str>,
+    explicit_remote_branch: Option<&str>,
+    set_upstream: bool,
+) -> Option<KillerPushTarget> {
+    let opened = crate::open_repo(repo).ok()?;
+    let local_branch = opened.head().ok()?.referent_name()?.shorten().to_string();
+    if push_branch.is_some_and(|branch| branch != local_branch) {
+        // Only the checked-out branch can be integrated in this work tree.
+        return None;
+    }
+    let config = opened.config_snapshot();
+    let configured_remote = config
+        .string(format!("branch.{local_branch}.remote"))
+        .map(|value| value.to_string());
+    let configured_merge = config
+        .string(format!("branch.{local_branch}.merge"))
+        .and_then(|value| value.to_string().strip_prefix("refs/heads/").map(str::to_string));
+    let remote = match explicit_remote {
+        Some(remote) => remote.to_string(),
+        None => configured_remote
+            .clone()
+            .or_else(|| config.string("remote.pushDefault").map(|value| value.to_string()))
+            .or_else(|| {
+                let remotes = crate::cli::remote_list(repo);
+                remotes.iter().find(|(name, _)| name == "origin").or_else(|| remotes.first()).map(|(name, _)| name.clone())
+            })?,
+    };
+    if check_name(&remote).is_err() {
+        return None;
+    }
+    if config
+        .strings(format!("remote.{remote}.push"))
+        .is_some_and(|specs| !specs.is_empty())
+    {
+        return None;
+    }
+    let branch = if let Some(branch) = explicit_remote_branch {
+        branch.to_string()
+    } else if set_upstream {
+        local_branch.clone()
+    } else {
+        let default = config
+            .string("push.default")
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "simple".into());
+        match default.as_str() {
+            "matching" | "nothing" => return None,
+            "current" => local_branch.clone(),
+            "upstream" | "tracking" => {
+                if configured_remote.as_deref() != Some(remote.as_str()) {
+                    return None;
+                }
+                configured_merge.clone()?
+            }
+            // `simple` uses the upstream name for its own remote and the local
+            // branch name when pushing elsewhere.
+            _ => {
+                if configured_remote.as_deref() == Some(remote.as_str()) {
+                    configured_merge.clone().unwrap_or_else(|| local_branch.clone())
+                } else {
+                    local_branch.clone()
+                }
+            }
+        }
+    };
+    if check_name(&branch).is_err() {
+        return None;
+    }
+    Some(KillerPushTarget { remote, branch })
+}
+
+/// Whether Git refused this push because the remote branch moved ahead.
+fn push_was_rejected(message: &str, force_with_lease: bool) -> bool {
+    let text = message.to_ascii_lowercase();
+    [
+        "non-fast-forward",
+        "fetch first",
+        "tip of your current branch is behind",
+        "remote contains work that you do not have locally",
+        "updates were rejected",
+        "非快进",
+        "远程包含本地没有的提交",
+        "当前分支落后于远程",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle))
+        || (force_with_lease && text.contains("stale info"))
+}
+
+fn push_args(repo: &Path, args: &[String]) -> Result<(), Error> {
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    surface(run(repo, &borrowed).map(|_| ()))
+}
+
+/// Run exactly one push on the normal path. A rejected push pays for one
+/// fetch and integration, then one retry; successful pushes start no extra
+/// command and read no repository state.
+fn push_with_killer(
+    repo: &Path,
+    args: Vec<String>,
+    retry_args: Option<Vec<String>>,
+    killer_push: bool,
+    rebase: bool,
+    force_with_lease: bool,
+    force: bool,
+    target: impl FnOnce() -> Option<KillerPushTarget>,
+) -> Result<(), Error> {
+    let error = match push_args(repo, &args) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    if !killer_push || force || !push_was_rejected(&error.to_string(), force_with_lease) {
+        return Err(error);
+    }
+    let Some(target) = target() else {
+        return Err(error);
+    };
+    // A paused operation owns HEAD and the index. Integrating now would rewrite
+    // that operation's base, so keep the ordinary push error instead.
+    if in_progress(repo).ok().flatten().is_some() || autostash::has_unmerged(repo) {
+        return Err(error);
+    }
+    let first = error.to_string();
+    match pull_autostashed(repo, rebase, Some((&target.remote, &target.branch))) {
+        Ok(()) => {
+            crate::flow::emit(crate::flow::Event {
+                key: format!("killer-push-{}/{}", target.remote, target.branch),
+                kind: "integration".into(),
+                state: "completed".into(),
+                detail: format!("{}/{}", target.remote, target.branch),
+                ..Default::default()
+            });
+            push_args(repo, retry_args.as_ref().unwrap_or(&args))
+        }
+        Err(pull_error) => {
+            let recovery = abort_killer_pull(repo);
+            Err(Error::Git(format!(
+                "killer push: could not integrate {remote}/{branch}; the push was not retried. / Killer 推送：无法合并 {remote}/{branch}，未重试推送。\n\n{push}\n\n{pull}\n\n{recovery}",
+                remote = target.remote,
+                branch = target.branch,
+                push = first.trim(),
+                pull = pull_error.to_string().trim(),
+                recovery = recovery.trim(),
+            )))
+        }
+    }
+}
+
+/// Abort what a failed killer integration left paused, then put the local
+/// changes its autostash kept back. Already paused operations never reach here.
+/// A cancelled task still restores the repository.
+fn abort_killer_pull(repo: &Path) -> String {
+    crate::cli::without_cancellation(|| {
+        let mut notes = Vec::new();
+        match in_progress(repo) {
+            Ok(Some(state)) => {
+                let name = match state {
+                    InProgress::Merge => "merge",
+                    InProgress::Rebase => "rebase",
+                    InProgress::CherryPick => "cherry-pick",
+                    InProgress::Revert => "revert",
+                };
+                match run(repo, &[name, "--abort"]) {
+                    Ok(_) => notes.push(format!("{name} aborted. / 已中止 {name}。")),
+                    Err(error) => notes.push(format!("{name} --abort failed: {error} / 中止 {name} 失败：{error}")),
+                }
+            }
+            Ok(None) => {}
+            Err(error) => notes.push(format!("could not inspect the operation state: {error} / 无法检查操作状态：{error}")),
+        }
+        if in_progress(repo).ok().flatten().is_none() {
+            match autostash::finish_if_settled(repo) {
+                Ok(autostash::Restored::Conflict) => notes.push(
+                    "saved local changes conflict with the restored work tree; the stash entry was kept. / 本地改动恢复时发生冲突，暂存条目已保留。".into(),
+                ),
+                Ok(_) => {}
+                Err(error) => notes.push(format!("could not restore saved local changes: {error} / 无法恢复本地改动：{error}")),
+            }
+        }
+        notes.join("\n")
+    })
 }
 
 fn stash_pop(repo: &Path, name: &str) -> Result<(), Error> {
@@ -2977,6 +3204,8 @@ struct PushRefOptions<'a> {
     force: bool,
     set_upstream: bool,
     tags: bool,
+    killer_push: bool,
+    rebase: bool,
 }
 
 /// The confirmed branch, not a potentially stale UI refs snapshot, owns this route.
@@ -3011,22 +3240,32 @@ fn push_ref(repo: &Path, options: PushRefOptions<'_>) -> Result<(), Error> {
         None => format!("refs/heads/{branch}"),
     };
     let spec = format!("{source}:refs/heads/{target}");
-    let mut args = vec!["push"];
+    let mut args = vec!["push".to_string()];
     if options.set_upstream && options.source_commit.is_none() {
-        args.push("--set-upstream");
+        args.push("--set-upstream".into());
     }
     if options.tags {
-        args.push("--tags");
+        args.push("--tags".into());
     }
     let (force, force_with_lease) = (options.force, options.force_with_lease);
     if force {
-        args.push("--force");
+        args.push("--force".into());
     } else if force_with_lease {
-        args.push("--force-with-lease");
+        args.push("--force-with-lease".into());
     }
-    args.push(remote);
-    args.push(&spec);
-    surface(run(repo, &args).map(|_| ()))?;
+    args.push(remote.to_string());
+    args.push(spec);
+    let recovery = || integration_target(repo, Some(branch), Some(remote), Some(target), options.set_upstream);
+    // A commit push names one object id. After integrating, the retry pushes the
+    // branch tip that now contains the remote commits instead of that stale id.
+    let retry = (options.killer_push && options.source_commit.is_some()).then(|| {
+        let mut retry = args.clone();
+        if let Some(last) = retry.last_mut() {
+            *last = format!("refs/heads/{branch}:refs/heads/{target}");
+        }
+        retry
+    });
+    push_with_killer(repo, args, retry, options.killer_push, options.rebase, force_with_lease, force, recovery)?;
     if options.set_upstream && options.source_commit.is_some() {
         // Git cannot infer the local branch when the refspec uses an object ID.
         config_local(repo, &format!("branch.{branch}.remote"), remote)?;

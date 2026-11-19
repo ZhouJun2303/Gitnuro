@@ -340,6 +340,12 @@ fn workspace_status(path: Option<String>) -> Result<awegit_git::StatusSnapshot, 
 fn workspace_status_paths(path: Option<String>, files: Vec<String>) -> Result<ChangeReport, String> {
     let repo = repo_from(path)?;
     tasks::wait_for_writes(&repo);
+    // A submodule git dir is `../../.git/modules/...`. Those events are metadata.
+    // Dropping them here keeps one stray path from failing the whole refresh.
+    let files: Vec<String> = files.into_iter().filter(|file| awegit_git::check_path(file).is_ok()).collect();
+    if files.is_empty() {
+        return Ok(ChangeReport { status: read_status(&repo)?, log: String::new(), status_paths: None });
+    }
     let status = read_status_paths(&repo, Some(&files))?;
     Ok(ChangeReport { status, log: String::new(), status_paths: Some(files) })
 }
@@ -624,7 +630,9 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
     };
     let _turn = repo_turn(&next);
     tasks::validate_intent(&repo)?;
-    let refresh_areas = request.refresh_areas().to_vec();
+    let killer_push = matches!(&request,
+        awegit_git::Mutation::Push { killer_push: true, .. } | awegit_git::Mutation::PushRef { killer_push: true, .. });
+    let mut refresh_areas = request.refresh_areas().to_vec();
     let (result, log) = awegit_git::capture_output(|| -> Result<MutationReport, String> {
         development::check_delete(&repo, &request)?;
         apply_session();
@@ -636,6 +644,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             | "merge" | "rebase" | "rebaseInteractive" | "reset" | "cherryPick" | "revert"
             | "stash" | "stashPop" | "stashApply" | "stashDrop" | "stashPaths"
         ).then(|| awegit_git::pull_refresh_state(&repo)).flatten();
+        let before_head = before_refs.as_ref().map(|state| state.head().to_string());
         let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
         let stage_paths = match &request {
             awegit_git::Mutation::StagePaths { files, .. }
@@ -652,6 +661,12 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             Ok::<_, awegit_git::Error>(output)
         });
         let result = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
+        // Killer recovery integrated remote history in a push, so the work tree,
+        // index, and history changed with HEAD. A plain push never moves HEAD.
+        if killer_push && result.is_ok() && before_head.as_deref().is_some_and(|head|
+            awegit_git::pull_refresh_state(&repo).map(|state| state.head() != head).unwrap_or(false)) {
+            refresh_areas = vec!["worktree", "index", "refs", "history", "flow"];
+        }
         // A killed Git process can leave index.lock behind and make the write fail
         // without a usable stderr. Report the file so the UI can offer to remove it.
         let stale_lock = if result.is_err() { awegit_git::stale_index_lock(&next) } else { None };
@@ -806,7 +821,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
     let text = match request {
         Mutation::Fetch { remote, prune, tags } => join([opt(remote), flag("prune", *prune), flag("tags", *tags)]),
         Mutation::Pull { rebase, autostash } => join([flag("rebase", *rebase), flag("autostash", *autostash)]),
-        Mutation::Push { remote, set_upstream, tags, force_with_lease, force } => {
+        Mutation::Push { remote, set_upstream, tags, force_with_lease, force, .. } => {
             join([opt(remote), flag("setUpstream", *set_upstream), flag("tags", *tags), flag("forceWithLease", *force_with_lease), flag("force", *force)])
         }
         Mutation::Stash { message, include_untracked } => join([bytes("message", message), flag("untracked", *include_untracked)]),
@@ -1317,7 +1332,7 @@ fn watch_worktree(watcher: &mut RecommendedWatcher, root: &Path, set: &mut Watch
 fn git_metadata_dir(repo: &Path) -> Option<PathBuf> {
     let git = repo.join(".git");
     if git.is_dir() {
-        return Some(git);
+        return Some(lexical_clean(&git));
     }
     let text = std::fs::read_to_string(&git).ok()?;
     let line = text.lines().find(|line| !line.trim().is_empty())?;
@@ -1326,8 +1341,30 @@ fn git_metadata_dir(repo: &Path) -> Option<PathBuf> {
         return None;
     }
     let path = PathBuf::from(rest);
-    let full = if path.is_absolute() { path } else { repo.join(path) };
+    let full = lexical_clean(&if path.is_absolute() { path } else { repo.join(path) });
     full.is_dir().then_some(full)
+}
+
+/// Collapse `.` and `..` without asking the filesystem.
+///
+/// A submodule gitfile says `gitdir: ../../.git/modules/<name>`. Events for
+/// `FETCH_HEAD` arrive on that relative path. Leaving the `..` in place makes
+/// the path look like a worktree file that then fails the repository check.
+fn lexical_clean(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in normalize_watch_path(path).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => match out.components().next_back() {
+                Some(std::path::Component::Normal(_)) => {
+                    out.pop();
+                }
+                _ => out.push(".."),
+            },
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 fn watch_git_metadata(watcher: &mut RecommendedWatcher, git: &Path, set: &mut WatchSet) {
@@ -1459,14 +1496,16 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
 }
 
 fn watched_relative(repo: &Path, path: &Path) -> Option<String> {
-    let path = normalize_watch_path(path);
-    if let Ok(relative) = path.strip_prefix(normalize_watch_path(repo)) {
+    let path = lexical_clean(path);
+    let repo_root = lexical_clean(repo);
+    if let Ok(relative) = path.strip_prefix(&repo_root) {
         return Some(relative.to_string_lossy().replace('\\', "/"));
     }
     let git = git_metadata_dir(repo)?;
     for root in [git.clone(), common_metadata_dir(&git)] {
-        if let Ok(relative) = path.strip_prefix(normalize_watch_path(&root)) {
-            return Some(format!(".git/{}", relative.to_string_lossy().replace('\\', "/")));
+        if let Ok(relative) = path.strip_prefix(&lexical_clean(&root)) {
+            let relative = relative.to_string_lossy().replace('\\', "/");
+            return Some(if relative.is_empty() { ".git".into() } else { format!(".git/{relative}") });
         }
     }
     None
@@ -2455,9 +2494,35 @@ struct RevealCommit {
     id: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryActionRequest {
+    action: String,
+    repo: String,
+    file: String,
+    rev: String,
+}
+
 #[tauri::command]
 fn reveal_commit(app: tauri::AppHandle, repo: String, id: String) -> Result<(), String> {
-    app.emit("awegit-reveal", RevealCommit { repo, id }).map_err(|error| error.to_string())
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    app.emit_to("main", "awegit-reveal", RevealCommit { repo, id }).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn request_history_action(app: tauri::AppHandle, action: String, repo: String, file: String, rev: String) -> Result<(), String> {
+    if !matches!(action.as_str(), "restore" | "save") {
+        return Err("Unknown history action".into());
+    }
+    if repo.trim().is_empty() || file.trim().is_empty() || rev.trim().is_empty() {
+        return Err("History action is missing its target".into());
+    }
+    app.emit_to("main", "awegit-history-action", HistoryActionRequest { action, repo, file, rev })
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2901,6 +2966,7 @@ pub fn run() {
             open_editor,
             open_window,
             reveal_commit,
+            request_history_action,
             save_revision,
             log_client,
             perf_snapshot,
@@ -3046,6 +3112,28 @@ mod watch_plan_tests {
         assert!(super::classify_changes(&worktree, &[git.join("index")]).is_some_and(|change| !change.refs));
         assert!(super::classify_changes(&worktree, &[common.join("refs/heads/main")]).is_some_and(|change| change.refs));
         assert!(super::classify_changes(&worktree, &[worktree.join(".git")]).is_some_and(|change| change.refs));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn submodule_gitdir_fetch_head_is_metadata_not_a_worktree_path() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
+            .join(".lab/watch-tests").join(format!("submodule-{nanos}"));
+        let submodule = root.join("Packages/HlwdFramework");
+        let gitdir = root.join(".git/modules/Packages/HlwdFramework");
+        fs::create_dir_all(&gitdir).unwrap();
+        fs::create_dir_all(&submodule).unwrap();
+        fs::write(submodule.join(".git"), "gitdir: ../../.git/modules/Packages/HlwdFramework\n").unwrap();
+        fs::write(gitdir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(submodule.join("note.txt"), "note\n").unwrap();
+        let escaped = |name: &str| submodule.join(format!("../../.git/modules/Packages/HlwdFramework/{name}"));
+        assert!(!super::watch_relevant(&submodule, &escaped("FETCH_HEAD")));
+        assert!(super::classify_changes(&submodule, &[escaped("FETCH_HEAD")]).is_none());
+        assert!(!super::watch_relevant(&submodule, &escaped("index.lock")));
+        assert!(super::classify_changes(&submodule, &[escaped("index")]).is_some_and(|change| !change.refs && change.paths.is_none()));
+        assert!(super::classify_changes(&root, &[escaped("FETCH_HEAD")]).is_none());
+        assert!(super::classify_changes(&submodule, &[submodule.join("note.txt")]).is_some_and(|change| change.paths.as_deref() == Some(&["note.txt".into()][..])));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -3274,7 +3362,7 @@ mod watch_plan_tests {
         assert_eq!(history["windows"], serde_json::json!(["history"]));
         assert!(main["permissions"].as_array().unwrap().contains(&serde_json::json!("allow-revision-copy-formats")));
         assert_eq!(history["permissions"], serde_json::json!([
-            "allow-revision-copy-support", "allow-create-revision-copy", "allow-remove-revision-copy"
+            "allow-revision-copy-support", "allow-create-revision-copy", "allow-remove-revision-copy", "allow-request-history-action"
         ]));
         for other in [
             include_str!("../capabilities/default.json"),
@@ -3286,6 +3374,7 @@ mod watch_plan_tests {
                 assert_ne!(permission.as_str(), Some("allow-revision-copy-support"));
                 assert_ne!(permission.as_str(), Some("allow-create-revision-copy"));
                 assert_ne!(permission.as_str(), Some("allow-remove-revision-copy"));
+                assert_ne!(permission.as_str(), Some("allow-request-history-action"));
             }
         }
     }

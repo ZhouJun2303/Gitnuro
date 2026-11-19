@@ -6,6 +6,7 @@
   "permissions": [
     "allow-revision-copy-support",
     "allow-create-revision-copy",
-    "allow-remove-revision-copy"
+    "allow-remove-revision-copy",
+    "allow-request-history-action"
   ]
 }

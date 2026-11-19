@@ -17,7 +17,7 @@ import { broadcastLocale, onLocaleChange } from "../i18n/sync";
 import { confirmAppearance, isAppearance, onAppearanceChange, pendingAppearance, rememberAppearance, resolveAppearance, type Appearance } from "../appearance";
 import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
 import { configureShortcuts, shortcut, shortcutLabel, typing } from "../keys";
-import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, commitGraph, commitHaystacks, commitHitIndexes, foldedMerges, formatWhen, gravatarUrl, hitContains, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type AppInfo,
@@ -47,10 +47,11 @@ import {
     recentWorkspaceId,
     defaultRecentWorkspaceLimit,
     workspaceTabWidth,
+    moveWorkspacePath,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, selectFolder, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabDisplay, tabColor, pairSetting } from "./diff.svelte";
-import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
+import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, revealCommit, followCommitQuery, stepCommitMatch, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
@@ -75,6 +76,26 @@ function standaloneView(): "" | "history" | "blob" | "merge" {
   const view = new URLSearchParams(window.location.search).get("view");
   return view === "history" || view === "blob" || view === "merge" ? view : "";
 }
+
+type HistoryActionRequest = {
+  action: "restore" | "save";
+  repo: string;
+  file: string;
+  rev: string;
+};
+
+const AUTOMATIC_FETCH_INTERVAL_MS = 10 * 60 * 1000;
+const AUTOMATIC_FETCH_FOCUS_STALE_MS = 5 * 60 * 1000;
+const AUTOMATIC_FETCH_DELAY_MS = 350;
+const AUTOMATIC_FETCH_BACKGROUND_REFRESH_DELAY_MS = 250;
+const AUTOMATIC_FETCH_MAX_BACKOFF_MS = 30 * 60 * 1000;
+
+type AutomaticFetchState = {
+  lastAttemptAt: number;
+  nextAttemptAt: number;
+  failures: number;
+  pending: boolean;
+};
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   if (left === right) return true;
@@ -270,6 +291,7 @@ export class ShellState {
     signOff: false,
     signOffFormat: "Signed-off-by: %user <%email>",
     forceWithLease: true,
+    killerPush: false,
     aiEnabled: true,
     aiLanguage: "zh",
     aiMaxChars: 12000,
@@ -442,7 +464,11 @@ export class ShellState {
   /** Repositories with an automatic fetch in flight. This does not count as busy. */
   backgroundFetch = new Set<string>();
 
+  automaticFetchStates = new Map<string, AutomaticFetchState>();
+
   automaticFetchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  historyRefreshPending = $state(false);
 
 
   /** Set as soon as a tab is chosen, before that repository's status returns. */
@@ -937,6 +963,9 @@ export class ShellState {
 
   commitQuery = $state("");
 
+  /** Index into `commitMatchIndexes`, not into the history list. */
+  commitMatchCursor = $state(0);
+
 
   drops = $state<string[]>([]);
 
@@ -1042,7 +1071,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.14");
+  appVersion = $state("2.0.15");
 
   appInfo = $state<AppInfo | null>(null);
 
@@ -2192,25 +2221,7 @@ export class ShellState {
   });
 
 
-  shownCommits = $derived.by(() => {
-    const query = this.commitQuery.trim().toLowerCase();
-    const rows = this.commitsLive;
-    if (!query) return rows;
-    if (this.commitNeedles?.rows !== rows) {
-      this.commitNeedles = {
-        rows,
-        text: rows.map((commit) => `${commit.summary}\n${commit.author}\n${commit.email ?? ""}\n${commit.refs.join("\n")}`.toLowerCase()),
-      };
-    }
-    const text = this.commitNeedles.text;
-    const hex = /^[0-9a-f]{4,}$/.test(query);
-    const matched: CommitRow[] = [];
-    for (let index = 0; index < rows.length; index += 1) {
-      const row = rows[index];
-      if (row && (text[index]?.includes(query) || (hex && (row.id.startsWith(query) || row.shortId.startsWith(query))))) matched.push(row);
-    }
-    return matched;
-  });
+  shownCommits = $derived(this.commitsLive);
 
 
   liveFold = $derived(foldedMerges(this.commitsLive, this.expandedMerges));
@@ -2242,6 +2253,30 @@ export class ShellState {
 
 
   historyRows = $derived(this.historyWindow.rows);
+
+  /** Match indexes for the rows on screen. The full list stays mounted; only this list changes while typing. */
+  commitMatchIndexes = $derived.by(() => {
+    const query = this.commitQuery;
+    if (this.mode === "sample") return commitHitIndexes(this.sampleShown, query);
+    const needle = query.trim().toLowerCase();
+    if (!needle || needle.startsWith("s:") || needle.startsWith("g:")) return commitHitIndexes([], query);
+    const rows = this.historyItems;
+    let cached = this.commitNeedles;
+    if (!cached || cached.rows !== rows) {
+      cached = { rows, text: commitHaystacks(rows) };
+      this.commitNeedles = cached;
+    }
+    return commitHitIndexes(rows, query, cached.text);
+  });
+
+  commitMatchCurrent = $derived.by(() => {
+    const hits = this.commitMatchIndexes;
+    const total = hits.length;
+    if (total === 0) return -1;
+    const cursor = this.commitMatchCursor;
+    const at = cursor < 0 || cursor >= total ? 0 : cursor;
+    return hits[at] ?? -1;
+  });
 
 
   shownUnstaged = $derived(this.unstaged.filter((file) => this.matchesQuery(file.path, this.fileQuery) && (!this.conflictsOnly || file.letter === "C")));
@@ -2528,7 +2563,7 @@ export class ShellState {
       cmd("dialog.fastForward", () => { this.settings.pullRebase = false; void this.doPull(); }),
       cmd("chrome.push", () => void this.doPush()),
       cmd("menu.createTag", () => { this.draft = ""; this.draftExtra = "HEAD"; this.draftUser = ""; this.dialog = "tag"; }),
-      cmd("chrome.pushTags", () => void this.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: this.settings.forceWithLease })),
+      cmd("chrome.pushTags", () => void this.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: this.settings.forceWithLease, killerPush: this.settings.killerPush, rebase: this.settings.pullRebase })),
       cmd("chrome.stash", () => this.openStash([])),
       cmd("chrome.pop", () => this.confirmPopStash()),
       cmd("chrome.refresh", () => void this.refresh()),
@@ -2633,13 +2668,60 @@ export class ShellState {
   }
 
 
-  commitSearchEnter() {
+  commitSearchEnter(event?: Pick<KeyboardEvent, "shiftKey">) {
     const query = this.commitQuery.trim();
-    if (query.startsWith("S:") || query.startsWith("G:")) {
+    if (/^[sg]:/i.test(query)) {
       void this.searchContent(query[0] ?? "S", query.slice(2).trim());
       return;
     }
-    if (/^[0-9a-f]{4,}$/i.test(query) && this.shownCommits.length === 0) void this.locateRef(query);
+    if (this.commitMatchIndexes.length > 0) {
+      this.stepCommitMatch(event?.shiftKey ? -1 : 1);
+      return;
+    }
+    if (/^[0-9a-f]{4,}$/i.test(query)) void this.revealCommit(query);
+  }
+
+  followCommitQuery() {
+    return followCommitQuery(this);
+  }
+
+  stepCommitMatch(delta: number) {
+    return stepCommitMatch(this, delta);
+  }
+
+  commitHit(index: number) {
+    return hitContains(this.commitMatchIndexes, index);
+  }
+
+  commitMatchLabel() {
+    const total = this.commitMatchIndexes.length;
+    if (total === 0) return "0";
+    const cursor = this.commitMatchCursor;
+    const at = cursor < 0 || cursor >= total ? 0 : cursor;
+    return this.tr("chrome.matchCount", { current: String(at + 1), total: String(total) });
+  }
+
+  async revealCommit(id: string) {
+    return revealCommit(this, id);
+  }
+
+  async revealCommitIn(repo: string, id: string) {
+    if (this.standalone || !id) return;
+    if (repo && !this.viewing(repo)) {
+      await this.openRepo(repo);
+      if (!this.viewing(repo)) return;
+    }
+    if (this.inApp()) {
+      try {
+        const win = getCurrentWindow();
+        await win.unminimize();
+        await win.show();
+        await win.setFocus();
+      } catch {
+        /* the browser lab has no native window */
+      }
+    }
+    await revealCommit(this, id);
   }
 
 
@@ -2650,6 +2732,55 @@ export class ShellState {
 
   historyFileMenu(commit: CommitRow): MenuItem[] {
     return historyFileMenu(this, commit);
+  }
+
+
+  requestHistoryAction(action: HistoryActionRequest["action"], rev: string, file: string) {
+    const repo = this.repoPath();
+    if (!repo || !file || !rev) return;
+    const request = { action, repo, file, rev } satisfies HistoryActionRequest;
+    if (this.standalone === "history" && this.inApp()) {
+      if (action === "restore") {
+        this.ask(this.tr("menu.resetAtCommit"), this.tr("dialog.restoreFileBody"), () => void this.sendHistoryAction(request), [], { subject: file, danger: true });
+      } else {
+        void this.sendHistoryAction(request);
+      }
+      return;
+    }
+    if (action === "restore") {
+      this.ask(this.tr("menu.resetAtCommit"), this.tr("dialog.restoreFileBody"), this.bindMutation({ action: "restoreFile", rev, file }), [], { subject: file, danger: true });
+      return;
+    }
+    void invoke("save_revision", { path: repo, rev, file }).catch((error) => (this.actionError = this.message(error)));
+  }
+
+
+  private async sendHistoryAction(request: HistoryActionRequest) {
+    try {
+      await invoke("request_history_action", request);
+    } catch (error) {
+      this.actionError = this.message(error);
+    }
+  }
+
+
+  private async applyHistoryAction(request: HistoryActionRequest) {
+    if (this.standalone || !request?.repo || !request.file || !request.rev) return;
+    if (!this.viewing(request.repo)) await this.openRepo(request.repo);
+    if (!this.viewing(request.repo) || this.mode !== "live") return;
+    try {
+      const window = getCurrentWindow();
+      await window.show();
+      await window.setFocus();
+    } catch {
+      /* Focusing the main window is best effort before a native dialog or write. */
+    }
+    if (request.action === "restore") {
+      void this.bindMutation({ action: "restoreFile", rev: request.rev, file: request.file })();
+    } else {
+      void invoke("save_revision", { path: request.repo, rev: request.rev, file: request.file })
+        .catch((error) => (this.actionError = this.message(error)));
+    }
   }
 
 
@@ -3211,8 +3342,19 @@ export class ShellState {
 
 
 
-  async loadContext(operation?: string) {
-    return loadContext(this, operation);
+  async loadContext(operation?: string, parts: { history: boolean; flow: boolean; deferHistory?: boolean } = { history: true, flow: true }) {
+    if (parts.history) this.historyRefreshPending = false;
+    return loadContext(this, operation, parts);
+  }
+
+  refreshPendingHistory() {
+    const visible = this.section === "history" || this.standalone === "history";
+    const path = this.repoPath();
+    if (!visible || !this.historyRefreshPending || this.mode !== "live" || this.busy || this.refreshing || !path
+      || this.backgroundFetch.has(this.jobKey(path))) return;
+    void this.loadContext(undefined, { history: true, flow: false }).catch((error) => {
+      if (this.viewing(path)) this.actionError = this.message(error);
+    });
   }
 
   watchCovered(scope: "status" | "full", revision: number) {
@@ -3375,23 +3517,31 @@ export class ShellState {
 
   auxiliaryTimer: ReturnType<typeof setTimeout> | null = null;
   auxiliaryAreas = new Set<RefreshArea>();
+  auxiliaryDeferHistory = false;
 
   /** Reconcile lists first. History, previews and statistics cannot own a write slot. */
-  scheduleAuxiliary(areas: readonly RefreshArea[], operation?: string) {
+  scheduleAuxiliary(areas: readonly RefreshArea[], operation?: string, deferHistory = false) {
     for (const area of areas) this.auxiliaryAreas.add(area);
+    this.auxiliaryDeferHistory = deferHistory;
     if (this.auxiliaryTimer !== null) clearTimeout(this.auxiliaryTimer);
     const path = this.repoPath(), openGen = this.openGen;
+    const delay = deferHistory ? AUTOMATIC_FETCH_BACKGROUND_REFRESH_DELAY_MS : 0;
     this.auxiliaryTimer = setTimeout(() => {
       this.auxiliaryTimer = null;
       const changed = this.auxiliaryAreas;
       this.auxiliaryAreas = new Set();
+      const delayedHistory = this.auxiliaryDeferHistory;
+      this.auxiliaryDeferHistory = false;
       if (openGen !== this.openGen || !this.viewing(path)) return;
       const history = changed.has("history") || (changed.has("refs") && (!this.allBranches || !!this.graphBranches?.length));
-      void loadContext(this, operation, { history, flow: changed.has("flow") }).catch((error) => {
+      const historyVisible = this.section === "history" || this.standalone === "history";
+      const loadHistory = history && !(delayedHistory && !historyVisible);
+      if (history && !loadHistory) this.historyRefreshPending = true;
+      void this.loadContext(operation, { history: loadHistory, flow: changed.has("flow"), deferHistory: history && !loadHistory }).catch((error) => {
         if (openGen === this.openGen && this.viewing(path)) this.actionError = this.message(error);
       });
       if (changed.has("config")) { this.facts = null; this.factsPath = ""; }
-    }, 0);
+    }, delay);
   }
 
 
@@ -3786,7 +3936,10 @@ export class ShellState {
         const superseded = background && this.busy;
         if (current() && !superseded) {
           if (value.path && value.staged && value.unstaged) this.applySnapshot(value);
-          if (refreshContext && value.refreshScope !== "status") this.scheduleAuxiliary(value.refreshAreas ?? areasFor(action), operation);
+          if (refreshContext && value.refreshScope !== "status") {
+            const deferHistory = background && action === "fetch";
+            this.scheduleAuxiliary(value.refreshAreas ?? areasFor(action), operation, deferHistory);
+          }
           if (!background && this.viewing(path)) {
             if (action === "stagePaths") refreshStageDiff = true;
             else refreshStageDiff = areasFor(action).some((area) => area === "worktree" || area === "index");
@@ -3930,17 +4083,120 @@ export class ShellState {
 
 
 
-  doFetch(source: "user" | "background" = "user") {
-    const remote = this.settings.fetchAllRemotes ? null : this.refs?.remotes[0]?.name ?? null;
-    const request = { action: "fetch", remote, prune: this.settings.fetchPrune, tags: this.settings.fetchTags };
-    if (source !== "background") return this.mutate(request, source);
+  automaticFetchState(key: string) {
+    let state = this.automaticFetchStates.get(key);
+    if (!state) {
+      state = { lastAttemptAt: 0, nextAttemptAt: 0, failures: 0, pending: false };
+      this.automaticFetchStates.set(key, state);
+      while (this.automaticFetchStates.size > 32) this.automaticFetchStates.delete(this.automaticFetchStates.keys().next().value!);
+    }
+    return state;
+  }
+
+  automaticFetchRemote(): string | null | undefined {
+    const refs = this.refs;
+    if (!refs || refs.remotes.length === 0) return undefined;
+    if (this.settings.fetchAllRemotes) return null;
+    const current = refs.branches.find((branch) => branch.current);
+    const upstream = current?.upstream ?? "";
+    const upstreamRemote = [...refs.remotes]
+      .sort((left, right) => right.name.length - left.name.length)
+      .find((remote) => upstream.startsWith(`${remote.name}/`));
+    return upstreamRemote?.name ?? refs.remotes[0]?.name;
+  }
+
+  automaticFetchBackoff(failures: number) {
+    return Math.min(AUTOMATIC_FETCH_MAX_BACKOFF_MS, 60 * 1000 * 2 ** Math.max(0, failures - 1));
+  }
+
+  noteAutomaticFetchAttempt(key: string) {
+    const state = this.automaticFetchState(key);
+    state.lastAttemptAt = Date.now();
+    state.pending = false;
+  }
+
+  noteAutomaticFetchResult(key: string, result: unknown) {
+    const state = this.automaticFetchState(key);
+    if (state.lastAttemptAt === 0) state.lastAttemptAt = Date.now();
+    state.pending = false;
+    if (result === "completed") {
+      state.failures = 0;
+      state.nextAttemptAt = 0;
+      return;
+    }
+    state.failures = Math.min(8, state.failures + 1);
+    const delay = this.automaticFetchBackoff(state.failures);
+    state.nextAttemptAt = Date.now() + delay;
+    state.pending = true;
+    if (this.settings.fetchAutomatically && this.mode === "live" && this.jobKey(this.repoPath()) === key && this.automaticFetchTimer === null) {
+      this.scheduleAutomaticFetch(delay);
+    }
+  }
+
+  requestAutomaticFetch(reason: "ready" | "focus" | "periodic" | "idle" = "ready") {
+    if (!this.settings.fetchAutomatically || this.mode !== "live") return;
     const path = this.repoPath();
     const key = this.jobKey(path);
-    if (!key || this.backgroundFetch.has(key) || this.busy || this.userWrites > 0 || this.dialog === "pull") return;
+    if (!path || !key || !this.snapshot) return;
+    const state = this.automaticFetchState(key);
+    if (reason === "idle" && !state.pending) return;
+    const now = Date.now();
+    if (state.nextAttemptAt > now) {
+      if (this.automaticFetchTimer === null && this.jobKey(this.repoPath()) === key) {
+        this.scheduleAutomaticFetch(state.nextAttemptAt - now);
+      }
+      return;
+    }
+    const minimum = reason === "focus" || (reason === "ready" && state.lastAttemptAt > 0) ? AUTOMATIC_FETCH_FOCUS_STALE_MS
+      : reason === "periodic" ? AUTOMATIC_FETCH_INTERVAL_MS : 0;
+    if (state.lastAttemptAt > 0 && now - state.lastAttemptAt < minimum) return;
+    if (!this.refs || this.automaticFetchRemote() === undefined) {
+      state.pending = true;
+      return;
+    }
+    if (this.busy || this.refreshing || this.userWrites > 0 || this.dialog === "pull" || this.backgroundFetch.has(key)) {
+      state.pending = true;
+      return;
+    }
+    if (this.automaticFetchTimer === null) this.scheduleAutomaticFetch();
+  }
+
+  doFetch(source: "user" | "background" = "user") {
+    const path = this.repoPath();
+    const key = this.jobKey(path);
+    const remote = source === "background" ? this.automaticFetchRemote() : this.settings.fetchAllRemotes ? null : this.refs?.remotes[0]?.name ?? null;
+    if (source === "background" && remote === undefined) {
+      if (key) this.automaticFetchState(key).pending = true;
+      return;
+    }
+    const request = { action: "fetch", remote: remote ?? null, prune: this.settings.fetchPrune, tags: this.settings.fetchTags };
+    if (source !== "background") {
+      return this.mutate(request, source).then((result) => {
+        if (key && result !== undefined) this.noteAutomaticFetchResult(key, result);
+        return result;
+      }, (error) => {
+        if (key) this.noteAutomaticFetchResult(key, "failed");
+        throw error;
+      });
+    }
+    if (!key || this.backgroundFetch.has(key) || this.busy || this.refreshing || this.userWrites > 0 || this.dialog === "pull") {
+      if (key) this.automaticFetchState(key).pending = true;
+      return;
+    }
+    this.noteAutomaticFetchAttempt(key);
     this.backgroundFetch.add(key);
-    return this.mutate(request, source).finally(() => {
+    return this.mutate(request, source).then((result) => {
+      this.noteAutomaticFetchResult(key, result);
+      return result;
+    }, (error) => {
+      this.noteAutomaticFetchResult(key, "failed");
+      throw error;
+    }).finally(() => {
       this.backgroundFetch.delete(key);
-      if (this.viewing(path)) this.replayWatch();
+      if (this.viewing(path)) {
+        this.replayWatch();
+        this.requestAutomaticFetch("idle");
+      }
     });
   }
 
@@ -3949,14 +4205,14 @@ export class ShellState {
     this.automaticFetchTimer = null;
   }
 
-  scheduleAutomaticFetch() {
-    this.cancelAutomaticFetch();
+  scheduleAutomaticFetch(delay = AUTOMATIC_FETCH_DELAY_MS) {
+    if (this.automaticFetchTimer !== null) return;
     const path = this.repoPath();
     const gen = this.openGen;
     this.automaticFetchTimer = setTimeout(() => {
       this.automaticFetchTimer = null;
       if (gen === this.openGen && this.viewing(path) && this.settings.fetchAutomatically) void this.doFetch("background");
-    }, 1000);
+    }, delay);
   }
 
 
@@ -4045,6 +4301,8 @@ export class ShellState {
       setUpstream: !current?.upstream,
       tags: this.settings.pushAllTags,
       forceWithLease: this.settings.forceWithLease,
+      killerPush: this.settings.killerPush,
+      rebase: this.settings.pullRebase,
     });
   }
 
@@ -5271,6 +5529,7 @@ export class ShellState {
     if (!this.backend() || !path.trim()) return;
     if (!this.viewing(path)) this.commitSelection.clear();
     const stayingOnRepo = this.viewing(path);
+    if (!stayingOnRepo) this.cancelAutomaticFetch();
     if (!stayingOnRepo) this.rememberRepositoryView();
     this.dialog = null;
     this.textMerge = false;
@@ -5376,7 +5635,6 @@ export class ShellState {
       if (!running) this.stopWork(stopAt);
       if (gen === this.openGen) this.focusPath = null;
     }
-    if (gen === this.openGen && this.settings.fetchAutomatically && this.viewing(path) && !this.busy) this.scheduleAutomaticFetch();
   }
 
 
@@ -6732,6 +6990,30 @@ export class ShellState {
 
 
 
+  /** Reorder a project tab before or after another and save the workspace's order. */
+  moveTab(path: string, target: string, after: boolean) {
+    const next = moveWorkspacePath(this.repos, path, target, after);
+    if (!next) return;
+    this.repos = next;
+    const currentId = this.settings.currentWorkspace;
+    if (!currentId) return;
+    const active = this.snapshot?.path ?? path;
+    this.settings = {
+      ...this.settings,
+      workspaces: this.settings.workspaces.map((workspace) => {
+        if (workspace.id !== currentId) return workspace;
+        const openTabs = moveWorkspacePath(workspace.openTabs, path, target, after) ?? workspace.openTabs;
+        const repositories = moveWorkspacePath(workspace.repositories, path, target, after) ?? workspace.repositories;
+        const order = openTabs.length > 0 ? openTabs : repositories;
+        const selected = order.findIndex((item) => this.pathsMatch(item, active));
+        return { ...workspace, openTabs, repositories, selectedTab: selected >= 0 ? selected : workspace.selectedTab };
+      }),
+    };
+    void this.savePrefs(false);
+  }
+
+
+
   closeTab(path: string) {
     this.closedTabs = [path, ...this.closedTabs.filter((item) => item !== path)].slice(0, 12);
     const next = this.repos.filter((repo) => repo !== path);
@@ -6830,10 +7112,7 @@ export class ShellState {
     const sameMembers = fixed
       && fixed.repositories.length === recent.length
       && fixed.repositories.every((path) => keys.has(this.normalPath(path)));
-    const repositories = sameMembers ? [
-      ...fixed.repositories.filter((path) => this.isRecentRepoPinned(path)),
-      ...fixed.repositories.filter((path) => !this.isRecentRepoPinned(path)),
-    ] : recent;
+    const repositories = sameMembers ? [...fixed.repositories] : recent;
     const openKeys = new Set(fixed?.openTabs.map((path) => this.normalPath(path)));
     if (opened) openKeys.add(this.normalPath(opened));
     const openTabs = sameMembers ? repositories.filter((path) => openKeys.has(this.normalPath(path))) : repositories;
@@ -7237,6 +7516,24 @@ export class ShellState {
       this.replayWatch();
     });
     $effect(() => {
+      const enabled = this.settings.fetchAutomatically;
+      const path = this.repoPath();
+      const refs = this.refs;
+      if (enabled && this.mode === "live" && path && refs) this.requestAutomaticFetch("ready");
+    });
+    $effect(() => {
+      const idle = !this.busy && !this.refreshing && this.userWrites === 0 && this.dialog !== "pull";
+      if (idle) this.requestAutomaticFetch("idle");
+    });
+    $effect(() => {
+      this.section;
+      this.standalone;
+      this.historyRefreshPending;
+      this.busy;
+      this.refreshing;
+      this.refreshPendingHistory();
+    });
+    $effect(() => {
       const visible = this.section === "history" || this.standalone === "history";
       if (!visible) return;
       const straight = this.liveFold.straight;
@@ -7273,9 +7570,7 @@ export class ShellState {
     });
     $effect(() => {
     if (!this.settings.fetchAutomatically) return;
-    const timer = window.setInterval(() => {
-    if (!this.busy && this.snapshot) this.scheduleAutomaticFetch();
-    }, 10 * 60 * 1000);
+    const timer = window.setInterval(() => this.requestAutomaticFetch("periodic"), AUTOMATIC_FETCH_INTERVAL_MS);
     return () => { window.clearInterval(timer); this.cancelAutomaticFetch(); };
     });
     $effect(() => {
@@ -7390,6 +7685,12 @@ export class ShellState {
     this.goBack();
     };
     const onShortcut = this.onShortcut.bind(this);
+    const onWindowFocus = () => {
+      if (this.inApp() && !document.hidden) this.requestAutomaticFetch("focus");
+    };
+    const onVisibilityChange = () => {
+      if (this.inApp() && !document.hidden) this.requestAutomaticFetch("focus");
+    };
     const stopLocale = onLocaleChange((locale) => { this.settings.locale = locale; });
     const stopAppearance = onAppearanceChange((theme) => {
       if (this.prefsBaseline) this.prefsBaseline = { ...this.prefsBaseline, theme };
@@ -7397,6 +7698,8 @@ export class ShellState {
     });
     const onRememberPointer = this.rememberPointer.bind(this);
     window.addEventListener("keydown", onShortcut);
+    window.addEventListener("focus", onWindowFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("mousedown", onMouseNav);
     window.addEventListener("mousedown", onRememberPointer, true);
     window.addEventListener("mouseup", onMouseNav);
@@ -7410,6 +7713,8 @@ export class ShellState {
     stopAppearance();
     window.clearTimeout(historyTimer);
     window.removeEventListener("keydown", onShortcut);
+    window.removeEventListener("focus", onWindowFocus);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
     window.removeEventListener("mousedown", onMouseNav);
     window.removeEventListener("mousedown", onRememberPointer, true);
     window.removeEventListener("mouseup", onMouseNav);
@@ -7432,6 +7737,7 @@ export class ShellState {
     let unnav = () => {};
     let unreveal = () => {};
     let ukept = () => {};
+    let unhistoryAction = () => {};
     let unupdate = () => {};
     let placeTimer = 0;
     let stopped = false;
@@ -7519,15 +7825,18 @@ export class ShellState {
     });
     unreveal = await listen<{ repo: string; id: string }>("awegit-reveal", (event) => {
       if (this.standalone) return;
-      const repo = event.payload?.repo;
-      const id = event.payload?.id;
-      if (!id || (repo && repo !== this.repoPath())) return;
-      void this.locateRef(id);
+      const repo = event.payload?.repo ?? "";
+      const id = event.payload?.id ?? "";
+      if (!id) return;
+      void this.revealCommitIn(repo, id);
     });
     ukept = await listen<{ files?: string[] }>("awegit-preview-kept", (event) => {
       if (this.standalone) return;
       const files = (event.payload?.files ?? []).filter((file) => typeof file === "string" && file);
       if (files.length) this.actionError = this.tr("chrome.previewKept", { files: files.join(", ") });
+    });
+    unhistoryAction = await listen<HistoryActionRequest>("awegit-history-action", (event) => {
+      void this.applyHistoryAction(event.payload);
     });
     } catch {
     /* navigation events are optional outside the desktop shell */
@@ -7595,6 +7904,7 @@ export class ShellState {
     unreveal();
     ukept();
     unupdate();
+    unhistoryAction();
     };
     });
   }

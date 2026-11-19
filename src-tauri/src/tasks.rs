@@ -524,7 +524,7 @@ pub fn validate_intent(repo: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn verified_push(repo: &Path, prerequisite: &str, force_with_lease: bool) -> Result<(awegit_git::Mutation, serde_json::Value), String> {
+fn verified_push(repo: &Path, prerequisite: &str, force_with_lease: bool, killer_push: bool, rebase: bool) -> Result<(awegit_git::Mutation, serde_json::Value), String> {
     let (branch, head) = {
         let registry = registry().0.lock().unwrap_or_else(|error| error.into_inner());
         let task = registry.tasks.get(prerequisite).filter(|task| task.snapshot.state == "completed"
@@ -537,7 +537,7 @@ fn verified_push(repo: &Path, prerequisite: &str, force_with_lease: bool) -> Res
     }
     let (remote, remote_branch, set_upstream) = awegit_git::push_commit_target(repo, &branch).map_err(|error| error.to_string())?;
     let target = serde_json::json!({ "remote": remote, "branch": branch, "remoteBranch": remote_branch });
-    Ok((awegit_git::Mutation::PushRef { remote, branch, source_commit: Some(head), remote_branch, set_upstream, force_with_lease, force: false, tags: false }, target))
+    Ok((awegit_git::Mutation::PushRef { remote, branch, source_commit: Some(head), remote_branch, set_upstream, force_with_lease, force: false, tags: false, killer_push, rebase }, target))
 }
 
 /// Keep the original IPC names so desktop and lab exercise exactly the same commands.
@@ -564,7 +564,10 @@ pub fn execute(command: &str, args: &Value) -> Result<Value, String> {
             let mut target = None;
             let request = if let Some(prerequisite) = args.get("__pushCommit").and_then(Value::as_str) {
                 let repo = super::repo_from(path()?)?;
-                let (request, resolved) = verified_push(&repo, prerequisite, args["request"]["forceWithLease"].as_bool().unwrap_or(false))?;
+                let (request, resolved) = verified_push(&repo, prerequisite,
+                    args["request"]["forceWithLease"].as_bool().unwrap_or(false),
+                    args["request"]["killerPush"].as_bool().unwrap_or(false),
+                    args["request"]["rebase"].as_bool().unwrap_or(false))?;
                 target = Some(resolved);
                 request
             } else { arg(args, "request")? };

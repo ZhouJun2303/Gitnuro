@@ -490,6 +490,23 @@ function seedCheckoutRepo(name = "checkout-dirty") {
   write(path, ".fakeignore", "local-only\n");
 }
 
+function seedGoneUpstreamRepo() {
+  const path = join(repos, "gone-upstream");
+  const bare = join(lab, "gone-upstream.git");
+  wipe(path); wipe(bare);
+  initBare(bare);
+  initWork(path);
+  commit(path, "README.md", "base\n", "base");
+  git(path, ["remote", "add", "origin", fileUrl(bare)]);
+  git(path, ["push", "-u", "origin", "main"]);
+  git(path, ["checkout", "-b", "Dev/EnterFast_2026_10_27"]);
+  commit(path, "README.md", "branch\n", "local work on a deleted upstream");
+  git(path, ["push", "-u", "origin", "Dev/EnterFast_2026_10_27"]);
+  // Deleting the remote branch leaves branch.<name>.merge behind: %(upstream:short)
+  // still names origin/Dev/EnterFast_2026_10_27 while no such ref can be resolved.
+  git(path, ["push", "origin", "--delete", "Dev/EnterFast_2026_10_27"]);
+}
+
 function seedRevertRepo() {
   const path = join(repos, "revert");
   wipe(path);
@@ -598,6 +615,19 @@ function seedStageManyRepo(name = "stage-many", dense = false) {
   }
 }
 
+function seedSubmoduleDiffRepo() {
+  const path = join(repos, "submodule-diff");
+  wipe(path);
+  initWork(path);
+  const initial = git(subBare, ["rev-list", "--max-parents=0", "main"]).stdout.trim();
+  const latest = git(subBare, ["rev-parse", "main"]).stdout.trim();
+  git(path, ["-c", "protocol.file.allow=always", "submodule", "add", fileUrl(subBare), "vendor"]);
+  git(join(path, "vendor"), ["checkout", "--detach", initial]);
+  git(path, ["add", "vendor"]);
+  git(path, ["commit", "-m", "add submodule"]);
+  if (latest !== initial) git(join(path, "vendor"), ["checkout", "--detach", latest]);
+}
+
 const restore = {
   "stage-many": seedStageManyRepo,
   "stage-dense": () => seedStageManyRepo("stage-dense", true),
@@ -607,6 +637,8 @@ const restore = {
   "checkout-conflict": () => seedCheckoutRepo("checkout-conflict"),
   "unstage-initial": seedUnstageInitialRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
+  "submodule-diff": seedSubmoduleDiffRepo,
+  "gone-upstream": seedGoneUpstreamRepo,
   "pull-deleted": seedPullDeletedRepo,
   "pull-noop": seedPullNoopRepo,
   "pull-disjoint": () => seedPullNoopRepo("pull-disjoint"),
@@ -650,6 +682,9 @@ commit(subSrc, "lib.txt", "library\n", "lib");
 git(subSrc, ["remote", "add", "origin", fileUrl(subBare)]);
 git(subSrc, ["push", "-u", "origin", "HEAD:main"]);
 const subSha = git(subSrc, ["rev-parse", "HEAD"]).stdout.trim();
+commit(subSrc, "lib.txt", "library update\n", "lib update");
+git(subSrc, ["push", "origin", "HEAD:main"]);
+seedSubmoduleDiffRepo();
 
 const writer = join(repos, "writer");
 initWork(writer);
@@ -826,6 +861,7 @@ seedTagsRepo();
 seedHistoryImagesRepo();
 seedStageManyRepo();
 seedStageManyRepo("stage-dense", true);
+seedGoneUpstreamRepo();
 
 const detached = join(repos, "detached");
 initWork(detached);

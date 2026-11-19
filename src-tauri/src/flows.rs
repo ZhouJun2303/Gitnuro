@@ -1620,7 +1620,7 @@ mod tests {
         assert!(second.status.is_none(), "fetch only changes references");
         let status = super::super::workspace_status(Some(repo.0.display().to_string())).unwrap();
         assert!(status.unstaged.iter().any(|file| file.path == "note"), "independent status reconciliation retains external edits");
-        let push = |set_upstream| Mutation::Push { remote: Some("origin".into()), set_upstream, tags: false, force_with_lease: false, force: false };
+        let push = |set_upstream| Mutation::Push { remote: Some("origin".into()), set_upstream, tags: false, force_with_lease: false, force: false, killer_push: false, rebase: false };
         assert_eq!(run(push(true)).refresh_scope, None, "setting an upstream changes context");
         assert_eq!(run(push(false)).refresh_scope, Some("status"));
         assert_eq!(run(Mutation::Checkout { name: "main".into() }).refresh_scope, Some("status"));
@@ -1796,6 +1796,8 @@ mod tests {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         });
         assert_eq!(failed.state, "failed");
         resume(&repo.0);
@@ -2091,6 +2093,8 @@ mod tests {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         };
         let failed = repo.run(push());
         assert_eq!(failed.state, "failed");
@@ -2459,7 +2463,7 @@ mod tests {
                         }
                         let request = match case {
                             "fetch-noop" | "fetch-updated" => Mutation::Fetch { remote: None, prune: true, tags: false },
-                            "push-noop" | "push-updated" => Mutation::Push { remote: Some("origin".into()), set_upstream: false, tags: false, force_with_lease: false, force: false },
+                            "push-noop" | "push-updated" => Mutation::Push { remote: Some("origin".into()), set_upstream: false, tags: false, force_with_lease: false, force: false, killer_push: false, rebase: false },
                             "checkout-same" | "checkout-updated" => Mutation::Checkout { name: "perf-target".into() },
                             "pull-noop" | "pull-updated" | "pull-untracked" => Mutation::Pull { rebase: true, autostash: true },
                             "stage" | "unstage" => Mutation::StagePaths { files: vec!["tracked".into()], unstage: case == "unstage" },

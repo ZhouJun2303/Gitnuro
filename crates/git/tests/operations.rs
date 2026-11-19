@@ -9,7 +9,7 @@ use awegit_git::{
     blob_view, commit, commit_log, commits_from, conflict_view, discard_lines, file_diff,
     file_diff_with, file_preview, in_progress, launch_merge_tool, merge_preview, perform,
     remove_stale_index_lock, repository_refs, search_commits, search_log, stage_all, stage_hunk,
-    stage_line, stage_lines, stage_paths, stale_index_lock, status, stop_process_tree, ChangeKind,
+    stage_line, stage_lines, stage_paths, stale_index_lock, status, stop_process_tree, unstage_paths, ChangeKind,
     CommitRequest, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
 };
 
@@ -38,6 +38,69 @@ fn file_url(path: &Path) -> String {
     } else {
         format!("file:///{text}")
     }
+}
+
+#[test]
+fn submodule_head_change_can_be_staged_and_committed() {
+    let module = repo();
+    commit_file(&module, "module.txt", "one\n", "module base");
+
+    let superproject = repo();
+    superproject.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &file_url(&module.path),
+        "vendor",
+    ]);
+    superproject.git(&["commit", "-m", "add submodule"]);
+
+    commit_file(&module, "module.txt", "two\n", "module update");
+    superproject.git(&["-C", "vendor", "fetch", "--quiet"]);
+    superproject.git(&["-C", "vendor", "checkout", "--quiet", "--detach", "FETCH_HEAD"]);
+
+    let before = status(&superproject.path).unwrap();
+    assert!(before.unstaged.iter().any(|change| change.path == "vendor"));
+    let unstaged_diff = file_diff(&superproject.path, "vendor", false).unwrap();
+    assert!(unstaged_diff.lines.iter().any(|line| line.text.starts_with("-Subproject commit ")), "{unstaged_diff:?}");
+    assert!(unstaged_diff.lines.iter().any(|line| line.text.starts_with("+Subproject commit ")), "{unstaged_diff:?}");
+
+    stage_paths(&superproject.path, &["vendor".into()]).unwrap();
+    let path_staged = status(&superproject.path).unwrap();
+    assert!(path_staged.staged.iter().any(|change| change.path == "vendor"));
+    assert!(!path_staged.unstaged.iter().any(|change| change.path == "vendor"));
+    let staged_diff = file_diff(&superproject.path, "vendor", true).unwrap();
+    assert!(staged_diff.lines.iter().any(|line| line.text.starts_with("-Subproject commit ")), "{staged_diff:?}");
+    assert!(staged_diff.lines.iter().any(|line| line.text.starts_with("+Subproject commit ")), "{staged_diff:?}");
+
+    unstage_paths(&superproject.path, &["vendor".into()]).unwrap();
+
+    stage_all(&superproject.path).unwrap();
+    let staged = status(&superproject.path).unwrap();
+    assert!(staged.staged.iter().any(|change| change.path == "vendor"));
+    assert!(!staged.unstaged.iter().any(|change| change.path == "vendor"));
+    let scoped = awegit_git::status_paths_with(&superproject.path, false, &["vendor".into()]).unwrap();
+    assert!(scoped.staged.iter().any(|change| change.path == "vendor"));
+    assert!(!scoped.unstaged.iter().any(|change| change.path == "vendor"));
+
+    commit(
+        &superproject.path,
+        CommitRequest {
+            summary: "test: update submodule".into(),
+            description: String::new(),
+            amend: false,
+            sign_off: false,
+            sign_off_format: String::new(),
+            skip_hooks: true,
+            convention: false,
+            types: Vec::new(),
+        },
+    )
+    .unwrap();
+    let after = status(&superproject.path).unwrap();
+    assert!(after.staged.is_empty(), "{after:?}");
+    assert!(after.unstaged.is_empty(), "{after:?}");
 }
 
 fn commit_file(repo: &common::TempRepo, name: &str, body: &str, message: &str) {
@@ -131,6 +194,8 @@ fn fetch_push_and_fast_forward() {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         },
     )
     .unwrap();
@@ -170,6 +235,8 @@ fn fetch_push_and_fast_forward() {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         },
     )
     .unwrap();
@@ -213,6 +280,8 @@ fn push_ref_same_name_pushes_the_chosen_branch() {
             source_commit: None,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
             remote_branch: String::new(),
             set_upstream: true,
             tags: false,
@@ -249,6 +318,8 @@ fn marks_commits_that_exist_only_on_a_remote() {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         },
     )
     .unwrap();
@@ -1245,6 +1316,8 @@ fn deletes_a_remote_branch() {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         },
     )
     .unwrap();
@@ -2903,6 +2976,8 @@ fn pull_rebase_uses_one_visible_autostash() {
             tags: false,
             force_with_lease: false,
             force: false,
+            killer_push: false,
+            rebase: false,
         },
     )
     .unwrap();

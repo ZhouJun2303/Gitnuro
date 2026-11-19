@@ -225,6 +225,8 @@ export type Settings = {
   signOff: boolean;
   signOffFormat: string;
   forceWithLease: boolean;
+  /** A rejected push pulls the remote branch and retries once, aborting on conflict. */
+  killerPush: boolean;
   aiEnabled: boolean;
   aiLanguage: string;
   aiMaxChars: number;
@@ -366,6 +368,20 @@ export const defaultRecentWorkspaceLimit = 5;
 
 /** Narrowest project tab. Past this, the strip scrolls instead of shrinking further. */
 export const workspaceTabFloor = 96;
+
+/** Fallback tab label size; the strip otherwise uses its computed UI font size. */
+export const workspaceTabFontDefault = 14;
+export const workspaceTabFontMin = 10;
+
+/** Move `path` next to `target`; null when either is not in the list. */
+export function moveWorkspacePath(list: string[], path: string, target: string, after: boolean) {
+  if (path === target || !list.includes(path) || !list.includes(target)) return null;
+  const next = list.filter((item) => item !== path);
+  const at = next.indexOf(target);
+  if (at < 0) return null;
+  next.splice(after ? at + 1 : at, 0, path);
+  return next;
+}
 
 /** Width to store for a workspace. More repositories get a narrower tab. */
 export function workspaceTabWidth(count: number) {

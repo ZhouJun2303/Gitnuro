@@ -277,8 +277,14 @@
     flex: none;
     width: var(--tab-width, 220px);
     overflow: hidden;
+    user-select: none;
+    cursor: grab;
     transition: background 120ms ease, color 120ms ease;
   }
+
+.tab:active { cursor: grabbing; }
+
+.tab > .file-select { cursor: inherit; }
 
 .tabs .tab:last-child {
     width: calc(var(--tab-width, 220px) + var(--tab-extra, 0px));
@@ -307,9 +313,50 @@
     gap: 6px;
     min-width: 0;
     overflow: hidden;
+    white-space: nowrap;
+    font-size: var(--tab-font-size, inherit);
+  }
+
+.tab-name {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+.tab.dragging { opacity: 0.45; pointer-events: none; }
+
+.tab.drop-before::before,
+  .tab.drop-after::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--accent);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 60%, transparent);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+.tab.drop-before::before { left: 0; }
+
+.tab.drop-after::before { right: 0; }
+
+.vertical-tabs .tab.drop-before::before,
+  .vertical-tabs .tab.drop-after::before {
+    left: 0;
+    right: 0;
+    width: auto;
+    height: 2px;
+  }
+
+.vertical-tabs .tab.drop-before::before { top: 0; bottom: auto; }
+
+.vertical-tabs .tab.drop-after::before { top: auto; bottom: 0; }
 
 .tab.active:hover { background: var(--elevated); }
 
@@ -405,6 +452,10 @@
     line-height: 16px;
     text-align: center;
     pointer-events: none;
+}
+
+.push-icon {
+    flex: none;
 }
 
 .tool-btn.caret-only { width: 16px; min-width: 0; height: 42px; padding: 0; justify-content: center; margin-left: -6px; }

@@ -290,6 +290,14 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.loadContext();
     return;
   }
+  if (id === "history-gone-upstream") {
+    shell.section = "history";
+    shell.collapsedSide = [];
+    shell.graphBranches = ["Dev/EnterFast_2026_10_27"];
+    shell.allBranches = false;
+    await shell.loadContext();
+    return;
+  }
   if (id === "blob") {
     shell.blobFile = "README.md";
     shell.blobRev = "HEAD";
@@ -322,6 +330,7 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.repos = id === "workspace-tabs"
       ? [layout.full, layout.even, layout.ahead, layout.behind, layout.unity]
       : [...new Set([layout.full, ...layout.recentList.split(/\r?\n/).filter(Boolean)])];
+    if (id === "workspace-tabs") shell.settings.tabLabels = shell.pairSetting(shell.settings.tabLabels, layout.ahead, "AweGit-performance-branch");
     return;
   }
   if (id === "tab-copy-path" || id === "tab-repo-info") {
@@ -464,6 +473,9 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.collapsedSide = [];
     shell.sideQuery = "vendor";
     return;
+  }
+  if (id === "submodule-diff") {
+    return showChange(shell, "vendor", "unstaged");
   }
   if (id === "worktree") {
     shell.collapsedSide = [];

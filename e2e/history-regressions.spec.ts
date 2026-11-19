@@ -5,6 +5,29 @@ test.beforeEach(async ({ page }) => {
   await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();
 });
 
+test("standalone history actions are routed through the host window", async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { historyFileMenu } = await import(/* @vite-ignore */ "/src/lib/shell/menus.ts");
+    const requests: unknown[][] = [];
+    const shell: any = {
+      mode: "live",
+      standalone: "history",
+      historyFilter: "Assets/note.txt",
+      tr: (key: string) => key,
+      applicableTools: () => [],
+      requestHistoryAction: (...args: unknown[]) => requests.push(args),
+    };
+    const items = historyFileMenu(shell, { id: "commit", parents: [], summary: "change", author: "author", when: "today", at: 0 } as any);
+    items.find((item: any) => item.label === "menu.resetAtCommit")?.run?.();
+    items.find((item: any) => item.label === "menu.saveAs")?.run?.();
+    return requests;
+  });
+  expect(result).toEqual([
+    ["restore", "commit", "Assets/note.txt"],
+    ["save", "commit", "Assets/note.txt"],
+  ]);
+});
+
 for (const kind of ["tree", "blob", "history"] as const) {
   for (const { fail, change } of [
     { fail: false, change: "repository" },

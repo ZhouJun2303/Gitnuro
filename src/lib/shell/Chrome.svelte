@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getShell } from "./context";
-  import { fillWorkspaceTabs, terminalCliNames, type TerminalCli } from "../status";
+  import { fillWorkspaceTabs, workspaceTabFontDefault, workspaceTabFontMin, terminalCliNames, type TerminalCli } from "../status";
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
@@ -8,6 +8,8 @@
 
   const shell = getShell();
   const launchShortcut = $derived.by(() => { shell.settings.shortcuts; return shortcutLabel("launch"); });
+  /** Workspace identity for the tab strip: a switch, rename, open or close must re-fit the labels. */
+  const tabSignature = $derived(shell.repos.map((repo) => `${repo}\t${shell.tabText(repo)}`).join("\n"));
 
   async function openTerminal(path: string, cli?: TerminalCli) {
     try {
@@ -47,12 +49,32 @@
     });
   });
 
-  /** Write tab width once per frame, and only after the count or the strip size is marked dirty. */
-  function fillTabs(node: HTMLElement, count: number) {
-    let current = Math.max(1, count);
+  /** One size for the whole workspace: keep the default while every name fits, then step down to the floor. */
+  let tabCanvas: CanvasRenderingContext2D | null = null;
+
+  function fitTabFontSize(node: HTMLElement) {
+    const labels = node.querySelectorAll<HTMLElement>(".tab-name");
+    if (labels.length === 0) return workspaceTabFontDefault;
+    tabCanvas ??= document.createElement("canvas").getContext("2d");
+    if (!tabCanvas) return workspaceTabFontDefault;
+    const base = parseFloat(getComputedStyle(node).fontSize) || workspaceTabFontDefault;
+    const family = getComputedStyle(labels[0]).fontFamily;
+    const widths = Array.from(labels, (label) => ({ text: label.textContent ?? "", width: label.clientWidth }));
+    for (let size = base; size > workspaceTabFontMin; size -= 0.5) {
+      tabCanvas.font = `600 ${size}px ${family}`;
+      if (widths.every((item) => tabCanvas!.measureText(item.text).width <= item.width)) return size;
+    }
+    return workspaceTabFontMin;
+  }
+
+  /** Write tab width and the workspace-wide font size, only when the strip or its labels change. */
+  function fillTabs(node: HTMLElement, value: { count: number; key: string }) {
+    let current = Math.max(1, value.count);
+    let key = value.key;
     let dirty = false;
     let frame = 0;
     let painted = "";
+    let geometry = "";
     let misses = 0;
 
     const flush = () => {
@@ -72,15 +94,24 @@
         if (!painted) return;
         node.style.removeProperty("--tab-width");
         node.style.removeProperty("--tab-extra");
+        node.style.removeProperty("--tab-font-size");
         painted = "";
+        geometry = "";
         return;
       }
       const { width, extra } = fillWorkspaceTabs(node.clientWidth, current);
-      const next = `${width}:${extra}`;
+      const nextGeometry = `${width}:${extra}`;
+      // Width first: the labels' available width is what the font has to fit.
+      if (nextGeometry !== geometry) {
+        geometry = nextGeometry;
+        node.style.setProperty("--tab-width", `${width}px`);
+        node.style.setProperty("--tab-extra", `${extra}px`);
+      }
+      const fontSize = fitTabFontSize(node);
+      const next = `${geometry}:${fontSize}`;
       if (next === painted) return;
       painted = next;
-      node.style.setProperty("--tab-width", `${width}px`);
-      node.style.setProperty("--tab-extra", `${extra}px`);
+      node.style.setProperty("--tab-font-size", `${fontSize}px`);
     };
 
     const mark = () => {
@@ -97,17 +128,106 @@
     observer.observe(node);
     mark();
     return {
-      update(next: number) {
-        const countNext = Math.max(1, next);
-        if (countNext === current) return;
+      update(next: { count: number; key: string }) {
+        const countNext = Math.max(1, next.count);
+        const changed = countNext !== current || next.key !== key;
         current = countNext;
-        mark();
+        key = next.key;
+        if (changed) mark();
       },
       destroy() {
         if (frame) cancelAnimationFrame(frame);
         observer.disconnect();
       },
     };
+  }
+
+  /** Drag a project tab onto another tab's leading or trailing half to move it there. */
+  let dragTab = $state("");
+  let dropTab = $state<{ path: string; after: boolean } | null>(null);
+  let pendingTab: { path: string; x: number; y: number; node: HTMLElement; strip: HTMLElement; pointerId: number } | null = null;
+  let swallowTabClick = false;
+
+  function beginTabPointer(event: PointerEvent, path: string) {
+    if (event.button !== 0 || event.pointerType === "touch") return;
+    if ((event.target as Element | null)?.closest(".tab-close")) return;
+    const node = event.currentTarget as HTMLElement;
+    const strip = node.closest<HTMLElement>(".tabs");
+    if (!strip) return;
+    pendingTab = { path, x: event.clientX, y: event.clientY, node, strip, pointerId: event.pointerId };
+    window.addEventListener("pointermove", moveTabPointer);
+    window.addEventListener("pointerup", endTabPointer);
+    window.addEventListener("pointercancel", cancelTabPointer);
+    window.addEventListener("blur", cancelTabPointer);
+  }
+
+  function moveTabPointer(event: PointerEvent) {
+    const start = pendingTab;
+    if (!start || event.pointerId !== start.pointerId) return;
+    if (!dragTab) {
+      if (Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y) < 6) return;
+      dragTab = start.path;
+      dropTab = null;
+      try { start.strip.setPointerCapture(event.pointerId); } catch { /* pointer already released */ }
+    }
+    event.preventDefault();
+    const vertical = !!start.strip.closest(".vertical-tabs");
+    const bounds = start.strip.getBoundingClientRect();
+    if (vertical) {
+      if (event.clientY < bounds.top + 28) start.strip.scrollTop -= 14;
+      else if (event.clientY > bounds.bottom - 28) start.strip.scrollTop += 14;
+    } else if (event.clientX < bounds.left + 28) start.strip.scrollLeft -= 14;
+    else if (event.clientX > bounds.right - 28) start.strip.scrollLeft += 14;
+    const node = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>(".tab");
+    const path = node?.dataset.repo;
+    if (!node || !path || path === dragTab) {
+      dropTab = null;
+      return;
+    }
+    const rect = node.getBoundingClientRect();
+    const after = vertical ? event.clientY > rect.top + rect.height / 2 : event.clientX > rect.left + rect.width / 2;
+    dropTab = { path, after };
+  }
+
+  function endTabPointer(event: PointerEvent) {
+    const start = pendingTab;
+    if (!start || event.pointerId !== start.pointerId) return;
+    detachTabPointer(start);
+    const target = dropTab;
+    const moving = dragTab;
+    dragTab = "";
+    dropTab = null;
+    if (!target || !moving || target.path === moving) return;
+    swallowTabClick = true;
+    setTimeout(() => { swallowTabClick = false; }, 0);
+    shell.moveTab(moving, target.path, target.after);
+  }
+
+  function cancelTabPointer() {
+    const start = pendingTab;
+    if (start) detachTabPointer(start);
+    dragTab = "";
+    dropTab = null;
+  }
+
+  function detachTabPointer(start: NonNullable<typeof pendingTab>) {
+    window.removeEventListener("pointermove", moveTabPointer);
+    window.removeEventListener("pointerup", endTabPointer);
+    window.removeEventListener("pointercancel", cancelTabPointer);
+    window.removeEventListener("blur", cancelTabPointer);
+    pendingTab = null;
+    try { start.strip.releasePointerCapture(start.pointerId); } catch { /* pointer already released */ }
+  }
+
+  function guardTabClicks(node: HTMLElement) {
+    const stop = (event: MouseEvent) => {
+      if (!swallowTabClick) return;
+      swallowTabClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    node.addEventListener("click", stop, true);
+    return { destroy: () => node.removeEventListener("click", stop, true) };
   }
 
 </script>
@@ -129,15 +249,15 @@
         <button class="tool-btn stack" type="button" title={shell.tr("chrome.fetch")} disabled={shell.syncDisabled("fetch")} onclick={() => shell.confirmSync("fetch")} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("chrome.fetch"), shortcut: shortcutLabel("fetch"), disabled: shell.syncDisabled("fetch"), run: () => void shell.doFetch() },
           { label: shell.tr("chrome.fetchAll"), disabled: shell.syncDisabled("fetch"), run: () => void shell.mutate({ action: "fetch", remote: null, prune: shell.settings.fetchPrune, tags: shell.settings.fetchTags }) },
-        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span>{shell.tr("chrome.fetch")}</span></button>
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><path d="M12 7.5v8.3M8.8 12.6 12 15.8l3.2-3.2"/></svg><span>{shell.tr("chrome.fetch")}</span></button>
         <button class="tool-btn stack" type="button" title={shell.tr("chrome.pull")} disabled={shell.syncDisabled("pull")} onclick={() => shell.confirmSync("pull")} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("chrome.pull"), shortcut: shortcutLabel("pull"), disabled: shell.syncDisabled("pull"), run: () => void shell.doPull() },
           { label: shell.tr("dialog.fastForward"), disabled: shell.syncDisabled("pull"), run: () => { shell.settings.pullRebase = false; void shell.doPull(); } },
-        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v14M6 11l6 6 6-6M5 21h14"/></svg><span>{shell.tr("chrome.pull")}</span>{#if shell.currentBranch && shell.currentBranch.behind > 0}<em class="sync-count">{shell.currentBranch.behind > 99 ? "99+" : shell.currentBranch.behind}</em>{/if}</button>
-        <button class="tool-btn stack" type="button" title={shell.tr("chrome.push")} disabled={shell.syncDisabled("push")} onclick={() => shell.confirmSync("push")} oncontextmenu={(event) => shell.openMenu(event, [
+        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 18.5h14V21H5z"/><path d="M12 17 4.5 9.5H9V3h6v6.5h4.5z"/></svg><span>{shell.tr("chrome.pull")}</span>{#if shell.currentBranch && shell.currentBranch.behind > 0}<em class="sync-count">{shell.currentBranch.behind > 99 ? "99+" : shell.currentBranch.behind}</em>{/if}</button>
+        <button class="tool-btn stack" type="button" title={shell.settings.killerPush ? `${shell.tr("chrome.push")} · ${shell.tr("chrome.killerPushTooltip")}` : shell.tr("chrome.push")} disabled={shell.syncDisabled("push")} onclick={() => shell.confirmSync("push")} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("chrome.push"), shortcut: shortcutLabel("push"), disabled: shell.syncDisabled("push"), run: () => void shell.doPush() },
-          { label: shell.tr("chrome.pushTags"), disabled: shell.syncDisabled("push"), run: () => void shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease }) },
-        ])}><svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V7M6 13l6-6 6 6M5 3h14"/></svg><span>{shell.tr("chrome.push")}</span>{#if shell.currentBranch && shell.currentBranch.ahead > 0}<em class="sync-count">{shell.currentBranch.ahead > 99 ? "99+" : shell.currentBranch.ahead}</em>{/if}</button>
+          { label: shell.tr("chrome.pushTags"), disabled: shell.syncDisabled("push"), run: () => void shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease: shell.settings.forceWithLease, killerPush: shell.settings.killerPush, rebase: shell.settings.pullRebase }) },
+        ])}>{#if shell.settings.killerPush}<svg class="push-icon solid" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M5 3h14v2.5H5z"/><path d="M12 7 4.5 14.5H9V21h6v-6.5h4.5z"/></svg>{:else}<svg class="line-icon push-icon outline" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v2.5H5z"/><path d="M12 7 4.5 14.5H9V21h6v-6.5h4.5z"/></svg>{/if}<span>{shell.tr("chrome.push")}</span>{#if shell.currentBranch && shell.currentBranch.ahead > 0}<em class="sync-count">{shell.currentBranch.ahead > 99 ? "99+" : shell.currentBranch.ahead}</em>{/if}</button>
         <button class="tool-btn stack" type="button" title={shell.tr("chrome.stash")} disabled={shell.writeBlocked || shell.mode !== "live"} onclick={() => shell.openStash([])} oncontextmenu={(event) => shell.openMenu(event, shell.stashItems())}>
           <svg class="line-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
           <span>{shell.tr("chrome.stash")}</span>
@@ -226,10 +346,10 @@
       </div>
     </div>
     <div class="chrome-tabs">
-      <div class="chrome-side tabs" use:fillTabs={shell.repos.length}>
+      <div class="chrome-side tabs" role="group" aria-label={shell.tr("chrome.repositories")} use:fillTabs={{ count: shell.repos.length, key: tabSignature }} use:guardTabClicks>
       {#each shell.repos as repo (repo)}
         {@const job = shell.jobs[shell.jobKey(repo)] ?? shell.backgroundJobs[shell.jobKey(repo)]}
-        <div class="tab" role="group" class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} oncontextmenu={(event) => shell.openMenu(event, [
+        <div class="tab" role="group" data-repo={repo} class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} class:dragging={dragTab === repo} class:drop-before={dropTab?.path === repo && !dropTab.after} class:drop-after={dropTab?.path === repo && dropTab.after} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} onpointerdown={(event) => beginTabPointer(event, repo)} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("repoInfo.title"), run: () => { shell.repoInfoPath = repo; shell.dialog = "repoInfo"; } },
           terminalMenu(repo),
           { label: shell.tr("chrome.explorer"), run: () => void shell.openLocal(repo) },
@@ -247,7 +367,7 @@
                 <path d="M9 3.5h6v6.2l2.2 2.1v2.2h-4.1L12 20.5l-1.1-6.5H6.8v-2.2L9 9.7z" fill="currentColor" />
               </svg>
             {/if}
-            {shell.tabDisplay(repo)}
+            <span class="tab-name">{shell.tabDisplay(repo)}</span>
           </button>
           <button class="text-button row-action tab-close" type="button" onclick={() => shell.closeTab(repo)} aria-label={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`} title={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`}>×</button>
         </div>

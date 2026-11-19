@@ -223,7 +223,7 @@
           else if (shell.dialog === "tag") {
             const path = shell.repoPath(), push = shell.settings.pushTagOnCreate, forceWithLease = shell.settings.forceWithLease;
             const outcome = await shell.mutate({ action: "tag", name: shell.draft, rev: shell.draftExtra || "HEAD", message: shell.draftUser });
-            if (outcome === "completed" && push) await shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease }, "user", false, path);
+            if (outcome === "completed" && push) await shell.mutate({ action: "push", remote: null, setUpstream: true, tags: true, forceWithLease, killerPush: shell.settings.killerPush, rebase: shell.settings.pullRebase }, "user", false, path);
           }
           else if (shell.dialog === "remote") {
             const name = shell.remoteEdit ? shell.draft.trim() : shell.remoteName();
@@ -260,8 +260,8 @@
           else if (shell.dialog === "push") {
             const target = shell.pushTarget(shell.pushBranch, shell.pushTo);
             const request = target && shell.pushBranch
-              ? { action: "pushRef", remote: target.remote, branch: shell.pushBranch, remoteBranch: target.branch, setUpstream: target.setUpstream, tags: shell.syncTags, forceWithLease: shell.syncForce, force: false }
-              : { action: "push", remote: shell.draft || null, setUpstream: !shell.refs?.branches.some((branch) => branch.current && branch.upstream), tags: shell.syncTags, forceWithLease: shell.syncForce };
+              ? { action: "pushRef", remote: target.remote, branch: shell.pushBranch, remoteBranch: target.branch, setUpstream: target.setUpstream, tags: shell.syncTags, forceWithLease: shell.syncForce, force: false, killerPush: shell.settings.killerPush, rebase: shell.settings.pullRebase }
+              : { action: "push", remote: shell.draft || null, setUpstream: !shell.refs?.branches.some((branch) => branch.current && branch.upstream), tags: shell.syncTags, forceWithLease: shell.syncForce, killerPush: shell.settings.killerPush, rebase: shell.settings.pullRebase };
             shell.settings = { ...shell.settings, pushAllTags: shell.syncTags };
             void shell.savePrefs(false);
             shell.dialog = null;
@@ -323,7 +323,7 @@
               if (shell.dialog === "ssh" && shell.dialogLoadGen === gen) shell.actionError = shell.message(error);
             }
           }
-          else if (shell.dialog === "pushAs") void shell.mutate({ action: "pushRef", remote: shell.draftExtra || "origin", branch: shell.draft, remoteBranch: shell.draftUser, forceWithLease: false, force: false });
+          else if (shell.dialog === "pushAs") void shell.mutate({ action: "pushRef", remote: shell.draftExtra || "origin", branch: shell.draft, remoteBranch: shell.draftUser, forceWithLease: false, force: false, killerPush: shell.settings.killerPush, rebase: shell.settings.pullRebase });
           else if (shell.dialog === "askInput" && shell.pendingCommand) {
             const answers = Object.keys(shell.fieldValues).length > 0 ? { ...shell.fieldValues } : { input: shell.draft };
             const text = shell.fillCommand(shell.pendingCommand.command, answers);

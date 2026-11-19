@@ -165,6 +165,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "file-history-image", group: "主界面", title: "文件历史 · 图片", repo: "history-images", ready: ".revision-images", href: "/?scene=file-history-image&view=history&file=art/mark.png" }),
   scene({ id: "commit-image", group: "主界面", title: "提交详情 · 图片变更", repo: "history-images", ready: ".revision-images" }),
   scene({ id: "history-branches", group: "主界面", title: "自定义分支筛选", repo: "full", ready: ".filter-bar" }),
+  scene({ id: "history-gone-upstream", group: "主界面", title: "历史 · 上游已删除", repo: "gone-upstream", ready: ".filter-bar" }),
   scene({
     id: "blob",
     group: "主界面",
@@ -212,6 +213,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "blame", group: "仓库状态", title: "追溯", repo: "full", ready: "[data-layer=\"blame\"]" }),
   scene({ id: "reflog", group: "仓库状态", title: "引用日志", repo: "full", ready: "[data-layer=\"reflog\"]" }),
   scene({ id: "submodule", group: "仓库状态", title: "子模块", repo: "full", ready: "text=vendor" }),
+  scene({ id: "submodule-diff", group: "仓库状态", title: "子模块差异", repo: "submodule-diff", ready: ".submodule-diff" }),
   scene({ id: "worktree", group: "仓库状态", title: "工作区列表", repo: "full", ready: "text=extra" }),
   scene({ id: "clone-progress", group: "仓库状态", title: "克隆进度", repo: "even", ready: "[data-layer=\"clone\"]" }),
   scene({ id: "clone-done", group: "仓库状态", title: "克隆完成", repo: "even", ready: ".command-log [data-layer=\"clone-done\"]" }),

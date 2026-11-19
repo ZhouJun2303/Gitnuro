@@ -762,6 +762,31 @@ for (const theme of ["apple", "light", "dark"]) {
     await expect(menu.getByRole("menuitem", { name: "Initialize", exact: true })).toBeEnabled();
     await expect(menu.getByRole("menuitem", { name: "Sync", exact: true })).toBeEnabled();
   });
+
+  test(`submodule diff stages the gitlink as one path (${theme})`, async ({ page }) => {
+    await lab("lab_restore", { name: "submodule-diff" });
+    await pinLabSettings(page, { theme });
+    await openLabScene(page, "submodule-diff", ".submodule-diff", { locale: "en" });
+    await expect(page.locator("[data-submodule-commit]").first()).toBeVisible();
+    await expect(page.locator("[data-submodule-commit]").first()).toContainText("AweGit Lab");
+    await expect(page.locator("[data-submodule-commit-detail]")).toBeVisible();
+    await expect(page.locator("[data-submodule-uncommitted]")).toHaveText("1 uncommitted file");
+    await expect(page.locator("[data-submodule-old] code")).toHaveText(/^[0-9a-f]{40}$/);
+    await expect(page.locator("[data-submodule-new] code")).toHaveText(/^[0-9a-f]{40}$/);
+    await expect(page.locator("[data-submodule-open]")).toBeEnabled();
+    await page.locator("[data-submodule-stage]").click();
+    await expect(page.locator('.staged-pane .file-select[title="vendor"]')).toHaveCount(1);
+    await expect(page.locator('.unstaged-pane .file-select[title="vendor"]')).toHaveCount(0);
+  });
+
+  test(`submodule diff opens the checked out repository (${theme})`, async ({ page }) => {
+    await lab("lab_restore", { name: "submodule-diff" });
+    await pinLabSettings(page, { theme });
+    await openLabScene(page, "submodule-diff", ".submodule-diff", { locale: "en" });
+    await expect(page.locator("[data-submodule-commit]").first()).toBeVisible();
+    await page.locator("[data-submodule-open]").click();
+    await expect(page.locator('.chrome-tabs .tab.active .file-select[title="vendor"]')).toBeVisible();
+  });
 }
 
 test("commit patch renders each hunk header once", async ({ page }) => {

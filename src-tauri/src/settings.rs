@@ -110,6 +110,10 @@ pub struct Settings {
     pub sign_off_format: String,
     #[serde(default = "default_true")]
     pub force_with_lease: bool,
+    /// A rejected push pulls the remote branch and retries once. Conflicts abort
+    /// the pull and keep the local branch and work tree unchanged.
+    #[serde(default)]
+    pub killer_push: bool,
     #[serde(default = "default_true")]
     pub ai_enabled: bool,
     /// Language of AI commit messages: `zh` or `en`. Chinese is the default.
@@ -591,6 +595,7 @@ impl Default for Settings {
             sign_off: false,
             sign_off_format: sign_off_format(),
             force_with_lease: true,
+            killer_push: false,
             ai_enabled: true,
             ai_language: ai_language_default(),
             ai_max_chars: ai_max(),

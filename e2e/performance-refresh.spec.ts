@@ -29,6 +29,90 @@ test("automatic fetch waits for idle and a foreground sync cancels the pending t
   expect(result).toEqual({ immediate: 0, cancelled: 0, switched: 0, idle: 1 });
 });
 
+test("automatic fetch waits for refs, coalesces triggers, and uses the tracking remote", async ({ page }) => {
+  await page.goto("/?scene=clean");
+  await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();
+  const result = await page.evaluate(async () => {
+    const modulePath = "/src/lib/shell/state.svelte.ts";
+    const { ShellState } = await import(/* @vite-ignore */ modulePath);
+    const shell: any = {
+      automaticFetchTimer: null, automaticFetchStates: new Map(), openGen: 1,
+      settings: { fetchAutomatically: true, fetchAllRemotes: false, fetchPrune: true, fetchTags: false },
+      snapshot: { path: "D:/perf/one" }, mode: "live", refs: null,
+      busy: true, refreshing: false, userWrites: 0, dialog: null, backgroundFetch: new Set(),
+      repoPath: () => "D:/perf/one", viewing: (path: string) => path === "D:/perf/one",
+      replayWatch: () => {},
+      mutate: async (request: Record<string, unknown>) => { requests.push(request); return "completed"; },
+    };
+    const requests: Record<string, unknown>[] = [];
+    for (const method of ["automaticFetchState", "automaticFetchRemote", "automaticFetchBackoff", "requestAutomaticFetch", "scheduleAutomaticFetch", "cancelAutomaticFetch", "doFetch", "noteAutomaticFetchAttempt", "noteAutomaticFetchResult", "jobKey"] as const) {
+      shell[method] = ShellState.prototype[method].bind(shell);
+    }
+    shell.scheduleAutomaticFetch = () => ShellState.prototype.scheduleAutomaticFetch.call(shell, 5);
+    shell.requestAutomaticFetch("ready");
+    const pendingWithoutRefs = shell.automaticFetchStates.get("d:/perf/one")?.pending === true;
+    shell.refs = {
+      branches: [{ name: "main", current: true, upstream: "origin/main", ahead: 0, behind: 0 }],
+      remotes: [{ name: "origin" }, { name: "mirror" }], tags: [], stashes: [], submodules: [], worktrees: [],
+    };
+    shell.requestAutomaticFetch("ready");
+    const pendingWhileBusy = shell.automaticFetchStates.get("d:/perf/one")?.pending === true;
+    shell.busy = false;
+    shell.requestAutomaticFetch("idle");
+    shell.requestAutomaticFetch("focus");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const completedState = { ...shell.automaticFetchStates.get("d:/perf/one") };
+    const retryDelays: number[] = [];
+    shell.scheduleAutomaticFetch = (delay: number) => {
+      retryDelays.push(delay);
+      shell.automaticFetchTimer = 1;
+    };
+    shell.noteAutomaticFetchAttempt("d:/perf/one");
+    shell.noteAutomaticFetchResult("d:/perf/one", "failed");
+    return { pendingWithoutRefs, pendingWhileBusy, requests, completedState, retryDelays,
+      failedState: shell.automaticFetchStates.get("d:/perf/one") };
+  });
+  expect(result.pendingWithoutRefs).toBe(true);
+  expect(result.pendingWhileBusy).toBe(true);
+  expect(result.requests).toEqual([{ action: "fetch", remote: "origin", prune: true, tags: false }]);
+  expect(result.completedState.failures).toBe(0);
+  expect(result.retryDelays).toEqual([60_000]);
+  expect(result.failedState.failures).toBe(1);
+  expect(result.failedState.pending).toBe(true);
+});
+
+test("background fetch defers hidden history and refreshes it when the history view is active", async ({ page }) => {
+  await page.goto("/?scene=clean");
+  await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();
+  const result = await page.evaluate(async () => {
+    const modulePath = "/src/lib/shell/state.svelte.ts";
+    const { ShellState } = await import(/* @vite-ignore */ modulePath);
+    const calls: unknown[] = [];
+    const shell: any = {
+      auxiliaryTimer: null, auxiliaryAreas: new Set(), auxiliaryDeferHistory: false,
+      historyRefreshPending: false, section: "changes", standalone: "", allBranches: false, graphBranches: [],
+      openGen: 1, mode: "live", busy: false, refreshing: false, backgroundFetch: new Set(),
+      repoPath: () => "D:/perf/one", viewing: () => true, jobKey: (path: string) => path.toLowerCase(),
+      loadContext: async (_operation: string | undefined, parts: unknown) => { calls.push(parts); },
+      message: String, actionError: null,
+    };
+    shell.scheduleAuxiliary = ShellState.prototype.scheduleAuxiliary.bind(shell);
+    shell.refreshPendingHistory = ShellState.prototype.refreshPendingHistory.bind(shell);
+    shell.loadContext = async (_operation: string | undefined, parts: unknown) => { calls.push(parts); };
+    shell.scheduleAuxiliary(["refs"], "automatic", true);
+    await new Promise((resolve) => setTimeout(resolve, 280));
+    const hidden = { calls: [...calls], pending: shell.historyRefreshPending };
+    shell.section = "history";
+    shell.refreshPendingHistory();
+    await Promise.resolve();
+    return { hidden, calls, pending: shell.historyRefreshPending };
+  });
+  expect(result.hidden.calls).toEqual([{ history: false, flow: false, deferHistory: true }]);
+  expect(result.hidden.pending).toBe(true);
+  expect(result.calls).toHaveLength(2);
+  expect(result.calls[1]).toEqual({ history: true, flow: false });
+});
+
 test("covered write events reuse snapshots while external and unversioned changes refresh", async ({ page }) => {
   await page.goto("/?scene=clean");
   await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();

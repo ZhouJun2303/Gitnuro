@@ -13,6 +13,13 @@ pub struct RefreshState {
     metadata: Vec<(String, Option<Vec<u8>>)>,
 }
 
+impl RefreshState {
+    /// HEAD moved, so the work tree, index, and history changed too.
+    pub fn head(&self) -> &str {
+        &self.head
+    }
+}
+
 pub fn refresh_state(path: &Path) -> Option<RefreshState> {
     let repo = crate::open_repo(path).ok()?;
     let head = repo.head().ok()?;

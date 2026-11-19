@@ -149,6 +149,10 @@ export type Messages = {
     noReflog: string;
     noCommits: string;
     findCommits: string;
+    matchCount: string;
+    previousMatch: string;
+    nextMatch: string;
+    commitMissing: string;
     fileHistory: string;
     repositoryFiles: string;
     loadMore: string;
@@ -246,6 +250,19 @@ export type Messages = {
     toolPathEmpty: string;
     toolPathMissing: string;
     externalDiff: string;
+    submoduleChange: string;
+    submoduleChangedTitle: string;
+    submoduleChangeHint: string;
+    submoduleNotReady: string;
+    submoduleOld: string;
+    submoduleNew: string;
+    submoduleUncommittedOne: string;
+    submoduleUncommittedMany: string;
+    submoduleHistory: string;
+    submoduleHistoryLoading: string;
+    submoduleHistoryEmpty: string;
+    submoduleDetailsUnavailable: string;
+    openSubmodule: string;
     blameOf: string;
     view: string;
     window: string;
@@ -266,6 +283,8 @@ export type Messages = {
     collapseFirstLevel: string;
     commitSubject: string;
     pushTags: string;
+    /** Push button tooltip while killer push is enabled. */
+    killerPushTooltip: string;
     treeView: string;
     viewAsList: string;
     viewAsTree: string;
@@ -876,6 +895,8 @@ export type Messages = {
     pruneOnFetch: string;
     pullWithRebase: string;
     forceWithLease: string;
+    killerPush: string;
+    killerPushHint: string;
     checkoutAfter: string;
     includeUntracked: string;
     autostashIncludeUntracked: string;

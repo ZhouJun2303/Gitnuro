@@ -167,6 +167,7 @@ fn main() {
             "open_editor",
             "open_window",
             "reveal_commit",
+            "request_history_action",
             "save_revision",
             "open_file",
             "reveal_path",

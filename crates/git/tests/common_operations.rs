@@ -204,6 +204,8 @@ fn push_ref_disambiguates_branch_and_tag_names_on_both_sides() {
             tags: false,
             force: false,
             force_with_lease: false,
+            killer_push: false,
+            rebase: false,
         },
     )
     .unwrap();
