@@ -290,6 +290,14 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.loadContext();
     return;
   }
+  if (id === "history-gone-upstream") {
+    shell.section = "history";
+    shell.collapsedSide = [];
+    shell.graphBranches = ["Dev/EnterFast_2026_10_27"];
+    shell.allBranches = false;
+    await shell.loadContext();
+    return;
+  }
   if (id === "blob") {
     shell.blobFile = "README.md";
     shell.blobRev = "HEAD";

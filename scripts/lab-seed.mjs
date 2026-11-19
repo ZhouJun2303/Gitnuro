@@ -490,6 +490,23 @@ function seedCheckoutRepo(name = "checkout-dirty") {
   write(path, ".fakeignore", "local-only\n");
 }
 
+function seedGoneUpstreamRepo() {
+  const path = join(repos, "gone-upstream");
+  const bare = join(lab, "gone-upstream.git");
+  wipe(path); wipe(bare);
+  initBare(bare);
+  initWork(path);
+  commit(path, "README.md", "base\n", "base");
+  git(path, ["remote", "add", "origin", fileUrl(bare)]);
+  git(path, ["push", "-u", "origin", "main"]);
+  git(path, ["checkout", "-b", "Dev/EnterFast_2026_10_27"]);
+  commit(path, "README.md", "branch\n", "local work on a deleted upstream");
+  git(path, ["push", "-u", "origin", "Dev/EnterFast_2026_10_27"]);
+  // Deleting the remote branch leaves branch.<name>.merge behind: %(upstream:short)
+  // still names origin/Dev/EnterFast_2026_10_27 while no such ref can be resolved.
+  git(path, ["push", "origin", "--delete", "Dev/EnterFast_2026_10_27"]);
+}
+
 function seedRevertRepo() {
   const path = join(repos, "revert");
   wipe(path);
@@ -621,6 +638,7 @@ const restore = {
   "unstage-initial": seedUnstageInitialRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
   "submodule-diff": seedSubmoduleDiffRepo,
+  "gone-upstream": seedGoneUpstreamRepo,
   "pull-deleted": seedPullDeletedRepo,
   "pull-noop": seedPullNoopRepo,
   "pull-disjoint": () => seedPullNoopRepo("pull-disjoint"),
@@ -843,6 +861,7 @@ seedTagsRepo();
 seedHistoryImagesRepo();
 seedStageManyRepo();
 seedStageManyRepo("stage-dense", true);
+seedGoneUpstreamRepo();
 
 const detached = join(repos, "detached");
 initWork(detached);

@@ -69,11 +69,17 @@ export function writeErrorLog(items: StoredError[]) {
     localStorage.setItem(ERROR_KEY, JSON.stringify(items.slice(0, 200)));
   }
 
+/** A configured upstream survives on a local branch after the remote branch is pruned. */
+function upstreamExists(shell: ShellState, upstream: string) {
+    return (shell.refs?.branches ?? []).some((branch) => branch.name === upstream)
+      || (shell.refs?.remotes ?? []).some((remote) => remote.branches.some((branch) => `${remote.name}/${branch}` === upstream));
+  }
+
 export function currentFilterRefs(shell: ShellState) {
     const current = shell.refs?.branches.find((branch) => branch.current);
     if (!current) return [];
     const names = [current.name];
-    if (current.upstream && !names.includes(current.upstream)) names.push(current.upstream);
+    if (current.upstream && !names.includes(current.upstream) && upstreamExists(shell, current.upstream)) names.push(current.upstream);
     return names;
   }
 
@@ -399,10 +405,14 @@ export function exactRefs(shell: ShellState): string[] {
     if (shell.graphBranches?.length) {
       const names = new Set(shell.graphBranches);
       const locals = new Set<string>();
-      const remotes = new Set((shell.refs?.remotes ?? []).flatMap((remote) => remote.branches.map((branch) => `${remote.name}/${branch}`)));
+      const remotes = new Set<string>();
+      for (const branch of shell.refs?.branches ?? []) locals.add(branch.name);
+      for (const remote of shell.refs?.remotes ?? []) {
+        for (const branch of remote.branches) remotes.add(`${remote.name}/${branch}`);
+      }
       for (const branch of shell.refs?.branches ?? []) {
-        locals.add(branch.name);
-        if (names.has(branch.name) && branch.upstream && !shell.refHidden(branch.upstream)) names.add(branch.upstream);
+        const upstream = branch.upstream;
+        if (names.has(branch.name) && upstream && (locals.has(upstream) || remotes.has(upstream)) && !shell.refHidden(upstream)) names.add(upstream);
       }
       return [...names].map((name) => locals.has(name) ? `refs/heads/${name}` : remotes.has(name) ? `refs/remotes/${name}` : name);
     }
@@ -410,7 +420,7 @@ export function exactRefs(shell: ShellState): string[] {
     if (shell.graphSolo) {
       const names = [shell.graphSolo];
       const local = shell.refs?.branches.find((branch) => branch.name === shell.graphSolo);
-      if (local?.upstream && !names.includes(local.upstream)) names.push(local.upstream);
+      if (local?.upstream && !names.includes(local.upstream) && upstreamExists(shell, local.upstream)) names.push(local.upstream);
       return names.filter((name, index) => visible(name, index === 0));
     }
     return shell.currentFilterRefs().filter((name, index) => visible(name, index === 0));

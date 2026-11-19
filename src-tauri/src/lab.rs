@@ -206,6 +206,7 @@ fn layout() -> Result<Value, String> {
         "bisect": text(repos.join("bisect")),
         "ahead": text(repos.join("ahead")),
         "behind": text(repos.join("behind")),
+        "gone-upstream": text(repos.join("gone-upstream")),
         "even": text(repos.join("even")),
         "unity": text(repos.join("unity")),
         "duplicate": text(repos.join("copies").join("full")),
