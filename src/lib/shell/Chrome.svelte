@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getShell } from "./context";
-  import { fillWorkspaceTabs, terminalCliNames, type TerminalCli } from "../status";
+  import { fillWorkspaceTabs, workspaceTabFontSize, terminalCliNames, type TerminalCli } from "../status";
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
@@ -72,15 +72,18 @@
         if (!painted) return;
         node.style.removeProperty("--tab-width");
         node.style.removeProperty("--tab-extra");
+        node.style.removeProperty("--tab-font-size");
         painted = "";
         return;
       }
       const { width, extra } = fillWorkspaceTabs(node.clientWidth, current);
-      const next = `${width}:${extra}`;
+      const fontSize = workspaceTabFontSize(width);
+      const next = `${width}:${extra}:${fontSize}`;
       if (next === painted) return;
       painted = next;
       node.style.setProperty("--tab-width", `${width}px`);
       node.style.setProperty("--tab-extra", `${extra}px`);
+      node.style.setProperty("--tab-font-size", `${fontSize}px`);
     };
 
     const mark = () => {
@@ -108,6 +111,49 @@
         observer.disconnect();
       },
     };
+  }
+  /** Drag a project tab onto another tab's left or right half to move it there. */
+  let dragTab = $state("");
+  let dropTab = $state<{ path: string; after: boolean } | null>(null);
+
+  function startTabDrag(event: DragEvent, path: string) {
+    dragTab = path;
+    dropTab = null;
+    if (!event.dataTransfer) return;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", path);
+  }
+
+  function tabDragOver(event: DragEvent) {
+    if (!dragTab) return;
+    const strip = event.currentTarget as HTMLElement;
+    const bounds = strip.getBoundingClientRect();
+    if (event.clientX < bounds.left + 28) strip.scrollLeft -= 14;
+    else if (event.clientX > bounds.right - 28) strip.scrollLeft += 14;
+    const node = (event.target as Element | null)?.closest<HTMLElement>(".tab");
+    const path = node?.dataset.repo;
+    if (!node || !path || path === dragTab) {
+      dropTab = null;
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const rect = node.getBoundingClientRect();
+    dropTab = { path, after: event.clientX > rect.left + rect.width / 2 };
+  }
+
+  function dropTabAt(event: DragEvent) {
+    event.preventDefault();
+    const target = dropTab;
+    const moving = dragTab;
+    dragTab = "";
+    dropTab = null;
+    if (target && moving && target.path !== moving) shell.moveTab(moving, target.path, target.after);
+  }
+
+  function endTabDrag() {
+    dragTab = "";
+    dropTab = null;
   }
 
 </script>
@@ -226,10 +272,10 @@
       </div>
     </div>
     <div class="chrome-tabs">
-      <div class="chrome-side tabs" use:fillTabs={shell.repos.length}>
+      <div class="chrome-side tabs" role="group" aria-label={shell.tr("chrome.repositories")} use:fillTabs={shell.repos.length} ondragover={tabDragOver} ondrop={dropTabAt}>
       {#each shell.repos as repo (repo)}
         {@const job = shell.jobs[shell.jobKey(repo)] ?? shell.backgroundJobs[shell.jobKey(repo)]}
-        <div class="tab" role="group" class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} oncontextmenu={(event) => shell.openMenu(event, [
+        <div class="tab" role="group" draggable="true" data-repo={repo} class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} class:dragging={dragTab === repo} class:drop-before={dropTab?.path === repo && !dropTab.after} class:drop-after={dropTab?.path === repo && dropTab.after} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} ondragstart={(event) => startTabDrag(event, repo)} ondragend={endTabDrag} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("repoInfo.title"), run: () => { shell.repoInfoPath = repo; shell.dialog = "repoInfo"; } },
           terminalMenu(repo),
           { label: shell.tr("chrome.explorer"), run: () => void shell.openLocal(repo) },
@@ -247,7 +293,7 @@
                 <path d="M9 3.5h6v6.2l2.2 2.1v2.2h-4.1L12 20.5l-1.1-6.5H6.8v-2.2L9 9.7z" fill="currentColor" />
               </svg>
             {/if}
-            {shell.tabDisplay(repo)}
+            <span class="tab-name">{shell.tabDisplay(repo)}</span>
           </button>
           <button class="text-button row-action tab-close" type="button" onclick={() => shell.closeTab(repo)} aria-label={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`} title={`${shell.tr("chrome.close")} ${shell.tabDisplay(repo)}`}>×</button>
         </div>

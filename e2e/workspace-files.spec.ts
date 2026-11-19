@@ -58,6 +58,55 @@ for (const theme of ["apple", "light", "dark"] as const) {
       await info.attach("workspace-tabs", { path: screenshot, contentType: "image/png" });
     });
 
+    test("project names shrink with the tab and ellipsize at the minimum", async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await openLabScene(page, "workspace-tabs", ".chrome-tabs .tab");
+      const fontSize = () => page.locator(".chrome-tabs .tab-name").first().evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+      await expect.poll(fontSize).toBe(13);
+
+      await page.setViewportSize({ width: 640, height: 900 });
+      await expect.poll(fontSize).toBeLessThan(13);
+      expect(await fontSize()).toBeGreaterThanOrEqual(10);
+      const long = page.locator(".chrome-tabs .tab-name", { hasText: "AweGit-performance-branch" });
+      const metrics = await long.evaluate((node) => ({
+        overflow: getComputedStyle(node).textOverflow,
+        clipped: node.scrollWidth > node.clientWidth,
+      }));
+      expect(metrics.overflow).toBe("ellipsis");
+      expect(metrics.clipped).toBe(true);
+    });
+
+    test("project tabs keep the dragged order in the workspace", async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await openLabScene(page, "workspace-recent", ".chrome-tabs .tab .file-select");
+      const tabs = page.locator(".chrome-tabs .tab:has(.file-select)");
+      await expect(tabs).toHaveCount(5);
+      const names = () => tabs.locator(".tab-name").allTextContents();
+      const before = await names();
+      const paths = await tabs.evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).dataset.repo!));
+      const active = await page.locator(".chrome-tabs .tab.active .tab-name").textContent();
+      const rebuilt = (list: string[]) => [list[list.length - 1], ...list.slice(0, -1)];
+      const expected = rebuilt(before);
+      const expectedPaths = rebuilt(paths);
+      const source = tabs.last();
+      const target = tabs.first();
+      const box = (await target.boundingBox())!;
+      const saved = page.waitForRequest((request) => {
+        if (!request.url().endsWith("/__lab/invoke") || request.method() !== "POST") return false;
+        const body = request.postDataJSON();
+        const recent = body.args?.values?.workspaces?.find((item: { id: string }) => item.id === "awegit-recent");
+        return body.cmd === "save_settings" && recent?.openTabs?.[0] === expectedPaths[0];
+      });
+      await source.dragTo(target, { targetPosition: { x: 4, y: box.height / 2 } });
+      await expect.poll(names).toEqual(expected);
+      await expect(page.locator(".chrome-tabs .tab.active .tab-name")).toHaveText(active!);
+      const request = await saved;
+      const body = request.postDataJSON();
+      const recent = body.args.values.workspaces.find((item: { id: string }) => item.id === "awegit-recent");
+      expect(recent.openTabs).toEqual(expectedPaths);
+      expect(recent.repositories).toEqual(expectedPaths);
+    });
+
     test("many workspace tabs keep readable widths and scroll inside the strip", async ({ page }) => {
       await page.setViewportSize({ width: 640, height: 720 });
       await openLabScene(page, "workspace-tabs-many", ".chrome-tabs .tab");
@@ -69,6 +118,7 @@ for (const theme of ["apple", "light", "dark"] as const) {
       }));
       expect(before.scrollWidth).toBeGreaterThan(before.clientWidth);
       expect(Math.min(...before.widths)).toBeGreaterThanOrEqual(96);
+      expect(await tabs.locator(".file-select").first().evaluate((node) => parseFloat(getComputedStyle(node).fontSize))).toBe(10);
       await tabs.evaluate((strip) => { strip.scrollLeft = strip.scrollWidth; });
       await expect(tabs.locator(".tab").last()).toBeInViewport({ ratio: 1 });
       await expect(page.locator(".tab-add")).toBeInViewport({ ratio: 1 });

@@ -330,6 +330,7 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.repos = id === "workspace-tabs"
       ? [layout.full, layout.even, layout.ahead, layout.behind, layout.unity]
       : [...new Set([layout.full, ...layout.recentList.split(/\r?\n/).filter(Boolean)])];
+    if (id === "workspace-tabs") shell.settings.tabLabels = shell.pairSetting(shell.settings.tabLabels, layout.ahead, "AweGit-performance-branch");
     return;
   }
   if (id === "tab-copy-path" || id === "tab-repo-info") {
