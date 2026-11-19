@@ -278,8 +278,13 @@
     width: var(--tab-width, 220px);
     overflow: hidden;
     user-select: none;
+    cursor: grab;
     transition: background 120ms ease, color 120ms ease;
   }
+
+.tab:active { cursor: grabbing; }
+
+.tab > .file-select { cursor: inherit; }
 
 .tabs .tab:last-child {
     width: calc(var(--tab-width, 220px) + var(--tab-extra, 0px));
@@ -314,13 +319,14 @@
 
 .tab-name {
     display: block;
+    flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-.tab.dragging { opacity: 0.45; }
+.tab.dragging { opacity: 0.45; pointer-events: none; }
 
 .tab.drop-before::before,
   .tab.drop-after::before {

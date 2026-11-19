@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getShell } from "./context";
-  import { fillWorkspaceTabs, workspaceTabFontSize, terminalCliNames, type TerminalCli } from "../status";
+  import { fillWorkspaceTabs, workspaceTabFontMax, workspaceTabFontMin, terminalCliNames, type TerminalCli } from "../status";
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
@@ -8,6 +8,8 @@
 
   const shell = getShell();
   const launchShortcut = $derived.by(() => { shell.settings.shortcuts; return shortcutLabel("launch"); });
+  /** Workspace identity for the tab strip: a switch, rename, open or close must re-fit the labels. */
+  const tabSignature = $derived(shell.repos.map((repo) => `${repo}\t${shell.tabText(repo)}`).join("\n"));
 
   async function openTerminal(path: string, cli?: TerminalCli) {
     try {
@@ -47,12 +49,31 @@
     });
   });
 
-  /** Write tab width once per frame, and only after the count or the strip size is marked dirty. */
-  function fillTabs(node: HTMLElement, count: number) {
-    let current = Math.max(1, count);
+  /** One size for the whole workspace: keep the default while every name fits, then step down to the floor. */
+  let tabCanvas: CanvasRenderingContext2D | null = null;
+
+  function fitTabFontSize(node: HTMLElement) {
+    const labels = node.querySelectorAll<HTMLElement>(".tab-name");
+    if (labels.length === 0) return workspaceTabFontMax;
+    tabCanvas ??= document.createElement("canvas").getContext("2d");
+    if (!tabCanvas) return workspaceTabFontMax;
+    const family = getComputedStyle(labels[0]).fontFamily;
+    const widths = Array.from(labels, (label) => ({ text: label.textContent ?? "", width: label.clientWidth }));
+    for (let size = workspaceTabFontMax; size > workspaceTabFontMin; size -= 0.5) {
+      tabCanvas.font = `600 ${size}px ${family}`;
+      if (widths.every((item) => tabCanvas!.measureText(item.text).width <= item.width)) return size;
+    }
+    return workspaceTabFontMin;
+  }
+
+  /** Write tab width and the workspace-wide font size, only when the strip or its labels change. */
+  function fillTabs(node: HTMLElement, value: { count: number; key: string }) {
+    let current = Math.max(1, value.count);
+    let key = value.key;
     let dirty = false;
     let frame = 0;
     let painted = "";
+    let geometry = "";
     let misses = 0;
 
     const flush = () => {
@@ -74,15 +95,21 @@
         node.style.removeProperty("--tab-extra");
         node.style.removeProperty("--tab-font-size");
         painted = "";
+        geometry = "";
         return;
       }
       const { width, extra } = fillWorkspaceTabs(node.clientWidth, current);
-      const fontSize = workspaceTabFontSize(width);
-      const next = `${width}:${extra}:${fontSize}`;
+      const nextGeometry = `${width}:${extra}`;
+      // Width first: the labels' available width is what the font has to fit.
+      if (nextGeometry !== geometry) {
+        geometry = nextGeometry;
+        node.style.setProperty("--tab-width", `${width}px`);
+        node.style.setProperty("--tab-extra", `${extra}px`);
+      }
+      const fontSize = fitTabFontSize(node);
+      const next = `${geometry}:${fontSize}`;
       if (next === painted) return;
       painted = next;
-      node.style.setProperty("--tab-width", `${width}px`);
-      node.style.setProperty("--tab-extra", `${extra}px`);
       node.style.setProperty("--tab-font-size", `${fontSize}px`);
     };
 
@@ -100,11 +127,12 @@
     observer.observe(node);
     mark();
     return {
-      update(next: number) {
-        const countNext = Math.max(1, next);
-        if (countNext === current) return;
+      update(next: { count: number; key: string }) {
+        const countNext = Math.max(1, next.count);
+        const changed = countNext !== current || next.key !== key;
         current = countNext;
-        mark();
+        key = next.key;
+        if (changed) mark();
       },
       destroy() {
         if (frame) cancelAnimationFrame(frame);
@@ -112,48 +140,93 @@
       },
     };
   }
-  /** Drag a project tab onto another tab's left or right half to move it there. */
+
+  /** Drag a project tab onto another tab's leading or trailing half to move it there. */
   let dragTab = $state("");
   let dropTab = $state<{ path: string; after: boolean } | null>(null);
+  let pendingTab: { path: string; x: number; y: number; node: HTMLElement; strip: HTMLElement; pointerId: number } | null = null;
+  let swallowTabClick = false;
 
-  function startTabDrag(event: DragEvent, path: string) {
-    dragTab = path;
-    dropTab = null;
-    if (!event.dataTransfer) return;
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", path);
+  function beginTabPointer(event: PointerEvent, path: string) {
+    if (event.button !== 0 || event.pointerType === "touch") return;
+    if ((event.target as Element | null)?.closest(".tab-close")) return;
+    const node = event.currentTarget as HTMLElement;
+    const strip = node.closest<HTMLElement>(".tabs");
+    if (!strip) return;
+    pendingTab = { path, x: event.clientX, y: event.clientY, node, strip, pointerId: event.pointerId };
+    window.addEventListener("pointermove", moveTabPointer);
+    window.addEventListener("pointerup", endTabPointer);
+    window.addEventListener("pointercancel", cancelTabPointer);
+    window.addEventListener("blur", cancelTabPointer);
   }
 
-  function tabDragOver(event: DragEvent) {
-    if (!dragTab) return;
-    const strip = event.currentTarget as HTMLElement;
-    const bounds = strip.getBoundingClientRect();
-    if (event.clientX < bounds.left + 28) strip.scrollLeft -= 14;
-    else if (event.clientX > bounds.right - 28) strip.scrollLeft += 14;
-    const node = (event.target as Element | null)?.closest<HTMLElement>(".tab");
+  function moveTabPointer(event: PointerEvent) {
+    const start = pendingTab;
+    if (!start || event.pointerId !== start.pointerId) return;
+    if (!dragTab) {
+      if (Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y) < 6) return;
+      dragTab = start.path;
+      dropTab = null;
+      try { start.strip.setPointerCapture(event.pointerId); } catch { /* pointer already released */ }
+    }
+    event.preventDefault();
+    const vertical = !!start.strip.closest(".vertical-tabs");
+    const bounds = start.strip.getBoundingClientRect();
+    if (vertical) {
+      if (event.clientY < bounds.top + 28) start.strip.scrollTop -= 14;
+      else if (event.clientY > bounds.bottom - 28) start.strip.scrollTop += 14;
+    } else if (event.clientX < bounds.left + 28) start.strip.scrollLeft -= 14;
+    else if (event.clientX > bounds.right - 28) start.strip.scrollLeft += 14;
+    const node = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>(".tab");
     const path = node?.dataset.repo;
     if (!node || !path || path === dragTab) {
       dropTab = null;
       return;
     }
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
     const rect = node.getBoundingClientRect();
-    dropTab = { path, after: event.clientX > rect.left + rect.width / 2 };
+    const after = vertical ? event.clientY > rect.top + rect.height / 2 : event.clientX > rect.left + rect.width / 2;
+    dropTab = { path, after };
   }
 
-  function dropTabAt(event: DragEvent) {
-    event.preventDefault();
+  function endTabPointer(event: PointerEvent) {
+    const start = pendingTab;
+    if (!start || event.pointerId !== start.pointerId) return;
+    detachTabPointer(start);
     const target = dropTab;
     const moving = dragTab;
     dragTab = "";
     dropTab = null;
-    if (target && moving && target.path !== moving) shell.moveTab(moving, target.path, target.after);
+    if (!target || !moving || target.path === moving) return;
+    swallowTabClick = true;
+    setTimeout(() => { swallowTabClick = false; }, 0);
+    shell.moveTab(moving, target.path, target.after);
   }
 
-  function endTabDrag() {
+  function cancelTabPointer() {
+    const start = pendingTab;
+    if (start) detachTabPointer(start);
     dragTab = "";
     dropTab = null;
+  }
+
+  function detachTabPointer(start: NonNullable<typeof pendingTab>) {
+    window.removeEventListener("pointermove", moveTabPointer);
+    window.removeEventListener("pointerup", endTabPointer);
+    window.removeEventListener("pointercancel", cancelTabPointer);
+    window.removeEventListener("blur", cancelTabPointer);
+    pendingTab = null;
+    try { start.strip.releasePointerCapture(start.pointerId); } catch { /* pointer already released */ }
+  }
+
+  function guardTabClicks(node: HTMLElement) {
+    const stop = (event: MouseEvent) => {
+      if (!swallowTabClick) return;
+      swallowTabClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    node.addEventListener("click", stop, true);
+    return { destroy: () => node.removeEventListener("click", stop, true) };
   }
 
 </script>
@@ -272,10 +345,10 @@
       </div>
     </div>
     <div class="chrome-tabs">
-      <div class="chrome-side tabs" role="group" aria-label={shell.tr("chrome.repositories")} use:fillTabs={shell.repos.length} ondragover={tabDragOver} ondrop={dropTabAt}>
+      <div class="chrome-side tabs" role="group" aria-label={shell.tr("chrome.repositories")} use:fillTabs={{ count: shell.repos.length, key: tabSignature }} use:guardTabClicks>
       {#each shell.repos as repo (repo)}
         {@const job = shell.jobs[shell.jobKey(repo)] ?? shell.backgroundJobs[shell.jobKey(repo)]}
-        <div class="tab" role="group" draggable="true" data-repo={repo} class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} class:dragging={dragTab === repo} class:drop-before={dropTab?.path === repo && !dropTab.after} class:drop-after={dropTab?.path === repo && dropTab.after} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} ondragstart={(event) => startTabDrag(event, repo)} ondragend={endTabDrag} oncontextmenu={(event) => shell.openMenu(event, [
+        <div class="tab" role="group" data-repo={repo} class:active={shell.jobKey(repo) === shell.jobKey(shell.meterPath)} class:working={(job?.depth ?? 0) > 0} class:dirty={shell.settings.tabIndicator && !shell.switching && shell.jobKey(shell.snapshot?.path) === shell.jobKey(repo) && shell.changeCount > 0} class:dragging={dragTab === repo} class:drop-before={dropTab?.path === repo && !dropTab.after} class:drop-after={dropTab?.path === repo && dropTab.after} style:box-shadow={shell.tabColor(repo) ? `inset 0 -2px 0 ${shell.tabColor(repo)}` : ""} onpointerdown={(event) => beginTabPointer(event, repo)} oncontextmenu={(event) => shell.openMenu(event, [
           { label: shell.tr("repoInfo.title"), run: () => { shell.repoInfoPath = repo; shell.dialog = "repoInfo"; } },
           terminalMenu(repo),
           { label: shell.tr("chrome.explorer"), run: () => void shell.openLocal(repo) },

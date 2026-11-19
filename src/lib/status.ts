@@ -367,16 +367,9 @@ export const defaultRecentWorkspaceLimit = 5;
 /** Narrowest project tab. Past this, the strip scrolls instead of shrinking further. */
 export const workspaceTabFloor = 96;
 
-/** Project tab label size: full size at 200px, down to the floor at the narrowest tab. */
+/** Project tab label size. A workspace keeps the default until its names no longer fit, then shrinks to the floor. */
 export const workspaceTabFontMax = 13;
 export const workspaceTabFontMin = 10;
-const workspaceTabFontSpan = 200 - workspaceTabFloor;
-
-/** Computed with the tab width, not per frame: CSS paints from `--tab-font-size`. */
-export function workspaceTabFontSize(width: number) {
-  const size = workspaceTabFontMin + (width - workspaceTabFloor) * ((workspaceTabFontMax - workspaceTabFontMin) / workspaceTabFontSpan);
-  return Math.round(Math.min(workspaceTabFontMax, Math.max(workspaceTabFontMin, size)) * 2) / 2;
-}
 
 /** Move `path` next to `target`; null when either is not in the list. */
 export function moveWorkspacePath(list: string[], path: string, target: string, after: boolean) {
