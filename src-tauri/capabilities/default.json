@@ -20,6 +20,8 @@
     },
     "allow-workspace-status",
     "allow-workspace-status-paths",
+    "allow-status-probe",
+    "allow-load-status-cache",
     "allow-stage-all",
     "allow-unstage-all",
     "allow-stage-path",

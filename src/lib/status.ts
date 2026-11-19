@@ -7,6 +7,14 @@ export type StatusFile = {
   previousPath: string | null;
 };
 
+/** HEAD text, branch id, and the index trailer. A match means those files did not change. */
+export type StatusFingerprint = {
+  head: string;
+  refId: string;
+  indexLen: number;
+  indexSum: string;
+};
+
 export type StatusSnapshot = {
   /** A stage response updates only these paths; a later full read reconciles the repository. */
   statusPaths?: string[];
@@ -16,6 +24,8 @@ export type StatusSnapshot = {
   commitIntent?: { head: string | null; index: string };
   staged: StatusFile[];
   unstaged: StatusFile[];
+  /** Present after a full status read. Absent on a path-limited read. */
+  fingerprint?: StatusFingerprint | null;
 };
 
 /** Match Rust's UTF-8 path order, including supplementary Unicode characters. */

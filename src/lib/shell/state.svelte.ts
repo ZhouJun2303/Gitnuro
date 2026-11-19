@@ -55,7 +55,8 @@ import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, to
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
-import { statusPathBefore } from "../status";
+import { statusPathBefore, type StatusFingerprint } from "../status";
+import { mergeWatchNote, planStatusRefresh, type StatusProbe, type WatchNote } from "./status-plan";
 import { enqueueStage, projectStages, stageActions, type PendingStage } from "./staging";
 import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../operation-policy";
 import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
@@ -3268,6 +3269,7 @@ export class ShellState {
         if (file.previousPath) touched.add(file.previousPath.replaceAll("\\", "/"));
       }
       value = { ...partial, revision: this.statusRevision, commitIntent: this.snapshot.commitIntent,
+        fingerprint: this.snapshot.fingerprint,
         staged: mergeStatusFiles(this.snapshot.staged, value.staged, scopes, touched),
         unstaged: mergeStatusFiles(this.snapshot.unstaged, value.unstaged, scopes, touched),
       };
@@ -3282,7 +3284,11 @@ export class ShellState {
       this.watchQueued = null;
       this.watchRevision = 0;
     }
-    if (!partialUpdate) this.statusRevision = revision;
+    if (!partialUpdate) {
+      this.statusRevision = revision;
+      const noted = this.repoWatchNotes.get(this.jobKey(value.path));
+      if (!noted || noted.revision <= revision) this.repoWatchNotes.delete(this.jobKey(value.path));
+    }
     this.stageStatusUnverified = partialUpdate;
     if (revision > 0) this.statusObservedRevision = revision;
     this.statusGen += 1;
@@ -5505,6 +5511,9 @@ export class ShellState {
 
   repositoryViews = new Map<string, Pick<ShellState, "snapshot" | "refs" | "commitsLive" | "progress" | "selectedPath" | "selectedSide" | "selectedCommit" | "commitDetail" | "commitFiles" | "historyFile" | "historyFilter" | "sideTop" | "historyTop" | "fileTop" | "stagedTop" | "combinedTop" | "commitScrollTop" | "commitListTop" | "diffTop" | "historyDiffTop" | "selectedIndex" | "statusRevision" | "statusObservedRevision" | "stageStatusUnverified" | "contextRevision">>();
 
+  /** Watcher events for a repository that is not on screen. Capped with the view cache. */
+  repoWatchNotes = new Map<string, WatchNote>();
+
   rememberRepositoryView() {
     if (!this.snapshot || this.mode !== "live") return;
     const key = this.jobKey(this.snapshot.path);
@@ -5524,6 +5533,30 @@ export class ShellState {
       rows -= view.commitsLive.length + (view.snapshot?.staged.length ?? 0) + (view.snapshot?.unstaged.length ?? 0);
       this.repositoryViews.delete(oldest);
     }
+  }
+
+  noteRepoWatch(path: string, scope: "status" | "full", revision: number, paths: string[] | null | undefined) {
+    const key = this.jobKey(path);
+    if (!key) return;
+    const note = mergeWatchNote(this.repoWatchNotes.get(key) ?? null, scope, revision, paths);
+    this.repoWatchNotes.delete(key);
+    this.repoWatchNotes.set(key, note);
+    while (this.repoWatchNotes.size > 8) {
+      const oldest = this.repoWatchNotes.keys().next().value;
+      if (!oldest || oldest === key) break;
+      this.repoWatchNotes.delete(oldest);
+    }
+  }
+
+  /** Paint a cold-start snapshot. Revision stays 0 so it cannot pass for a live watcher. */
+  showStoredStatus(stored: { path: string; branch: string | null; commitIntent?: { head: string | null; index: string }; staged: StatusSnapshot["staged"]; unstaged: StatusSnapshot["unstaged"]; fingerprint: StatusFingerprint; overflow?: boolean }) {
+    if (stored.overflow) return false;
+    this.applySnapshot({
+      path: stored.path, branch: stored.branch, commitIntent: stored.commitIntent,
+      staged: stored.staged, unstaged: stored.unstaged, fingerprint: stored.fingerprint, revision: 0,
+    });
+    this.stageStatusUnverified = true;
+    return this.mode === "live";
   }
 
   async openRepo(path: string) {
@@ -5567,8 +5600,59 @@ export class ShellState {
     let stopAt = path;
     this.actionError = null;
     this.stashRetry = null;
-    if (!running) this.startWork(this.tr("chrome.open"), path);
+    let held = false;
     try {
+      const painted = () => this.mode === "live" && !!this.snapshot && (this.viewing(path) || this.viewing(this.snapshot.path));
+      if (!stayingOnRepo && !painted()) {
+        try {
+          const stored = await invoke<Parameters<ShellState["showStoredStatus"]>[0] | null>("load_status_cache", { path });
+          if (gen !== this.openGen) return;
+          if (stored) this.showStoredStatus(stored);
+        } catch {
+          /* a missing cache still opens from a live read */
+        }
+      }
+      if (!stayingOnRepo && painted()) {
+        // The list on screen is usable. A fingerprint stat must not keep the window in the open latch.
+        this.focusPath = null;
+        let headSame = false;
+        let plan: ReturnType<typeof planStatusRefresh> = { kind: "full" };
+        try {
+          const probe = await invoke<StatusProbe>("status_probe", { path });
+          if (gen !== this.openGen) return;
+          const previous = this.snapshot?.fingerprint;
+          headSame = !!previous && previous.head === probe.fingerprint.head && previous.refId === probe.fingerprint.refId;
+          plan = planStatusRefresh({
+            fingerprint: previous,
+            seen: this.snapshot?.revision ?? 0,
+            unverified: this.stageStatusUnverified,
+            probe,
+            note: this.repoWatchNotes.get(this.jobKey(this.snapshot?.path ?? path)) ?? null,
+          });
+        } catch {
+          plan = { kind: "full" };
+        }
+        if (gen !== this.openGen) return;
+        this.armOpenExtras(path, gen);
+        if (plan.kind === "trust") {
+          this.stageStatusUnverified = false;
+          void this.loadDiff();
+          return;
+        }
+        if (plan.kind === "full") this.stageStatusUnverified = true;
+        if (plan.kind === "paths") {
+          const noted = this.repoWatchNotes.get(this.jobKey(this.snapshot?.path ?? path));
+          void this.validatePaths(path, gen, plan.paths, noted?.revision ?? 0);
+          return;
+        }
+        const keepHistory = headSame && this.commitsLive.length > 0 && !!this.refs;
+        void this.refresh(keepHistory ? "status" : "full", true, null);
+        return;
+      }
+      if (!running) {
+        held = true;
+        this.startWork(this.tr("chrome.open"), path);
+      }
       const value = await invoke<StatusSnapshot>("workspace_status", { path });
       if (gen !== this.openGen) return;
       // Reopening the repository already on screen keeps the message being written.
@@ -5612,29 +5696,57 @@ export class ShellState {
       if (this.standalone !== "history") this.historyFilter = "";
       void this.loadContext().catch((error) => { if (gen === this.openGen) this.actionError = this.message(error); });
       void this.loadDiff();
-      // Arming the watcher walks every work-tree directory; on a huge repository that
-      // must not hold up the first paint. Changes before it arms are rare and recover
-      // on the next refresh.
-      void invoke("watch_repository", { path: this.repoPath() }).catch(() => {});
-      void invoke<{ available: boolean }>("lfs_locks", { path: this.repoPath(), list: false })
-        .then((locks) => {
-          if (gen === this.openGen) this.lfsAvailable = locks.available;
-        })
-        .catch(() => {
-          if (gen === this.openGen) this.lfsAvailable = false;
-        });
-      void this.rememberRepo(path);
-      this.facts = null;
-      this.factsPath = "";
-      void this.fillTemplate();
+      this.armOpenExtras(path, gen);
     } catch (error) {
       if (gen !== this.openGen) return;
       const text = this.message(error);
       this.actionError = text;
       if (this.missingRepoPath(text)) await this.dropMissingRepo(path, text);
     } finally {
-      if (!running) this.stopWork(stopAt);
+      if (held) this.stopWork(stopAt);
       if (gen === this.openGen) this.focusPath = null;
+    }
+  }
+
+  /** Watcher, locks, and the commit template. None of these may sit in front of the first paint. */
+  armOpenExtras(path: string, gen: number) {
+    // Arming the watcher walks tracked directories. On a huge repository that
+    // must not hold up the first paint. Changes before it arms are rare and recover
+    // on the next refresh.
+    void invoke("watch_repository", { path: this.repoPath() }).catch(() => {});
+    void invoke<{ available: boolean }>("lfs_locks", { path: this.repoPath(), list: false })
+      .then((locks) => {
+        if (gen === this.openGen) this.lfsAvailable = locks.available;
+      })
+      .catch(() => {
+        if (gen === this.openGen) this.lfsAvailable = false;
+      });
+    void this.rememberRepo(path);
+    this.facts = null;
+    this.factsPath = "";
+    void this.fillTemplate();
+  }
+
+  /** Refresh only the paths the watcher named, then keep that list. A full walk would defeat the switch. */
+  async validatePaths(path: string, gen: number, files: string[], notedRevision: number) {
+    try {
+      const value = await invoke<StatusSnapshot>("workspace_status_paths", { path, files });
+      if (gen !== this.openGen || !this.viewing(value.path)) return;
+      this.applySnapshot(value);
+      if (this.stageRefreshTimer != null) {
+        clearTimeout(this.stageRefreshTimer);
+        this.stageRefreshTimer = null;
+      }
+      this.stageStatusUnverified = false;
+      const key = this.jobKey(value.path);
+      const noted = this.repoWatchNotes.get(key);
+      if (!noted || noted.revision <= notedRevision) this.repoWatchNotes.delete(key);
+      void this.loadDiff();
+    } catch (error) {
+      if (gen !== this.openGen) return;
+      const text = this.message(error);
+      this.actionError = text;
+      if (this.missingRepoPath(text)) await this.dropMissingRepo(path, text);
     }
   }
 
@@ -7785,9 +7897,12 @@ export class ShellState {
     try {
     unlisten = await listen<{ refs?: boolean; path?: string; revision?: number; paths?: string[] | null } | null>("repo-changed", (event) => {
       const path = event.payload?.path;
-      if (path && !this.viewing(path)) return;
       const scope = event.payload?.refs === false ? "status" : "full";
       const revision = event.payload?.revision ?? 0;
+      if (path && !this.viewing(path)) {
+        this.noteRepoWatch(path, scope, revision, event.payload?.paths);
+        return;
+      }
       if (this.watchCovered(scope, revision)) return;
       if (this.busy || this.refreshing || this.backgroundFetch.has(this.jobKey(this.repoPath()))) {
         // A write ignores refreshes for its whole duration; replay the newest event when it ends.

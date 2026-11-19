@@ -49,6 +49,8 @@ fn main() {
         tauri_build::AppManifest::new().commands(&[
             "workspace_status",
             "workspace_status_paths",
+            "status_probe",
+            "load_status_cache",
             "stage_all",
             "unstage_all",
             "stage_path",

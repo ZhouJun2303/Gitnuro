@@ -6,6 +6,7 @@ mod autostash;
 mod change;
 mod cli;
 mod fakeignore;
+mod fingerprint;
 pub mod flow;
 mod locks;
 mod model;
@@ -33,6 +34,7 @@ pub use cli::{
     set_https_credentials, set_passphrase, set_progress, set_trace, stop_process_tree, use_bundled_git,
     common_repo_key, check_cancelled, cancel_token, check_path, with_cancellation, without_cancellation, with_operation_repo, GitRuntime, HttpsCredential, Session, Trace,
 };
+pub use fingerprint::{status_fingerprint, StatusFingerprint};
 pub use model::{
     blame_file, blame_source, blame_file_range, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log,
     commit_log_sorted, commit_tree, commits_from, compare_file, compare_files, file_history,
@@ -52,10 +54,10 @@ pub use ops::{
 };
 
 use gix::bstr::BStr;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// One changed path, either staged or unstaged.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileChange {
     pub path: String,
@@ -64,7 +66,7 @@ pub struct FileChange {
 }
 
 /// How a path changed, matching what `git status` would show.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChangeKind {
     Added,
@@ -76,7 +78,7 @@ pub enum ChangeKind {
 }
 
 /// The branch and the two change lists for one work tree.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusSnapshot {
     #[serde(default)]
@@ -86,6 +88,9 @@ pub struct StatusSnapshot {
     pub commit_intent: CommitIntent,
     pub staged: Vec<FileChange>,
     pub unstaged: Vec<FileChange>,
+    /// Set after a full status read. Path-limited reads leave it empty so a partial list cannot vouch for the index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<StatusFingerprint>,
 }
 
 /// Ignore cache-only index updates. A commit depends on the staged paths, modes and object IDs.
@@ -236,6 +241,7 @@ fn status_patterns(path: &Path, fakeignore: bool, patterns: Vec<gix::bstr::BStri
         commit_intent,
         staged,
         unstaged,
+        fingerprint: None,
     })
 }
 

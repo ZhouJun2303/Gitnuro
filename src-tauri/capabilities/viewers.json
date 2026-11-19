@@ -16,6 +16,8 @@
     },
     "allow-workspace-status",
     "allow-workspace-status-paths",
+    "allow-status-probe",
+    "allow-load-status-cache",
     "allow-operation-tasks",
     "allow-stage-all",
     "allow-unstage-all",

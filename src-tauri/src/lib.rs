@@ -19,6 +19,7 @@ mod revision_copy;
 mod scans;
 mod secrets;
 mod settings;
+mod status_cache;
 mod settings_merge;
 mod tasks;
 mod tools;
@@ -265,6 +266,13 @@ fn read_status_paths(repo: &Path, paths: Option<&[String]>) -> Result<awegit_git
         None => awegit_git::status_with(repo, use_fakeignore()),
     }.map_err(|error| error.to_string())?;
     status.revision = revision;
+    // A full read can vouch for the index. Path-limited reads must not replace that fingerprint.
+    if paths.is_none() {
+        if let Ok(fingerprint) = awegit_git::status_fingerprint(repo) {
+            status.fingerprint = Some(fingerprint.clone());
+            status_cache::remember(repo, &status, &fingerprint);
+        }
+    }
     Ok(status)
 }
 
@@ -325,6 +333,28 @@ fn write_kind_then_status_paths(path: Option<String>, kind: &str, write: impl Fn
     if let Some(flow) = flow { flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), kind); }
     result.map_err(|error| error.to_string())?;
     Ok((read_status_paths(&repo, paths.as_deref())?, paths))
+}
+
+#[tauri::command]
+fn status_probe(state: tauri::State<'_, RepoWatch>, path: Option<String>) -> Result<status_cache::StatusProbe, String> {
+    let repo = repo_from(path)?;
+    status_cache::probe(&repo, watcher_alive(&state, &repo))
+}
+
+#[tauri::command]
+fn load_status_cache(path: Option<String>) -> Result<Option<status_cache::StoredStatus>, String> {
+    let repo = repo_from(path)?;
+    Ok(status_cache::load(&repo))
+}
+
+fn watcher_alive(state: &RepoWatch, repo: &Path) -> bool {
+    let key = watch_key(repo);
+    state
+        .0
+        .lock()
+        .ok()
+        .and_then(|slots| slots.get(&key).map(|slot| slot.alive.load(Ordering::Acquire)))
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -2880,6 +2910,8 @@ pub fn run() {
     let handler: std::sync::Arc<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = std::sync::Arc::new(tauri::generate_handler![
             workspace_status,
             workspace_status_paths,
+            status_probe,
+            load_status_cache,
             stage_all,
             unstage_all,
             stage_path,
