@@ -2,6 +2,7 @@
   import { tick, untrack } from "svelte";
   import { getShell } from "./context";
   import "./DiffPane.css";
+  import { invoke } from "../perf";
   import { sampleImages } from "../sample";
   import { onVirtualScroll, type SplitRow } from "../view";
   import WrappedRows from "../WrappedRows.svelte";
@@ -10,8 +11,7 @@
   import BinaryDiff from "./BinaryDiff.svelte";
   import ImageComparison from "./ImageComparison.svelte";
   import { formatBytes } from "../format";
-  import type { ConflictParty } from "../status";
-  import type { DiffLine } from "../status";
+  import type { CommitRow, ConflictParty, DiffLine } from "../status";
 
   const shell = getShell();
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
@@ -86,6 +86,68 @@
       if (line.text.startsWith("+Subproject commit ")) newId = line.text.slice("+Subproject commit ".length).trim();
     }
     return { oldId, newId };
+  });
+  let submoduleDetailsKey = $state("");
+  let submoduleDetailsToken = 0;
+  let submoduleHistory = $state<CommitRow[]>([]);
+  let submoduleDetailsLoading = $state(false);
+  let submoduleDetailsError = $state("");
+  let submoduleSelectedCommitId = $state("");
+  const submoduleName = $derived(selectedSubmodule ? shell.folderName(selectedSubmodule.path) : "");
+  const submoduleSelectedCommit = $derived(submoduleHistory.find((commit) => commit.id === submoduleSelectedCommitId) ?? submoduleHistory[0] ?? null);
+  const submoduleUncommittedCount = $derived.by(() => {
+    const path = selectedSubmodule?.path;
+    if (!path) return 0;
+    const parentRows = [...(shell.snapshot?.staged ?? []), ...(shell.snapshot?.unstaged ?? [])];
+    return parentRows.some((file) => file.path === path) ? 1 : 0;
+  });
+
+  $effect(() => {
+    const submodule = selectedSubmodule;
+    const path = submodule?.ready ? shell.fullPath(submodule.path) : "";
+    const oldId = submoduleCommits.oldId;
+    const newId = submoduleCommits.newId;
+    if (!path || !newId) {
+      submoduleDetailsKey = "";
+      submoduleHistory = [];
+      submoduleDetailsLoading = false;
+      submoduleDetailsError = "";
+      submoduleSelectedCommitId = "";
+      return;
+    }
+    const key = `${path}\0${oldId}\0${newId}`;
+    if (key === submoduleDetailsKey) return;
+    submoduleDetailsKey = key;
+    submoduleDetailsToken += 1;
+    const token = submoduleDetailsToken;
+    submoduleHistory = [];
+    submoduleDetailsLoading = true;
+    submoduleDetailsError = "";
+    submoduleSelectedCommitId = "";
+
+    const revs = oldId && oldId !== newId ? [newId, `^${oldId}`] : [newId];
+    void (async () => {
+      let history: CommitRow[] = [];
+      let failed = false;
+      try {
+        history = await invoke<CommitRow[]>("commit_log", { path, limit: 20, all: false, order: "date", revs });
+      } catch {
+        failed = true;
+      }
+      if (history.length === 0 && oldId && oldId !== newId) {
+        try {
+          history = await invoke<CommitRow[]>("commit_log", { path, limit: 20, all: false, order: "date", revs: [newId] });
+          failed = false;
+        } catch {
+          failed = true;
+        }
+      }
+      if (token !== submoduleDetailsToken) return;
+      submoduleHistory = history;
+      submoduleSelectedCommitId = history[0]?.id ?? "";
+      submoduleDetailsError = failed && history.length === 0 ? shell.tr("chrome.submoduleDetailsUnavailable") : "";
+      submoduleDetailsLoading = false;
+    })();
   });
   const hunkList = $derived(shell.mode === "live" && shell.section === "changes" && !selectedSubmodule ? shell.hunkRanges() : []);
   let wrapped = $state<{ scrollTo: (index: number) => Promise<void> }>();
@@ -436,17 +498,64 @@
               <p class="diff-empty" data-stage-pending aria-live="polite">{shell.tr(shell.pendingStage(shell.selectedPath) ? "chrome.unstagePending" : "chrome.stagePending")}</p>
             {:else if submodule}
               <div class="submodule-diff" data-submodule-diff>
-                <div class="submodule-diff-title">
-                  <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M3 3.5h10M3 8h10M3 12.5h6"/><circle cx="12.2" cy="12.5" r="1.3" fill="currentColor"/></svg>
-                  <strong>{shell.tr("chrome.submoduleChange")}</strong>
+                <div class="submodule-content">
+                  <p class="submodule-diff-path" title={submodule.path}>{submodule.path}</p>
+                  <div class="submodule-diff-title">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M3 3.5h10M3 8h10M3 12.5h6"/><circle cx="12.2" cy="12.5" r="1.3" fill="currentColor"/></svg>
+                    <strong>{shell.tr("chrome.submoduleChangedTitle", { name: submoduleName })}</strong>
+                  </div>
+                  {#if submoduleUncommittedCount > 0}
+                    <p class="submodule-uncommitted" data-submodule-uncommitted>
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.9v3.4l2.1 1.3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                      {shell.tr(submoduleUncommittedCount === 1 ? "chrome.submoduleUncommittedOne" : "chrome.submoduleUncommittedMany", { count: String(submoduleUncommittedCount) })}
+                    </p>
+                  {/if}
+                  {#if !submodule.ready}
+                    <p class="submodule-diff-hint">{shell.tr("chrome.submoduleNotReady")}</p>
+                  {:else if submoduleDetailsError}
+                    <p class="submodule-diff-hint">{submoduleDetailsError}</p>
+                  {:else if submoduleDetailsLoading}
+                    <p class="submodule-diff-hint">{shell.tr("chrome.submoduleHistoryLoading")}</p>
+                  {:else if submoduleHistory.length === 0}
+                    <p class="submodule-diff-hint">{shell.tr("chrome.submoduleHistoryEmpty")}</p>
+                  {:else}
+                    <div class="submodule-history" aria-label={shell.tr("chrome.submoduleHistory")}>
+                      {#each submoduleHistory as commit (commit.id)}
+                        <button class="submodule-commit" class:selected={commit.id === submoduleSelectedCommit?.id} data-submodule-commit type="button" aria-pressed={commit.id === submoduleSelectedCommit?.id} onclick={() => (submoduleSelectedCommitId = commit.id)}>
+                          <span class="submodule-commit-avatar" style:background={shell.avatarColor(commit.author)}>{(commit.author || "?").slice(0, 1).toUpperCase()}</span>
+                          <span class="submodule-commit-copy">
+                            <strong class="submodule-commit-subject" title={commit.summary}>{commit.summary}</strong>
+                            <span class="submodule-commit-author" title={commit.author}>{commit.author}</span>
+                          </span>
+                          <span class="submodule-commit-meta">
+                            <code title={commit.id}>{commit.shortId}</code>
+                            <time datetime={commit.at ? new Date(commit.at * 1000).toISOString() : undefined}>{commit.at ? shell.forkWhen(commit.at) : commit.when}</time>
+                          </span>
+                        </button>
+                      {/each}
+                    </div>
+                    {#if submoduleSelectedCommit}
+                      <div class="submodule-commit-detail" data-submodule-commit-detail>
+                        <span class="submodule-commit-marker" aria-hidden="true"></span>
+                        <strong title={submoduleSelectedCommit.summary}>{submoduleSelectedCommit.summary}</strong>
+                        <span class="submodule-commit-detail-meta">
+                          <span>{submoduleSelectedCommit.author}</span>
+                          <button class="submodule-sha" type="button" title={submoduleSelectedCommit.id} onclick={() => shell.copyText(submoduleSelectedCommit.id)}>{submoduleSelectedCommit.shortId}</button>
+                          <time>{submoduleSelectedCommit.at ? shell.forkWhen(submoduleSelectedCommit.at) : submoduleSelectedCommit.when}</time>
+                        </span>
+                      </div>
+                    {/if}
+                  {/if}
+                  <div class="submodule-range">
+                    <div data-submodule-old><span>{shell.tr("chrome.submoduleOld")}</span><code title={submoduleCommits.oldId}>{submoduleCommits.oldId || "—"}</code></div>
+                    <span class="submodule-range-arrow" aria-hidden="true">→</span>
+                    <div data-submodule-new><span>{shell.tr("chrome.submoduleNew")}</span><code title={submoduleCommits.newId}>{submoduleCommits.newId || "—"}</code></div>
+                  </div>
+                  <div class="submodule-footer">
+                    <span class="submodule-footer-hint">{shell.tr(submodule.ready ? "chrome.submoduleChangeHint" : "chrome.submoduleNotReady")}</span>
+                    <button class="pane-chip submodule-open" data-submodule-open type="button" disabled={!submodule.ready} title={shell.tr("chrome.openSubmodule")} onclick={() => void shell.openRepo(shell.fullPath(submodule.path))}>{shell.tr("chrome.openSubmodule")}</button>
+                  </div>
                 </div>
-                <p class="submodule-diff-path" title={submodule.path}>{submodule.path}</p>
-                <dl class="submodule-commits">
-                  <div data-submodule-old><dt>{shell.tr("chrome.submoduleOld")}</dt><dd><code>{submoduleCommits.oldId || "—"}</code></dd></div>
-                  <div data-submodule-new><dt>{shell.tr("chrome.submoduleNew")}</dt><dd><code>{submoduleCommits.newId || "—"}</code></dd></div>
-                </dl>
-                <p class="submodule-diff-hint">{shell.tr(submodule.ready ? "chrome.submoduleChangeHint" : "chrome.submoduleNotReady")}</p>
-                <button class="pane-chip submodule-open" data-submodule-open type="button" disabled={!submodule.ready} title={shell.tr("chrome.openSubmodule")} onclick={() => void shell.openRepo(shell.fullPath(submodule.path))}>{shell.tr("chrome.openSubmodule")}</button>
               </div>
             {:else if shell.diffError}
               <p class="diff-empty">{shell.diffError}</p>

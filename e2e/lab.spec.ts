@@ -767,6 +767,10 @@ for (const theme of ["apple", "light", "dark"]) {
     await lab("lab_restore", { name: "submodule-diff" });
     await pinLabSettings(page, { theme });
     await openLabScene(page, "submodule-diff", ".submodule-diff", { locale: "en" });
+    await expect(page.locator("[data-submodule-commit]").first()).toBeVisible();
+    await expect(page.locator("[data-submodule-commit]").first()).toContainText("AweGit Lab");
+    await expect(page.locator("[data-submodule-commit-detail]")).toBeVisible();
+    await expect(page.locator("[data-submodule-uncommitted]")).toHaveText("1 uncommitted file");
     await expect(page.locator("[data-submodule-old] code")).toHaveText(/^[0-9a-f]{40}$/);
     await expect(page.locator("[data-submodule-new] code")).toHaveText(/^[0-9a-f]{40}$/);
     await expect(page.locator("[data-submodule-open]")).toBeEnabled();
@@ -779,6 +783,7 @@ for (const theme of ["apple", "light", "dark"]) {
     await lab("lab_restore", { name: "submodule-diff" });
     await pinLabSettings(page, { theme });
     await openLabScene(page, "submodule-diff", ".submodule-diff", { locale: "en" });
+    await expect(page.locator("[data-submodule-commit]").first()).toBeVisible();
     await page.locator("[data-submodule-open]").click();
     await expect(page.locator('.chrome-tabs .tab.active .file-select[title="vendor"]')).toBeVisible();
   });

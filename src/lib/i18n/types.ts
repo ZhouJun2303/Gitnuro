@@ -247,10 +247,17 @@ export type Messages = {
     toolPathMissing: string;
     externalDiff: string;
     submoduleChange: string;
+    submoduleChangedTitle: string;
     submoduleChangeHint: string;
     submoduleNotReady: string;
     submoduleOld: string;
     submoduleNew: string;
+    submoduleUncommittedOne: string;
+    submoduleUncommittedMany: string;
+    submoduleHistory: string;
+    submoduleHistoryLoading: string;
+    submoduleHistoryEmpty: string;
+    submoduleDetailsUnavailable: string;
     openSubmodule: string;
     blameOf: string;
     view: string;

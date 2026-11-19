@@ -255,20 +255,25 @@ section.diff > .diff-viewport {
   min-height: 0;
   overflow: auto;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: safe center;
-  gap: 10px;
-  padding: 28px 20px 64px;
-  text-align: center;
+  justify-content: center;
+  padding: 20px 24px 28px;
+  text-align: left;
 }
 
-.submodule-diff > * { flex-shrink: 0; }
+.submodule-content {
+  width: min(780px, 100%);
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
 
 .submodule-diff-title {
+  align-self: center;
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-top: 4px;
+  color: var(--text);
   font-size: 18px;
   font-weight: 650;
 }
@@ -280,8 +285,9 @@ section.diff > .diff-viewport {
 }
 
 .submodule-diff-path {
-  max-width: min(680px, 100%);
-  margin: 0 0 12px;
+  align-self: center;
+  max-width: 100%;
+  margin: 0;
   color: var(--text-secondary);
   font: 12px var(--mono);
   overflow: hidden;
@@ -290,56 +296,240 @@ section.diff > .diff-viewport {
   user-select: text;
 }
 
-.submodule-commits {
-  display: grid;
-  gap: 8px;
-  width: min(680px, 100%);
-  margin: 0;
-  text-align: left;
+.submodule-uncommitted {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+  color: var(--deleted);
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.submodule-commits > div {
+.submodule-uncommitted svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.submodule-history {
+  width: 100%;
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+}
+
+.submodule-commit {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  min-height: 54px;
+  padding: 9px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.submodule-commit:hover {
+  background: var(--hover);
+}
+
+.submodule-commit.selected {
+  background: color-mix(in srgb, var(--selection) 42%, transparent);
+}
+
+.submodule-commit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.submodule-commit-avatar {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.submodule-commit-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.submodule-commit-subject,
+.submodule-commit-author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.submodule-commit-subject {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.submodule-commit-author {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.submodule-commit-meta {
+  display: inline-flex;
   align-items: baseline;
   gap: 12px;
-  min-width: 0;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  background: var(--elevated);
-}
-
-.submodule-commits dt {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
-.submodule-commits dd {
-  min-width: 0;
-  margin: 0;
-}
-
-.submodule-commits code {
-  display: block;
-  overflow: hidden;
+.submodule-commit-meta code,
+.submodule-commit-detail-meta code {
   color: var(--text);
-  font: 12px var(--mono);
+  font: 11px var(--mono);
+}
+
+.submodule-sha {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 11px var(--mono);
+  cursor: pointer;
+}
+
+.submodule-sha:hover { color: var(--accent); }
+
+.submodule-sha:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.submodule-commit-detail {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px 16px;
+  margin: 0 0 0 14px;
+  padding: 14px 10px 18px 24px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 65%, var(--line));
+}
+
+.submodule-commit-marker {
+  position: absolute;
+  top: 17px;
+  left: -6px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--canvas);
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.submodule-commit-detail > strong {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  user-select: text;
+  font-size: 13px;
+}
+
+.submodule-commit-detail-meta {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .submodule-diff-hint {
+  align-self: center;
   max-width: 520px;
-  margin: 4px 0 8px;
+  margin: 22px 0 0;
   color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.5;
+  text-align: center;
+}
+
+.submodule-range {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 24px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.submodule-range > div {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.submodule-range code {
+  max-width: 21ch;
+  overflow: hidden;
+  color: var(--text);
+  font: 11px var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.submodule-range-arrow {
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.submodule-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.submodule-footer-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .submodule-open {
-  margin-top: 2px;
+  flex: none;
+  margin-top: 0;
+}
+
+@media (max-width: 620px) {
+  .submodule-diff { padding-inline: 14px; }
+  .submodule-commit { grid-template-columns: 24px minmax(0, 1fr); }
+  .submodule-commit-meta { grid-column: 2; gap: 8px; }
+  .submodule-commit-detail-meta { width: 100%; margin-left: 0; }
+  .submodule-range { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .submodule-range-arrow { display: none; }
+  .submodule-footer { align-items: flex-start; flex-direction: column; gap: 10px; }
 }
 
 .conflict-title {
