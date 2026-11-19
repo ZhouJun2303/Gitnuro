@@ -1,12 +1,12 @@
 {
-    "appVersion": "2.0.15",
-    "notes":  "✨ 新功能\n\n· 侧栏和项目终端菜单新增打开终端等操作\n· 设置中可自动检测并选择终端工具\n· 支持管理最近工作区并固定常用项目\n· 历史列表支持多选和 Shift 范围选择\n· 支持批量拣选提交，冲突后可继续、跳过或中止\n· 文件夹右键支持打开和复制路径\n· 耗时 Git 操作显示百分比进度\n\n⚡ 体验优化\n\n· 暂存和取消暂存立即反馈，无需等待\n· 大量文件改动时暂存和取消暂存明显更快\n· Git 操作按仓库排队，减少相互干扰\n· 耗时操作改为后台执行，界面保持可操作\n· 任务队列可查看后台任务进度\n· 任务入口位置调整，更方便找到\n· 统一顶部进度扫光动画节奏\n\n🐛 问题修复\n\n· 修复 Windows 项目终端无法启动 Grok\n· 修复提交详情图片预览被裁切\n· 修复空提交导致批量拣选无法继续\n· 修复拉取后分支仍显示等待标记\n· 修复提交和继续变基时缺少校验提示\n· 修复暂存失败后状态无法恢复\n· 修复连续操作时状态显示错乱\n· 修复账号同步状态未及时更新\n· 修复补丁预览显示不正确\n· 修复文件变化后界面未及时刷新",
-    "appCode":  41,
-    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.14/AweGit_2.0.14_x64-setup.exe",
+    "appVersion":  "2.0.15",
+    "notes":  "✨ 新功能\n\n· 新增 Killer 推送，被远程拒绝时自动拉取并重推，可在设置开启\n· 工作区项目标签可以拖动排序\n· 全部提交搜索保留完整提交表，并高亮和定位匹配项\n· 子模块改动显示提交区间，打开入口固定在底部\n\n⚡ 体验优化\n\n· 推送、获取、拉取按钮统一为线框图标，开启 Killer 推送后推送箭头变实心\n· 工作区标签字号跟随界面字号，放不下时才缩小\n· 优化自动获取与刷新时机，减少等待\n\n🐛 问题修复\n\n· 远程分支删除后，历史不再因失效的上游分支出错\n· 子模块内的 FETCH_HEAD 不再被当成工作区文件\n· 修复子模块无法暂存、差异入口打不开的问题\n· 推送被远程拒绝后自动获取远程更新",
+    "appCode":  42,
+    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.15/AweGit_2.0.15_x64-setup.exe",
     "downloads":  {
                       "windows":  {
-                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.14/AweGit_2.0.14_x64-setup.exe",
-                                      "sha256":  "81d08ed01b0e9a06b7cfb44785c1e3149bffd359da5cb797cdb9f51402dabde0"
+                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.15/AweGit_2.0.15_x64-setup.exe",
+                                      "sha256":  "48f2a8c684c7f0ee5fb63c3b9944db3955ecc5f2532ee97e6584c5077eb2fe82"
                                   },
                       "macos":  ""
                   }
