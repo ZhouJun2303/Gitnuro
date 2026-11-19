@@ -15,7 +15,7 @@ use std::thread;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::tools::{resolve_terminal_cli, TerminalCli};
+use crate::tools::{resolve_terminal_cli_configured, TerminalCli};
 
 static PROMPT_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -182,8 +182,10 @@ pub fn run(
     cli: TerminalCli,
     prompt: String,
     run_id: String,
+    configured: Option<String>,
 ) -> Result<AgentReport, String> {
-    let tool = resolve_terminal_cli(cli).ok_or_else(|| "terminal-cli-missing".to_string())?;
+    let tool = resolve_terminal_cli_configured(cli, configured.as_deref())
+        .ok_or_else(|| "terminal-cli-missing".to_string())?;
     emit(
         &app,
         AgentEvent {

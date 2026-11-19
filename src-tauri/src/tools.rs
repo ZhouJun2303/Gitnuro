@@ -84,6 +84,18 @@ pub fn resolve_terminal_cli(cli: TerminalCli) -> Option<PathBuf> {
     cli.resolve(&terminal_cli_paths())
 }
 
+/// Prefer an explicitly configured executable. A configured path that is
+/// missing fails instead of silently running a different CLI.
+pub fn resolve_terminal_cli_configured(cli: TerminalCli, custom: Option<&str>) -> Option<PathBuf> {
+    match custom.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(path) => {
+            let path = PathBuf::from(path.trim().trim_matches('"'));
+            path.is_file().then_some(path)
+        }
+        None => resolve_terminal_cli(cli),
+    }
+}
+
 fn executable_file(path: &Path) -> bool {
     let Ok(metadata) = path.metadata() else { return false };
     #[cfg(unix)]
@@ -1106,6 +1118,24 @@ mod tests {
         assert_eq!(found.len(), 2);
         assert!(found[0].contains("2024.2"), "{found:?}");
         assert!(found[1].contains("2023.3"), "{found:?}");
+    }
+
+    #[test]
+    fn configured_cli_paths_are_used_without_falling_back_to_path_detection() {
+        use super::{resolve_terminal_cli_configured, TerminalCli};
+        use std::fs;
+
+        let directory = std::env::temp_dir().join(format!("awegit-cli configured-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let launcher = directory.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+        fs::write(&launcher, "").unwrap();
+        assert_eq!(
+            resolve_terminal_cli_configured(TerminalCli::Codex, launcher.to_str()),
+            Some(launcher.clone())
+        );
+        let missing = directory.join("missing-codex");
+        assert_eq!(resolve_terminal_cli_configured(TerminalCli::Codex, missing.to_str()), None);
+        let _ = fs::remove_dir_all(&directory);
     }
 
     #[test]

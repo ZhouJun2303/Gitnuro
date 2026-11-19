@@ -259,6 +259,7 @@ export class ShellState {
     aiApiKey: "",
     liteMode: false,
     liteAgent: "",
+    cliPaths: {},
     terminal: "",
     swapPanes: false,
     showEntireFile: false,
@@ -470,6 +471,15 @@ export class ShellState {
 
 
   liteAgentOutput = $state("");
+
+
+  liteWindowRestore: { width: number; height: number; maximized: boolean } | null = null;
+
+
+  liteWindowCompact = false;
+
+
+  liteWindowWanted = false;
 
 
   /** Repositories with an automatic fetch in flight. This does not count as busy. */
@@ -1757,12 +1767,13 @@ export class ShellState {
     if (enabled && !this.liteConfigEligible) {
       this.settings = { ...this.settings, liteMode: false };
       this.actionError = this.litePrerequisiteMessage() || this.tr("dialog.liteEnableHint");
-      this.prefTab = "ai";
+      this.prefTab = "lite";
       this.dialog = "prefs";
       return false;
     }
     this.settings = { ...this.settings, liteMode: enabled };
     void this.savePrefs(false);
+    if (enabled && this.dialog === "prefs") this.dialog = null;
     return true;
   }
 
@@ -1794,8 +1805,94 @@ export class ShellState {
 
   liteCli(): TerminalCli | null {
     const selected = this.settings.liteAgent.trim();
-    const candidate = selected || this.settings.terminalClis?.[0] || "";
+    const candidate = selected
+      || terminalCliNames.find((cli) => this.liteCliPath(cli))
+      || this.settings.terminalClis?.[0]
+      || "";
     return (terminalCliNames as readonly string[]).includes(candidate) ? candidate as TerminalCli : null;
+  }
+
+
+  liteCliPath(cli: TerminalCli) {
+    return (this.settings.cliPaths?.[cli] ?? "").trim();
+  }
+
+
+  liteCliReady(cli: TerminalCli) {
+    return !!this.liteCliPath(cli) || (this.settings.terminalClis ?? []).includes(cli);
+  }
+
+
+  setLiteCliPath(cli: TerminalCli, path: string) {
+    const value = path.trim().replace(/^"+|"+$/g, "");
+    const cliPaths = { ...this.settings.cliPaths };
+    if (value) cliPaths[cli] = value;
+    else delete cliPaths[cli];
+    this.settings = { ...this.settings, cliPaths };
+    void this.savePrefs(false);
+  }
+
+
+  async browseLiteCli(cli: TerminalCli) {
+    if (!this.inApp()) return;
+    try {
+      const file = await invoke<string | null>("pick_file", { initial: this.liteCliPath(cli) || null, kind: "program" });
+      if (file) this.setLiteCliPath(cli, file);
+    } catch (error) {
+      this.actionError = this.message(error);
+    }
+  }
+
+
+  /** Shrink the main window while the compact workbench is showing. */
+  async fitLiteWindow() {
+    if (!this.inApp() || this.liteWindowCompact) return;
+    this.liteWindowWanted = true;
+    const win = getCurrentWindow();
+    try {
+      const factor = await win.scaleFactor();
+      if (!this.liteWindowWanted) return;
+      const size = await win.innerSize();
+      if (!this.liteWindowWanted) return;
+      const maximized = await win.isMaximized().catch(() => false);
+      if (!this.liteWindowWanted) return;
+      this.liteWindowRestore = {
+        width: maximized ? Math.max(960, this.settings.windowWidth || 1280) : Math.max(360, Math.round(size.width / factor)),
+        height: maximized ? Math.max(640, this.settings.windowHeight || 800) : Math.max(480, Math.round(size.height / factor)),
+        maximized,
+      };
+      this.liteWindowCompact = true;
+      await win.setMinSize(new LogicalSize(360, 480)).catch(() => {});
+      if (!this.liteWindowWanted) return;
+      if (maximized) await win.unmaximize().catch(() => {});
+      if (!this.liteWindowWanted) return;
+      await win.setSize(new LogicalSize(440, 640));
+    } catch {
+      this.liteWindowCompact = false;
+      this.liteWindowRestore = null;
+      await win.setMinSize(new LogicalSize(960, 640)).catch(() => {});
+    }
+  }
+
+
+  /** Restore the size the window had before Lite was shown. */
+  async restoreLiteWindow() {
+    this.liteWindowWanted = false;
+    const restore = this.liteWindowRestore;
+    this.liteWindowRestore = null;
+    if (!this.inApp()) {
+      this.liteWindowCompact = false;
+      return;
+    }
+    const win = getCurrentWindow();
+    this.liteWindowCompact = false;
+    try {
+      if (restore) await win.setSize(new LogicalSize(restore.width, restore.height));
+    } catch {
+      /* the window may already be closing */
+    }
+    await win.setMinSize(new LogicalSize(960, 640)).catch(() => {});
+    if (restore?.maximized) await win.maximize().catch(() => {});
   }
 
 
@@ -1873,7 +1970,7 @@ export class ShellState {
     if (!path) return;
     if (!cli) {
       this.actionError = this.tr("dialog.liteNoCli");
-      this.prefTab = "integration";
+      this.prefTab = "lite";
       this.dialog = "prefs";
       return;
     }
@@ -4606,6 +4703,7 @@ export class ShellState {
       })),
       commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })),
       shortcuts: value.shortcuts ?? {},
+      cliPaths: value.cliPaths ?? {},
       expandedGroups: value.expandedGroups ?? [],
       accounts: (value.accounts ?? []).map((item) => ({
         ...item,
@@ -7438,6 +7536,7 @@ export class ShellState {
 
 
   async saveWindow() {
+    if (this.liteWindowCompact) return;
     return saveWindow(this);
   }
 
@@ -8034,6 +8133,7 @@ export class ShellState {
     };
     unmoved = await win.onMoved(remember);
     unresized = await win.onResized(remember);
+    if (!this.settings.liteMode) await win.setMinSize(new LogicalSize(960, 640)).catch(() => {});
     }
     } catch {
     /* placement events are optional */

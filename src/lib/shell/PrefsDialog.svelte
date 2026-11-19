@@ -6,9 +6,11 @@
   import RevisionPreviewFormats from "./RevisionPreviewFormats.svelte";
   import FontSettings from "./FontSettings.svelte";
   import { terminalCliNames } from "../status";
+  import { shortcutLabel } from "../keys";
   import type { MenuItem, PrefTab } from "./types";
 
   const shell = getShell();
+  const liteShortcut = $derived.by(() => { shell.settings.shortcuts; return shortcutLabel("toggleLite"); });
 
   type ToolKind = "diff" | "merge" | "editor";
 
@@ -37,6 +39,7 @@
       tabs: [
         { id: "commit" as PrefTab, label: shell.tr("dialog.commitPage"), hint: shell.tr("dialog.prefHintCommit") },
         { id: "ai" as PrefTab, label: shell.tr("dialog.ai"), hint: shell.tr("dialog.prefHintAi") },
+        { id: "lite" as PrefTab, label: shell.tr("dialog.liteTitle"), hint: shell.tr("dialog.liteHint") },
         { id: "git" as PrefTab, label: shell.tr("dialog.git"), hint: shell.tr("dialog.prefHintGit") },
         { id: "integration" as PrefTab, label: shell.tr("dialog.integration"), hint: shell.tr("dialog.prefHintIntegration") },
         { id: "commands" as PrefTab, label: shell.tr("dialog.customCommands"), hint: shell.tr("dialog.prefHintCommands") },
@@ -97,6 +100,8 @@
     {:else if id === "ai"}
       <path d="M8 1.9 9.15 6 13.2 7.15 9.15 8.3 8 12.4 6.85 8.3 2.8 7.15 6.85 6z" />
       <path d="M12.4 11.2l.4 1.2 1.2.4-1.2.4-.4 1.2-.4-1.2-1.2-.4 1.2-.4z" />
+    {:else if id === "lite"}
+      <path d="M9.4 1.6 3.6 9.1h3.7L6.4 14.4 12.4 6.8H8.7z" />
     {:else if id === "git"}
       <circle cx="4.4" cy="3.6" r="1.5" />
       <circle cx="4.4" cy="12.4" r="1.5" />
@@ -529,31 +534,51 @@
             </label>
           </div>
         </section>
-
+      {:else if shell.prefTab === "lite"}
         <section class="pref-card" aria-labelledby="lite-settings-title" data-lite-settings>
           <h3 class="pref-card-title" id="lite-settings-title">{shell.tr("dialog.liteTitle")}</h3>
           <div class="pref-card-body">
             <label class="pref-row pref-toggle">
               <input type="checkbox" checked={shell.settings.liteMode} disabled={!shell.liteConfigEligible} onchange={(event) => shell.setLiteMode(event.currentTarget.checked)} />
               <span class="pref-label">{shell.tr("dialog.liteEnable")}</span>
+              <span class="pref-control"><span class="empty">{shell.settings.liteMode ? "Lite" : shell.tr("dialog.liteNormal")}</span></span>
             </label>
             <p class="pref-setting-hint">{shell.liteConfigEligible ? shell.tr("dialog.liteEnableHint") : shell.litePrerequisiteMessage()}</p>
+            <p class="pref-setting-hint">{shell.tr("dialog.liteWindowHint")} {shell.tr("dialog.liteShortcutHint", { shortcut: liteShortcut })}</p>
+          </div>
+        </section>
+
+        <section class="pref-card" aria-labelledby="lite-cli-title">
+          <h3 class="pref-card-title" id="lite-cli-title">{shell.tr("dialog.liteSelectCli")}</h3>
+          <div class="pref-card-body">
             <label class="pref-row wide">
               <span class="pref-label">{shell.tr("dialog.liteSelectCli")}</span>
               <span class="pref-control">
                 <select value={shell.settings.liteAgent} onchange={(event) => { shell.settings = { ...shell.settings, liteAgent: event.currentTarget.value }; void shell.savePrefs(false); }}>
                   <option value="">{shell.tr("dialog.liteAutoCli")}</option>
                   {#each shell.liteAgentOptions as cli (cli)}
-                    <option value={cli}>{cli}{shell.settings.terminalClis?.includes(cli) ? " · ✓" : ""}</option>
+                    <option value={cli}>{cli}{shell.liteCliReady(cli) ? " · ✓" : ""}</option>
                   {/each}
                 </select>
               </span>
             </label>
+            <p class="pref-setting-hint">{shell.tr("dialog.liteCliPathHint")}</p>
+            {#each terminalCliNames as cli (cli)}
+              <label class="pref-row lite-path">
+                <span class="pref-label">{cli}</span>
+                <span class="pref-control">
+                  <span class="tool-path-row">
+                    <input value={shell.liteCliPath(cli)} placeholder={shell.tr("dialog.liteCliPathAuto")} title={shell.liteCliPath(cli)} aria-label={cli} onchange={(event) => shell.setLiteCliPath(cli, event.currentTarget.value)} />
+                    <button class="text-button" type="button" onclick={() => void shell.browseLiteCli(cli)}>{shell.tr("dialog.browse")}</button>
+                  </span>
+                </span>
+              </label>
+            {/each}
             <div class="pref-card-actions">
               <button class="text-button" type="button" disabled={shell.detectingTerminalClis} onclick={() => void shell.detectTerminalClis()}>
                 {shell.tr(shell.detectingTerminalClis ? "dialog.detectingTerminalClis" : "dialog.liteDetectCli")}
               </button>
-              {#if shell.settings.terminalClis?.length === 0}<span class="empty">{shell.tr("dialog.liteNoCli")}</span>{/if}
+              {#if (shell.settings.terminalClis?.length ?? 0) === 0}<span class="empty">{shell.tr("dialog.liteNoCli")}</span>{/if}
             </div>
           </div>
         </section>

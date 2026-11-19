@@ -192,6 +192,7 @@ export type Settings = {
   aiApiKey: string;
   liteMode: boolean;
   liteAgent: string;
+  cliPaths: Record<string, string>;
   terminal: string;
   swapPanes: boolean;
   showEntireFile: boolean;

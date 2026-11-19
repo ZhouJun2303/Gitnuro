@@ -738,7 +738,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.editorDetecting = false;
       break;
     case "prefs": {
-      const prefTabs: Record<string, "general" | "fonts" | "workspace" | "diff" | "previewFormats" | "shortcuts" | "commit" | "ai" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
+      const prefTabs: Record<string, "general" | "fonts" | "workspace" | "diff" | "previewFormats" | "shortcuts" | "commit" | "ai" | "lite" | "git" | "integration" | "commands" | "network" | "accounts" | "advanced"> = {
         "prefs-fonts": "fonts",
         "prefs-flow": "advanced",
         "prefs-workspace": "workspace",
@@ -747,7 +747,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
         "prefs-preview-formats": "previewFormats",
         "prefs-commit": "commit",
         "prefs-ai": "ai",
-        "prefs-lite": "ai",
+        "prefs-lite": "lite",
         "prefs-git": "git",
         "prefs-autostash": "git",
         "prefs-integration": "integration",
@@ -773,6 +773,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
           aiApiKey: "lab-key",
           liteAgent: "codex",
           terminalClis: ["codex", "claude", "grok", "cursor-agent"],
+          cliPaths: { codex: "C:\\Users\\lab\\AppData\\Roaming\\npm\\codex.cmd" },
         };
       }
       if (sceneId === "prefs-commit") shell.resetCommitTypes();

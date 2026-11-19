@@ -172,6 +172,7 @@ export function viewItems(shell: ShellState) {
       { label: shell.tr("dialog.squash"), disabled: shell.mode !== "live" || !shell.selectedCommit || shell.writeBlocked || !!shell.progress, run: () => { shell.draft = ""; shell.dialog = "squash"; } },
       { label: shell.tr("chrome.compare"), disabled: shell.mode !== "live" || shell.drops.length !== 2, run: () => shell.compareDrops() },
       { label: shell.tr("chrome.refresh"), shortcut: shortcutLabel("refresh"), run: () => void shell.refresh() },
+      { label: shell.tr("dialog.liteTitle"), shortcut: shortcutLabel("toggleLite"), checked: shell.settings.liteMode, run: () => shell.toggleLiteMode() },
       { label: shell.tr("chrome.preferences"), shortcut: shortcutLabel("settings"), run: () => (shell.dialog = "prefs") },
     ];
   }

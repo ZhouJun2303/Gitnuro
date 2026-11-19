@@ -778,6 +778,11 @@ export type Messages = {
     liteAutoCli: string;
     liteDetectCli: string;
     liteNoCli: string;
+    liteNormal: string;
+    liteCliPathHint: string;
+    liteCliPathAuto: string;
+    liteWindowHint: string;
+    liteShortcutHint: string;
     prefSecGitFetch: string;
     prefSecGitPush: string;
     prefSecGitBranch: string;

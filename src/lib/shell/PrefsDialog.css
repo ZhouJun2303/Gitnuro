@@ -531,6 +531,9 @@
 
 .tool-path-row .text-button { flex: none; margin-left: 0; }
 
+.dialog .pref-row.lite-path { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+.dialog .pref-row.lite-path .pref-control { width: 100%; }
+
 .tool-types { display: flex; flex-direction: column; gap: 4px; }
 
 .tool-type-row,

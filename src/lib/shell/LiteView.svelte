@@ -27,6 +27,11 @@
   function branchMenu(event: MouseEvent) {
     shell.openBar(event, shell.branchItems());
   }
+
+  $effect(() => {
+    void shell.fitLiteWindow();
+    return () => { void shell.restoreLiteWindow(); };
+  });
 </script>
 
 <main class="lite-shell" data-layer="lite" aria-label={shell.tr("dialog.liteTitle")}>
@@ -82,7 +87,7 @@
       <span>{shell.tr("dialog.liteSelectCli")}</span>
       <select value={selectedCli} onchange={chooseCli} disabled={shell.liteWorking}>
         {#each terminalCliNames as cli (cli)}
-          <option value={cli}>{cli}{shell.settings.terminalClis?.includes(cli) ? " · ✓" : ""}</option>
+          <option value={cli}>{cli}{shell.liteCliReady(cli) ? " · ✓" : ""}</option>
         {/each}
       </select>
     </label>

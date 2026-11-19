@@ -1563,7 +1563,8 @@ async fn run_lite_agent(
     run_id: String,
 ) -> Result<lite::AgentReport, String> {
     let repo = repo_from(path)?;
-    tauri::async_runtime::spawn_blocking(move || lite::run(app, repo, cli, prompt, run_id))
+    let configured = settings::load().ok().and_then(|values| values.cli_paths.get(cli.name()).cloned());
+    tauri::async_runtime::spawn_blocking(move || lite::run(app, repo, cli, prompt, run_id, configured))
         .await
         .map_err(|error| error.to_string())?
 }

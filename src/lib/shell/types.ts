@@ -166,7 +166,7 @@ export type LiteTask = {
   state: "running" | "completed" | "failed";
 };
 
-export type PrefTab = "general" | "fonts" | "workspace" | "diff" | "previewFormats" | "commit" | "ai" | "git" | "integration" | "network" | "accounts" | "advanced" | "commands" | "shortcuts";
+export type PrefTab = "general" | "fonts" | "workspace" | "diff" | "previewFormats" | "commit" | "ai" | "lite" | "git" | "integration" | "network" | "accounts" | "advanced" | "commands" | "shortcuts";
 
 /** `keywords` holds the label in other UI languages, so a query typed in any language still matches. */
 export type LaunchItem = { label: string; keywords?: string; group: string; run: () => void; stay?: boolean };

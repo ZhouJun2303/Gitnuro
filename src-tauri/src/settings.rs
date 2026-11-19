@@ -44,6 +44,9 @@ pub struct Settings {
     /// CLI used by the high-performance workspace. Empty selects the first detected CLI.
     #[serde(default)]
     pub lite_agent: String,
+    /// Full executable paths for the Lite AI agent CLIs, keyed by CLI name.
+    #[serde(default)]
+    pub cli_paths: BTreeMap<String, String>,
     #[serde(default)]
     pub terminal: String,
     #[serde(default)]
@@ -564,6 +567,7 @@ impl Default for Settings {
             ai_api_key: String::new(),
             lite_mode: false,
             lite_agent: String::new(),
+            cli_paths: BTreeMap::new(),
             terminal: String::new(),
             swap_panes: false,
             show_entire_file: false,
