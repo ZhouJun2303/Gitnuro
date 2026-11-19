@@ -6,7 +6,7 @@
 
 ## 最近完成
 
-- [x] `c0fc2a34`：工作区项目标签改用指针拖动，顺序随工作区保存；每个工作区一个字号，放得下保持默认 13px，放不下才逐级缩到 10px，仍放不下显示省略号。回归：`e2e/workspace-files.spec.ts` 的 `project tabs keep the dragged order in the workspace`、`project names shrink with the tab and ellipsize at the minimum`。
+- [x] `b6a6f53f`：工作区项目标签改用指针拖动，顺序随工作区保存；字号以界面字号为上限（放得下就用界面字号），放不下才按工作区逐级缩到 10px，仍放不下显示省略号。回归：`e2e/workspace-files.spec.ts` 的 `project tabs keep the dragged order in the workspace`、`project names shrink with the tab and ellipsize at the minimum`。
 
 - [x] `d932b503`：全部提交搜索保留整表，匹配项用微光标出，上一个/下一个显示总数并滚到对应提交；Reveal in AweGit 滚到该提交。回归：`e2e/history-search.spec.ts`。
 
