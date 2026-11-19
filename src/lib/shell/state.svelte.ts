@@ -1757,7 +1757,6 @@ export class ShellState {
 
 
   litePrerequisiteMessage() {
-    if (!this.settings.aiEnabled) return this.tr("dialog.liteNeedAi");
     if (!this.liteHasApiKey) return this.tr("dialog.liteNeedApiKey");
     if (!this.liteHasRemote) return this.tr("dialog.liteNeedRemote");
     return "";
@@ -1915,6 +1914,46 @@ export class ShellState {
   }
 
 
+  liteConflictPrompt() {
+    const branch = this.branchLabel || "HEAD";
+    const conflicts = [...(this.snapshot?.staged ?? []), ...(this.snapshot?.unstaged ?? [])]
+      .filter((file) => file.kind === "conflict")
+      .map((file) => file.path);
+    return [
+      "A Git pull or rebase is paused because the current worktree has merge conflicts.",
+      `Current branch: ${branch}`,
+      conflicts.length ? `Conflicted files:\n${conflicts.join("\n")}` : "Conflicted files: inspect the repository status",
+      "Inspect every conflicted file and resolve all conflict markers while preserving both sides where appropriate.",
+      "Edit files only. Do not commit, push, abort, or skip the Git operation. Leave the resolved files ready for AweGit to stage and continue.",
+    ].join("\n\n");
+  }
+
+
+  async resolveLiteConflict(path: string, cli: TerminalCli, runId: string) {
+    this.litePhase("agent", "resolve", 58, this.tr("dialog.liteResolve"));
+    const report = await invoke<{ ok: boolean; output: string; code?: number }>("run_lite_agent", {
+      path,
+      cli,
+      prompt: this.liteConflictPrompt(),
+      runId,
+    });
+    this.liteAgentOutput = report.output ?? "";
+    if (!report.ok) return false;
+    await this.refresh("full", true);
+    if (!this.conflicted) return true;
+    this.litePhase("agent", "stage", 72, this.tr("dialog.liteStage"), report.output ?? "");
+    const staged = await this.runChange("stage_all");
+    if (!staged || this.conflicted) return false;
+    if (this.progress) {
+      this.litePhase("agent", "continue", 82, this.tr("dialog.liteContinue"), report.output ?? "");
+      const continued = await this.mutate({ action: "continue", message: "" });
+      if (continued !== "completed" || this.conflicted) return false;
+    }
+    await this.refresh("full", true);
+    return !this.conflicted;
+  }
+
+
   async runLiteSync() {
     if (this.liteWorking || !this.liteModeActive) return;
     const path = this.repoPath();
@@ -2010,11 +2049,30 @@ export class ShellState {
       this.litePhase("agent", "pull", 92, this.tr("dialog.litePull"), report.output ?? "");
       const pulled = await this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: this.settings.autostashIncludeUntracked });
       if (this.liteModeActive) this.dialog = null;
+      let pullCompleted = pulled === "completed";
       if (this.conflicted || pulled === "conflict") {
-        this.liteFallbackToNormal();
-        return;
+        const resolved = await this.resolveLiteConflict(path, cli, runId);
+        if (!resolved) {
+          this.liteFallbackToNormal();
+          return;
+        }
+        pullCompleted = true;
+        if (this.staged.length > 0) {
+          this.litePhase("agent", "commit", 88, this.tr("dialog.liteCommit"), this.liteAgentOutput);
+          const suggestion = await invoke<Suggestion>("suggest_commit_message", { path, style: this.settings.aiPromptStyle === "long" ? "long" : "short" });
+          const split = splitSubject(suggestion.summary);
+          const summary = joinSubject(split.type || this.settings.commitType, split.text || suggestion.summary);
+          const committed = await this.runChange("commit_changes", {
+            summary,
+            description: withoutRepeatedSubject(suggestion.description, split.type || this.settings.commitType, split.text || suggestion.summary),
+            amend: false,
+            signOff: this.settings.signOff,
+            skipHooks: false,
+          });
+          if (!committed) throw new Error(this.actionError || this.tr("chrome.taskFailed"));
+        }
       }
-      if (pulled !== "completed") throw new Error(this.actionError || this.tr("chrome.taskFailed"));
+      if (!pullCompleted) throw new Error(this.actionError || this.tr("chrome.taskFailed"));
       this.litePhase("agent", "push", 96, this.tr("dialog.litePush"), report.output ?? "");
       const pushed = await this.mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: this.settings.forceWithLease });
       if (this.liteModeActive) this.dialog = null;
@@ -2793,7 +2851,7 @@ export class ShellState {
   liteHasRemote = $derived((this.refs?.remotes ?? []).some((remote) => !!remote.url?.trim()));
 
 
-  liteConfigEligible = $derived(this.settings.aiEnabled && this.liteHasApiKey && this.liteHasRemote);
+  liteConfigEligible = $derived(this.liteHasApiKey && this.liteHasRemote);
 
 
   liteModeActive = $derived(!this.standalone && this.settings.liteMode && this.mode === "live" && !!this.snapshot && this.liteConfigEligible && !this.conflicted);

@@ -1154,6 +1154,8 @@ export const en: Messages = {
     litePull: "Pull remote",
     litePush: "Push remote",
     liteAgentWork: "CLI is working",
+    liteResolve: "Resolve conflicts with the CLI",
+    liteContinue: "Continue Git operation",
     liteCheck: "Check result",
     liteDone: "Completed",
     liteConflictFallback: "A conflict was detected. Switched to the normal workspace.",

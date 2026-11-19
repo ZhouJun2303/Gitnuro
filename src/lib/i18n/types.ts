@@ -1094,6 +1094,8 @@ export type Messages = {
     litePull: string;
     litePush: string;
     liteAgentWork: string;
+    liteResolve: string;
+    liteContinue: string;
     liteCheck: string;
     liteDone: string;
     liteConflictFallback: string;

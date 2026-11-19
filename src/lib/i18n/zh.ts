@@ -1155,6 +1155,8 @@ export const zh: Messages = {
     litePull: "拉取远程",
     litePush: "推送远程",
     liteAgentWork: "CLI 正在工作",
+    liteResolve: "让 CLI 自动解决冲突",
+    liteContinue: "继续 Git 操作",
     liteCheck: "检查结果",
     liteDone: "已完成",
     liteConflictFallback: "检测到冲突，已切换到正常版。",

@@ -63,6 +63,28 @@ fn flatten(prompt: &str) -> String {
 }
 
 fn command_for(tool: &Path, cli: TerminalCli, prompt_file: &Path, prompt: &str) -> Command {
+    #[cfg(windows)]
+    let mut command = {
+        let script = tool
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.eq_ignore_ascii_case("cmd") || value.eq_ignore_ascii_case("bat"))
+            .unwrap_or(false);
+        if script {
+            let shell = std::env::var_os("SystemRoot")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+                .join("System32")
+                .join("cmd.exe");
+            let mut command = Command::new(shell);
+            command.args(["/D", "/S", "/C"]).arg(tool);
+            command
+        } else {
+            Command::new(tool)
+        }
+    };
+
+    #[cfg(not(windows))]
     let mut command = Command::new(tool);
     match cli {
         // Codex reads the batch prompt from stdin when the prompt argument is "-".
