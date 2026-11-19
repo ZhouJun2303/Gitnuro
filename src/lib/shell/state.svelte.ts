@@ -49,6 +49,7 @@ import {
     recentWorkspaceId,
     defaultRecentWorkspaceLimit,
     workspaceTabWidth,
+    moveWorkspacePath,
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, selectFolder, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabDisplay, tabColor, pairSetting } from "./diff.svelte";
@@ -7314,6 +7315,30 @@ export class ShellState {
 
 
 
+  /** Reorder a project tab before or after another and save the workspace's order. */
+  moveTab(path: string, target: string, after: boolean) {
+    const next = moveWorkspacePath(this.repos, path, target, after);
+    if (!next) return;
+    this.repos = next;
+    const currentId = this.settings.currentWorkspace;
+    if (!currentId) return;
+    const active = this.snapshot?.path ?? path;
+    this.settings = {
+      ...this.settings,
+      workspaces: this.settings.workspaces.map((workspace) => {
+        if (workspace.id !== currentId) return workspace;
+        const openTabs = moveWorkspacePath(workspace.openTabs, path, target, after) ?? workspace.openTabs;
+        const repositories = moveWorkspacePath(workspace.repositories, path, target, after) ?? workspace.repositories;
+        const order = openTabs.length > 0 ? openTabs : repositories;
+        const selected = order.findIndex((item) => this.pathsMatch(item, active));
+        return { ...workspace, openTabs, repositories, selectedTab: selected >= 0 ? selected : workspace.selectedTab };
+      }),
+    };
+    void this.savePrefs(false);
+  }
+
+
+
   closeTab(path: string) {
     this.closedTabs = [path, ...this.closedTabs.filter((item) => item !== path)].slice(0, 12);
     const next = this.repos.filter((repo) => repo !== path);
@@ -7412,10 +7437,7 @@ export class ShellState {
     const sameMembers = fixed
       && fixed.repositories.length === recent.length
       && fixed.repositories.every((path) => keys.has(this.normalPath(path)));
-    const repositories = sameMembers ? [
-      ...fixed.repositories.filter((path) => this.isRecentRepoPinned(path)),
-      ...fixed.repositories.filter((path) => !this.isRecentRepoPinned(path)),
-    ] : recent;
+    const repositories = sameMembers ? [...fixed.repositories] : recent;
     const openKeys = new Set(fixed?.openTabs.map((path) => this.normalPath(path)));
     if (opened) openKeys.add(this.normalPath(opened));
     const openTabs = sameMembers ? repositories.filter((path) => openKeys.has(this.normalPath(path))) : repositories;
