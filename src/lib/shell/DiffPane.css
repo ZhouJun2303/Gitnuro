@@ -255,16 +255,33 @@ section.diff > .diff-viewport {
   min-height: 0;
   overflow: auto;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
   padding: 20px 24px 28px;
   text-align: left;
 }
 
 .submodule-content {
   width: min(780px, 100%);
-  min-height: 100%;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+.submodule-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 24px;
+}
+
+.submodule-dock {
+  flex: none;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
 .submodule-diff-title {
@@ -471,8 +488,7 @@ section.diff > .diff-viewport {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  margin-top: auto;
-  padding-top: 24px;
+  padding-bottom: 4px;
   color: var(--text-secondary);
   font-size: 11px;
 }
