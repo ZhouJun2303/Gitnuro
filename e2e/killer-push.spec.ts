@@ -2,30 +2,25 @@ import { expect, test } from "@playwright/test";
 import { pinLabSettings } from "./helpers";
 
 for (const theme of ["apple", "light", "dark"] as const) {
-  test(`killer push badge sits in the push button corner (${theme})`, async ({ page }) => {
+  test(`killer push uses a solid push icon (${theme})`, async ({ page }) => {
     await pinLabSettings(page, { theme, locale: "zh", killerPush: true, fetchAutomatically: false });
     await page.goto(`/?scene=ahead&theme=${theme}&locale=zh`);
     await expect(page.locator('[data-lab-scene="ahead"]')).toBeVisible();
 
-    const push = page.locator(".chrome-left").getByTitle(/^(推送|Push)$/);
-    const badge = push.locator(".killer-badge");
-    await expect(badge).toBeVisible();
-    await expect(badge).toHaveText("K");
+    const push = page.locator(".chrome-left").getByTitle(/推送|Push/);
+    await expect(push.locator("svg.push-icon.solid")).toBeVisible();
+    await expect(push.locator("svg.push-icon.outline")).toHaveCount(0);
 
+    // The ahead count keeps the familiar top-right corner, clear of the icon.
+    const count = push.locator(".sync-count");
+    await expect(count).toHaveText("24");
     const button = await push.boundingBox();
-    const mark = await badge.boundingBox();
+    const mark = await count.boundingBox();
     expect(button && mark).toBeTruthy();
-    // Top-right corner of the 42px toolbar button.
     expect(mark!.x + mark!.width).toBeGreaterThan(button!.x + button!.width - 6);
     expect(mark!.y).toBeLessThan(button!.y + 6);
 
-    // The ahead count stays readable next to the badge instead of underneath it.
-    const count = push.locator(".sync-count");
-    await expect(count).toBeVisible();
-    const countBox = await count.boundingBox();
-    expect(countBox!.x + countBox!.width).toBeLessThanOrEqual(mark!.x);
-
-    await page.screenshot({ path: `.lab/killer-push-badge-${theme}.png` });
+    await page.screenshot({ path: `.lab/killer-push-icon-${theme}.png` });
   });
 }
 
@@ -33,8 +28,11 @@ test("killer push is off by default and saves from Git preferences", async ({ pa
   await pinLabSettings(page, { locale: "zh", fetchAutomatically: false });
   await page.goto("/?scene=ahead&locale=zh");
   await expect(page.locator('[data-lab-scene="ahead"]')).toBeVisible();
-  const push = page.locator(".chrome-left").getByTitle(/^(推送|Push)$/);
-  await expect(push.locator(".killer-badge")).toHaveCount(0);
+  const push = page.locator(".chrome-left").getByTitle(/推送|Push/);
+  await expect(push.locator("svg.push-icon.outline")).toBeVisible();
+  await expect(push.locator("svg.push-icon.solid")).toHaveCount(0);
+  await expect(push.locator(".sync-count")).toBeVisible();
+  await page.screenshot({ path: ".lab/killer-push-off.png" });
 
   await page.goto("/?scene=prefs-git&locale=zh");
   await expect(page.locator('[data-lab-scene="prefs-git"]')).toBeVisible();
@@ -53,7 +51,7 @@ test("killer push is off by default and saves from Git preferences", async ({ pa
 
   await page.goto("/?scene=ahead&locale=zh");
   await expect(page.locator('[data-lab-scene="ahead"]')).toBeVisible();
-  await expect(page.locator(".chrome-left").getByTitle(/^(推送|Push)$/).locator(".killer-badge")).toBeVisible();
+  await expect(page.locator(".chrome-left").getByTitle(/推送|Push/).locator("svg.push-icon.solid")).toBeVisible();
 });
 
 test("killer push can be turned off again from preferences", async ({ page }) => {
@@ -75,5 +73,6 @@ test("killer push can be turned off again from preferences", async ({ page }) =>
 
   await page.goto("/?scene=ahead&locale=zh");
   await expect(page.locator('[data-lab-scene="ahead"]')).toBeVisible();
-  await expect(page.locator(".chrome-left").getByTitle(/^(推送|Push)$/).locator(".killer-badge")).toHaveCount(0);
+  await expect(page.locator(".chrome-left").getByTitle(/推送|Push/).locator("svg.push-icon.solid")).toHaveCount(0);
+  await expect(page.locator(".chrome-left").getByTitle(/推送|Push/).locator("svg.push-icon.outline")).toBeVisible();
 });

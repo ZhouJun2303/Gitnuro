@@ -332,7 +332,7 @@ export const zh: Messages = {
     collapseFirstLevel: "折叠一级目录",
     commitSubject: "写一句描述",
     pushTags: "推送标签",
-    killerPushBadge: "Killer 推送已开启：远程领先时自动拉取后重推，冲突会中止",
+    killerPushTooltip: "实心推送图标表示 Killer 推送已开启：推送被远程新提交拒绝时自动拉取后重推，冲突会中止",
     treeView: "树",
     viewAsList: "按列表查看",
     viewAsTree: "按树查看",

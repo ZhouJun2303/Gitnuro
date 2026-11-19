@@ -331,7 +331,7 @@ export const en: Messages = {
     collapseFirstLevel: "Collapse First Level",
     commitSubject: "Describe the change",
     pushTags: "Push tags",
-    killerPushBadge: "Killer push is on: a rejected push pulls and retries once; conflicts abort",
+    killerPushTooltip: "The solid push icon means killer push is on: a rejected push pulls and retries once; conflicts abort",
     treeView: "Tree",
     viewAsList: "View as List",
     viewAsTree: "View as Tree",

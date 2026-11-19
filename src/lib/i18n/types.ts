@@ -283,8 +283,8 @@ export type Messages = {
     collapseFirstLevel: string;
     commitSubject: string;
     pushTags: string;
-    /** Badge title on the push button while killer push is enabled. */
-    killerPushBadge: string;
+    /** Push button tooltip while killer push is enabled. */
+    killerPushTooltip: string;
     treeView: string;
     viewAsList: string;
     viewAsTree: string;
