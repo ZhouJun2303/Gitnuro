@@ -499,6 +499,7 @@
             {:else if submodule}
               <div class="submodule-diff" data-submodule-diff>
                 <div class="submodule-content">
+                  <div class="submodule-scroll">
                   <p class="submodule-diff-path" title={submodule.path}>{submodule.path}</p>
                   <div class="submodule-diff-title">
                     <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" d="M3 3.5h10M3 8h10M3 12.5h6"/><circle cx="12.2" cy="12.5" r="1.3" fill="currentColor"/></svg>
@@ -546,6 +547,8 @@
                       </div>
                     {/if}
                   {/if}
+                  </div>
+                  <div class="submodule-dock">
                   <div class="submodule-range">
                     <div data-submodule-old><span>{shell.tr("chrome.submoduleOld")}</span><code title={submoduleCommits.oldId}>{submoduleCommits.oldId || "—"}</code></div>
                     <span class="submodule-range-arrow" aria-hidden="true">→</span>
@@ -554,6 +557,7 @@
                   <div class="submodule-footer">
                     <span class="submodule-footer-hint">{shell.tr(submodule.ready ? "chrome.submoduleChangeHint" : "chrome.submoduleNotReady")}</span>
                     <button class="pane-chip submodule-open" data-submodule-open type="button" disabled={!submodule.ready} title={shell.tr("chrome.openSubmodule")} onclick={() => void shell.openRepo(shell.fullPath(submodule.path))}>{shell.tr("chrome.openSubmodule")}</button>
+                  </div>
                   </div>
                 </div>
               </div>
