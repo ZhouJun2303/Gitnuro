@@ -340,6 +340,12 @@ fn workspace_status(path: Option<String>) -> Result<awegit_git::StatusSnapshot, 
 fn workspace_status_paths(path: Option<String>, files: Vec<String>) -> Result<ChangeReport, String> {
     let repo = repo_from(path)?;
     tasks::wait_for_writes(&repo);
+    // A submodule git dir is `../../.git/modules/...`. Those events are metadata.
+    // Dropping them here keeps one stray path from failing the whole refresh.
+    let files: Vec<String> = files.into_iter().filter(|file| awegit_git::check_path(file).is_ok()).collect();
+    if files.is_empty() {
+        return Ok(ChangeReport { status: read_status(&repo)?, log: String::new(), status_paths: None });
+    }
     let status = read_status_paths(&repo, Some(&files))?;
     Ok(ChangeReport { status, log: String::new(), status_paths: Some(files) })
 }
@@ -1317,7 +1323,7 @@ fn watch_worktree(watcher: &mut RecommendedWatcher, root: &Path, set: &mut Watch
 fn git_metadata_dir(repo: &Path) -> Option<PathBuf> {
     let git = repo.join(".git");
     if git.is_dir() {
-        return Some(git);
+        return Some(lexical_clean(&git));
     }
     let text = std::fs::read_to_string(&git).ok()?;
     let line = text.lines().find(|line| !line.trim().is_empty())?;
@@ -1326,8 +1332,30 @@ fn git_metadata_dir(repo: &Path) -> Option<PathBuf> {
         return None;
     }
     let path = PathBuf::from(rest);
-    let full = if path.is_absolute() { path } else { repo.join(path) };
+    let full = lexical_clean(&if path.is_absolute() { path } else { repo.join(path) });
     full.is_dir().then_some(full)
+}
+
+/// Collapse `.` and `..` without asking the filesystem.
+///
+/// A submodule gitfile says `gitdir: ../../.git/modules/<name>`. Events for
+/// `FETCH_HEAD` arrive on that relative path. Leaving the `..` in place makes
+/// the path look like a worktree file that then fails the repository check.
+fn lexical_clean(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in normalize_watch_path(path).components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => match out.components().next_back() {
+                Some(std::path::Component::Normal(_)) => {
+                    out.pop();
+                }
+                _ => out.push(".."),
+            },
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 fn watch_git_metadata(watcher: &mut RecommendedWatcher, git: &Path, set: &mut WatchSet) {
@@ -1459,14 +1487,16 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
 }
 
 fn watched_relative(repo: &Path, path: &Path) -> Option<String> {
-    let path = normalize_watch_path(path);
-    if let Ok(relative) = path.strip_prefix(normalize_watch_path(repo)) {
+    let path = lexical_clean(path);
+    let repo_root = lexical_clean(repo);
+    if let Ok(relative) = path.strip_prefix(&repo_root) {
         return Some(relative.to_string_lossy().replace('\\', "/"));
     }
     let git = git_metadata_dir(repo)?;
     for root in [git.clone(), common_metadata_dir(&git)] {
-        if let Ok(relative) = path.strip_prefix(normalize_watch_path(&root)) {
-            return Some(format!(".git/{}", relative.to_string_lossy().replace('\\', "/")));
+        if let Ok(relative) = path.strip_prefix(&lexical_clean(&root)) {
+            let relative = relative.to_string_lossy().replace('\\', "/");
+            return Some(if relative.is_empty() { ".git".into() } else { format!(".git/{relative}") });
         }
     }
     None
@@ -3073,6 +3103,28 @@ mod watch_plan_tests {
         assert!(super::classify_changes(&worktree, &[git.join("index")]).is_some_and(|change| !change.refs));
         assert!(super::classify_changes(&worktree, &[common.join("refs/heads/main")]).is_some_and(|change| change.refs));
         assert!(super::classify_changes(&worktree, &[worktree.join(".git")]).is_some_and(|change| change.refs));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn submodule_gitdir_fetch_head_is_metadata_not_a_worktree_path() {
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap()
+            .join(".lab/watch-tests").join(format!("submodule-{nanos}"));
+        let submodule = root.join("Packages/HlwdFramework");
+        let gitdir = root.join(".git/modules/Packages/HlwdFramework");
+        fs::create_dir_all(&gitdir).unwrap();
+        fs::create_dir_all(&submodule).unwrap();
+        fs::write(submodule.join(".git"), "gitdir: ../../.git/modules/Packages/HlwdFramework\n").unwrap();
+        fs::write(gitdir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(submodule.join("note.txt"), "note\n").unwrap();
+        let escaped = |name: &str| submodule.join(format!("../../.git/modules/Packages/HlwdFramework/{name}"));
+        assert!(!super::watch_relevant(&submodule, &escaped("FETCH_HEAD")));
+        assert!(super::classify_changes(&submodule, &[escaped("FETCH_HEAD")]).is_none());
+        assert!(!super::watch_relevant(&submodule, &escaped("index.lock")));
+        assert!(super::classify_changes(&submodule, &[escaped("index")]).is_some_and(|change| !change.refs && change.paths.is_none()));
+        assert!(super::classify_changes(&root, &[escaped("FETCH_HEAD")]).is_none());
+        assert!(super::classify_changes(&submodule, &[submodule.join("note.txt")]).is_some_and(|change| change.paths.as_deref() == Some(&["note.txt".into()][..])));
         fs::remove_dir_all(root).unwrap();
     }
 
