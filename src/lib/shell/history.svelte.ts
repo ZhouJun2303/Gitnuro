@@ -126,9 +126,10 @@ export async function loadMoreHistory(shell: ShellState) {
     finally { moreReads.delete(shell); }
 }
 
+type ContextParts = { history: boolean; flow: boolean; deferHistory?: boolean };
 const contextReads = new WeakMap<ShellState, { key: string; promise: Promise<void> }>();
 
-export function loadContext(shell: ShellState, operation?: string, parts = { history: true, flow: true }): Promise<void> {
+export function loadContext(shell: ShellState, operation?: string, parts: ContextParts = { history: true, flow: true }): Promise<void> {
     // Only request parameters and a data generation, never serialize history/state.
     const key = JSON.stringify([shell.repoPath(), shell.statusGen, shell.settings.commitSort, shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.logLimit, shell.allBranches, shell.exactRefs(), parts]);
     const current = contextReads.get(shell);
@@ -140,7 +141,7 @@ export function loadContext(shell: ShellState, operation?: string, parts = { his
     return promise;
 }
 
-async function readContext(shell: ShellState, operation?: string, parts = { history: true, flow: true }) {
+async function readContext(shell: ShellState, operation?: string, parts: ContextParts = { history: true, flow: true }) {
     const path = shell.repoPath();
     const statusGen = shell.statusGen;
     const openGen = shell.openGen;
@@ -150,7 +151,7 @@ async function readContext(shell: ShellState, operation?: string, parts = { hist
     const { revision, ...visibleRefs } = nextRefs;
     const loaded = new Set(shell.commitsLive.map((row) => row.id));
     const previousTips = new Set(Object.keys(shell.refs?.labels ?? {}));
-    if (!parts.history && Object.keys(nextRefs.labels ?? {}).some((id) => !loaded.has(id) && !previousTips.has(id))) parts = { ...parts, history: true };
+    if (!parts.history && !parts.deferHistory && Object.keys(nextRefs.labels ?? {}).some((id) => !loaded.has(id) && !previousTips.has(id))) parts = { ...parts, history: true };
     if (!shell.same(shell.refs, visibleRefs)) shell.refs = visibleRefs;
     shell.contextRevision = revision ?? 0;
     if (!parts.history && nextRefs.labels) {

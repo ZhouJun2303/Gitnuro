@@ -83,6 +83,19 @@ type HistoryActionRequest = {
   rev: string;
 };
 
+const AUTOMATIC_FETCH_INTERVAL_MS = 10 * 60 * 1000;
+const AUTOMATIC_FETCH_FOCUS_STALE_MS = 5 * 60 * 1000;
+const AUTOMATIC_FETCH_DELAY_MS = 350;
+const AUTOMATIC_FETCH_BACKGROUND_REFRESH_DELAY_MS = 250;
+const AUTOMATIC_FETCH_MAX_BACKOFF_MS = 30 * 60 * 1000;
+
+type AutomaticFetchState = {
+  lastAttemptAt: number;
+  nextAttemptAt: number;
+  failures: number;
+  pending: boolean;
+};
+
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
   if (left === right) return true;
   if (left.length !== right.length) return false;
@@ -449,7 +462,11 @@ export class ShellState {
   /** Repositories with an automatic fetch in flight. This does not count as busy. */
   backgroundFetch = new Set<string>();
 
+  automaticFetchStates = new Map<string, AutomaticFetchState>();
+
   automaticFetchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  historyRefreshPending = $state(false);
 
 
   /** Set as soon as a tab is chosen, before that repository's status returns. */
@@ -3267,8 +3284,19 @@ export class ShellState {
 
 
 
-  async loadContext(operation?: string) {
-    return loadContext(this, operation);
+  async loadContext(operation?: string, parts: { history: boolean; flow: boolean; deferHistory?: boolean } = { history: true, flow: true }) {
+    if (parts.history) this.historyRefreshPending = false;
+    return loadContext(this, operation, parts);
+  }
+
+  refreshPendingHistory() {
+    const visible = this.section === "history" || this.standalone === "history";
+    const path = this.repoPath();
+    if (!visible || !this.historyRefreshPending || this.mode !== "live" || this.busy || this.refreshing || !path
+      || this.backgroundFetch.has(this.jobKey(path))) return;
+    void this.loadContext(undefined, { history: true, flow: false }).catch((error) => {
+      if (this.viewing(path)) this.actionError = this.message(error);
+    });
   }
 
   watchCovered(scope: "status" | "full", revision: number) {
@@ -3431,23 +3459,31 @@ export class ShellState {
 
   auxiliaryTimer: ReturnType<typeof setTimeout> | null = null;
   auxiliaryAreas = new Set<RefreshArea>();
+  auxiliaryDeferHistory = false;
 
   /** Reconcile lists first. History, previews and statistics cannot own a write slot. */
-  scheduleAuxiliary(areas: readonly RefreshArea[], operation?: string) {
+  scheduleAuxiliary(areas: readonly RefreshArea[], operation?: string, deferHistory = false) {
     for (const area of areas) this.auxiliaryAreas.add(area);
+    this.auxiliaryDeferHistory = deferHistory;
     if (this.auxiliaryTimer !== null) clearTimeout(this.auxiliaryTimer);
     const path = this.repoPath(), openGen = this.openGen;
+    const delay = deferHistory ? AUTOMATIC_FETCH_BACKGROUND_REFRESH_DELAY_MS : 0;
     this.auxiliaryTimer = setTimeout(() => {
       this.auxiliaryTimer = null;
       const changed = this.auxiliaryAreas;
       this.auxiliaryAreas = new Set();
+      const delayedHistory = this.auxiliaryDeferHistory;
+      this.auxiliaryDeferHistory = false;
       if (openGen !== this.openGen || !this.viewing(path)) return;
       const history = changed.has("history") || (changed.has("refs") && (!this.allBranches || !!this.graphBranches?.length));
-      void loadContext(this, operation, { history, flow: changed.has("flow") }).catch((error) => {
+      const historyVisible = this.section === "history" || this.standalone === "history";
+      const loadHistory = history && !(delayedHistory && !historyVisible);
+      if (history && !loadHistory) this.historyRefreshPending = true;
+      void this.loadContext(operation, { history: loadHistory, flow: changed.has("flow"), deferHistory: history && !loadHistory }).catch((error) => {
         if (openGen === this.openGen && this.viewing(path)) this.actionError = this.message(error);
       });
       if (changed.has("config")) { this.facts = null; this.factsPath = ""; }
-    }, 0);
+    }, delay);
   }
 
 
@@ -3842,7 +3878,10 @@ export class ShellState {
         const superseded = background && this.busy;
         if (current() && !superseded) {
           if (value.path && value.staged && value.unstaged) this.applySnapshot(value);
-          if (refreshContext && value.refreshScope !== "status") this.scheduleAuxiliary(value.refreshAreas ?? areasFor(action), operation);
+          if (refreshContext && value.refreshScope !== "status") {
+            const deferHistory = background && action === "fetch";
+            this.scheduleAuxiliary(value.refreshAreas ?? areasFor(action), operation, deferHistory);
+          }
           if (!background && this.viewing(path)) {
             if (action === "stagePaths") refreshStageDiff = true;
             else refreshStageDiff = areasFor(action).some((area) => area === "worktree" || area === "index");
@@ -3986,17 +4025,120 @@ export class ShellState {
 
 
 
-  doFetch(source: "user" | "background" = "user") {
-    const remote = this.settings.fetchAllRemotes ? null : this.refs?.remotes[0]?.name ?? null;
-    const request = { action: "fetch", remote, prune: this.settings.fetchPrune, tags: this.settings.fetchTags };
-    if (source !== "background") return this.mutate(request, source);
+  automaticFetchState(key: string) {
+    let state = this.automaticFetchStates.get(key);
+    if (!state) {
+      state = { lastAttemptAt: 0, nextAttemptAt: 0, failures: 0, pending: false };
+      this.automaticFetchStates.set(key, state);
+      while (this.automaticFetchStates.size > 32) this.automaticFetchStates.delete(this.automaticFetchStates.keys().next().value!);
+    }
+    return state;
+  }
+
+  automaticFetchRemote(): string | null | undefined {
+    const refs = this.refs;
+    if (!refs || refs.remotes.length === 0) return undefined;
+    if (this.settings.fetchAllRemotes) return null;
+    const current = refs.branches.find((branch) => branch.current);
+    const upstream = current?.upstream ?? "";
+    const upstreamRemote = [...refs.remotes]
+      .sort((left, right) => right.name.length - left.name.length)
+      .find((remote) => upstream.startsWith(`${remote.name}/`));
+    return upstreamRemote?.name ?? refs.remotes[0]?.name;
+  }
+
+  automaticFetchBackoff(failures: number) {
+    return Math.min(AUTOMATIC_FETCH_MAX_BACKOFF_MS, 60 * 1000 * 2 ** Math.max(0, failures - 1));
+  }
+
+  noteAutomaticFetchAttempt(key: string) {
+    const state = this.automaticFetchState(key);
+    state.lastAttemptAt = Date.now();
+    state.pending = false;
+  }
+
+  noteAutomaticFetchResult(key: string, result: unknown) {
+    const state = this.automaticFetchState(key);
+    if (state.lastAttemptAt === 0) state.lastAttemptAt = Date.now();
+    state.pending = false;
+    if (result === "completed") {
+      state.failures = 0;
+      state.nextAttemptAt = 0;
+      return;
+    }
+    state.failures = Math.min(8, state.failures + 1);
+    const delay = this.automaticFetchBackoff(state.failures);
+    state.nextAttemptAt = Date.now() + delay;
+    state.pending = true;
+    if (this.settings.fetchAutomatically && this.mode === "live" && this.jobKey(this.repoPath()) === key && this.automaticFetchTimer === null) {
+      this.scheduleAutomaticFetch(delay);
+    }
+  }
+
+  requestAutomaticFetch(reason: "ready" | "focus" | "periodic" | "idle" = "ready") {
+    if (!this.settings.fetchAutomatically || this.mode !== "live") return;
     const path = this.repoPath();
     const key = this.jobKey(path);
-    if (!key || this.backgroundFetch.has(key) || this.busy || this.userWrites > 0 || this.dialog === "pull") return;
+    if (!path || !key || !this.snapshot) return;
+    const state = this.automaticFetchState(key);
+    if (reason === "idle" && !state.pending) return;
+    const now = Date.now();
+    if (state.nextAttemptAt > now) {
+      if (this.automaticFetchTimer === null && this.jobKey(this.repoPath()) === key) {
+        this.scheduleAutomaticFetch(state.nextAttemptAt - now);
+      }
+      return;
+    }
+    const minimum = reason === "focus" || (reason === "ready" && state.lastAttemptAt > 0) ? AUTOMATIC_FETCH_FOCUS_STALE_MS
+      : reason === "periodic" ? AUTOMATIC_FETCH_INTERVAL_MS : 0;
+    if (state.lastAttemptAt > 0 && now - state.lastAttemptAt < minimum) return;
+    if (!this.refs || this.automaticFetchRemote() === undefined) {
+      state.pending = true;
+      return;
+    }
+    if (this.busy || this.refreshing || this.userWrites > 0 || this.dialog === "pull" || this.backgroundFetch.has(key)) {
+      state.pending = true;
+      return;
+    }
+    if (this.automaticFetchTimer === null) this.scheduleAutomaticFetch();
+  }
+
+  doFetch(source: "user" | "background" = "user") {
+    const path = this.repoPath();
+    const key = this.jobKey(path);
+    const remote = source === "background" ? this.automaticFetchRemote() : this.settings.fetchAllRemotes ? null : this.refs?.remotes[0]?.name ?? null;
+    if (source === "background" && remote === undefined) {
+      if (key) this.automaticFetchState(key).pending = true;
+      return;
+    }
+    const request = { action: "fetch", remote: remote ?? null, prune: this.settings.fetchPrune, tags: this.settings.fetchTags };
+    if (source !== "background") {
+      return this.mutate(request, source).then((result) => {
+        if (key && result !== undefined) this.noteAutomaticFetchResult(key, result);
+        return result;
+      }, (error) => {
+        if (key) this.noteAutomaticFetchResult(key, "failed");
+        throw error;
+      });
+    }
+    if (!key || this.backgroundFetch.has(key) || this.busy || this.refreshing || this.userWrites > 0 || this.dialog === "pull") {
+      if (key) this.automaticFetchState(key).pending = true;
+      return;
+    }
+    this.noteAutomaticFetchAttempt(key);
     this.backgroundFetch.add(key);
-    return this.mutate(request, source).finally(() => {
+    return this.mutate(request, source).then((result) => {
+      this.noteAutomaticFetchResult(key, result);
+      return result;
+    }, (error) => {
+      this.noteAutomaticFetchResult(key, "failed");
+      throw error;
+    }).finally(() => {
       this.backgroundFetch.delete(key);
-      if (this.viewing(path)) this.replayWatch();
+      if (this.viewing(path)) {
+        this.replayWatch();
+        this.requestAutomaticFetch("idle");
+      }
     });
   }
 
@@ -4005,14 +4147,14 @@ export class ShellState {
     this.automaticFetchTimer = null;
   }
 
-  scheduleAutomaticFetch() {
-    this.cancelAutomaticFetch();
+  scheduleAutomaticFetch(delay = AUTOMATIC_FETCH_DELAY_MS) {
+    if (this.automaticFetchTimer !== null) return;
     const path = this.repoPath();
     const gen = this.openGen;
     this.automaticFetchTimer = setTimeout(() => {
       this.automaticFetchTimer = null;
       if (gen === this.openGen && this.viewing(path) && this.settings.fetchAutomatically) void this.doFetch("background");
-    }, 1000);
+    }, delay);
   }
 
 
@@ -5327,6 +5469,7 @@ export class ShellState {
     if (!this.backend() || !path.trim()) return;
     if (!this.viewing(path)) this.commitSelection.clear();
     const stayingOnRepo = this.viewing(path);
+    if (!stayingOnRepo) this.cancelAutomaticFetch();
     if (!stayingOnRepo) this.rememberRepositoryView();
     this.dialog = null;
     this.textMerge = false;
@@ -5432,7 +5575,6 @@ export class ShellState {
       if (!running) this.stopWork(stopAt);
       if (gen === this.openGen) this.focusPath = null;
     }
-    if (gen === this.openGen && this.settings.fetchAutomatically && this.viewing(path) && !this.busy) this.scheduleAutomaticFetch();
   }
 
 
@@ -7293,6 +7435,24 @@ export class ShellState {
       this.replayWatch();
     });
     $effect(() => {
+      const enabled = this.settings.fetchAutomatically;
+      const path = this.repoPath();
+      const refs = this.refs;
+      if (enabled && this.mode === "live" && path && refs) this.requestAutomaticFetch("ready");
+    });
+    $effect(() => {
+      const idle = !this.busy && !this.refreshing && this.userWrites === 0 && this.dialog !== "pull";
+      if (idle) this.requestAutomaticFetch("idle");
+    });
+    $effect(() => {
+      this.section;
+      this.standalone;
+      this.historyRefreshPending;
+      this.busy;
+      this.refreshing;
+      this.refreshPendingHistory();
+    });
+    $effect(() => {
       const visible = this.section === "history" || this.standalone === "history";
       if (!visible) return;
       const straight = this.liveFold.straight;
@@ -7329,9 +7489,7 @@ export class ShellState {
     });
     $effect(() => {
     if (!this.settings.fetchAutomatically) return;
-    const timer = window.setInterval(() => {
-    if (!this.busy && this.snapshot) this.scheduleAutomaticFetch();
-    }, 10 * 60 * 1000);
+    const timer = window.setInterval(() => this.requestAutomaticFetch("periodic"), AUTOMATIC_FETCH_INTERVAL_MS);
     return () => { window.clearInterval(timer); this.cancelAutomaticFetch(); };
     });
     $effect(() => {
@@ -7446,6 +7604,12 @@ export class ShellState {
     this.goBack();
     };
     const onShortcut = this.onShortcut.bind(this);
+    const onWindowFocus = () => {
+      if (this.inApp() && !document.hidden) this.requestAutomaticFetch("focus");
+    };
+    const onVisibilityChange = () => {
+      if (this.inApp() && !document.hidden) this.requestAutomaticFetch("focus");
+    };
     const stopLocale = onLocaleChange((locale) => { this.settings.locale = locale; });
     const stopAppearance = onAppearanceChange((theme) => {
       if (this.prefsBaseline) this.prefsBaseline = { ...this.prefsBaseline, theme };
@@ -7453,6 +7617,8 @@ export class ShellState {
     });
     const onRememberPointer = this.rememberPointer.bind(this);
     window.addEventListener("keydown", onShortcut);
+    window.addEventListener("focus", onWindowFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("mousedown", onMouseNav);
     window.addEventListener("mousedown", onRememberPointer, true);
     window.addEventListener("mouseup", onMouseNav);
@@ -7466,6 +7632,8 @@ export class ShellState {
     stopAppearance();
     window.clearTimeout(historyTimer);
     window.removeEventListener("keydown", onShortcut);
+    window.removeEventListener("focus", onWindowFocus);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
     window.removeEventListener("mousedown", onMouseNav);
     window.removeEventListener("mousedown", onRememberPointer, true);
     window.removeEventListener("mouseup", onMouseNav);
