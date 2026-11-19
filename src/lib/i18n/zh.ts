@@ -954,6 +954,8 @@ export const zh: Messages = {
     includeTags: "包含标签",
     pruneOnFetch: "清理已删除的远程分支",
     pullWithRebase: "拉取时用变基代替合并",
+    excelAutoSaveOnPull: "拉取前自动保存并关闭 Excel",
+    excelAutoSaveOnPullHint: "拉取结束后重新打开当前仓库目录下的 Excel 工作簿；仅桌面版 Windows 生效。",
     forceWithLease: "使用 --force-with-lease",
     killerPush: "Killer 推送",
     killerPushHint: "推送被远程新提交拒绝时，自动拉取后再推一次；合并或变基冲突时中止并恢复现场。直接推送成功不会增加任何操作。",

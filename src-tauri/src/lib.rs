@@ -5,6 +5,7 @@ mod changes;
 #[cfg(test)]
 mod command_acl;
 mod development;
+mod excel;
 mod forge;
 mod fonts;
 mod flow_window;
@@ -646,6 +647,12 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             | "stash" | "stashPop" | "stashApply" | "stashDrop" | "stashPaths"
         )).then(|| awegit_git::pull_refresh_state(&repo)).flatten();
         let before_head = before_refs.as_ref().map(|state| state.head().to_string());
+        let excel_session = if settings::load().map(|values| values.excel_auto_save_on_pull).unwrap_or(true)
+            && matches!(action_name, "pull" | "pullRef") {
+            excel::prepare(&repo)?
+        } else {
+            None
+        };
         let flow = if push_noop {
             None
         } else {
@@ -673,6 +680,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         } else {
             action()
         };
+        let excel_restore_error = excel_session.as_ref().and_then(|session| excel::restore(session).err());
         // Killer recovery integrated remote history in a push, so the work tree,
         // index, and history changed with HEAD. A plain push never moves HEAD.
         if killer_push && result.is_ok() && before_head.as_deref().is_some_and(|head|
@@ -696,7 +704,13 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         let conflicted = conflict_capable && status.as_ref().is_some_and(|status| status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict));
         let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
         let error = result.as_ref().err().map(ToString::to_string).unwrap_or_default();
-        let output = result.unwrap_or_default();
+        let mut output = result.unwrap_or_default();
+        if let Some(error) = excel_restore_error {
+            if !output.trim().is_empty() {
+                output.push_str("\n\n");
+            }
+            output.push_str(&format!("Excel reopen warning: {error}"));
+        }
         Ok(MutationReport {
             status,
             status_paths,

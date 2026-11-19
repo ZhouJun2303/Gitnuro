@@ -24,6 +24,9 @@ pub struct Settings {
     pub theme: String,
     #[serde(default)]
     pub pull_rebase: bool,
+    /// Save and close Excel workbooks inside the repository before a pull, then reopen them.
+    #[serde(default = "default_true")]
+    pub excel_auto_save_on_pull: bool,
     #[serde(default)]
     pub autostash_include_untracked: bool,
     #[serde(default = "default_true")]
@@ -553,6 +556,7 @@ impl Default for Settings {
             recovery_notice: String::new(),
             theme: theme_default(),
             pull_rebase: false,
+            excel_auto_save_on_pull: true,
             autostash_include_untracked: false,
             fetch_prune: true,
             diff_style: split_style(),
@@ -1634,6 +1638,13 @@ mod tests {
             assert_eq!(saved["autostashIncludeUntracked"], enabled);
             assert_eq!(serde_json::from_value::<Settings>(saved).unwrap().autostash_include_untracked, enabled);
         }
+    }
+
+    #[test]
+    fn excel_auto_save_on_pull_defaults_on_and_can_be_disabled() {
+        assert!(Settings::default().excel_auto_save_on_pull);
+        assert!(serde_json::from_str::<Settings>(r#"{}"#).unwrap().excel_auto_save_on_pull);
+        assert!(!serde_json::from_str::<Settings>(r#"{"excelAutoSaveOnPull":false}"#).unwrap().excel_auto_save_on_pull);
     }
 
     #[test]

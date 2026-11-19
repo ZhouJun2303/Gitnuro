@@ -953,6 +953,8 @@ export const en: Messages = {
     includeTags: "Include tags",
     pruneOnFetch: "Prune deleted remote branches",
     pullWithRebase: "Rebase instead of merge",
+    excelAutoSaveOnPull: "Save and close Excel before pulling",
+    excelAutoSaveOnPullHint: "Reopens Excel workbooks from the current repository after the pull; desktop Windows only.",
     forceWithLease: "Use --force-with-lease",
     killerPush: "Killer push",
     killerPushHint: "When new remote commits reject a push, pull and retry once; a merge or rebase conflict aborts and restores the work tree. A push that succeeds directly runs no extra operation.",

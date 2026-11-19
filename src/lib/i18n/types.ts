@@ -894,6 +894,8 @@ export type Messages = {
     includeTags: string;
     pruneOnFetch: string;
     pullWithRebase: string;
+    excelAutoSaveOnPull: string;
+    excelAutoSaveOnPullHint: string;
     forceWithLease: string;
     killerPush: string;
     killerPushHint: string;

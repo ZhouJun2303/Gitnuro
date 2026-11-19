@@ -249,6 +249,7 @@ export class ShellState {
   defaultSettings: Settings = {
     theme: "apple",
     pullRebase: false,
+    excelAutoSaveOnPull: true,
     autostashIncludeUntracked: false,
     fetchPrune: true,
     diffStyle: "split",

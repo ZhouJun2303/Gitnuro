@@ -183,6 +183,8 @@ export type TerminalCli = (typeof terminalCliNames)[number];
 export type Settings = {
   theme: string;
   pullRebase: boolean;
+  /** Save and close Excel workbooks inside the repository during a pull. */
+  excelAutoSaveOnPull: boolean;
   autostashIncludeUntracked: boolean;
   fetchPrune: boolean;
   diffStyle: string;
