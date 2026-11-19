@@ -42,6 +42,7 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
     await expect(page.locator('[data-shortcut="launch"] .shortcut-key')).toHaveText(["Ctrl+K", "Ctrl+P"]);
     await expect(page.locator('[data-shortcut="performance"] .shortcut-key')).toHaveText("Ctrl+Alt+P");
+    await expect(page.locator('[data-shortcut="toggleLite"] .shortcut-key')).toHaveText("Ctrl+Alt+Shift+M");
     await expect(page.locator(".shortcut-row")).toHaveCount(44);
   });
 }

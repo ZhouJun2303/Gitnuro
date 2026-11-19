@@ -108,7 +108,7 @@ const base: Array<[Shortcut, Chord[]]> = [
   ["tabRight", [{ key: "Tab", ctrl: true }]],
   ["settings", [{ key: ",", ctrl: true }]],
   ["switchLanguage", [{ key: "l", ctrl: true, alt: true }]],
-  ["toggleLite", [{ key: "m", ctrl: true, alt: true }]],
+  ["toggleLite", [{ key: "m", ctrl: true, alt: true, shift: true }]],
   ["launch", [{ key: "k", ctrl: true }, { key: "p", ctrl: true }]],
   ["back", [{ key: "ArrowLeft", alt: true }]],
   ["forward", [{ key: "ArrowRight", alt: true }]],

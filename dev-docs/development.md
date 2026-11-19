@@ -329,7 +329,7 @@ Windows 更新清单与安装包默认使用 WinHTTP 流式下载，采用系统
 
 ## 高性能 Lite
 
-Lite 是紧凑工作台，设置项 `liteMode` 决定启动模式，`liteAgent` 记住所选 CLI，`cliPaths` 按 CLI 名保存完整的可执行文件路径（留空则走 PATH 检测，填了但文件不存在会报找不到 CLI，不会悄悄换用别的）。只有设置里有 API key 且当前仓库至少一个 remote 时才能启用；`Ctrl+Alt+M` 走同一校验。智能同步按现有 pull / push 偏好执行；AI 代理通过 `run_lite_agent` 调用已检测或指定路径的 CLI，CLI 只改文件和解决冲突，提交、拉取、推送仍由 AweGit 完成。出现冲突时写回 `liteMode=false` 并打开正常版的冲突界面。
+Lite 是紧凑工作台，设置项 `liteMode` 决定启动模式，`liteAgent` 记住所选 CLI，`cliPaths` 按 CLI 名保存完整的可执行文件路径（留空则走 PATH 检测，填了但文件不存在会报找不到 CLI，不会悄悄换用别的）。只有设置里有 API key 且当前仓库至少一个 remote 时才能启用；`Ctrl+Alt+Shift+M` 走同一校验。智能同步按现有 pull / push 偏好执行；AI 代理通过 `run_lite_agent` 调用已检测或指定路径的 CLI，CLI 只改文件和解决冲突，提交、拉取、推送仍由 AweGit 完成。出现冲突时写回 `liteMode=false` 并打开正常版的冲突界面。
 
 窗口只渲染仓库、分支、领先 / 落后、改动数量和两个动作，沿用现有任务队列的动画和进度思路；CLI 的 stdout / stderr 通过 `lite-agent` 事件流式显示，输出上限 64 KB。LiteView 挂载时把主窗口最小尺寸降到 360×480，并收成 440×640；退出时恢复进入前的尺寸和 960×640 最小尺寸。Lite 期间的移动和缩放不写入窗口位置，避免小窗尺寸覆盖正常版的窗口记忆。提示词写入系统临时文件后删除：Codex 和 Claude 从 stdin 读取，Grok 使用 `--prompt-file`，Cursor Agent 使用单行参数，避免 Windows 下 npm 的 `.cmd` 包装器丢失引号或拒绝多行参数。
 
@@ -414,7 +414,7 @@ pnpm package:mac
 | 后退 / 前进 | `Alt+Left` / `Alt+Right` |
 | 设置 | `Ctrl+,` |
 | 切换中英文 | `Ctrl+Alt+L` |
-| 切换高性能 Lite | `Ctrl+Alt+M` |
+| 切换高性能 Lite | `Ctrl+Alt+Shift+M` |
 | 在文件管理器中显示 | `Ctrl+Alt+O` |
 | 打开终端 | `Ctrl+Alt+Shift+T` |
 | 性能面板 | `Ctrl+Alt+P` |
