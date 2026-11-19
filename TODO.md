@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] `5256d6f8`：工作区项目标签支持拖动调整顺序，顺序随工作区保存；标签名按标签宽度在 13–10px 间缩放，到最小字号后显示省略号。回归：`e2e/workspace-files.spec.ts` 的 `project tabs keep the dragged order in the workspace`、`project names shrink with the tab and ellipsize at the minimum`。
+
 - [x] `d932b503`：全部提交搜索保留整表，匹配项用微光标出，上一个/下一个显示总数并滚到对应提交；Reveal in AweGit 滚到该提交。回归：`e2e/history-search.spec.ts`。
 
 - [x] `258d5141`：入队校验按仓库隔离；暂存失败回读真实状态，撤销依赖失败结果的暂存请求。回归：`slow_admission_only_delays_its_own_repository`、`e2e/stage-queue.spec.ts` 的 `a failed write restores confirmed state, cancels dependent intents and allows retry`。
