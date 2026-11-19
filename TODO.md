@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] `f4b00316`：新增 Killer 推送开关。直接推送成功仍只执行一条 `git push`；被远程新提交拒绝或 `--force-with-lease` 过期时，自动拉取并重试一次；合并或变基冲突会中止并恢复自动贮藏，本地分支与工作区保持原样。推送按钮右上角的 K 角标表示已开启。回归：`killer_push.rs` 的 `killer_push_merges_remote_commits_then_pushes_once`、`killer_push_aborts_a_conflicting_merge_and_keeps_local_history`、`killer_push_aborts_a_conflicting_rebase_and_keeps_local_history`、`killer_push_restores_uncommitted_changes_after_a_conflicting_pull`、`killer_push_off_keeps_the_plain_rejection`、`killer_push_recovers_a_stale_force_with_lease`、`push_ref_killer_replaces_a_commit_push_with_the_integrated_branch`；`e2e/killer-push.spec.ts`。
+
 - [x] `b6a6f53f`：工作区项目标签改用指针拖动，顺序随工作区保存；字号以界面字号为上限（放得下就用界面字号），放不下才按工作区逐级缩到 10px，仍放不下显示省略号。回归：`e2e/workspace-files.spec.ts` 的 `project tabs keep the dragged order in the workspace`、`project names shrink with the tab and ellipsize at the minimum`。
 
 - [x] `d932b503`：全部提交搜索保留整表，匹配项用微光标出，上一个/下一个显示总数并滚到对应提交；Reveal in AweGit 滚到该提交。回归：`e2e/history-search.spec.ts`。
