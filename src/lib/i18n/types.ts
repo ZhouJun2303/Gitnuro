@@ -149,6 +149,10 @@ export type Messages = {
     noReflog: string;
     noCommits: string;
     findCommits: string;
+    matchCount: string;
+    previousMatch: string;
+    nextMatch: string;
+    commitMissing: string;
     fileHistory: string;
     repositoryFiles: string;
     loadMore: string;

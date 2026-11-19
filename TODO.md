@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 全部提交搜索保留整表，匹配项用微光标出，上一个/下一个显示总数并滚到对应提交；Reveal in AweGit 滚到该提交。回归：`e2e/history-search.spec.ts`。
+
 - [x] `258d5141`：入队校验按仓库隔离；暂存失败回读真实状态，撤销依赖失败结果的暂存请求。回归：`slow_admission_only_delays_its_own_repository`、`e2e/stage-queue.spec.ts` 的 `a failed write restores confirmed state, cancels dependent intents and allows retry`。
 - [x] `296533fd`：写入保序，提交、丢弃、提交后推送核对原意图；增量回传任务变化，修复 Windows 文件占用提示。回归：`queued_discard_preserves_later_disk_and_index_changes`、`queued_commit_does_not_include_paths_staged_after_confirmation`、`dependent_push_uses_the_confirmed_commit_and_rejects_a_moved_head`、`task_deltas_bound_targets_and_omit_unchanged_entries`、`writes_name_the_process_and_explain_how_to_release_the_file`（正常 Windows 权限下单独通过）。
 

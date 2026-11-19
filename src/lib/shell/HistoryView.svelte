@@ -27,11 +27,18 @@
   }
 
   function restoreHistory(node: HTMLElement) {
-    const top = shell.historyTop;
     requestAnimationFrame(() => {
+      if (!node.isConnected) return;
       const max = Math.max(0, node.scrollHeight - node.clientHeight);
-      node.scrollTop = Math.min(top, max);
+      const next = Math.min(shell.historyTop, max);
+      if (Math.abs(node.scrollTop - next) > 1) node.scrollTop = next;
     });
+  }
+
+  function onCommitQuery(event: Event) {
+    if (event instanceof InputEvent && event.isComposing) return;
+    if (event.currentTarget instanceof HTMLInputElement) shell.commitQuery = event.currentTarget.value;
+    shell.followCommitQuery();
   }
 </script>
 
@@ -45,7 +52,18 @@
           {/if}
           <div class="pane-head">
             {#if shell.searchOpen.commit}
-              <input class="search" placeholder={shell.tr("chrome.findCommits")} aria-label={shell.tr("chrome.findCommits")} bind:this={shell.searchEl} bind:value={shell.commitQuery} use:focusOnMount onkeydown={(event) => { shell.searchKeys("commit", event); if (event.key === "Enter") shell.commitSearchEnter(); }} onblur={() => shell.searchBlur("commit")} />
+              <input class="search" placeholder={shell.tr("chrome.findCommits")} aria-label={shell.tr("chrome.findCommits")} bind:this={shell.searchEl} bind:value={shell.commitQuery} use:focusOnMount oninput={onCommitQuery} oncompositionend={onCommitQuery} onkeydown={(event) => { if (event.key === "Enter") { event.preventDefault(); shell.commitSearchEnter(event); return; } if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); shell.stepCommitMatch(event.key === "ArrowDown" ? 1 : -1); return; } shell.searchKeys("commit", event); }} onblur={() => shell.searchBlur("commit")} />
+              {#if shell.commitQuery.trim() && !/^[sg]:/i.test(shell.commitQuery.trim())}
+                <span class="count match-count" data-match-count={shell.commitMatchIndexes.length} aria-live="polite">{shell.commitMatchLabel()}</span>
+                {#if shell.commitMatchIndexes.length > 1}
+                  <button class="icon-btn match-nav" type="button" aria-label={shell.tr("chrome.previousMatch")} title={shell.tr("chrome.previousMatch")} onmousedown={(event) => event.preventDefault()} onclick={() => shell.stepCommitMatch(-1)}>
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10.5 8 5.5l4 5"/></svg>
+                  </button>
+                  <button class="icon-btn match-nav" type="button" aria-label={shell.tr("chrome.nextMatch")} title={shell.tr("chrome.nextMatch")} onmousedown={(event) => event.preventDefault()} onclick={() => shell.stepCommitMatch(1)}>
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5 8 10.5l4-5"/></svg>
+                  </button>
+                {/if}
+              {/if}
             {:else}
               <span class="pane-title">{shell.tr("chrome.allCommits")}</span>
             {/if}
@@ -79,8 +97,8 @@
               </div>
             {/if}
           {:else if shell.mode !== "sample"}
-            {#if shell.shownCommits.length === 0}
-              <p class="empty">{shell.commitQuery.trim() || shell.historyFilter ? shell.tr("chrome.noMatch") : shell.tr("chrome.noCommits")}</p>
+            {#if shell.historyItems.length === 0}
+              <p class="empty">{shell.historyFilter ? shell.tr("chrome.noMatch") : shell.tr("chrome.noCommits")}</p>
             {:else}
               <div class="commit-window" style:height="{shell.historyItems.length * shell.rowCommit}px">
                 {#each shell.historyRows as commit, index (commit.id)}
@@ -89,6 +107,8 @@
                 {@const plate = shell.stashParts(commit.summary, commit.refs)}
                   <div
                     class="commit-row virtual"
+                    class:match={shell.commitHit(shell.historyStart + index)}
+                    class:current-match={shell.historyStart + index === shell.commitMatchCurrent}
                     class:selected={shell.commitSelection.has(commit.id, shell.selectedCommit)}
                     aria-pressed={shell.commitSelection.has(commit.id, shell.selectedCommit)}
                     data-commit-id={commit.id}
@@ -170,7 +190,7 @@
                 {@const graphRow = shell.sampleShownGraph.rows[index] ?? []}
                 {@const tone = shell.laneTone(graphRow)}
                 {@const plate = shell.stashParts(commit.summary, commit.badges)}
-                <button class="commit-row" class:selected={shell.commitSelection.has(commit.id, shell.selectedCommit)} class:unpushed={shell.isCommitUnpushed(commit)} class:pushed={(shell.refs?.remotes.length ?? 0) > 0 && !shell.isCommitUnpushed(commit) && commit.remoteOnly !== true} class:remote-only={commit.remoteOnly === true} type="button" onclick={(event) => shell.selectSample(commit.id, event)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
+                <button class="commit-row" data-commit-id={commit.id} class:match={shell.commitHit(index)} class:current-match={index === shell.commitMatchCurrent} class:selected={shell.commitSelection.has(commit.id, shell.selectedCommit)} class:unpushed={shell.isCommitUnpushed(commit)} class:pushed={(shell.refs?.remotes.length ?? 0) > 0 && !shell.isCommitUnpushed(commit) && commit.remoteOnly !== true} class:remote-only={commit.remoteOnly === true} type="button" onclick={(event) => shell.selectSample(commit.id, event)} oncontextmenu={(event) => commit.badges.includes("stash") ? shell.openMenu(event, [{ label: shell.tr("menu.apply"), disabled: true }, { label: shell.tr("menu.pop"), disabled: true }, { label: shell.tr("menu.drop"), disabled: true }]) : shell.openMenu(event, shell.commitMenu(commit))}>
                   {@render laneGraph(graphRow, commit.id)}
                   <span class="commit-copy">
                     {@render branchChips(shell.branchRefLabels(commit.badges), tone, activeColor)}

@@ -944,7 +944,7 @@ input[type="checkbox"]:disabled,
     margin-left: auto;
   }
 
-.pane-head .search + .search-toggle {
+.pane-head .search ~ .search-toggle {
     margin-left: 0;
   }
 

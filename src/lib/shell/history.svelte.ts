@@ -894,13 +894,182 @@ export function whenLabel(shell: ShellState, commit: CommitRow) {
     return formatCommitDate(shell, commit.at, commit.when);
   }
 
-export function scrollToCommit(shell: ShellState, id: string) {
-    const index = shell.historyItems.findIndex((commit) => commit.id === id);
+const historyScrollToken = new WeakMap<ShellState, number>();
+
+export function scrollToCommit(shell: ShellState, id: string, index = -1) {
+    if (shell.mode === "sample") {
+      const node = shell.historyEl?.querySelector<HTMLElement>(`[data-commit-id="${CSS.escape(id)}"]`);
+      node?.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    if (index < 0) index = shell.historyItems.findIndex((commit) => commit.id === id);
     if (index < 0) return;
-    const view = shell.historyEl?.clientHeight ?? 0;
-    const top = Math.max(0, index * shell.rowCommit - Math.max(0, view / 2 - shell.rowCommit));
+    const row = shell.rowCommit || 28;
+    const node = shell.historyEl;
+    const view = node?.clientHeight || shell.historyHeight || 0;
+    const target = index * row;
+    const top = Math.max(0, target - Math.max(0, (view - row) / 2));
+    const current = node?.scrollTop ?? shell.historyTop;
+    const padding = row;
+    if (view > 0 && target >= current + padding && target + row <= current + view - padding) {
+      if (Math.abs(shell.historyTop - current) > 1) shell.historyTop = current;
+      return;
+    }
     shell.historyTop = top;
-    shell.historyEl?.scrollTo({ top });
+    if (!node) return;
+    const token = (historyScrollToken.get(shell) ?? 0) + 1;
+    historyScrollToken.set(shell, token);
+    let tries = 0;
+    const apply = () => {
+      if (historyScrollToken.get(shell) !== token || shell.historyEl !== node) return;
+      tries += 1;
+      const height = node.clientHeight || view;
+      const nextTop = Math.max(0, target - Math.max(0, (height - row) / 2));
+      const max = Math.max(0, node.scrollHeight - node.clientHeight);
+      const next = Math.min(nextTop, max);
+      if (Math.abs(node.scrollTop - next) > 1) node.scrollTop = next;
+      if (shell.historyTop !== nextTop) shell.historyTop = nextTop;
+      const short = node.scrollHeight + 1 < (index + 1) * row;
+      if (tries < 4 && (short || (index > 0 && next + 1 < nextTop))) requestAnimationFrame(apply);
+    };
+    apply();
+  }
+
+function matchRows(shell: ShellState) {
+    return shell.mode === "sample" ? shell.sampleShown : shell.historyItems;
+  }
+
+export function followCommitQuery(shell: ShellState) {
+    shell.commitMatchCursor = 0;
+    const query = shell.commitQuery.trim();
+    if (!query || /^[sg]:/i.test(query) || shell.commitMatchIndexes.length === 0) return;
+    const index = shell.commitMatchIndexes[0] ?? -1;
+    const id = matchRows(shell)[index]?.id ?? "";
+    if (id) scrollToCommit(shell, id, shell.mode === "sample" ? -1 : index);
+  }
+
+export function stepCommitMatch(shell: ShellState, delta: number) {
+    const hits = shell.commitMatchIndexes;
+    const total = hits.length;
+    if (total === 0) return;
+    const cursor = shell.commitMatchCursor;
+    const from = cursor < 0 || cursor >= total ? 0 : cursor;
+    const next = (from + delta + total) % total;
+    shell.commitMatchCursor = next;
+    const index = hits[next] ?? -1;
+    const id = matchRows(shell)[index]?.id ?? "";
+    if (!id) return;
+    scrollToCommit(shell, id, shell.mode === "sample" ? -1 : index);
+    if (shell.mode === "sample") shell.selectSample(id);
+    else shell.selectCommitSoon(id);
+  }
+
+function expandToCommit(shell: ShellState, id: string) {
+    const expanded = new Set(shell.expandedMerges);
+    let changed = false;
+    for (let guard = 0; guard < 8; guard += 1) {
+      const fold = shell.liveFold;
+      if (!fold?.hidden.has(id)) break;
+      const owner = fold.owner.get(id);
+      if (!owner || expanded.has(owner)) break;
+      expanded.add(owner);
+      changed = true;
+      shell.expandedMerges = [...expanded];
+    }
+    return changed;
+  }
+
+function nextFrame() {
+    return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+async function presentCommit(shell: ShellState, id: string, current: () => boolean) {
+    if (!current()) return;
+    expandToCommit(shell, id);
+    await tick();
+    if (!current()) return;
+    scrollToCommit(shell, id);
+    await nextFrame();
+    if (!current()) return;
+    scrollToCommit(shell, id);
+    if (!current()) return;
+    shell.selectCommitSoon(id);
+  }
+
+const REVEAL_LIMIT = 20_000;
+
+async function loadCommitPage(shell: ShellState, path: string, id: string, current: () => boolean) {
+    const order = shell.settings.commitSort === "topo" ? "topo" : "date";
+    let limit = Math.max(shell.logLimit, shell.commitsLive.length, 500);
+    if (shell.commitsLive.length >= limit) limit = Math.min(REVEAL_LIMIT, Math.max(limit * 4, limit + 1));
+    while (current() && limit <= REVEAL_LIMIT) {
+      const revs = shell.allBranches ? [] : shell.exactRefs();
+      const rows = await invoke<CommitRow[]>("commit_log", {
+        path,
+        limit,
+        order,
+        all: shell.allBranches || revs.length === 0,
+        revs,
+      });
+      if (!current()) return null;
+      const hit = rows.find((commit) => commit.id === id || commit.id.startsWith(id));
+      if (hit) return { id: hit.id, rows, widened: false };
+      if (rows.length < limit) break;
+      const next = Math.min(REVEAL_LIMIT, limit * 4);
+      if (next === limit) break;
+      limit = next;
+    }
+    if (!current()) return null;
+    const located = await invoke<{ id: string; commits: CommitRow[] }>("locate_ref", { path, name: id, order });
+    if (!current()) return null;
+    const hit = located.commits.find((commit) => commit.id === located.id)
+      ?? located.commits.find((commit) => commit.id === id || commit.id.startsWith(id));
+    if (!hit) {
+      shell.actionError = shell.tr("chrome.commitMissing");
+      return null;
+    }
+    return { id: hit.id, rows: located.commits, widened: !shell.allBranches };
+  }
+
+/** Open All commits and scroll that row into view, loading older history only when the row is not loaded yet. */
+export async function revealCommit(shell: ShellState, id: string) {
+    if (shell.mode !== "live" || !id) return;
+    const seq = ++shell.locateSeq;
+    const path = shell.repoPath();
+    const openGen = shell.openGen;
+    const current = () => seq === shell.locateSeq && openGen === shell.openGen && !!path && shell.viewing(path);
+    shell.openHistory();
+    shell.reflogOn = false;
+    shell.treeOn = false;
+    const filtered = shell.historyFilter !== "";
+    if (filtered) shell.historyFilter = "";
+    if (shell.commitQuery.trim()) shell.commitQuery = "";
+    shell.contentHits = null;
+    shell.actionError = null;
+    const known = !filtered ? shell.commitsLive.find((commit) => commit.id === id || (id.length >= 4 && commit.id.startsWith(id))) : undefined;
+    if (known) {
+      await presentCommit(shell, known.id, current);
+      return;
+    }
+    if (!path) return;
+    await shell.withWork(shell.tr("chrome.locating", { name: id.slice(0, 7) }), async () => {
+      try {
+        const found = await loadCommitPage(shell, path, id, current);
+        if (!current() || !found) return;
+        shell.contextGen += 1;
+        shell.logLimit = Math.min(REVEAL_LIMIT, Math.max(shell.logLimit, found.rows.length));
+        if (found.widened) {
+          shell.allBranches = true;
+          shell.graphSolo = null;
+          shell.graphBranches = [];
+          shell.rememberHistoryFilter();
+        }
+        if (!sameHistory(shell.commitsLive, found.rows)) shell.commitsLive = found.rows;
+        await presentCommit(shell, found.id, current);
+      } catch (error) {
+        if (current()) shell.actionError = shell.message(error);
+      }
+    });
   }
 
 export function openHistory(shell: ShellState) {
@@ -910,6 +1079,10 @@ export function openHistory(shell: ShellState) {
   }
 
 export async function locateRef(shell: ShellState, name: string) {
+    if (/^[0-9a-f]{4,64}$/i.test(name)) {
+      await revealCommit(shell, name);
+      return;
+    }
     if (shell.mode !== "live") return;
     // A double click fires two clicks, then checkout. Only the newest locate keeps going.
     const seq = ++shell.locateSeq;

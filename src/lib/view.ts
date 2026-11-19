@@ -491,6 +491,59 @@ export function sameHistory(left: CommitRow[], right: CommitRow[]) {
   return true;
 }
 
+export type CommitMatchRow = {
+  id: string;
+  shortId?: string;
+  summary?: string;
+  author?: string;
+  email?: string;
+  refs?: readonly string[];
+  badges?: readonly string[];
+};
+
+const NO_COMMIT_HITS: readonly number[] = [];
+
+function commitHaystack(row: CommitMatchRow | undefined) {
+  const labels = row?.refs ?? row?.badges ?? [];
+  return `${row?.summary ?? ""}\n${row?.author ?? ""}\n${row?.email ?? ""}\n${labels.join("\n")}`.toLowerCase();
+}
+
+/** Lowercased text searched by the history find box. Built once per row list, not per keystroke. */
+export function commitHaystacks(rows: readonly CommitMatchRow[]) {
+  const text = new Array<string>(rows.length);
+  for (let index = 0; index < rows.length; index += 1) text[index] = commitHaystack(rows[index]);
+  return text;
+}
+
+/** Indexes of commits the find box should ring. `S:` and `G:` stay content searches and match nothing here. */
+export function commitHitIndexes(rows: readonly CommitMatchRow[], query: string, needles?: readonly string[]): readonly number[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle || needle.startsWith("s:") || needle.startsWith("g:")) return NO_COMMIT_HITS;
+  const hex = /^[0-9a-f]{4,}$/.test(needle);
+  const hits: number[] = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (!row) continue;
+    const haystack = needles ? (needles[index] ?? "") : commitHaystack(row);
+    if (haystack.includes(needle) || (hex && (row.id.toLowerCase().startsWith(needle) || (row.shortId ?? "").toLowerCase().startsWith(needle)))) hits.push(index);
+  }
+  return hits;
+}
+
+/** `indexes` is sorted. Visible rows use this instead of allocating a set for every keystroke. */
+export function hitContains(indexes: readonly number[], at: number) {
+  let low = 0;
+  let high = indexes.length - 1;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const value = indexes[mid] ?? -1;
+    if (value === at) return true;
+    if (value < at) low = mid + 1;
+    else high = mid - 1;
+  }
+  return false;
+}
+
 /** Coalesce scroll events so a virtual list writes state at most once per frame. */
 export function onVirtualScroll(apply: (top: number) => void) {
   let frame = 0;

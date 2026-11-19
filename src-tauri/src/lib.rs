@@ -2466,7 +2466,12 @@ struct HistoryActionRequest {
 
 #[tauri::command]
 fn reveal_commit(app: tauri::AppHandle, repo: String, id: String) -> Result<(), String> {
-    app.emit("awegit-reveal", RevealCommit { repo, id }).map_err(|error| error.to_string())
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    app.emit_to("main", "awegit-reveal", RevealCommit { repo, id }).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

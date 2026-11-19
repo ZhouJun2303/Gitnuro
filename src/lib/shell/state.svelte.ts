@@ -17,7 +17,7 @@ import { broadcastLocale, onLocaleChange } from "../i18n/sync";
 import { confirmAppearance, isAppearance, onAppearanceChange, pendingAppearance, rememberAppearance, resolveAppearance, type Appearance } from "../appearance";
 import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
 import { configureShortcuts, shortcut, shortcutLabel, typing } from "../keys";
-import { branchGroup, changedRanges, commitGraph, foldedMerges, formatWhen, gravatarUrl, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
+import { branchGroup, changedRanges, commitGraph, commitHaystacks, commitHitIndexes, foldedMerges, formatWhen, gravatarUrl, hitContains, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
     badge,
     type AppInfo,
@@ -50,7 +50,7 @@ import {
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, selectFolder, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabDisplay, tabColor, pairSetting } from "./diff.svelte";
-import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
+import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, revealCommit, followCommitQuery, stepCommitMatch, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
@@ -960,6 +960,9 @@ export class ShellState {
 
 
   commitQuery = $state("");
+
+  /** Index into `commitMatchIndexes`, not into the history list. */
+  commitMatchCursor = $state(0);
 
 
   drops = $state<string[]>([]);
@@ -2216,25 +2219,7 @@ export class ShellState {
   });
 
 
-  shownCommits = $derived.by(() => {
-    const query = this.commitQuery.trim().toLowerCase();
-    const rows = this.commitsLive;
-    if (!query) return rows;
-    if (this.commitNeedles?.rows !== rows) {
-      this.commitNeedles = {
-        rows,
-        text: rows.map((commit) => `${commit.summary}\n${commit.author}\n${commit.email ?? ""}\n${commit.refs.join("\n")}`.toLowerCase()),
-      };
-    }
-    const text = this.commitNeedles.text;
-    const hex = /^[0-9a-f]{4,}$/.test(query);
-    const matched: CommitRow[] = [];
-    for (let index = 0; index < rows.length; index += 1) {
-      const row = rows[index];
-      if (row && (text[index]?.includes(query) || (hex && (row.id.startsWith(query) || row.shortId.startsWith(query))))) matched.push(row);
-    }
-    return matched;
-  });
+  shownCommits = $derived(this.commitsLive);
 
 
   liveFold = $derived(foldedMerges(this.commitsLive, this.expandedMerges));
@@ -2266,6 +2251,30 @@ export class ShellState {
 
 
   historyRows = $derived(this.historyWindow.rows);
+
+  /** Match indexes for the rows on screen. The full list stays mounted; only this list changes while typing. */
+  commitMatchIndexes = $derived.by(() => {
+    const query = this.commitQuery;
+    if (this.mode === "sample") return commitHitIndexes(this.sampleShown, query);
+    const needle = query.trim().toLowerCase();
+    if (!needle || needle.startsWith("s:") || needle.startsWith("g:")) return commitHitIndexes([], query);
+    const rows = this.historyItems;
+    let cached = this.commitNeedles;
+    if (!cached || cached.rows !== rows) {
+      cached = { rows, text: commitHaystacks(rows) };
+      this.commitNeedles = cached;
+    }
+    return commitHitIndexes(rows, query, cached.text);
+  });
+
+  commitMatchCurrent = $derived.by(() => {
+    const hits = this.commitMatchIndexes;
+    const total = hits.length;
+    if (total === 0) return -1;
+    const cursor = this.commitMatchCursor;
+    const at = cursor < 0 || cursor >= total ? 0 : cursor;
+    return hits[at] ?? -1;
+  });
 
 
   shownUnstaged = $derived(this.unstaged.filter((file) => this.matchesQuery(file.path, this.fileQuery) && (!this.conflictsOnly || file.letter === "C")));
@@ -2657,13 +2666,60 @@ export class ShellState {
   }
 
 
-  commitSearchEnter() {
+  commitSearchEnter(event?: Pick<KeyboardEvent, "shiftKey">) {
     const query = this.commitQuery.trim();
-    if (query.startsWith("S:") || query.startsWith("G:")) {
+    if (/^[sg]:/i.test(query)) {
       void this.searchContent(query[0] ?? "S", query.slice(2).trim());
       return;
     }
-    if (/^[0-9a-f]{4,}$/i.test(query) && this.shownCommits.length === 0) void this.locateRef(query);
+    if (this.commitMatchIndexes.length > 0) {
+      this.stepCommitMatch(event?.shiftKey ? -1 : 1);
+      return;
+    }
+    if (/^[0-9a-f]{4,}$/i.test(query)) void this.revealCommit(query);
+  }
+
+  followCommitQuery() {
+    return followCommitQuery(this);
+  }
+
+  stepCommitMatch(delta: number) {
+    return stepCommitMatch(this, delta);
+  }
+
+  commitHit(index: number) {
+    return hitContains(this.commitMatchIndexes, index);
+  }
+
+  commitMatchLabel() {
+    const total = this.commitMatchIndexes.length;
+    if (total === 0) return "0";
+    const cursor = this.commitMatchCursor;
+    const at = cursor < 0 || cursor >= total ? 0 : cursor;
+    return this.tr("chrome.matchCount", { current: String(at + 1), total: String(total) });
+  }
+
+  async revealCommit(id: string) {
+    return revealCommit(this, id);
+  }
+
+  async revealCommitIn(repo: string, id: string) {
+    if (this.standalone || !id) return;
+    if (repo && !this.viewing(repo)) {
+      await this.openRepo(repo);
+      if (!this.viewing(repo)) return;
+    }
+    if (this.inApp()) {
+      try {
+        const win = getCurrentWindow();
+        await win.unminimize();
+        await win.show();
+        await win.setFocus();
+      } catch {
+        /* the browser lab has no native window */
+      }
+    }
+    await revealCommit(this, id);
   }
 
 
@@ -7744,10 +7800,10 @@ export class ShellState {
     });
     unreveal = await listen<{ repo: string; id: string }>("awegit-reveal", (event) => {
       if (this.standalone) return;
-      const repo = event.payload?.repo;
-      const id = event.payload?.id;
-      if (!id || (repo && repo !== this.repoPath())) return;
-      void this.locateRef(id);
+      const repo = event.payload?.repo ?? "";
+      const id = event.payload?.id ?? "";
+      if (!id) return;
+      void this.revealCommitIn(repo, id);
     });
     ukept = await listen<{ files?: string[] }>("awegit-preview-kept", (event) => {
       if (this.standalone) return;
