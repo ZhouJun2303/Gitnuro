@@ -15,7 +15,7 @@ import { fileAccessReport } from "../fileAccess";
 import { resolveLocale, translate } from "../i18n";
 import { broadcastLocale, onLocaleChange } from "../i18n/sync";
 import { confirmAppearance, isAppearance, onAppearanceChange, pendingAppearance, rememberAppearance, resolveAppearance, type Appearance } from "../appearance";
-import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, type CommitType } from "./commitMessage";
+import { commitTypesOf, isBuiltinCommitType, isCommentary, isCommitType, joinSubject, splitSubject, subjectFitsConvention, typeMessageKey, withoutRepeatedSubject, type CommitType } from "./commitMessage";
 import { configureShortcuts, shortcut, shortcutLabel, typing } from "../keys";
 import { branchGroup, changedRanges, commitGraph, commitHaystacks, commitHitIndexes, foldedMerges, formatWhen, gravatarUrl, hitContains, laneColors, laneCommits, markTokens, numberedDiff, orderRefNames, splitDiff, virtualLines, virtualSplit, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
@@ -44,6 +44,8 @@ import {
     type UpdateNotice,
     type UpdateProgress,
     type WorkspaceRecord,
+    type TerminalCli,
+    terminalCliNames,
     recentWorkspaceId,
     defaultRecentWorkspaceLimit,
     workspaceTabWidth,
@@ -52,7 +54,7 @@ import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems,
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, selectFolder, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabDisplay, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, revealCommit, followCommitQuery, stepCommitMatch, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
-import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
+import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, LiteTask, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 import { statusPathBefore } from "../status";
 import { enqueueStage, projectStages, stageActions, type PendingStage } from "./staging";
@@ -255,6 +257,8 @@ export class ShellState {
     aiBaseUrl: "https://api.x.ai/v1",
     aiModel: "grok-4.7",
     aiApiKey: "",
+    liteMode: false,
+    liteAgent: "",
     terminal: "",
     swapPanes: false,
     showEntireFile: false,
@@ -457,6 +461,15 @@ export class ShellState {
   jobs = $state<Record<string, RepoJob>>({});
 
   backgroundJobs = $state<Record<string, RepoJob>>({});
+
+
+  liteTask = $state<LiteTask | null>(null);
+
+
+  liteRunId = $state("");
+
+
+  liteAgentOutput = $state("");
 
 
   /** Repositories with an automatic fetch in flight. This does not count as busy. */
@@ -1695,7 +1708,7 @@ export class ShellState {
       remove_index_lock: "menu.delete", remove_stale_lock: "menu.delete", write_ssh_config: "chrome.sshConfig", read_ssh_config: "chrome.sshConfig",
       commit_changes: "chrome.commit", stage_path: "chrome.stagePending", stage_all: "chrome.stagePending",
       unstage_path: "chrome.unstagePending", unstage_all: "chrome.unstagePending",
-      suggest_commit_message: "chrome.reading", review_branch: "menu.review",
+      suggest_commit_message: "chrome.reading", run_lite_agent: "dialog.liteAgent", review_branch: "menu.review",
       browser_login: "dialog.accountsBrowserWait", test_account: "dialog.accountsTesting", sync_accounts: "dialog.accountsSync",
       scan_repositories: "chrome.reading", repository_inspection: "menu.repoInfo", launch_tool: "menu.externalDiff",
       check_for_update: "chrome.checkUpdate", download_update: "dialog.update", download_font: "dialog.fontDownloading",
@@ -1729,6 +1742,198 @@ export class ShellState {
   syncDisabled(kind: "fetch" | "pull" | "push") {
     return this.writeBlocked || !this.snapshot
       || (kind !== "fetch" && (!!this.progress || this.conflicted));
+  }
+
+
+  litePrerequisiteMessage() {
+    if (!this.settings.aiEnabled) return this.tr("dialog.liteNeedAi");
+    if (!this.liteHasApiKey) return this.tr("dialog.liteNeedApiKey");
+    if (!this.liteHasRemote) return this.tr("dialog.liteNeedRemote");
+    return "";
+  }
+
+
+  setLiteMode(enabled: boolean) {
+    if (enabled && !this.liteConfigEligible) {
+      this.settings = { ...this.settings, liteMode: false };
+      this.actionError = this.litePrerequisiteMessage() || this.tr("dialog.liteEnableHint");
+      this.prefTab = "ai";
+      this.dialog = "prefs";
+      return false;
+    }
+    this.settings = { ...this.settings, liteMode: enabled };
+    void this.savePrefs(false);
+    return true;
+  }
+
+
+  toggleLiteMode() {
+    return this.setLiteMode(!this.settings.liteMode);
+  }
+
+
+  liteFallbackToNormal() {
+    this.settings = { ...this.settings, liteMode: false };
+    void this.savePrefs(false);
+    this.liteTask = null;
+    this.actionError = this.tr("dialog.liteConflictFallback");
+    if (this.conflicted) this.dialog = "mergeConflict";
+  }
+
+
+  liteSetTask(task: LiteTask | null) {
+    this.liteTask = task;
+    if (task?.output) this.liteAgentOutput = task.output;
+  }
+
+
+  litePhase(kind: LiteTask["kind"], phase: string, percent: number, detail: string, output = "") {
+    this.liteSetTask({ kind, phase, percent, detail, output, state: "running" });
+  }
+
+
+  liteCli(): TerminalCli | null {
+    const selected = this.settings.liteAgent.trim();
+    const candidate = selected || this.settings.terminalClis?.[0] || "";
+    return (terminalCliNames as readonly string[]).includes(candidate) ? candidate as TerminalCli : null;
+  }
+
+
+  litePrompt() {
+    const branch = this.branchLabel || "HEAD";
+    const current = this.currentBranch;
+    const files = [...this.staged, ...this.unstaged].map((file) => `${file.letter} ${file.path}`).slice(0, 160);
+    const conflicts = [...(this.snapshot?.staged ?? []), ...(this.snapshot?.unstaged ?? [])].filter((file) => file.kind === "conflict").map((file) => file.path);
+    return [
+      "You are working inside the current Git repository.",
+      `Current branch: ${branch}`,
+      `Remote state: ahead ${current?.ahead ?? 0}, behind ${current?.behind ?? 0}`,
+      files.length ? `Current changes:\n${files.join("\n")}` : "Current changes: none",
+      conflicts.length ? `Conflicted files:\n${conflicts.join("\n")}` : "Conflicted files: none",
+      "Inspect the repository and make the necessary code or configuration changes.",
+      "Resolve any merge conflicts carefully, preserve the intended behavior, and leave the worktree ready for AweGit to stage, commit, pull, and push.",
+      "Do not commit or push. Report a short summary when the work is complete.",
+    ].join("\n\n");
+  }
+
+
+  async runLiteSync() {
+    if (this.liteWorking || !this.liteModeActive) return;
+    const path = this.repoPath();
+    if (!path) return;
+    const kind: LiteTask["kind"] = "sync";
+    try {
+      this.litePhase(kind, "stage", 8, this.tr("dialog.liteStage"));
+      if (this.changeCount > 0) {
+        const staged = await this.runChange("stage_all");
+        if (!staged) throw new Error(this.actionError || this.tr("chrome.taskFailed"));
+        this.litePhase(kind, "prompt", 28, this.tr("dialog.litePrompt"));
+        const suggestion = await invoke<Suggestion>("suggest_commit_message", { path, style: this.settings.aiPromptStyle === "long" ? "long" : "short" });
+        const split = splitSubject(suggestion.summary);
+        const summary = joinSubject(split.type || this.settings.commitType, split.text || suggestion.summary);
+        if (!summary) throw new Error(this.tr("chrome.commitSubjectRequired"));
+        this.litePhase(kind, "commit", 42, this.tr("dialog.liteCommit"));
+        const committed = await this.runChange("commit_changes", {
+          summary,
+          description: withoutRepeatedSubject(suggestion.description, split.type || this.settings.commitType, split.text || suggestion.summary),
+          amend: false,
+          signOff: this.settings.signOff,
+          skipHooks: false,
+        });
+        if (!committed) throw new Error(this.actionError || this.tr("chrome.taskFailed"));
+      }
+      this.litePhase(kind, "pull", 62, this.tr("dialog.litePull"));
+      const pulled = await this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: this.settings.autostashIncludeUntracked });
+      if (this.liteModeActive) this.dialog = null;
+      if (this.conflicted || pulled === "conflict") {
+        this.liteFallbackToNormal();
+        return;
+      }
+      if (pulled !== "completed") throw new Error(this.actionError || this.tr("chrome.taskFailed"));
+      this.litePhase(kind, "push", 82, this.tr("dialog.litePush"));
+      const pushed = await this.mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: this.settings.forceWithLease });
+      if (this.liteModeActive) this.dialog = null;
+      if (this.conflicted || pushed === "conflict") {
+        this.liteFallbackToNormal();
+        return;
+      }
+      if (pushed !== "completed") throw new Error(this.actionError || this.tr("chrome.taskFailed"));
+      this.liteSetTask({ kind, phase: "done", percent: 100, detail: this.tr("dialog.liteDone"), output: "", state: "completed" });
+    } catch (error) {
+      this.liteSetTask({ kind, phase: "failed", percent: this.liteTask?.percent ?? 0, detail: this.message(error), output: "", state: "failed" });
+      this.actionError = this.message(error);
+    }
+  }
+
+
+  async runLiteAgent() {
+    if (this.liteWorking || !this.liteModeActive) return;
+    const path = this.repoPath();
+    const cli = this.liteCli();
+    if (!path) return;
+    if (!cli) {
+      this.actionError = this.tr("dialog.liteNoCli");
+      this.prefTab = "integration";
+      this.dialog = "prefs";
+      return;
+    }
+    const runId = `lite-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    this.liteRunId = runId;
+    this.liteAgentOutput = "";
+    try {
+      const prompt = this.litePrompt();
+      this.litePhase("agent", "prompt", 24, this.tr("dialog.litePrompt"));
+      this.litePhase("agent", "agent", 45, this.tr("dialog.liteAgentWork"));
+      const report = await invoke<{ ok: boolean; output: string; code?: number }>("run_lite_agent", { path, cli, prompt, runId });
+      this.liteAgentOutput = report.output ?? "";
+      if (!report.ok) throw new Error(report.output || this.tr("dialog.liteAgentFailed"));
+      await this.refresh("full", true);
+      if (this.conflicted) {
+        this.liteFallbackToNormal();
+        return;
+      }
+      this.litePhase("agent", "stage", 74, this.tr("dialog.liteStage"), report.output ?? "");
+      const staged = await this.runChange("stage_all");
+      if (!staged) throw new Error(this.actionError || this.tr("chrome.taskFailed"));
+      if (this.staged.length > 0) {
+        this.litePhase("agent", "commit", 84, this.tr("dialog.liteCommit"), report.output ?? "");
+        const suggestion = await invoke<Suggestion>("suggest_commit_message", { path, style: this.settings.aiPromptStyle === "long" ? "long" : "short" });
+        const split = splitSubject(suggestion.summary);
+        const summary = joinSubject(split.type || this.settings.commitType, split.text || suggestion.summary);
+        const committed = await this.runChange("commit_changes", {
+          summary,
+          description: withoutRepeatedSubject(suggestion.description, split.type || this.settings.commitType, split.text || suggestion.summary),
+          amend: false,
+          signOff: this.settings.signOff,
+          skipHooks: false,
+        });
+        if (!committed) throw new Error(this.actionError || this.tr("chrome.taskFailed"));
+      }
+      this.litePhase("agent", "pull", 92, this.tr("dialog.litePull"), report.output ?? "");
+      const pulled = await this.mutate({ action: "pull", rebase: this.settings.pullRebase, autostash: this.settings.autostashIncludeUntracked });
+      if (this.liteModeActive) this.dialog = null;
+      if (this.conflicted || pulled === "conflict") {
+        this.liteFallbackToNormal();
+        return;
+      }
+      if (pulled !== "completed") throw new Error(this.actionError || this.tr("chrome.taskFailed"));
+      this.litePhase("agent", "push", 96, this.tr("dialog.litePush"), report.output ?? "");
+      const pushed = await this.mutate({ action: "push", remote: null, setUpstream: false, tags: false, forceWithLease: this.settings.forceWithLease });
+      if (this.liteModeActive) this.dialog = null;
+      if (this.conflicted || pushed === "conflict") {
+        this.liteFallbackToNormal();
+        return;
+      }
+      if (pushed !== "completed") throw new Error(this.actionError || this.tr("chrome.taskFailed"));
+      this.liteSetTask({ kind: "agent", phase: "done", percent: 100, detail: this.tr("dialog.liteDone"), output: report.output ?? "", state: "completed" });
+    } catch (error) {
+      const text = this.message(error);
+      if (text === "terminal-cli-missing") this.actionError = this.tr("dialog.liteAgentMissing");
+      else this.actionError = text;
+      this.liteSetTask({ kind: "agent", phase: "failed", percent: this.liteTask?.percent ?? 0, detail: this.actionError, output: this.liteAgentOutput, state: "failed" });
+    } finally {
+      this.liteRunId = "";
+    }
   }
 
 
@@ -2482,6 +2687,30 @@ export class ShellState {
 
 
   currentBranch = $derived(this.refs?.branches.find((branch) => branch.current) ?? null);
+
+
+  liteHasApiKey = $derived(this.settings.aiApiKey.trim().length > 0);
+
+
+  liteHasRemote = $derived((this.refs?.remotes ?? []).some((remote) => !!remote.url?.trim()));
+
+
+  liteConfigEligible = $derived(this.settings.aiEnabled && this.liteHasApiKey && this.liteHasRemote);
+
+
+  liteModeActive = $derived(!this.standalone && this.settings.liteMode && this.mode === "live" && !!this.snapshot && this.liteConfigEligible && !this.conflicted);
+
+
+  liteWorking = $derived(this.liteTask?.state === "running");
+
+
+  liteAgentOptions = $derived.by(() => {
+    const detected = this.settings.terminalClis ?? [];
+    const selected = this.settings.liteAgent.trim();
+    const values = detected.length ? detected : [...terminalCliNames];
+    if (selected && !values.includes(selected as (typeof terminalCliNames)[number])) values.unshift(selected as (typeof terminalCliNames)[number]);
+    return values;
+  });
 
 
   localBranchNames = $derived(new Set((this.refs?.branches ?? []).map((branch) => branch.name)));
@@ -4403,6 +4632,7 @@ export class ShellState {
       this.settings = { ...this.settings, aiLanguage: /^(en|english)$/i.test(legacy) ? "en" : "zh" };
     }
     if (this.settings.aiPromptStyle !== "long") this.settings = { ...this.settings, aiPromptStyle: "short" };
+    if (this.settings.liteAgent && !(terminalCliNames as readonly string[]).includes(this.settings.liteAgent)) this.settings = { ...this.settings, liteAgent: "" };
     if (!isCommitType(this.settings.commitType)) this.settings = { ...this.settings, commitType: this.preferredCommitType() };
     if (!this.settings.errorLogDays) this.settings = { ...this.settings, errorLogDays: 7 };
     this.pruneErrorLog();
@@ -7289,6 +7519,12 @@ export class ShellState {
       window.dispatchEvent(new CustomEvent("awegit-perf"));
       return;
     }
+    if (action === "toggleLite") {
+      if (typing(event) || this.dialog || this.textMerge || this.confirmAsk) return;
+      event.preventDefault();
+      if (!event.repeat) this.toggleLiteMode();
+      return;
+    }
     if (action === "copy") {
       if (typing(event) || this.dialog || this.launchOpen) return;
       if (this.heldText) {
@@ -7707,6 +7943,7 @@ export class ShellState {
     }
     let unlisten = () => {};
     let unprogress = () => {};
+    let unliteAgent = () => {};
     let unmoved = () => {};
     let unresized = () => {};
     let unnav = () => {};
@@ -7774,6 +8011,13 @@ export class ShellState {
     const percent = event.payload?.percent;
     const path = event.payload?.path;
     if (typeof percent === "number" && percent >= 0 && percent <= 100 && path) this.noteProgress(path, percent);
+    });
+    unliteAgent = await listen<{ runId: string; phase: string; text: string; percent: number; state: string }>("lite-agent", (event) => {
+    const value = event.payload;
+    if (!value || value.runId !== this.liteRunId) return;
+    const state = value.state === "failed" ? "failed" : value.state === "completed" ? "completed" : "running";
+    this.liteTask = { kind: "agent", phase: value.phase || "agent", percent: Math.max(0, Math.min(100, value.percent ?? 0)), detail: value.text || this.tr("dialog.liteAgentWork"), output: value.text || this.liteAgentOutput, state };
+    if (value.text && value.state === "running") this.liteAgentOutput = `${this.liteAgentOutput}${this.liteAgentOutput ? "\n" : ""}${value.text}`.slice(-64_000);
     });
     unupdate = await listen<UpdateProgress>("update-progress", (event) => {
     if (event.payload) this.noteUpdateProgress(event.payload);
@@ -7873,6 +8117,7 @@ export class ShellState {
     window.clearTimeout(placeTimer);
     unlisten();
     unprogress();
+    unliteAgent();
     unmoved();
     unresized();
     unnav();

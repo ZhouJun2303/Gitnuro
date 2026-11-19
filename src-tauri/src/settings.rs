@@ -38,6 +38,12 @@ pub struct Settings {
     pub ai_model: String,
     #[serde(default)]
     pub ai_api_key: String,
+    /// Keep the compact high-performance workspace selected across launches.
+    #[serde(default)]
+    pub lite_mode: bool,
+    /// CLI used by the high-performance workspace. Empty selects the first detected CLI.
+    #[serde(default)]
+    pub lite_agent: String,
     #[serde(default)]
     pub terminal: String,
     #[serde(default)]
@@ -556,6 +562,8 @@ impl Default for Settings {
             ai_base_url: ai_base(),
             ai_model: ai_model(),
             ai_api_key: String::new(),
+            lite_mode: false,
+            lite_agent: String::new(),
             terminal: String::new(),
             swap_panes: false,
             show_entire_file: false,

@@ -11,6 +11,7 @@ mod flow_window;
 mod flows;
 mod http;
 mod lab;
+mod lite;
 mod perf;
 mod reads;
 mod repo_inspection;
@@ -1553,6 +1554,20 @@ async fn open_terminal(path: Option<String>, cli: Option<tools::TerminalCli>) ->
     Ok(())
 }
 
+#[tauri::command]
+async fn run_lite_agent(
+    app: tauri::AppHandle,
+    path: Option<String>,
+    cli: tools::TerminalCli,
+    prompt: String,
+    run_id: String,
+) -> Result<lite::AgentReport, String> {
+    let repo = repo_from(path)?;
+    tauri::async_runtime::spawn_blocking(move || lite::run(app, repo, cli, prompt, run_id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
 fn split_command_args(text: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut current = String::new();
@@ -2883,6 +2898,7 @@ pub fn run() {
             program_exists,
             watch_repository,
             open_terminal,
+            run_lite_agent,
             clipboard_text,
             pick_directory,
             pick_file,

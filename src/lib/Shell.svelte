@@ -1,6 +1,7 @@
 <script lang="ts">
   import { setShell } from "./shell/context";
   import Chrome from "./shell/Chrome.svelte";
+  import LiteView from "./shell/LiteView.svelte";
   import Welcome from "./shell/Welcome.svelte";
   import Sidebar from "./shell/Sidebar.svelte";
   import ChangesView from "./shell/ChangesView.svelte";
@@ -898,6 +899,8 @@
     <FileHistoryPane />
   {:else if shell.standalone === "blob"}
     <BlobPane />
+  {:else if shell.liteModeActive}
+    <LiteView />
   {:else}
   <Chrome />
 

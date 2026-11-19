@@ -157,6 +157,15 @@ export const STATUS_NOTICE_ENTRY: Record<StatusNoticeId, number> = {
 
 export type RepoJob = { label: string; percent: number | null; depth: number };
 
+export type LiteTask = {
+  kind: "sync" | "agent";
+  phase: string;
+  detail: string;
+  percent: number;
+  output: string;
+  state: "running" | "completed" | "failed";
+};
+
 export type PrefTab = "general" | "fonts" | "workspace" | "diff" | "previewFormats" | "commit" | "ai" | "git" | "integration" | "network" | "accounts" | "advanced" | "commands" | "shortcuts";
 
 /** `keywords` holds the label in other UI languages, so a query typed in any language still matches. */

@@ -346,6 +346,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "program_exists" => done(super::program_exists(req(args, "path")?)),
         "watch_repository" => Ok(Value::Null),
         "open_terminal" => Ok(Value::Null),
+        "run_lite_agent" => done(serde_json::json!({ "ok": true, "output": "lab agent complete", "code": 0 })),
         "clipboard_text" => done("lab clipboard"),
         "pick_directory" => done(Some(lab_root()?.join("repos").display().to_string())),
         "pick_file" => {

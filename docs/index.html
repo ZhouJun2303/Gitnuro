@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AweGit 功能介绍</title>
-  <meta name="description" content="AweGit 的功能介绍。fakeignore、多工作区、冲突合并、提交说明、操作流程、偏好设置，以及历史、差异、远程和窗口里的其余能力。" />
+  <meta name="description" content="AweGit 的功能介绍。fakeignore、多工作区、高性能 Lite、冲突合并、提交说明、操作流程、偏好设置，以及历史、差异、远程和窗口里的其余能力。" />
   <style>
     :root {
       --canvas: #f4f4f5;
@@ -146,6 +146,7 @@
         <a href="#workspaces" data-zh>工作区</a><a href="#workspaces" data-en>Workspaces</a>
         <a href="#conflicts" data-zh>冲突</a><a href="#conflicts" data-en>Conflicts</a>
         <a href="#flow" data-zh>操作流程</a><a href="#flow" data-en>Pipeline</a>
+        <a href="#lite" data-zh>高性能 Lite</a><a href="#lite" data-en>Lite</a>
         <a href="#commit" data-zh>提交说明</a><a href="#commit" data-en>Messages</a>
         <a href="#history" data-zh>历史与差异</a><a href="#history" data-en>History</a>
         <a href="#prefs" data-zh>偏好设置</a><a href="#prefs" data-en>Preferences</a>
@@ -304,6 +305,21 @@ bonus = 1</pre>
       </figure>
     </section>
 
+    <section id="lite">
+      <p class="kicker" data-zh>高性能 Lite</p><p class="kicker" data-en>High-performance Lite</p>
+      <h2 data-zh>只剩同步和 AI 代理的小工作台</h2>
+      <h2 data-en>A small workbench for sync and the AI agent</h2>
+      <p class="sub" data-zh>启用 AI 提交说明、填好 API key，并且当前仓库有远程地址后，偏好设置的 AI 页会出现「启用高性能 Lite」。打开后只保留仓库名、当前分支、领先 / 落后、改动数量和两个动作：智能同步整理改动、生成提交说明、提交、拉取、推送；AI 代理调用已检测的 Codex / Claude / Grok / Cursor Agent 修改文件和处理冲突，再由 AweGit 提交推送。遇到冲突会切回正常版并记住。Ctrl+Alt+M 随时切换，重启后恢复上次模式。</p>
+      <p class="sub" data-en>Once AI commit messages, an API key, and a repository remote are in place, Preferences → AI shows Enable high-performance Lite. The compact window keeps the repository, current branch, ahead/behind, change count, and two actions. Smart sync stages changes, generates a commit message, commits, pulls, and pushes. The AI agent runs a detected Codex, Claude, Grok, or Cursor Agent CLI to edit files and resolve conflicts, then AweGit commits and pushes. A conflict returns to the normal workspace and remembers it. Ctrl+Alt+M toggles the mode, which is restored on launch.</p>
+      <div class="stage">
+        <div class="chrome"><b data-zh>full · main · Lite</b><b data-en>full · main · Lite</b></div>
+        <div class="file"><span class="mark m">M</span><span data-zh>智能同步 · 提交、拉取、推送</span><span data-en>Smart sync · commit, pull, push</span></div>
+        <div class="file"><span class="mark a">✦</span><span data-zh>AI 代理 · codex</span><span data-en>AI agent · codex</span></div>
+        <p class="result" data-zh>8 个修改 · 领先 2 · 落后 0 · 已完成</p>
+        <p class="result" data-en>8 changes · ahead 2 · behind 0 · completed</p>
+      </div>
+    </section>
+
     <section id="prefs">
       <p class="kicker" data-zh>偏好设置</p><p class="kicker" data-en>Preferences</p>
       <h2 data-zh>11 个页签，修改即时生效</h2>
@@ -400,6 +416,7 @@ bonus = 1</pre>
           <tr><td><span data-zh>后退 / 前进</span><span data-en>Back / forward</span></td><td><span class="kbd">Alt+Left</span> / <span class="kbd">Alt+Right</span></td></tr>
           <tr><td><span data-zh>设置</span><span data-en>Settings</span></td><td><span class="kbd">Ctrl+,</span></td></tr>
           <tr><td><span data-zh>切换中英文</span><span data-en>Switch Chinese / English</span></td><td><span class="kbd">Ctrl+Alt+L</span></td></tr>
+          <tr><td><span data-zh>切换高性能 Lite</span><span data-en>Toggle high-performance Lite</span></td><td><span class="kbd">Ctrl+Alt+M</span></td></tr>
           <tr><td><span data-zh>在文件管理器中显示</span><span data-en>Reveal in file manager</span></td><td><span class="kbd">Ctrl+Alt+O</span></td></tr>
           <tr><td><span data-zh>放大 / 缩小</span><span data-en>Zoom in / out</span></td><td><span class="kbd">Ctrl+=</span> / <span class="kbd">Ctrl+-</span></td></tr>
         </tbody>

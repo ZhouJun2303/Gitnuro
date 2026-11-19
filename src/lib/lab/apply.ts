@@ -147,6 +147,26 @@ async function showCommitBySummary(shell: ShellState, summary: string) {
 }
 
 async function fillSurface(shell: ShellState, id: string) {
+  if (id === "lite" || id === "lite-progress") {
+    shell.settings = {
+      ...shell.settings,
+      aiApiKey: "lab-key",
+      liteMode: true,
+      liteAgent: "codex",
+      terminalClis: ["codex", "claude", "grok", "cursor-agent"],
+    };
+    if (id === "lite-progress") {
+      shell.liteSetTask({
+        kind: "agent",
+        phase: "agent",
+        percent: 55,
+        detail: shell.tr("dialog.liteAgentWork"),
+        output: "Reading repository state…\nResolving note.txt conflicts…",
+        state: "running",
+      });
+    }
+    return;
+  }
   if (id === "operation-tasks") {
     for (const [index, state] of (["running", "queued", "verifying", "completed", "conflict", "failed", "cancelled", "blocked"] as const).entries()) {
       acceptTask({ id: `lab-task-${index}`, path: shell.repoPath() ?? "", action: "fetch", label: `git fetch origin · ${index + 1}`, targets: ["origin"], state,
@@ -727,6 +747,7 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
         "prefs-preview-formats": "previewFormats",
         "prefs-commit": "commit",
         "prefs-ai": "ai",
+        "prefs-lite": "ai",
         "prefs-git": "git",
         "prefs-autostash": "git",
         "prefs-integration": "integration",
@@ -746,6 +767,14 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       }
       fillSourceRoots(shell);
       fillLabTools(shell);
+      if (sceneId === "prefs-lite") {
+        shell.settings = {
+          ...shell.settings,
+          aiApiKey: "lab-key",
+          liteAgent: "codex",
+          terminalClis: ["codex", "claude", "grok", "cursor-agent"],
+        };
+      }
       if (sceneId === "prefs-commit") shell.resetCommitTypes();
       if (sceneId === "prefs-integration-merge") {
         shell.toolKind = "merge";

@@ -56,7 +56,7 @@ pub enum TerminalCli {
 impl TerminalCli {
     const ALL: [Self; 4] = [Self::Codex, Self::Grok, Self::CursorAgent, Self::Claude];
 
-    fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Self::Codex => "codex",
             Self::Grok => "grok",
@@ -77,6 +77,11 @@ impl TerminalCli {
             })
         })
     }
+}
+
+/// Resolve a detected terminal CLI to its executable or Windows shim.
+pub fn resolve_terminal_cli(cli: TerminalCli) -> Option<PathBuf> {
+    cli.resolve(&terminal_cli_paths())
 }
 
 fn executable_file(path: &Path) -> bool {

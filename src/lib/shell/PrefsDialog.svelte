@@ -529,6 +529,34 @@
             </label>
           </div>
         </section>
+
+        <section class="pref-card" aria-labelledby="lite-settings-title" data-lite-settings>
+          <h3 class="pref-card-title" id="lite-settings-title">{shell.tr("dialog.liteTitle")}</h3>
+          <div class="pref-card-body">
+            <label class="pref-row pref-toggle">
+              <input type="checkbox" checked={shell.settings.liteMode} disabled={!shell.liteConfigEligible} onchange={(event) => shell.setLiteMode(event.currentTarget.checked)} />
+              <span class="pref-label">{shell.tr("dialog.liteEnable")}</span>
+            </label>
+            <p class="pref-setting-hint">{shell.liteConfigEligible ? shell.tr("dialog.liteEnableHint") : shell.litePrerequisiteMessage()}</p>
+            <label class="pref-row wide">
+              <span class="pref-label">{shell.tr("dialog.liteSelectCli")}</span>
+              <span class="pref-control">
+                <select value={shell.settings.liteAgent} onchange={(event) => { shell.settings = { ...shell.settings, liteAgent: event.currentTarget.value }; void shell.savePrefs(false); }}>
+                  <option value="">{shell.tr("dialog.liteAutoCli")}</option>
+                  {#each shell.liteAgentOptions as cli (cli)}
+                    <option value={cli}>{cli}{shell.settings.terminalClis?.includes(cli) ? " · ✓" : ""}</option>
+                  {/each}
+                </select>
+              </span>
+            </label>
+            <div class="pref-card-actions">
+              <button class="text-button" type="button" disabled={shell.detectingTerminalClis} onclick={() => void shell.detectTerminalClis()}>
+                {shell.tr(shell.detectingTerminalClis ? "dialog.detectingTerminalClis" : "dialog.liteDetectCli")}
+              </button>
+              {#if shell.settings.terminalClis?.length === 0}<span class="empty">{shell.tr("dialog.liteNoCli")}</span>{/if}
+            </div>
+          </div>
+        </section>
       {:else if shell.prefTab === "git"}
         <section class="pref-card">
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecGitFetch")}</h3>

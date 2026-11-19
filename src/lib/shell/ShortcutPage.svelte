@@ -10,7 +10,7 @@
   let conflict = $state("");
 
   const groups: { name: string; actions: Shortcut[] }[] = [
-    { name: "shortcutGroupApp", actions: ["exit", "settings", "switchLanguage", "launch", "zoomIn", "zoomOut", "performance"] },
+    { name: "shortcutGroupApp", actions: ["exit", "settings", "switchLanguage", "toggleLite", "launch", "zoomIn", "zoomOut", "performance"] },
     { name: "shortcutGroupRepo", actions: ["refresh", "pull", "push", "fetch", "quickFetch", "quickPull", "quickPush", "branch", "stash", "tag", "clone", "init", "open", "terminal", "explorer"] },
     { name: "shortcutGroupNavigate", actions: ["newTab", "closeTab", "reopen", "tabLeft", "tabRight", "back", "forward", "changes", "commits", "reveal", "filterBranch"] },
     { name: "shortcutGroupChanges", actions: ["commit", "commitPush", "stageToggle", "stageAll", "discard", "copy", "selectAll", "pastePatch", "search", "up", "down"] },

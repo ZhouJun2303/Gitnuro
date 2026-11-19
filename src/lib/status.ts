@@ -190,6 +190,8 @@ export type Settings = {
   aiBaseUrl: string;
   aiModel: string;
   aiApiKey: string;
+  liteMode: boolean;
+  liteAgent: string;
   terminal: string;
   swapPanes: boolean;
   showEntireFile: boolean;

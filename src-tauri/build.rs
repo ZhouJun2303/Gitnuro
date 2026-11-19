@@ -89,6 +89,7 @@ fn main() {
             "program_exists",
             "watch_repository",
             "open_terminal",
+            "run_lite_agent",
             "clipboard_text",
             "pick_directory",
             "pick_file",

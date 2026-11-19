@@ -229,8 +229,13 @@
   :root[data-theme="apple"] .welcome-btn { padding: 14px; }
 }
 
+/* High-performance Lite keeps the compact workbench inside the same glass shell. */
+:root[data-theme="apple"] .lite-shell { background: transparent; }
+:root[data-theme="apple"] :is(.lite-header, .lite-action) { border-color: var(--glass-edge); background: var(--glass); backdrop-filter: blur(20px); box-shadow: var(--glass-shadow); }
+:root[data-theme="apple"] .lite-output { background: rgba(255, 255, 255, 0.55); }
+
 @media (prefers-reduced-transparency: reduce) {
-  :root[data-theme="apple"] :is(.sidebar, .history-stage, .changes-column, .right-stage, .chrome-left, .chrome-right, .chrome-identity, .welcome-btn, .welcome-recent, .dialog, .menu, .repo-picker, .command-log, .palette, .type-menu, .perf, .history-file, .blob-pane > header, .flow-header, .flow-meta, .flow-overview, .flow-footer, .merge-panel-title, .merge-panel-foot) { background: #f7f5f8; backdrop-filter: none; }
+  :root[data-theme="apple"] :is(.sidebar, .history-stage, .changes-column, .right-stage, .chrome-left, .chrome-right, .chrome-identity, .welcome-btn, .welcome-recent, .dialog, .menu, .repo-picker, .command-log, .palette, .type-menu, .perf, .history-file, .blob-pane > header, .flow-header, .flow-meta, .flow-overview, .flow-footer, .merge-panel-title, .merge-panel-foot, .lite-header, .lite-action) { background: #f7f5f8; backdrop-filter: none; }
   :root[data-theme="apple"] :is(.scrim, .palette-scrim) { backdrop-filter: none; }
   :root[data-theme="apple"] .vertical-tabs .tabs { background: #f7f5f8; backdrop-filter: none; }
 }
