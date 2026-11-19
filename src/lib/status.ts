@@ -367,8 +367,8 @@ export const defaultRecentWorkspaceLimit = 5;
 /** Narrowest project tab. Past this, the strip scrolls instead of shrinking further. */
 export const workspaceTabFloor = 96;
 
-/** Project tab label size. A workspace keeps the default until its names no longer fit, then shrinks to the floor. */
-export const workspaceTabFontMax = 13;
+/** Fallback tab label size; the strip otherwise uses its computed UI font size. */
+export const workspaceTabFontDefault = 14;
 export const workspaceTabFontMin = 10;
 
 /** Move `path` next to `target`; null when either is not in the list. */

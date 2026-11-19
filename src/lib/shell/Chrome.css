@@ -314,7 +314,7 @@
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
-    font-size: var(--tab-font-size, 13px);
+    font-size: var(--tab-font-size, inherit);
   }
 
 .tab-name {

@@ -59,10 +59,11 @@ for (const theme of ["apple", "light", "dark"] as const) {
     });
 
     test("project names shrink with the tab and ellipsize at the minimum", async ({ page }) => {
-      await page.setViewportSize({ width: 1440, height: 900 });
+      await pinLabSettings(page, { uiScale: 20 });
+      await page.setViewportSize({ width: 1900, height: 900 });
       await openLabScene(page, "workspace-tabs", ".chrome-tabs .tab");
       const fontSize = () => page.locator(".chrome-tabs .tab-name").first().evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
-      await expect.poll(fontSize).toBe(13);
+      await expect.poll(fontSize).toBe(20);
 
       await page.setViewportSize({ width: 640, height: 900 });
       await expect.poll(fontSize).toBe(10);
@@ -80,7 +81,7 @@ for (const theme of ["apple", "light", "dark"] as const) {
       await page.locator(".workspace-chip").click();
       await page.getByRole("menuitemradio", { name: "实验室工作区 01", exact: true }).click();
       await expect(page.locator(".chrome-tabs .tab")).toHaveCount(3);
-      await expect.poll(fontSize).toBe(13);
+      await expect.poll(fontSize).toBe(20);
     });
 
     test("project tabs keep the dragged order in the workspace", async ({ page }) => {
@@ -125,8 +126,8 @@ for (const theme of ["apple", "light", "dark"] as const) {
       }));
       expect(before.scrollWidth).toBeGreaterThan(before.clientWidth);
       expect(Math.min(...before.widths)).toBeGreaterThanOrEqual(96);
-      // Short names still fit at the default size, so the workspace is not shrunk.
-      expect(await tabs.locator(".file-select").first().evaluate((node) => parseFloat(getComputedStyle(node).fontSize))).toBe(13);
+      // Short names still fit at the UI font size, so the workspace is not shrunk.
+      expect(await tabs.locator(".file-select").first().evaluate((node) => parseFloat(getComputedStyle(node).fontSize))).toBe(14);
       await tabs.evaluate((strip) => { strip.scrollLeft = strip.scrollWidth; });
       await expect(tabs.locator(".tab").last()).toBeInViewport({ ratio: 1 });
       await expect(page.locator(".tab-add")).toBeInViewport({ ratio: 1 });

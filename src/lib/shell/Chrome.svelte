@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getShell } from "./context";
-  import { fillWorkspaceTabs, workspaceTabFontMax, workspaceTabFontMin, terminalCliNames, type TerminalCli } from "../status";
+  import { fillWorkspaceTabs, workspaceTabFontDefault, workspaceTabFontMin, terminalCliNames, type TerminalCli } from "../status";
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
@@ -54,12 +54,13 @@
 
   function fitTabFontSize(node: HTMLElement) {
     const labels = node.querySelectorAll<HTMLElement>(".tab-name");
-    if (labels.length === 0) return workspaceTabFontMax;
+    if (labels.length === 0) return workspaceTabFontDefault;
     tabCanvas ??= document.createElement("canvas").getContext("2d");
-    if (!tabCanvas) return workspaceTabFontMax;
+    if (!tabCanvas) return workspaceTabFontDefault;
+    const base = parseFloat(getComputedStyle(node).fontSize) || workspaceTabFontDefault;
     const family = getComputedStyle(labels[0]).fontFamily;
     const widths = Array.from(labels, (label) => ({ text: label.textContent ?? "", width: label.clientWidth }));
-    for (let size = workspaceTabFontMax; size > workspaceTabFontMin; size -= 0.5) {
+    for (let size = base; size > workspaceTabFontMin; size -= 0.5) {
       tabCanvas.font = `600 ${size}px ${family}`;
       if (widths.every((item) => tabCanvas!.measureText(item.text).width <= item.width)) return size;
     }
