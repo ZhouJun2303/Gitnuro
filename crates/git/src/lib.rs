@@ -46,7 +46,7 @@ pub use model::{
 };
 pub use ops::{
     approve_credential, cherry_preview, merge_preview, merge_state, merged_branches, perform, perform_stashed,
-    pick_history, push_commit_target, repo_facts, repo_facts_brief, scan_repositories, search_commits, set_repo_author,
+    pick_history, push_commit_target, push_is_up_to_date, repo_facts, repo_facts_brief, scan_repositories, search_commits, set_repo_author,
     tracked_directories, HotPath, MergeFile, MergePreview, MergeState, Mutation, RebaseStep,
     RepoFacts, RepositoryScan, ResetMode, ScanResult, SearchHit, TrackedDirs,
 };

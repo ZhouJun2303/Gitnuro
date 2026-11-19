@@ -255,6 +255,50 @@ fn fetch_push_and_fast_forward() {
 }
 
 #[test]
+fn push_with_no_new_commit_skips_the_remote_command() {
+    let origin = bare();
+    let local = repo();
+    commit_file(&local, "a.txt", "one\n", "first");
+    perform(
+        &local.path,
+        Mutation::AddRemote {
+            name: "origin".into(),
+            url: file_url(&origin.path),
+        },
+    )
+    .unwrap();
+    perform(
+        &local.path,
+        Mutation::Push {
+            remote: Some("origin".into()),
+            set_upstream: true,
+            tags: false,
+            force_with_lease: false,
+            force: false,
+            killer_push: false,
+            rebase: false,
+        },
+    )
+    .unwrap();
+
+    let missing = origin.path.with_extension("missing.git");
+    local.git(&["remote", "set-url", "origin", &file_url(&missing)]);
+    perform(
+        &local.path,
+        Mutation::Push {
+            remote: Some("origin".into()),
+            set_upstream: false,
+            tags: false,
+            force_with_lease: false,
+            force: false,
+            killer_push: false,
+            rebase: false,
+        },
+    )
+    .unwrap();
+}
+
+#[test]
 fn push_ref_same_name_pushes_the_chosen_branch() {
     let origin = bare();
     let local = repo();

@@ -635,17 +635,23 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
     let mut refresh_areas = request.refresh_areas().to_vec();
     let (result, log) = awegit_git::capture_output(|| -> Result<MutationReport, String> {
         development::check_delete(&repo, &request)?;
-        apply_session();
-        let _https = accounts::install_https(&repo, &request);
-        record_action(&request);
         let action_name = action_label(&request);
-        let before_refs = matches!(action_name,
+        let push_noop = matches!(action_name, "push" | "pushRef") && awegit_git::push_is_up_to_date(&repo, &request);
+        apply_session();
+        let _https = (!push_noop).then(|| accounts::install_https(&repo, &request));
+        record_action(&request);
+        let before_refs = (!push_noop && matches!(action_name,
             "fetch" | "pull" | "pullRef" | "push" | "pushRef" | "checkout" | "checkoutRemote"
             | "merge" | "rebase" | "rebaseInteractive" | "reset" | "cherryPick" | "revert"
             | "stash" | "stashPop" | "stashApply" | "stashDrop" | "stashPaths"
-        ).then(|| awegit_git::pull_refresh_state(&repo)).flatten();
+        )).then(|| awegit_git::pull_refresh_state(&repo)).flatten();
         let before_head = before_refs.as_ref().map(|state| state.head().to_string());
-        let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
+        let flow = if push_noop {
+            None
+        } else {
+            let _phase = perf::phase("flow-begin");
+            flows::begin(&repo, &request)
+        };
         let stage_paths = match &request {
             awegit_git::Mutation::StagePaths { files, .. }
                 if files.len() <= 512 && flow.is_none() && !awegit_git::flow::has_pending_restore(&repo) => Some(files.clone()),
@@ -660,7 +666,13 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             }
             Ok::<_, awegit_git::Error>(output)
         });
-        let result = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
+        let result = if push_noop {
+            Ok(String::new())
+        } else if let Some(flow) = &flow {
+            awegit_git::flow::observe(flow.observer(), action)
+        } else {
+            action()
+        };
         // Killer recovery integrated remote history in a push, so the work tree,
         // index, and history changed with HEAD. A plain push never moves HEAD.
         if killer_push && result.is_ok() && before_head.as_deref().is_some_and(|head|
@@ -675,7 +687,9 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         let status = if result.is_err() || refresh_areas.iter().any(|area| matches!(*area, "worktree" | "index" | "flow")) {
             Some(awegit_git::without_cancellation(|| read_status_paths(&next, status_paths.as_deref()))?)
         } else { None };
-        let refresh_scope = if result.is_ok() && before_refs.is_some()
+        let refresh_scope = if push_noop {
+            Some("status")
+        } else if result.is_ok() && before_refs.is_some()
             && before_refs == awegit_git::pull_refresh_state(&repo) { Some("status") } else { None };
         let conflict_capable = matches!(action_name, "pull" | "pullRef" | "merge" | "rebase" | "rebaseInteractive" | "revert" | "cherryPick"
             | "checkout" | "checkoutRemote" | "stashPop" | "stashApply" | "stashBranch" | "continue" | "skip" | "abort" | "gitFlowFinish");

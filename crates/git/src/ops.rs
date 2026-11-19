@@ -497,6 +497,9 @@ impl Mutation {
 
 pub fn perform(repo: &Path, mutation: Mutation) -> Result<String, Error> {
     crate::cli::check_cancelled()?;
+    if push_is_up_to_date(repo, &mutation) {
+        return Ok(String::new());
+    }
     if let Mutation::Custom {
         command,
         repo: marked,
@@ -1303,6 +1306,99 @@ fn push(
         }
     }
     push_with_killer(repo, args, None, killer_push, rebase, force_with_lease, force, target)
+}
+
+/// Avoid starting a network push when the local tracking ref already points at
+/// the exact commit that would be sent. The tracking ref is deliberately used
+/// as the proof: it keeps this path local and makes it conservative for a
+/// branch with no fetched remote state. Operations that may intentionally alter
+/// remote refs still go through Git below.
+pub fn push_is_up_to_date(repo: &Path, mutation: &Mutation) -> bool {
+    match mutation {
+        Mutation::Push {
+            remote,
+            set_upstream,
+            tags,
+            force_with_lease,
+            force,
+            ..
+        } => {
+            if *tags || *force_with_lease || *force {
+                return false;
+            }
+            let Some(target) = integration_target(repo, None, remote.as_deref(), None, *set_upstream) else { return false };
+            let Some(branch) = head_branch_name(repo) else { return false };
+            push_target_is_up_to_date(repo, &branch, None, &target.remote, &target.branch, *set_upstream)
+        }
+        Mutation::PushRef {
+            remote,
+            branch,
+            source_commit,
+            remote_branch,
+            set_upstream,
+            tags,
+            force_with_lease,
+            force,
+            ..
+        } => {
+            if *tags || *force_with_lease || *force {
+                return false;
+            }
+            let target = remote_branch.trim();
+            if check_name(remote).is_err() || check_name(branch).is_err() || (!target.is_empty() && check_name(target).is_err()) {
+                return false;
+            }
+            push_target_is_up_to_date(repo, branch, source_commit.as_deref(), remote, target, *set_upstream)
+        }
+        _ => return false,
+    }
+}
+
+fn push_target_is_up_to_date(
+    repo: &Path,
+    branch: &str,
+    source_commit: Option<&str>,
+    remote: &str,
+    remote_branch: &str,
+    set_upstream: bool,
+) -> bool {
+    if remote == "." {
+        return false;
+    }
+    let target = if remote_branch.is_empty() { branch } else { remote_branch };
+    let Ok(opened) = crate::open_repo(repo) else { return false };
+    let source = match source_commit {
+        Some(source) if matches!(source.len(), 40 | 64) && source.bytes().all(|byte| byte.is_ascii_hexdigit()) => source.to_string(),
+        Some(_) => return false,
+        None => {
+            let name = format!("refs/heads/{branch}");
+            let Ok(mut reference) = opened.find_reference(name.as_str()) else { return false };
+            let Ok(id) = reference.peel_to_id_in_place() else { return false };
+            id.to_string()
+        }
+    };
+    let tracking = format!("refs/remotes/{remote}/{target}");
+    let Ok(mut tracking) = opened.find_reference(tracking.as_str()) else { return false };
+    let Ok(tracking) = tracking.peel_to_id_in_place() else { return false };
+    let tracking = tracking.to_string();
+    if source != tracking {
+        return false;
+    }
+    if set_upstream {
+        let config = opened.config_snapshot();
+        let stored_remote = config.string(format!("branch.{branch}.remote")).map(|value| value.to_string());
+        let stored_merge = config.string(format!("branch.{branch}.merge")).map(|value| value.to_string());
+        let expected_merge = format!("refs/heads/{target}");
+        if stored_remote.as_deref() != Some(remote) || stored_merge.as_deref() != Some(expected_merge.as_str()) {
+            return false;
+        }
+    }
+    true
+}
+
+fn head_branch_name(repo: &Path) -> Option<String> {
+    let opened = crate::open_repo(repo).ok()?;
+    Some(opened.head().ok()?.referent_name()?.shorten().to_string())
 }
 
 /// The remote branch a rejected push would have updated. Recovery only
