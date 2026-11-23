@@ -185,8 +185,8 @@
     // Re-measure as the scrollport moves or wrapping and font sizes change.
     void shell.diffTop;
     void shell.settings.diffWordWrap;
-    void shell.settings.diffFontSize;
-    void shell.settings.uiScale;
+    void shell.effectiveDiffFontSize;
+    void shell.effectiveUiScale;
     const bodyTop = body.getBoundingClientRect().top;
     const anchor =
       body.querySelector<HTMLElement>(`[data-line="${range.start}"]`) ??

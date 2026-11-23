@@ -36,6 +36,26 @@
   const fitMenu = (node: HTMLElement, spot: { x: number; y: number; anchorTop?: number }) => shell.fitMenu(node, spot);
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
 
+  function toggleConfirmFile(file: string, checked: boolean) {
+    const ask = shell.confirmAsk;
+    if (!ask) return;
+    const selected = new Set(ask.selectedFiles ?? ask.files ?? []);
+    if (checked) selected.add(file);
+    else selected.delete(file);
+    shell.confirmAsk = {
+      ...ask,
+      selectedFiles: (ask.files ?? []).filter((path) => selected.has(path)),
+    };
+  }
+
+  function submitConfirm() {
+    const current = shell.confirmAsk;
+    if (!current) return;
+    const selected = current.selectedFiles ?? current.files ?? [];
+    shell.confirmAsk = null;
+    current.run(selected);
+  }
+
   let submenuAnchor: HTMLElement | null = null;
   const focusTraps: HTMLElement[] = [];
 
@@ -222,19 +242,44 @@
     flex-direction: column;
     gap: 3px;
     min-height: 0;
-    max-height: 40vh;
+    max-height: min(420px, 44vh);
     margin: 0;
     padding: 0;
     list-style: none;
     overflow: auto;
+    scrollbar-gutter: stable;
   }
 
 .confirm-files li {
     display: flex;
+    flex: 0 0 auto;
     min-width: 0;
+    min-height: 18px;
     overflow: hidden;
     font-size: 12px;
     line-height: 18px;
+  }
+
+.dialog .confirm-file {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    font-size: inherit;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+.confirm-file input {
+    margin-top: 1px;
+  }
+
+.confirm-file-path {
+    display: flex;
+    min-width: 0;
+    overflow: hidden;
     white-space: nowrap;
   }
 
@@ -259,7 +304,8 @@
   }
 
 .dialog.confirm {
-    width: min(460px, calc(100vw - 32px));
+    width: min(560px, calc(100vw - 32px));
+    max-height: min(720px, calc(100vh - 32px));
     gap: 14px;
     padding: 24px 24px 18px;
   }
@@ -891,7 +937,7 @@
 
 <PerfPanel />
 
-<div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.settings.diffFontSize || 13}px" style:--guide="{shell.settings.pageGuide || 72}" data-lab-scene={shell.labSceneId || undefined} data-lab-error={shell.labPage && !shell.labSceneId && shell.loadError ? shell.loadError : undefined}>
+<div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.effectiveDiffFontSize}px" style:--guide="{shell.settings.pageGuide || 72}" data-lab-scene={shell.labSceneId || undefined} data-lab-error={shell.labPage && !shell.labSceneId && shell.loadError ? shell.loadError : undefined}>
   {#if shell.standalone === "merge"}
     <MergePanel />
   {:else if shell.standalone === "history"}
@@ -1113,6 +1159,8 @@
   {/if}
   {#if shell.confirmAsk}
     {@const ask = shell.confirmAsk}
+    {@const selectedFiles = new Set(ask.selectedFiles ?? ask.files ?? [])}
+    {@const noFilesSelected = (ask.files?.length ?? 0) > 0 && selectedFiles.size === 0}
     <div class="scrim confirm-scrim" role="presentation">
       <div class="dialog sm confirm" class:danger={ask.danger} data-confirm data-layer="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby={[ask.body ? "confirm-body" : "", ask.detail ? "confirm-detail" : ""].filter(Boolean).join(" ") || undefined} tabindex="-1" use:overlayFocus={{ close: () => (shell.confirmAsk = null), focus: ask.danger && !ask.focusConfirm ? ".text-button" : ".commit" }}>
         <div class="confirm-head">
@@ -1142,15 +1190,20 @@
             <div class="confirm-count">{shell.tr("dialog.fileCount", { count: String(ask.files.length) })}</div>
             <ol>
               {#each ask.files as file (file)}
-                {@const cut = file.lastIndexOf("/")}
-                <li title={file}><span class="confirm-file-dir">{cut > 0 ? file.slice(0, cut + 1) : ""}</span><span class="confirm-file-name">{cut > 0 ? file.slice(cut + 1) : file}</span></li>
+                {@const cut = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"))}
+                <li title={file}>
+                  <label class="confirm-file">
+                    <input type="checkbox" checked={selectedFiles.has(file)} aria-label={file} onchange={(event) => toggleConfirmFile(file, event.currentTarget.checked)} />
+                    <span class="confirm-file-path"><span class="confirm-file-dir">{cut > 0 ? file.slice(0, cut + 1) : ""}</span><span class="confirm-file-name">{cut > 0 ? file.slice(cut + 1) : file}</span></span>
+                  </label>
+                </li>
               {/each}
             </ol>
           </div>
         {/if}
         <div class="confirm-actions">
           <button class="text-button" type="button" onclick={() => (shell.confirmAsk = null)}>{shell.tr("dialog.cancel")}</button>
-          <button class="commit" class:danger={ask.danger} type="button" disabled={!!ask.revert?.commit && !ask.revert.message.trim()} onclick={() => { const run = shell.confirmAsk?.run; shell.confirmAsk = null; run?.(); }}>{ask.confirmLabel ?? shell.tr("dialog.confirm")}</button>
+          <button class="commit" class:danger={ask.danger} type="button" disabled={noFilesSelected || !!ask.revert?.commit && !ask.revert.message.trim()} onclick={submitConfirm}>{ask.confirmLabel ?? shell.tr("dialog.confirm")}</button>
         </div>
       </div>
     </div>

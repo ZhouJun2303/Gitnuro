@@ -9,7 +9,7 @@ use awegit_git::{
     blob_view, commit, commit_log, commits_from, conflict_view, discard_lines, file_diff,
     file_diff_with, file_preview, in_progress, launch_merge_tool, merge_preview, perform,
     remove_stale_index_lock, repository_refs, search_commits, search_log, stage_all, stage_hunk,
-    stage_line, stage_lines, stage_paths, stale_index_lock, status, stop_process_tree, unstage_paths, ChangeKind,
+    stage_line, stage_lines, stage_paths, stale_index_lock, stale_index_lock_for_error, status, stop_process_tree, unstage_paths, ChangeKind,
     CommitRequest, InProgress, LineEdit, Mutation, RebaseStep, ResetMode,
 };
 
@@ -252,6 +252,50 @@ fn fetch_push_and_fast_forward() {
     let log = git_at(&other, &["log", "--format=%s"]);
     assert!(log.contains("second"), "{log}");
     assert!(log.contains("first"), "{log}");
+}
+
+#[test]
+fn push_with_no_new_commit_skips_the_remote_command() {
+    let origin = bare();
+    let local = repo();
+    commit_file(&local, "a.txt", "one\n", "first");
+    perform(
+        &local.path,
+        Mutation::AddRemote {
+            name: "origin".into(),
+            url: file_url(&origin.path),
+        },
+    )
+    .unwrap();
+    perform(
+        &local.path,
+        Mutation::Push {
+            remote: Some("origin".into()),
+            set_upstream: true,
+            tags: false,
+            force_with_lease: false,
+            force: false,
+            killer_push: false,
+            rebase: false,
+        },
+    )
+    .unwrap();
+
+    let missing = origin.path.with_extension("missing.git");
+    local.git(&["remote", "set-url", "origin", &file_url(&missing)]);
+    perform(
+        &local.path,
+        Mutation::Push {
+            remote: Some("origin".into()),
+            set_upstream: false,
+            tags: false,
+            force_with_lease: false,
+            force: false,
+            killer_push: false,
+            rebase: false,
+        },
+    )
+    .unwrap();
 }
 
 #[test]
@@ -3171,6 +3215,32 @@ fn stale_index_lock_is_offered_only_after_it_ages() {
     assert!(!lock.exists());
     assert!(remove_stale_index_lock(&repo.path, &stale.path).is_err());
     assert!(remove_stale_index_lock(&repo.path, "elsewhere.lock").is_err());
+}
+
+#[test]
+fn stale_submodule_index_lock_is_offered_from_git_error() {
+    let repo = repo();
+    let lock = repo
+        .path
+        .join(".git/modules/Packages/HlwdFramework/index.lock");
+    fs::create_dir_all(lock.parent().unwrap()).unwrap();
+    fs::write(&lock, "").unwrap();
+    let old = SystemTime::now() - Duration::from_secs(60);
+    fs::File::options()
+        .write(true)
+        .open(&lock)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+
+    let error = format!(
+        "fatal: Unable to create '{}': File exists\nAnother git process seems to be running in this repository, or the lock file may be stale",
+        lock.display().to_string().replace('\\', "/")
+    );
+    let stale = stale_index_lock_for_error(&repo.path, &error).expect("the submodule lock is stale");
+    assert!(stale.path.ends_with(".git/modules/Packages/HlwdFramework/index.lock"), "{}", stale.path);
+    remove_stale_index_lock(&repo.path, &stale.path).unwrap();
+    assert!(!lock.exists());
 }
 
 #[test]

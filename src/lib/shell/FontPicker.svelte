@@ -8,6 +8,8 @@
   const value = $derived(kind === "ui" ? shell.settings.uiFont : shell.settings.codeFont);
   const size = $derived(kind === "ui" ? shell.settings.uiScale : shell.settings.diffFontSize);
   const weight = $derived(kind === "ui" ? shell.settings.uiFontWeight : shell.settings.codeFontWeight);
+  const previewFontSize = $derived(kind === "ui" ? shell.effectiveUiScale : shell.effectiveDiffFontSize);
+  const previewFontWeight = $derived(kind === "ui" ? shell.effectiveUiFontWeight : shell.effectiveCodeFontWeight);
   const fonts = $derived<FontOption[]>([...(kind === "ui" ? uiFonts : codeFonts), ...(cache?.customFonts ?? []).map((font) => ({ ...font, script: "custom" }))]);
   const selected = $derived(fonts.find((font) => font.id === value));
   const cached = $derived(cache?.fonts.find((font) => font.id === value));
@@ -16,14 +18,14 @@
     : shell.tr(!value ? "dialog.fontSystemPreview" : status === "loading" ? "dialog.fontLoading" : "dialog.fontNotDownloaded"));
 
   function setSize(input: HTMLInputElement) {
-    const next = Math.min(kind === "ui" ? 20 : 32, Math.max(kind === "ui" ? 11 : 8, Math.round(Number(input.value) || 14)));
+    const next = Math.min(kind === "ui" ? 30 : 32, Math.max(kind === "ui" ? 11 : 8, Math.round(Number(input.value) || 14)));
     if (kind === "ui") shell.settings.uiScale = next;
     else shell.settings.diffFontSize = next;
     input.value = String(next);
   }
   function previewSize(input: HTMLInputElement) {
     const value = Number(input.value);
-    if (input.value && value >= (kind === "ui" ? 11 : 8) && value <= (kind === "ui" ? 20 : 32)) setSize(input);
+    if (input.value && value >= (kind === "ui" ? 11 : 8) && value <= (kind === "ui" ? 30 : 32)) setSize(input);
   }
 </script>
 
@@ -61,8 +63,8 @@
     <div class="font-metrics">
       <label for={`font-size-${kind}`}>{shell.tr(kind === "ui" ? "dialog.uiFontSize" : "dialog.codeFontSize")}</label>
       <div class="font-size-control">
-        <input type="range" aria-label={shell.tr(kind === "ui" ? "dialog.uiFontSize" : "dialog.codeFontSize")} min={kind === "ui" ? 11 : 8} max={kind === "ui" ? 20 : 32} value={size} oninput={(event) => setSize(event.currentTarget)} />
-        <input id={`font-size-${kind}`} type="number" min={kind === "ui" ? 11 : 8} max={kind === "ui" ? 20 : 32} value={size} oninput={(event) => previewSize(event.currentTarget)} onchange={(event) => setSize(event.currentTarget)} /><span>px</span>
+        <input type="range" aria-label={shell.tr(kind === "ui" ? "dialog.uiFontSize" : "dialog.codeFontSize")} min={kind === "ui" ? 11 : 8} max={kind === "ui" ? 30 : 32} value={size} oninput={(event) => setSize(event.currentTarget)} />
+        <input id={`font-size-${kind}`} type="number" min={kind === "ui" ? 11 : 8} max={kind === "ui" ? 30 : 32} value={size} oninput={(event) => previewSize(event.currentTarget)} onchange={(event) => setSize(event.currentTarget)} /><span>px</span>
       </div>
       <label for={`font-weight-${kind}`}>{shell.tr("dialog.fontWeight")}</label>
       <select id={`font-weight-${kind}`} value={weight || 400} onchange={(event) => {
@@ -75,7 +77,7 @@
       </select>
     </div>
     <div class="font-preview-label"><span>{shell.tr("dialog.fontPreview")}</span><span role="status">{previewStatus}</span></div>
-    <div class="font-preview" data-font-preview={kind} style:font-family={kind === "ui" ? "var(--font)" : "var(--mono)"} style:font-size={`${size || 14}px`} style:font-weight={weight || 400}>
+    <div class="font-preview" data-font-preview={kind} style:font-family={kind === "ui" ? "var(--font)" : "var(--mono)"} style:font-size={`${previewFontSize}px`} style:font-weight={previewFontWeight}>
       {#if kind === "ui"}
         <p>AweGit · 让每一次提交清晰可见</p>
         <p>The quick brown fox jumps over the lazy dog.</p>

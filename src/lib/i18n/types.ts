@@ -469,6 +469,8 @@ export type Messages = {
   dialog: {
     fonts: string;
     fontsHint: string;
+    seniorMode: string;
+    seniorModeHint: string;
     googleFontAdd: string;
     googleFontHint: string;
     googleFontBrowse: string;
@@ -894,6 +896,8 @@ export type Messages = {
     includeTags: string;
     pruneOnFetch: string;
     pullWithRebase: string;
+    excelAutoSaveOnPull: string;
+    excelAutoSaveOnPullHint: string;
     forceWithLease: string;
     killerPush: string;
     killerPushHint: string;

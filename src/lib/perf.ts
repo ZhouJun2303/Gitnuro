@@ -1,6 +1,6 @@
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { runTask } from "./tasks";
-import { invalidateReads, scheduleRead } from "./read-scheduler";
+import { invalidateReads, scheduleRead, setReadCanceller } from "./read-scheduler";
 import { repositoryWrites } from "./operation-policy";
 
 type Args = Parameters<typeof rawInvoke>[1];
@@ -49,7 +49,7 @@ export function logClient(level: Entry["level"], kind: string, name: string, det
   push({ level, kind, name, detail, ms });
 }
 
-async function call<T>(cmd: string, args?: Args, options?: Options): Promise<T> {
+async function call<T>(cmd: string, args?: Args, options?: Options, signal?: AbortSignal): Promise<T> {
   if (live) return rawInvoke<T>(cmd, args, options);
   let response: Response;
   try {
@@ -57,6 +57,7 @@ async function call<T>(cmd: string, args?: Args, options?: Options): Promise<T> 
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ cmd, args: args ?? {} }),
+      signal,
     });
   } catch {
     throw new Error("试验台未启动，请运行 pnpm dev");
@@ -71,6 +72,8 @@ async function call<T>(cmd: string, args?: Args, options?: Options): Promise<T> 
   return payload.value as T;
 }
 
+setReadCanceller((path) => call("cancel_reads", { path }).then(() => undefined));
+
 /** Desktop calls Tauri. The browser lab posts the same command to `/__lab`. */
 export async function invoke<T>(cmd: string, args?: Args, options?: Options, operation?: string): Promise<T> {
   const start = performance.now();
@@ -79,7 +82,7 @@ export async function invoke<T>(cmd: string, args?: Args, options?: Options, ope
   const tracedArgs = { ...args, __perf: trace };
   if (repositoryWrites.has(cmd)) invalidateReads(String((tracedArgs as Record<string, unknown>).path ?? ""));
   try {
-    const value = await runTask<T>(cmd, tracedArgs, trace, (taskArgs) => scheduleRead(cmd, taskArgs, () => call<T>(cmd, taskArgs, options)));
+    const value = await runTask<T>(cmd, tracedArgs, trace, (taskArgs) => scheduleRead(cmd, taskArgs, (signal) => call<T>(cmd, taskArgs, options, signal)));
     const ms = performance.now() - start;
     record(cmd, ms, true);
     if (ms >= SLOW_INVOKE_MS || ["mutate", "workspace_status", "repository_refs", "commit_log", "operation_flow", "conflict_view"].includes(cmd)) push({ level: ms >= SLOW_INVOKE_MS ? "slow" : "info", kind: "invoke", name: cmd, ms, at, trace });

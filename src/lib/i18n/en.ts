@@ -528,6 +528,8 @@ export const en: Messages = {
   dialog: {
     fonts: "Fonts",
     fontsHint: "Choose interface and code fonts, adjust their size and weight, and preview the result immediately.",
+    seniorMode: "Large text mode",
+    seniorModeHint: "Uses larger text, clearer weights, and stronger contrast for easier reading.",
     googleFontAdd: "Add from Google Fonts",
     googleFontHint: "Browse and preview all families on the official website. Paste a family name or specimen link here; once recognized, download and add it. Added fonts appear in both selectors below and work offline. The regular face is downloaded, up to 32 MB.",
     googleFontBrowse: "Browse Google Fonts",
@@ -953,6 +955,8 @@ export const en: Messages = {
     includeTags: "Include tags",
     pruneOnFetch: "Prune deleted remote branches",
     pullWithRebase: "Rebase instead of merge",
+    excelAutoSaveOnPull: "Save and close Excel before pulling",
+    excelAutoSaveOnPullHint: "Reopens Excel workbooks from the current repository after the pull; desktop Windows only.",
     forceWithLease: "Use --force-with-lease",
     killerPush: "Killer push",
     killerPushHint: "When new remote commits reject a push, pull and retry once; a merge or rebase conflict aborts and restores the work tree. A push that succeeds directly runs no extra operation.",

@@ -553,6 +553,11 @@
               <input type="checkbox" bind:checked={shell.settings.pullRebase} />
               <span class="pref-label">{shell.tr("dialog.pullWithRebase")}</span>
             </label>
+            <label class="pref-row pref-toggle">
+              <input type="checkbox" name="excelAutoSaveOnPull" bind:checked={shell.settings.excelAutoSaveOnPull} />
+              <span class="pref-label">{shell.tr("dialog.excelAutoSaveOnPull")}</span>
+            </label>
+            <p class="pref-setting-hint">{shell.tr("dialog.excelAutoSaveOnPullHint")}</p>
           </div>
         </section>
 

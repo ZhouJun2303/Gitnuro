@@ -5,6 +5,7 @@ mod changes;
 #[cfg(test)]
 mod command_acl;
 mod development;
+mod excel;
 mod forge;
 mod fonts;
 mod flow_window;
@@ -18,6 +19,7 @@ mod revision_copy;
 mod scans;
 mod secrets;
 mod settings;
+mod status_cache;
 mod settings_merge;
 mod tasks;
 mod tools;
@@ -264,6 +266,13 @@ fn read_status_paths(repo: &Path, paths: Option<&[String]>) -> Result<awegit_git
         None => awegit_git::status_with(repo, use_fakeignore()),
     }.map_err(|error| error.to_string())?;
     status.revision = revision;
+    // A full read can vouch for the index. Path-limited reads must not replace that fingerprint.
+    if paths.is_none() {
+        if let Ok(fingerprint) = awegit_git::status_fingerprint(repo) {
+            status.fingerprint = Some(fingerprint.clone());
+            status_cache::remember(repo, &status, &fingerprint);
+        }
+    }
     Ok(status)
 }
 
@@ -324,6 +333,28 @@ fn write_kind_then_status_paths(path: Option<String>, kind: &str, write: impl Fn
     if let Some(flow) = flow { flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), kind); }
     result.map_err(|error| error.to_string())?;
     Ok((read_status_paths(&repo, paths.as_deref())?, paths))
+}
+
+#[tauri::command]
+fn status_probe(state: tauri::State<'_, RepoWatch>, path: Option<String>) -> Result<status_cache::StatusProbe, String> {
+    let repo = repo_from(path)?;
+    status_cache::probe(&repo, watcher_alive(&state, &repo))
+}
+
+#[tauri::command]
+fn load_status_cache(path: Option<String>) -> Result<Option<status_cache::StoredStatus>, String> {
+    let repo = repo_from(path)?;
+    Ok(status_cache::load(&repo))
+}
+
+fn watcher_alive(state: &RepoWatch, repo: &Path) -> bool {
+    let key = watch_key(repo);
+    state
+        .0
+        .lock()
+        .ok()
+        .and_then(|slots| slots.get(&key).map(|slot| slot.alive.load(Ordering::Acquire)))
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -497,9 +528,10 @@ fn commit_log(
     tasks::wait_for_writes(&repo);
     let limit = limit.unwrap_or(500);
     let topo = order.as_deref() == Some("topo");
-    let key = format!("log:{}:{}:{limit}:{topo}:{all:?}:{revs:?}:{offset:?}", awegit_git::repo_key(&repo), changes::revision(&repo));
+    let revision = changes::revision(&repo);
+    let key = format!("log:{}:{revision}:{limit}:{topo}:{all:?}:{revs:?}:{offset:?}", awegit_git::repo_key(&repo));
     reads::shared(key, || {
-        awegit_git::commit_log_page(&repo, limit, all.unwrap_or(true), &revs.unwrap_or_default(), topo, offset.unwrap_or(0)).map_err(|error| error.to_string())
+        awegit_git::commit_log_page_with_revision(&repo, limit, all.unwrap_or(true), &revs.unwrap_or_default(), topo, offset.unwrap_or(0), Some(revision)).map_err(|error| error.to_string())
     })
 }
 
@@ -551,7 +583,8 @@ fn in_progress(path: Option<String>) -> Result<Option<awegit_git::InProgress>, S
 fn file_history(path: Option<String>, file: String, limit: Option<usize>, offset: Option<usize>) -> Result<Vec<awegit_git::CommitRow>, String> {
     let repo = repo_from(path)?;
     tasks::wait_for_writes(&repo);
-    awegit_git::file_history_page(&repo, &file, limit.unwrap_or(200), offset.unwrap_or(0)).map_err(|error| error.to_string())
+    let revision = changes::revision(&repo);
+    awegit_git::file_history_page_with_revision(&repo, &file, limit.unwrap_or(200), offset.unwrap_or(0), Some(revision)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -635,17 +668,29 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
     let mut refresh_areas = request.refresh_areas().to_vec();
     let (result, log) = awegit_git::capture_output(|| -> Result<MutationReport, String> {
         development::check_delete(&repo, &request)?;
-        apply_session();
-        let _https = accounts::install_https(&repo, &request);
-        record_action(&request);
         let action_name = action_label(&request);
-        let before_refs = matches!(action_name,
+        let push_noop = matches!(action_name, "push" | "pushRef") && awegit_git::push_is_up_to_date(&repo, &request);
+        apply_session();
+        let _https = (!push_noop).then(|| accounts::install_https(&repo, &request));
+        record_action(&request);
+        let before_refs = (!push_noop && matches!(action_name,
             "fetch" | "pull" | "pullRef" | "push" | "pushRef" | "checkout" | "checkoutRemote"
             | "merge" | "rebase" | "rebaseInteractive" | "reset" | "cherryPick" | "revert"
             | "stash" | "stashPop" | "stashApply" | "stashDrop" | "stashPaths"
-        ).then(|| awegit_git::pull_refresh_state(&repo)).flatten();
+        )).then(|| awegit_git::pull_refresh_state(&repo)).flatten();
         let before_head = before_refs.as_ref().map(|state| state.head().to_string());
-        let flow = { let _phase = perf::phase("flow-begin"); flows::begin(&repo, &request) };
+        let excel_session = if settings::load().map(|values| values.excel_auto_save_on_pull).unwrap_or(true)
+            && matches!(action_name, "pull" | "pullRef") {
+            excel::prepare(&repo)?
+        } else {
+            None
+        };
+        let flow = if push_noop {
+            None
+        } else {
+            let _phase = perf::phase("flow-begin");
+            flows::begin(&repo, &request)
+        };
         let stage_paths = match &request {
             awegit_git::Mutation::StagePaths { files, .. }
                 if files.len() <= 512 && flow.is_none() && !awegit_git::flow::has_pending_restore(&repo) => Some(files.clone()),
@@ -660,7 +705,14 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             }
             Ok::<_, awegit_git::Error>(output)
         });
-        let result = if let Some(flow) = &flow { awegit_git::flow::observe(flow.observer(), action) } else { action() };
+        let result = if push_noop {
+            Ok(String::new())
+        } else if let Some(flow) = &flow {
+            awegit_git::flow::observe(flow.observer(), action)
+        } else {
+            action()
+        };
+        let excel_restore_error = excel_session.as_ref().and_then(|session| excel::restore(session).err());
         // Killer recovery integrated remote history in a push, so the work tree,
         // index, and history changed with HEAD. A plain push never moves HEAD.
         if killer_push && result.is_ok() && before_head.as_deref().is_some_and(|head|
@@ -669,20 +721,31 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         }
         // A killed Git process can leave index.lock behind and make the write fail
         // without a usable stderr. Report the file so the UI can offer to remove it.
-        let stale_lock = if result.is_err() { awegit_git::stale_index_lock(&next) } else { None };
+        // The error path also covers locks created inside a submodule's git dir.
+        let stale_lock = result.as_ref().err().and_then(|error| {
+            awegit_git::stale_index_lock_for_error(&next, &error.to_string())
+        });
         let flow = flow.map(|flow| { let _phase = perf::phase("flow-finish"); flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name) });
         let status_paths = if result.is_ok() { stage_paths } else { None };
         let status = if result.is_err() || refresh_areas.iter().any(|area| matches!(*area, "worktree" | "index" | "flow")) {
             Some(awegit_git::without_cancellation(|| read_status_paths(&next, status_paths.as_deref()))?)
         } else { None };
-        let refresh_scope = if result.is_ok() && before_refs.is_some()
+        let refresh_scope = if push_noop {
+            Some("status")
+        } else if result.is_ok() && before_refs.is_some()
             && before_refs == awegit_git::pull_refresh_state(&repo) { Some("status") } else { None };
         let conflict_capable = matches!(action_name, "pull" | "pullRef" | "merge" | "rebase" | "rebaseInteractive" | "revert" | "cherryPick"
             | "checkout" | "checkoutRemote" | "stashPop" | "stashApply" | "stashBranch" | "continue" | "skip" | "abort" | "gitFlowFinish");
         let conflicted = conflict_capable && status.as_ref().is_some_and(|status| status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict));
         let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
         let error = result.as_ref().err().map(ToString::to_string).unwrap_or_default();
-        let output = result.unwrap_or_default();
+        let mut output = result.unwrap_or_default();
+        if let Some(error) = excel_restore_error {
+            if !output.trim().is_empty() {
+                output.push_str("\n\n");
+            }
+            output.push_str(&format!("Excel reopen warning: {error}"));
+        }
         Ok(MutationReport {
             status,
             status_paths,
@@ -1835,7 +1898,8 @@ fn remove_index_lock(path: Option<String>) -> Result<bool, String> {
 }
 
 /// Remove the `index.lock` a killed Git command left, after the user confirmed.
-/// The git crate re-checks its age so a lock a new command just took is kept.
+/// This also accepts locks in a submodule's shared git directory. The git crate
+/// re-checks its age so a lock a new command just took is kept.
 #[tauri::command]
 fn remove_stale_lock(path: Option<String>, lock: String) -> Result<(), String> {
     let repo = repo_from(path)?;
@@ -2174,6 +2238,14 @@ fn facts_stamp(repo: &Path) -> String {
     }
     stamp.push('|');
     stamp.push_str(&file_mark(&git.join("index")));
+    for relative in ["config", "info/exclude", "info/attributes", "objects/info/alternates"] {
+        stamp.push('|');
+        stamp.push_str(&file_mark(&git.join(relative)));
+    }
+    for relative in [".gitignore", ".gitattributes"] {
+        stamp.push('|');
+        stamp.push_str(&file_mark(&repo.join(relative)));
+    }
     stamp.push('|');
     stamp.push_str(repo.to_string_lossy().as_ref());
     stamp
@@ -2268,7 +2340,8 @@ fn search_log(
     let repo = repo_from(path)?;
     let topo = order.as_deref() == Some("topo");
     tasks::wait_for_writes(&repo);
-    awegit_git::search_log_page(&repo, &field, &scope, &query, limit.unwrap_or(500), topo, offset.unwrap_or(0)).map_err(|error| error.to_string())
+    let revision = changes::revision(&repo);
+    awegit_git::search_log_page_with_revision(&repo, &field, &scope, &query, limit.unwrap_or(500), topo, offset.unwrap_or(0), Some(revision)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2852,6 +2925,8 @@ pub fn run() {
     let handler: std::sync::Arc<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync> = std::sync::Arc::new(tauri::generate_handler![
             workspace_status,
             workspace_status_paths,
+            status_probe,
+            load_status_cache,
             stage_all,
             unstage_all,
             stage_path,

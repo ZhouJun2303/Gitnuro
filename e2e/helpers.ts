@@ -55,14 +55,20 @@ export async function openLabScene(
   page: Page,
   id: string,
   ready: string,
-  options?: { locale?: "en" | "zh"; diffStyle?: "split" | "unified" },
+  options?: { locale?: "en" | "zh"; diffStyle?: "split" | "unified"; theme?: "apple" | "light" | "dark" },
 ) {
   const scene = scenes.find((item) => item.id === id);
   if (!scene) throw new Error(`Unknown lab scene: ${id}`);
   const patch: Record<string, unknown> = {};
   if (options?.locale) patch.locale = options.locale;
   if (options?.diffStyle) patch.diffStyle = options.diffStyle;
+  if (options?.theme) patch.theme = options.theme;
   if (Object.keys(patch).length > 0) await pinLabSettings(page, patch);
-  await openScene(page, scene, options?.locale ? `&locale=${options.locale}` : "");
+  const queryParts = [
+    options?.locale ? `locale=${options.locale}` : "",
+    options?.theme ? `theme=${options.theme}` : "",
+  ].filter(Boolean);
+  const query = queryParts.join("&");
+  await openScene(page, scene, query ? `&${query}` : "");
   await expect(page.locator(ready).first()).toBeVisible();
 }

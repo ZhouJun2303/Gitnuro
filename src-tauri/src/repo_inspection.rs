@@ -29,6 +29,58 @@ fn metadata_dir(root: &Path) -> Option<PathBuf> {
     directory.is_dir().then_some(directory)
 }
 
+#[derive(Default)]
+struct TreeStats {
+    files: u64,
+    directories: u64,
+    bytes: u64,
+    skipped: u64,
+}
+
+fn scan_tree(root: &Path, skip: Option<&Path>, count_directories: bool) -> TreeStats {
+    let mut result = TreeStats::default();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => {
+                result.skipped += 1;
+                continue;
+            }
+        };
+        for entry in entries {
+            let Ok(entry) = entry else {
+                result.skipped += 1;
+                continue;
+            };
+            let path = entry.path();
+            if skip.is_some_and(|marker| path == marker) {
+                continue;
+            }
+            let metadata = match std::fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(_) => {
+                    result.skipped += 1;
+                    continue;
+                }
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            if metadata.is_dir() {
+                if count_directories {
+                    result.directories += 1;
+                }
+                stack.push(path);
+            } else if metadata.is_file() {
+                result.files += 1;
+                result.bytes = result.bytes.saturating_add(metadata.len());
+            }
+        }
+    }
+    result
+}
+
 fn inspect(root: &Path, git_dir: Option<&Path>) -> RepoInspection {
     let git_marker = root.join(".git");
     let mut kinds = Vec::new();
@@ -42,37 +94,24 @@ fn inspect(root: &Path, git_dir: Option<&Path>) -> RepoInspection {
             || root.join("app/src/main/AndroidManifest.xml").is_file()) {
         kinds.push("android");
     }
-    let mut result = RepoInspection { kinds, files: 0, directories: 0, worktree_bytes: 0, git_bytes: 0, skipped: 0, remotes: Vec::new() };
-    let mut stack = vec![(root.to_path_buf(), false)];
-    if let Some(dir) = git_dir.filter(|dir| dir.is_dir()) {
-        stack.push((dir.to_path_buf(), true));
-    }
-    while let Some((dir, git)) = stack.pop() {
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(_) => { result.skipped += 1; continue; }
-        };
-        for entry in entries {
-            let Ok(entry) = entry else { result.skipped += 1; continue };
-            let path = entry.path();
-            if !git && path == git_marker { continue; }
-            let metadata = match std::fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(_) => { result.skipped += 1; continue; }
-            };
-            if metadata.file_type().is_symlink() { continue; }
-            if metadata.is_dir() {
-                if !git { result.directories += 1; }
-                stack.push((path, git));
-            } else if metadata.is_file() {
-                if git { result.git_bytes = result.git_bytes.saturating_add(metadata.len()); }
-                else {
-                    result.files += 1;
-                    result.worktree_bytes = result.worktree_bytes.saturating_add(metadata.len());
-                }
-            }
-        }
-    }
+    let (worktree, git) = std::thread::scope(|scope| {
+        let worktree = scope.spawn(|| scan_tree(root, Some(&git_marker), true));
+        let git = git_dir
+            .filter(|dir| dir.is_dir())
+            .map(|dir| scope.spawn(|| scan_tree(dir, None, false)));
+        let worktree = worktree.join().unwrap_or_default();
+        let git = git.and_then(|thread| thread.join().ok()).unwrap_or_default();
+        (worktree, git)
+    });
+    let result = RepoInspection {
+        kinds,
+        files: worktree.files,
+        directories: worktree.directories,
+        worktree_bytes: worktree.bytes,
+        git_bytes: git.bytes,
+        skipped: worktree.skipped.saturating_add(git.skipped),
+        remotes: Vec::new(),
+    };
     result
 }
 
@@ -81,8 +120,14 @@ pub fn repository_inspection(path: Option<String>) -> Result<RepoInspection, Str
     let root = super::repo_from(path)?;
     let git_dir = metadata_dir(&root);
     if let Some(ref directory) = git_dir { super::lab::ensure_lab_path(directory)?; }
-    let mut result = inspect(&root, git_dir.as_deref());
-    result.remotes = awegit_git::remote_list(&root);
+    let (mut result, remotes) = std::thread::scope(|scope| {
+        let inspection = scope.spawn(|| inspect(&root, git_dir.as_deref()));
+        let remotes = scope.spawn(|| awegit_git::remote_list(&root));
+        let inspection = inspection.join().map_err(|_| "repository inspection stopped unexpectedly".to_string())?;
+        let remotes = remotes.join().unwrap_or_default();
+        Ok::<_, String>((inspection, remotes))
+    })?;
+    result.remotes = remotes;
     Ok(result)
 }
 

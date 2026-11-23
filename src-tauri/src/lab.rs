@@ -277,6 +277,17 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "lab_restore" => done_result(restore_repo(req(args, "name")?)),
         "workspace_status" => done_result(super::workspace_status(req(args, "path")?)),
         "workspace_status_paths" => done_result(super::workspace_status_paths(req(args, "path")?, req(args, "files")?)),
+        "status_probe" => {
+            let path: Option<String> = req(args, "path")?;
+            let repo = super::repo_from(path)?;
+            // The lab watcher is a stub, so a quiet fingerprint cannot skip the work tree here.
+            done_result(super::status_cache::probe(&repo, false))
+        }
+        "load_status_cache" => {
+            let path: Option<String> = req(args, "path")?;
+            let repo = super::repo_from(path)?;
+            done(super::status_cache::load(&repo))
+        }
         "stage_all" => done_result(super::stage_all(req(args, "path")?)),
         "unstage_all" => done_result(super::unstage_all(req(args, "path")?)),
         "stage_path" => done_result(super::stage_path(req(args, "path")?, req(args, "file")?, req(args, "files")?, req(args, "filtered")?, req(args, "incremental")?)),

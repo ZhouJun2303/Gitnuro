@@ -1,4 +1,5 @@
 import { invoke } from "../perf";
+import { cancelReads } from "../read-scheduler";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
 import { comparePixels, PixelDiffLimitError } from "../pixel-diff";
@@ -515,6 +516,7 @@ export async function loadBlameRange(shell: ShellState) {
 
 export async function showBlame(shell: ShellState, file: string) {
     const path = shell.repoPath();
+    if (path) cancelReads(path);
     const openGen = shell.openGen;
     const gen = ++shell.blameGen;
     const selection = shell.selectedPath;
@@ -866,39 +868,68 @@ export async function deletePicked(shell: ShellState, files = [...shell.picked])
 
 export function confirmPicked(shell: ShellState, files: string[], title: string, run: (files: string[]) => Promise<void>) {
     if (files.length === 0 || shell.mode !== "live") return;
-    shell.ask(title, "", () => void run(files), files, { danger: true });
+    shell.ask(title, "", (selectedFiles = files) => void run(selectedFiles), files, { danger: true, selectedFiles: files });
   }
 
-export function discardChosen(shell: ShellState, files: string[], focusConfirm = false) {
-    const names = files.filter((path) => path.length > 0);
+function pathSelection(files: string[], candidates: string[] = files) {
+    const names = [...new Set(files.filter((path) => path.length > 0))];
+    const listed = [...new Set([...candidates, ...names].filter((path) => path.length > 0))];
+    return { names, listed };
+  }
+
+export function discardChosen(shell: ShellState, files: string[], focusConfirm = false, candidates = files) {
+    const { names, listed } = pathSelection(files, candidates);
     if (names.length === 0 || shell.mode !== "live") return;
     const includesSubmodule = shell.refs?.submodules.some((row) => names.includes(row.path));
     const path = shell.repoPath(), openGen = shell.openGen;
-    const discard = shell.bindMutation(names.length === 1 ? { action: "discard", file: names[0] } : { action: "discardPaths", files: names });
-    shell.ask(shell.tr("chrome.discardSelected"), shell.tr(includesSubmodule ? "dialog.discardSubmoduleBody" : "dialog.discardFilesBody"), () => void discard().then((outcome) => {
-      if (outcome === "completed" && openGen === shell.openGen && shell.viewing(path)) unpickFiles(shell, names);
-    }), names, { danger: true, focusConfirm });
+    shell.ask(shell.tr("chrome.discardSelected"), shell.tr(includesSubmodule ? "dialog.discardSubmoduleBody" : "dialog.discardFilesBody"), (selectedFiles = names) => {
+      const chosen = [...new Set(selectedFiles.filter((file) => listed.includes(file)))];
+      if (chosen.length === 0) return;
+      const discard = shell.bindMutation(chosen.length === 1 ? { action: "discard", file: chosen[0] } : { action: "discardPaths", files: chosen });
+      void discard().then((outcome) => {
+        if (outcome === "completed" && openGen === shell.openGen && shell.viewing(path)) unpickFiles(shell, chosen);
+      });
+    }, listed, { danger: true, focusConfirm, selectedFiles: names });
   }
 
-export function deleteChosen(shell: ShellState, files: string[]) {
-    const names = files.filter((path) => path.length > 0);
+export function deleteChosen(shell: ShellState, files: string[], candidates = files) {
+    const { names, listed } = pathSelection(files, candidates);
     if (names.length === 0 || shell.mode !== "live") return;
-    const remove = shell.bindMutation(names.length === 1 ? { action: "delete", file: names[0] } : { action: "deletePaths", files: names });
     if (names.length === 1) {
+      const remove = shell.bindMutation({ action: "delete", file: names[0] });
       shell.ask(shell.tr("menu.deleteFile"), shell.tr("dialog.deleteBody"), () => void remove(), [], { subject: names[0], danger: true });
       return;
     }
-    shell.ask(shell.tr("chrome.deleteSelected"), "", () => void remove(), names, { danger: true });
+    shell.ask(shell.tr("chrome.deleteSelected"), "", (selectedFiles = names) => {
+      const chosen = [...new Set(selectedFiles.filter((file) => listed.includes(file)))];
+      if (chosen.length === 0) return;
+      const remove = shell.bindMutation(chosen.length === 1 ? { action: "delete", file: chosen[0] } : { action: "deletePaths", files: chosen });
+      void remove();
+    }, listed, { danger: true, selectedFiles: names });
   }
 
-export function openStash(shell: ShellState, files: string[]) {
-    const names = [...new Set(files.filter((path) => path.length > 0))];
+export function openStash(shell: ShellState, files: string[], candidates = files) {
+    const requested = [...new Set(files.filter((path) => path.length > 0))];
+    let available = candidates;
+    if (available.length === 0) {
+      if (requested.length > 0) available = requested;
+      else available = [...shell.unstaged, ...shell.staged].map((file) => file.path);
+    }
+    const initial = requested.length > 0 ? requested : available;
+    const { names, listed } = pathSelection(initial, available);
     shell.draft = "";
+    if (names.length === 0) {
+      shell.stashFiles = [];
+      shell.stashSelectedFiles = [];
+      shell.dialog = "stash";
+      return;
+    }
     const selected = new Set(names);
     const untracked = (file: Row) => (file.letter === "A" || file.letter === "?") && selected.has(file.path);
     const selectedUntracked = shell.unstaged.some(untracked) || shell.staged.some(untracked);
     shell.includeUntracked = shell.settings.stashIncludeUntracked || selectedUntracked;
-    shell.stashFiles = names;
+    shell.stashFiles = listed;
+    shell.stashSelectedFiles = names;
     shell.dialog = "stash";
   }
 

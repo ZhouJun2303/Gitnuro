@@ -106,7 +106,18 @@
       shell.closeEditorImport();
       return;
     }
+    if (shell.dialog === "stash") {
+      shell.stashFiles = [];
+      shell.stashSelectedFiles = [];
+    }
     shell.dialog = null;
+  }
+
+  function toggleStashFile(file: string, checked: boolean) {
+    const selected = new Set(shell.stashSelectedFiles);
+    if (checked) selected.add(file);
+    else selected.delete(file);
+    shell.stashSelectedFiles = shell.stashFiles.filter((path) => selected.has(path));
   }
 
   function trapTab(event: KeyboardEvent) {
@@ -268,12 +279,15 @@
             void shell.mutate(request);
           }
           else if (shell.dialog === "stash") {
-            const files = shell.stashFiles;
+            const hasPaths = shell.stashFiles.length > 0;
+            const files = [...shell.stashSelectedFiles];
+            if (hasPaths && files.length === 0) return;
             shell.stashFiles = [];
-            if (files.length > 0) {
+            shell.stashSelectedFiles = [];
+            if (hasPaths && files.length > 0) {
               await shell.mutate({ action: "stashPaths", files, message: shell.draft, includeUntracked: shell.includeUntracked });
               if (!shell.actionError) unpickFiles(shell, files);
-            } else await shell.mutate({ action: "stash", message: shell.draft, includeUntracked: shell.includeUntracked });
+            } else if (!hasPaths) await shell.mutate({ action: "stash", message: shell.draft, includeUntracked: shell.includeUntracked });
           }
           else if (shell.dialog === "rename") void shell.mutate({ action: "renameBranch", name: shell.draft, to: shell.draftExtra });
           else if (shell.dialog === "upstream") void shell.mutate({ action: "setUpstream", branch: shell.draft, upstream: shell.draftExtra });
@@ -621,17 +635,27 @@
           </div>
         {:else if shell.dialog === "stash"}
           <h2>{shell.tr("chrome.stash")}</h2>
-          {#if shell.stashFiles.length === 1}
-            <div class="dialog-subject" title={shell.stashFiles[0]}>{shell.stashFiles[0]}</div>
-          {:else if shell.stashFiles.length > 1}
-            <div class="dialog-subject">{shell.tr("dialog.fileCount", { count: String(shell.stashFiles.length) })}</div>
-            <pre class="diff-body stash-paths">{shell.stashFiles.join("\n")}</pre>
+          {#if shell.stashFiles.length > 0}
+            <div class="path-picker" data-dialog-files>
+              <div class="path-picker-count">{shell.tr("dialog.fileCount", { count: String(shell.stashFiles.length) })}</div>
+              <ol class="path-picker-list">
+                {#each shell.stashFiles as file (file)}
+                  {@const cut = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"))}
+                  <li title={file}>
+                    <label class="path-picker-item">
+                      <input type="checkbox" checked={shell.stashSelectedFiles.includes(file)} aria-label={file} onchange={(event) => toggleStashFile(file, event.currentTarget.checked)} />
+                      <span class="path-picker-path"><span class="path-picker-dir">{cut > 0 ? file.slice(0, cut + 1) : ""}</span><span class="path-picker-name">{cut > 0 ? file.slice(cut + 1) : file}</span></span>
+                    </label>
+                  </li>
+                {/each}
+              </ol>
+            </div>
           {/if}
           <label>{shell.tr("dialog.message")}<input bind:value={shell.draft} /></label>
           <label class="check"><input type="checkbox" bind:checked={shell.includeUntracked} /> {shell.tr("dialog.includeUntracked")}</label>
           <div class="composer-row actions">
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="submit" disabled={loading}>{shell.tr("chrome.stash")}</button>
+            <button class="commit" type="submit" disabled={loading || shell.stashFiles.length > 0 && shell.stashSelectedFiles.length === 0}>{shell.tr("chrome.stash")}</button>
           </div>
         {:else if shell.dialog === "rename"}
           <h2>{shell.tr("dialog.renameBranch")}</h2>

@@ -6,6 +6,7 @@ mod autostash;
 mod change;
 mod cli;
 mod fakeignore;
+mod fingerprint;
 pub mod flow;
 mod locks;
 mod model;
@@ -33,29 +34,32 @@ pub use cli::{
     set_https_credentials, set_passphrase, set_progress, set_trace, stop_process_tree, use_bundled_git,
     common_repo_key, check_cancelled, cancel_token, check_path, with_cancellation, without_cancellation, with_operation_repo, GitRuntime, HttpsCredential, Session, Trace,
 };
+pub use fingerprint::{status_fingerprint, StatusFingerprint};
 pub use model::{
     blame_file, blame_source, blame_file_range, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log,
     commit_log_sorted, commit_tree, commits_from, compare_file, compare_files, file_history,
     ignored_paths, in_progress, index_lock_path, lfs_available, lfs_locks, locate_ref,
     prompt_facts, rebase_conflicts, reflog, remove_stale_index_lock, repo_sign_off_format,
     repository_refs, repository_summary, search_log, show_commit_file, show_commit_file_with,
-    remote_account_overrides, stale_index_lock, write_expanded_groups, write_hidden_refs, write_remote_account, write_sign_off, BlameLine,
+    remote_account_overrides, stale_index_lock, stale_index_lock_for_error,
+    write_expanded_groups, write_hidden_refs, write_remote_account, write_sign_off, BlameLine,
     BlameSource, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, LocatedRef, RefSnapshot,
-    commit_log_page, file_history_page, search_log_page, reflog_page,
+    commit_log_page, commit_log_page_with_revision, file_history_page, file_history_page_with_revision,
+    search_log_page, search_log_page_with_revision, reflog_page,
     ReflogRow, RemoteRow, RepoSummary, StaleIndexLock, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
 pub use ops::{
     approve_credential, cherry_preview, merge_preview, merge_state, merged_branches, perform, perform_stashed,
-    pick_history, push_commit_target, repo_facts, repo_facts_brief, scan_repositories, search_commits, set_repo_author,
+    pick_history, push_commit_target, push_is_up_to_date, repo_facts, repo_facts_brief, scan_repositories, search_commits, set_repo_author,
     tracked_directories, HotPath, MergeFile, MergePreview, MergeState, Mutation, RebaseStep,
     RepoFacts, RepositoryScan, ResetMode, ScanResult, SearchHit, TrackedDirs,
 };
 
 use gix::bstr::BStr;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// One changed path, either staged or unstaged.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileChange {
     pub path: String,
@@ -64,7 +68,7 @@ pub struct FileChange {
 }
 
 /// How a path changed, matching what `git status` would show.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChangeKind {
     Added,
@@ -76,7 +80,7 @@ pub enum ChangeKind {
 }
 
 /// The branch and the two change lists for one work tree.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusSnapshot {
     #[serde(default)]
@@ -86,6 +90,9 @@ pub struct StatusSnapshot {
     pub commit_intent: CommitIntent,
     pub staged: Vec<FileChange>,
     pub unstaged: Vec<FileChange>,
+    /// Set after a full status read. Path-limited reads leave it empty so a partial list cannot vouch for the index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<StatusFingerprint>,
 }
 
 /// Ignore cache-only index updates. A commit depends on the staged paths, modes and object IDs.
@@ -236,6 +243,7 @@ fn status_patterns(path: &Path, fakeignore: bool, patterns: Vec<gix::bstr::BStri
         commit_intent,
         staged,
         unstaged,
+        fingerprint: None,
     })
 }
 

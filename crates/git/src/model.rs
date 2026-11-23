@@ -3,7 +3,8 @@
 //! These reads go through `git` porcelain so decorations, ahead/behind, and submodule
 //! state match the Git the user already has installed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::thread::ScopedJoinHandle;
@@ -16,6 +17,31 @@ use crate::{ChangeKind, Error, FileChange};
 
 static GIT_DIRS: Mutex<BTreeMap<PathBuf, PathBuf>> = Mutex::new(BTreeMap::new());
 static LFS_INSTALLED: OnceLock<bool> = OnceLock::new();
+static REMOTE_STATE_CACHE: OnceLock<Mutex<BTreeMap<String, RemoteStateCache>>> = OnceLock::new();
+static REFS_CACHE: OnceLock<Mutex<BTreeMap<String, CachedRefs>>> = OnceLock::new();
+
+fn capped_output_error(limit: usize) -> Error {
+    Error::Git(format!("git output exceeded the {} byte read limit", limit))
+}
+
+struct RemoteStateCache {
+    has_remotes: bool,
+    local_only: HashSet<String>,
+    remote_only: HashMap<String, HashSet<String>>,
+}
+
+fn remote_state_cache() -> &'static Mutex<BTreeMap<String, RemoteStateCache>> {
+    REMOTE_STATE_CACHE.get_or_init(Default::default)
+}
+
+struct CachedRefs {
+    stamp: String,
+    refs: RefSnapshot,
+}
+
+fn refs_cache() -> &'static Mutex<BTreeMap<String, CachedRefs>> {
+    REFS_CACHE.get_or_init(Default::default)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -205,6 +231,19 @@ pub fn search_log(
 }
 
 pub fn search_log_page(repo: &Path, field: &str, scope: &str, query: &str, limit: usize, topo: bool, offset: usize) -> Result<Vec<CommitRow>, Error> {
+    search_log_page_with_revision(repo, field, scope, query, limit, topo, offset, None)
+}
+
+pub fn search_log_page_with_revision(
+    repo: &Path,
+    field: &str,
+    scope: &str,
+    query: &str,
+    limit: usize,
+    topo: bool,
+    offset: usize,
+    revision: Option<u64>,
+) -> Result<Vec<CommitRow>, Error> {
     let query = query.trim();
     if query.is_empty() || query.starts_with('-') || query.contains(['\n', '\r', '\0']) {
         return Err(Error::Rev(query.to_string()));
@@ -249,10 +288,13 @@ pub fn search_log_page(repo: &Path, field: &str, scope: &str, query: &str, limit
         }
     }
     let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-    let (output, _) = with_read(|| run_capped(repo, &args, 16_000_000))?;
+    let (output, truncated) = with_read(|| run_capped(repo, &args, 16_000_000))?;
+    if truncated {
+        return Err(capped_output_error(16_000_000));
+    }
     let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
     assign_lanes(&mut commits);
-    mark_remote_state(repo, &mut commits, &[]);
+    mark_remote_state(repo, &mut commits, &[], revision);
     Ok(commits)
 }
 
@@ -323,19 +365,50 @@ fn log_with(
     revs: &[&str],
     topo: bool,
 ) -> Result<Vec<CommitRow>, Error> {
-    log_page(repo, limit, all, path, revs, topo, 0)
+    log_page(repo, limit, all, path, revs, topo, 0, None)
 }
 
 pub fn commit_log_page(repo: &Path, limit: usize, all: bool, revs: &[String], topo: bool, offset: usize) -> Result<Vec<CommitRow>, Error> {
+    commit_log_page_with_revision(repo, limit, all, revs, topo, offset, None)
+}
+
+pub fn commit_log_page_with_revision(
+    repo: &Path,
+    limit: usize,
+    all: bool,
+    revs: &[String],
+    topo: bool,
+    offset: usize,
+    revision: Option<u64>,
+) -> Result<Vec<CommitRow>, Error> {
     let checked = revs.iter().map(|rev| check_rev(rev)).collect::<Result<Vec<_>, _>>()?;
-    log_page(repo, limit, all, &[], &checked, topo, offset)
+    log_page(repo, limit, all, &[], &checked, topo, offset, revision)
 }
 
 pub fn file_history_page(repo: &Path, file: &str, limit: usize, offset: usize) -> Result<Vec<CommitRow>, Error> {
-    log_page(repo, limit, false, &[check_path(file)?], &[], false, offset)
+    file_history_page_with_revision(repo, file, limit, offset, None)
 }
 
-fn log_page(repo: &Path, limit: usize, all: bool, path: &[&str], revs: &[&str], topo: bool, offset: usize) -> Result<Vec<CommitRow>, Error> {
+pub fn file_history_page_with_revision(
+    repo: &Path,
+    file: &str,
+    limit: usize,
+    offset: usize,
+    revision: Option<u64>,
+) -> Result<Vec<CommitRow>, Error> {
+    log_page(repo, limit, false, &[check_path(file)?], &[], false, offset, revision)
+}
+
+fn log_page(
+    repo: &Path,
+    limit: usize,
+    all: bool,
+    path: &[&str],
+    revs: &[&str],
+    topo: bool,
+    offset: usize,
+    revision: Option<u64>,
+) -> Result<Vec<CommitRow>, Error> {
     let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]));
     if !matches!(head, Ok(output) if output.status.success()) {
         return Ok(Vec::new());
@@ -364,69 +437,122 @@ fn log_page(repo: &Path, limit: usize, all: bool, path: &[&str], revs: &[&str], 
         args.push("--");
         args.extend_from_slice(path);
     }
-    let (output, _) = with_read(|| run_capped(repo, &args, 16_000_000))?;
+    let (output, truncated) = with_read(|| run_capped(repo, &args, 16_000_000))?;
+    if truncated {
+        return Err(capped_output_error(16_000_000));
+    }
     let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
     assign_lanes(&mut commits);
-    with_read(|| mark_remote_state(repo, &mut commits, &revs));
+    with_read(|| mark_remote_state(repo, &mut commits, &revs, revision));
     Ok(commits)
 }
 
-fn mark_remote_state(repo: &Path, commits: &mut [CommitRow], revs: &[&str]) {
+fn mark_remote_state(repo: &Path, commits: &mut [CommitRow], revs: &[&str], revision: Option<u64>) {
     if commits.is_empty() {
         return;
     }
-    if !has_remotes(repo) {
+    let scope = remote_scope(repo, revs);
+    let Some((local_only, remote_only)) = remote_sets(repo, &scope, revision) else {
         return;
+    };
+    for commit in commits.iter_mut() {
+        if local_only.contains(&commit.id) {
+            commit.unpushed = true;
+        }
+        if remote_only.contains(&commit.id) {
+            commit.remote_only = true;
+        }
     }
-    if let Ok(output) = run(
-        repo,
-        &[
-            "rev-list",
-            "--all",
-            "--not",
-            "--remotes",
-            "--max-count=20000",
-        ],
-    ) {
-        let text = String::from_utf8_lossy(&output.stdout);
-        let local_only: std::collections::HashSet<&str> = text
-            .lines()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !local_only.is_empty() {
-            for commit in commits.iter_mut() {
-                if local_only.contains(commit.id.as_str()) {
-                    commit.unpushed = true;
-                }
+}
+
+fn remote_sets(
+    repo: &Path,
+    scope: &Option<(Vec<String>, Vec<String>)>,
+    revision: Option<u64>,
+) -> Option<(HashSet<String>, HashSet<String>)> {
+    let cache_key = match revision {
+        Some(revision) if revision > 0 => Some(format!("{}:revision:{revision}", crate::repo_key(repo))),
+        Some(_) => {
+            let stamp = refs_stamp(repo);
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            stamp.hash(&mut hasher);
+            Some(format!("{}:stamp:{:x}", crate::repo_key(repo), hasher.finish()))
+        }
+        None => None,
+    };
+    let scope_key = scope
+        .as_ref()
+        .map(|(remote, local)| format!("r:{}|l:{}", remote.join("\x1f"), local.join("\x1f")))
+        .unwrap_or_else(|| "all".into());
+    if let Some(key) = cache_key.as_deref() {
+        if let Some(cached) = remote_state_cache().lock().ok()?.get(key) {
+            if !cached.has_remotes {
+                return None;
+            }
+            if let Some(remote_only) = cached.remote_only.get(&scope_key) {
+                return Some((cached.local_only.clone(), remote_only.clone()));
             }
         }
     }
-    let scope = remote_scope(repo, revs);
+    if !has_remotes(repo) {
+        if let Some(key) = cache_key {
+            if let Ok(mut cache) = remote_state_cache().lock() {
+                cache.insert(key, RemoteStateCache { has_remotes: false, local_only: HashSet::new(), remote_only: HashMap::new() });
+                while cache.len() > 64 {
+                    let Some(oldest) = cache.keys().next().cloned() else { break };
+                    cache.remove(&oldest);
+                }
+            }
+        }
+        return None;
+    }
+    let local_only = run(
+        repo,
+        &["rev-list", "--all", "--not", "--remotes", "--max-count=20000"],
+    )
+    .ok()
+    .map(|output| {
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .collect::<HashSet<_>>()
+    })
+    .unwrap_or_default();
     let mut remote_only_args = vec!["rev-list", "--max-count=20000"];
-    match &scope {
+    match scope {
         Some((remote, local)) => {
             remote_only_args.extend(remote.iter().map(String::as_str));
             remote_only_args.push("--not");
             remote_only_args.extend(local.iter().map(String::as_str));
         }
         None => remote_only_args.extend(["--remotes", "--not", "--branches", "HEAD"]),
-    };
-    if let Ok(output) = run(repo, &remote_only_args) {
-        let text = String::from_utf8_lossy(&output.stdout);
-        let remote_only: std::collections::HashSet<&str> = text
-            .lines()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !remote_only.is_empty() {
-            for commit in commits.iter_mut() {
-                if remote_only.contains(commit.id.as_str()) {
-                    commit.remote_only = true;
-                }
+    }
+    let remote_only = run(repo, &remote_only_args)
+        .ok()
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
+    if let Some(key) = cache_key {
+        if let Ok(mut cache) = remote_state_cache().lock() {
+            let entry = cache.entry(key).or_insert_with(|| RemoteStateCache { has_remotes: true, local_only: local_only.clone(), remote_only: HashMap::new() });
+            entry.has_remotes = true;
+            entry.local_only = local_only.clone();
+            entry.remote_only.insert(scope_key, remote_only.clone());
+            while cache.len() > 64 {
+                let Some(oldest) = cache.keys().next().cloned() else { break };
+                cache.remove(&oldest);
             }
         }
     }
+    Some((local_only, remote_only))
 }
 
 /// Remote and local refs among the revisions a filtered view walks. `None` when the view is
@@ -562,6 +688,25 @@ pub fn commit_detail(repo: &Path, id: &str) -> Result<CommitDetail, Error> {
 }
 
 pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
+    let key = crate::repo_key(repo);
+    let stamp = refs_stamp(repo);
+    if let Ok(cache) = refs_cache().lock() {
+        if let Some(cached) = cache.get(&key).filter(|cached| cached.stamp == stamp) {
+            return Ok(cached.refs.clone());
+        }
+    }
+    let refs = repository_refs_uncached(repo)?;
+    if let Ok(mut cache) = refs_cache().lock() {
+        cache.insert(key, CachedRefs { stamp, refs: refs.clone() });
+        while cache.len() > 8 {
+            let Some(oldest) = cache.keys().next().cloned() else { break };
+            cache.remove(&oldest);
+        }
+    }
+    Ok(refs)
+}
+
+fn repository_refs_uncached(repo: &Path) -> Result<RefSnapshot, Error> {
     let local = local_text(repo);
     let first = |text: &str, section: &str, key: &str| {
         values_in(text, section, key)
@@ -598,6 +743,92 @@ pub fn repository_refs(repo: &Path) -> Result<RefSnapshot, Error> {
             sign_off_format: first(&local, "signoff", "format"),
         })
     })
+}
+
+fn refs_stamp(repo: &Path) -> String {
+    let Ok(git) = absolute_git_dir(repo) else {
+        return format!("missing:{}", repo.display());
+    };
+    let mut stamp = String::new();
+    for relative in [
+        "HEAD",
+        "config",
+        "packed-refs",
+        "index",
+        "logs/refs/stash",
+        "awegit",
+        "gitnuro",
+    ] {
+        if !stamp.is_empty() {
+            stamp.push('|');
+        }
+        stamp.push_str(relative);
+        stamp.push(':');
+        stamp.push_str(&file_mark(&git.join(relative)));
+    }
+    for relative in ["refs/heads", "refs/remotes", "refs/tags", "worktrees"] {
+        if !stamp.is_empty() {
+            stamp.push('|');
+        }
+        stamp.push_str(relative);
+        stamp.push(':');
+        stamp.push_str(&tree_mark(&git.join(relative)));
+    }
+    stamp.push('|');
+    stamp.push_str(&file_mark(&repo.join(".gitmodules")));
+    stamp
+}
+
+fn file_mark(path: &Path) -> String {
+    match std::fs::metadata(path) {
+        Ok(meta) => {
+            let modified = meta.modified().ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0);
+            let digest = if meta.is_file() && meta.len() <= 1_048_576 {
+                std::fs::read(path)
+                    .ok()
+                    .map(|bytes| {
+                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                        bytes.hash(&mut hasher);
+                        hasher.finish().to_string()
+                    })
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            format!("{}:{modified}:{digest}", meta.len())
+        }
+        Err(_) => "missing".into(),
+    }
+}
+
+fn tree_mark(root: &Path) -> String {
+    let mut entries = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        let Ok(read) = std::fs::read_dir(&directory) else {
+            entries.push(format!("{}:unreadable", directory.display()));
+            continue;
+        };
+        for entry in read.flatten() {
+            let path = entry.path();
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                entries.push(format!("{}:missing", path.display()));
+                continue;
+            };
+            if metadata.file_type().is_symlink() {
+                entries.push(format!("{}:symlink", path.display()));
+            } else if metadata.is_dir() {
+                stack.push(path);
+            } else if metadata.is_file() {
+                entries.push(format!("{}:{}", path.display(), file_mark(&path)));
+            }
+        }
+    }
+    entries.sort_unstable();
+    entries.join("|")
 }
 
 /// Ref decorations are small metadata; changing a label never requires another log walk.
@@ -670,7 +901,32 @@ pub struct StaleIndexLock {
 
 pub fn stale_index_lock(repo: &Path) -> Option<StaleIndexLock> {
     let lock = index_lock_path(repo)?;
-    let meta = std::fs::symlink_metadata(&lock).ok()?;
+    stale_lock_at(repo, &lock)
+}
+
+/// Find the stale index lock named by a failed Git command. Submodule updates
+/// write through `.git/modules/...`, so the lock can be outside the work tree's
+/// own Git directory while still belonging to this repository.
+pub fn stale_index_lock_for_error(repo: &Path, error: &str) -> Option<StaleIndexLock> {
+    let mut found_lock_path = false;
+    for candidate in lock_paths_from_error(error) {
+        found_lock_path = true;
+        let Some(lock) = resolve_lock_path(repo, &candidate) else {
+            continue;
+        };
+        if let Some(stale) = stale_lock_at(repo, &lock) {
+            return Some(stale);
+        }
+    }
+    if found_lock_path {
+        None
+    } else {
+        stale_index_lock(repo)
+    }
+}
+
+fn stale_lock_at(repo: &Path, lock: &Path) -> Option<StaleIndexLock> {
+    let meta = std::fs::symlink_metadata(lock).ok()?;
     if !meta.file_type().is_file() {
         return None;
     }
@@ -678,9 +934,14 @@ pub fn stale_index_lock(repo: &Path) -> Option<StaleIndexLock> {
     if age < STALE_LOCK_AGE {
         return None;
     }
-    let shown = lock.strip_prefix(repo).unwrap_or(&lock);
+    let shown = std::fs::canonicalize(repo)
+        .ok()
+        .and_then(|root| lock.strip_prefix(root).ok())
+        .or_else(|| lock.strip_prefix(repo).ok())
+        .map(|path| path.display().to_string().replace('\\', "/"))
+        .unwrap_or_else(|| lock.display().to_string().replace('\\', "/"));
     Some(StaleIndexLock {
-        path: shown.display().to_string(),
+        path: shown,
         age_secs: age.as_secs(),
     })
 }
@@ -688,17 +949,101 @@ pub fn stale_index_lock(repo: &Path) -> Option<StaleIndexLock> {
 /// Remove the exact lock the user confirmed. Re-reading the age refuses a lock
 /// that a new Git process took after the prompt appeared.
 pub fn remove_stale_index_lock(repo: &Path, expected: &str) -> Result<(), Error> {
-    let lock = stale_index_lock(repo)
+    let path = resolve_lock_path(repo, Path::new(expected))
         .ok_or_else(|| Error::Git("no stale index.lock to remove".into()))?;
-    if lock.path != expected {
-        return Err(Error::Git(
-            "the stale index.lock changed; retry the failed action".into(),
-        ));
+    let _lock = stale_lock_at(repo, &path)
+        .ok_or_else(|| Error::Git("no stale index.lock to remove".into()))?;
+    std::fs::remove_file(&path)
+        .map_err(|source| Error::Git(format!("could not remove {}: {source}", path.display())))
+}
+
+fn lock_paths_from_error(error: &str) -> Vec<PathBuf> {
+    const SUFFIX: &str = "index.lock";
+    let lower_suffix = SUFFIX.to_ascii_lowercase();
+    let mut paths = Vec::new();
+    for line in error.lines() {
+        let lower = line.to_ascii_lowercase();
+        let Some(end) = lower.find(&lower_suffix).map(|index| index + SUFFIX.len()) else {
+            continue;
+        };
+        let prefix = &line[..end - SUFFIX.len()];
+        let start = prefix
+            .rfind(['\'', '"'])
+            .map(|index| index + 1)
+            .or_else(|| {
+                let lower_prefix = &lower[..end - SUFFIX.len()];
+                ["unable to create ", "could not create "]
+                    .iter()
+                    .find_map(|marker| {
+                        lower_prefix
+                            .rfind(marker)
+                            .map(|index| index + marker.len())
+                    })
+            })
+            .or_else(|| prefix.rfind(char::is_whitespace).map(|index| index + 1))
+            .unwrap_or(0);
+        let path = line[start..end].trim();
+        if !path.is_empty() && !paths.iter().any(|item: &PathBuf| item == Path::new(path)) {
+            paths.push(PathBuf::from(path));
+        }
     }
-    let path = index_lock_path(repo).ok_or_else(|| Error::Git("repository is gone".into()))?;
-    std::fs::remove_file(&path).map_err(|source| {
-        Error::Git(format!("could not remove {}: {source}", path.display()))
-    })
+    paths
+}
+
+fn resolve_lock_path(repo: &Path, candidate: &Path) -> Option<PathBuf> {
+    let path = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        repo.join(candidate)
+    };
+    let name = path.file_name()?.to_str()?;
+    if !name.eq_ignore_ascii_case("index.lock") {
+        return None;
+    }
+    let path = std::fs::canonicalize(path).ok()?;
+    let allowed = allowed_git_dirs(repo);
+    if allowed.iter().any(|root| path_is_within(&path, root)) {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn allowed_git_dirs(repo: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(dir) = absolute_git_dir(repo) {
+        dirs.push(std::fs::canonicalize(&dir).unwrap_or(dir));
+    }
+    if let Ok(opened) = crate::open_repo(repo) {
+        let common = opened.common_dir().to_path_buf();
+        let common = std::fs::canonicalize(&common).unwrap_or(common);
+        if !dirs
+            .iter()
+            .any(|dir| path_is_within(dir, &common) && path_is_within(&common, dir))
+        {
+            dirs.push(common);
+        }
+    }
+    dirs
+}
+
+fn path_is_within(path: &Path, root: &Path) -> bool {
+    let path = normalized_path_key(path);
+    let root = normalized_path_key(root);
+    path == root || path.starts_with(&(root + "/"))
+}
+
+fn normalized_path_key(path: &Path) -> String {
+    let key = crate::repo_key(path);
+    if cfg!(windows) {
+        if let Some(rest) = key.strip_prefix("//?/") {
+            return rest
+                .strip_prefix("unc/")
+                .map(|unc| format!("//{unc}"))
+                .unwrap_or_else(|| rest.to_string());
+        }
+    }
+    key
 }
 
 fn read_local(path: &Path) -> Result<String, Error> {
@@ -1150,7 +1495,7 @@ fn merge_base_of(repo: &Path, id: &str) -> Option<String> {
 pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
     let id = check_rev(id)?;
     let base = merge_base_of(repo, id);
-    let (output, _) = with_read(|| match base {
+    let (output, truncated) = with_read(|| match base {
         Some(ref base) => run_capped(
             repo,
             &["diff", "--name-status", "-z", "-r", "-M", base, id],
@@ -1171,6 +1516,9 @@ pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
             8_000_000,
         ),
     })?;
+    if truncated {
+        return Err(capped_output_error(8_000_000));
+    }
     Ok(parse_name_status(&output.stdout))
 }
 
@@ -1373,13 +1721,16 @@ pub fn show_commit_file_with(
 pub fn compare_files(repo: &Path, from: &str, to: &str) -> Result<Vec<FileChange>, Error> {
     let from = check_rev(from)?;
     let to = check_rev(to)?;
-    let (output, _) = with_read(|| {
+    let (output, truncated) = with_read(|| {
         run_capped(
             repo,
             &["diff", "--name-status", "-z", "-r", "-M", from, to],
             8_000_000,
         )
     })?;
+    if truncated {
+        return Err(capped_output_error(8_000_000));
+    }
     Ok(parse_name_status(&output.stdout))
 }
 
@@ -1698,8 +2049,11 @@ pub fn reflog_page(repo: &Path, limit: usize, offset: usize) -> Result<Vec<Reflo
 /// Paths in the tree of `rev`.
 pub fn commit_tree(repo: &Path, rev: &str) -> Result<Vec<String>, Error> {
     let rev = check_rev(rev)?;
-    let (output, _) =
+    let (output, truncated) =
         with_read(|| run_capped(repo, &["ls-tree", "-r", "--name-only", "-z", rev], 8_000_000))?;
+    if truncated {
+        return Err(capped_output_error(8_000_000));
+    }
     Ok(nul_records(&output.stdout)
         .filter(|path| !path.is_empty())
         .map(|path| String::from_utf8_lossy(path).into_owned())

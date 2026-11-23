@@ -55,13 +55,15 @@ import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, to
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
-import { statusPathBefore } from "../status";
+import { statusPathBefore, type StatusFingerprint } from "../status";
+import { mergeWatchNote, planStatusRefresh, type StatusProbe, type WatchNote } from "./status-plan";
 import { enqueueStage, projectStages, stageActions, type PendingStage } from "./staging";
 import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../operation-policy";
 import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
 import { watchOperationTasks } from "./task-monitor";
-import { invalidateReads } from "../read-scheduler";
+import { cancelReads, invalidateReads, isReadSuperseded } from "../read-scheduler";
 import { mergeResponse } from "../reconcile";
+import { sceneById } from "../lab/scenes";
 
 const initialErrors = readErrorLog();
 
@@ -249,6 +251,7 @@ export class ShellState {
   defaultSettings: Settings = {
     theme: "apple",
     pullRebase: false,
+    excelAutoSaveOnPull: true,
     autostashIncludeUntracked: false,
     fetchPrune: true,
     diffStyle: "split",
@@ -261,6 +264,7 @@ export class ShellState {
     showEntireFile: false,
     linesHeight: "compact",
     uiScale: 14,
+    seniorMode: false,
     uiFont: "",
     codeFont: "",
     uiFontWeight: 400,
@@ -1071,7 +1075,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.15");
+  appVersion = $state("2.0.16");
 
   appInfo = $state<AppInfo | null>(null);
 
@@ -1227,7 +1231,11 @@ export class ShellState {
   includeUntracked = $state(false);
 
 
+  /** All paths shown in the stash dialog. */
   stashFiles = $state<string[]>([]);
+
+  /** Paths currently selected in the stash dialog. */
+  stashSelectedFiles = $state<string[]>([]);
 
 
   flowKind = $state("feature");
@@ -1948,6 +1956,18 @@ export class ShellState {
   canCommit = $derived(!this.commitBlockReason);
 
 
+  effectiveUiScale = $derived(Math.max(this.settings.uiScale || 14, this.settings.seniorMode ? 18 : 0));
+
+
+  effectiveDiffFontSize = $derived(Math.max(this.settings.diffFontSize || 14, this.settings.seniorMode ? 16 : 0));
+
+
+  effectiveUiFontWeight = $derived(Math.max(this.settings.uiFontWeight || 400, this.settings.seniorMode ? 600 : 0));
+
+
+  effectiveCodeFontWeight = $derived(Math.max(this.settings.codeFontWeight || 400, this.settings.seniorMode ? 500 : 0));
+
+
   rowCommit = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 36 : 28, 2.1));
 
 
@@ -1961,7 +1981,7 @@ export class ShellState {
 
 
   rowHeight(base: number, factor: number) {
-    return Math.max(base, Math.ceil((this.settings.uiScale || 13) * factor));
+    return Math.max(base, Math.ceil(this.effectiveUiScale * factor));
   }
 
 
@@ -2383,7 +2403,7 @@ export class ShellState {
   });
 
 
-  diffRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)));
+  diffRowHeight = $derived(Math.max(18, Math.ceil(this.effectiveDiffFontSize * 1.45)));
 
 
   diffWindow = $derived(virtualLines(this.diffLines, this.diffTop, this.diffRowHeight, this.windowRows(this.diffHeight, this.diffRowHeight), this.settings.diffWordWrap));
@@ -2990,7 +3010,7 @@ export class ShellState {
     const params = new URLSearchParams(window.location.search);
     const id = params.get("scene") ?? "";
     try {
-      const [{ sceneById }, { applyLabScene }] = await Promise.all([import("../lab/scenes"), import("../lab/apply")]);
+      const { applyLabScene } = await import("../lab/apply");
       const item = sceneById(id);
       if (!item) throw new Error(`未知场景 ${id}`);
       const layout = await invoke<Record<string, string>>("lab_layout");
@@ -3218,6 +3238,7 @@ export class ShellState {
 
 
   message(error: unknown) {
+    if (isReadSuperseded(error)) return "";
     const raw = (error instanceof Error ? error.message : String(error)).trim();
     const coded = /^awegit:([a-z]+):(.*)$/i.exec(raw);
     if (coded) {
@@ -3267,6 +3288,7 @@ export class ShellState {
         if (file.previousPath) touched.add(file.previousPath.replaceAll("\\", "/"));
       }
       value = { ...partial, revision: this.statusRevision, commitIntent: this.snapshot.commitIntent,
+        fingerprint: this.snapshot.fingerprint,
         staged: mergeStatusFiles(this.snapshot.staged, value.staged, scopes, touched),
         unstaged: mergeStatusFiles(this.snapshot.unstaged, value.unstaged, scopes, touched),
       };
@@ -3281,7 +3303,11 @@ export class ShellState {
       this.watchQueued = null;
       this.watchRevision = 0;
     }
-    if (!partialUpdate) this.statusRevision = revision;
+    if (!partialUpdate) {
+      this.statusRevision = revision;
+      const noted = this.repoWatchNotes.get(this.jobKey(value.path));
+      if (!noted || noted.revision <= revision) this.repoWatchNotes.delete(this.jobKey(value.path));
+    }
     this.stageStatusUnverified = partialUpdate;
     if (revision > 0) this.statusObservedRevision = revision;
     this.statusGen += 1;
@@ -3949,7 +3975,12 @@ export class ShellState {
         if (value.outcome === "failed" || (value.outcome === "conflict" && value.error)) throw new Error(value.error || value.log || "Git conflict");
         if (followSubmodules) {
           const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } }, undefined, operation);
-          if (follow.outcome === "failed") throw new Error(follow.error || follow.log);
+          if (follow.outcome === "failed") {
+            // Keep a submodule lock report so the same confirmation can remove
+            // it and retry the checkout that triggered the automatic update.
+            if (follow.staleLock) report = follow;
+            throw new Error(follow.error || follow.log);
+          }
           if (this.viewing(path)) this.applySnapshot(follow);
           this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
         }
@@ -5138,7 +5169,7 @@ export class ShellState {
 
 
 
-  ask(title: string, body: string, run: () => void, files: string[] = [], extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "focusConfirm" | "confirmLabel" | "revert"> = {}) {
+  ask(title: string, body: string, run: (selectedFiles?: string[]) => void, files: string[] = [], extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "focusConfirm" | "confirmLabel" | "revert" | "selectedFiles"> = {}) {
     return ask(this, title, body, run, files, extras);
   }
 
@@ -5504,6 +5535,9 @@ export class ShellState {
 
   repositoryViews = new Map<string, Pick<ShellState, "snapshot" | "refs" | "commitsLive" | "progress" | "selectedPath" | "selectedSide" | "selectedCommit" | "commitDetail" | "commitFiles" | "historyFile" | "historyFilter" | "sideTop" | "historyTop" | "fileTop" | "stagedTop" | "combinedTop" | "commitScrollTop" | "commitListTop" | "diffTop" | "historyDiffTop" | "selectedIndex" | "statusRevision" | "statusObservedRevision" | "stageStatusUnverified" | "contextRevision">>();
 
+  /** Watcher events for a repository that is not on screen. Capped with the view cache. */
+  repoWatchNotes = new Map<string, WatchNote>();
+
   rememberRepositoryView() {
     if (!this.snapshot || this.mode !== "live") return;
     const key = this.jobKey(this.snapshot.path);
@@ -5525,6 +5559,30 @@ export class ShellState {
     }
   }
 
+  noteRepoWatch(path: string, scope: "status" | "full", revision: number, paths: string[] | null | undefined) {
+    const key = this.jobKey(path);
+    if (!key) return;
+    const note = mergeWatchNote(this.repoWatchNotes.get(key) ?? null, scope, revision, paths);
+    this.repoWatchNotes.delete(key);
+    this.repoWatchNotes.set(key, note);
+    while (this.repoWatchNotes.size > 8) {
+      const oldest = this.repoWatchNotes.keys().next().value;
+      if (!oldest || oldest === key) break;
+      this.repoWatchNotes.delete(oldest);
+    }
+  }
+
+  /** Paint a cold-start snapshot. Revision stays 0 so it cannot pass for a live watcher. */
+  showStoredStatus(stored: { path: string; branch: string | null; commitIntent?: { head: string | null; index: string }; staged: StatusSnapshot["staged"]; unstaged: StatusSnapshot["unstaged"]; fingerprint: StatusFingerprint; overflow?: boolean }) {
+    if (stored.overflow) return false;
+    this.applySnapshot({
+      path: stored.path, branch: stored.branch, commitIntent: stored.commitIntent,
+      staged: stored.staged, unstaged: stored.unstaged, fingerprint: stored.fingerprint, revision: 0,
+    });
+    this.stageStatusUnverified = true;
+    return this.mode === "live";
+  }
+
   async openRepo(path: string) {
     if (!this.backend() || !path.trim()) return;
     if (!this.viewing(path)) this.commitSelection.clear();
@@ -5543,7 +5601,7 @@ export class ShellState {
     this.diffToken += 1;
     this.contextGen += 1;
     this.commitSearchGen += 1;
-    if (this.snapshot?.path && !this.viewing(path)) void invoke("cancel_reads", { path: this.snapshot.path }).catch(() => {});
+    if (this.snapshot?.path && !this.viewing(path)) cancelReads(this.snapshot.path);
     this.focusPath = path;
     if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description, commitType: this.commitType });
     if (!stayingOnRepo) {
@@ -5566,8 +5624,59 @@ export class ShellState {
     let stopAt = path;
     this.actionError = null;
     this.stashRetry = null;
-    if (!running) this.startWork(this.tr("chrome.open"), path);
+    let held = false;
     try {
+      const painted = () => this.mode === "live" && !!this.snapshot && (this.viewing(path) || this.viewing(this.snapshot.path));
+      if (!stayingOnRepo && !painted()) {
+        try {
+          const stored = await invoke<Parameters<ShellState["showStoredStatus"]>[0] | null>("load_status_cache", { path });
+          if (gen !== this.openGen) return;
+          if (stored) this.showStoredStatus(stored);
+        } catch {
+          /* a missing cache still opens from a live read */
+        }
+      }
+      if (!stayingOnRepo && painted()) {
+        // The list on screen is usable. A fingerprint stat must not keep the window in the open latch.
+        this.focusPath = null;
+        let headSame = false;
+        let plan: ReturnType<typeof planStatusRefresh> = { kind: "full" };
+        try {
+          const probe = await invoke<StatusProbe>("status_probe", { path });
+          if (gen !== this.openGen) return;
+          const previous = this.snapshot?.fingerprint;
+          headSame = !!previous && previous.head === probe.fingerprint.head && previous.refId === probe.fingerprint.refId;
+          plan = planStatusRefresh({
+            fingerprint: previous,
+            seen: this.snapshot?.revision ?? 0,
+            unverified: this.stageStatusUnverified,
+            probe,
+            note: this.repoWatchNotes.get(this.jobKey(this.snapshot?.path ?? path)) ?? null,
+          });
+        } catch {
+          plan = { kind: "full" };
+        }
+        if (gen !== this.openGen) return;
+        this.armOpenExtras(path, gen);
+        if (plan.kind === "trust") {
+          this.stageStatusUnverified = false;
+          void this.loadDiff();
+          return;
+        }
+        if (plan.kind === "full") this.stageStatusUnverified = true;
+        if (plan.kind === "paths") {
+          const noted = this.repoWatchNotes.get(this.jobKey(this.snapshot?.path ?? path));
+          void this.validatePaths(path, gen, plan.paths, noted?.revision ?? 0);
+          return;
+        }
+        const keepHistory = headSame && this.commitsLive.length > 0 && !!this.refs;
+        void this.refresh(keepHistory ? "status" : "full", true, null);
+        return;
+      }
+      if (!running) {
+        held = true;
+        this.startWork(this.tr("chrome.open"), path);
+      }
       const value = await invoke<StatusSnapshot>("workspace_status", { path });
       if (gen !== this.openGen) return;
       // Reopening the repository already on screen keeps the message being written.
@@ -5611,29 +5720,57 @@ export class ShellState {
       if (this.standalone !== "history") this.historyFilter = "";
       void this.loadContext().catch((error) => { if (gen === this.openGen) this.actionError = this.message(error); });
       void this.loadDiff();
-      // Arming the watcher walks every work-tree directory; on a huge repository that
-      // must not hold up the first paint. Changes before it arms are rare and recover
-      // on the next refresh.
-      void invoke("watch_repository", { path: this.repoPath() }).catch(() => {});
-      void invoke<{ available: boolean }>("lfs_locks", { path: this.repoPath(), list: false })
-        .then((locks) => {
-          if (gen === this.openGen) this.lfsAvailable = locks.available;
-        })
-        .catch(() => {
-          if (gen === this.openGen) this.lfsAvailable = false;
-        });
-      void this.rememberRepo(path);
-      this.facts = null;
-      this.factsPath = "";
-      void this.fillTemplate();
+      this.armOpenExtras(path, gen);
     } catch (error) {
       if (gen !== this.openGen) return;
       const text = this.message(error);
       this.actionError = text;
       if (this.missingRepoPath(text)) await this.dropMissingRepo(path, text);
     } finally {
-      if (!running) this.stopWork(stopAt);
+      if (held) this.stopWork(stopAt);
       if (gen === this.openGen) this.focusPath = null;
+    }
+  }
+
+  /** Watcher, locks, and the commit template. None of these may sit in front of the first paint. */
+  armOpenExtras(path: string, gen: number) {
+    // Arming the watcher walks tracked directories. On a huge repository that
+    // must not hold up the first paint. Changes before it arms are rare and recover
+    // on the next refresh.
+    void invoke("watch_repository", { path: this.repoPath() }).catch(() => {});
+    void invoke<{ available: boolean }>("lfs_locks", { path: this.repoPath(), list: false })
+      .then((locks) => {
+        if (gen === this.openGen) this.lfsAvailable = locks.available;
+      })
+      .catch(() => {
+        if (gen === this.openGen) this.lfsAvailable = false;
+      });
+    void this.rememberRepo(path);
+    this.facts = null;
+    this.factsPath = "";
+    void this.fillTemplate();
+  }
+
+  /** Refresh only the paths the watcher named, then keep that list. A full walk would defeat the switch. */
+  async validatePaths(path: string, gen: number, files: string[], notedRevision: number) {
+    try {
+      const value = await invoke<StatusSnapshot>("workspace_status_paths", { path, files });
+      if (gen !== this.openGen || !this.viewing(value.path)) return;
+      this.applySnapshot(value);
+      if (this.stageRefreshTimer != null) {
+        clearTimeout(this.stageRefreshTimer);
+        this.stageRefreshTimer = null;
+      }
+      this.stageStatusUnverified = false;
+      const key = this.jobKey(value.path);
+      const noted = this.repoWatchNotes.get(key);
+      if (!noted || noted.revision <= notedRevision) this.repoWatchNotes.delete(key);
+      void this.loadDiff();
+    } catch (error) {
+      if (gen !== this.openGen) return;
+      const text = this.message(error);
+      this.actionError = text;
+      if (this.missingRepoPath(text)) await this.dropMissingRepo(path, text);
     }
   }
 
@@ -6354,20 +6491,20 @@ export class ShellState {
 
 
 
-  discardChosen(files: string[], focusConfirm = false) {
-    return discardChosen(this, files, focusConfirm);
+  discardChosen(files: string[], focusConfirm = false, candidates = files) {
+    return discardChosen(this, files, focusConfirm, candidates);
   }
 
 
 
-  deleteChosen(files: string[]) {
-    return deleteChosen(this, files);
+  deleteChosen(files: string[], candidates = files) {
+    return deleteChosen(this, files, candidates);
   }
 
 
 
-  openStash(files: string[]) {
-    return openStash(this, files);
+  openStash(files: string[], candidates = files) {
+    return openStash(this, files, candidates);
   }
 
 
@@ -7432,7 +7569,7 @@ export class ShellState {
     else if (action === "commits") this.section = "history";
     else if (action === "reveal") this.revealHead();
     else if (action === "zoomIn") {
-      this.settings.uiScale = Math.min(20, this.settings.uiScale + 1);
+      this.settings.uiScale = Math.min(30, this.settings.uiScale + 1);
       void this.savePrefs(false);
     } else if (action === "zoomOut") {
       this.settings.uiScale = Math.max(11, this.settings.uiScale - 1);
@@ -7451,7 +7588,7 @@ export class ShellState {
       const inUnstaged = (event.target as HTMLElement | null)?.closest(".unstaged-pane");
       if ((bareDelete && !inUnstaged) || this.dialog || this.menu || this.launchOpen || !this.selectedPath || this.selectedSide !== "unstaged") return;
       const chosen = this.pickedIn(this.shownUnstaged);
-      this.discardChosen(chosen.length > 1 && chosen.includes(this.selectedPath) ? chosen : [this.selectedPath], true);
+      this.discardChosen(chosen.length > 1 && chosen.includes(this.selectedPath) ? chosen : [this.selectedPath], true, this.shownUnstaged.map((file) => file.path));
     } else if (action === "explorer" && this.snapshot) void this.openLocal(this.snapshot.path);
     else if (action === "terminal") void invoke("open_terminal", { path: this.repoPath() });
     else if (action === "filterBranch") this.toggleHistoryScope(); else if (action === "reopen") this.reopenClosed();
@@ -7603,14 +7740,15 @@ export class ShellState {
     const theme = resolved();
     this.appliedTheme = theme;
     root.setAttribute("data-theme", theme);
+    root.dataset.seniorMode = this.settings.seniorMode ? "true" : "false";
     root.lang = this.activeLocale === "zh" ? "zh-CN" : "en";
     if (this.inApp()) void getCurrentWindow().setTheme(theme === "dark" ? "dark" : "light").catch(() => {});
     };
     paint();
     media?.addEventListener("change", paint);
-    root.style.setProperty("--ui-scale", `${this.settings.uiScale || 14}px`);
-    root.style.setProperty("--ui-weight", String(this.settings.uiFontWeight || 400));
-    root.style.setProperty("--code-weight", String(this.settings.codeFontWeight || 400));
+    root.style.setProperty("--ui-scale", `${this.effectiveUiScale}px`);
+    root.style.setProperty("--ui-weight", String(this.effectiveUiFontWeight));
+    root.style.setProperty("--code-weight", String(this.effectiveCodeFontWeight));
     root.style.setProperty("--row-file", `${this.rowFile}px`);
     root.style.setProperty("--row-commit", `${this.rowCommit}px`);
     root.style.setProperty("--row-side", `${this.rowSide}px`);
@@ -7784,9 +7922,12 @@ export class ShellState {
     try {
     unlisten = await listen<{ refs?: boolean; path?: string; revision?: number; paths?: string[] | null } | null>("repo-changed", (event) => {
       const path = event.payload?.path;
-      if (path && !this.viewing(path)) return;
       const scope = event.payload?.refs === false ? "status" : "full";
       const revision = event.payload?.revision ?? 0;
+      if (path && !this.viewing(path)) {
+        this.noteRepoWatch(path, scope, revision, event.payload?.paths);
+        return;
+      }
       if (this.watchCovered(scope, revision)) return;
       if (this.busy || this.refreshing || this.backgroundFetch.has(this.jobKey(this.repoPath()))) {
         // A write ignores refreshes for its whole duration; replay the newest event when it ends.

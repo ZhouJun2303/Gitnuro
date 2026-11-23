@@ -55,6 +55,7 @@
     shell.settings.uiFont = "";
     shell.settings.codeFont = "";
     shell.settings.uiScale = 14;
+    shell.settings.seniorMode = false;
     shell.settings.diffFontSize = 14;
     shell.settings.uiFontWeight = 400;
     shell.settings.codeFontWeight = 400;
@@ -81,6 +82,17 @@
   }
   onMount(() => { void refresh(); return () => { active = false; }; });
 </script>
+
+<section class="pref-card senior-mode-card">
+  <h3 class="pref-card-title">{shell.tr("dialog.seniorMode")}</h3>
+  <div class="pref-card-body">
+    <label class="pref-row pref-toggle">
+      <input type="checkbox" bind:checked={shell.settings.seniorMode} />
+      <span class="pref-label">{shell.tr("dialog.seniorMode")}</span>
+    </label>
+    <p class="pref-setting-hint">{shell.tr("dialog.seniorModeHint")}</p>
+  </div>
+</section>
 
 <div class="font-defaults">
   <p class="pref-setting-hint">{shell.tr("dialog.fontDefaultsHint")}</p>

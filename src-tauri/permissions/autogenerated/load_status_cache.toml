@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-load-status-cache"
+description = "Enables the load_status_cache command without any pre-configured scope."
+commands.allow = ["load_status_cache"]
+
+[[permission]]
+identifier = "deny-load-status-cache"
+description = "Denies the load_status_cache command without any pre-configured scope."
+commands.deny = ["load_status_cache"]
