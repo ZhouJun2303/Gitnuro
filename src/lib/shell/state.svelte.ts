@@ -3956,7 +3956,12 @@ export class ShellState {
         if (value.outcome === "failed" || (value.outcome === "conflict" && value.error)) throw new Error(value.error || value.log || "Git conflict");
         if (followSubmodules) {
           const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } }, undefined, operation);
-          if (follow.outcome === "failed") throw new Error(follow.error || follow.log);
+          if (follow.outcome === "failed") {
+            // Keep a submodule lock report so the same confirmation can remove
+            // it and retry the checkout that triggered the automatic update.
+            if (follow.staleLock) report = follow;
+            throw new Error(follow.error || follow.log);
+          }
           if (this.viewing(path)) this.applySnapshot(follow);
           this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
         }

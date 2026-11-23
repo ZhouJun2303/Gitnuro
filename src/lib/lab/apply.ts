@@ -613,14 +613,17 @@ async function fillSurface(shell: ShellState, id: string) {
     if (commit) await shell.previewCherry(commit.id, true, commit.summary);
     return;
   }
-  if (id === "stale-lock-confirm") {
+  if (id === "stale-lock-confirm" || id === "stale-submodule-lock-confirm") {
+    const subject = id === "stale-submodule-lock-confirm"
+      ? ".git/modules/Packages/HlwdFramework/index.lock"
+      : ".git/index.lock";
     shell.ask(
       shell.tr("dialog.staleLockBlocked"),
       shell.tr("dialog.staleLockBlockedBody"),
       () => {},
       [],
       {
-        subject: ".git/index.lock",
+        subject,
         detail: shell.tr("dialog.staleLockAge", { seconds: "812" }),
         danger: true,
         confirmLabel: shell.tr("dialog.removeLockAndRetry"),

@@ -239,6 +239,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "cherry-confirm", group: "叠层", title: "拣选确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "cherry-many-confirm", group: "叠层", title: "批量拣选确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "stale-lock-confirm", group: "叠层", title: "残留 index.lock 确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
+  scene({ id: "stale-submodule-lock-confirm", group: "叠层", title: "残留子模块 index.lock 确认", repo: "full", ready: "[data-layer=\"confirm\"]" }),
   scene({ id: "menu", group: "叠层", title: "菜单", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "file-menu", group: "叠层", title: "文件右键菜单 · 常用操作置顶", repo: "full", ready: "[data-layer=\"menu\"]" }),
   scene({ id: "folder-menu", group: "叠层", title: "文件夹右键菜单 · 打开与复制路径", repo: "full", ready: "[data-layer=\"menu\"]" }),

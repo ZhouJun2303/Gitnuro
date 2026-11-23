@@ -719,7 +719,10 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         }
         // A killed Git process can leave index.lock behind and make the write fail
         // without a usable stderr. Report the file so the UI can offer to remove it.
-        let stale_lock = if result.is_err() { awegit_git::stale_index_lock(&next) } else { None };
+        // The error path also covers locks created inside a submodule's git dir.
+        let stale_lock = result.as_ref().err().and_then(|error| {
+            awegit_git::stale_index_lock_for_error(&next, &error.to_string())
+        });
         let flow = flow.map(|flow| { let _phase = perf::phase("flow-finish"); flow.finish(result.as_ref().map(|_| ()).map_err(ToString::to_string), action_name) });
         let status_paths = if result.is_ok() { stage_paths } else { None };
         let status = if result.is_err() || refresh_areas.iter().any(|area| matches!(*area, "worktree" | "index" | "flow")) {
@@ -1893,7 +1896,8 @@ fn remove_index_lock(path: Option<String>) -> Result<bool, String> {
 }
 
 /// Remove the `index.lock` a killed Git command left, after the user confirmed.
-/// The git crate re-checks its age so a lock a new command just took is kept.
+/// This also accepts locks in a submodule's shared git directory. The git crate
+/// re-checks its age so a lock a new command just took is kept.
 #[tauri::command]
 fn remove_stale_lock(path: Option<String>, lock: String) -> Result<(), String> {
     let repo = repo_from(path)?;

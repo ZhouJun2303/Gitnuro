@@ -670,7 +670,32 @@ pub struct StaleIndexLock {
 
 pub fn stale_index_lock(repo: &Path) -> Option<StaleIndexLock> {
     let lock = index_lock_path(repo)?;
-    let meta = std::fs::symlink_metadata(&lock).ok()?;
+    stale_lock_at(repo, &lock)
+}
+
+/// Find the stale index lock named by a failed Git command. Submodule updates
+/// write through `.git/modules/...`, so the lock can be outside the work tree's
+/// own Git directory while still belonging to this repository.
+pub fn stale_index_lock_for_error(repo: &Path, error: &str) -> Option<StaleIndexLock> {
+    let mut found_lock_path = false;
+    for candidate in lock_paths_from_error(error) {
+        found_lock_path = true;
+        let Some(lock) = resolve_lock_path(repo, &candidate) else {
+            continue;
+        };
+        if let Some(stale) = stale_lock_at(repo, &lock) {
+            return Some(stale);
+        }
+    }
+    if found_lock_path {
+        None
+    } else {
+        stale_index_lock(repo)
+    }
+}
+
+fn stale_lock_at(repo: &Path, lock: &Path) -> Option<StaleIndexLock> {
+    let meta = std::fs::symlink_metadata(lock).ok()?;
     if !meta.file_type().is_file() {
         return None;
     }
@@ -678,9 +703,14 @@ pub fn stale_index_lock(repo: &Path) -> Option<StaleIndexLock> {
     if age < STALE_LOCK_AGE {
         return None;
     }
-    let shown = lock.strip_prefix(repo).unwrap_or(&lock);
+    let shown = std::fs::canonicalize(repo)
+        .ok()
+        .and_then(|root| lock.strip_prefix(root).ok())
+        .or_else(|| lock.strip_prefix(repo).ok())
+        .map(|path| path.display().to_string().replace('\\', "/"))
+        .unwrap_or_else(|| lock.display().to_string().replace('\\', "/"));
     Some(StaleIndexLock {
-        path: shown.display().to_string(),
+        path: shown,
         age_secs: age.as_secs(),
     })
 }
@@ -688,17 +718,101 @@ pub fn stale_index_lock(repo: &Path) -> Option<StaleIndexLock> {
 /// Remove the exact lock the user confirmed. Re-reading the age refuses a lock
 /// that a new Git process took after the prompt appeared.
 pub fn remove_stale_index_lock(repo: &Path, expected: &str) -> Result<(), Error> {
-    let lock = stale_index_lock(repo)
+    let path = resolve_lock_path(repo, Path::new(expected))
         .ok_or_else(|| Error::Git("no stale index.lock to remove".into()))?;
-    if lock.path != expected {
-        return Err(Error::Git(
-            "the stale index.lock changed; retry the failed action".into(),
-        ));
+    let _lock = stale_lock_at(repo, &path)
+        .ok_or_else(|| Error::Git("no stale index.lock to remove".into()))?;
+    std::fs::remove_file(&path)
+        .map_err(|source| Error::Git(format!("could not remove {}: {source}", path.display())))
+}
+
+fn lock_paths_from_error(error: &str) -> Vec<PathBuf> {
+    const SUFFIX: &str = "index.lock";
+    let lower_suffix = SUFFIX.to_ascii_lowercase();
+    let mut paths = Vec::new();
+    for line in error.lines() {
+        let lower = line.to_ascii_lowercase();
+        let Some(end) = lower.find(&lower_suffix).map(|index| index + SUFFIX.len()) else {
+            continue;
+        };
+        let prefix = &line[..end - SUFFIX.len()];
+        let start = prefix
+            .rfind(['\'', '"'])
+            .map(|index| index + 1)
+            .or_else(|| {
+                let lower_prefix = &lower[..end - SUFFIX.len()];
+                ["unable to create ", "could not create "]
+                    .iter()
+                    .find_map(|marker| {
+                        lower_prefix
+                            .rfind(marker)
+                            .map(|index| index + marker.len())
+                    })
+            })
+            .or_else(|| prefix.rfind(char::is_whitespace).map(|index| index + 1))
+            .unwrap_or(0);
+        let path = line[start..end].trim();
+        if !path.is_empty() && !paths.iter().any(|item: &PathBuf| item == Path::new(path)) {
+            paths.push(PathBuf::from(path));
+        }
     }
-    let path = index_lock_path(repo).ok_or_else(|| Error::Git("repository is gone".into()))?;
-    std::fs::remove_file(&path).map_err(|source| {
-        Error::Git(format!("could not remove {}: {source}", path.display()))
-    })
+    paths
+}
+
+fn resolve_lock_path(repo: &Path, candidate: &Path) -> Option<PathBuf> {
+    let path = if candidate.is_absolute() {
+        candidate.to_path_buf()
+    } else {
+        repo.join(candidate)
+    };
+    let name = path.file_name()?.to_str()?;
+    if !name.eq_ignore_ascii_case("index.lock") {
+        return None;
+    }
+    let path = std::fs::canonicalize(path).ok()?;
+    let allowed = allowed_git_dirs(repo);
+    if allowed.iter().any(|root| path_is_within(&path, root)) {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn allowed_git_dirs(repo: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(dir) = absolute_git_dir(repo) {
+        dirs.push(std::fs::canonicalize(&dir).unwrap_or(dir));
+    }
+    if let Ok(opened) = crate::open_repo(repo) {
+        let common = opened.common_dir().to_path_buf();
+        let common = std::fs::canonicalize(&common).unwrap_or(common);
+        if !dirs
+            .iter()
+            .any(|dir| path_is_within(dir, &common) && path_is_within(&common, dir))
+        {
+            dirs.push(common);
+        }
+    }
+    dirs
+}
+
+fn path_is_within(path: &Path, root: &Path) -> bool {
+    let path = normalized_path_key(path);
+    let root = normalized_path_key(root);
+    path == root || path.starts_with(&(root + "/"))
+}
+
+fn normalized_path_key(path: &Path) -> String {
+    let key = crate::repo_key(path);
+    if cfg!(windows) {
+        if let Some(rest) = key.strip_prefix("//?/") {
+            return rest
+                .strip_prefix("unc/")
+                .map(|unc| format!("//{unc}"))
+                .unwrap_or_else(|| rest.to_string());
+        }
+    }
+    key
 }
 
 fn read_local(path: &Path) -> Result<String, Error> {
