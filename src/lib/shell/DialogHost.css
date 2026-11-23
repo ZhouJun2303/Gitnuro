@@ -187,14 +187,82 @@
     font-size: 11px;
   }
 
-.stash-paths {
-    max-height: 180px;
-    margin: 0;
-    white-space: pre-wrap;
+.path-picker {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--canvas);
   }
 
-.dialog pre.stash-paths {
-    max-height: 180px;
+.path-picker-count {
+    color: var(--text-secondary);
+    font-size: 12px;
+  }
+
+.path-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-height: 0;
+    max-height: min(360px, 42vh);
+    margin: 0;
+    padding: 0;
+    overflow: auto;
+    scrollbar-gutter: stable;
+    list-style: none;
+  }
+
+.path-picker-list li {
+    display: flex;
+    flex: 0 0 auto;
+    min-width: 0;
+    min-height: 18px;
+    overflow: hidden;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+.dialog .path-picker-item {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+.path-picker-item input {
+    margin-top: 1px;
+  }
+
+.path-picker-path {
+    display: flex;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+.path-picker-dir,
+.path-picker-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+.path-picker-dir {
+    flex: 0 1 auto;
+    min-width: 0;
+    color: var(--text-secondary);
+  }
+
+.path-picker-name {
+    flex: 0 0 auto;
+    max-width: 100%;
   }
 
 .merge-conflict-log {

@@ -579,9 +579,15 @@ async function fillSurface(shell: ShellState, id: string) {
       "src/i18n/zh-CN.json",
       "README.md",
       "docs/release-notes.md",
+      ...Array.from({ length: 114 }, (_, index) => `generated/changes/file-${String(index + 7).padStart(3, "0")}.ts`),
     ];
-    shell.discardChosen(names, true);
-    if (!shell.confirmAsk) shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => {}, names, { danger: true, focusConfirm: true });
+    shell.discardChosen(names.slice(0, 3), true, names);
+    if (!shell.confirmAsk) shell.ask(shell.tr("chrome.discardSelected"), shell.tr("dialog.discardFilesBody"), () => {}, names, { danger: true, focusConfirm: true, selectedFiles: names.slice(0, 3) });
+    return;
+  }
+  if (id === "stash-many-confirm") {
+    const names = Array.from({ length: 120 }, (_, index) => `generated/stash/file-${String(index + 1).padStart(3, "0")}.txt`);
+    shell.openStash(names.slice(0, 3), names);
     return;
   }
   if (id === "stash-apply-confirm") {

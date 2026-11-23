@@ -734,17 +734,37 @@ test("a long stash summary stays readable inside the confirmation", async ({ pag
   expect(box.clipped).toBeLessThanOrEqual(0);
 });
 
-test("multi-file confirmation lists one file per line with a total", async ({ page }) => {
-  await openLabScene(page, "discard-many-confirm", '[data-layer="confirm"]');
-  const confirm = page.locator('[data-layer="confirm"]');
-  const rows = confirm.locator(".confirm-files li");
-  await expect(rows).toHaveCount(6);
-  await expect(confirm.locator(".confirm-count")).toHaveText(/^(6 files|共 6 个文件)$/);
-  await expect(rows.first()).toContainText("Y语言表_Data_Language.xlsx");
-  await expect(confirm.locator(".commit")).toBeFocused();
-  const heights = await rows.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
-  expect(Math.max(...heights)).toBeLessThan(26);
-});
+for (const theme of ["apple", "light", "dark"] as const) {
+  test(`multi-file confirmation keeps every candidate visible and inherits the selection (${theme})`, async ({ page }) => {
+    await openLabScene(page, "discard-many-confirm", '[data-layer="confirm"]', { theme });
+    const confirm = page.locator('[data-layer="confirm"]');
+    const rows = confirm.locator(".confirm-files li");
+    await expect(rows).toHaveCount(120);
+    await expect(confirm.locator(".confirm-count")).toHaveText(/^(120 files|共 120 个文件)$/);
+    await expect(rows.first()).toContainText("Y语言表_Data_Language.xlsx");
+    await expect(rows.locator("input:checked")).toHaveCount(3);
+    await expect(rows.nth(3).locator("input")).not.toBeChecked();
+    await expect(confirm.locator(".commit")).toBeFocused();
+    await rows.nth(3).locator("input").check({ force: true });
+    await expect(rows.locator("input:checked")).toHaveCount(4);
+    const heights = await rows.evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
+    expect(Math.max(...heights)).toBeLessThan(26);
+    const list = confirm.locator(".confirm-files ol");
+    await expect(list).toHaveCSS("overflow-y", /auto|scroll/);
+  });
+
+  test(`stash file selection keeps all candidates and allows changing the inherited selection (${theme})`, async ({ page }) => {
+    await openLabScene(page, "stash-many-confirm", '[data-dialog="stash"]', { theme });
+    const dialog = page.locator('[data-dialog="stash"]');
+    const rows = dialog.locator(".path-picker-list li");
+    await expect(rows).toHaveCount(120);
+    await expect(rows.locator("input:checked")).toHaveCount(3);
+    await expect(rows.nth(3).locator("input")).not.toBeChecked();
+    await rows.nth(3).locator("input").check({ force: true });
+    await expect(rows.locator("input:checked")).toHaveCount(4);
+    await expect(dialog.locator(".path-picker-list")).toHaveCSS("overflow-y", /auto|scroll/);
+  });
+}
 
 test("discard opened with Delete focuses the confirm button", async ({ page }) => {
   await openLabScene(page, "changes", ".unstaged-pane .file-list");

@@ -1230,7 +1230,11 @@ export class ShellState {
   includeUntracked = $state(false);
 
 
+  /** All paths shown in the stash dialog. */
   stashFiles = $state<string[]>([]);
+
+  /** Paths currently selected in the stash dialog. */
+  stashSelectedFiles = $state<string[]>([]);
 
 
   flowKind = $state("feature");
@@ -5163,7 +5167,7 @@ export class ShellState {
 
 
 
-  ask(title: string, body: string, run: () => void, files: string[] = [], extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "focusConfirm" | "confirmLabel" | "revert"> = {}) {
+  ask(title: string, body: string, run: (selectedFiles?: string[]) => void, files: string[] = [], extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "focusConfirm" | "confirmLabel" | "revert" | "selectedFiles"> = {}) {
     return ask(this, title, body, run, files, extras);
   }
 
@@ -6485,20 +6489,20 @@ export class ShellState {
 
 
 
-  discardChosen(files: string[], focusConfirm = false) {
-    return discardChosen(this, files, focusConfirm);
+  discardChosen(files: string[], focusConfirm = false, candidates = files) {
+    return discardChosen(this, files, focusConfirm, candidates);
   }
 
 
 
-  deleteChosen(files: string[]) {
-    return deleteChosen(this, files);
+  deleteChosen(files: string[], candidates = files) {
+    return deleteChosen(this, files, candidates);
   }
 
 
 
-  openStash(files: string[]) {
-    return openStash(this, files);
+  openStash(files: string[], candidates = files) {
+    return openStash(this, files, candidates);
   }
 
 
@@ -7582,7 +7586,7 @@ export class ShellState {
       const inUnstaged = (event.target as HTMLElement | null)?.closest(".unstaged-pane");
       if ((bareDelete && !inUnstaged) || this.dialog || this.menu || this.launchOpen || !this.selectedPath || this.selectedSide !== "unstaged") return;
       const chosen = this.pickedIn(this.shownUnstaged);
-      this.discardChosen(chosen.length > 1 && chosen.includes(this.selectedPath) ? chosen : [this.selectedPath], true);
+      this.discardChosen(chosen.length > 1 && chosen.includes(this.selectedPath) ? chosen : [this.selectedPath], true, this.shownUnstaged.map((file) => file.path));
     } else if (action === "explorer" && this.snapshot) void this.openLocal(this.snapshot.path);
     else if (action === "terminal") void invoke("open_terminal", { path: this.repoPath() });
     else if (action === "filterBranch") this.toggleHistoryScope(); else if (action === "reopen") this.reopenClosed();

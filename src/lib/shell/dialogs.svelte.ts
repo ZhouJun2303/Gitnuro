@@ -551,11 +551,15 @@ export function ask(
     shell: ShellState,
     title: string,
     body: string,
-    run: () => void,
+    run: (selectedFiles?: string[]) => void,
     files: string[] = [],
-    extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "focusConfirm" | "confirmLabel" | "revert"> = {},
+    extras: Pick<ConfirmAsk, "subject" | "detail" | "danger" | "focusConfirm" | "confirmLabel" | "revert" | "selectedFiles"> = {},
   ) {
-    shell.confirmAsk = { title, body, files, ...extras, run };
+    const listed = [...new Set(files.filter((file) => file.length > 0))];
+    const selected = extras.selectedFiles
+      ? listed.filter((file) => extras.selectedFiles?.includes(file))
+      : listed;
+    shell.confirmAsk = { title, body, files: listed, ...extras, selectedFiles: selected, run };
   }
 
 export function liveOnly(shell: ShellState, run: () => void) {

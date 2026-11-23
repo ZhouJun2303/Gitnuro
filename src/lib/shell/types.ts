@@ -89,8 +89,11 @@ export type ConfirmAsk = {
     focusConfirm?: boolean;
     confirmLabel?: string;
     revert?: { commit: boolean; message: string };
+    /** All paths shown in the confirmation list. */
     files?: string[];
-    run: () => void;
+    /** Paths checked when the confirmation opened or changed inside it. */
+    selectedFiles?: string[];
+    run: (selectedFiles?: string[]) => void;
 };
 
 export type TreeEntry = { key: string; kind: "dir" | "file"; path: string; file?: Row; depth: number };

@@ -437,14 +437,14 @@
           <span class="pick-count">{shell.tr("chrome.pickedCount", { count: String(unstagedFiles.length + stagedFiles.length) })}</span>
           {#if unstagedFiles.length > 1}
             <button class="pane-chip" type="button" disabled={shell.stageDisabled} onclick={() => void shell.stagePicked(unstagedFiles)}>{shell.tr("chrome.stageSelected")}</button>
-            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.discardChosen(unstagedFiles)}>{shell.tr("chrome.discardSelected")}</button>
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.openStash(unstagedFiles)}>{shell.tr("chrome.stash")}</button>
-            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.deleteChosen(unstagedFiles)}>{shell.tr("chrome.deleteSelected")}</button>
+            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.discardChosen(unstagedFiles, false, shell.shownUnstaged.map((file) => file.path))}>{shell.tr("chrome.discardSelected")}</button>
+            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.openStash(unstagedFiles, shell.shownUnstaged.map((file) => file.path))}>{shell.tr("chrome.stash")}</button>
+            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.deleteChosen(unstagedFiles, shell.shownUnstaged.map((file) => file.path))}>{shell.tr("chrome.deleteSelected")}</button>
           {/if}
           {#if stagedFiles.length > 1}
             <button class="pane-chip" type="button" disabled={shell.stageDisabled} onclick={() => void shell.unstagePicked(stagedFiles)}>{shell.tr("chrome.unstageSelected")}</button>
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.openStash(stagedFiles)}>{shell.tr("chrome.stash")}</button>
-            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.deleteChosen(stagedFiles)}>{shell.tr("chrome.deleteSelected")}</button>
+            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.openStash(stagedFiles, shell.shownStaged.map((file) => file.path))}>{shell.tr("chrome.stash")}</button>
+            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.deleteChosen(stagedFiles, shell.shownStaged.map((file) => file.path))}>{shell.tr("chrome.deleteSelected")}</button>
           {/if}
         </div>
       {/if}
