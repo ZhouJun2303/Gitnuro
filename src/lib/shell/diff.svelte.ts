@@ -1,5 +1,5 @@
 import { invoke } from "../perf";
-import { cancelReads } from "../read-scheduler";
+import { cancelReads, isReadSuperseded } from "../read-scheduler";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
 import { comparePixels, PixelDiffLimitError } from "../pixel-diff";
@@ -271,6 +271,7 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
     const rows = stagedSide ? shell.snapshot?.staged : shell.snapshot?.unstaged;
     const conflicted = rows?.some((item) => item.path === file && item.kind === "conflict") ?? false;
     const flight: DiffFlight = { key: flightKey, promise: Promise.resolve() };
+    let retryAfterCancellation = false;
     const promise = shell.withWork(shell.tr("chrome.readingFile"), async () => {
     try {
       if (conflicted) {
@@ -318,6 +319,13 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
         }
       }
     } catch (error) {
+      if (isReadSuperseded(error)) {
+        retryAfterCancellation = token === shell.diffToken
+          && shell.viewing(path)
+          && shell.selectedPath === file
+          && shell.section === "changes";
+        return;
+      }
       if (token === shell.diffToken && shell.viewing(path)) {
         shell.diff = null;
         shell.conflictView = null;
@@ -325,7 +333,14 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
       }
     }
     }).finally(() => {
-      if (diffFlights.get(shell) === flight) diffFlights.delete(shell);
+      if (diffFlights.get(shell) !== flight) return;
+      diffFlights.delete(shell);
+      if (retryAfterCancellation) {
+        queueMicrotask(() => {
+          if (token !== shell.diffToken || !shell.viewing(path) || shell.selectedPath !== file || shell.section !== "changes") return;
+          void shell.loadDiff(loadLarge);
+        });
+      }
     });
     flight.promise = promise;
     diffFlights.set(shell, flight);
