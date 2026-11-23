@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { operationAreas, repositoryKey } from "../src/lib/operation-policy";
-import { scheduleRead, invalidateReads, setReadCanceller } from "../src/lib/read-scheduler";
+import { scheduleRead, invalidateReads, setReadCanceller, isReadSuperseded } from "../src/lib/read-scheduler";
 import { mergeFields, mergeRecords, mergeResponse } from "../src/lib/reconcile";
 import { acceptTask, projectRefs, runTask, subscribeTasks, type OperationTask } from "../src/lib/tasks";
 import { projectStages, stageActions } from "../src/lib/shell/staging";
@@ -63,6 +63,12 @@ test("cancelling a mutable read keeps an active immutable object read alive", as
   } finally {
     setReadCanceller(() => {});
   }
+});
+
+test("superseded reads are recognized as internal cancellations", () => {
+  expect(isReadSuperseded(new Error("Preview superseded"))).toBe(true);
+  expect(isReadSuperseded("Preview superseded")).toBe(true);
+  expect(isReadSuperseded(new Error("read failed"))).toBe(false);
 });
 
 test("a new repository read waits for backend cancellation to finish", async () => {

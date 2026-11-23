@@ -37,6 +37,11 @@ const repositoryCancels = new Map<string, Promise<void>>();
 let cancelRepository: (path: string) => void | Promise<void> = () => {};
 const MAX_BYTES = 24 * 1024 * 1024;
 
+/** Cancellation of a stale read is an internal scheduling result, not a user-facing error. */
+export function isReadSuperseded(error: unknown) {
+  return (error instanceof Error ? error.message : String(error)).trim() === "Preview superseded";
+}
+
 /** Connect repository cancellation to the desktop backend or the browser lab. */
 export function setReadCanceller(cancel: (path: string) => void | Promise<void>) {
   cancelRepository = cancel;

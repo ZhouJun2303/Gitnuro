@@ -61,7 +61,7 @@ import { enqueueStage, projectStages, stageActions, type PendingStage } from "./
 import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../operation-policy";
 import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
 import { watchOperationTasks } from "./task-monitor";
-import { cancelReads, invalidateReads } from "../read-scheduler";
+import { cancelReads, invalidateReads, isReadSuperseded } from "../read-scheduler";
 import { mergeResponse } from "../reconcile";
 import { sceneById } from "../lab/scenes";
 
@@ -3238,6 +3238,7 @@ export class ShellState {
 
 
   message(error: unknown) {
+    if (isReadSuperseded(error)) return "";
     const raw = (error instanceof Error ? error.message : String(error)).trim();
     const coded = /^awegit:([a-z]+):(.*)$/i.exec(raw);
     if (coded) {
