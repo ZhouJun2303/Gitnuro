@@ -1066,6 +1066,9 @@ export class ShellState {
 
   updateCheckedAt = $state(0);
   private updateCheckGen = 0;
+  private updateCheckTimer: ReturnType<typeof setTimeout> | null = null;
+  private updateCheckDay = "";
+  private updateCheckInFlight = false;
 
   updateReleaseUrl = $state("");
 
@@ -4464,6 +4467,62 @@ export class ShellState {
     if (this.updatePhase === "idle") this.updatePhase = "available";
   }
 
+  private updateDay(value = new Date()) {
+    return `${value.getFullYear()}-${value.getMonth()}-${value.getDate()}`;
+  }
+
+  private scheduleDailyUpdateCheck() {
+    if (this.updateCheckTimer !== null) clearTimeout(this.updateCheckTimer);
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const delay = Math.max(1000, next.getTime() - now.getTime());
+    this.updateCheckTimer = setTimeout(() => {
+      this.updateCheckTimer = null;
+      this.checkUpdateForCurrentDay();
+      this.scheduleDailyUpdateCheck();
+    }, delay);
+  }
+
+  private stopDailyUpdateCheck() {
+    if (this.updateCheckTimer === null) return;
+    clearTimeout(this.updateCheckTimer);
+    this.updateCheckTimer = null;
+  }
+
+  private checkUpdateForCurrentDay() {
+    const day = this.updateDay();
+    if (day === this.updateCheckDay) return;
+    if (this.updateCheckInFlight || this.updateBusy) return;
+    this.updateCheckDay = day;
+    void this.checkForUpdateInBackground();
+  }
+
+  private finishUpdateCheck() {
+    this.updateCheckInFlight = false;
+    if (this.updateCheckDay !== this.updateDay()) queueMicrotask(() => this.checkUpdateForCurrentDay());
+  }
+
+  private async checkForUpdateInBackground() {
+    if (this.updateCheckInFlight || this.updateBusy) return;
+    this.updateCheckInFlight = true;
+    try {
+      const value = await invoke<UpdateNotice | null>("check_for_update");
+      this.updateCheckedAt = Date.now();
+      this.pendingUpdate = value;
+      if (!value) {
+        this.updateNotice = null;
+        if (this.updatePhase === "available") this.updatePhase = "idle";
+        return;
+      }
+      if (this.updatePhase !== "available") this.updatePhase = "idle";
+      this.showPendingUpdate(false);
+    } catch {
+      // Automatic checks stay quiet. The next day boundary or a manual check can retry.
+    } finally {
+      this.finishUpdateCheck();
+    }
+  }
+
   updateStatusLine = $derived.by(() => {
     if (this.updatePhase === "checking") return this.tr("chrome.updateChecking");
     if (this.updatePhase === "current") return this.tr("chrome.updateCurrent", { version: this.appVersion });
@@ -4478,13 +4537,15 @@ export class ShellState {
 
   openUpdatePanel(check = true) {
     this.dialog = "update";
-    if (!check || this.updateBusy || this.updatePhase === "checking") return;
+    if (!check || this.updateBusy || this.updateCheckInFlight || this.updatePhase === "checking") return;
     if (this.updateNotice) return;
     void this.checkForUpdate();
   }
 
   async checkForUpdate() {
-    if (this.updatePhase === "checking" || this.updateBusy) return;
+    if (this.updateCheckInFlight || this.updatePhase === "checking" || this.updateBusy) return;
+    this.updateCheckInFlight = true;
+    this.updateCheckDay = this.updateDay();
     const generation = ++this.updateCheckGen;
     this.updatePhase = "checking";
     this.updateMessage = this.tr("chrome.updateChecking");
@@ -4510,6 +4571,8 @@ export class ShellState {
       if (generation !== this.updateCheckGen) return;
       this.updatePhase = "error";
       this.updateMessage = this.message(error);
+    } finally {
+      this.finishUpdateCheck();
     }
   }
 
@@ -4582,6 +4645,7 @@ export class ShellState {
       this.updateBusy = false;
       this.updateCancelling = false;
       this.updateCancelRequested = false;
+      this.checkUpdateForCurrentDay();
     }
   }
 
@@ -7824,10 +7888,16 @@ export class ShellState {
     };
     const onShortcut = this.onShortcut.bind(this);
     const onWindowFocus = () => {
-      if (this.inApp() && !document.hidden) this.requestAutomaticFetch("focus");
+      if (this.inApp() && !document.hidden) {
+        this.checkUpdateForCurrentDay();
+        this.requestAutomaticFetch("focus");
+      }
     };
     const onVisibilityChange = () => {
-      if (this.inApp() && !document.hidden) this.requestAutomaticFetch("focus");
+      if (this.inApp() && !document.hidden) {
+        this.checkUpdateForCurrentDay();
+        this.requestAutomaticFetch("focus");
+      }
     };
     const stopLocale = onLocaleChange((locale) => { this.settings.locale = locale; });
     const stopAppearance = onAppearanceChange((theme) => {
@@ -7849,6 +7919,7 @@ export class ShellState {
     stopTaskMonitor();
     stopLocale();
     stopAppearance();
+    this.stopDailyUpdateCheck();
     window.clearTimeout(historyTimer);
     window.removeEventListener("keydown", onShortcut);
     window.removeEventListener("focus", onWindowFocus);
@@ -7892,12 +7963,8 @@ export class ShellState {
       if (!value.version) this.actionError = this.tr("chrome.gitMissing");
       else if (!value.minimum) this.actionError = this.tr("chrome.gitOld", { version: value.version });
     }).catch(() => {});
-    invoke<UpdateNotice | null>("check_for_update")
-    .then((value) => {
-    this.pendingUpdate = value;
-    this.showPendingUpdate(false);
-    })
-    .catch(() => {});
+    this.scheduleDailyUpdateCheck();
+    this.checkUpdateForCurrentDay();
     let targeted = false;
     let introduce = false;
     void (async () => {
