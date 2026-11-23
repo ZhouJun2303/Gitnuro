@@ -18,14 +18,14 @@
     : shell.tr(!value ? "dialog.fontSystemPreview" : status === "loading" ? "dialog.fontLoading" : "dialog.fontNotDownloaded"));
 
   function setSize(input: HTMLInputElement) {
-    const next = Math.min(kind === "ui" ? 20 : 32, Math.max(kind === "ui" ? 11 : 8, Math.round(Number(input.value) || 14)));
+    const next = Math.min(kind === "ui" ? 30 : 32, Math.max(kind === "ui" ? 11 : 8, Math.round(Number(input.value) || 14)));
     if (kind === "ui") shell.settings.uiScale = next;
     else shell.settings.diffFontSize = next;
     input.value = String(next);
   }
   function previewSize(input: HTMLInputElement) {
     const value = Number(input.value);
-    if (input.value && value >= (kind === "ui" ? 11 : 8) && value <= (kind === "ui" ? 20 : 32)) setSize(input);
+    if (input.value && value >= (kind === "ui" ? 11 : 8) && value <= (kind === "ui" ? 30 : 32)) setSize(input);
   }
 </script>
 
@@ -63,8 +63,8 @@
     <div class="font-metrics">
       <label for={`font-size-${kind}`}>{shell.tr(kind === "ui" ? "dialog.uiFontSize" : "dialog.codeFontSize")}</label>
       <div class="font-size-control">
-        <input type="range" aria-label={shell.tr(kind === "ui" ? "dialog.uiFontSize" : "dialog.codeFontSize")} min={kind === "ui" ? 11 : 8} max={kind === "ui" ? 20 : 32} value={size} oninput={(event) => setSize(event.currentTarget)} />
-        <input id={`font-size-${kind}`} type="number" min={kind === "ui" ? 11 : 8} max={kind === "ui" ? 20 : 32} value={size} oninput={(event) => previewSize(event.currentTarget)} onchange={(event) => setSize(event.currentTarget)} /><span>px</span>
+        <input type="range" aria-label={shell.tr(kind === "ui" ? "dialog.uiFontSize" : "dialog.codeFontSize")} min={kind === "ui" ? 11 : 8} max={kind === "ui" ? 30 : 32} value={size} oninput={(event) => setSize(event.currentTarget)} />
+        <input id={`font-size-${kind}`} type="number" min={kind === "ui" ? 11 : 8} max={kind === "ui" ? 30 : 32} value={size} oninput={(event) => previewSize(event.currentTarget)} onchange={(event) => setSize(event.currentTarget)} /><span>px</span>
       </div>
       <label for={`font-weight-${kind}`}>{shell.tr("dialog.fontWeight")}</label>
       <select id={`font-weight-${kind}`} value={weight || 400} onchange={(event) => {

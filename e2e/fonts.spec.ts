@@ -29,6 +29,8 @@ for (const theme of ["apple", "light", "dark"] as const) {
       codeFontWeight: 400,
     });
     await openLabScene(page, "prefs-fonts", '[data-pref-tab="fonts"]', { locale: "en" });
+    await expect(page.getByRole("slider", { name: "Interface font size" })).toHaveAttribute("max", "30");
+    await expect(page.getByRole("spinbutton", { name: "Interface font size" })).toHaveAttribute("max", "30");
     const toggle = page.getByRole("checkbox", { name: "Large text mode" });
     await expect(toggle).not.toBeChecked();
     await expect(page.locator('[data-font-preview="ui"]')).toHaveCSS("font-size", "14px");
@@ -41,6 +43,7 @@ for (const theme of ["apple", "light", "dark"] as const) {
       uiWeight: document.documentElement.style.getPropertyValue("--ui-weight"),
       codeWeight: document.documentElement.style.getPropertyValue("--code-weight"),
     }))).toEqual({ mode: "true", uiScale: "18px", uiWeight: "600", codeWeight: "500" });
+    await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).fontFamily)).toMatch(/Noto Sans SC|Noto Sans CJK SC|Microsoft YaHei UI|PingFang SC/);
     await expect(page.locator('[data-font-preview="ui"]')).toHaveCSS("font-size", "18px");
     await expect(page.locator('[data-font-preview="ui"]')).toHaveCSS("font-weight", "600");
     await expect(page.locator('[data-font-preview="code"]')).toHaveCSS("font-size", "16px");

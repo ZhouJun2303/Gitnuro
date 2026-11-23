@@ -280,6 +280,11 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
   --tok-comment: #d0d0d0;
 }
 
+/* Use one CJK-capable family first so Latin and CJK glyphs share the same bold metrics. */
+:root[data-senior-mode="true"] {
+  --font: var(--font-user,) "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
 /* VS Code: flat, compact panels and square controls. */
 :root[data-theme="dark"] :is(.history-stage, .changes-column) { background: var(--canvas); }
 :root[data-theme="dark"] .tab.active { background: var(--canvas); }

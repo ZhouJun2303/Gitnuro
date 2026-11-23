@@ -7563,7 +7563,7 @@ export class ShellState {
     else if (action === "commits") this.section = "history";
     else if (action === "reveal") this.revealHead();
     else if (action === "zoomIn") {
-      this.settings.uiScale = Math.min(20, this.settings.uiScale + 1);
+      this.settings.uiScale = Math.min(30, this.settings.uiScale + 1);
       void this.savePrefs(false);
     } else if (action === "zoomOut") {
       this.settings.uiScale = Math.max(11, this.settings.uiScale - 1);
