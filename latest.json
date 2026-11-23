@@ -1,12 +1,12 @@
 {
-    "appVersion": "2.0.16",
-    "notes":  "✨ 新功能\n\n· 新增 Killer 推送，被远程拒绝时自动拉取并重推，可在设置开启\n· 工作区项目标签可以拖动排序\n· 全部提交搜索保留完整提交表，并高亮和定位匹配项\n· 子模块改动显示提交区间，打开入口固定在底部\n\n⚡ 体验优化\n\n· 推送、获取、拉取按钮统一为线框图标，开启 Killer 推送后推送箭头变实心\n· 工作区标签字号跟随界面字号，放不下时才缩小\n· 优化自动获取与刷新时机，减少等待\n\n🐛 问题修复\n\n· 远程分支删除后，历史不再因失效的上游分支出错\n· 子模块内的 FETCH_HEAD 不再被当成工作区文件\n· 修复子模块无法暂存、差异入口打不开的问题\n· 推送被远程拒绝后自动获取远程更新",
-    "appCode":  42,
-    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.15/AweGit_2.0.15_x64-setup.exe",
+    "appVersion":  "2.0.16",
+    "notes":  "✨ 新功能\n\n· 新增老年人模式，字体更大、字重更清晰、对比度更高\n· 拉取前自动保存并关闭 Excel，拉取后重新打开（仅 Windows 桌面版）\n· 批量丢弃、删除或贮藏时可勾选要处理的文件\n\n⚡ 体验优化\n\n· 切换或重新打开仓库时复用上次状态，显示更快\n· 没有待推送提交时，推送不再等待网络\n· 切换文件或搜索时不再等待过期结果，界面更流畅\n· 打开大仓库时仓库信息统计更快\n· 界面字号上限提高到 30px，可以调得更大\n\n🐛 问题修复\n\n· 子模块里的残留 index.lock 现在也能清理并重试\n· 切换文件时不再弹出内部取消错误\n· 大文件、长历史或搜索结果超出上限时改为提示，不再截断显示",
+    "appCode":  43,
+    "downloadUrl":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.16/AweGit_2.0.16_x64-setup.exe",
     "downloads":  {
                       "windows":  {
-                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.15/AweGit_2.0.15_x64-setup.exe",
-                                      "sha256":  "48f2a8c684c7f0ee5fb63c3b9944db3955ecc5f2532ee97e6584c5077eb2fe82"
+                                      "url":  "https://github.com/ZhouJun2303/Gitnuro/releases/download/v2.0.16/AweGit_2.0.16_x64-setup.exe",
+                                      "sha256":  "b77f4b4e7460f712eda62d367cf533907ae26526d9728d39e34b7b6eda371b09"
                                   },
                       "macos":  ""
                   }
