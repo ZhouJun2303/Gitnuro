@@ -529,6 +529,8 @@ export const zh: Messages = {
   dialog: {
     fonts: "字体",
     fontsHint: "分别配置界面和代码字体，调整字号、字重，即时预览显示效果。",
+    seniorMode: "老年人模式",
+    seniorModeHint: "增大界面和差异字体，使用更清晰的字重与更高的文字对比度，适合近视和老年用户。",
     googleFontAdd: "从 Google Fonts 添加",
     googleFontHint: "在官网浏览、预览全部字体，粘贴字体名称或字体页面链接，识别为可下载后再点击下载。添加后可在下方两个字体列表中选用，支持离线使用。下载常规字体文件，单个文件上限 32 MB。",
     googleFontBrowse: "浏览 Google Fonts 官网",

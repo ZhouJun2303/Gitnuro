@@ -52,6 +52,8 @@ pub struct Settings {
     #[serde(default = "scale_default")]
     pub ui_scale: u32,
     #[serde(default)]
+    pub senior_mode: bool,
+    #[serde(default)]
     pub ui_font: String,
     #[serde(default)]
     pub code_font: String,
@@ -569,6 +571,7 @@ impl Default for Settings {
             show_entire_file: false,
             lines_height: compact(),
             ui_scale: scale_default(),
+            senior_mode: false,
             ui_font: String::new(),
             code_font: String::new(),
             ui_font_weight: font_weight(),
@@ -1563,11 +1566,14 @@ mod tests {
         assert_eq!(defaults.ui_font, "");
         assert_eq!(defaults.code_font, "");
         assert_eq!(defaults.ui_scale, 14);
+        assert!(!defaults.senior_mode);
         assert_eq!(defaults.diff_font_size, 14);
         assert_eq!(defaults.ui_font_weight, 400);
         assert_eq!(defaults.code_font_weight, 400);
         let saved: super::Settings = serde_json::from_str(r#"{"uiScale":13,"diffFontSize":16,"uiFont":"inter","codeFont":"jetbrains-mono","uiFontWeight":500,"codeFontWeight":600}"#).unwrap();
         assert_eq!(saved.ui_scale, 13);
+        let senior: super::Settings = serde_json::from_str(r#"{"seniorMode":true}"#).unwrap();
+        assert!(senior.senior_mode);
         assert_eq!(saved.diff_font_size, 16);
         assert_eq!(saved.ui_font, "inter");
         assert_eq!(saved.code_font, "jetbrains-mono");

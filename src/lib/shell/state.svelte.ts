@@ -263,6 +263,7 @@ export class ShellState {
     showEntireFile: false,
     linesHeight: "compact",
     uiScale: 14,
+    seniorMode: false,
     uiFont: "",
     codeFont: "",
     uiFontWeight: 400,
@@ -1950,6 +1951,18 @@ export class ShellState {
   canCommit = $derived(!this.commitBlockReason);
 
 
+  effectiveUiScale = $derived(Math.max(this.settings.uiScale || 14, this.settings.seniorMode ? 18 : 0));
+
+
+  effectiveDiffFontSize = $derived(Math.max(this.settings.diffFontSize || 14, this.settings.seniorMode ? 16 : 0));
+
+
+  effectiveUiFontWeight = $derived(Math.max(this.settings.uiFontWeight || 400, this.settings.seniorMode ? 600 : 0));
+
+
+  effectiveCodeFontWeight = $derived(Math.max(this.settings.codeFontWeight || 400, this.settings.seniorMode ? 500 : 0));
+
+
   rowCommit = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 36 : 28, 2.1));
 
 
@@ -1963,7 +1976,7 @@ export class ShellState {
 
 
   rowHeight(base: number, factor: number) {
-    return Math.max(base, Math.ceil((this.settings.uiScale || 13) * factor));
+    return Math.max(base, Math.ceil(this.effectiveUiScale * factor));
   }
 
 
@@ -2385,7 +2398,7 @@ export class ShellState {
   });
 
 
-  diffRowHeight = $derived(Math.max(18, Math.ceil((this.settings.diffFontSize || 13) * 1.45)));
+  diffRowHeight = $derived(Math.max(18, Math.ceil(this.effectiveDiffFontSize * 1.45)));
 
 
   diffWindow = $derived(virtualLines(this.diffLines, this.diffTop, this.diffRowHeight, this.windowRows(this.diffHeight, this.diffRowHeight), this.settings.diffWordWrap));
@@ -7721,14 +7734,15 @@ export class ShellState {
     const theme = resolved();
     this.appliedTheme = theme;
     root.setAttribute("data-theme", theme);
+    root.dataset.seniorMode = this.settings.seniorMode ? "true" : "false";
     root.lang = this.activeLocale === "zh" ? "zh-CN" : "en";
     if (this.inApp()) void getCurrentWindow().setTheme(theme === "dark" ? "dark" : "light").catch(() => {});
     };
     paint();
     media?.addEventListener("change", paint);
-    root.style.setProperty("--ui-scale", `${this.settings.uiScale || 14}px`);
-    root.style.setProperty("--ui-weight", String(this.settings.uiFontWeight || 400));
-    root.style.setProperty("--code-weight", String(this.settings.codeFontWeight || 400));
+    root.style.setProperty("--ui-scale", `${this.effectiveUiScale}px`);
+    root.style.setProperty("--ui-weight", String(this.effectiveUiFontWeight));
+    root.style.setProperty("--code-weight", String(this.effectiveCodeFontWeight));
     root.style.setProperty("--row-file", `${this.rowFile}px`);
     root.style.setProperty("--row-commit", `${this.rowCommit}px`);
     root.style.setProperty("--row-side", `${this.rowSide}px`);

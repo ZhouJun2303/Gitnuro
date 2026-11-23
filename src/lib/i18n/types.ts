@@ -469,6 +469,8 @@ export type Messages = {
   dialog: {
     fonts: string;
     fontsHint: string;
+    seniorMode: string;
+    seniorModeHint: string;
     googleFontAdd: string;
     googleFontHint: string;
     googleFontBrowse: string;

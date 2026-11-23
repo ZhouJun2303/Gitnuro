@@ -528,6 +528,8 @@ export const en: Messages = {
   dialog: {
     fonts: "Fonts",
     fontsHint: "Choose interface and code fonts, adjust their size and weight, and preview the result immediately.",
+    seniorMode: "Large text mode",
+    seniorModeHint: "Uses larger text, clearer weights, and stronger contrast for easier reading.",
     googleFontAdd: "Add from Google Fonts",
     googleFontHint: "Browse and preview all families on the official website. Paste a family name or specimen link here; once recognized, download and add it. Added fonts appear in both selectors below and work offline. The regular face is downloaded, up to 32 MB.",
     googleFontBrowse: "Browse Google Fonts",

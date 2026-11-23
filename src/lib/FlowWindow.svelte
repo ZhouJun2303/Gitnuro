@@ -47,8 +47,10 @@
   function useFonts(settings: Settings) {
     uiFont = settings.uiFont || "";
     codeFont = settings.codeFont || "";
-    document.documentElement.style.setProperty("--ui-weight", String(settings.uiFontWeight || 400));
-    document.documentElement.style.setProperty("--code-weight", String(settings.codeFontWeight || 400));
+    document.documentElement.dataset.seniorMode = settings.seniorMode ? "true" : "false";
+    document.documentElement.style.setProperty("--ui-scale", `${Math.max(settings.uiScale || 14, settings.seniorMode ? 18 : 0)}px`);
+    document.documentElement.style.setProperty("--ui-weight", String(Math.max(settings.uiFontWeight || 400, settings.seniorMode ? 600 : 0)));
+    document.documentElement.style.setProperty("--code-weight", String(Math.max(settings.codeFontWeight || 400, settings.seniorMode ? 500 : 0)));
   }
   const label = (key: string) => { const text = tr(key); return text.startsWith("flow.") ? key : text; };
   const title = (node: FlowNode) => node.kind === "finished" && node.state !== "completed" ? tr("phase-finished") : node.kind === "conflict" ? tr("round", { n: String(node.round) })

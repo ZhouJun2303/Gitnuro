@@ -262,6 +262,24 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
   --shadow: 0 24px 64px rgba(24, 24, 27, 0.18);
 }
 
+:root[data-senior-mode="true"] {
+  --text: #151515;
+  --text-secondary: #454545;
+  --line: rgba(0, 0, 0, 0.16);
+  --separator: rgba(0, 0, 0, 0.24);
+  --control-edge: rgba(0, 0, 0, 0.28);
+  --tok-comment: #4a4a4a;
+}
+
+:root[data-theme="dark"][data-senior-mode="true"] {
+  --text: #ffffff;
+  --text-secondary: #d4d4d4;
+  --line: rgba(255, 255, 255, 0.16);
+  --separator: rgba(255, 255, 255, 0.25);
+  --control-edge: rgba(255, 255, 255, 0.3);
+  --tok-comment: #d0d0d0;
+}
+
 /* VS Code: flat, compact panels and square controls. */
 :root[data-theme="dark"] :is(.history-stage, .changes-column) { background: var(--canvas); }
 :root[data-theme="dark"] .tab.active { background: var(--canvas); }

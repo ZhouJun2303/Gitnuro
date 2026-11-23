@@ -8,6 +8,8 @@
   const value = $derived(kind === "ui" ? shell.settings.uiFont : shell.settings.codeFont);
   const size = $derived(kind === "ui" ? shell.settings.uiScale : shell.settings.diffFontSize);
   const weight = $derived(kind === "ui" ? shell.settings.uiFontWeight : shell.settings.codeFontWeight);
+  const previewFontSize = $derived(kind === "ui" ? shell.effectiveUiScale : shell.effectiveDiffFontSize);
+  const previewFontWeight = $derived(kind === "ui" ? shell.effectiveUiFontWeight : shell.effectiveCodeFontWeight);
   const fonts = $derived<FontOption[]>([...(kind === "ui" ? uiFonts : codeFonts), ...(cache?.customFonts ?? []).map((font) => ({ ...font, script: "custom" }))]);
   const selected = $derived(fonts.find((font) => font.id === value));
   const cached = $derived(cache?.fonts.find((font) => font.id === value));
@@ -75,7 +77,7 @@
       </select>
     </div>
     <div class="font-preview-label"><span>{shell.tr("dialog.fontPreview")}</span><span role="status">{previewStatus}</span></div>
-    <div class="font-preview" data-font-preview={kind} style:font-family={kind === "ui" ? "var(--font)" : "var(--mono)"} style:font-size={`${size || 14}px`} style:font-weight={weight || 400}>
+    <div class="font-preview" data-font-preview={kind} style:font-family={kind === "ui" ? "var(--font)" : "var(--mono)"} style:font-size={`${previewFontSize}px`} style:font-weight={previewFontWeight}>
       {#if kind === "ui"}
         <p>AweGit · 让每一次提交清晰可见</p>
         <p>The quick brown fox jumps over the lazy dog.</p>

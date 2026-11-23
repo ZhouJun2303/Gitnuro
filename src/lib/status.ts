@@ -207,6 +207,7 @@ export type Settings = {
   showEntireFile: boolean;
   linesHeight: string;
   uiScale: number;
+  seniorMode: boolean;
   uiFont: string;
   codeFont: string;
   uiFontWeight: number;

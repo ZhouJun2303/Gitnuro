@@ -19,6 +19,40 @@ test.beforeEach(async ({ page }) => {
 });
 
 for (const theme of ["apple", "light", "dark"] as const) {
+  test(`${theme}: large text mode improves readable font metrics`, async ({ page }) => {
+    await pinLabSettings(page, {
+      theme,
+      seniorMode: false,
+      uiScale: 14,
+      diffFontSize: 14,
+      uiFontWeight: 400,
+      codeFontWeight: 400,
+    });
+    await openLabScene(page, "prefs-fonts", '[data-pref-tab="fonts"]', { locale: "en" });
+    const toggle = page.getByRole("checkbox", { name: "Large text mode" });
+    await expect(toggle).not.toBeChecked();
+    await expect(page.locator('[data-font-preview="ui"]')).toHaveCSS("font-size", "14px");
+    await expect(page.locator('[data-font-preview="code"]')).toHaveCSS("font-size", "14px");
+    await toggle.check();
+    await expect(toggle).toBeChecked();
+    await expect.poll(() => page.evaluate(() => ({
+      mode: document.documentElement.dataset.seniorMode,
+      uiScale: document.documentElement.style.getPropertyValue("--ui-scale"),
+      uiWeight: document.documentElement.style.getPropertyValue("--ui-weight"),
+      codeWeight: document.documentElement.style.getPropertyValue("--code-weight"),
+    }))).toEqual({ mode: "true", uiScale: "18px", uiWeight: "600", codeWeight: "500" });
+    await expect(page.locator('[data-font-preview="ui"]')).toHaveCSS("font-size", "18px");
+    await expect(page.locator('[data-font-preview="ui"]')).toHaveCSS("font-weight", "600");
+    await expect(page.locator('[data-font-preview="code"]')).toHaveCSS("font-size", "16px");
+    await expect(page.locator('[data-font-preview="code"]')).toHaveCSS("font-weight", "500");
+    await toggle.uncheck();
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.seniorMode)).toBe("false");
+    await expect(page.locator('[data-font-preview="ui"]')).toHaveCSS("font-size", "14px");
+    await expect(page.locator('[data-font-preview="code"]')).toHaveCSS("font-size", "14px");
+  });
+}
+
+for (const theme of ["apple", "light", "dark"] as const) {
   test(`${theme}: optional fonts load on request and work from cache while offline`, async ({ page }) => {
     test.skip(!fixture, "No system test font installed");
     const source = "awegit-font:inter";

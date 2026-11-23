@@ -891,7 +891,7 @@
 
 <PerfPanel />
 
-<div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.settings.diffFontSize || 13}px" style:--guide="{shell.settings.pageGuide || 72}" data-lab-scene={shell.labSceneId || undefined} data-lab-error={shell.labPage && !shell.labSceneId && shell.loadError ? shell.loadError : undefined}>
+<div class="shell" class:vertical-tabs={shell.settings.verticalTabs} class:diff-wrap={shell.settings.diffWordWrap} style:--diff-font="{shell.effectiveDiffFontSize}px" style:--guide="{shell.settings.pageGuide || 72}" data-lab-scene={shell.labSceneId || undefined} data-lab-error={shell.labPage && !shell.labSceneId && shell.loadError ? shell.loadError : undefined}>
   {#if shell.standalone === "merge"}
     <MergePanel />
   {:else if shell.standalone === "history"}
