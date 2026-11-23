@@ -3639,13 +3639,16 @@ pub fn search_commits(repo: &Path, kind: &str, needle: &str) -> Result<Vec<Searc
     if needle.is_empty() || needle.starts_with('-') || needle.contains(['\n', '\r', '\0']) {
         return Err(Error::Rev(needle.to_string()));
     }
-    let (output, _) = crate::cli::with_read(|| {
+    let (output, truncated) = crate::cli::with_read(|| {
         crate::cli::run_capped(
             repo,
             &["log", "-n", "80", "--format=%H%x09%h%x09%s", flag, needle],
             1_000_000,
         )
     })?;
+    if truncated {
+        return Err(Error::Git("git search output exceeded the 1000000 byte read limit".into()));
+    }
     let text = String::from_utf8_lossy(&output.stdout);
     Ok(text
         .lines()

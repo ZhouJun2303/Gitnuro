@@ -528,9 +528,10 @@ fn commit_log(
     tasks::wait_for_writes(&repo);
     let limit = limit.unwrap_or(500);
     let topo = order.as_deref() == Some("topo");
-    let key = format!("log:{}:{}:{limit}:{topo}:{all:?}:{revs:?}:{offset:?}", awegit_git::repo_key(&repo), changes::revision(&repo));
+    let revision = changes::revision(&repo);
+    let key = format!("log:{}:{revision}:{limit}:{topo}:{all:?}:{revs:?}:{offset:?}", awegit_git::repo_key(&repo));
     reads::shared(key, || {
-        awegit_git::commit_log_page(&repo, limit, all.unwrap_or(true), &revs.unwrap_or_default(), topo, offset.unwrap_or(0)).map_err(|error| error.to_string())
+        awegit_git::commit_log_page_with_revision(&repo, limit, all.unwrap_or(true), &revs.unwrap_or_default(), topo, offset.unwrap_or(0), Some(revision)).map_err(|error| error.to_string())
     })
 }
 
@@ -582,7 +583,8 @@ fn in_progress(path: Option<String>) -> Result<Option<awegit_git::InProgress>, S
 fn file_history(path: Option<String>, file: String, limit: Option<usize>, offset: Option<usize>) -> Result<Vec<awegit_git::CommitRow>, String> {
     let repo = repo_from(path)?;
     tasks::wait_for_writes(&repo);
-    awegit_git::file_history_page(&repo, &file, limit.unwrap_or(200), offset.unwrap_or(0)).map_err(|error| error.to_string())
+    let revision = changes::revision(&repo);
+    awegit_git::file_history_page_with_revision(&repo, &file, limit.unwrap_or(200), offset.unwrap_or(0), Some(revision)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2236,6 +2238,14 @@ fn facts_stamp(repo: &Path) -> String {
     }
     stamp.push('|');
     stamp.push_str(&file_mark(&git.join("index")));
+    for relative in ["config", "info/exclude", "info/attributes", "objects/info/alternates"] {
+        stamp.push('|');
+        stamp.push_str(&file_mark(&git.join(relative)));
+    }
+    for relative in [".gitignore", ".gitattributes"] {
+        stamp.push('|');
+        stamp.push_str(&file_mark(&repo.join(relative)));
+    }
     stamp.push('|');
     stamp.push_str(repo.to_string_lossy().as_ref());
     stamp
@@ -2330,7 +2340,8 @@ fn search_log(
     let repo = repo_from(path)?;
     let topo = order.as_deref() == Some("topo");
     tasks::wait_for_writes(&repo);
-    awegit_git::search_log_page(&repo, &field, &scope, &query, limit.unwrap_or(500), topo, offset.unwrap_or(0)).map_err(|error| error.to_string())
+    let revision = changes::revision(&repo);
+    awegit_git::search_log_page_with_revision(&repo, &field, &scope, &query, limit.unwrap_or(500), topo, offset.unwrap_or(0), Some(revision)).map_err(|error| error.to_string())
 }
 
 #[tauri::command]

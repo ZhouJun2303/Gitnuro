@@ -203,14 +203,15 @@ export type MergeFold = {
 
 type FoldCommit = { id: string; parents?: string[] };
 const mergeBubbleCache = new WeakMap<FoldCommit[], Array<string[] | undefined>>();
+const MAX_FOLD_COMMITS = 12_000;
 
 /** Ancestors depend on history, never on which merges the user expanded. */
 function mergeBubbles(commits: FoldCommit[]): Array<string[] | undefined> {
   const cached = mergeBubbleCache.get(commits);
   if (cached) return cached;
   const n = commits.length;
-  // Bound ancestor bitsets to O(n²/32); larger histories draw without folding.
-  if (n === 0 || n > 25_000 || !commits.some((commit) => (commit.parents?.length ?? 0) > 1)) {
+  // Bound ancestor bitsets to a size that keeps long histories responsive.
+  if (n === 0 || n > MAX_FOLD_COMMITS || !commits.some((commit) => (commit.parents?.length ?? 0) > 1)) {
     const empty: Array<string[] | undefined> = [];
     mergeBubbleCache.set(commits, empty);
     return empty;

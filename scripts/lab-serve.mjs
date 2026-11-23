@@ -43,7 +43,7 @@ export function startVite(port, { reuse = false } = {}) {
 export function stop(child) {
   if (!child?.pid) return;
   if (process.platform === "win32") {
-    spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
+    child.kill();
     return;
   }
   child.kill("SIGTERM");

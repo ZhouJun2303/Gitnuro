@@ -1,5 +1,6 @@
 import { onMount, tick } from "svelte";
 import { invoke, prefetch } from "../perf";
+import { cancelReads } from "../read-scheduler";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { branchGroup, changedRanges, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, rowAtUnit, sameHistory, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
@@ -140,6 +141,8 @@ export function loadContext(shell: ShellState, operation?: string, parts: Contex
     const key = JSON.stringify([shell.repoPath(), shell.statusGen, shell.settings.commitSort, shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.logLimit, shell.allBranches, shell.exactRefs(), parts]);
     const current = contextReads.get(shell);
     if (current?.key === key) return current.promise;
+    const path = shell.repoPath();
+    if (path) cancelReads(path);
     const promise = readContext(shell, operation, parts).finally(() => {
       if (contextReads.get(shell)?.promise === promise) contextReads.delete(shell);
     });
@@ -263,7 +266,8 @@ export function showSideRefs(shell: ShellState) {
     shell.commitSearchOpen = false;
     shell.commitSearchGen += 1;
     window.clearTimeout(shell.commitSearchTimer);
-    void invoke("cancel_reads", { path: shell.repoPath() }).catch(() => {});
+    const path = shell.repoPath();
+    if (path) cancelReads(path);
     void tick().then(() => shell.sideFilter?.focus());
     if (restore && shell.mode === "live") void shell.loadContext();
   }
@@ -279,7 +283,8 @@ export function showSideSearch(shell: ShellState) {
 export function queueCommitSearch(shell: ShellState) {
     window.clearTimeout(shell.commitSearchTimer);
     const gen = ++shell.commitSearchGen;
-    void invoke("cancel_reads", { path: shell.repoPath() }).catch(() => {});
+    const path = shell.repoPath();
+    if (path) cancelReads(path);
     shell.commitSearchTimer = window.setTimeout(() => {
       if (gen !== shell.commitSearchGen || shell.sideView !== "search" || shell.mode !== "live") return;
       void refreshSearchedCommits(shell, gen);
@@ -319,6 +324,7 @@ export async function searchContent(shell: ShellState, kind: string, needle: str
     const gen = ++shell.contentSearchGen;
     const current = () => gen === shell.contentSearchGen && openGen === shell.openGen
       && shell.repoPath() === path && shell.commitQuery === query;
+    if (path) cancelReads(path);
     try {
       const hits = await invoke<{ id: string; shortId: string; summary: string }[]>("search_commits", { path, kind, needle });
       if (current()) shell.contentHits = hits;

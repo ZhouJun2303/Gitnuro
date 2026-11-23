@@ -1,7 +1,7 @@
 //! Stage, unstage, and commit through the `git` command.
 
-use std::fs::File;
 use std::collections::HashMap;
+use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -394,6 +394,7 @@ const MAX_LARGE_FILE: u64 = 2_000_000;
 const MAX_PREVIEW_BYTES: u64 = 8_000_000;
 const MAX_BLOB_READ_BYTES: u64 = 8_000_000;
 const MAX_BLOB_TEXT_BYTES: usize = 200_000;
+const MAX_CONFLICT_TEXT_BYTES: usize = MAX_BLOB_READ_BYTES as usize;
 
 /// Stage or unstage a single hunk. Hunks come from a zero-context diff, so adjacent edits stay separate.
 pub fn stage_hunk(
@@ -724,17 +725,35 @@ pub struct ConflictSides {
 pub fn conflict_sides(repo: &Path, path: &str) -> Result<ConflictSides, Error> {
     let path = check_path(path)?;
     Ok(ConflictSides {
-        ours: show_stage(repo, path, 2),
-        theirs: show_stage(repo, path, 3),
-        working: std::fs::read_to_string(repo.join(path)).unwrap_or_default(),
+        ours: show_stage(repo, path, 2)?,
+        theirs: show_stage(repo, path, 3)?,
+        working: read_conflict_text(&repo.join(path), path)?,
     })
 }
 
-fn show_stage(repo: &Path, path: &str, stage: u8) -> String {
-    match run(repo, &["show", &format!(":{stage}:{path}")]) {
-        Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
-        Err(_) => String::new(),
+fn show_stage(repo: &Path, path: &str, stage: u8) -> Result<String, Error> {
+    match run_capped(repo, &["show", &format!(":{stage}:{path}")], MAX_CONFLICT_TEXT_BYTES) {
+        Ok((_output, true)) => Err(Error::Git(format!("conflict side exceeds {} bytes", MAX_CONFLICT_TEXT_BYTES))),
+        Ok((output, false)) => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
+        Err(error) if error.to_string().starts_with("awegit:cancelled:") => Err(error),
+        Err(_) => Ok(String::new()),
     }
+}
+
+fn read_conflict_text(path: &Path, display: &str) -> Result<String, Error> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(source) => return Err(Error::Read { path: display.to_string(), source }),
+    };
+    let mut bytes = Vec::new();
+    file.take((MAX_CONFLICT_TEXT_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|source| Error::Read { path: display.to_string(), source })?;
+    if bytes.len() > MAX_CONFLICT_TEXT_BYTES {
+        return Err(Error::Git(format!("conflict working file exceeds {} bytes", MAX_CONFLICT_TEXT_BYTES)));
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// The commit a conflict side comes from, so the merge panel can name it.
@@ -1100,8 +1119,8 @@ pub fn resolve_conflict(repo: &Path, path: &str, side: &str, text: &str) -> Resu
     }
     match side {
         "both" => {
-            let ours = show_stage(repo, path, 2);
-            let theirs = show_stage(repo, path, 3);
+            let ours = show_stage(repo, path, 2)?;
+            let theirs = show_stage(repo, path, 3)?;
             let mut body = ours;
             if !body.is_empty() && !body.ends_with('\n') {
                 body.push('\n');

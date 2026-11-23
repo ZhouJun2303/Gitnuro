@@ -70,6 +70,21 @@ fn log_lists_commits_branches_and_tags() {
 }
 
 #[test]
+fn repository_refs_notice_a_loose_branch_value_change() {
+    let repo = repo();
+    repo.git(&["commit", "--allow-empty", "-m", "first"]);
+    let first = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
+    repo.git(&["commit", "--allow-empty", "-m", "second"]);
+    let before = repository_refs(&repo.path).unwrap();
+    assert_eq!(before.head.as_deref(), Some(repo.output(&["rev-parse", "HEAD"]).trim()));
+
+    repo.git(&["update-ref", "refs/heads/main", &first]);
+    let after = repository_refs(&repo.path).unwrap();
+    assert_eq!(after.head.as_deref(), Some(first.as_str()));
+    assert!(after.labels.get(&first).is_some_and(|labels| labels.iter().any(|label| label == "main")));
+}
+
+#[test]
 fn branch_log_hides_other_branches() {
     let repo = repo();
     fs::write(repo.path.join("a.txt"), "one\n").unwrap();

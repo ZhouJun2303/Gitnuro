@@ -1,4 +1,5 @@
 import { invoke } from "../perf";
+import { cancelReads } from "../read-scheduler";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
 import { comparePixels, PixelDiffLimitError } from "../pixel-diff";
@@ -515,6 +516,7 @@ export async function loadBlameRange(shell: ShellState) {
 
 export async function showBlame(shell: ShellState, file: string) {
     const path = shell.repoPath();
+    if (path) cancelReads(path);
     const openGen = shell.openGen;
     const gen = ++shell.blameGen;
     const selection = shell.selectedPath;

@@ -61,8 +61,9 @@ import { enqueueStage, projectStages, stageActions, type PendingStage } from "./
 import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../operation-policy";
 import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
 import { watchOperationTasks } from "./task-monitor";
-import { invalidateReads } from "../read-scheduler";
+import { cancelReads, invalidateReads } from "../read-scheduler";
 import { mergeResponse } from "../reconcile";
+import { sceneById } from "../lab/scenes";
 
 const initialErrors = readErrorLog();
 
@@ -3009,7 +3010,7 @@ export class ShellState {
     const params = new URLSearchParams(window.location.search);
     const id = params.get("scene") ?? "";
     try {
-      const [{ sceneById }, { applyLabScene }] = await Promise.all([import("../lab/scenes"), import("../lab/apply")]);
+      const { applyLabScene } = await import("../lab/apply");
       const item = sceneById(id);
       if (!item) throw new Error(`未知场景 ${id}`);
       const layout = await invoke<Record<string, string>>("lab_layout");
@@ -5599,7 +5600,7 @@ export class ShellState {
     this.diffToken += 1;
     this.contextGen += 1;
     this.commitSearchGen += 1;
-    if (this.snapshot?.path && !this.viewing(path)) void invoke("cancel_reads", { path: this.snapshot.path }).catch(() => {});
+    if (this.snapshot?.path && !this.viewing(path)) cancelReads(this.snapshot.path);
     this.focusPath = path;
     if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description, commitType: this.commitType });
     if (!stayingOnRepo) {

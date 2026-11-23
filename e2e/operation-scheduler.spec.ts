@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { operationAreas, repositoryKey } from "../src/lib/operation-policy";
-import { scheduleRead, invalidateReads } from "../src/lib/read-scheduler";
+import { scheduleRead, invalidateReads, setReadCanceller } from "../src/lib/read-scheduler";
 import { mergeFields, mergeRecords, mergeResponse } from "../src/lib/reconcile";
 import { acceptTask, projectRefs, runTask, subscribeTasks, type OperationTask } from "../src/lib/tasks";
 import { projectStages, stageActions } from "../src/lib/shell/staging";
@@ -44,6 +44,51 @@ test("immutable object reads are single flight and reusable; mutable reads expir
   expect(await scheduleRead("workspace_status", { path }, async () => ++reads)).toBe(1);
   await tick(); invalidateReads(path);
   expect(await scheduleRead("workspace_status", { path }, async () => ++reads)).toBe(2);
+});
+
+test("cancelling a mutable read keeps an active immutable object read alive", async () => {
+  const path = "scheduler-stable-cancellation", id = "d".repeat(40);
+  const stableGate = deferred<number>();
+  const mutableGate = deferred<number>();
+  let cancelled = 0;
+  setReadCanceller(() => { cancelled += 1; });
+  try {
+    const stable = scheduleRead("commit_detail", { path, id }, () => stableGate.promise);
+    const mutable = scheduleRead("file_diff", { path, file: "old.txt" }, () => mutableGate.promise).catch((error) => error.message);
+    invalidateReads(path);
+    expect(cancelled).toBe(0);
+    stableGate.resolve(7);
+    expect(await stable).toBe(7);
+    expect(await mutable).toBe("Preview superseded");
+  } finally {
+    setReadCanceller(() => {});
+  }
+});
+
+test("a new repository read waits for backend cancellation to finish", async () => {
+  const path = "scheduler-cancellation-order";
+  const oldGate = deferred<number>(), cancelGate = deferred<void>();
+  const started: string[] = [];
+  setReadCanceller(() => cancelGate.promise);
+  try {
+    const old = scheduleRead("file_diff", { path, file: "old.txt" }, () => {
+      started.push("old");
+      return oldGate.promise;
+    }).catch((error) => error.message);
+    await tick();
+    invalidateReads(path);
+    const next = scheduleRead("file_diff", { path, file: "new.txt" }, async () => {
+      started.push("new");
+      return 2;
+    });
+    await tick();
+    expect(started).toEqual(["old"]);
+    cancelGate.resolve();
+    expect(await next).toBe(2);
+    expect(await old).toBe("Preview superseded");
+  } finally {
+    setReadCanceller(() => {});
+  }
 });
 
 test("reads waiting for repository writes leave capacity to browse immutable commits", async () => {

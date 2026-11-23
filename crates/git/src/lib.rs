@@ -44,7 +44,8 @@ pub use model::{
     remote_account_overrides, stale_index_lock, stale_index_lock_for_error,
     write_expanded_groups, write_hidden_refs, write_remote_account, write_sign_off, BlameLine,
     BlameSource, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, LocatedRef, RefSnapshot,
-    commit_log_page, file_history_page, search_log_page, reflog_page,
+    commit_log_page, commit_log_page_with_revision, file_history_page, file_history_page_with_revision,
+    search_log_page, search_log_page_with_revision, reflog_page,
     ReflogRow, RemoteRow, RepoSummary, StaleIndexLock, StashRow, SubmoduleRow, TagRow, WorktreeRow,
 };
 pub use ops::{
