@@ -433,6 +433,9 @@ export type CommandRecord = {
 };
 
 export type ConflictSides = {
+  /** Common ancestor from index stage 1. Empty when the conflict has no base blob. */
+  base?: string;
+  /** Backend fingerprint used to reject writes after an external change. */
   version?: string;
   ours: string;
   theirs: string;
@@ -460,6 +463,11 @@ export type ConflictView = {
   ours: ConflictParty;
   theirs: ConflictParty;
   binary: boolean;
+  /** Broad conflict class used by the workbench for a focused action card. */
+  kind?: "content" | "binary" | "deleteModify" | "rename" | "path";
+  basePath?: string | null;
+  oursPath?: string | null;
+  theirsPath?: string | null;
 };
 
 export type FilePreview = {

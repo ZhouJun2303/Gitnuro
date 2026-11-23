@@ -52,8 +52,8 @@ import {
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, selectFolder, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabDisplay, tabColor, pairSetting } from "./diff.svelte";
 import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, revealCommit, followCommitQuery, stepCommitMatch, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
-import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
-import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
+import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, saveMergeDraft, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
+import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone, MergeFileEntry } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 import { statusPathBefore, type StatusFingerprint } from "../status";
 import { mergeWatchNote, planStatusRefresh, type StatusProbe, type WatchNote } from "./status-plan";
@@ -1263,6 +1263,10 @@ export class ShellState {
 
   mergeFile = $state("");
   mergeSource = $state.raw<MergePiece[]>([]);
+  /** Complete base content is kept separately so it is never duplicated into every conflict hunk. */
+  mergeBase = $state.raw<MergePiece[]>([]);
+  mergeVersion = $state("");
+  mergeDraftSaved = $state(false);
   mergeDirty = $state(false);
   mergeEdited = $state(false);
   mergeEditing = $state(false);
@@ -1428,6 +1432,9 @@ export class ShellState {
 
 
   conflict = $state<ConflictSides | null>(null);
+
+
+  conflictPreview = $state<ConflictSides | null>(null);
 
 
   conflictView = $state<ConflictView | null>(null);
@@ -1597,6 +1604,26 @@ export class ShellState {
     for (const file of this.snapshot?.staged ?? []) if (file.kind === "conflict") count += 1;
     for (const file of this.snapshot?.unstaged ?? []) if (file.kind === "conflict") count += 1;
     return count;
+  });
+
+  /** Conflict files shown by the workbench. The list is cheap to derive and does not load file contents. */
+  conflictFiles = $derived.by<MergeFileEntry[]>(() => {
+    const entries = new Map<string, MergeFileEntry>();
+    if (this.mode === "sample") {
+      for (const path of Object.keys(sampleConflictViews)) entries.set(path, { path, kind: "conflict", binary: sampleConflictViews[path]?.binary });
+    } else {
+      for (const file of [...(this.snapshot?.staged ?? []), ...(this.snapshot?.unstaged ?? [])]) {
+        if (file.kind !== "conflict") continue;
+        const current = entries.get(file.path);
+        entries.set(file.path, { path: file.path, previousPath: file.previousPath, kind: current?.kind ?? "conflict", binary: current?.binary });
+      }
+    }
+    if (this.mergeFile && !entries.has(this.mergeFile)) entries.set(this.mergeFile, { path: this.mergeFile, kind: "draft" });
+    return [...entries.values()].sort((left, right) => {
+      if (statusPathBefore(left.path, right.path)) return -1;
+      if (statusPathBefore(right.path, left.path)) return 1;
+      return 0;
+    });
   });
 
 
@@ -3357,6 +3384,34 @@ export class ShellState {
     return loadDiff(this, loadLarge);
   }
 
+  setDiffContext(value: number) {
+    const next = Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : 3;
+    this.settings.diffContext = next;
+    this.settings.showEntireFile = false;
+    void this.savePrefs(false);
+  }
+
+  toggleShowEntireFile() {
+    this.settings.showEntireFile = !this.settings.showEntireFile;
+    void this.savePrefs(false);
+  }
+
+  toggleDiffWordWrap() {
+    this.settings.diffWordWrap = !this.settings.diffWordWrap;
+    void this.savePrefs(false);
+  }
+
+  toggleIgnoreSpace() {
+    this.settings.ignoreSpace = !this.settings.ignoreSpace;
+    void this.savePrefs(false);
+  }
+
+  setDiffStyle(style: "split" | "unified") {
+    if (this.settings.diffStyle === style) return;
+    this.settings.diffStyle = style;
+    void this.savePrefs(false);
+  }
+
 
 
   currentFilterRefs() {
@@ -3957,7 +4012,11 @@ export class ShellState {
         report = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash, __taskLabel: described.title,
           ...(["push", "pull"].includes(action) ? { __branch: expectedBranch } : {}),
           ...(patchActions.has(action) ? { __expectedDiff: expectedDiff } : {}),
-          ...(action === "resolve" && request.side === "text" && this.conflict?.version ? { __expectedConflict: { file: request.file, version: this.conflict.version } } : {}) }, undefined, operation);
+            ...(action === "resolve" && request.side === "text" ? (() => {
+              const file = String(request.file ?? "");
+              const version = this.mergeFile === file ? this.mergeVersion : this.selectedPath === file ? this.conflictPreview?.version ?? "" : "";
+              return version ? { __expectedConflict: { file: request.file, version } } : {};
+            })() : {}) }, undefined, operation);
         backendFinished = performance.now();
         const value = report;
         const output = value.output ?? "";
@@ -6743,6 +6802,10 @@ export class ShellState {
     return loadTextMerge(this);
   }
 
+  saveMergeDraft() {
+    return saveMergeDraft(this);
+  }
+
 
   guardMerge(run: () => void) {
     if (this.mergeApplying) return;
@@ -7687,6 +7750,7 @@ export class ShellState {
   }
 
   constructor() {
+    let requestedDiffKey = "";
     $effect(() => {
       const path = this.repoPath();
       if (this.mode !== "live" || !path || (this.focusPath && !this.viewing(this.focusPath))) return;
@@ -7709,8 +7773,22 @@ export class ShellState {
     $effect(() => {
       // Leaving History cleared the diff; opening Changes again must start the read,
       // otherwise the pane sits on "Reading…" until the file is clicked again.
-      if (this.section !== "changes" || this.mode !== "live" || !this.selectedPath || this.switching) return;
-      if (!this.diff && !this.diffError && !this.conflictView) void this.loadDiff();
+      const section = this.section;
+      const mode = this.mode;
+      const selectedPath = this.selectedPath;
+      const selectedSide = this.selectedSide;
+      const repository = this.repoPath();
+      const showEntireFile = this.settings.showEntireFile;
+      const diffContext = this.settings.diffContext;
+      const ignoreSpace = this.settings.ignoreSpace;
+      if (section !== "changes" || mode !== "live" || !selectedPath || this.switching || !repository) {
+        requestedDiffKey = "";
+        return;
+      }
+      const key = `${repository}\0${selectedSide}\0${selectedPath}\0${this.statusGen}\0${showEntireFile ? "all" : diffContext}\0${ignoreSpace ? "ignore" : "keep"}`;
+      if (key === requestedDiffKey && (this.diff || this.diffError || this.conflictView)) return;
+      requestedDiffKey = key;
+      void this.loadDiff();
     });
     $effect(() => {
       if (this.busy) return;

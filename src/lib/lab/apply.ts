@@ -228,6 +228,11 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.settings = { ...shell.settings, diffWordWrap: true, diffStyle: "unified" };
     return showChange(shell, "notes/wrap.txt", "unstaged");
   }
+  if (id === "diff-toolbar") return showChange(shell, "README.md", "unstaged");
+  if (id === "diff-whole-file") {
+    shell.settings = { ...shell.settings, showEntireFile: true };
+    return showChange(shell, "README.md", "unstaged");
+  }
   if (id === "history" || id === "commit" || id === "history-remote") return showHistory(shell);
   if (id === "history-multiselect" || id === "cherry-many-confirm") {
     await showHistory(shell);
@@ -445,7 +450,12 @@ async function fillSurface(shell: ShellState, id: string) {
     window.dispatchEvent(new CustomEvent("awegit-perf", { detail: { open: true } }));
     return;
   }
-  if (id === "conflict") return showChange(shell, "src/both-sides.ts", "unstaged");
+  if (id === "conflict" || id === "conflict-preview") return showChange(shell, "src/both-sides.ts", "unstaged");
+  if (id === "conflict-preview-compact") {
+    shell.changesWidth = 650;
+    shell.settings.verticalTabs = false;
+    return showChange(shell, "src/many-hunks.ts", "unstaged");
+  }
   if (id === "conflict-compact") {
     shell.sidebarCollapsed = false;
     shell.sidebarWidth = 280;

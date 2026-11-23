@@ -351,21 +351,33 @@
               <input type="checkbox" bind:checked={shell.settings.disableSyntaxHighlight} />
               <span class="pref-label">{shell.tr("dialog.disableHighlight")}</span>
             </label>
+          </div>
+        </section>
+
+        <section class="pref-card">
+          <h3 class="pref-card-title">{shell.tr("dialog.prefSecDiffReading")}</h3>
+          <div class="pref-card-body">
             <label class="pref-row pref-toggle">
               <input type="checkbox" bind:checked={shell.settings.diffWordWrap} />
               <span class="pref-label">{shell.tr("dialog.wordWrap")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.ignoreSpace} />
-              <span class="pref-label">{shell.tr("dialog.ignoreSpace")}</span>
-            </label>
-            <label class="pref-row pref-toggle">
               <input type="checkbox" bind:checked={shell.settings.showWhitespace} />
               <span class="pref-label">{shell.tr("dialog.showSpace")}</span>
             </label>
+          </div>
+        </section>
+
+        <section class="pref-card">
+          <h3 class="pref-card-title">{shell.tr("dialog.prefSecDiffCompare")}</h3>
+          <div class="pref-card-body">
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.diffContext")}</span>
-              <span class="pref-control"><input type="number" min="0" max="100" bind:value={shell.settings.diffContext} /></span>
+              <span class="pref-control"><input type="number" min="0" max="100" bind:value={shell.settings.diffContext} onchange={() => shell.setDiffContext(shell.settings.diffContext)} /></span>
+            </label>
+            <label class="pref-row pref-toggle">
+              <input type="checkbox" bind:checked={shell.settings.ignoreSpace} />
+              <span class="pref-label">{shell.tr("dialog.ignoreSpace")}</span>
             </label>
           </div>
         </section>

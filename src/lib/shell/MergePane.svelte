@@ -9,7 +9,8 @@
   let viewport: HTMLDivElement;
   let top = $state(0), height = $state(0), width = $state(0), revision = $state(0);
   let scrollFrame = 0, measureFrame = 0;
-  const blocks = $derived(mergeBlocks(side === "result" ? shell.mergePieces : shell.mergeSource, side,
+  const sourcePieces = $derived(side === "result" ? shell.mergePieces : side === "base" ? shell.mergeBase : shell.mergeSource);
+  const blocks = $derived(mergeBlocks(sourcePieces, side,
     shell.tr("dialog.mergeEmpty"), shell.tr("dialog.mergeConflictMark"), side === "result" && shell.mergeEdited ? shell.mergeResult : undefined));
   const layout = $derived(new MergeLayout(blocks, width));
   const range = $derived.by(() => {
@@ -70,14 +71,14 @@
   $effect(() => () => { cancelAnimationFrame(scrollFrame); cancelAnimationFrame(measureFrame); });
 </script>
 
-<div class={side === "result" ? "merge-result-scroll" : `merge-side ${side === "theirs" ? "left" : "right"}`}
+<div class={side === "result" ? "merge-result-scroll" : `merge-side ${side === "theirs" ? "left" : side === "ours" ? "right" : "base"}`}
   bind:this={viewport} bind:clientHeight={height} bind:clientWidth={width} onscroll={scrolled}>
   {#if before > 0}<div class="merge-spacer" style:height="{before}px"></div>{/if}
   {#each visible as block, offset (block.key)}
-    {@const piece = shell.mergePieces[block.piece]}
-    {@const selected = piece?.kind === "hunk" && side !== "result" && hunkIncludes(piece.pick, side)}
+    {@const piece = sourcePieces[block.piece] ?? shell.mergePieces[block.piece]}
+    {@const selected = piece?.kind === "hunk" && (side === "ours" || side === "theirs") && hunkIncludes(piece.pick, side)}
     <div class="merge-block" data-merge-piece={block.piece} use:measure={{ index: range.start + offset, layout }}>
-      {#if side !== "result" && block.kind === "hunk"}
+      {#if (side === "ours" || side === "theirs") && block.kind === "hunk"}
         <div class="merge-cell hunk" class:on={selected} data-merge-hunk={block.piece} role="group">
           <pre class:empty={block.empty}>{block.text}</pre>
           <button class="merge-hover-btn" class:remove={selected} type="button" disabled={shell.mergeApplying}

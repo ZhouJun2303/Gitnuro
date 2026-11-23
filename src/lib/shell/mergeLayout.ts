@@ -1,6 +1,6 @@
 import type { MergePiece } from "./types";
 
-export type MergeSide = "theirs" | "ours" | "result";
+export type MergeSide = "base" | "theirs" | "ours" | "result";
 export type MergeBlock = { key: string; piece: number; kind: "text" | "hunk" | "pending" | "manual"; text: string; empty: boolean };
 
 /** Bound text in a single DOM node, including a file containing just one huge hunk. */
@@ -16,6 +16,7 @@ export function mergeBlocks(pieces: MergePiece[], side: MergeSide, empty: string
   if (manual !== undefined) append(manual, -1, "manual");
   else pieces.forEach((piece, index) => {
     if (piece.kind === "text") append(piece.text, index, "text");
+    else if (side === "base") append(piece.base ?? "", index, "text");
     else if (side !== "result") append(piece[side], index, "hunk");
     else if (piece.pick === "none") append(pending, index, "pending");
     else {

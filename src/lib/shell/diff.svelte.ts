@@ -243,6 +243,7 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
       shell.diff = null;
       shell.diffError = null;
       shell.conflictView = null;
+      shell.conflictPreview = null;
       return;
     }
     const file = shell.selectedPath;
@@ -251,6 +252,7 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
       shell.diff = null;
       shell.diffError = null;
       shell.conflictView = null;
+      shell.conflictPreview = null;
       shell.preview = null;
       shell.imageOld = null;
       shell.imageNew = null;
@@ -260,7 +262,8 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
     const path = shell.repoPath();
     const loadKey = `${path}\0${stagedSide ? "staged" : "unstaged"}\0${file}`;
     const load = loadLarge || shell.largeLoaded.has(loadKey);
-    const flightKey = `${loadKey}\0${load ? "large" : "text"}\0${shell.statusGen}`;
+    const unified = shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3);
+    const flightKey = `${loadKey}\0${load ? "large" : "text"}\0${unified}\0${shell.settings.ignoreSpace ? "ignore-space" : "keep-space"}\0${shell.statusGen}`;
     const existing = diffFlights.get(shell);
     if (existing?.key === flightKey) {
       await existing.promise;
@@ -276,8 +279,10 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
     try {
       if (conflicted) {
         const view = await invoke<ConflictView>("conflict_view", { path, file });
+        const preview = await invoke<ConflictSides>("conflict_sides", { path, file }).catch(() => null);
         if (token === shell.diffToken && shell.viewing(path) && shell.selectedPath === file) {
           shell.conflictView = view;
+          shell.conflictPreview = preview;
           shell.diff = null;
           shell.diffError = null;
           shell.preview = null;
@@ -287,11 +292,12 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
         return;
       }
       shell.conflictView = null;
+      shell.conflictPreview = null;
       const value = await invoke<FileDiff>("file_diff", {
         path,
         file,
         staged: stagedSide,
-        unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
+        unified,
         ignoreSpace: shell.settings.ignoreSpace,
         load,
       });
@@ -329,6 +335,7 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
       if (token === shell.diffToken && shell.viewing(path)) {
         shell.diff = null;
         shell.conflictView = null;
+        shell.conflictPreview = null;
         shell.diffError = shell.message(error);
       }
     }

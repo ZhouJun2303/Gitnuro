@@ -713,10 +713,12 @@ fn apply_line_edits(
     Ok(())
 }
 
-/// The two conflict stages plus the working tree text.
+/// The three conflict stages plus the working tree text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConflictSides {
+    /// Common ancestor from index stage 1. An empty string means the path has no base blob.
+    pub base: String,
     pub ours: String,
     pub theirs: String,
     pub working: String,
@@ -724,11 +726,20 @@ pub struct ConflictSides {
 
 pub fn conflict_sides(repo: &Path, path: &str) -> Result<ConflictSides, Error> {
     let path = check_path(path)?;
+    let stages = stage_oids(repo, path)?;
     Ok(ConflictSides {
-        ours: show_stage(repo, path, 2)?,
-        theirs: show_stage(repo, path, 3)?,
+        base: show_existing_stage(repo, path, 1, stages[1].is_some())?,
+        ours: show_existing_stage(repo, path, 2, stages[2].is_some())?,
+        theirs: show_existing_stage(repo, path, 3, stages[3].is_some())?,
         working: read_conflict_text(&repo.join(path), path)?,
     })
+}
+
+fn show_existing_stage(repo: &Path, path: &str, stage: u8, present: bool) -> Result<String, Error> {
+    if !present {
+        return Ok(String::new());
+    }
+    show_stage(repo, path, stage)
 }
 
 fn show_stage(repo: &Path, path: &str, stage: u8) -> Result<String, Error> {
@@ -790,6 +801,10 @@ pub struct ConflictView {
     pub ours: ConflictParty,
     pub theirs: ConflictParty,
     pub binary: bool,
+    pub kind: String,
+    pub base_path: Option<String>,
+    pub ours_path: Option<String>,
+    pub theirs_path: Option<String>,
 }
 
 pub fn conflict_view(repo: &Path, path: &str) -> Result<ConflictView, Error> {
@@ -802,20 +817,36 @@ pub fn conflict_view(repo: &Path, path: &str) -> Result<ConflictView, Error> {
     let (their_label, their_rev) = theirs_party(repo, path, stages[3].as_deref());
     let sizes = conflict_sizes(repo, &stages);
     let (ours_commit, theirs_commit) = conflict_commits(repo, their_rev.as_deref());
+    let binary = file_has_nul(repo, path) || stages.iter().flatten().any(|oid| blob_has_nul_with_size(repo, oid, sizes.get(oid).copied()));
+    let ours_state = side_state(base, stages[2].as_deref());
+    let theirs_state = side_state(base, stages[3].as_deref());
+    let kind = if binary {
+        "binary"
+    } else if (ours_state == "deleted" && theirs_state != "deleted")
+        || (theirs_state == "deleted" && ours_state != "deleted")
+    {
+        "deleteModify"
+    } else {
+        "content"
+    };
     Ok(ConflictView {
         ours: ConflictParty {
             label: ours_label(repo),
-            state: side_state(base, stages[2].as_deref()).into(),
+            state: ours_state.into(),
             bytes: stages[2].as_ref().and_then(|oid| sizes.get(oid)).copied().unwrap_or(0),
             commit: ours_commit,
         },
         theirs: ConflictParty {
             label: their_label,
-            state: side_state(base, stages[3].as_deref()).into(),
+            state: theirs_state.into(),
             bytes: stages[3].as_ref().and_then(|oid| sizes.get(oid)).copied().unwrap_or(0),
             commit: theirs_commit,
         },
-        binary: file_has_nul(repo, path) || stages.iter().flatten().any(|oid| blob_has_nul_with_size(repo, oid, sizes.get(oid).copied())),
+        binary,
+        kind: kind.into(),
+        base_path: stages[1].as_ref().map(|_| path.to_string()),
+        ours_path: stages[2].as_ref().map(|_| path.to_string()),
+        theirs_path: stages[3].as_ref().map(|_| path.to_string()),
     })
 }
 
@@ -1119,13 +1150,13 @@ pub fn resolve_conflict(repo: &Path, path: &str, side: &str, text: &str) -> Resu
     }
     match side {
         "both" => {
-            let ours = show_stage(repo, path, 2)?;
             let theirs = show_stage(repo, path, 3)?;
-            let mut body = ours;
+            let ours = show_stage(repo, path, 2)?;
+            let mut body = theirs;
             if !body.is_empty() && !body.ends_with('\n') {
                 body.push('\n');
             }
-            body.push_str(&theirs);
+            body.push_str(&ours);
             if !body.is_empty() && !body.ends_with('\n') {
                 body.push('\n');
             }

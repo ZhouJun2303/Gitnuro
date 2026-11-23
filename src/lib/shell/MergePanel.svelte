@@ -15,6 +15,7 @@
   let activeConflict = $state(0);
   let leftPane = $state<MergePane>();
   let rightPane = $state<MergePane>();
+  let basePane = $state<MergePane>();
   let resultPane = $state<MergePane>();
   let scrollFrame = 0;
   const mirrored = new WeakMap<HTMLElement, { top: number; left: number }>();
@@ -72,6 +73,10 @@
   const rightParty = $derived(view?.ours ?? null);
   const unresolved = $derived(Math.max(0, conflictTotal - conflictResolved));
   const canResolve = $derived(!shell.mergeLoading && (shell.mergeKind === "file" ? fileSide !== "" : !shell.mergeLarge && unresolved === 0));
+  const mergeFiles = $derived(shell.conflictFiles);
+  const currentFileAt = $derived(Math.max(0, mergeFiles.findIndex((entry) => entry.path === shell.mergeFile)));
+  const currentFile = $derived(mergeFiles[currentFileAt]);
+  const canSaveDraft = $derived(shell.mergeKind === "text" && !shell.mergeLarge && shell.mergePieces.length > 0 && !shell.mergeApplying);
 
   function trapTab(event: KeyboardEvent) {
     if (event.key !== "Tab" || !panel) return;
@@ -125,6 +130,18 @@
     withDirtyGuard(() => shell.takeMergeSide("ours", next));
   }
 
+  function chooseFileSide(side: "ours" | "theirs") {
+    shell.mergeDirty = true;
+    shell.mergeDraftSaved = false;
+    if (side === "theirs") {
+      fileLeft = true;
+      fileRight = false;
+    } else {
+      fileLeft = false;
+      fileRight = true;
+    }
+  }
+
   function stateText(state: ConflictParty["state"]) {
     if (state === "added") return shell.tr("chrome.sideAdded");
     if (state === "modified") return shell.tr("chrome.sideModified");
@@ -136,7 +153,7 @@
     return at ? new Date(at * 1000).toISOString() : undefined;
   }
 
-  function syncScroll(source: "left" | "right", event: Event) {
+  function syncScroll(source: "base" | "left" | "right", event: Event) {
     const target = event.currentTarget;
     if (!(target instanceof HTMLElement)) return;
     const expected = mirrored.get(target);
@@ -148,11 +165,15 @@
     cancelAnimationFrame(scrollFrame);
     scrollFrame = requestAnimationFrame(() => {
       scrollFrame = 0;
-      const other = (source === "left" ? rightPane : leftPane)?.element();
-      if (!other) return;
-      other.scrollTop = target.scrollTop;
-      other.scrollLeft = target.scrollLeft;
-      mirrored.set(other, { top: other.scrollTop, left: other.scrollLeft });
+      const panes = [basePane, leftPane, rightPane];
+      for (const pane of panes) {
+        if (!pane) continue;
+        const other = pane.element();
+        if (other === target) continue;
+        other.scrollTop = target.scrollTop;
+        other.scrollLeft = target.scrollLeft;
+        mirrored.set(other, { top: other.scrollTop, left: other.scrollLeft });
+      }
     });
   }
 
@@ -172,6 +193,18 @@
     const index = hunkIndexes[next];
     if (index == null) return;
     void revealHunk(index);
+  }
+
+  function openMergeFile(file: string) {
+    if (!file || file === shell.mergeFile) return;
+    withDirtyGuard(() => void shell.openTextMerge(file));
+  }
+
+  function stepFile(delta: number) {
+    if (mergeFiles.length < 2) return;
+    const next = (currentFileAt + delta + mergeFiles.length) % mergeFiles.length;
+    const entry = mergeFiles[next];
+    if (entry) openMergeFile(entry.path);
   }
 
   function formatBytes(bytes: number) {
@@ -194,6 +227,14 @@
     if (ext === "xls" || ext === "xlsx" || ext === "xlsm" || ext === "csv" || ext === "ods") return "sheet";
     if (ext === "png" || ext === "jpg" || ext === "jpeg" || ext === "gif" || ext === "webp" || ext === "bmp" || ext === "svg" || ext === "ico") return "image";
     return "doc";
+  }
+
+  function conflictKindLabel() {
+    if (view?.kind === "binary" || view?.binary) return shell.tr("dialog.mergeConflictBinary");
+    if (view?.kind === "deleteModify") return shell.tr("dialog.mergeConflictDeleteModify");
+    if (view?.kind === "path") return shell.tr("dialog.mergeConflictPath");
+    if (view?.kind === "rename") return shell.tr("dialog.mergeConflictRename");
+    return "";
   }
 
   async function resolve() {
@@ -226,6 +267,13 @@
           {@render mark(fileKind(shell.mergeFile), 16)}
           <span>{shell.mergeFile}</span>
         </span>
+        {#if mergeFiles.length > 0}
+          <div class="merge-file-step" role="group" aria-label={shell.tr("dialog.mergeFiles") }>
+            <span class="merge-file-position">{currentFileAt + 1}/{mergeFiles.length}</span>
+            <button class="merge-nav-btn" type="button" aria-label={shell.tr("dialog.mergePreviousFile")} onclick={() => stepFile(-1)}>‹</button>
+            <button class="merge-nav-btn" type="button" aria-label={shell.tr("dialog.mergeNextFile")} onclick={() => stepFile(1)}>›</button>
+          </div>
+        {/if}
         {#if shell.mergeKind === "text" && conflictTotal > 0}
           <div class="merge-nav">
             <span class="merge-count" class:done={conflictResolved === conflictTotal}>{conflictResolved}/{conflictTotal}</span>
@@ -236,6 +284,23 @@
         <button class="merge-close" type="button" disabled={shell.mergeApplying} aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={() => closePanel()}>×</button>
       </header>
       <div class="merge-head">
+        {#if mergeFiles.length > 0}
+          <nav class="merge-file-nav" aria-label={shell.tr("dialog.mergeFiles")}>
+            <div class="merge-file-nav-head">
+              <span>{shell.tr("dialog.mergeFiles")}</span>
+              <span>{mergeFiles.length}</span>
+            </div>
+            <div class="merge-file-nav-list">
+              {#each mergeFiles as entry, index (entry.path)}
+                <button class="merge-file-nav-item" class:active={entry.path === shell.mergeFile} type="button" aria-current={entry.path === shell.mergeFile ? "true" : undefined} onclick={() => openMergeFile(entry.path)}>
+                  <span class="merge-file-nav-status" class:binary={entry.binary}>{entry.binary ? "◆" : entry.kind === "draft" ? "✎" : "C"}</span>
+                  <span class="merge-file-nav-name" title={entry.path}>{entry.path}</span>
+                  <span class="merge-file-nav-index">{index + 1}</span>
+                </button>
+              {/each}
+            </div>
+          </nav>
+        {/if}
         <div class="merge-parties">
           <div class="merge-party">
             <label class="merge-party-pick">
@@ -286,8 +351,8 @@
       </div>
       {#if shell.mergeKind === "file"}
         <div class="merge-stage files">
-          {@render fileCard(view?.theirs)}
-          {@render fileCard(view?.ours)}
+          {@render fileCard(view?.theirs, "theirs")}
+          {@render fileCard(view?.ours, "ours")}
         </div>
       {:else if shell.mergeLarge}
         <div class="merge-stage merge-large">
@@ -296,8 +361,18 @@
         </div>
       {:else}
         <div class="merge-top">
-          <MergePane side="theirs" bind:this={leftPane} onpick={chooseHunk} onscroll={(event) => syncScroll("left", event)} />
-          <MergePane side="ours" bind:this={rightPane} onpick={chooseHunk} onscroll={(event) => syncScroll("right", event)} />
+          <div class="merge-column base">
+            <div class="merge-column-head"><span>{shell.tr("dialog.mergeBase")}</span><span class="merge-column-hint">{shell.tr("dialog.mergeBaseHint")}</span></div>
+            <MergePane side="base" bind:this={basePane} onpick={chooseHunk} onscroll={(event) => syncScroll("base", event)} />
+          </div>
+          <div class="merge-column">
+            <div class="merge-column-head"><span>{shell.mergeLeft}</span><span class="merge-column-hint">{shell.tr("dialog.mergeIncoming")}</span></div>
+            <MergePane side="theirs" bind:this={leftPane} onpick={chooseHunk} onscroll={(event) => syncScroll("left", event)} />
+          </div>
+          <div class="merge-column">
+            <div class="merge-column-head"><span>{shell.mergeRight}</span><span class="merge-column-hint">{shell.tr("dialog.mergeCurrent")}</span></div>
+            <MergePane side="ours" bind:this={rightPane} onpick={chooseHunk} onscroll={(event) => syncScroll("right", event)} />
+          </div>
         </div>
         <div class="merge-result-pane">
           <div class="merge-result-head">
@@ -305,10 +380,16 @@
             {#if shell.mergeEditing}<span class="merge-result-mode">{shell.tr("dialog.editResult")}</span>{/if}
           </div>
           {#if shell.mergeEditing}
-            <textarea class="merge-result-edit" aria-label={shell.tr("dialog.result")} spellcheck="false" bind:value={shell.mergeResult} disabled={shell.mergeApplying} oninput={() => { shell.mergeEdited = true; shell.mergeDirty = true; }}></textarea>
+            <textarea class="merge-result-edit" aria-label={shell.tr("dialog.result")} spellcheck="false" bind:value={shell.mergeResult} disabled={shell.mergeApplying} oninput={() => { shell.mergeEdited = true; shell.mergeDraftSaved = false; shell.mergeDirty = true; }}></textarea>
           {:else}
             <MergePane side="result" bind:this={resultPane} onpick={chooseHunk} />
           {/if}
+        </div>
+      {/if}
+      {#if currentFile?.previousPath || conflictKindLabel()}
+        <div class="merge-path-note">
+          {#if conflictKindLabel()}<span class="merge-kind-badge">{conflictKindLabel()}</span>{/if}
+          {#if currentFile?.previousPath}<span>{currentFile.previousPath} → {shell.mergeFile}</span>{/if}
         </div>
       {/if}
       {#if shell.mergeError}<p class="merge-error" role="alert">{shell.mergeError}</p>{/if}
@@ -332,6 +413,10 @@
               if (shell.mergeEditing) queueMicrotask(() => panel?.querySelector<HTMLTextAreaElement>(".merge-result-edit")?.focus());
             }}
           >{shell.mergeEditing ? shell.tr("dialog.previewResult") : shell.tr("dialog.editResult")}</button>
+          <button class="text-button merge-draft-button" type="button" disabled={!canSaveDraft} onclick={() => shell.saveMergeDraft()}>{shell.mergeDraftSaved ? shell.tr("dialog.mergeDraftSaved") : shell.tr("dialog.mergeSaveDraft")}</button>
+        {/if}
+        {#if shell.progress && shell.mergeKind === "text" && unresolved === 0 && !shell.mergeLarge}
+          <button class="text-button merge-continue" type="button" disabled={shell.mergeApplying || shell.conflicted} onclick={() => void shell.continueFlow()}>{shell.flowLabel()}</button>
         {/if}
         <button class="text-button" type="button" disabled={shell.mergeApplying} onclick={() => closePanel()}>{shell.tr("chrome.cancel")}</button>
         <button class="commit" type="button" disabled={shell.mergeApplying || !canResolve} title={!canResolve ? shell.tr(shell.mergeKind === "file" ? "dialog.mergePickFile" : "dialog.mergeUnresolved", shell.mergeKind === "file" ? {} : { count: String(unresolved) }) : undefined} onclick={() => void resolve()}>{shell.tr("dialog.mergeResolve")}</button>
@@ -339,7 +424,7 @@
     </div>
 {/snippet}
 
-{#snippet fileCard(party: ConflictParty | undefined)}
+{#snippet fileCard(party: ConflictParty | undefined, side: "ours" | "theirs")}
   <div class="merge-file-slot">
     <div class="merge-file-card">
       {#if party?.state === "deleted"}
@@ -361,6 +446,9 @@
             <div><dt>{shell.tr("dialog.mergeTime")}</dt><dd>{shell.forkWhen(party.commit.at)}</dd></div>
           </dl>
         {/if}
+        <button class="merge-file-choice" class:selected={side === "theirs" ? fileLeft : fileRight} type="button" disabled={shell.mergeApplying} onclick={() => chooseFileSide(side)}>
+          {shell.tr("dialog.mergeKeepSide", { name: party.label })}
+        </button>
       {/if}
     </div>
   </div>

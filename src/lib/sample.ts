@@ -1,4 +1,4 @@
-import type { ConflictCommit } from "./status";
+import type { ConflictCommit, ConflictSides } from "./status";
 
 export type FileChange = {
   path: string;
@@ -18,8 +18,9 @@ function sampleCommit(short: string, subject: string, at: number): ConflictCommi
 }
 
 /** Working copies with conflict markers, so sample data can open the text merger. */
-export const sampleConflictText: Record<string, { ours: string; theirs: string; working: string }> = {
+export const sampleConflictText: Record<string, ConflictSides> = {
   "src/merge/both-sides.ts": {
+    base: "export const rate = 3;\n  return rate + 2;",
     ours: "export const rate = 2;\n  return rate + 1;",
     theirs: "export const rate = 5;\n  return rate + 4;",
     working: [
@@ -39,11 +40,13 @@ export const sampleConflictText: Record<string, { ours: string; theirs: string; 
     ].join("\n"),
   },
   "src/merge/both-added.ts": {
+    base: "",
     ours: "export const created = \"main\";",
     theirs: "export const created = \"feature\";",
     working: ["<<<<<<< main", "export const created = \"main\";", "=======", "export const created = \"feature\";", ">>>>>>> feature", ""].join("\n"),
   },
   "docs/removed-there.md": {
+    base: "# old documentation",
     ours: "# still documented on main",
     theirs: "",
     working: ["<<<<<<< main", "# still documented on main", "=======", ">>>>>>> feature", ""].join("\n"),
