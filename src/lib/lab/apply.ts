@@ -551,7 +551,18 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.openTextMerge("src/many-hunks.ts");
     return;
   }
-  if (id === "text-merge" || id === "text-merge-window") {
+  if (id === "text-merge-window") {
+    // The standalone window should become interactive while the initial
+    // conflict preview is still loading. A delayed conflict_sides response
+    // must not block the scene from opening the merge workbench.
+    shell.section = "changes";
+    shell.selectedSide = "unstaged";
+    shell.selectedPath = "src/both-sides.ts";
+    void shell.loadDiff();
+    await shell.openTextMerge("src/both-sides.ts");
+    return;
+  }
+  if (id === "text-merge") {
     await showChange(shell, "src/both-sides.ts", "unstaged");
     await shell.openTextMerge("src/both-sides.ts");
     return;

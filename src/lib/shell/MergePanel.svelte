@@ -4,7 +4,7 @@
   import { onMount } from "svelte";
   import MergePane from "./MergePane.svelte";
   import type { ConflictParty } from "../status";
-  import { hunkIncludes, loadTextMerge } from "./dialogs.svelte";
+  import { hunkIncludes, loadTextMerge, mergeTextReady } from "./dialogs.svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
 
   const shell = getShell();
@@ -72,7 +72,9 @@
   const leftParty = $derived(view?.theirs ?? null);
   const rightParty = $derived(view?.ours ?? null);
   const unresolved = $derived(Math.max(0, conflictTotal - conflictResolved));
-  const canResolve = $derived(!shell.mergeLoading && (shell.mergeKind === "file" ? fileSide !== "" : !shell.mergeLarge && unresolved === 0));
+  const canResolve = $derived(!shell.mergeLoading && (shell.mergeKind === "file"
+    ? fileSide !== ""
+    : !shell.mergeLarge && (unresolved === 0 || (shell.mergeEdited && shell.mergeManualReady))));
   const mergeFiles = $derived(shell.conflictFiles);
   const currentFileAt = $derived(Math.max(0, mergeFiles.findIndex((entry) => entry.path === shell.mergeFile)));
   const currentFile = $derived(mergeFiles[currentFileAt]);
@@ -93,7 +95,7 @@
     }
   }
 
-  function withDirtyGuard(run: () => void) {
+  function withEditedGuard(run: () => void) {
     if (!shell.mergeEdited) {
       run();
       return;
@@ -101,6 +103,21 @@
     shell.ask(shell.tr("dialog.mergeOverwriteEdits"), shell.tr("dialog.mergeOverwriteEditsBody"), () => {
       shell.mergeEdited = false;
       shell.mergeEditing = false;
+      shell.mergeManualReady = false;
+      run();
+    }, [], { danger: true });
+  }
+
+  function withFileGuard(run: () => void) {
+    if (!shell.mergeDirty && !shell.mergeEdited) {
+      run();
+      return;
+    }
+    shell.ask(shell.tr("dialog.mergeOverwriteEdits"), shell.tr("dialog.mergeOverwriteEditsBody"), () => {
+      shell.mergeEdited = false;
+      shell.mergeEditing = false;
+      shell.mergeManualReady = false;
+      shell.mergeDirty = false;
       run();
     }, [], { danger: true });
   }
@@ -115,7 +132,7 @@
     const next = !leftOn;
     // The confirm may be cancelled, so hold the browser's toggle until the state moves.
     if (shell.mergeEdited && event.currentTarget instanceof HTMLInputElement) event.currentTarget.checked = leftOn;
-    withDirtyGuard(() => shell.takeMergeSide("theirs", next));
+    withEditedGuard(() => shell.takeMergeSide("theirs", next));
   }
 
   function onRight(event: Event) {
@@ -127,7 +144,7 @@
     }
     const next = !rightOn;
     if (shell.mergeEdited && event.currentTarget instanceof HTMLInputElement) event.currentTarget.checked = rightOn;
-    withDirtyGuard(() => shell.takeMergeSide("ours", next));
+    withEditedGuard(() => shell.takeMergeSide("ours", next));
   }
 
   function chooseFileSide(side: "ours" | "theirs") {
@@ -184,7 +201,7 @@
   }
 
   function chooseHunk(index: number, side: "theirs" | "ours") {
-    withDirtyGuard(() => { shell.toggleMergeSide(index, side); void revealHunk(index); });
+    withEditedGuard(() => { shell.toggleMergeSide(index, side); void revealHunk(index); });
   }
 
   function jumpConflict(delta: number) {
@@ -197,7 +214,7 @@
 
   function openMergeFile(file: string) {
     if (!file || file === shell.mergeFile) return;
-    withDirtyGuard(() => void shell.openTextMerge(file));
+    withFileGuard(() => void shell.openTextMerge(file));
   }
 
   function stepFile(delta: number) {
@@ -230,10 +247,11 @@
   }
 
   function conflictKindLabel() {
-    if (view?.kind === "binary" || view?.binary) return shell.tr("dialog.mergeConflictBinary");
-    if (view?.kind === "deleteModify") return shell.tr("dialog.mergeConflictDeleteModify");
-    if (view?.kind === "path") return shell.tr("dialog.mergeConflictPath");
-    if (view?.kind === "rename") return shell.tr("dialog.mergeConflictRename");
+    const kind = view?.kind ?? currentFile?.conflictKind;
+    if (kind === "binary" || view?.binary || currentFile?.binary) return shell.tr("dialog.mergeConflictBinary");
+    if (kind === "deleteModify") return shell.tr("dialog.mergeConflictDeleteModify");
+    if (kind === "path") return shell.tr("dialog.mergeConflictPath");
+    if (kind === "rename") return shell.tr("dialog.mergeConflictRename");
     return "";
   }
 
@@ -270,8 +288,8 @@
         {#if mergeFiles.length > 0}
           <div class="merge-file-step" role="group" aria-label={shell.tr("dialog.mergeFiles") }>
             <span class="merge-file-position">{currentFileAt + 1}/{mergeFiles.length}</span>
-            <button class="merge-nav-btn" type="button" aria-label={shell.tr("dialog.mergePreviousFile")} onclick={() => stepFile(-1)}>‹</button>
-            <button class="merge-nav-btn" type="button" aria-label={shell.tr("dialog.mergeNextFile")} onclick={() => stepFile(1)}>›</button>
+            <button class="merge-file-nav-btn" type="button" aria-label={shell.tr("dialog.mergePreviousFile")} onclick={() => stepFile(-1)}>‹</button>
+            <button class="merge-file-nav-btn" type="button" aria-label={shell.tr("dialog.mergeNextFile")} onclick={() => stepFile(1)}>›</button>
           </div>
         {/if}
         {#if shell.mergeKind === "text" && conflictTotal > 0}
@@ -293,7 +311,7 @@
             <div class="merge-file-nav-list">
               {#each mergeFiles as entry, index (entry.path)}
                 <button class="merge-file-nav-item" class:active={entry.path === shell.mergeFile} type="button" aria-current={entry.path === shell.mergeFile ? "true" : undefined} onclick={() => openMergeFile(entry.path)}>
-                  <span class="merge-file-nav-status" class:binary={entry.binary}>{entry.binary ? "◆" : entry.kind === "draft" ? "✎" : "C"}</span>
+                  <span class="merge-file-nav-status" class:binary={entry.binary} class:resolved={entry.kind === "resolved"} title={entry.kind === "resolved" ? shell.tr("dialog.mergeResolved") : entry.kind === "draft" ? shell.tr("dialog.mergeDraftSaved") : undefined}>{entry.kind === "resolved" ? "✓" : entry.kind === "draft" ? "✎" : entry.binary ? "◆" : "C"}</span>
                   <span class="merge-file-nav-name" title={entry.path}>{entry.path}</span>
                   <span class="merge-file-nav-index">{index + 1}</span>
                 </button>
@@ -380,7 +398,7 @@
             {#if shell.mergeEditing}<span class="merge-result-mode">{shell.tr("dialog.editResult")}</span>{/if}
           </div>
           {#if shell.mergeEditing}
-            <textarea class="merge-result-edit" aria-label={shell.tr("dialog.result")} spellcheck="false" bind:value={shell.mergeResult} disabled={shell.mergeApplying} oninput={() => { shell.mergeEdited = true; shell.mergeDraftSaved = false; shell.mergeDirty = true; }}></textarea>
+            <textarea class="merge-result-edit" aria-label={shell.tr("dialog.result")} spellcheck="false" bind:value={shell.mergeResult} disabled={shell.mergeApplying} oninput={() => { shell.mergeEdited = true; shell.mergeManualReady = mergeTextReady(shell.mergeResult); shell.mergeDraftSaved = false; shell.mergeDirty = true; }}></textarea>
           {:else}
             <MergePane side="result" bind:this={resultPane} onpick={chooseHunk} />
           {/if}
@@ -390,6 +408,13 @@
         <div class="merge-path-note">
           {#if conflictKindLabel()}<span class="merge-kind-badge">{conflictKindLabel()}</span>{/if}
           {#if currentFile?.previousPath}<span>{currentFile.previousPath} → {shell.mergeFile}</span>{/if}
+          {#if view?.basePath || view?.oursPath || view?.theirsPath}
+            <span class="merge-paths">
+              {#if view?.basePath}<span>{shell.tr("dialog.mergeBase")}: {view.basePath}</span>{/if}
+              {#if view?.theirsPath}<span>{shell.tr("dialog.mergeIncoming")}: {view.theirsPath}</span>{/if}
+              {#if view?.oursPath}<span>{shell.tr("dialog.mergeCurrent")}: {view.oursPath}</span>{/if}
+            </span>
+          {/if}
         </div>
       {/if}
       {#if shell.mergeError}<p class="merge-error" role="alert">{shell.mergeError}</p>{/if}
@@ -408,7 +433,10 @@
             type="button"
             aria-pressed={shell.mergeEditing}
             onclick={() => {
-              if (!shell.mergeEditing && !shell.mergeEdited) shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+              if (!shell.mergeEditing && !shell.mergeEdited) {
+                shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+                shell.mergeManualReady = mergeTextReady(shell.mergeResult);
+              }
               shell.mergeEditing = !shell.mergeEditing;
               if (shell.mergeEditing) queueMicrotask(() => panel?.querySelector<HTMLTextAreaElement>(".merge-result-edit")?.focus());
             }}

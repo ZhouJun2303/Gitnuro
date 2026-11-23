@@ -801,7 +801,7 @@ export class ShellState {
   mergeAutoSummary = $state("");
 
 
-  mergeFiles = $state<{ status: string; path: string }[]>([]);
+  mergeFiles = $state<{ status: string; path: string; previousPath?: string | null }[]>([]);
 
 
   mergeState = $state<MergeState | null>(null);
@@ -1267,9 +1267,14 @@ export class ShellState {
   mergeBase = $state.raw<MergePiece[]>([]);
   mergeVersion = $state("");
   mergeDraftSaved = $state(false);
+  /** Files resolved during the current workbench session, including lab sessions where Git is not mutated. */
+  mergeResolvedFiles = $state<string[]>([]);
+  /** Metadata loaded lazily for the file navigator. */
+  mergeFileMeta = $state<Record<string, { binary?: boolean; conflictKind?: ConflictView["kind"] }>>({});
   mergeDirty = $state(false);
   mergeEdited = $state(false);
   mergeEditing = $state(false);
+  mergeManualReady = $state(false);
   mergeError = $state("");
   mergeLoading = $state(false);
   mergeApplying = $state(false);
@@ -1609,16 +1614,47 @@ export class ShellState {
   /** Conflict files shown by the workbench. The list is cheap to derive and does not load file contents. */
   conflictFiles = $derived.by<MergeFileEntry[]>(() => {
     const entries = new Map<string, MergeFileEntry>();
+    const resolved = new Set(this.mergeResolvedFiles);
     if (this.mode === "sample") {
-      for (const path of Object.keys(sampleConflictViews)) entries.set(path, { path, kind: "conflict", binary: sampleConflictViews[path]?.binary });
+      for (const path of Object.keys(sampleConflictViews)) {
+        const meta = this.mergeFileMeta[path];
+        entries.set(path, {
+          path,
+          kind: resolved.has(path) ? "resolved" : path === this.mergeFile && this.mergeDraftSaved ? "draft" : "conflict",
+          binary: meta?.binary ?? sampleConflictViews[path]?.binary,
+          conflictKind: meta?.conflictKind,
+        });
+      }
     } else {
       for (const file of [...(this.snapshot?.staged ?? []), ...(this.snapshot?.unstaged ?? [])]) {
         if (file.kind !== "conflict") continue;
         const current = entries.get(file.path);
-        entries.set(file.path, { path: file.path, previousPath: file.previousPath, kind: current?.kind ?? "conflict", binary: current?.binary });
+        const meta = this.mergeFileMeta[file.path];
+        const flowFile = this.mergeState?.files.find((item) => item.path === file.path);
+        entries.set(file.path, {
+          path: file.path,
+          previousPath: file.previousPath ?? current?.previousPath ?? flowFile?.previousPath,
+          kind: resolved.has(file.path) ? "resolved" : file.path === this.mergeFile && this.mergeDraftSaved ? "draft" : current?.kind ?? "conflict",
+          binary: meta?.binary ?? current?.binary,
+          conflictKind: meta?.conflictKind,
+        });
       }
     }
-    if (this.mergeFile && !entries.has(this.mergeFile)) entries.set(this.mergeFile, { path: this.mergeFile, kind: "draft" });
+    for (const path of this.mergeResolvedFiles) {
+      if (!entries.has(path)) {
+        const meta = this.mergeFileMeta[path];
+        entries.set(path, { path, kind: "resolved", binary: meta?.binary, conflictKind: meta?.conflictKind });
+      }
+    }
+    if (this.mergeFile && !entries.has(this.mergeFile)) {
+      const meta = this.mergeFileMeta[this.mergeFile];
+      entries.set(this.mergeFile, {
+        path: this.mergeFile,
+        kind: resolved.has(this.mergeFile) ? "resolved" : "draft",
+        binary: meta?.binary,
+        conflictKind: meta?.conflictKind,
+      });
+    }
     return [...entries.values()].sort((left, right) => {
       if (statusPathBefore(left.path, right.path)) return -1;
       if (statusPathBefore(right.path, left.path)) return 1;
@@ -3144,7 +3180,10 @@ export class ShellState {
         await this.openRepo(path);
         if (!this.snapshot) throw new Error(this.actionError || `打不开 ${item.repo}`);
         await this.loadContext();
-        await this.loadDiff();
+        // The standalone merge scene opens its workbench before the initial
+        // conflict preview finishes, so a gated conflict_sides read cannot
+        // prevent the scene from becoming editable.
+        if (item.id !== "text-merge-window") await this.loadDiff();
       } else {
         this.snapshot = null;
         this.mode = "error";
@@ -6791,6 +6830,30 @@ export class ShellState {
 
   async openResolve(file: string) {
     return openResolve(this, file);
+  }
+
+
+  beginMergeSession() {
+    this.mergeResolvedFiles = [];
+    this.mergeFileMeta = {};
+  }
+
+
+  markMergeResolved(file: string) {
+    if (!file || this.mergeResolvedFiles.includes(file)) return;
+    this.mergeResolvedFiles = [...this.mergeResolvedFiles, file];
+  }
+
+
+  nextMergeFile(current: string) {
+    const entries = this.conflictFiles;
+    const at = entries.findIndex((entry) => entry.path === current);
+    const start = at >= 0 ? at : -1;
+    for (let offset = 1; offset <= entries.length; offset += 1) {
+      const entry = entries[(start + offset + entries.length) % entries.length];
+      if (entry?.kind === "conflict") return entry.path;
+    }
+    return "";
   }
 
 

@@ -1024,6 +1024,7 @@ export const zh: Messages = {
     mergeSaveDraft: "保存草稿",
     mergeDraftSaved: "草稿已保存",
     mergeDraftFailed: "无法将合并草稿保存到本地存储。",
+    mergeResolved: "已解决",
     mergeConflictBinary: "二进制冲突",
     mergeConflictDeleteModify: "删除与修改冲突",
     mergeConflictPath: "路径冲突",

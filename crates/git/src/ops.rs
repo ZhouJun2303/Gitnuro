@@ -2078,33 +2078,60 @@ fn current_branch_name(repo: &Path) -> String {
 
 fn changed_names(repo: &Path, name: &str) -> Result<Vec<MergeFile>, Error> {
     let triple = format!("HEAD...{name}");
-    let output = match run(repo, &["diff", "--name-status", &triple]) {
+    let output = match run(repo, &["diff", "--name-status", "-z", "-M", "--no-ext-diff", &triple]) {
         Ok(output) => output,
-        Err(_) => run(repo, &["diff", "--name-status", &format!("HEAD..{name}")])?,
+        Err(_) => run(repo, &["diff", "--name-status", "-z", "-M", "--no-ext-diff", &format!("HEAD..{name}")])?,
     };
     Ok(parse_name_status(&output.stdout))
 }
 
 fn parse_name_status(stdout: &[u8]) -> Vec<MergeFile> {
+    if stdout.contains(&0) {
+        let mut records = stdout.split(|byte| *byte == 0).filter(|record| !record.is_empty());
+        let mut files = Vec::new();
+        while let Some(status) = records.next() {
+            let Some(first) = records.next() else { break };
+            let Some(kind) = status.first().copied() else { continue };
+            let (path, previous_path) = if matches!(kind, b'R' | b'C') {
+                let Some(path) = records.next() else { break };
+                (path, (kind == b'R').then(|| String::from_utf8_lossy(first).into_owned()))
+            } else {
+                (first, None)
+            };
+            if path.is_empty() {
+                continue;
+            }
+            files.push(MergeFile {
+                status: String::from_utf8_lossy(&status[..1]).into_owned(),
+                path: String::from_utf8_lossy(path).into_owned(),
+                previous_path,
+            });
+        }
+        return files;
+    }
     String::from_utf8_lossy(stdout)
         .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() {
-                return None;
-            }
-            let mut parts = line.split('\t');
-            let status = parts.next()?.trim();
-            let path = parts.last()?.trim();
-            if status.is_empty() || path.is_empty() {
-                return None;
-            }
-            Some(MergeFile {
-                status: status.chars().next()?.to_string(),
-                path: path.to_string(),
-            })
-        })
+        .filter_map(|line| parse_name_status_line(line))
         .collect()
+}
+
+fn parse_name_status_line(line: &str) -> Option<MergeFile> {
+    let mut parts = line.trim().split('\t');
+    let status = parts.next()?.trim();
+    let paths: Vec<_> = parts.map(str::trim).filter(|path| !path.is_empty()).collect();
+    let path = paths.last().copied()?;
+    if status.is_empty() || path.is_empty() {
+        return None;
+    }
+    Some(MergeFile {
+        status: status.chars().next()?.to_string(),
+        path: path.to_string(),
+        previous_path: if matches!(status.as_bytes().first(), Some(b'R' | b'C')) && paths.len() > 1 {
+            Some(paths[paths.len() - 2].to_string())
+        } else {
+            None
+        },
+    })
 }
 
 /// One changed path in a merge preview.
@@ -2113,6 +2140,8 @@ fn parse_name_status(stdout: &[u8]) -> Vec<MergeFile> {
 pub struct MergeFile {
     pub status: String,
     pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_path: Option<String>,
 }
 
 /// Where a merge lands, and the paths it would change.

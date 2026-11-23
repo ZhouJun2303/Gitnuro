@@ -152,7 +152,7 @@ export type InProgress = "merge" | "rebase" | "cherryPick" | "revert";
 export type MergeState = {
   source: string;
   into: string;
-  files: { status: string; path: string }[];
+  files: { status: string; path: string; previousPath?: string | null }[];
 };
 
 export type BlameLine = {

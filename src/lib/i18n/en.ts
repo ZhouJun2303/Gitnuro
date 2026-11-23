@@ -1023,6 +1023,7 @@ export const en: Messages = {
     mergeSaveDraft: "Save draft",
     mergeDraftSaved: "Draft saved",
     mergeDraftFailed: "Could not save the merge draft in local storage.",
+    mergeResolved: "Resolved",
     mergeConflictBinary: "Binary conflict",
     mergeConflictDeleteModify: "Delete / modify conflict",
     mergeConflictPath: "Path conflict",

@@ -77,6 +77,7 @@ export type MergeFileEntry = {
   previousPath?: string | null;
   kind: "conflict" | "draft" | "resolved";
   binary?: boolean;
+  conflictKind?: "content" | "binary" | "deleteModify" | "rename" | "path";
 };
 
 export type RepoFacts = {

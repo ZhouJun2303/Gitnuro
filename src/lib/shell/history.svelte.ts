@@ -224,7 +224,10 @@ function sameMergeState(left: MergeState | null, right: MergeState | null) {
     if (left === right) return true;
     if (!left || !right) return false;
     if (left.source !== right.source || left.into !== right.into || left.files.length !== right.files.length) return false;
-    return left.files.every((file, index) => file.status === right.files[index]?.status && file.path === right.files[index]?.path);
+    return left.files.every((file, index) => {
+      const other = right.files[index];
+      return file.status === other?.status && file.path === other?.path && file.previousPath === other?.previousPath;
+    });
   }
 
 /** Fill the composer for a paused merge without replacing a draft the user wrote. */

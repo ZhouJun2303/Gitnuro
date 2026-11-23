@@ -81,7 +81,8 @@
   color: var(--on-added);
 }
 
-.merge-nav-btn {
+.merge-nav-btn,
+.merge-file-nav-btn {
   width: 24px;
   height: 24px;
   border: 1px solid var(--line);
@@ -92,7 +93,8 @@
   line-height: 1;
 }
 
-.merge-nav-btn:hover {
+.merge-nav-btn:hover,
+.merge-file-nav-btn:hover {
   background: var(--hover);
   color: var(--text);
 }
@@ -208,6 +210,11 @@
 .merge-file-nav-status.binary {
   background: color-mix(in srgb, var(--deleted) 24%, transparent);
   color: var(--deleted);
+}
+
+.merge-file-nav-status.resolved {
+  background: color-mix(in srgb, var(--added) 24%, transparent);
+  color: var(--added);
 }
 
 .merge-file-nav-name {
@@ -626,6 +633,7 @@
 .merge-path-note {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   flex: none;
   min-width: 0;
@@ -635,6 +643,13 @@
   color: var(--text-secondary);
   font-size: 11px;
   overflow-wrap: anywhere;
+}
+
+.merge-paths {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-width: 0;
 }
 
 .merge-kind-badge {

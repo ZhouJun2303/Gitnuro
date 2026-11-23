@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use awegit_git::{
-    blob_view, commit, commit_log, commits_from, conflict_view, discard_lines, file_diff,
+    blob_view, commit, commit_log, commits_from, conflict_sides, conflict_view, discard_lines, file_diff,
     file_diff_with, file_preview, in_progress, launch_merge_tool, merge_preview, perform,
     remove_stale_index_lock, repository_refs, search_commits, search_log, stage_all, stage_hunk,
     stage_line, stage_lines, stage_paths, stale_index_lock, stale_index_lock_for_error, status, stop_process_tree, unstage_paths, ChangeKind,
@@ -1189,6 +1189,45 @@ fn resolve_conflict_keeps_ours() {
 }
 
 #[test]
+fn conflict_sides_include_the_base_and_keep_both_uses_incoming_first() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main");
+    assert!(perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .is_err());
+
+    let sides = conflict_sides(&repo.path, "a.txt").unwrap();
+    assert_eq!(sides.base, "base\n");
+    assert_eq!(sides.ours, "main\n");
+    assert_eq!(sides.theirs, "side\n");
+    assert!(sides.working.contains("<<<<<<<"));
+
+    perform(
+        &repo.path,
+        Mutation::Resolve {
+            file: "a.txt".into(),
+            side: "both".into(),
+            text: String::new(),
+        },
+    )
+    .unwrap();
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "side\nmain\n");
+}
+
+#[test]
 fn resolve_paths_keeps_the_chosen_side_for_every_file() {
     let repo = repo();
     commit_file(&repo, "a.txt", "base a\n", "base a");
@@ -2362,6 +2401,7 @@ fn merge_conflict_names_both_branches() {
     assert_eq!(edited.ours.state, "modified");
     assert_eq!(edited.theirs.label, "topic");
     assert_eq!(edited.theirs.state, "modified");
+    assert_eq!(edited.kind, "content");
     assert!(edited.ours.bytes > 0 && edited.theirs.bytes > 0);
     assert_eq!(edited.ours.commit.as_ref().unwrap().subject, "edit-gone");
     assert_eq!(edited.theirs.commit.as_ref().unwrap().subject, "drop");
@@ -2373,6 +2413,7 @@ fn merge_conflict_names_both_branches() {
     assert_eq!(removed.theirs.state, "deleted");
     assert_eq!(removed.theirs.bytes, 0);
     assert!(removed.ours.bytes > 0);
+    assert_eq!(removed.kind, "deleteModify");
 }
 
 #[test]
@@ -2403,6 +2444,7 @@ fn conflict_blob_probe_keeps_the_prefix_boundary_and_large_object_policy() {
         for _ in 0..3 {
             let view = conflict_view(&repo.path, "probe").unwrap();
             assert_eq!(view.binary, binary, "size={size}, nul={nul:?}");
+            assert_eq!(view.kind, if binary { "binary" } else { "content" });
             assert_eq!(view.ours.bytes, size as u64);
             assert_eq!(view.theirs.bytes, size as u64);
         }
@@ -2701,6 +2743,91 @@ fn merge_preview_fills_message() {
     let log = repo.output(&["log", "-1", "--format=%B"]);
     assert!(log.contains("Merge topic into main"), "{log}");
     assert!(log.contains("b.txt"), "{log}");
+}
+
+#[test]
+fn merge_preview_keeps_rename_paths_with_spaces() {
+    let repo = repo();
+    commit_file(&repo, "old name.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    repo.git(&["mv", "old name.txt", "new name.txt"]);
+    repo.git(&["commit", "-am", "chore: rename"]);
+    repo.git(&["checkout", "main"]);
+
+    let preview = merge_preview(&repo.path, "topic").unwrap();
+    let renamed = preview.files.iter().find(|file| file.path == "new name.txt").expect("renamed path");
+    assert_eq!(renamed.previous_path.as_deref(), Some("old name.txt"));
+}
+
+#[test]
+fn rename_delete_conflict_reports_the_three_paths() {
+    let repo = repo();
+    commit_file(&repo, "old.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "delete"]);
+    repo.git(&["rm", "old.txt"]);
+    repo.git(&["commit", "-m", "chore: delete"]);
+    repo.git(&["checkout", "main"]);
+    repo.git(&["checkout", "-b", "rename"]);
+    repo.git(&["mv", "old.txt", "new.txt"]);
+    repo.git(&["commit", "-m", "chore: rename"]);
+    repo.git(&["checkout", "delete"]);
+
+    assert!(perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "rename".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .is_err());
+
+    let view = conflict_view(&repo.path, "new.txt").unwrap();
+    assert_eq!(view.kind, "deleteModify");
+    assert_eq!(view.base_path.as_deref(), Some("old.txt"));
+    assert_eq!(view.ours_path.as_deref(), Some("old.txt"));
+    assert_eq!(view.theirs_path.as_deref(), Some("new.txt"));
+}
+
+#[test]
+fn rename_rename_conflict_reports_the_source_path() {
+    let repo = repo();
+    commit_file(&repo, "old.txt", "base\n", "feat: base");
+    repo.git(&["checkout", "-b", "ours"]);
+    repo.git(&["mv", "old.txt", "new.txt"]);
+    fs::write(repo.path.join("new.txt"), "ours\n").unwrap();
+    repo.git(&["add", "-A"]);
+    repo.git(&["commit", "-m", "feat: ours rename"]);
+    repo.git(&["checkout", "main"]);
+    repo.git(&["checkout", "-b", "theirs"]);
+    repo.git(&["mv", "old.txt", "new.txt"]);
+    fs::write(repo.path.join("new.txt"), "theirs\n").unwrap();
+    repo.git(&["add", "-A"]);
+    repo.git(&["commit", "-m", "feat: theirs rename"]);
+    repo.git(&["checkout", "main"]);
+    repo.git(&["merge", "--no-ff", "ours", "-m", "merge: ours"]);
+
+    assert!(perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "theirs".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .is_err());
+
+    let view = conflict_view(&repo.path, "new.txt").unwrap();
+    assert_eq!(view.kind, "rename");
+    assert_eq!(view.base_path.as_deref(), Some("old.txt"));
+    assert_eq!(view.ours_path.as_deref(), Some("new.txt"));
+    assert_eq!(view.theirs_path.as_deref(), Some("new.txt"));
 }
 
 fn large_asset(name: &str) -> String {

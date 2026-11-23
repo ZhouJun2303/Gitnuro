@@ -809,7 +809,12 @@ pub struct ConflictView {
 
 pub fn conflict_view(repo: &Path, path: &str) -> Result<ConflictView, Error> {
     let path = check_path(path)?;
-    let stages = stage_oids(repo, path)?;
+    let mut entries = stage_entries(repo, Some(path))?;
+    let mut stages = stage_oids_from(&entries, path);
+    if stages[2].is_none() || stages[3].is_none() {
+        entries = stage_entries(repo, None)?;
+        stages = stage_oids_from(&entries, path);
+    }
     if stages[2].is_none() && stages[3].is_none() {
         return Err(Error::Git(format!("{path} is not unmerged")));
     }
@@ -820,12 +825,22 @@ pub fn conflict_view(repo: &Path, path: &str) -> Result<ConflictView, Error> {
     let binary = file_has_nul(repo, path) || stages.iter().flatten().any(|oid| blob_has_nul_with_size(repo, oid, sizes.get(oid).copied()));
     let ours_state = side_state(base, stages[2].as_deref());
     let theirs_state = side_state(base, stages[3].as_deref());
+    let (base_path, ours_path, theirs_path) = conflict_paths(repo, &entries, path);
+    let paths_differ = [base_path.as_deref(), ours_path.as_deref(), theirs_path.as_deref()]
+        .into_iter()
+        .flatten()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len() > 1;
     let kind = if binary {
         "binary"
     } else if (ours_state == "deleted" && theirs_state != "deleted")
         || (theirs_state == "deleted" && ours_state != "deleted")
     {
         "deleteModify"
+    } else if paths_differ && base_path.is_some() && ours_path.is_some() && theirs_path.is_some() {
+        "rename"
+    } else if paths_differ {
+        "path"
     } else {
         "content"
     };
@@ -844,9 +859,9 @@ pub fn conflict_view(repo: &Path, path: &str) -> Result<ConflictView, Error> {
         },
         binary,
         kind: kind.into(),
-        base_path: stages[1].as_ref().map(|_| path.to_string()),
-        ours_path: stages[2].as_ref().map(|_| path.to_string()),
-        theirs_path: stages[3].as_ref().map(|_| path.to_string()),
+        base_path,
+        ours_path,
+        theirs_path,
     })
 }
 
@@ -909,30 +924,177 @@ fn conflict_sizes(repo: &Path, stages: &[Option<String>; 4]) -> HashMap<String, 
     }).collect()
 }
 
-fn stage_oids(repo: &Path, path: &str) -> Result<[Option<String>; 4], Error> {
-    let output = run(
-        repo,
-        &[
-            "--literal-pathspecs",
-            "ls-files",
-            "-u",
-            "--stage",
-            "--",
-            path,
-        ],
-    )?;
+#[derive(Debug, Clone)]
+struct StageEntry {
+    path: String,
+    stage: u8,
+    oid: String,
+}
+
+fn stage_entries(repo: &Path, path: Option<&str>) -> Result<Vec<StageEntry>, Error> {
+    let mut args = vec!["--literal-pathspecs", "ls-files", "-u", "--stage", "-z"];
+    if let Some(path) = path {
+        args.extend(["--", path]);
+    }
+    let refs: Vec<&str> = args.iter().copied().collect();
+    let output = run(repo, &refs)?;
     let text = String::from_utf8_lossy(&output.stdout);
-    let mut stages = [None, None, None, None];
-    for line in text.lines() {
-        let mut fields = line.split_whitespace();
+    let mut entries = Vec::new();
+    for record in text.split('\0') {
+        let Some((meta, path)) = record.split_once('\t') else { continue };
+        let mut fields = meta.split_whitespace();
         let _mode = fields.next();
-        let oid = fields.next().unwrap_or("");
-        let stage: usize = fields.next().unwrap_or("0").parse().unwrap_or(0);
-        if (1..=3).contains(&stage) && oid.len() >= 7 {
-            stages[stage] = Some(oid.to_string());
+        let Some(oid) = fields.next() else { continue };
+        let Ok(stage) = fields.next().unwrap_or("").parse::<u8>() else { continue };
+        if (1..=3).contains(&stage) && !path.is_empty() && oid.len() >= 7 {
+            entries.push(StageEntry { path: path.to_string(), stage, oid: oid.to_string() });
         }
     }
-    Ok(stages)
+    Ok(entries)
+}
+
+fn stage_oids(repo: &Path, path: &str) -> Result<[Option<String>; 4], Error> {
+    Ok(stage_oids_from(&stage_entries(repo, Some(path))?, path))
+}
+
+fn stage_oids_from(entries: &[StageEntry], path: &str) -> [Option<String>; 4] {
+    let mut stages = [None, None, None, None];
+    for entry in entries {
+        if entry.path == path {
+            stages[entry.stage as usize] = Some(entry.oid.clone());
+        }
+    }
+    stages
+}
+
+fn conflict_paths(repo: &Path, entries: &[StageEntry], path: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let mut paths = [None, None, None];
+    for entry in entries {
+        if entry.path == path {
+            paths[entry.stage as usize - 1] = Some(entry.path.clone());
+        }
+    }
+    // Git's unmerged index keeps the destination path for many rename
+    // conflicts and omits the source name. Recover each side from the
+    // in-progress operation's NUL-safe rename summaries.
+    if let Some((previous, current)) = merge_rename_pair(repo, path) {
+        if current == path {
+            paths[0] = Some(previous.clone());
+            if paths[1].is_none() {
+                paths[1] = Some(previous);
+            }
+            if paths[2].is_none() {
+                paths[2] = Some(current);
+            }
+        }
+    }
+    if let Some((previous, current)) = head_rename_pair(repo, path) {
+        if current == path {
+            if paths[0].is_none() {
+                paths[0] = Some(previous.clone());
+            }
+            if paths[1].is_none() {
+                paths[1] = Some(current);
+            }
+            if paths[2].is_none() {
+                paths[2] = Some(previous);
+            }
+        }
+    }
+    (paths[0].clone(), paths[1].clone(), paths[2].clone())
+}
+
+fn merge_rename_pair(repo: &Path, path: &str) -> Option<(String, String)> {
+    for head in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD"] {
+        let Ok(revision) = run(repo, &["rev-parse", "--verify", "--quiet", head]) else {
+            continue;
+        };
+        let revision = String::from_utf8_lossy(&revision.stdout).trim().to_string();
+        if revision.is_empty() {
+            continue;
+        }
+        let triple = format!("HEAD...{revision}");
+        if let Some(pair) = rename_pair(repo, &triple, path) {
+            return Some(pair);
+        }
+    }
+    None
+}
+
+fn head_rename_pair(repo: &Path, path: &str) -> Option<(String, String)> {
+    for head in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD"] {
+        let Ok(revision) = run(repo, &["rev-parse", "--verify", "--quiet", head]) else {
+            continue;
+        };
+        let revision = String::from_utf8_lossy(&revision.stdout).trim().to_string();
+        if revision.is_empty() {
+            continue;
+        }
+        let Ok(base) = run(repo, &["merge-base", "HEAD", &revision]) else {
+            continue;
+        };
+        let base = String::from_utf8_lossy(&base.stdout).trim().to_string();
+        if base.is_empty() {
+            continue;
+        }
+        let range = format!("{base}..HEAD");
+        if let Some(pair) = rename_pair(repo, &range, path) {
+            return Some(pair);
+        }
+    }
+    None
+}
+
+fn rename_pair(repo: &Path, range: &str, path: &str) -> Option<(String, String)> {
+    for rename_flag in ["-M", "-M0"] {
+        let Ok(output) = run(repo, &["diff", "--name-status", "-z", rename_flag, "--no-ext-diff", range]) else {
+            continue;
+        };
+        if let Some(rename) = parse_merge_name_status(&output.stdout).into_iter().find(|file| {
+            file.previous_path.as_deref() == Some(path) || file.path == path
+        }) {
+            if let Some(previous) = rename.previous_path {
+                return Some((previous, rename.path));
+            }
+        }
+        let files = parse_merge_name_status(&output.stdout);
+        let additions: Vec<_> = files.iter().filter(|file| file.status == "A" && file.path == path).collect();
+        let deletions: Vec<_> = files.iter().filter(|file| file.status == "D").collect();
+        if additions.len() == 1 && deletions.len() == 1 {
+            return Some((deletions[0].path.clone(), additions[0].path.clone()));
+        }
+    }
+    None
+}
+
+fn parse_merge_name_status(stdout: &[u8]) -> Vec<MergeNameStatus> {
+    let mut records = stdout.split(|byte| *byte == 0).filter(|record| !record.is_empty());
+    let mut files = Vec::new();
+    while let Some(status) = records.next() {
+        let Some(first) = records.next() else { break };
+        let Some(kind) = status.first().copied() else { continue };
+        let (path, previous_path) = if matches!(kind, b'R' | b'C') {
+            let Some(path) = records.next() else { break };
+            (path, (kind == b'R').then(|| String::from_utf8_lossy(first).into_owned()))
+        } else {
+            (first, None)
+        };
+        if path.is_empty() {
+            continue;
+        }
+        files.push(MergeNameStatus {
+            status: String::from_utf8_lossy(&status[..1]).into_owned(),
+            path: String::from_utf8_lossy(path).into_owned(),
+            previous_path,
+        });
+    }
+    files
+}
+
+struct MergeNameStatus {
+    status: String,
+    path: String,
+    previous_path: Option<String>,
 }
 
 fn side_state(base: Option<&str>, side: Option<&str>) -> &'static str {

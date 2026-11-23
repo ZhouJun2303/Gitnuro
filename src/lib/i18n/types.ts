@@ -964,6 +964,7 @@ export type Messages = {
     mergeSaveDraft: string;
     mergeDraftSaved: string;
     mergeDraftFailed: string;
+    mergeResolved: string;
     mergeConflictBinary: string;
     mergeConflictDeleteModify: string;
     mergeConflictPath: string;
