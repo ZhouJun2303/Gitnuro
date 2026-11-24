@@ -341,6 +341,8 @@ export type Settings = {
   featuresIntro: string;
   /** `recovered-backup` when the last load restored a damaged settings file. */
   recoveryNotice?: string;
+  /** Draw the full conflicted file and every block in the changes pane. Off, because large files stall the window. */
+  showConflictPreview: boolean;
 };
 
 export type ForkImport = {

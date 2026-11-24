@@ -1159,6 +1159,8 @@ export const zh: Messages = {
     lineCompact: "紧凑",
     lineSpaced: "宽松",
     wholeFile: "差异中显示整个文件",
+    showConflictPreview: "冲突预览",
+    showConflictPreviewHint: "展开全文和每一个冲突块。大文件会卡住界面，所以默认关闭。逐块编辑仍可打开合并窗口。",
     aiEnabled: "AI 生成提交说明",
     aiLanguage: "提交信息语言",
     aiMaxChars: "AI 最大字符数",

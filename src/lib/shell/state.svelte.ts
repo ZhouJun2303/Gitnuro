@@ -392,6 +392,7 @@ export class ShellState {
     silentInstall: true,
     featuresIntro: "seen",
     recoveryNotice: "",
+    showConflictPreview: false,
   };
 
 

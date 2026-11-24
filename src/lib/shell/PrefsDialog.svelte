@@ -340,6 +340,21 @@
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecDiffDisplay")}</h3>
           <div class="pref-card-body">
             <label class="pref-row pref-toggle">
+              <input
+                type="checkbox"
+                data-pref="show-conflict-preview"
+                checked={shell.settings.showConflictPreview}
+                onchange={(event) => {
+                  const enabled = event.currentTarget.checked;
+                  shell.settings = { ...shell.settings, showConflictPreview: enabled };
+                  if (!enabled) shell.conflictPreview = null;
+                  if (shell.section === "changes" && shell.selectedConflict) void shell.loadDiff();
+                }}
+              />
+              <span class="pref-label">{shell.tr("dialog.showConflictPreview")}</span>
+            </label>
+            <p class="pref-setting-hint">{shell.tr("dialog.showConflictPreviewHint")}</p>
+            <label class="pref-row pref-toggle">
               <input type="checkbox" bind:checked={shell.settings.showDiffMarks} />
               <span class="pref-label">{shell.tr("dialog.showMarks")}</span>
             </label>

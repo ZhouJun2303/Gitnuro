@@ -1099,6 +1099,8 @@ export type Messages = {
     lineCompact: string;
     lineSpaced: string;
     wholeFile: string;
+    showConflictPreview: string;
+    showConflictPreviewHint: string;
     aiEnabled: string;
     aiLanguage: string;
     aiMaxChars: string;

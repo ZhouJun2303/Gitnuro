@@ -154,6 +154,7 @@
   const conflictSelection = $derived(shell.section === "changes" ? shell.pickedConflicts() : []);
   const activeAt = $derived(hunkList.findIndex((range) => range.index === activeHunk));
   const conflictPreview = $derived.by<ConflictSides | null>(() => {
+    if (shell.settings.showConflictPreview !== true) return null;
     if (shell.mode === "sample") return shell.selectedPath ? (sampleConflictText[shell.selectedPath] ?? null) : null;
     return shell.conflictPreview;
   });

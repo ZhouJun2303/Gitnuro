@@ -450,11 +450,15 @@ async function fillSurface(shell: ShellState, id: string) {
     window.dispatchEvent(new CustomEvent("awegit-perf", { detail: { open: true } }));
     return;
   }
-  if (id === "conflict" || id === "conflict-preview") return showChange(shell, "src/both-sides.ts", "unstaged");
-  if (id === "conflict-preview-compact") {
-    shell.changesWidth = 650;
-    shell.settings.verticalTabs = false;
-    return showChange(shell, "src/many-hunks.ts", "unstaged");
+  if (id === "conflict") return showChange(shell, "src/both-sides.ts", "unstaged");
+  if (id === "conflict-preview" || id === "conflict-preview-compact") {
+    shell.settings = {
+      ...shell.settings,
+      showConflictPreview: true,
+      ...(id === "conflict-preview-compact" ? { verticalTabs: false } : {}),
+    };
+    if (id === "conflict-preview-compact") shell.changesWidth = 650;
+    return showChange(shell, id === "conflict-preview" ? "src/both-sides.ts" : "src/many-hunks.ts", "unstaged");
   }
   if (id === "conflict-compact") {
     shell.sidebarCollapsed = false;

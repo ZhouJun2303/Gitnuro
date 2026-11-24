@@ -346,6 +346,10 @@ pub struct Settings {
     /// existing file means the install predates the guide, so it stays `seen`.
     #[serde(default = "features_intro_seen")]
     pub features_intro: String,
+    /// Draw the full conflicted file and every block in the changes pane.
+    /// Off by default: a large file stalls the window while that text is split and painted.
+    #[serde(default)]
+    pub show_conflict_preview: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -697,6 +701,7 @@ impl Default for Settings {
             dismissed_update: String::new(),
             silent_install: true,
             features_intro: features_intro_seen(),
+            show_conflict_preview: false,
         }
     }
 }
@@ -1731,6 +1736,16 @@ mod tests {
     fn missing_features_intro_counts_as_seen() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings.features_intro, "seen");
+    }
+
+    #[test]
+    fn missing_conflict_preview_defaults_off_and_keeps_an_explicit_choice() {
+        assert!(!serde_json::from_str::<Settings>("{}").unwrap().show_conflict_preview);
+        assert!(!Settings::default().show_conflict_preview);
+        let settings: Settings = serde_json::from_str(r#"{"showConflictPreview":true}"#).unwrap();
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["showConflictPreview"], true);
+        assert!(serde_json::from_value::<Settings>(saved).unwrap().show_conflict_preview);
     }
 
     #[test]

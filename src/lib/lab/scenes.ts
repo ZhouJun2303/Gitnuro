@@ -196,7 +196,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "checkout-progress", group: "仓库状态", title: "检出进度 · 更新工作区", repo: "even", ready: '.identity-bar[aria-valuenow="20"]' }),
   scene({ id: "clone-waiting", group: "仓库状态", title: "克隆进度 · 等待远程", repo: "even", ready: '.identity-bar[aria-valuenow="33"]' }),
   scene({ id: "sync-stash-conflict", group: "仓库状态", title: "同步按钮 · 恢复本地修改冲突", repo: "conflict", ready: ".identity-floor[data-layer=\"conflicts\"]" }),
-  scene({ id: "conflict", group: "仓库状态", title: "文本冲突", repo: "conflict", ready: ".conflict-preview" }),
+  scene({ id: "conflict", group: "仓库状态", title: "文本冲突", repo: "conflict", ready: ".conflict-pane" }),
   scene({ id: "conflict-preview", group: "仓库状态", title: "冲突 · 全文与多块预览", repo: "conflict", ready: ".conflict-preview-block" }),
   scene({ id: "conflict-preview-compact", group: "仓库状态", title: "冲突 · 窄面板全文预览", repo: "conflict", ready: ".conflict-preview" }),
   scene({ id: "conflict-compact", group: "仓库状态", title: "窄面板 · 表格冲突", repo: "conflict", ready: ".conflict-pane .conflict-tool-group" }),

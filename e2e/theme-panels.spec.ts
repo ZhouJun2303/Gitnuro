@@ -50,7 +50,7 @@ const pages: PanelPage[] = [
   { name: "update", scene: "update-available", panels: [".update-panel"] },
   { name: "preferences general", scene: "prefs-appearance", tab: "general", panels: [".pref-nav", ".pref-page", ".theme-styles"] },
   { name: "preferences workspace", scene: "prefs-workspace", tab: "workspace", panels: [".pref-nav", ".pref-page", ".pref-source-row"] },
-  { name: "preferences diff", scene: "prefs-diff", tab: "diff", panels: [".pref-page", "[data-pref=\"diff-style\"]"] },
+  { name: "preferences diff", scene: "prefs-diff", tab: "diff", panels: [".pref-page", "[data-pref=\"diff-style\"]", "[data-pref=\"show-conflict-preview\"]"] },
   { name: "preferences preview formats", scene: "prefs-preview-formats", tab: "previewFormats", panels: [".pref-page", ".preview-catalog", "[data-tool=\"unity\"]"] },
   { name: "preferences commit", scene: "prefs-commit", tab: "commit", panels: [".pref-page", ".commit-type-list"] },
   { name: "preferences ai", scene: "prefs-ai", tab: "ai", panels: [".pref-page", "[data-ai-field=\"enabled\"]"] },
@@ -146,6 +146,8 @@ for (const theme of themes) {
           await page.setViewportSize({ width: 320, height: 480 });
           await expectLauncherFiles(page);
         }
+        if (item.scene === "conflict") await expect(page.locator(".conflict-preview")).toHaveCount(0);
+        if (item.scene === "prefs-diff") await expect(page.locator("[data-pref=\"show-conflict-preview\"]")).not.toBeChecked();
         if (item.scene === "prefs-accounts") await expectAccountActions(page, theme.locale);
       });
     }

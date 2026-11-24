@@ -1158,6 +1158,8 @@ export const en: Messages = {
     lineCompact: "Compact",
     lineSpaced: "Spaced",
     wholeFile: "Show whole file in diffs",
+    showConflictPreview: "Conflict preview",
+    showConflictPreviewHint: "Shows the full file and every conflict block. Large files can stall the window, so this stays off until you turn it on. The merge window still edits block by block.",
     aiEnabled: "AI commit messages",
     aiLanguage: "Commit message language",
     aiMaxChars: "AI max characters",
