@@ -47,6 +47,25 @@ test("large text assets load their diff on demand", async ({ page }) => {
   await expect(page.locator(".merge-side").first()).toContainText("m_Entry_1:", { timeout: 30_000 });
 });
 
+test("diff toolbar keeps context and display toggles independent", async ({ page }) => {
+  await openLabScene(page, "diff-whole-file", "[data-diff-toolbar]");
+  const toolbar = page.locator("[data-diff-toolbar]");
+  await expect(toolbar.locator(".diff-toolbar-value")).toHaveText("3");
+  await expect(toolbar.locator("input[type=checkbox]")).toHaveCount(0);
+  const whole = toolbar.getByRole("button", { name: /显示整个文件|Show whole file/ });
+  await expect(whole).toHaveAttribute("aria-pressed", "true");
+  await toolbar.getByRole("button", { name: /增加上下文行|Show more context lines/ }).click();
+  await expect(toolbar.locator(".diff-toolbar-value")).toHaveText("4");
+  await expect(whole).toHaveAttribute("aria-pressed", "true");
+
+  const wrap = toolbar.getByRole("button", { name: /差异长行自动换行|Wrap long diff lines/ });
+  const ignore = toolbar.getByRole("button", { name: /忽略空白|Ignore whitespace/ });
+  await wrap.click();
+  await ignore.click();
+  await expect(wrap).toHaveAttribute("aria-pressed", "true");
+  await expect(ignore).toHaveAttribute("aria-pressed", "true");
+});
+
 test("pushbox commits and pushes", async () => {
   const layout = (await lab("lab_layout")) as { pushbox: string; remotePush: string };
   const summary = `lab: record the push note ${Date.now()}`;

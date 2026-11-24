@@ -741,10 +741,10 @@
                 {/each}
                 {#if shell.splitWindow.afterPx > 0}<div class="split-gap" style:height="{shell.splitWindow.afterPx}px"></div>{/if}
                 {/if}
+                {#if shell.diff.truncated}<span class="meta split-meta">{shell.tr("chrome.truncated")}</span>{/if}
                 {@render splitBar()}
               </div>
               {@render hunkActions()}
-              {#if shell.diff.truncated}<span class="meta">{shell.tr("chrome.truncated")}</span>{/if}
               </div>
             {:else}
               <div class="diff-viewport">
@@ -878,18 +878,12 @@
     </div>
     <div class="diff-toolbar-group diff-toolbar-context" role="group" aria-label={shell.tr("dialog.diffContext")}>
       <span class="diff-toolbar-label">{shell.tr("dialog.diffContext")}</span>
-      <button type="button" disabled={shell.settings.showEntireFile} aria-label={shell.tr("chrome.diffContextDecrease")} title={shell.tr("chrome.diffContextDecrease")} onclick={() => shell.setDiffContext(shell.settings.diffContext - 1)}>−</button>
-      <span class="diff-toolbar-value">{shell.settings.showEntireFile ? "∞" : shell.settings.diffContext}</span>
-      <button type="button" disabled={shell.settings.showEntireFile} aria-label={shell.tr("chrome.diffContextIncrease")} title={shell.tr("chrome.diffContextIncrease")} onclick={() => shell.setDiffContext(shell.settings.diffContext + 1)}>+</button>
+      <button type="button" aria-label={shell.tr("chrome.diffContextDecrease")} title={shell.tr("chrome.diffContextDecrease")} onclick={() => shell.setDiffContext(shell.settings.diffContext - 1)}>−</button>
+      <span class="diff-toolbar-value">{shell.settings.diffContext}</span>
+      <button type="button" aria-label={shell.tr("chrome.diffContextIncrease")} title={shell.tr("chrome.diffContextIncrease")} onclick={() => shell.setDiffContext(shell.settings.diffContext + 1)}>+</button>
       <button class:active={shell.settings.showEntireFile} type="button" title={shell.tr("chrome.diffShowWhole")} aria-pressed={shell.settings.showEntireFile} onclick={() => shell.toggleShowEntireFile()}>{shell.tr("chrome.diffShowWhole")}</button>
     </div>
-    <label class="diff-toolbar-check">
-      <input type="checkbox" checked={shell.settings.diffWordWrap} onchange={() => shell.toggleDiffWordWrap()} />
-      <span>{shell.tr("dialog.wordWrap")}</span>
-    </label>
-    <label class="diff-toolbar-check">
-      <input type="checkbox" checked={shell.settings.ignoreSpace} onchange={() => shell.toggleIgnoreSpace()} />
-      <span>{shell.tr("dialog.ignoreSpace")}</span>
-    </label>
+    <button class:active={shell.settings.diffWordWrap} type="button" title={shell.tr("dialog.wordWrap")} aria-pressed={shell.settings.diffWordWrap} onclick={() => shell.toggleDiffWordWrap()}>{shell.tr("dialog.wordWrap")}</button>
+    <button class:active={shell.settings.ignoreSpace} type="button" title={shell.tr("dialog.ignoreSpace")} aria-pressed={shell.settings.ignoreSpace} onclick={() => shell.toggleIgnoreSpace()}>{shell.tr("dialog.ignoreSpace")}</button>
   </div>
 {/snippet}

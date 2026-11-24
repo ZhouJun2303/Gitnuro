@@ -199,8 +199,7 @@
   font-size: 11px;
 }
 
-.diff-toolbar-group,
-.diff-toolbar-check {
+.diff-toolbar-group {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -224,6 +223,8 @@
   color: var(--text-secondary);
   font: inherit;
   cursor: pointer;
+  flex: none;
+  white-space: nowrap;
 }
 
 .diff-toolbar button:hover:not(:disabled) {
@@ -254,20 +255,6 @@
   color: var(--text);
   font-variant-numeric: tabular-nums;
   text-align: center;
-}
-
-.diff-toolbar-check {
-  padding: 0 2px;
-  color: var(--text);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.diff-toolbar-check input {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: var(--accent);
 }
 
 .hunk-tools {
@@ -1220,10 +1207,6 @@ section.diff > .diff-viewport {
   }
 
   .diff-toolbar-context {
-    flex: 1 1 auto;
-  }
-
-  .diff-toolbar-check {
     flex: 1 1 auto;
   }
 
