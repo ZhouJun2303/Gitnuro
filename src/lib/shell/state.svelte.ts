@@ -509,6 +509,12 @@ export class ShellState {
   commitSearchTimer = 0;
 
 
+  commitQuerySearchGen = 0;
+
+
+  commitQuerySearchTimer = 0;
+
+
   refreshing = false;
 
 
@@ -966,6 +972,10 @@ export class ShellState {
 
 
   commitQuery = $state("");
+
+
+  /** Commit ids whose full message matched the history find query. */
+  commitQueryMessageHits = $state<string[]>([]);
 
   /** Index into `commitMatchIndexes`, not into the history list. */
   commitMatchCursor = $state(0);
@@ -2352,7 +2362,7 @@ export class ShellState {
       cached = { rows, text: commitHaystacks(rows) };
       this.commitNeedles = cached;
     }
-    return commitHitIndexes(rows, query, cached.text);
+    return commitHitIndexes(rows, query, cached.text, new Set(this.commitQueryMessageHits));
   });
 
   commitMatchCurrent = $derived.by(() => {
@@ -3426,7 +3436,6 @@ export class ShellState {
   setDiffContext(value: number) {
     const next = Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : 3;
     this.settings.diffContext = next;
-    this.settings.showEntireFile = false;
     void this.savePrefs(false);
   }
 
@@ -5763,6 +5772,9 @@ export class ShellState {
     this.diffToken += 1;
     this.contextGen += 1;
     this.commitSearchGen += 1;
+    this.commitQuerySearchGen += 1;
+    window.clearTimeout(this.commitQuerySearchTimer);
+    this.commitQueryMessageHits = [];
     if (this.snapshot?.path && !this.viewing(path)) cancelReads(this.snapshot.path);
     this.focusPath = path;
     if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description, commitType: this.commitType });

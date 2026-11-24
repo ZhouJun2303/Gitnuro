@@ -2196,7 +2196,7 @@ fn search_commits_finds_added_text() {
 fn search_log_finds_message_and_diff() {
     let repo = repo();
     commit_file(&repo, "a.txt", "one\n", "base");
-    commit_file(&repo, "a.txt", "needle-token\n", "feat: add the needle");
+    commit_file(&repo, "a.txt", "needle-token\n", "feat: add the needle\n\nID: 1002778");
     repo.git(&["checkout", "-b", "side"]);
     commit_file(&repo, "b.txt", "side\n", "only-on-side");
     repo.git(&["checkout", "main"]);
@@ -2209,6 +2209,11 @@ fn search_log_finds_message_and_diff() {
     assert!(
         diffs.iter().any(|row| row.summary.contains("needle")),
         "{diffs:?}"
+    );
+    let body = search_log(&repo.path, "message", "repository", "ID: 1002778", 20, false).unwrap();
+    assert!(
+        body.iter().any(|row| row.summary.contains("needle")),
+        "{body:?}"
     );
     let here = search_log(&repo.path, "message", "branch", "only-on-side", 20, false).unwrap();
     assert!(here.is_empty(), "{here:?}");

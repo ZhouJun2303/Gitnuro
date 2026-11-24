@@ -958,13 +958,58 @@ function matchRows(shell: ShellState) {
     return shell.mode === "sample" ? shell.sampleShown : shell.historyItems;
   }
 
+function focusFirstCommitMatch(shell: ShellState) {
+    const index = shell.commitMatchIndexes[0] ?? -1;
+    if (index < 0) return;
+    const id = matchRows(shell)[index]?.id ?? "";
+    if (id) scrollToCommit(shell, id, shell.mode === "sample" ? -1 : index);
+}
+
+/** History rows carry the subject, so ask Git for body matches and merge their ids into the find index. */
+function queueCommitMessageSearch(shell: ShellState, query: string) {
+    window.clearTimeout(shell.commitQuerySearchTimer);
+    const gen = ++shell.commitQuerySearchGen;
+    shell.commitQueryMessageHits = [];
+    if (shell.mode !== "live" || query.length < 3) return;
+    const path = shell.repoPath();
+    if (!path || query.startsWith("-") || /[\n\r\0]/.test(query)) return;
+    const openGen = shell.openGen;
+    shell.commitQuerySearchTimer = window.setTimeout(() => {
+      if (gen !== shell.commitQuerySearchGen || openGen !== shell.openGen || shell.commitQuery.trim() !== query || shell.mode !== "live") return;
+      void searchCommitMessage(shell, path, query, gen, openGen);
+    }, 180);
+}
+
+async function searchCommitMessage(shell: ShellState, path: string, query: string, gen: number, openGen: number) {
+    const current = () => gen === shell.commitQuerySearchGen
+      && openGen === shell.openGen
+      && shell.commitQuery.trim() === query
+      && shell.mode === "live"
+      && shell.repoPath() === path;
+    try {
+      const rows = await invoke<CommitRow[]>("search_log", {
+        path,
+        field: "message",
+        scope: "repository",
+        query,
+        limit: Math.min(100_000, Math.max(500, shell.commitsLive.length)),
+        offset: 0,
+        order: shell.settings.commitSort === "topo" ? "topo" : "date",
+      });
+      if (!current()) return;
+      shell.commitQueryMessageHits = rows.map((row) => row.id);
+      focusFirstCommitMatch(shell);
+    } catch {
+      if (current()) shell.commitQueryMessageHits = [];
+    }
+}
+
 export function followCommitQuery(shell: ShellState) {
     shell.commitMatchCursor = 0;
     const query = shell.commitQuery.trim();
-    if (!query || /^[sg]:/i.test(query) || shell.commitMatchIndexes.length === 0) return;
-    const index = shell.commitMatchIndexes[0] ?? -1;
-    const id = matchRows(shell)[index]?.id ?? "";
-    if (id) scrollToCommit(shell, id, shell.mode === "sample" ? -1 : index);
+    queueCommitMessageSearch(shell, query);
+    if (!query || /^[sg]:/i.test(query)) return;
+    focusFirstCommitMatch(shell);
   }
 
 export function stepCommitMatch(shell: ShellState, delta: number) {
