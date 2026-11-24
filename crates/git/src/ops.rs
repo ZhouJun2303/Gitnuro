@@ -3007,7 +3007,7 @@ fn clone_repo(url: &str, destination: &str) -> Result<(), Error> {
     let dest = destination_path.display().to_string();
     let reported = PathBuf::from(destination);
     surface(with_operation_repo(&reported, || {
-        run(&cwd, &["clone", url, &dest]).map(|_| ())
+        run(&cwd, &["clone", "--recurse-submodules", url, &dest]).map(|_| ())
     }))
 }
 

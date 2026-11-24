@@ -3753,7 +3753,7 @@ export class ShellState {
       case "stashPop":
         return { title: this.tr("chrome.pop"), command: this.gitLine(["stash", "pop", text("name")]) };
       case "clone":
-        return { title: `${this.tr("chrome.clone")} ${text("url")}`, command: this.gitLine(["clone", text("url"), text("destination")]) };
+        return { title: `${this.tr("chrome.clone")} ${text("url")}`, command: this.gitLine(["clone", "--recurse-submodules", text("url"), text("destination")]) };
       case "init":
         return { title: this.tr("chrome.newRepo"), command: this.gitLine(["init", text("destination")]) };
       case "custom":

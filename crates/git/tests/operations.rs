@@ -103,6 +103,56 @@ fn submodule_head_change_can_be_staged_and_committed() {
     assert!(after.unstaged.is_empty(), "{after:?}");
 }
 
+#[test]
+fn clone_recursively_initializes_submodules() {
+    let module = repo();
+    commit_file(&module, "module.txt", "module\n", "test: module");
+
+    let source = repo();
+    source.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &file_url(&module.path),
+        "vendor",
+    ]);
+    source.git(&["commit", "-m", "test: add submodule"]);
+
+    let destination = std::env::temp_dir().join(format!(
+        "awegit-recursive-clone-{}",
+        SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _cleanup = RemoveDir(destination.clone());
+
+    // Git protects recursive clones from file:// submodule URLs by default. The
+    // test opts into the local transport so it can use temporary repositories.
+    let previous = std::env::var_os("GIT_ALLOW_PROTOCOL");
+    std::env::set_var("GIT_ALLOW_PROTOCOL", "file");
+    let result = perform(
+        &source.path,
+        Mutation::Clone {
+            url: file_url(&source.path),
+            destination: destination.display().to_string(),
+        },
+    );
+    match previous {
+        Some(value) => std::env::set_var("GIT_ALLOW_PROTOCOL", value),
+        None => std::env::remove_var("GIT_ALLOW_PROTOCOL"),
+    }
+    result.unwrap();
+
+    assert_eq!(
+        fs::read_to_string(destination.join("vendor/module.txt"))
+            .unwrap()
+            .trim(),
+        "module"
+    );
+}
+
 fn commit_file(repo: &common::TempRepo, name: &str, body: &str, message: &str) {
     fs::write(repo.path.join(name), body).unwrap();
     repo.git(&["add", "--", name]);
