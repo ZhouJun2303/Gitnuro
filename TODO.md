@@ -6,7 +6,7 @@
 
 ## 最近完成
 
-- [x] 冲突预览改为偏好设置 → 差异里的开关，默认关闭。关闭时不读取冲突全文，也不在面板里展开每一块；合并窗口不受影响。回归：`missing_conflict_preview_defaults_off_and_keeps_an_explicit_choice`，`e2e/conflict-preview-setting.spec.ts`。
+- [x] `9fdf8a38`：冲突预览改为偏好设置 → 差异里的开关，默认关闭。关闭时不读取冲突全文，也不在面板里展开每一块；合并窗口不受影响。回归：`missing_conflict_preview_defaults_off_and_keeps_an_explicit_choice`，`e2e/conflict-preview-setting.spec.ts`。
 
 - [x] `f4b00316`、`b5023ddf`：新增 Killer 推送开关。直接推送成功仍只执行一条 `git push`；被远程新提交拒绝或 `--force-with-lease` 过期时，自动拉取并重试一次；合并或变基冲突会中止并恢复自动贮藏，本地分支与工作区保持原样。开启时推送图标变为实心。回归：`killer_push.rs` 的 `killer_push_merges_remote_commits_then_pushes_once`、`killer_push_aborts_a_conflicting_merge_and_keeps_local_history`、`killer_push_aborts_a_conflicting_rebase_and_keeps_local_history`、`killer_push_restores_uncommitted_changes_after_a_conflicting_pull`、`killer_push_off_keeps_the_plain_rejection`、`killer_push_recovers_a_stale_force_with_lease`、`push_ref_killer_replaces_a_commit_push_with_the_integrated_branch`；`e2e/killer-push.spec.ts`。
 
