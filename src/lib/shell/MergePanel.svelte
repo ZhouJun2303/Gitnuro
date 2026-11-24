@@ -74,7 +74,7 @@
   const unresolved = $derived(Math.max(0, conflictTotal - conflictResolved));
   const canResolve = $derived(!shell.mergeLoading && (shell.mergeKind === "file"
     ? fileSide !== ""
-    : !shell.mergeLarge && (unresolved === 0 || (shell.mergeEdited && shell.mergeManualReady))));
+    : !shell.mergeLarge && shell.mergePieces.length > 0 && (unresolved === 0 || (shell.mergeEdited && shell.mergeManualReady))));
   const mergeFiles = $derived(shell.conflictFiles);
   const currentFileAt = $derived(Math.max(0, mergeFiles.findIndex((entry) => entry.path === shell.mergeFile)));
   const currentFile = $derived(mergeFiles[currentFileAt]);
@@ -131,7 +131,8 @@
     }
     const next = !leftOn;
     // The confirm may be cancelled, so hold the browser's toggle until the state moves.
-    if (shell.mergeEdited && event.currentTarget instanceof HTMLInputElement) event.currentTarget.checked = leftOn;
+    // With no hunks the derived check never changes, and the box would stay ticked.
+    if ((shell.mergeEdited || conflictTotal === 0) && event.currentTarget instanceof HTMLInputElement) event.currentTarget.checked = leftOn;
     withEditedGuard(() => shell.takeMergeSide("theirs", next));
   }
 
@@ -143,7 +144,7 @@
       return;
     }
     const next = !rightOn;
-    if (shell.mergeEdited && event.currentTarget instanceof HTMLInputElement) event.currentTarget.checked = rightOn;
+    if ((shell.mergeEdited || conflictTotal === 0) && event.currentTarget instanceof HTMLInputElement) event.currentTarget.checked = rightOn;
     withEditedGuard(() => shell.takeMergeSide("ours", next));
   }
 
@@ -432,7 +433,7 @@
         {#if shell.mergeKind === "text" && !shell.mergeLarge}
           {#if unresolved > 0}
             <span class="merge-edit-hint merge-unresolved" role="status">{shell.tr("dialog.mergeUnresolved", { count: String(unresolved) })}</span>
-          {:else}
+          {:else if shell.mergePieces.length > 0 || shell.mergeEdited}
             <span class="merge-edit-hint">{shell.tr("dialog.editingAllowed")}</span>
           {/if}
         {/if}

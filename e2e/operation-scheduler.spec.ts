@@ -65,6 +65,25 @@ test("cancelling a mutable read keeps an active immutable object read alive", as
   }
 });
 
+test("invalidateReads can keep the open conflict read", async () => {
+  const path = "scheduler-keep-conflict";
+  const gate = deferred<number>();
+  let cancelled = 0;
+  setReadCanceller(() => { cancelled += 1; });
+  try {
+    const kept = scheduleRead("conflict_view", { path, file: "GameLauncher.cs" }, () => gate.promise);
+    const dropped = scheduleRead("file_diff", { path, file: "other.cs" }, () => gate.promise).catch((error) => error.message);
+    await tick();
+    invalidateReads(path, ["conflict_view", "conflict_sides"]);
+    expect(cancelled).toBe(0);
+    gate.resolve(4);
+    expect(await kept).toBe(4);
+    expect(await dropped).toBe("Preview superseded");
+  } finally {
+    setReadCanceller(() => {});
+  }
+});
+
 test("superseded reads are recognized as internal cancellations", () => {
   expect(isReadSuperseded(new Error("Preview superseded"))).toBe(true);
   expect(isReadSuperseded("Preview superseded")).toBe(true);

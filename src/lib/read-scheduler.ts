@@ -14,6 +14,7 @@ let bytes = 0, active = 0, background = 0, mutableActive = 0;
 type Read = (signal: AbortSignal) => Promise<unknown>;
 type Job = {
   key: string;
+  command: string;
   repo: string;
   path: string;
   lane: string;
@@ -85,17 +86,21 @@ function cancelJob(job: Job) {
   if (job.started) release(job);
 }
 
-function cancelRepositoryJobs(path: string) {
+function cancelRepositoryJobs(path: string, keep = new Set<string>()) {
   const repo = repositoryKey(path);
-  const queued = waiting.filter((job) => job.repo === repo && job.mutable);
+  const spared = (job: Job) => keep.has(job.command);
+  const queued = waiting.filter((job) => job.repo === repo && job.mutable && !spared(job));
   for (const job of queued) {
     const index = waiting.indexOf(job);
     if (index >= 0) waiting.splice(index, 1);
     cancelJob(job);
   }
-  const active = [...activeJobs].filter((job) => job.repo === repo && job.mutable);
+  const active = [...activeJobs].filter((job) => job.repo === repo && job.mutable && !spared(job));
+  // A spared read is the merge panel body. Killing every Git process for the
+  // repository would abort it even though this scheduler kept the promise.
+  const sparedLive = [...activeJobs].some((job) => job.repo === repo && spared(job) && job.started && !job.released);
   const stableActive = [...activeJobs].some((job) => job.repo === repo && job.started && !job.released && !job.mutable);
-  if (active.length > 0 && !stableActive) requestRepositoryCancel(path);
+  if (active.length > 0 && !stableActive && !sparedLive) requestRepositoryCancel(path);
   for (const job of active) cancelJob(job);
 }
 
@@ -127,10 +132,10 @@ function weight(value: unknown, limit = MAX_BYTES): number {
   return size;
 }
 
-export function invalidateReads(path: string) {
+export function invalidateReads(path: string, keep: readonly string[] = []) {
   const key = repositoryKey(path);
   versions.set(key, (versions.get(key) ?? 0) + 1);
-  cancelRepositoryJobs(path);
+  cancelRepositoryJobs(path, new Set(keep));
 }
 
 /** Cancel stale mutable reads before a newer view starts using the repository. */
@@ -170,7 +175,7 @@ export function scheduleRead<T>(command: string, args: Record<string, unknown>, 
   const promise = new Promise<T>((resolve, reject) => {
     const controller = new AbortController();
     job = {
-      key, repo, path, lane, prefetch, mutable: !stable, controller,
+      key, command, repo, path, lane, prefetch, mutable: !stable, controller,
       resolve: resolve as (value: unknown) => void,
       reject,
       started: false,

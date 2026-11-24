@@ -1,5 +1,6 @@
 import { onMount, tick } from "svelte";
 import { invoke, traceOperation } from "../perf";
+import { isReadSuperseded } from "../read-scheduler";
 import { areasFor } from "../operation-policy";
 import { mergeResponse } from "../reconcile";
 import { broadcastLocale } from "../i18n/sync";
@@ -474,12 +475,39 @@ export async function loadTextMerge(shell: ShellState) {
     } catch (error) {
       if (shell.mergeGeneration === generation) {
         if (conflictReadTooLarge(error)) showFileMerge(shell, file);
-        else shell.mergeError = shell.message(error);
+        else shell.mergeError = mergeReadFailure(shell, error);
       }
     } finally {
       if (shell.mergeGeneration === generation) shell.mergeLoading = false;
     }
   }
+
+function mergeReadInterrupted(error: unknown) {
+  if (isReadSuperseded(error)) return true;
+  const raw = (error instanceof Error ? error.message : String(error)).trim();
+  return /^awegit:cancelled:/i.test(raw);
+}
+
+const MERGE_READ_ATTEMPTS = 8;
+
+/** A refresh or another window can cancel the Git process under this panel. Retry instead of showing an empty diff. */
+async function retryInterruptedMerge(shell: ShellState, error: unknown, stillOpen: () => boolean, retry: number, file: string, generation: number) {
+  if (!mergeReadInterrupted(error) || !stillOpen() || retry >= MERGE_READ_ATTEMPTS) return false;
+  await new Promise<void>((resolve) => setTimeout(resolve, Math.min(40 * (retry + 1), 240)));
+  if (!stillOpen()) return true;
+  let spins = 0;
+  while (shell.refreshing && stillOpen() && spins < 40) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    spins += 1;
+  }
+  if (!stillOpen()) return true;
+  await readTextMerge(shell, file, generation, false, retry + 1);
+  return true;
+}
+
+function mergeReadFailure(shell: ShellState, error: unknown) {
+  return shell.message(error) || shell.tr("error.cancelled");
+}
 
 export async function openTextMerge(shell: ShellState, file: string) {
     if (shell.inApp() && shell.standalone !== "merge") {
@@ -501,25 +529,33 @@ export async function openTextMerge(shell: ShellState, file: string) {
     finally { if (generation === shell.mergeGeneration) shell.mergeLoading = false; }
   }
 
-async function readTextMerge(shell: ShellState, file: string, generation: number) {
-    shell.mergeFile = file;
-    shell.mergeDirty = false;
-    shell.mergeEdited = false;
-    shell.mergeEditing = false;
-    shell.mergeError = "";
-    shell.textMerge = true;
-    shell.mergePieces = [];
-    shell.mergeSource = [];
-    shell.mergeBase = [];
-    shell.mergeResult = "";
-    shell.mergeVersion = "";
-    shell.mergeDraftSaved = false;
-    shell.mergeManualReady = false;
+async function readTextMerge(shell: ShellState, file: string, generation: number, reset = true, retry = 0) {
+    if (reset) {
+      shell.mergeFile = file;
+      shell.mergeDirty = false;
+      shell.mergeEdited = false;
+      shell.mergeEditing = false;
+      shell.mergeError = "";
+      shell.textMerge = true;
+      shell.mergePieces = [];
+      shell.mergeSource = [];
+      shell.mergeBase = [];
+      shell.mergeResult = "";
+      shell.mergeVersion = "";
+      shell.mergeDraftSaved = false;
+      shell.mergeManualReady = false;
+      shell.conflictView = null;
+    } else {
+      shell.mergeError = "";
+      shell.textMerge = true;
+    }
     shell.section = "changes";
     const already = shell.selectedPath === file;
+    shell.mergeFile = file;
     shell.selectedPath = file;
     const path = shell.repoPath();
-    const stillOpen = () => generation === shell.mergeGeneration && (shell.mode !== "live" || (shell.viewing(path) && shell.selectedPath === file));
+    const stillOpen = () => generation === shell.mergeGeneration && shell.textMerge && shell.mergeFile === file
+      && (shell.mode !== "live" || shell.viewing(path));
     let view = shell.mode === "sample" ? sampleConflictViews[file] : already ? shell.activeConflict : null;
     if (shell.mode === "live" && !view) {
       try {
@@ -527,7 +563,8 @@ async function readTextMerge(shell: ShellState, file: string, generation: number
         if (!stillOpen()) return;
         shell.conflictView = view;
       } catch (error) {
-        if (stillOpen()) shell.mergeError = shell.message(error);
+        if (await retryInterruptedMerge(shell, error, stillOpen, retry, file, generation)) return;
+        if (stillOpen()) shell.mergeError = mergeReadFailure(shell, error);
         return;
       }
     }
@@ -566,9 +603,10 @@ async function readTextMerge(shell: ShellState, file: string, generation: number
       } else restoreMergeState(shell, sides, piecesFromSides(shell, sides));
       shell.textMerge = true;
     } catch (error) {
+      if (await retryInterruptedMerge(shell, error, stillOpen, retry, file, generation)) return;
       if (stillOpen()) {
         if (conflictReadTooLarge(error)) showFileMerge(shell, file);
-        else shell.mergeError = shell.message(error);
+        else shell.mergeError = mergeReadFailure(shell, error);
       }
     }
   }

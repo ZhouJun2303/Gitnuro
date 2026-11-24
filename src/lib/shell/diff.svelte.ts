@@ -239,6 +239,11 @@ type DiffFlight = { key: string; promise: Promise<void> };
 const diffFlights = new WeakMap<ShellState, DiffFlight>();
 
 export async function loadDiff(shell: ShellState, loadLarge = false) {
+    // A standalone merge window owns the conflict reads for its workbench.
+    // Letting a status refresh start a normal diff here cancels conflict_view
+    // or conflict_sides through the shared read scheduler and leaves the
+    // merge panel with its headers but no pieces to render.
+    if (shell.standalone === "merge") return;
     if (shell.mode !== "live" || !shell.selectedPath || shell.section !== "changes") {
       shell.diff = null;
       shell.diffError = null;

@@ -3542,7 +3542,10 @@ export class ShellState {
     }
     this.refreshing = true;
     const openGen = this.openGen, statusGen = this.statusGen;
-    invalidateReads(path);
+    // The open conflict read is the merge panel body. Cancelling it leaves the
+    // headers up and the center on "no changes": the failure is "Preview superseded",
+    // and message() turns that into an empty string.
+    invalidateReads(path, this.textMerge ? ["conflict_view", "conflict_sides"] : []);
     try {
       const gen = this.statusGen;
       const value = await invoke<StatusSnapshot>(paths?.length ? "workspace_status_paths" : "workspace_status", paths?.length ? { path, files: paths } : { path });

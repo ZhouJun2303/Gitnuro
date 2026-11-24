@@ -61,6 +61,41 @@ test("merge drafts restore choices and the three-way base after reopening", asyn
   await expect(page.locator(".merge-draft-button")).toHaveText(/Draft saved|草稿已保存/);
 });
 
+test("a superseded conflict view is read again and the merge is drawn", async ({ page }) => {
+  let views = 0;
+  let repo = "";
+  let release!: () => void;
+  const gate = new Promise<void>((done) => { release = done; });
+  await page.route("**/__lab/invoke", async (route) => {
+    const { cmd, args } = route.request().postDataJSON();
+    if (cmd !== "conflict_view") return route.continue();
+    views += 1;
+    repo = String(args?.path ?? repo);
+    if (views === 1) {
+      await gate;
+      try { await route.continue(); } catch { /* this read was already superseded */ }
+      return;
+    }
+    return route.continue();
+  });
+  try {
+    const opened = page.goto("/?scene=text-merge-window&view=merge&theme=light", { waitUntil: "domcontentloaded" });
+    await page.locator(".merge-panel.standalone").waitFor({ timeout: 90_000 });
+    await expect.poll(() => views, { timeout: 90_000 }).toBe(1);
+    await page.evaluate(async (path) => {
+      const { invalidateReads } = await import("/src/lib/read-scheduler.ts");
+      invalidateReads(path);
+    }, repo);
+    await expect.poll(() => views, { timeout: 15_000 }).toBe(2);
+    release();
+    await opened;
+    await expect(page.locator(".merge-top")).toBeVisible();
+    await expect(page.locator(".merge-stage.merge-loading-state")).toHaveCount(0);
+    await expect(page.locator(".merge-party input").first()).not.toHaveAttribute("aria-label", "保留 ");
+    await expect(page.locator(".merge-panel .commit")).toBeDisabled();
+  } finally { release(); }
+});
+
 test("a late conflict read does not overwrite a draft typed while loading", async ({ page }) => {
   let release!: () => void;
   const gate = new Promise<void>((done) => { release = done; });

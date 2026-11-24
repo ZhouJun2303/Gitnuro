@@ -1166,6 +1166,31 @@ test("merge panel opens as a standalone page", async ({ page }) => {
   await expect(page.locator(".merge-scrim")).toHaveCount(0);
 });
 
+test("standalone merge keeps conflict data when a normal diff refresh is requested", async ({ page }) => {
+  await openLabScene(page, "text-merge-window", ".merge-panel.standalone");
+  const state = await page.evaluate(async () => {
+    const { ShellState } = await import(/* @vite-ignore */ "/src/lib/shell/state.svelte.ts");
+    const shell = {
+      standalone: "merge",
+      mode: "live",
+      section: "changes",
+      selectedPath: null,
+      diff: { path: "keep" },
+      diffError: "keep",
+      conflictView: { kind: "content" },
+      conflictPreview: { working: "keep" },
+    } as any;
+    await ShellState.prototype.loadDiff.call(shell);
+    return {
+      diff: shell.diff?.path,
+      diffError: shell.diffError,
+      conflictKind: shell.conflictView?.kind,
+      conflictText: shell.conflictPreview?.working,
+    };
+  });
+  expect(state).toEqual({ diff: "keep", diffError: "keep", conflictKind: "content", conflictText: "keep" });
+});
+
 test("unified diff keeps row nodes while scrolling", async ({ page }) => {
   await openLabScene(page, "prefs-diff", '[data-dialog="prefs"]');
   const style = page.locator('[data-dialog="prefs"] [data-pref="diff-style"]');
