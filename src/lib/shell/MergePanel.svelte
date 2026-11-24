@@ -377,21 +377,31 @@
           <p>{shell.tr("dialog.mergeLargeHint")}</p>
           <button class="pane-chip" type="button" disabled={shell.mergeApplying || shell.mergeLoading} onclick={() => void loadTextMerge(shell)}>{shell.tr("dialog.loadMerge")}</button>
         </div>
-      {:else}
-        <div class="merge-top">
-          <div class="merge-column base">
-            <div class="merge-column-head"><span>{shell.tr("dialog.mergeBase")}</span><span class="merge-column-hint">{shell.tr("dialog.mergeBaseHint")}</span></div>
-            <MergePane side="base" bind:this={basePane} onpick={chooseHunk} onscroll={(event) => syncScroll("base", event)} />
-          </div>
-          <div class="merge-column">
-            <div class="merge-column-head"><span>{shell.mergeLeft}</span><span class="merge-column-hint">{shell.tr("dialog.mergeIncoming")}</span></div>
-            <MergePane side="theirs" bind:this={leftPane} onpick={chooseHunk} onscroll={(event) => syncScroll("left", event)} />
-          </div>
-          <div class="merge-column">
-            <div class="merge-column-head"><span>{shell.mergeRight}</span><span class="merge-column-hint">{shell.tr("dialog.mergeCurrent")}</span></div>
-            <MergePane side="ours" bind:this={rightPane} onpick={chooseHunk} onscroll={(event) => syncScroll("right", event)} />
-          </div>
+      {:else if shell.mergePieces.length === 0 && !shell.mergeEditing}
+        <div class="merge-stage merge-loading-state" role="status">
+          <p>{shell.mergeLoading ? shell.tr("chrome.reading") : shell.mergeError || shell.tr("chrome.noChanges")}</p>
         </div>
+      {:else}
+        {#if shell.mergePieces.length > 0}
+          <div class="merge-top">
+            <div class="merge-column base">
+              <div class="merge-column-head"><span>{shell.tr("dialog.mergeBase")}</span><span class="merge-column-hint">{shell.tr("dialog.mergeBaseHint")}</span></div>
+              <MergePane side="base" bind:this={basePane} onpick={chooseHunk} onscroll={(event) => syncScroll("base", event)} />
+            </div>
+            <div class="merge-column">
+              <div class="merge-column-head"><span>{shell.mergeLeft}</span><span class="merge-column-hint">{shell.tr("dialog.mergeIncoming")}</span></div>
+              <MergePane side="theirs" bind:this={leftPane} onpick={chooseHunk} onscroll={(event) => syncScroll("left", event)} />
+            </div>
+            <div class="merge-column">
+              <div class="merge-column-head"><span>{shell.mergeRight}</span><span class="merge-column-hint">{shell.tr("dialog.mergeCurrent")}</span></div>
+              <MergePane side="ours" bind:this={rightPane} onpick={chooseHunk} onscroll={(event) => syncScroll("right", event)} />
+            </div>
+          </div>
+        {:else}
+          <div class="merge-stage merge-loading-state" role="status">
+            <p>{shell.mergeLoading ? shell.tr("chrome.reading") : shell.mergeError || shell.tr("chrome.noChanges")}</p>
+          </div>
+        {/if}
         <div class="merge-result-pane">
           <div class="merge-result-head">
             <span>{shell.tr("dialog.result")}</span>

@@ -1431,9 +1431,36 @@ export function chosenDiffLines(shell: ShellState, clicked: number) {
   }
 
 const hunkIndexCache = new WeakMap<object, Int32Array>();
+const wholeFileHunkIndexCache = new WeakMap<object, Int32Array>();
+
+function wholeFileHunkIndex(lines: DiffLine[]) {
+    let table = wholeFileHunkIndexCache.get(lines);
+    if (table) return table;
+    table = new Int32Array(lines.length);
+    table.fill(-1);
+    let hunk = -1;
+    let inChange = false;
+    for (let cursor = 0; cursor < lines.length; cursor += 1) {
+      const changed = lines[cursor]?.kind === "add" || lines[cursor]?.kind === "delete";
+      if (changed && !inChange) {
+        hunk += 1;
+        inChange = true;
+      } else if (!changed) {
+        inChange = false;
+      }
+      if (changed) table[cursor] = hunk;
+    }
+    wholeFileHunkIndexCache.set(lines, table);
+    return table;
+  }
 
 export function hunkOf(shell: ShellState, index: number) {
     const lines = shell.diffLines;
+    if (shell.settings.showEntireFile) {
+      const table = wholeFileHunkIndex(lines);
+      const hunk = table[Math.min(index, table.length - 1)] ?? -1;
+      return hunk >= 0 ? hunk : null;
+    }
     let table = hunkIndexCache.get(lines);
     if (!table) {
       table = new Int32Array(lines.length);
@@ -1448,8 +1475,27 @@ export function hunkOf(shell: ShellState, index: number) {
     return hunk >= 0 ? hunk : null;
   }
 
-/** Inclusive start / exclusive end for each `@@` hunk in the current diff. */
+/** Inclusive start / exclusive end for each displayed hunk in the current diff. */
 export function hunkRanges(shell: ShellState) {
+    if (shell.settings.showEntireFile) {
+      const ranges: { index: number; start: number; end: number }[] = [];
+      let start = -1;
+      let index = 0;
+      for (let cursor = 0; cursor < shell.diffLines.length; cursor += 1) {
+        const changed = shell.diffLines[cursor]?.kind === "add" || shell.diffLines[cursor]?.kind === "delete";
+        if (changed) {
+          if (start < 0) start = cursor;
+          continue;
+        }
+        if (start >= 0) {
+          ranges.push({ index, start, end: cursor });
+          index += 1;
+          start = -1;
+        }
+      }
+      if (start >= 0) ranges.push({ index, start, end: shell.diffLines.length });
+      return ranges;
+    }
     const ranges: { index: number; start: number; end: number }[] = [];
     let current: { index: number; start: number; end: number } | null = null;
     let hunk = -1;

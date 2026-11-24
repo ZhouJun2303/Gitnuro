@@ -624,6 +624,23 @@
   font-size: 13px;
 }
 
+.merge-stage.merge-loading-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  background: var(--canvas);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.merge-stage.merge-loading-state p {
+  margin: 0;
+  padding: 24px;
+  text-align: center;
+}
+
 .merge-stage.merge-large p {
   max-width: 340px;
   margin: 0;

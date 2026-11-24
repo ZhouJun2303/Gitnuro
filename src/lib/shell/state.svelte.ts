@@ -7853,10 +7853,11 @@ export class ShellState {
       const selectedPath = this.selectedPath;
       const selectedSide = this.selectedSide;
       const repository = this.repoPath();
+      const standalone = this.standalone;
       const showEntireFile = this.settings.showEntireFile;
       const diffContext = this.settings.diffContext;
       const ignoreSpace = this.settings.ignoreSpace;
-      if (section !== "changes" || mode !== "live" || !selectedPath || this.switching || !repository) {
+      if (section !== "changes" || mode !== "live" || standalone === "merge" || !selectedPath || this.switching || !repository) {
         requestedDiffKey = "";
         return;
       }
