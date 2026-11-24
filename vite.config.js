@@ -5,10 +5,43 @@ import { isolatedViteCache } from "./scripts/vite-cache.mjs";
 import process from "node:process";
 const host = process.env.TAURI_DEV_HOST;
 const port = Number(process.env.AWEGIT_VITE_PORT || 1420);
+const clientDependencies = [
+  "@tauri-apps/api/core",
+  "@tauri-apps/api/dpi",
+  "@tauri-apps/api/event",
+  "@tauri-apps/api/window",
+  "@tauri-apps/plugin-opener",
+  "highlight.js/lib/core",
+  "highlight.js/lib/languages/bash",
+  "highlight.js/lib/languages/c",
+  "highlight.js/lib/languages/cpp",
+  "highlight.js/lib/languages/csharp",
+  "highlight.js/lib/languages/dart",
+  "highlight.js/lib/languages/go",
+  "highlight.js/lib/languages/ini",
+  "highlight.js/lib/languages/java",
+  "highlight.js/lib/languages/json",
+  "highlight.js/lib/languages/kotlin",
+  "highlight.js/lib/languages/lua",
+  "highlight.js/lib/languages/objectivec",
+  "highlight.js/lib/languages/php",
+  "highlight.js/lib/languages/python",
+  "highlight.js/lib/languages/ruby",
+  "highlight.js/lib/languages/rust",
+  "highlight.js/lib/languages/scala",
+  "highlight.js/lib/languages/sql",
+  "highlight.js/lib/languages/swift",
+  "highlight.js/lib/languages/typescript",
+  "highlight.js/lib/languages/xml",
+  "highlight.js/lib/languages/yaml",
+];
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [isolatedViteCache(), sveltekit()],
+  optimizeDeps: {
+    include: clientDependencies,
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
