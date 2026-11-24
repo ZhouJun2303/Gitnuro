@@ -246,6 +246,19 @@ function sameValue(left: unknown, right: unknown): boolean {
   return true;
 }
 
+function boundedSetting(value: unknown, fallback: number, min: number, max: number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
+}
+
+function boundedDecimalSetting(value: unknown, fallback: number, min: number, max: number, step = 0.1) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  const bounded = Math.min(max, Math.max(min, number));
+  const precision = Math.max(0, (String(step).split(".")[1] ?? "").length);
+  return Number((Math.round(bounded / step) * step).toFixed(precision));
+}
+
 export class ShellState {
 
 
@@ -270,6 +283,20 @@ export class ShellState {
     codeFont: "",
     uiFontWeight: 400,
     codeFontWeight: 400,
+    commitRowHeight: 30,
+    commitSubjectFontSize: 14,
+    commitAuthorFontSize: 11,
+    commitShaFontSize: 11,
+    commitTimeFontSize: 11,
+    changesRowHeight: 28,
+    changesFontSize: 14,
+    changesMetaFontSize: 11,
+    changesIndentCh: 2,
+    detailBodyFontSize: 14,
+    detailTabFontSize: 13,
+    detailMetaFontSize: 12,
+    sidebarFontSize: 14,
+    sidebarSectionFontSize: 11,
     dateRelative: true,
     dateFormat: "dd MMM yyyy",
     date24h: true,
@@ -2046,10 +2073,10 @@ export class ShellState {
   effectiveCodeFontWeight = $derived(Math.max(this.settings.codeFontWeight || 400, this.settings.seniorMode ? 500 : 0));
 
 
-  rowCommit = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 36 : 28, 2.1));
+  rowCommit = $derived(boundedSetting(this.settings.commitRowHeight, 30, 20, 80));
 
 
-  rowFile = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 32 : 28, 2));
+  rowFile = $derived(boundedSetting(this.settings.changesRowHeight, 28, 20, 80));
 
 
   rowTree = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 28 : 24, 1.8));
@@ -2404,7 +2431,7 @@ export class ShellState {
   unstagedTree = $derived(this.fileLayout === "tree" ? this.asTree(this.shownUnstaged, this.collapsedDirs) : this.flatEntries(this.shownUnstaged));
 
 
-  fileStride = $derived(this.fileLayout === "tree" ? this.rowTree : this.rowFile);
+  fileStride = $derived(this.rowFile);
 
 
   fileWindow = $derived(windowSlice(this.unstagedTree, this.fileTop, this.fileStride));
@@ -3353,6 +3380,17 @@ export class ShellState {
   applySnapshot(value: StatusSnapshot) {
     const revision = value.revision ?? 0;
     const partialUpdate = !!value.statusPaths;
+    const previousSelection = this.selectedPath;
+    const previousSide = this.selectedSide;
+    const query = typeof this.fileQuery === "string" ? this.fileQuery.trim().toLowerCase() : "";
+    const conflictsOnly = this.conflictsOnly === true;
+    const shown = (files: readonly StatusFile[]) => files.filter((file) =>
+      (!query || file.path.toLowerCase().includes(query)) && (!conflictsOnly || file.kind === "conflict"),
+    );
+    const previousRows = this.snapshot?.path === value.path
+      ? shown(previousSide === "staged" ? this.snapshot.staged : this.snapshot.unstaged)
+      : [];
+    const previousIndex = previousSelection ? previousRows.findIndex((file) => file.path === previousSelection) : -1;
     if (this.viewing(value.path) && value.revision != null && revision < Math.max(this.statusRevision, this.statusObservedRevision)) {
       // A late delta can cover an unrelated path; reconcile without rolling the list backward.
       this.scheduleStageRefresh();
@@ -3413,6 +3451,16 @@ export class ShellState {
     if (this.selectedPath && other.some((file) => file.path === this.selectedPath)) {
       this.selectedSide = otherSide;
       return;
+    }
+    if (previousSelection && previousIndex >= 0) {
+      const adjacent = shown(previousSide === "staged" ? visible.staged : visible.unstaged);
+      const next = adjacent[previousIndex] ?? adjacent[previousIndex - 1];
+      if (next) {
+        this.selectedSide = previousSide;
+        this.selectedPath = next.path;
+        this.selectedIndex = adjacent.indexOf(next);
+        return;
+      }
     }
     const conflict = visible.unstaged.find((file) => file.kind === "conflict");
     if (conflict) {
@@ -4555,6 +4603,23 @@ export class ShellState {
     if (this.settings.aiPromptStyle !== "long") this.settings = { ...this.settings, aiPromptStyle: "short" };
     if (!isCommitType(this.settings.commitType)) this.settings = { ...this.settings, commitType: this.preferredCommitType() };
     if (!this.settings.errorLogDays) this.settings = { ...this.settings, errorLogDays: 7 };
+    this.settings = {
+      ...this.settings,
+      commitRowHeight: boundedSetting(this.settings.commitRowHeight, 30, 20, 80),
+      commitSubjectFontSize: boundedSetting(this.settings.commitSubjectFontSize, 14, 8, 32),
+      commitAuthorFontSize: boundedSetting(this.settings.commitAuthorFontSize, 11, 8, 24),
+      commitShaFontSize: boundedSetting(this.settings.commitShaFontSize, 11, 8, 24),
+      commitTimeFontSize: boundedSetting(this.settings.commitTimeFontSize, 11, 8, 24),
+      changesRowHeight: boundedSetting(this.settings.changesRowHeight, 28, 20, 80),
+      changesFontSize: boundedSetting(this.settings.changesFontSize, 14, 8, 32),
+      changesMetaFontSize: boundedSetting(this.settings.changesMetaFontSize, 11, 8, 24),
+      changesIndentCh: boundedDecimalSetting(this.settings.changesIndentCh, 2, 0.2, 4),
+      detailBodyFontSize: boundedSetting(this.settings.detailBodyFontSize, 14, 8, 32),
+      detailTabFontSize: boundedSetting(this.settings.detailTabFontSize, 13, 8, 32),
+      detailMetaFontSize: boundedSetting(this.settings.detailMetaFontSize, 12, 8, 24),
+      sidebarFontSize: boundedSetting(this.settings.sidebarFontSize, 14, 8, 32),
+      sidebarSectionFontSize: boundedSetting(this.settings.sidebarSectionFontSize, 11, 8, 24),
+    };
     this.pruneErrorLog();
     if (!this.snapshot && isCommitType(this.settings.commitType)) this.commitType = this.settings.commitType;
     const limit = Math.min(100000, Math.max(1, this.settings.maxCommits || 500));
@@ -7976,6 +8041,18 @@ export class ShellState {
     root.style.setProperty("--row-commit", `${this.rowCommit}px`);
     root.style.setProperty("--row-side", `${this.rowSide}px`);
     root.style.setProperty("--row-tree", `${this.rowTree}px`);
+    root.style.setProperty("--commit-subject-font-size", `${boundedSetting(this.settings.commitSubjectFontSize, 14, 8, 32)}px`);
+    root.style.setProperty("--commit-author-font-size", `${boundedSetting(this.settings.commitAuthorFontSize, 11, 8, 24)}px`);
+    root.style.setProperty("--commit-sha-font-size", `${boundedSetting(this.settings.commitShaFontSize, 11, 8, 24)}px`);
+    root.style.setProperty("--commit-time-font-size", `${boundedSetting(this.settings.commitTimeFontSize, 11, 8, 24)}px`);
+    root.style.setProperty("--changes-font-size", `${boundedSetting(this.settings.changesFontSize, 14, 8, 32)}px`);
+    root.style.setProperty("--changes-meta-font-size", `${boundedSetting(this.settings.changesMetaFontSize, 11, 8, 24)}px`);
+    root.style.setProperty("--changes-indent-ch", String(boundedDecimalSetting(this.settings.changesIndentCh, 2, 0.2, 4)));
+    root.style.setProperty("--detail-body-font-size", `${boundedSetting(this.settings.detailBodyFontSize, 14, 8, 32)}px`);
+    root.style.setProperty("--detail-tab-font-size", `${boundedSetting(this.settings.detailTabFontSize, 13, 8, 32)}px`);
+    root.style.setProperty("--detail-meta-font-size", `${boundedSetting(this.settings.detailMetaFontSize, 12, 8, 24)}px`);
+    root.style.setProperty("--sidebar-font-size", `${boundedSetting(this.settings.sidebarFontSize, 14, 8, 32)}px`);
+    root.style.setProperty("--sidebar-section-font-size", `${boundedSetting(this.settings.sidebarSectionFontSize, 11, 8, 24)}px`);
     root.style.setProperty("--diff-row", `${this.diffRowHeight}px`);
     return () => media?.removeEventListener("change", paint);
     });

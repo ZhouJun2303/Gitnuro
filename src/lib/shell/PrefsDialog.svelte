@@ -358,10 +358,6 @@
               <input type="checkbox" bind:checked={shell.settings.showDiffMarks} />
               <span class="pref-label">{shell.tr("dialog.showMarks")}</span>
             </label>
-            <label class="pref-row">
-              <span class="pref-label">{shell.tr("dialog.fontSize")}</span>
-              <span class="pref-control"><input type="number" min="8" max="32" bind:value={shell.settings.diffFontSize} /></span>
-            </label>
             <label class="pref-row pref-toggle">
               <input type="checkbox" bind:checked={shell.settings.disableSyntaxHighlight} />
               <span class="pref-label">{shell.tr("dialog.disableHighlight")}</span>

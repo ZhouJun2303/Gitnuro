@@ -19,6 +19,11 @@
   const matches = new Map<string, FontMatch>();
   const recognized = $derived(!!recognition && recognition.id === `google-${(googleFamily(family) ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase()}`);
   const used = $derived(cache?.fonts.reduce((sum, font) => sum + (font.bytes ?? 0), 0) ?? 0);
+  type FontSettingKey =
+    | "commitRowHeight" | "commitSubjectFontSize" | "commitAuthorFontSize" | "commitShaFontSize" | "commitTimeFontSize"
+    | "changesRowHeight" | "changesFontSize" | "changesMetaFontSize" | "changesIndentCh"
+    | "detailBodyFontSize" | "detailTabFontSize" | "detailMetaFontSize"
+    | "sidebarFontSize" | "sidebarSectionFontSize";
 
   async function refresh() {
     if (!shell.backend()) return;
@@ -59,7 +64,30 @@
     shell.settings.diffFontSize = 14;
     shell.settings.uiFontWeight = 400;
     shell.settings.codeFontWeight = 400;
+    shell.settings.commitRowHeight = 30;
+    shell.settings.commitSubjectFontSize = 14;
+    shell.settings.commitAuthorFontSize = 11;
+    shell.settings.commitShaFontSize = 11;
+    shell.settings.commitTimeFontSize = 11;
+    shell.settings.changesRowHeight = 28;
+    shell.settings.changesFontSize = 14;
+    shell.settings.changesMetaFontSize = 11;
+    shell.settings.changesIndentCh = 2;
+    shell.settings.detailBodyFontSize = 14;
+    shell.settings.detailTabFontSize = 13;
+    shell.settings.detailMetaFontSize = 12;
+    shell.settings.sidebarFontSize = 14;
+    shell.settings.sidebarSectionFontSize = 11;
     shell.fontError = "";
+    void shell.savePrefs(false);
+  }
+  function setFontSetting(key: FontSettingKey, input: HTMLInputElement, min: number, max: number, step = 1) {
+    const value = Number(input.value);
+    const bounded = Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min;
+    const precision = Math.max(0, (String(step).split(".")[1] ?? "").length);
+    const next = Number((Math.round(bounded / step) * step).toFixed(precision));
+    shell.settings[key] = next;
+    input.value = String(next);
   }
   $effect(() => {
     const downloading = !!shell.fontDownloading;
@@ -136,6 +164,40 @@
 {#if shell.fontError}<p class="font-error" role="alert">{shell.fontError}</p>{/if}
 <FontPicker kind="ui" {cache} ondownload={download} />
 <FontPicker kind="code" {cache} ondownload={download} />
+<section class="pref-card font-panel-card">
+  <h3 class="pref-card-title">{shell.tr("dialog.commitPanelFonts")}</h3>
+  <div class="pref-card-body font-panel-grid">
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.commitItemHeight")}</span><span class="pref-control"><input type="number" min="20" max="80" value={shell.settings.commitRowHeight} onchange={(event) => setFontSetting("commitRowHeight", event.currentTarget, 20, 80)} /><span>px</span></span></label>
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.commitSubjectFontSize")}</span><span class="pref-control"><input type="number" min="8" max="32" value={shell.settings.commitSubjectFontSize} onchange={(event) => setFontSetting("commitSubjectFontSize", event.currentTarget, 8, 32)} /><span>px</span></span></label>
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.commitAuthorFontSize")}</span><span class="pref-control"><input type="number" min="8" max="24" value={shell.settings.commitAuthorFontSize} onchange={(event) => setFontSetting("commitAuthorFontSize", event.currentTarget, 8, 24)} /><span>px</span></span></label>
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.commitShaFontSize")}</span><span class="pref-control"><input type="number" min="8" max="24" value={shell.settings.commitShaFontSize} onchange={(event) => setFontSetting("commitShaFontSize", event.currentTarget, 8, 24)} /><span>px</span></span></label>
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.commitTimeFontSize")}</span><span class="pref-control"><input type="number" min="8" max="24" value={shell.settings.commitTimeFontSize} onchange={(event) => setFontSetting("commitTimeFontSize", event.currentTarget, 8, 24)} /><span>px</span></span></label>
+  </div>
+</section>
+<section class="pref-card font-panel-card">
+  <h3 class="pref-card-title">{shell.tr("dialog.changesPanelFonts")}</h3>
+  <div class="pref-card-body font-panel-grid">
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.changesItemHeight")}</span><span class="pref-control"><input type="number" min="20" max="80" value={shell.settings.changesRowHeight} onchange={(event) => setFontSetting("changesRowHeight", event.currentTarget, 20, 80)} /><span>px</span></span></label>
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.changesFontSize")}</span><span class="pref-control"><input type="number" min="8" max="32" value={shell.settings.changesFontSize} onchange={(event) => setFontSetting("changesFontSize", event.currentTarget, 8, 32)} /><span>px</span></span></label>
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.changesMetaFontSize")}</span><span class="pref-control"><input type="number" min="8" max="24" value={shell.settings.changesMetaFontSize} onchange={(event) => setFontSetting("changesMetaFontSize", event.currentTarget, 8, 24)} /><span>px</span></span></label>
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.changesIndentCh")}</span><span class="pref-control"><input type="number" min="0.2" max="4" step="0.1" value={shell.settings.changesIndentCh} onchange={(event) => setFontSetting("changesIndentCh", event.currentTarget, 0.2, 4, 0.1)} /><span>ch</span></span></label>
+  </div>
+</section>
+<section class="pref-card font-panel-card">
+  <h3 class="pref-card-title">{shell.tr("dialog.detailPanelFonts")}</h3>
+  <div class="pref-card-body font-panel-grid">
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.detailBodyFontSize")}</span><span class="pref-control"><input type="number" min="8" max="32" value={shell.settings.detailBodyFontSize} onchange={(event) => setFontSetting("detailBodyFontSize", event.currentTarget, 8, 32)} /><span>px</span></span></label>
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.detailTabFontSize")}</span><span class="pref-control"><input type="number" min="8" max="32" value={shell.settings.detailTabFontSize} onchange={(event) => setFontSetting("detailTabFontSize", event.currentTarget, 8, 32)} /><span>px</span></span></label>
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.detailMetaFontSize")}</span><span class="pref-control"><input type="number" min="8" max="24" value={shell.settings.detailMetaFontSize} onchange={(event) => setFontSetting("detailMetaFontSize", event.currentTarget, 8, 24)} /><span>px</span></span></label>
+  </div>
+</section>
+<section class="pref-card font-panel-card">
+  <h3 class="pref-card-title">{shell.tr("dialog.sidebarFonts")}</h3>
+  <div class="pref-card-body font-panel-grid">
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.sidebarFontSize")}</span><span class="pref-control"><input type="number" min="8" max="32" value={shell.settings.sidebarFontSize} onchange={(event) => setFontSetting("sidebarFontSize", event.currentTarget, 8, 32)} /><span>px</span></span></label>
+    <label class="pref-row"><span class="pref-label">{shell.tr("dialog.sidebarSectionFontSize")}</span><span class="pref-control"><input type="number" min="8" max="24" value={shell.settings.sidebarSectionFontSize} onchange={(event) => setFontSetting("sidebarSectionFontSize", event.currentTarget, 8, 24)} /><span>px</span></span></label>
+  </div>
+</section>
 <section class="pref-card font-storage">
   <h3 class="pref-card-title">{shell.tr("dialog.fontStorage")}</h3>
   <div class="pref-card-body">

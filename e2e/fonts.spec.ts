@@ -56,6 +56,34 @@ for (const theme of ["apple", "light", "dark"] as const) {
 }
 
 for (const theme of ["apple", "light", "dark"] as const) {
+  test(`${theme}: panel typography settings apply and reset together`, async ({ page }) => {
+    await pinLabSettings(page, { theme });
+    await openLabScene(page, "prefs-fonts", '[data-pref-tab="fonts"]', { locale: "en" });
+    await page.getByRole("spinbutton", { name: "Commit item height" }).fill("42");
+    await page.getByRole("spinbutton", { name: "Commit description font size" }).fill("17");
+    await page.getByRole("spinbutton", { name: "Author font size" }).fill("12");
+    await page.getByRole("spinbutton", { name: "File name font size" }).fill("16");
+    await page.getByRole("spinbutton", { name: "Tree indentation" }).fill("0.6");
+    await page.getByRole("spinbutton", { name: "Tree indentation" }).press("Tab");
+    await expect.poll(() => page.evaluate(() => ({
+      row: getComputedStyle(document.documentElement).getPropertyValue("--row-commit").trim(),
+      subject: getComputedStyle(document.documentElement).getPropertyValue("--commit-subject-font-size").trim(),
+      author: getComputedStyle(document.documentElement).getPropertyValue("--commit-author-font-size").trim(),
+      changes: getComputedStyle(document.documentElement).getPropertyValue("--changes-font-size").trim(),
+      indent: getComputedStyle(document.documentElement).getPropertyValue("--changes-indent-ch").trim(),
+    }))).toEqual({ row: "42px", subject: "17px", author: "12px", changes: "16px", indent: "0.6" });
+    await page.getByRole("button", { name: "Restore font defaults", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => ({
+      row: getComputedStyle(document.documentElement).getPropertyValue("--row-commit").trim(),
+      subject: getComputedStyle(document.documentElement).getPropertyValue("--commit-subject-font-size").trim(),
+      author: getComputedStyle(document.documentElement).getPropertyValue("--commit-author-font-size").trim(),
+      changes: getComputedStyle(document.documentElement).getPropertyValue("--changes-font-size").trim(),
+      indent: getComputedStyle(document.documentElement).getPropertyValue("--changes-indent-ch").trim(),
+    }))).toEqual({ row: "30px", subject: "14px", author: "11px", changes: "14px", indent: "2" });
+  });
+}
+
+for (const theme of ["apple", "light", "dark"] as const) {
   test(`${theme}: optional fonts load on request and work from cache while offline`, async ({ page }) => {
     test.skip(!fixture, "No system test font installed");
     const source = "awegit-font:inter";

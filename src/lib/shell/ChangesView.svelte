@@ -16,6 +16,10 @@
   const onCombinedScroll = onVirtualScroll((top) => (shell.combinedTop = top));
   let typeOpen = $state(false);
 
+  function treeIndent(depth: number) {
+    return `calc(8px + ${depth} * var(--changes-indent-ch, 2) * 1ch)`;
+  }
+
   onMount(() => {
     // A refresh while the history view was open clears the diff; reload it here
     // instead of leaving the pane on its "reading" placeholder.
@@ -296,7 +300,7 @@
 
 {#snippet dirRow(path: string, side: Side, depth: number)}
       {@const open = !shell.collapsedDirs.includes(path)}
-      <div class="tree-row dir-row" aria-busy={shell.pendingStage(path) !== undefined || shell.pathPending(path)} class:picked={side === "staged" ? shell.pickedStagedDirs.has(path) : shell.pickedUnstagedDirs.has(path)} style:padding-left="{8 + depth * 16}px" role="group" oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
+      <div class="tree-row dir-row" aria-busy={shell.pendingStage(path) !== undefined || shell.pathPending(path)} class:picked={side === "staged" ? shell.pickedStagedDirs.has(path) : shell.pickedUnstagedDirs.has(path)} style:padding-left={treeIndent(depth)} role="group" oncontextmenu={(event) => shell.openMenu(event, shell.dirMenu(path, side))}>
         <button class="twist-btn" type="button" aria-expanded={open} aria-label={shell.fileName(path)} onclick={(event) => onTwistClick(event, path)}>
           {@render disclosure(open)}
         </button>
@@ -455,7 +459,7 @@
         class="file"
         aria-busy={shell.pendingStage(file.path) !== undefined || shell.pathPending(file.path)}
         class:tree-row={shell.fileLayout === "tree"}
-        style:padding-left="{shell.fileLayout === "tree" ? 8 + depth * 16 : 8 + depth * 14}px"
+        style:padding-left={shell.fileLayout === "tree" ? treeIndent(depth) : `${8 + depth * 14}px`}
         class:selected={shell.selectedPath === file.path && (shell.mode !== "live" || shell.selectedSide === side)}
         class:picked={pickedPaths.has(file.path) && !(shell.selectedPath === file.path && (shell.mode !== "live" || shell.selectedSide === side))}
         role="group"

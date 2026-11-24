@@ -61,6 +61,34 @@ pub struct Settings {
     pub ui_font_weight: u32,
     #[serde(default = "font_weight")]
     pub code_font_weight: u32,
+    #[serde(default = "commit_row_height")]
+    pub commit_row_height: u32,
+    #[serde(default = "commit_subject_font")]
+    pub commit_subject_font_size: u32,
+    #[serde(default = "commit_meta_font")]
+    pub commit_author_font_size: u32,
+    #[serde(default = "commit_meta_font")]
+    pub commit_sha_font_size: u32,
+    #[serde(default = "commit_meta_font")]
+    pub commit_time_font_size: u32,
+    #[serde(default = "changes_row_height")]
+    pub changes_row_height: u32,
+    #[serde(default = "changes_font")]
+    pub changes_font_size: u32,
+    #[serde(default = "changes_meta_font")]
+    pub changes_meta_font_size: u32,
+    #[serde(default = "changes_indent")]
+    pub changes_indent_ch: f32,
+    #[serde(default = "detail_body_font")]
+    pub detail_body_font_size: u32,
+    #[serde(default = "detail_tab_font")]
+    pub detail_tab_font_size: u32,
+    #[serde(default = "detail_meta_font")]
+    pub detail_meta_font_size: u32,
+    #[serde(default = "sidebar_font")]
+    pub sidebar_font_size: u32,
+    #[serde(default = "sidebar_section_font")]
+    pub sidebar_section_font_size: u32,
     #[serde(default = "default_true")]
     pub date_relative: bool,
     #[serde(default)]
@@ -518,6 +546,18 @@ fn diff_font() -> u32 {
     14
 }
 fn font_weight() -> u32 { 400 }
+fn commit_row_height() -> u32 { 30 }
+fn commit_subject_font() -> u32 { 14 }
+fn commit_meta_font() -> u32 { 11 }
+fn changes_row_height() -> u32 { 28 }
+fn changes_font() -> u32 { 14 }
+fn changes_meta_font() -> u32 { 11 }
+fn changes_indent() -> f32 { 2.0 }
+fn detail_body_font() -> u32 { 14 }
+fn detail_tab_font() -> u32 { 13 }
+fn detail_meta_font() -> u32 { 12 }
+fn sidebar_font() -> u32 { 14 }
+fn sidebar_section_font() -> u32 { 11 }
 fn date_sort() -> String {
     "date".into()
 }
@@ -580,6 +620,20 @@ impl Default for Settings {
             code_font: String::new(),
             ui_font_weight: font_weight(),
             code_font_weight: font_weight(),
+            commit_row_height: commit_row_height(),
+            commit_subject_font_size: commit_subject_font(),
+            commit_author_font_size: commit_meta_font(),
+            commit_sha_font_size: commit_meta_font(),
+            commit_time_font_size: commit_meta_font(),
+            changes_row_height: changes_row_height(),
+            changes_font_size: changes_font(),
+            changes_meta_font_size: changes_meta_font(),
+            changes_indent_ch: changes_indent(),
+            detail_body_font_size: detail_body_font(),
+            detail_tab_font_size: detail_tab_font(),
+            detail_meta_font_size: detail_meta_font(),
+            sidebar_font_size: sidebar_font(),
+            sidebar_section_font_size: sidebar_section_font(),
             date_relative: true,
             date_format: String::new(),
             date_24h: true,
@@ -1575,6 +1629,7 @@ mod tests {
         assert_eq!(defaults.diff_font_size, 14);
         assert_eq!(defaults.ui_font_weight, 400);
         assert_eq!(defaults.code_font_weight, 400);
+        assert_eq!(defaults.changes_indent_ch, 2.0);
         let saved: super::Settings = serde_json::from_str(r#"{"uiScale":13,"diffFontSize":16,"uiFont":"inter","codeFont":"jetbrains-mono","uiFontWeight":500,"codeFontWeight":600}"#).unwrap();
         assert_eq!(saved.ui_scale, 13);
         let senior: super::Settings = serde_json::from_str(r#"{"seniorMode":true}"#).unwrap();
@@ -1584,6 +1639,8 @@ mod tests {
         assert_eq!(saved.code_font, "jetbrains-mono");
         assert_eq!(saved.ui_font_weight, 500);
         assert_eq!(saved.code_font_weight, 600);
+        let decimal: super::Settings = serde_json::from_str(r#"{"changesIndentCh":0.6}"#).unwrap();
+        assert!((decimal.changes_indent_ch - 0.6).abs() < f32::EPSILON);
     }
 
     use super::*;

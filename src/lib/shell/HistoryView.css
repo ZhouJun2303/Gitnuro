@@ -122,7 +122,7 @@
     white-space: nowrap;
   }
 
-.commit-row .subject { font-weight: 400; flex: 1; min-width: 96px; }
+.commit-row .subject { font-weight: 400; font-size: var(--commit-subject-font-size, inherit); flex: 1; min-width: 96px; }
 
 .history .commit-row.selected .subject { font-weight: 600; }
 
@@ -322,11 +322,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: var(--commit-author-font-size, 11px);
   }
 
 .commit-side .meta {
     line-height: 16px;
-    font-size: 11px;
   }
 
 .commit-side .sha {
@@ -338,6 +338,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: color-mix(in srgb, var(--text-secondary) 85%, var(--accent));
+    font-size: var(--commit-sha-font-size, 11px);
   }
 
 .commit-side .date {
@@ -347,6 +348,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: var(--commit-time-font-size, 11px);
   }
 
 .commit-side .selector {

@@ -168,6 +168,7 @@ textarea:focus-visible,
     display: flex;
     align-items: center;
     gap: 6px;
+    font-size: var(--sidebar-font-size, inherit);
     text-align: left;
   }
 

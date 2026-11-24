@@ -50,6 +50,17 @@
   --row-commit: 28px;
   --row-side: 28px;
   --row-tree: 24px;
+  --commit-subject-font-size: 14px;
+  --commit-author-font-size: 11px;
+  --commit-sha-font-size: 11px;
+  --commit-time-font-size: 11px;
+  --changes-font-size: 14px;
+  --changes-meta-font-size: 11px;
+  --detail-body-font-size: 14px;
+  --detail-tab-font-size: 13px;
+  --detail-meta-font-size: 12px;
+  --sidebar-font-size: 14px;
+  --sidebar-section-font-size: 11px;
   --split-row: 19px;
   --guide: 72;
   /* Radii, shadows, focus */

@@ -212,6 +212,9 @@
 .font-card .pref-control { flex: 1 1 280px; }
 .font-card .pref-control > select { flex: 1; width: auto; min-width: 140px; }
 .font-card .text-button { margin: 0; min-width: 115px; }
+.font-panel-card .pref-card-body { padding-top: 4px; }
+.font-panel-grid .pref-control > input[type="number"] { width: 72px; }
+.font-panel-grid .pref-control > span { color: var(--text-secondary); font-size: 12px; }
 .dialog .font-file-path { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; font-size: 11px; color: var(--text-secondary); white-space: normal; max-height: none; }
 .font-file-path code, .font-cache-path { user-select: text; overflow-wrap: anywhere; font-family: var(--mono); font-size: 11px; }
 .font-cache-path { display: block; margin: 6px 0 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field); }
