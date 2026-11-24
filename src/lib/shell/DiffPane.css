@@ -100,7 +100,9 @@
 
 .diff-hunk-actions {
   position: absolute;
-  right: 16px;
+  /* Keep the action strip out of the code columns so row context menus and
+     line selection remain reachable while the strip is visible. */
+  left: 8px;
   z-index: 5;
   display: flex;
   gap: 6px;

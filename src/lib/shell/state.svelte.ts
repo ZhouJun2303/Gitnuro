@@ -3424,8 +3424,12 @@ export class ShellState {
     }
     if (!partialUpdate) {
       this.statusRevision = revision;
-      const noted = this.repoWatchNotes.get(this.jobKey(value.path));
-      if (!noted || noted.revision <= revision) this.repoWatchNotes.delete(this.jobKey(value.path));
+      const notes = this.repoWatchNotes;
+      if (notes) {
+        const key = this.jobKey(value.path);
+        const noted = notes.get(key);
+        if (!noted || noted.revision <= revision) notes.delete(key);
+      }
     }
     this.stageStatusUnverified = partialUpdate;
     if (revision > 0) this.statusObservedRevision = revision;
