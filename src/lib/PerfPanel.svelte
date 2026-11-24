@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { clientStats, frame, invoke, type ClientStat } from "./perf";
+  import { subscribeUpdate } from "./update-loop";
 
   type Stat = { name: string; count: number; totalMs: number; maxMs: number; lastMs: number; slow: number; onMain: number; failed: number };
   type Snapshot = { uptimeMs: number; build: string; logFile: string; issueFile: string; stalls: number; stallMaxMs: number; stallTotalMs: number; items: Stat[] };
@@ -22,9 +23,7 @@
 
   $effect(() => {
     if (!open) return;
-    void poll();
-    const timer = window.setInterval(() => void poll(), 1000);
-    return () => window.clearInterval(timer);
+    return subscribeUpdate(poll, 1000, true);
   });
 
   onMount(() => {

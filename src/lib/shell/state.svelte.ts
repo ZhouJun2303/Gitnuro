@@ -62,6 +62,7 @@ import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../oper
 import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
 import { watchOperationTasks } from "./task-monitor";
 import { cancelReads, invalidateReads, isReadSuperseded } from "../read-scheduler";
+import { subscribeUpdate } from "../update-loop";
 import { mergeResponse } from "../reconcile";
 import { sceneById } from "../lab/scenes";
 
@@ -620,9 +621,9 @@ export class ShellState {
       }).catch(() => { /* The download itself reports network errors. */ }).finally(() => { reading = null; });
       return reading;
     };
-    const timer = setInterval(() => void poll(), 250);
+    const stopPolling = subscribeUpdate(poll, 250);
     return { requestId, finish: async (success: boolean) => {
-      clearInterval(timer);
+      stopPolling();
       await poll();
       active = false;
       const current = this.fontProgress;
@@ -7925,16 +7926,16 @@ export class ShellState {
     });
     $effect(() => {
     if (!this.settings.fetchAutomatically) return;
-    const timer = window.setInterval(() => this.requestAutomaticFetch("periodic"), AUTOMATIC_FETCH_INTERVAL_MS);
-    return () => { window.clearInterval(timer); this.cancelAutomaticFetch(); };
+    const stop = subscribeUpdate(() => this.requestAutomaticFetch("periodic"), AUTOMATIC_FETCH_INTERVAL_MS);
+    return () => { stop(); this.cancelAutomaticFetch(); };
     });
     $effect(() => {
     const seconds = this.settings.statusInterval;
     if (!seconds || seconds < 1) return;
-    const timer = window.setInterval(() => {
+    const stop = subscribeUpdate(() => {
     if (!this.busy && this.snapshot && this.mode === "live") void this.refresh("status", true);
     }, seconds * 1000);
-    return () => window.clearInterval(timer);
+    return stop;
     });
     $effect(() => {
     const parts: string[] = [];

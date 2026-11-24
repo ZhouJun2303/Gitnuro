@@ -2,11 +2,12 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "../perf";
 import { areasFor } from "../operation-policy";
 import { acceptTasks, clearRemoteTasks, ownsTask, taskDone, taskRecord, type OperationTask } from "../tasks";
+import { subscribeUpdate } from "../update-loop";
 import type { ShellState } from "./state.svelte";
 
 export function watchOperationTasks(shell: ShellState) {
   if (!shell.backend()) return () => {};
-  let stopped = false, unlisten = () => {}, timer: ReturnType<typeof setTimeout>;
+  let stopped = false, unlisten = () => {};
   let cursor = 0;
   let session: string | undefined;
 
@@ -44,12 +45,15 @@ export function watchOperationTasks(shell: ShellState) {
       for (const task of tasks) cursor = Math.max(cursor, task.sequence ?? 0);
       accept(tasks);
     } catch { /* A reconnect retains local tasks and retries. */ }
-    if (!stopped) timer = setTimeout(poll, shell.inApp() ? 15000 : shell.operationTasks.some((task) => !taskDone(task)) ? 250 : 1500);
   };
+  const stopPolling = subscribeUpdate(
+    poll,
+    () => shell.inApp() ? 15000 : shell.operationTasks.some((task) => !taskDone(task)) ? 250 : 1500,
+    true,
+  );
   if (shell.inApp()) void listen<OperationTask>("operation-task", (event) => {
     if (stopped) return;
     accept([event.payload]);
-  }).then((stop) => { if (stopped) stop(); else unlisten = stop; }).catch(() => {}).finally(() => { if (!stopped) void poll(); });
-  else void poll();
-  return () => { stopped = true; clearTimeout(timer); unlisten(); };
+  }).then((stop) => { if (stopped) stop(); else unlisten = stop; }).catch(() => {});
+  return () => { stopped = true; stopPolling(); unlisten(); };
 }
