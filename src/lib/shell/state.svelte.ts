@@ -5894,7 +5894,7 @@ export class ShellState {
       }
       if (this.standalone !== "history") this.historyFilter = "";
       void this.loadContext().catch((error) => { if (gen === this.openGen) this.actionError = this.message(error); });
-      void this.loadDiff();
+      if (this.standalone !== "merge") void this.loadDiff();
       this.armOpenExtras(path, gen);
     } catch (error) {
       if (gen !== this.openGen) return;

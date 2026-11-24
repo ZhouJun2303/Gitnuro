@@ -877,10 +877,12 @@
       <button class:active={shell.settings.diffStyle !== "split"} type="button" title={shell.tr("dialog.diffUnified")} aria-label={shell.tr("dialog.diffUnified")} onclick={() => shell.setDiffStyle("unified")}>≡</button>
     </div>
     <div class="diff-toolbar-group diff-toolbar-context" role="group" aria-label={shell.tr("dialog.diffContext")}>
-      <span class="diff-toolbar-label">{shell.tr("dialog.diffContext")}</span>
-      <button type="button" aria-label={shell.tr("chrome.diffContextDecrease")} title={shell.tr("chrome.diffContextDecrease")} onclick={() => shell.setDiffContext(shell.settings.diffContext - 1)}>−</button>
-      <span class="diff-toolbar-value">{shell.settings.diffContext}</span>
-      <button type="button" aria-label={shell.tr("chrome.diffContextIncrease")} title={shell.tr("chrome.diffContextIncrease")} onclick={() => shell.setDiffContext(shell.settings.diffContext + 1)}>+</button>
+      {#if !shell.settings.showEntireFile}
+        <span class="diff-toolbar-label">{shell.tr("dialog.diffContext")}</span>
+        <button type="button" aria-label={shell.tr("chrome.diffContextDecrease")} title={shell.tr("chrome.diffContextDecrease")} onclick={() => shell.setDiffContext(shell.settings.diffContext - 1)}>−</button>
+        <span class="diff-toolbar-value">{shell.settings.diffContext}</span>
+        <button type="button" aria-label={shell.tr("chrome.diffContextIncrease")} title={shell.tr("chrome.diffContextIncrease")} onclick={() => shell.setDiffContext(shell.settings.diffContext + 1)}>+</button>
+      {/if}
       <button class:active={shell.settings.showEntireFile} type="button" title={shell.tr("chrome.diffShowWhole")} aria-pressed={shell.settings.showEntireFile} onclick={() => shell.toggleShowEntireFile()}>{shell.tr("chrome.diffShowWhole")}</button>
     </div>
     <button class:active={shell.settings.diffWordWrap} type="button" title={shell.tr("dialog.wordWrap")} aria-pressed={shell.settings.diffWordWrap} onclick={() => shell.toggleDiffWordWrap()}>{shell.tr("dialog.wordWrap")}</button>

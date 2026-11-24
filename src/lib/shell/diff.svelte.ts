@@ -1431,10 +1431,9 @@ export function chosenDiffLines(shell: ShellState, clicked: number) {
   }
 
 const hunkIndexCache = new WeakMap<object, Int32Array>();
-const wholeFileHunkIndexCache = new WeakMap<object, Int32Array>();
 
-function wholeFileHunkIndex(lines: DiffLine[]) {
-    let table = wholeFileHunkIndexCache.get(lines);
+function changedHunkIndex(lines: DiffLine[]) {
+    let table = hunkIndexCache.get(lines);
     if (table) return table;
     table = new Int32Array(lines.length);
     table.fill(-1);
@@ -1450,68 +1449,36 @@ function wholeFileHunkIndex(lines: DiffLine[]) {
       }
       if (changed) table[cursor] = hunk;
     }
-    wholeFileHunkIndexCache.set(lines, table);
+    hunkIndexCache.set(lines, table);
     return table;
   }
 
 export function hunkOf(shell: ShellState, index: number) {
     const lines = shell.diffLines;
-    if (shell.settings.showEntireFile) {
-      const table = wholeFileHunkIndex(lines);
-      const hunk = table[Math.min(index, table.length - 1)] ?? -1;
-      return hunk >= 0 ? hunk : null;
-    }
-    let table = hunkIndexCache.get(lines);
-    if (!table) {
-      table = new Int32Array(lines.length);
-      let hunk = -1;
-      for (let cursor = 0; cursor < lines.length; cursor += 1) {
-        if (lines[cursor]?.kind === "hunk") hunk += 1;
-        table[cursor] = hunk;
-      }
-      hunkIndexCache.set(lines, table);
-    }
+    const table = changedHunkIndex(lines);
     const hunk = table[Math.min(index, table.length - 1)] ?? -1;
     return hunk >= 0 ? hunk : null;
   }
 
 /** Inclusive start / exclusive end for each displayed hunk in the current diff. */
 export function hunkRanges(shell: ShellState) {
-    if (shell.settings.showEntireFile) {
-      const ranges: { index: number; start: number; end: number }[] = [];
-      let start = -1;
-      let index = 0;
-      for (let cursor = 0; cursor < shell.diffLines.length; cursor += 1) {
-        const changed = shell.diffLines[cursor]?.kind === "add" || shell.diffLines[cursor]?.kind === "delete";
-        if (changed) {
-          if (start < 0) start = cursor;
-          continue;
-        }
-        if (start >= 0) {
-          ranges.push({ index, start, end: cursor });
-          index += 1;
-          start = -1;
-        }
-      }
-      if (start >= 0) ranges.push({ index, start, end: shell.diffLines.length });
-      return ranges;
-    }
     const ranges: { index: number; start: number; end: number }[] = [];
+    const table = changedHunkIndex(shell.diffLines);
     let current: { index: number; start: number; end: number } | null = null;
-    let hunk = -1;
     for (let cursor = 0; cursor < shell.diffLines.length; cursor += 1) {
-      const kind = shell.diffLines[cursor]?.kind;
-      if (kind === "hunk") {
+      const index = table[cursor] ?? -1;
+      if (index < 0) {
         if (current) {
-          current.end = cursor;
           ranges.push(current);
+          current = null;
         }
-        hunk += 1;
-        current = { index: hunk, start: cursor, end: shell.diffLines.length };
-      } else if (kind === "meta" && current) {
-        current.end = cursor;
-        ranges.push(current);
-        current = null;
+        continue;
+      }
+      if (!current || current.index !== index) {
+        if (current) ranges.push(current);
+        current = { index, start: cursor, end: cursor + 1 };
+      } else {
+        current.end = cursor + 1;
       }
     }
     if (current) ranges.push(current);

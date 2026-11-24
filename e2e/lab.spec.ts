@@ -47,15 +47,21 @@ test("large text assets load their diff on demand", async ({ page }) => {
   await expect(page.locator(".merge-side").first()).toContainText("m_Entry_1:", { timeout: 30_000 });
 });
 
-test("diff toolbar keeps context and display toggles independent", async ({ page }) => {
+test("diff toolbar hides context controls while showing the whole file", async ({ page }) => {
   await openLabScene(page, "diff-whole-file", "[data-diff-toolbar]");
   const toolbar = page.locator("[data-diff-toolbar]");
-  await expect(toolbar.locator(".diff-toolbar-value")).toHaveText("3");
+  await expect(toolbar.locator(".diff-toolbar-value")).toHaveCount(0);
+  await expect(toolbar.getByRole("button", { name: /减少上下文行|Show less context lines/ })).toHaveCount(0);
+  await expect(toolbar.getByRole("button", { name: /增加上下文行|Show more context lines/ })).toHaveCount(0);
   await expect(toolbar.locator("input[type=checkbox]")).toHaveCount(0);
   const whole = toolbar.getByRole("button", { name: /显示整个文件|Show whole file/ });
   await expect(whole).toHaveAttribute("aria-pressed", "true");
+  await whole.click();
+  await expect(toolbar.locator(".diff-toolbar-value")).toHaveText("3");
   await toolbar.getByRole("button", { name: /增加上下文行|Show more context lines/ }).click();
   await expect(toolbar.locator(".diff-toolbar-value")).toHaveText("4");
+  await whole.click();
+  await expect(toolbar.locator(".diff-toolbar-value")).toHaveCount(0);
   await expect(whole).toHaveAttribute("aria-pressed", "true");
 
   const wrap = toolbar.getByRole("button", { name: /差异长行自动换行|Wrap long diff lines/ });
