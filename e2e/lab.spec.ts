@@ -1119,6 +1119,9 @@ test("batch conflict actions keep one side for the selected files", async ({ pag
     await expect(page.locator(".composer textarea")).not.toHaveValue(/conflict\/file-/);
     await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("topic");
     await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("main");
+    await expect(page.locator(".unstaged-pane .pick-bar")).toBeVisible();
+    await expect(page.locator(".staged-pane .pick-bar")).toBeVisible();
+    await expect(page.locator(".unstaged-pane .pick-action").first()).toBeDisabled();
     const rows = page.locator(".unstaged-pane .file-list .file");
     const paths = await rows.evaluateAll((nodes) =>
       nodes.slice(0, 2).map((node) => node.querySelector<HTMLElement>(".file-select")?.title ?? ""),
@@ -1127,8 +1130,9 @@ test("batch conflict actions keep one side for the selected files", async ({ pag
     expect(paths.every((path) => path !== "")).toBe(true);
     await rows.nth(0).click();
     await rows.nth(1).click({ modifiers: ["Control"] });
-    await expect(page.locator(".pick-bar")).toBeVisible();
-    await expect(page.locator(".pick-count")).toHaveText(/2/);
+    const pickBar = page.locator(".unstaged-pane .pick-bar");
+    await expect(pickBar).toBeVisible();
+    await expect(pickBar.locator(".pick-count")).toHaveText(/2/);
     const pane = page.locator(".conflict-pane");
     await expect(pane.locator(".conflict-selection")).toContainText("2");
     await pane.locator("#conflict-theirs").click();

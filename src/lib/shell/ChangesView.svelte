@@ -326,7 +326,7 @@
           {@render fileViewButton()}
         </div>
       </div>
-      {@render pickedActions(shell.pickedIn(shell.shownUnstaged), shell.pickedIn(shell.shownStaged))}
+      {@render pickedActions("combined", shell.pickedIn(shell.shownUnstaged), shell.pickedIn(shell.shownStaged))}
       <div class="file-list" role="group" onscroll={onCombinedScroll} bind:clientHeight={shell.combinedHeight} oncontextmenu={openViewMenu}>
         <div class="commit-window" style:height="{shell.combinedRows.length * shell.rowFile}px">
           {#each shell.combinedWindow.rows as entry, index (entry.key)}
@@ -362,7 +362,7 @@
           <button class="pane-chip" type="button" disabled={shell.stageDisabled || shell.staged.length === 0} onclick={() => shell.runChange("unstage_all")}>{shell.tr("chrome.unstageAll")}</button>
         </div>
       </div>
-      {@render pickedActions([], stagedPicked)}
+      {@render pickedActions("staged", [], stagedPicked)}
       {#if shell.shownStaged.length === 0}
         <p class="empty" oncontextmenu={openViewMenu}>{shell.staged.length === 0 ? shell.tr("chrome.noStaged") : shell.tr("chrome.noMatch")}</p>
       {:else}
@@ -401,7 +401,7 @@
           {/if}
         </div>
       </div>
-      {@render pickedActions(unstagedPicked, [])}
+      {@render pickedActions("unstaged", unstagedPicked, [])}
       <div class="file-list" role="group" onscroll={onFileScroll} oncontextmenu={openViewMenu}>
         {#if shell.showIgnored}
             {#if (shell.facts?.ignored.length ?? 0) === 0}
@@ -435,23 +435,40 @@
       </div>
     {/snippet}
 
-{#snippet pickedActions(unstagedFiles: string[], stagedFiles: string[])}
-      {#if unstagedFiles.length > 1 || stagedFiles.length > 1}
-        <div class="pick-bar">
-          <span class="pick-count">{shell.tr("chrome.pickedCount", { count: String(unstagedFiles.length + stagedFiles.length) })}</span>
-          {#if unstagedFiles.length > 1}
-            <button class="pane-chip" type="button" disabled={shell.stageDisabled} onclick={() => void shell.stagePicked(unstagedFiles)}>{shell.tr("chrome.stageSelected")}</button>
-            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.discardChosen(unstagedFiles, false, shell.shownUnstaged.map((file) => file.path))}>{shell.tr("chrome.discardSelected")}</button>
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.openStash(unstagedFiles, shell.shownUnstaged.map((file) => file.path))}>{shell.tr("chrome.stash")}</button>
-            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.deleteChosen(unstagedFiles, shell.shownUnstaged.map((file) => file.path))}>{shell.tr("chrome.deleteSelected")}</button>
+{#snippet pickedActions(pane: "combined" | Side, unstagedFiles: string[], stagedFiles: string[])}
+      {@const canUnstagedBatch = unstagedFiles.length > 1}
+      {@const canStagedBatch = stagedFiles.length > 1}
+      <div class="pick-bar">
+        <span class="pick-count">{shell.tr("chrome.pickedCount", { count: String(unstagedFiles.length + stagedFiles.length) })}</span>
+        <div class="pick-actions">
+          {#if pane !== "staged"}
+            <button class="icon-btn pick-action" type="button" aria-label={shell.tr("chrome.stageSelected")} title={shell.tr("chrome.stageSelected")} disabled={!canUnstagedBatch || shell.stageDisabled} onclick={() => void shell.stagePicked(unstagedFiles)}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 9.2h3.1l1 1.5h3.4l1-1.5h3.1v3.3H2.2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 2.2v6M5.8 6l2.2 2.2L10.2 6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="icon-btn pick-action danger" type="button" aria-label={shell.tr("chrome.discardSelected")} title={shell.tr("chrome.discardSelected")} disabled={!canUnstagedBatch || shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.discardChosen(unstagedFiles, false, shell.shownUnstaged.map((file) => file.path))}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 6.1a5 5 0 1 1 1.1 5.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M3.2 2.8v3.5h3.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="icon-btn pick-action" type="button" aria-label={shell.tr("chrome.stash")} title={shell.tr("chrome.stash")} disabled={!canUnstagedBatch || shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.openStash(unstagedFiles, shell.shownUnstaged.map((file) => file.path))}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 5.4h11.6v7.9H2.2zM2.2 5.4l1.5-2.7h8.6l1.5 2.7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.2 8.5h5.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            </button>
+            <button class="icon-btn pick-action danger" type="button" aria-label={shell.tr("chrome.deleteSelected")} title={shell.tr("chrome.deleteSelected")} disabled={!canUnstagedBatch || shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.deleteChosen(unstagedFiles, shell.shownUnstaged.map((file) => file.path))}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.6 4.8h8.8l-.7 9H4.3zM5.5 4.8V2.9h5v1.9M2.6 4.8h10.8M6.4 7v4.7M9.6 7v4.7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
           {/if}
-          {#if stagedFiles.length > 1}
-            <button class="pane-chip" type="button" disabled={shell.stageDisabled} onclick={() => void shell.unstagePicked(stagedFiles)}>{shell.tr("chrome.unstageSelected")}</button>
-            <button class="pane-chip" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.openStash(stagedFiles, shell.shownStaged.map((file) => file.path))}>{shell.tr("chrome.stash")}</button>
-            <button class="pane-chip danger" type="button" disabled={shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.deleteChosen(stagedFiles, shell.shownStaged.map((file) => file.path))}>{shell.tr("chrome.deleteSelected")}</button>
+          {#if pane === "combined"}<span class="pick-divider" aria-hidden="true"></span>{/if}
+          {#if pane !== "unstaged"}
+            <button class="icon-btn pick-action" type="button" aria-label={shell.tr("chrome.unstageSelected")} title={shell.tr("chrome.unstageSelected")} disabled={!canStagedBatch || shell.stageDisabled} onclick={() => void shell.unstagePicked(stagedFiles)}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 9.2h3.1l1 1.5h3.4l1-1.5h3.1v3.3H2.2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8 2.2v6M5.8 6.4 8 4.2l2.2 2.2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="icon-btn pick-action" type="button" aria-label={shell.tr("chrome.stash")} title={shell.tr("chrome.stash")} disabled={!canStagedBatch || shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.openStash(stagedFiles, shell.shownStaged.map((file) => file.path))}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 5.4h11.6v7.9H2.2zM2.2 5.4l1.5-2.7h8.6l1.5 2.7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.2 8.5h5.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+            </button>
+            <button class="icon-btn pick-action danger" type="button" aria-label={shell.tr("chrome.deleteSelected")} title={shell.tr("chrome.deleteSelected")} disabled={!canStagedBatch || shell.mode !== "live" || shell.writeBlocked} onclick={() => shell.deleteChosen(stagedFiles, shell.shownStaged.map((file) => file.path))}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.6 4.8h8.8l-.7 9H4.3zM5.5 4.8V2.9h5v1.9M2.6 4.8h10.8M6.4 7v4.7M9.6 7v4.7" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
           {/if}
         </div>
-      {/if}
+      </div>
     {/snippet}
 
 {#snippet fileRow(file: Row, side: Side, depth = 0)}
