@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
-import { openLabScene, pinLabSettings } from "./helpers";
+import { openLabScene, openScene, pinLabSettings } from "./helpers";
 import catalog from "../src/lib/font-catalog.json" with { type: "json" };
+import { scenes } from "../src/lib/lab/scenes";
 
 // Use an installed test font so UI tests never need the Google network or ship font binaries.
 const fixture = ["C:/Windows/Fonts/segoeui.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf"].find(existsSync);
@@ -109,6 +110,29 @@ for (const theme of ["apple", "light", "dark"] as const) {
       changes: getComputedStyle(document.documentElement).getPropertyValue("--changes-font-size").trim(),
       indent: getComputedStyle(document.documentElement).getPropertyValue("--changes-indent-ch").trim(),
     }))).toEqual({ row: "30px", subject: "17px", author: "14px", changes: "14px", indent: "0.8" });
+  });
+}
+
+for (const theme of ["apple", "light", "dark"] as const) {
+  test(`${theme}: commit meta font sizes reach the rendered row`, async ({ page }) => {
+    await pinLabSettings(page, { theme });
+    await openLabScene(page, "prefs-fonts", '[data-pref-tab="fonts"]', { locale: "en" });
+    await setSlider(page, "Author font size", 18);
+    await setSlider(page, "SHA font size", 19);
+    await setSlider(page, "Commit time font size", 20);
+    const saved = page.waitForRequest((request) => {
+      if (!request.url().includes("/__lab/invoke")) return false;
+      try {
+        const body = request.postDataJSON();
+        return body?.cmd === "save_settings" && body.args?.values?.commitAuthorFontSize === 18 && body.args?.values?.commitShaFontSize === 19 && body.args?.values?.commitTimeFontSize === 20;
+      } catch { return false; }
+    });
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+    await saved;
+    await openScene(page, scenes.find((scene) => scene.id === "history")!, `&locale=en&theme=${theme}`);
+    await expect(page.locator(".commit-side .author").first()).toHaveCSS("font-size", "18px");
+    await expect(page.locator(".commit-side .sha").first()).toHaveCSS("font-size", "19px");
+    await expect(page.locator(".commit-side .date").first()).toHaveCSS("font-size", "20px");
   });
 }
 

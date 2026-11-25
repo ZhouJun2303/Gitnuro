@@ -129,7 +129,6 @@
 :root[data-theme="apple"] .pane-title { font-size: 13px; letter-spacing: -0.01em; }
 :root[data-theme="apple"] .pane-chip { border-radius: 7px; background: rgba(255, 255, 255, 0.7); }
 :root[data-theme="apple"] .pane-chip.pane-go { color: var(--text); background: rgba(255, 255, 255, 0.88); }
-:root[data-theme="apple"] .commit-side .meta { font-size: 12px; }
 :root[data-theme="apple"] .history .commit-row { border-radius: 6px; }
 :root[data-theme="apple"] .history .commit-row.selected::before { display: none; }
 :root[data-theme="apple"] .commit-row.selected .subject { font-weight: 500; }
