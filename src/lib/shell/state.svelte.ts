@@ -4719,7 +4719,8 @@ export class ShellState {
     void this.checkForUpdateInBackground();
   }
 
-  private finishUpdateCheck() {
+  private finishUpdateCheck(generation = this.updateCheckGen) {
+    if (generation !== this.updateCheckGen) return;
     this.updateCheckInFlight = false;
     if (this.updateCheckDay !== this.updateDay()) queueMicrotask(() => this.checkUpdateForCurrentDay());
   }
@@ -4727,6 +4728,7 @@ export class ShellState {
   private async checkForUpdateInBackground() {
     if (this.updateCheckInFlight || this.updateBusy) return;
     this.updateCheckInFlight = true;
+    const generation = this.updateCheckGen;
     try {
       const value = await invoke<UpdateNotice | null>("check_for_update");
       this.updateCheckedAt = Date.now();
@@ -4741,7 +4743,7 @@ export class ShellState {
     } catch {
       // Automatic checks stay quiet. The next day boundary or a manual check can retry.
     } finally {
-      this.finishUpdateCheck();
+      this.finishUpdateCheck(generation);
     }
   }
 
@@ -4794,7 +4796,7 @@ export class ShellState {
       this.updatePhase = "error";
       this.updateMessage = this.message(error);
     } finally {
-      this.finishUpdateCheck();
+      this.finishUpdateCheck(generation);
     }
   }
 
@@ -4842,6 +4844,7 @@ export class ShellState {
 
   dismissUpdate() {
     this.updateCheckGen++;
+    this.updateCheckInFlight = false;
     const version = this.updateNotice?.appVersion ?? "";
     this.updateNotice = null;
     this.updatePhase = "idle";
