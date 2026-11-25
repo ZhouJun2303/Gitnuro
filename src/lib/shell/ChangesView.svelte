@@ -29,7 +29,7 @@
   let typeOpen = $state(false);
 
   function treeIndent(depth: number) {
-    return `calc(8px + ${depth} * var(--changes-indent-ch, 2) * 1ch)`;
+    return `calc(8px + ${depth} * var(--changes-indent-ch, 0.8) * 1ch)`;
   }
 
   onMount(() => {
