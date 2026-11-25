@@ -3262,7 +3262,8 @@ export class ShellState {
       if (runtime) this.gitRuntime = runtime;
       if (!isAppearance(params.get("theme"))) this.restoreAppearance(settings.theme);
       await applyLabScene(this, item);
-      if (params.get("locale") === "en") this.settings.locale = "en";
+      const locale = params.get("locale");
+      if (locale === "en" || locale === "zh") this.settings.locale = locale;
       this.labSceneId = item.id;
     } catch (error) {
       const text = this.message(error);
@@ -6026,7 +6027,8 @@ export class ShellState {
           const probe = await invoke<StatusProbe>("status_probe", { path });
           if (gen !== this.openGen) return;
           const previous = this.snapshot?.fingerprint;
-          headSame = !!previous && previous.head === probe.fingerprint.head && previous.refId === probe.fingerprint.refId;
+          headSame = !!previous && previous.head === probe.fingerprint.head && previous.refId === probe.fingerprint.refId
+            && (previous.submoduleSum ?? "") === (probe.fingerprint.submoduleSum ?? "");
           plan = planStatusRefresh({
             fingerprint: previous,
             seen: this.snapshot?.revision ?? 0,
