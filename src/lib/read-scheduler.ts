@@ -11,7 +11,7 @@ for (const command of ["workspace_status_paths", "search_commits", "search_log",
 export const STATUS_READS = ["workspace_status", "workspace_status_paths"];
 
 /** History and ref reads. A status refresh must not cancel the list already on its way. */
-export const HISTORY_READS = ["commit_log", "repository_refs", "file_history", "search_log", "reflog", "in_progress", "merge_state"];
+export const HISTORY_READS = ["commit_log", "repository_refs", "file_history", "search_log", "reflog", "in_progress", "merge_state", "blame_source", "blame_file"];
 const alongsideStatus = new Set(HISTORY_READS);
 
 const flights = new Map<string, Promise<unknown>>();
