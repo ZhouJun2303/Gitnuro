@@ -1910,7 +1910,11 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
             binary = true;
             break;
         }
-        if raw.starts_with("diff --git ") || raw.starts_with("index ") {
+        if raw.starts_with("diff --git ") {
+            in_hunk = false;
+            continue;
+        }
+        if raw.starts_with("index ") {
             continue;
         }
         if lines.len() == MAX_DIFF_LINES {
@@ -1933,9 +1937,16 @@ pub(crate) fn parse_diff(path: &str, staged: bool, text: &str) -> FileDiff {
             });
             continue;
         }
-        let kind = if raw.starts_with('+') && !raw.starts_with("+++") {
+        // The pane already names the file, so its ---/+++ header adds nothing.
+        if !in_hunk && (raw.starts_with("--- ") || raw.starts_with("+++ ")) {
+            continue;
+        }
+        let kind = if !in_hunk {
+            DiffLineKind::Meta
+        } else if raw.starts_with('+') {
+            // Inside a hunk a leading --- / +++ is content, not another file header.
             DiffLineKind::Add
-        } else if raw.starts_with('-') && !raw.starts_with("---") {
+        } else if raw.starts_with('-') {
             DiffLineKind::Delete
         } else if raw.starts_with(' ') || raw == "\\ No newline at end of file" {
             DiffLineKind::Context

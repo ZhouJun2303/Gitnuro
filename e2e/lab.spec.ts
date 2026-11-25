@@ -862,6 +862,21 @@ test("commit patch renders each hunk header once", async ({ page }) => {
   expect(await page.locator(".detail .split-row").count()).toBeGreaterThan(0);
 });
 
+test("diff panes do not draw the ---/+++ file header", async ({ page }) => {
+  await openLabScene(page, "diff-text", "section.diff .split-meta", { diffStyle: "split" });
+  const changes = await page.locator("section.diff .split-meta").allTextContents();
+  expect(changes.some((text) => text.startsWith("--- ") || text.startsWith("+++ "))).toBe(false);
+
+  for (const style of ["split", "unified"] as const) {
+    await openLabScene(page, "commit", ".detail", { diffStyle: style });
+    await page.locator(".patch-toggle").first().click();
+    const meta = page.locator(`.detail ${style === "split" ? ".split-meta" : ".virtual-row.meta"}`);
+    await expect(meta.first()).toBeVisible();
+    const texts = await meta.allTextContents();
+    expect(texts.some((text) => text.startsWith("--- ") || text.startsWith("+++ ")), style).toBe(false);
+  }
+});
+
 test("commit detail filter narrows files in every tab", async ({ page }) => {
   await openLabScene(page, "commit-filter", ".detail .detail-filter");
   const paths = page.locator(".commit-files .patch-path");

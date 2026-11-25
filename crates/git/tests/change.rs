@@ -149,3 +149,32 @@ fn assert_has(snapshot: &awegit_git::StatusSnapshot, path: &str, kind: ChangeKin
         "missing staged={staged} {path} {kind:?} in {snapshot:?}"
     );
 }
+
+#[test]
+fn diff_hides_the_file_header_and_keeps_content_that_resembles_one() {
+    let repo = common::TempRepo::new();
+    repo.git(&["init", "-b", "main"]);
+    repo.git(&["config", "core.autocrlf", "false"]);
+    repo.git(&["config", "commit.gpgsign", "false"]);
+    repo.git(&["config", "core.hooksPath", ".git/no-hooks"]);
+    repo.git(&["config", "user.name", "Test"]);
+    repo.git(&["config", "user.email", "test@example.com"]);
+    fs::write(repo.path.join("note.lua"), "keep\n-- old comment\n").unwrap();
+    repo.git(&["add", "note.lua"]);
+    repo.git(&["commit", "-m", "initial"]);
+    fs::write(repo.path.join("note.lua"), "keep\n++ new comment\n").unwrap();
+
+    let diff = file_diff(&repo.path, "note.lua", false).unwrap();
+    assert!(
+        !diff.lines.iter().any(|line| line.text.starts_with("--- a/") || line.text.starts_with("+++ b/")),
+        "{diff:?}"
+    );
+    assert!(
+        diff.lines.iter().any(|line| line.kind == DiffLineKind::Delete && line.text == "--- old comment"),
+        "{diff:?}"
+    );
+    assert!(
+        diff.lines.iter().any(|line| line.kind == DiffLineKind::Add && line.text == "+++ new comment"),
+        "{diff:?}"
+    );
+}
