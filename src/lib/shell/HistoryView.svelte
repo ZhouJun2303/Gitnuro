@@ -8,14 +8,23 @@
   import CommitDetail from "./CommitDetail.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { sampleReflog } from "../sample";
-  import { gravatarUrl, laneColors, onVirtualScroll, rowGraph, windowSlice, type GraphCell } from "../view";
+  import { gravatarUrl, laneColors, onVirtualScroll, rowGraph, syncVirtualScroll, windowSlice, type GraphCell } from "../view";
   import type { Row, SearchKey } from "./types";
 
   const shell = getShell();
   const focusOnMount = (node: HTMLInputElement) => shell.focusOnMount(node);
   const onHistoryScroll = onVirtualScroll((top) => (shell.historyTop = top));
+  const historyScrollSync = {
+    getTop: () => shell.historyTop,
+    setTop: (top: number) => { shell.historyTop = top; },
+  };
   const activeColor = $derived(shell.activeLaneColor());
   const reflogWindow = $derived(windowSlice(shell.reflogRows, shell.historyTop, shell.rowCommit, 80, shell.windowRows(shell.historyHeight, shell.rowCommit)));
+  const historyContentKey = $derived.by(() => {
+    if (shell.reflogOn) return shell.mode === "sample" ? sampleReflog : shell.reflogRows;
+    if (shell.contentHits) return shell.contentHits;
+    return shell.mode === "sample" ? shell.sampleShown : shell.historyItems;
+  });
 
   $effect(() => {
     const rows = shell.mode === "sample" ? shell.sampleShown : shell.historyItems;
@@ -24,15 +33,6 @@
 
   function focusSelectionSoon() {
     requestAnimationFrame(() => shell.historyEl?.querySelector<HTMLElement>(".commit-row.selected")?.focus());
-  }
-
-  function restoreHistory(node: HTMLElement) {
-    requestAnimationFrame(() => {
-      if (!node.isConnected) return;
-      const max = Math.max(0, node.scrollHeight - node.clientHeight);
-      const next = Math.min(shell.historyTop, max);
-      if (Math.abs(node.scrollTop - next) > 1) node.scrollTop = next;
-    });
   }
 
   function onCommitQuery(event: Event) {
@@ -73,7 +73,7 @@
             {/if}
           </div>
         </div>
-        <section class="history flex-fill" bind:this={shell.historyEl} bind:clientHeight={shell.historyHeight} use:restoreHistory onscroll={onHistoryScroll}>
+        <section class="history flex-fill" bind:this={shell.historyEl} bind:clientHeight={shell.historyHeight} use:syncVirtualScroll={{ ...historyScrollSync, contentKey: historyContentKey }} onscroll={onHistoryScroll}>
           {#if shell.contentHits}
             <div class="pane-head"><span>{shell.tr("chrome.contentSearch")}</span><button class="text-button" type="button" onclick={() => { shell.contentSearchGen += 1; shell.contentHits = null; }}>{shell.tr("chrome.close")}</button></div>
             {#each shell.contentHits as hit (hit.id)}

@@ -4,7 +4,7 @@
   import "./ChangesView.css";
   import SplitHandle from "../SplitHandle.svelte";
   import DiffPane from "./DiffPane.svelte";
-  import { onVirtualScroll } from "../view";
+  import { onVirtualScroll, syncVirtualScroll } from "../view";
   import type { Row, SearchKey, Side } from "./types";
   import type { CommitType } from "./commitMessage";
 
@@ -14,6 +14,18 @@
   const onStagedScroll = onVirtualScroll((top) => (shell.stagedTop = top));
   const onFileScroll = onVirtualScroll((top) => (shell.fileTop = top));
   const onCombinedScroll = onVirtualScroll((top) => (shell.combinedTop = top));
+  const stagedScrollSync = {
+    getTop: () => shell.stagedTop,
+    setTop: (top: number) => { shell.stagedTop = top; },
+  };
+  const fileScrollSync = {
+    getTop: () => shell.fileTop,
+    setTop: (top: number) => { shell.fileTop = top; },
+  };
+  const combinedScrollSync = {
+    getTop: () => shell.combinedTop,
+    setTop: (top: number) => { shell.combinedTop = top; },
+  };
   let typeOpen = $state(false);
 
   function treeIndent(depth: number) {
@@ -155,7 +167,7 @@
     const side = shell.selectedSide;
     if (!path) return;
     queueMicrotask(() => {
-      document.querySelector<HTMLElement>(".file-list .file.selected")?.scrollIntoView({ block: "nearest" });
+      document.querySelector<HTMLElement>(".file-list .file.selected, .file-list .side.selected")?.scrollIntoView({ block: "nearest" });
     });
     void side;
   });
@@ -327,7 +339,7 @@
         </div>
       </div>
       {@render pickedActions("combined", shell.pickedIn(shell.shownUnstaged), shell.pickedIn(shell.shownStaged))}
-      <div class="file-list" role="group" onscroll={onCombinedScroll} bind:clientHeight={shell.combinedHeight} oncontextmenu={openViewMenu}>
+      <div class="file-list" role="group" onscroll={onCombinedScroll} bind:clientHeight={shell.combinedHeight} use:syncVirtualScroll={{ ...combinedScrollSync, contentKey: shell.combinedRows }} oncontextmenu={openViewMenu}>
         <div class="commit-window" style:height="{shell.combinedRows.length * shell.rowFile}px">
           {#each shell.combinedWindow.rows as entry, index (entry.key)}
             <div class="virtual-row" style:top="{(shell.combinedWindow.start + index) * shell.rowFile}px">
@@ -366,7 +378,7 @@
       {#if shell.shownStaged.length === 0}
         <p class="empty" oncontextmenu={openViewMenu}>{shell.staged.length === 0 ? shell.tr("chrome.noStaged") : shell.tr("chrome.noMatch")}</p>
       {:else}
-        <div class="file-list staged-list" role="group" onscroll={onStagedScroll} oncontextmenu={openViewMenu}>
+        <div class="file-list staged-list" role="group" onscroll={onStagedScroll} use:syncVirtualScroll={{ ...stagedScrollSync, contentKey: shell.stagedTree }} oncontextmenu={openViewMenu}>
           <div class="commit-window" style:height="{shell.stagedTree.length * shell.fileStride}px">
             {#each shell.stagedWindow.rows as entry, index (entry.key)}
               <div class="virtual-row" style:top="{(shell.stagedWindow.start + index) * shell.fileStride}px">
@@ -402,7 +414,7 @@
         </div>
       </div>
       {@render pickedActions("unstaged", unstagedPicked, [])}
-      <div class="file-list" role="group" onscroll={onFileScroll} oncontextmenu={openViewMenu}>
+      <div class="file-list" role="group" onscroll={onFileScroll} use:syncVirtualScroll={{ ...fileScrollSync, contentKey: shell.showIgnored ? (shell.facts?.ignored ?? []) : shell.unstagedTree }} oncontextmenu={openViewMenu}>
         {#if shell.showIgnored}
             {#if (shell.facts?.ignored.length ?? 0) === 0}
               <p class="empty">{shell.tr("chrome.noIgnored")}</p>

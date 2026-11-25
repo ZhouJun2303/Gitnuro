@@ -871,6 +871,10 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
     const repo = shell.repoPath();
     const file = rowOnSide(shell, path, side);
     if (!repo || !file) return;
+    // The optimistic stage projection moves the current row before Git returns.
+    const unstagedBefore = side === "unstaged" ? shell.shownUnstaged.map((item) => item.path) : [];
+    const selectedBefore = shell.selectedPath;
+    const sideBefore = shell.selectedSide;
     const key = `${shell.jobKey(repo)}\0${side}\0${path}`;
     const checking = file.letter === "C";
     if (checking && flipping.has(key)) return;
@@ -882,7 +886,13 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
         if (!rowOnSide(shell, path, side)) return;
       }
       const reading = readingOnly(shell);
-      await shell.runChange(side === "staged" ? "unstage_path" : "stage_path", { file: path }, reading);
+      const result = await shell.runChange(side === "staged" ? "unstage_path" : "stage_path", { file: path }, reading);
+      if (side !== "unstaged" || !result || shell.repoPath() !== repo || sideBefore !== "unstaged" || selectedBefore !== path || shell.selectedPath !== path) return;
+      const index = unstagedBefore.indexOf(path);
+      if (index < 0) return;
+      const remaining = shell.shownUnstaged.filter((item) => item.path !== path);
+      const next = remaining[index] ?? remaining[index - 1];
+      if (next) shell.selectFile(next.path, "unstaged");
     } finally {
       if (checking) flipping.delete(key);
     }
