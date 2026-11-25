@@ -1100,9 +1100,11 @@ test("switching repositories clears the previous commit detail", async ({ page }
   await page.locator(".commit-row").nth(1).click();
   await expect(page.locator(".detail").getByText("AweGit Lab").first()).toBeVisible();
   await page.locator(".tab-add").click();
-  await page.locator(".repo-row").and(page.getByTitle(layout.even, { exact: true })).click();
+  await page.locator(".repo-row").and(page.getByTitle(layout.even, { exact: true })).first().click();
   await expect(page.locator(".chrome-side .tab.active")).toContainText("even", { timeout: 30_000 });
   await expect(page.locator(".detail .empty")).toContainText(/Select a file|选择/, { timeout: 20_000 });
+  await expect(page.locator(".history .commit-row").first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".history > .empty")).toHaveCount(0);
   expect(layout.even).not.toBe("");
 });
 

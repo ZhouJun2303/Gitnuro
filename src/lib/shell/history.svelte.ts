@@ -1,6 +1,6 @@
 import { onMount, tick } from "svelte";
 import { invoke, prefetch } from "../perf";
-import { cancelReads, isReadSuperseded } from "../read-scheduler";
+import { cancelReads, isReadSuperseded, STATUS_READS } from "../read-scheduler";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { branchGroup, changedRanges, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, rowAtUnit, sameHistory, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
@@ -207,18 +207,24 @@ export function queueHistoryFill(shell: ShellState) {
 type ContextParts = { history: boolean; flow: boolean; deferHistory?: boolean };
 const contextReads = new WeakMap<ShellState, { key: string; promise: Promise<void> }>();
 
+function readCancelled(error: unknown) {
+    if (isReadSuperseded(error)) return true;
+    const text = error instanceof Error ? error.message : String(error);
+    return /awegit:cancelled:/i.test(text);
+}
+
 export function loadContext(shell: ShellState, operation?: string, parts: ContextParts = { history: true, flow: true }): Promise<void> {
-    // Only request parameters and a data generation, never serialize history/state.
-    const key = JSON.stringify([shell.repoPath(), shell.statusGen, shell.settings.commitSort, shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.logLimit, shell.allBranches, shell.exactRefs(), parts]);
+    // Status generation is not part of the key. A worktree scan must not start a second history read.
+    const key = JSON.stringify([shell.repoPath(), shell.snapshot?.fingerprint?.refId ?? "", shell.snapshot?.branch ?? "", shell.settings.commitSort, shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.logLimit, shell.allBranches, shell.exactRefs(), parts]);
     const current = contextReads.get(shell);
     if (current?.key === key) return current.promise;
     const path = shell.repoPath();
-    if (path) cancelReads(path);
+    if (path) cancelReads(path, STATUS_READS);
     const promise = readContext(shell, operation, parts).catch((error) => {
       // Changing the branch filter intentionally cancels the previous read.
       // Callers often fire-and-forget this refresh, so an expected cancellation
       // must not surface as an unhandled page error.
-      if (isReadSuperseded(error)) return;
+      if (readCancelled(error)) return;
       throw error;
     }).finally(() => {
       if (contextReads.get(shell)?.promise === promise) contextReads.delete(shell);
@@ -229,11 +235,14 @@ export function loadContext(shell: ShellState, operation?: string, parts: Contex
 
 async function readContext(shell: ShellState, operation?: string, parts: ContextParts = { history: true, flow: true }) {
     const path = shell.repoPath();
-    const statusGen = shell.statusGen;
     const openGen = shell.openGen;
     const gen = ++shell.contextGen;
+    // An empty list is still loading. A later status snapshot must not turn that into "no commits".
+    const trackLoading = parts.history && shell.commitsLive.length === 0;
+    if (trackLoading) shell.historyLoading = true;
+    try {
     const nextRefs = await invoke<RefSnapshot>("repository_refs", { path }, undefined, operation);
-    if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
+    if (gen !== shell.contextGen || openGen !== shell.openGen || !shell.viewing(path)) return;
     const { revision, ...visibleRefs } = nextRefs;
     const loaded = new Set(shell.commitsLive.map((row) => row.id));
     const previousTips = new Set(Object.keys(shell.refs?.labels ?? {}));
@@ -257,7 +266,7 @@ async function readContext(shell: ShellState, operation?: string, parts: Context
         return found;
       };
       const [local, remote] = await Promise.all([ancestors(localNames), ancestors(remoteNames)]);
-      if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
+      if (gen !== shell.contextGen || openGen !== shell.openGen || !shell.viewing(path)) return;
       const rows: CommitRow[] = [];
       for (let index = 0; index < shell.commitsLive.length; index++) {
         const row = shell.commitsLive[index], refs = labels[row.id] ?? [];
@@ -266,7 +275,7 @@ async function readContext(shell: ShellState, operation?: string, parts: Context
         rows.push(shell.same(row.refs, refs) && row.unpushed === unpushed && row.remoteOnly === remoteOnly ? row : { ...row, refs, unpushed, remoteOnly });
         if (index % 1000 === 999) await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
-      if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
+      if (gen !== shell.contextGen || openGen !== shell.openGen || !shell.viewing(path)) return;
       if (rows.some((row, index) => row !== shell.commitsLive[index])) shell.commitsLive = rows;
     }
     if (shell.graphBranches?.length) {
@@ -288,7 +297,7 @@ async function readContext(shell: ShellState, operation?: string, parts: Context
       parts.flow ? invoke<InProgress | null>("in_progress", { path }, undefined, operation) : Promise.resolve(shell.progress),
       parts.flow ? invoke<MergeState | null>("merge_state", { path }, undefined, operation).catch(() => null) : Promise.resolve(shell.mergeState),
     ]);
-    if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
+    if (gen !== shell.contextGen || openGen !== shell.openGen || !shell.viewing(path)) return;
     shell.contextRevision = revision ?? 0;
     if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
     if (parts.history) {
@@ -301,6 +310,9 @@ async function readContext(shell: ShellState, operation?: string, parts: Context
     if (!sameMergeState(shell.mergeState, nextMerge)) shell.mergeState = nextMerge;
     if (nextMerge) fillMergeProgress(shell, nextMerge);
     else clearMergeProgress(shell);
+    } finally {
+      if (trackLoading && shell.contextGen === gen) shell.historyLoading = false;
+    }
   }
 
 function sameMergeState(left: MergeState | null, right: MergeState | null) {

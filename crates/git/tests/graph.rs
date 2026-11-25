@@ -1,10 +1,11 @@
 mod common;
 
 use std::fs;
+use std::sync::{atomic::AtomicBool, Arc};
 
 use awegit_git::{
     blame_file, branch_commits, commit_detail, commit_files, commit_log, commit_tree, commits_from,
-    compare_files, locate_ref, repository_refs, show_commit_file, ChangeKind,
+    compare_files, locate_ref, repository_refs, show_commit_file, with_cancellation, ChangeKind,
 };
 
 fn repo() -> common::TempRepo {
@@ -23,6 +24,14 @@ fn empty_repository_has_no_commits() {
     let repo = repo();
     let log = commit_log(&repo.path, 20).unwrap();
     assert!(log.is_empty(), "{log:?}");
+}
+
+#[test]
+fn cancelled_history_is_not_an_empty_repository() {
+    let repo = repo();
+    let token = Arc::new(AtomicBool::new(true));
+    let error = with_cancellation(token, || commit_log(&repo.path, 20)).unwrap_err();
+    assert!(error.to_string().contains("awegit:cancelled:"), "{error}");
 }
 
 #[test]

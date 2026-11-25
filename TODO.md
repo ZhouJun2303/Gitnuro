@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 切换仓库时全部提交不再停在「还没有提交」。历史和工作区同时读，状态刷新不会丢掉已经在读的提交列表；空列表在第一页到达前显示「正在读取…」。装上监听不再额外做一次全量扫描。回归：`cancelled_history_is_not_an_empty_repository`、`e2e/operation-scheduler.spec.ts` 的 `history is read while the same repository is still scanning status`、`e2e/performance-refresh.spec.ts` 的 `a status snapshot does not discard history for the open repository`、`e2e/lab.spec.ts` 的 `switching repositories clears the previous commit detail`。修复：本条所在提交 `fix: 切换仓库时立即读取全部提交`。
+
 - [x] 丢弃子模块时，如果子模块已经停在父仓库记录的提交上，只在该子模块内重置索引和工作区，不再把它改成游离 HEAD；未跟踪文件仍保留，提交不同时仍切到父仓库记录的提交，reflog 留下正常的 checkout 记录。回归：`discard_dirty_submodule_keeps_its_branch`、`discard_paths_restores_submodule_and_regular_file_together`、`discard_submodule_restores_checkout_without_touching_other_submodules`。修复：本条所在提交 `fix: 丢弃子模块修改时不再无故切换 HEAD`。
 
 - [x] `9fdf8a38`：冲突预览改为偏好设置 → 差异里的开关，默认关闭。关闭时不读取冲突全文，也不在面板里展开每一块；合并窗口不受影响。回归：`missing_conflict_preview_defaults_off_and_keeps_an_explicit_choice`，`e2e/conflict-preview-setting.spec.ts`。

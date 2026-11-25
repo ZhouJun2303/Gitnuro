@@ -207,6 +207,44 @@ for (const switchRepo of [false, true]) {
   });
 }
 
+test("a status snapshot does not discard history for the open repository", async ({ page }) => {
+  await page.route("**/__lab/invoke", async (route) => {
+    const { cmd, args } = route.request().postDataJSON();
+    if (!args.path?.startsWith("D:/perf/")) return route.continue();
+    if (cmd === "repository_refs") await new Promise((resolve) => setTimeout(resolve, 80));
+    const row = { id: "c1", shortId: "c1", summary: "kept", author: "A", email: "a@e", at: 1, when: "now", parents: [], refs: [], lane: 0, unpushed: false, remoteOnly: false };
+    const value = cmd === "repository_refs" ? {
+      revision: 10, head: "c1", branches: [], remotes: [], tags: [], stashes: [], submodules: [], worktrees: [], hiddenRefs: [], expandedGroups: [],
+    } : cmd === "commit_log" ? [row] : null;
+    await route.fulfill({ json: { ok: true, value } });
+  });
+  await page.goto("/?scene=clean");
+  await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();
+  const result = await page.evaluate(async () => {
+    const modulePath = "/src/lib/shell/state.svelte.ts";
+    const historyPath = "/src/lib/shell/history.svelte.ts";
+    const { ShellState } = await import(/* @vite-ignore */ modulePath);
+    const { loadContext } = await import(/* @vite-ignore */ historyPath);
+    const shell: any = {
+      snapshot: null, repos: [], selectedPath: null, statusGen: 0, contextGen: 0, openGen: 0,
+      settings: { commitSort: "date", signOff: false }, commitsLive: [], mergeState: null,
+      sideView: "changes", commitSearch: "", historyFilter: "", logLimit: 500, allBranches: true,
+      historyFillPending: false, historyLoading: false, actionError: null, contextRevision: 0, mergeProgressAutoSummary: "",
+      section: "changes", standalone: "", mode: "live", busy: false, reflogOn: false,
+      exactRefs: () => [], tr: String, message: String,
+    };
+    for (const method of ["applySnapshot", "repoPath", "jobKey", "viewing", "same", "loadCommits"] as const) shell[method] = ShellState.prototype[method].bind(shell);
+    shell.focusPath = "D:/perf/history-keep";
+    shell.applySnapshot({ path: shell.focusPath, staged: [], unstaged: [], revision: 10 });
+    const pending = loadContext(shell, "history-keep");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    shell.applySnapshot({ path: shell.focusPath, staged: [{ path: "dirty.txt" }], unstaged: [], revision: 11 });
+    await pending;
+    return { ids: shell.commitsLive.map((row: { id: string }) => row.id), statusGen: shell.statusGen };
+  });
+  expect(result).toEqual({ ids: ["c1"], statusGen: 2 });
+});
+
 test("a repository switch paints one history page before older pages stream in", async ({ page }) => {
   await page.goto("/?scene=clean");
   await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();

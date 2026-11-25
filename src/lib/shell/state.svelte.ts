@@ -61,7 +61,7 @@ import { enqueueStage, projectStages, stageActions, type PendingStage } from "./
 import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../operation-policy";
 import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
 import { watchOperationTasks } from "./task-monitor";
-import { cancelReads, invalidateReads, isReadSuperseded } from "../read-scheduler";
+import { cancelReads, HISTORY_READS, invalidateReads, isReadSuperseded } from "../read-scheduler";
 import { subscribeUpdate } from "../update-loop";
 import { mergeResponse } from "../reconcile";
 import { sceneById } from "../lab/scenes";
@@ -555,7 +555,7 @@ export class ShellState {
   refreshing = false;
 
 
-  refreshQueued: "status" | "full" | null = null;
+  refreshQueued: { scope: "status" | "full"; path: string } | null = null;
 
 
   /** A watcher event that arrived while a write was running. */
@@ -571,6 +571,9 @@ export class ShellState {
 
 
   commitsLive = $state.raw<CommitRow[]>([]);
+
+  /** The first history page has not arrived. An empty list is not "no commits" yet. */
+  historyLoading = $state(false);
 
 
   progress = $state<InProgress | null>(null);
@@ -1749,7 +1752,9 @@ export class ShellState {
 
   viewing(path: string | null | undefined) {
     const key = this.jobKey(path);
-    return key !== "" && key === this.jobKey(this.snapshot?.path);
+    if (!key) return false;
+    if (key === this.jobKey(this.snapshot?.path)) return true;
+    return !this.snapshot && key === this.jobKey(this.focusPath);
   }
 
 
@@ -3267,7 +3272,8 @@ export class ShellState {
 
 
   repoPath() {
-    return this.snapshot?.path;
+    // While a switch has cleared the previous snapshot, history still needs the selected path.
+    return this.snapshot?.path ?? (this.focusPath || undefined);
   }
 
 
@@ -3616,7 +3622,10 @@ export class ShellState {
       this.queueWatch(scope, 0, paths); return;
     }
     if (this.refreshing) {
-      if (this.refreshQueued !== "full") this.refreshQueued = scope;
+      const queued = this.refreshQueued;
+      const sameRepo = !!queued && this.jobKey(queued.path) === this.jobKey(path);
+      const scopeNow = sameRepo && (queued.scope === "full" || scope === "full") ? "full" : scope;
+      this.refreshQueued = { scope: scopeNow, path };
       return;
     }
     this.refreshing = true;
@@ -3624,7 +3633,10 @@ export class ShellState {
     // The open conflict read is the merge panel body. Cancelling it leaves the
     // headers up and the center on "no changes": the failure is "Preview superseded",
     // and message() turns that into an empty string.
-    invalidateReads(path, this.textMerge ? ["conflict_view", "conflict_sides"] : []);
+    // A status scan must not cancel history that is already loading for this repository.
+    const keep = scope === "status" ? [...HISTORY_READS] : [];
+    if (this.textMerge) keep.push("conflict_view", "conflict_sides");
+    invalidateReads(path, keep);
     try {
       const gen = this.statusGen;
       const value = await invoke<StatusSnapshot>(paths?.length ? "workspace_status_paths" : "workspace_status", paths?.length ? { path, files: paths } : { path });
@@ -3643,7 +3655,7 @@ export class ShellState {
       this.refreshing = false;
       const next = this.refreshQueued;
       this.refreshQueued = null;
-      if (next && this.viewing(path)) await this.refresh(next, silent);
+      if (next && this.viewing(next.path)) await this.refresh(next.scope, silent);
       else if (this.viewing(path)) this.replayWatch();
     }
   }
@@ -5885,8 +5897,11 @@ export class ShellState {
         this.snapshot = null; this.refs = null; this.commitsLive = []; this.mode = "loading";
         this.historyFillPending = false;
         this.selectedPath = null; this.selectedCommit = null; this.commitDetail = null; this.commitFiles = [];
+        this.contentHits = null; this.expandedMerges = []; this.historyTop = 0;
         this.progress = null; this.statusRevision = 0; this.statusObservedRevision = 0; this.stageStatusUnverified = false; this.contextRevision = 0;
+        if (this.standalone !== "history") this.historyFilter = "";
       }
+      this.historyLoading = false;
       this.diff = null; this.diffError = null; this.conflictView = null; this.historyDiff = null;
       this.preview = null; this.imageOld = null; this.imageNew = null; this.blameLines = null;
       const draft = this.drafts.get(path);
@@ -5895,6 +5910,14 @@ export class ShellState {
       this.commitType = isCommitType(draftType) ? draftType : this.preferredCommitType();
       this.restoreHistoryFilter(path);
     }
+    let historyStarted = false;
+    const startHistory = (force: boolean) => {
+      if (historyStarted || (!force && this.commitsLive.length > 0 && this.refs)) return;
+      historyStarted = true;
+      void this.loadContext().catch((error) => {
+        if (gen === this.openGen && this.viewing(path)) this.actionError = this.message(error);
+      });
+    };
     const running = (this.jobs[this.jobKey(path)]?.depth ?? 0) > 0;
     let stopAt = path;
     this.actionError = null;
@@ -5933,6 +5956,10 @@ export class ShellState {
         }
         if (gen !== this.openGen) return;
         this.armOpenExtras(path, gen);
+        // Commits do not wait on the work tree. A quiet index can still have history,
+        // and a painted status cache does not include the commit list.
+        const keepHistory = headSame && this.commitsLive.length > 0 && !!this.refs;
+        startHistory(!keepHistory);
         if (plan.kind === "trust") {
           this.stageStatusUnverified = false;
           void this.loadDiff();
@@ -5944,18 +5971,20 @@ export class ShellState {
           void this.validatePaths(path, gen, plan.paths, noted?.revision ?? 0);
           return;
         }
-        const keepHistory = headSame && this.commitsLive.length > 0 && !!this.refs;
-        void this.refresh(keepHistory ? "status" : "full", true, null);
+        void this.refresh("status", true, null);
         return;
       }
       if (!running) {
         held = true;
         this.startWork(this.tr("chrome.open"), path);
       }
+      if (!stayingOnRepo) startHistory(true);
       const value = await invoke<StatusSnapshot>("workspace_status", { path });
       if (gen !== this.openGen) return;
       // Reopening the repository already on screen keeps the message being written.
-      const staying = this.viewing(path) || this.viewing(value.path);
+      // focusPath stands in for the snapshot until status returns. That must not
+      // count as reopening the same repository and keep the previous scroll.
+      const staying = stayingOnRepo || (this.mode === "live" && (this.viewing(path) || this.viewing(value.path)));
       this.aliasJob(path, value.path);
       stopAt = value.path;
       this.applySnapshot(value);
@@ -5992,8 +6021,8 @@ export class ShellState {
         this.description = saved?.description ?? "";
         this.normalizeSummary();
       }
-      if (this.standalone !== "history") this.historyFilter = "";
-      void this.loadContext().catch((error) => { if (gen === this.openGen) this.actionError = this.message(error); });
+      if (!historyStarted && this.standalone !== "history") this.historyFilter = "";
+      if (!historyStarted) void this.loadContext().catch((error) => { if (gen === this.openGen) this.actionError = this.message(error); });
       if (this.standalone !== "merge") void this.loadDiff();
       this.armOpenExtras(path, gen);
     } catch (error) {
@@ -6003,7 +6032,10 @@ export class ShellState {
       if (this.missingRepoPath(text)) await this.dropMissingRepo(path, text);
     } finally {
       if (held) this.stopWork(stopAt);
-      if (gen === this.openGen) this.focusPath = null;
+      if (gen === this.openGen) {
+        this.focusPath = null;
+        queueHistoryFill(this);
+      }
     }
   }
 

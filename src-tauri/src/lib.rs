@@ -1174,15 +1174,8 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
             started.elapsed().as_millis()
         ),
     );
-    let _ = app.emit(
-        "repo-changed",
-        RepoChange {
-            refs: true,
-            path: repo.display().to_string(),
-            revision: changes::changed(&repo),
-            paths: None,
-        },
-    );
+    // Opening already decided whether to scan the work tree. Emitting a full
+    // refresh here starts a second scan and cancels the history read.
     let shared = Arc::new(WatchSlot {
         watcher: Mutex::new(Some(watcher)),
         alive: Arc::new(AtomicBool::new(true)),

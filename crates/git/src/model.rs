@@ -262,8 +262,10 @@ pub fn search_log_page_with_revision(
         return Err(Error::Path(query.to_string()));
     }
     let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]));
-    if !matches!(head, Ok(output) if output.status.success()) {
-        return Ok(Vec::new());
+    match head {
+        Err(error) => return Err(error),
+        Ok(output) if output.status.success() => {}
+        Ok(_) => return Ok(Vec::new()),
     }
     let limit_text = limit.clamp(1, 100_000).to_string();
     let order = if topo { "--topo-order" } else { "--date-order" };
@@ -420,8 +422,11 @@ fn log_page(
     revision: Option<u64>,
 ) -> Result<Vec<CommitRow>, Error> {
     let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]));
-    if !matches!(head, Ok(output) if output.status.success()) {
-        return Ok(Vec::new());
+    match head {
+        Err(error) => return Err(error),
+        Ok(output) if output.status.success() => {}
+        // An unborn repository has no commits. A cancelled or failed Git process does not.
+        Ok(_) => return Ok(Vec::new()),
     }
     let limit = limit.clamp(1, 100_000).to_string();
     let order = if topo { "--topo-order" } else { "--date-order" };

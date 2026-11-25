@@ -29,6 +29,22 @@ test("every Rust mutation declares its refresh domains", () => {
   expect(operationAreas.stageLines).toEqual(["index"]);
 });
 
+test("history is read while the same repository is still scanning status", async () => {
+  const path = "scheduler-history-beside-status";
+  const statusGate = deferred<string>();
+  let historyStarted = false;
+  const status = scheduleRead("workspace_status", { path }, () => statusGate.promise);
+  const history = scheduleRead("commit_log", { path, limit: 1 }, async () => {
+    historyStarted = true;
+    return [{ id: "abc" }];
+  });
+  await tick();
+  expect(historyStarted).toBe(true);
+  statusGate.resolve("status");
+  expect(await status).toBe("status");
+  expect(await history).toEqual([{ id: "abc" }]);
+});
+
 test("immutable object reads are single flight and reusable; mutable reads expire with writes", async () => {
   const gate = deferred<string>(), path = "scheduler-cache", id = "a".repeat(40);
   let calls = 0;
