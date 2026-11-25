@@ -5,6 +5,70 @@ import { expect, test } from "@playwright/test";
 import { pinLabSettings } from "./helpers";
 
 for (const theme of ["apple", "light", "dark"]) {
+  test(`checkout clears the branch spinner after the reference snapshot arrives (${theme})`, async ({ page }) => {
+    let status: Record<string, unknown>, refs: Record<string, any>;
+    let task: { id: string; path: string; action: string; label: string; targets: string[]; state: "completed"; dependsOn: string[]; revision: number } | undefined;
+    let refreshing = false, deliveries = 0;
+    let releaseResult!: () => void, releaseRefs!: () => void, receivedTask!: () => void;
+    const resultGate = new Promise<void>((done) => { releaseResult = done; });
+    const refsGate = new Promise<void>((done) => { releaseRefs = done; });
+    const taskResponse = new Promise<void>((done) => { receivedTask = done; });
+
+    await pinLabSettings(page, { theme, locale: "zh", fetchAutomatically: false, statusInterval: 0 });
+    await page.route("**/__lab/invoke", async (route) => {
+      const { cmd, args } = route.request().postDataJSON();
+      if (cmd === "operation_tasks") {
+        const tasks = task && deliveries === 0 ? [task] : [];
+        await route.fulfill({ json: { ok: true, value: tasks } });
+        if (tasks.length) { deliveries += 1; receivedTask(); }
+        return;
+      }
+      if (cmd === "workspace_status" && !task) {
+        const response = await route.fetch();
+        status = (await response.json()).value;
+        return route.fulfill({ response });
+      }
+      if (cmd === "repository_refs") {
+        if (!task) {
+          const response = await route.fetch();
+          refs = (await response.json()).value;
+          return route.fulfill({ response });
+        }
+        refreshing = true;
+        await refsGate;
+        const branches = (refs.branches ?? []).map((branch: { name: string }) => ({ ...branch, current: branch.name === "topic" }));
+        return route.fulfill({ json: { ok: true, value: { ...refs, branches, revision: task.revision } } });
+      }
+      if (cmd === "mutate" && args.request?.action === "checkout") {
+        task = { id: args.__task, path: args.path, action: "checkout", label: "检出 topic", targets: ["topic"], state: "completed", dependsOn: [], revision: Number(refs.revision ?? 0) + 1 };
+        await resultGate;
+        return route.fulfill({ json: { ok: true, value: {
+          ...status, branch: "topic", revision: task.revision, outcome: "completed", error: "", log: "$ git checkout topic",
+          refreshAreas: ["worktree", "index", "refs", "history", "flow"],
+        } } });
+      }
+      return route.fallback();
+    });
+    await page.goto("/?scene=checkout-dirty&theme=" + theme + "&locale=zh");
+    await expect(page.locator('[data-lab-scene="checkout-dirty"]')).toBeVisible();
+    const spinner = page.locator('.sidebar .file-select[title="topic"] .reference-pending');
+    await expect(spinner).toHaveCount(0);
+    await page.locator('.sidebar .file-select[title="topic"]').dblclick();
+    try {
+      await taskResponse;
+      await expect(spinner).toBeVisible();
+      releaseResult();
+      await expect(page.locator(".identity-floor.tone-busy")).toHaveCount(0);
+      await expect.poll(() => refreshing).toBe(true);
+      await expect(spinner).toBeVisible();
+      releaseRefs();
+      await expect(spinner).toHaveCount(0, { timeout: 3000 });
+    } finally {
+      releaseResult();
+      releaseRefs();
+    }
+  });
+
   for (const kind of ["local", "remote", "index", "conflict", "failed"]) {
     test(`double-click checkout preserves local work ${kind} (${theme})`, async ({ page, request }) => {
       test.setTimeout(90_000);

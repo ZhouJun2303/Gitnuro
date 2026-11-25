@@ -13,6 +13,8 @@ export type StatusFingerprint = {
   refId: string;
   indexLen: number;
   indexSum: string;
+  /** Stable signature of the checked-out submodule HEADs and indexes. */
+  submoduleSum?: string;
 };
 
 export type StatusSnapshot = {

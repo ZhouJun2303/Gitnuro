@@ -4190,7 +4190,10 @@ export class ShellState {
             if (follow.staleLock) report = follow;
             throw new Error(follow.error || follow.log);
           }
-          if (this.viewing(path)) this.applySnapshot(follow);
+          if (this.viewing(path)) {
+            this.applySnapshot(follow);
+            if (follow.refreshScope !== "status") this.scheduleAuxiliary(follow.refreshAreas ?? areasFor("submoduleUpdate"), operation);
+          }
           this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
         }
         this.noteActivity(`${action}${output ? " output" : " ok"}`);

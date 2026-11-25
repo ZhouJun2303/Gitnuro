@@ -476,13 +476,16 @@ impl Mutation {
             StashDrop { .. } | StashRename { .. } => &["stashes"],
             Stash { .. } | StashPop { .. } | StashPaths { .. } => &["worktree", "index", "stashes"],
             StashApply { .. } | RestoreFile { .. } | Discard { .. } | DiscardPaths { .. } | Delete { .. } | DeletePaths { .. }
-                | ApplyPatch { .. } | SubmoduleUpdate | SubmoduleUpdatePath { .. } => &["worktree", "index"],
+                | ApplyPatch { .. } => &["worktree", "index"],
+            SubmoduleUpdate | SubmoduleUpdatePath { .. } => &["worktree", "index", "refs"],
             StageHunk { .. } | StageLine { .. } | StageLines { .. } | StagePaths { .. } => &["index"],
             DiscardHunk { .. } | DiscardLine { .. } | DiscardLines { .. } | LfsPull => &["worktree"],
             Resolve { .. } | ResolvePaths { .. } => &["worktree", "index", "flow"],
-            WriteGitignore { .. } | AppendIgnore { .. } | SubmoduleAdd { .. } | SubmoduleRemove { .. } => &["worktree", "index", "config"],
+            WriteGitignore { .. } | AppendIgnore { .. } => &["worktree", "index", "config"],
+            SubmoduleAdd { .. } | SubmoduleRemove { .. } => &["worktree", "index", "refs", "config"],
             WriteMailmap { .. } => &["worktree", "config", "history"],
-            SubmoduleInit { .. } | SubmoduleSync { .. } | GitFlowInit { .. } | LfsLock { .. } | LfsUnlock { .. }
+            SubmoduleInit { .. } => &["refs", "config"],
+            SubmoduleSync { .. } | GitFlowInit { .. } | LfsLock { .. } | LfsUnlock { .. }
                 | SetHidden { .. } | SetExpanded { .. } | SetSignOff { .. } => &["config"],
             StashPatch { .. } | LfsPush => &[],
             Reset { mode: ResetMode::Soft, .. } => &["refs", "history", "flow"],

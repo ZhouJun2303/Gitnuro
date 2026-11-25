@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 仓库状态、子模块工作区和子模块 Git 元数据变更会及时通知界面；切换回仓库会比较子模块指纹，checkout 完成后的分支等待标记会在引用快照到达后清除。修复提交：本条所在提交 `fix: 修复仓库状态刷新延迟`。回归：`watch_plan_tests::submodule_gitdir_fetch_head_is_metadata_not_a_worktree_path`、`fingerprint::tests::submodule_checkout_changes_move_the_fingerprint`、`e2e/status-switch.spec.ts`、`e2e/checkout.spec.ts`、`e2e/operation-scheduler.spec.ts`。
+
 - [x] 全新安装第一次启动后，在首屏绘制完成时后台自动同步本机已登录账号、导入 Fork 设置、启用 AI 提交说明接口并开启 Killer 推送；只执行一次，不弹窗、不阻塞打开仓库，失败就跳过。回归：`missing_onboarding_counts_as_seen`、`e2e/first-run.spec.ts`。实现：本条所在提交 `feat: 新装首次启动后台自动准备本地设置并更新功能页`。
 
 - [x] 切换仓库时全部提交不再停在「还没有提交」。历史和工作区同时读，状态刷新不会丢掉已经在读的提交列表；空列表在第一页到达前显示「正在读取…」。装上监听不再额外做一次全量扫描。回归：`cancelled_history_is_not_an_empty_repository`、`e2e/operation-scheduler.spec.ts` 的 `history is read while the same repository is still scanning status`、`e2e/performance-refresh.spec.ts` 的 `a status snapshot does not discard history for the open repository`、`e2e/lab.spec.ts` 的 `switching repositories clears the previous commit detail`。修复：本条所在提交 `fix: 切换仓库时立即读取全部提交`。

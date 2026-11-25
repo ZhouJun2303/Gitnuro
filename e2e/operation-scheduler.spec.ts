@@ -27,6 +27,11 @@ test("every Rust mutation declares its refresh domains", () => {
   expect(Object.keys(operationAreas).filter((key) => key !== "commit").sort()).toEqual(variants.sort());
   expect(operationAreas.createBranch).toEqual(["refs"]);
   expect(operationAreas.stageLines).toEqual(["index"]);
+  expect(operationAreas.submoduleUpdate).toEqual(["worktree", "index", "refs"]);
+  expect(operationAreas.submoduleUpdatePath).toEqual(["worktree", "index", "refs"]);
+  expect(operationAreas.submoduleAdd).toEqual(["worktree", "index", "refs", "config"]);
+  expect(operationAreas.submoduleInit).toEqual(["refs", "config"]);
+  expect(operationAreas.submoduleRemove).toEqual(["worktree", "index", "refs", "config"]);
 });
 
 test("history is read while the same repository is still scanning status", async () => {
@@ -146,7 +151,7 @@ test("mutable reads waiting in one repository leave a slot for another", async (
   const first = scheduleRead("workspace_status", { path: "D:/repo-a" }, () => { started.push("A status"); return gate.promise; });
   const next = scheduleRead("repository_refs", { path: "d:\\repo-a" }, async () => { started.push("A refs"); return 2; });
   expect(await scheduleRead("workspace_status", { path: "D:/repo-b" }, async () => { started.push("B status"); return 3; })).toBe(3);
-  expect(started).toEqual(["A status", "B status"]);
+  expect(started).toEqual(["A status", "A refs", "B status"]);
   gate.resolve(1);
   expect(await Promise.all([first, next])).toEqual([1, 2]);
 });

@@ -630,6 +630,7 @@ struct MutationReport {
     flow: Option<flows::Summary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     refresh_scope: Option<&'static str>,
+    revision: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -757,6 +758,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             stale_lock,
             flow,
             refresh_scope,
+            revision: changes::revision(&next),
         })
     });
     let log = perf::redact(&log);
@@ -1162,6 +1164,7 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
         let common = common_metadata_dir(git);
         if common != *git { watch_git_metadata(&mut watcher, &common, &mut watched); }
     }
+    watch_submodule_metadata(&mut watcher, &repo, &mut watched);
     watch_tracked_directories(&mut watcher, &repo, &mut watched);
     perf::write(
         "INFO",
@@ -1201,6 +1204,47 @@ fn watch_tracked_directories(watcher: &mut RecommendedWatcher, repo: &Path, watc
             perf::write("WARN", "watch", &error);
         }
     }
+}
+
+/// Watch initialized submodules through the parent repository's watcher. Their gitdirs live
+/// below `.git/modules`, so the normal superproject metadata watch does not reach them.
+fn watch_submodule_metadata(watcher: &mut RecommendedWatcher, repo: &Path, watched: &mut WatchSet) {
+    for checkout in submodule_worktrees(repo) {
+        if !checkout.is_dir() { continue; }
+        if let Some(git) = git_metadata_dir(&checkout) {
+            watch_git_metadata(watcher, &git, watched);
+            watch_tracked_directories(watcher, &checkout, watched);
+        }
+    }
+}
+
+fn submodule_worktrees(repo: &Path) -> Vec<PathBuf> {
+    let Ok(text) = std::fs::read_to_string(repo.join(".gitmodules")) else { return Vec::new() };
+    let mut paths = text.lines().filter_map(|line| {
+        let (key, value) = line.trim().split_once('=')?;
+        if key.trim() != "path" { return None; }
+        let path = value.trim().trim_matches('"');
+        safe_submodule_path(path).then(|| repo.join(path))
+    }).collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn safe_submodule_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.contains('\0')
+        && !Path::new(path).is_absolute()
+        && !path.split(['/', '\\']).any(|part| part.is_empty() || part == "." || part == "..")
+}
+
+fn submodule_watch_needs_rearm(repo: &Path, path: &Path) -> bool {
+    let Some(relative) = watched_relative(repo, path) else { return false };
+    if relative == ".gitmodules" { return true; }
+    let Some(inner) = relative.strip_prefix(".git/modules") else { return false };
+    if inner.is_empty() { return true; }
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+    path.is_dir() && !matches!(name, "refs" | "logs" | "objects" | "info" | "hooks" | "worktrees")
 }
 
 /// Directories that are huge or rewrite themselves. A recursive watch of the work tree
@@ -1487,9 +1531,13 @@ fn settle_changes(
         }
         let paths: Vec<_> = unique.into_iter().collect();
         attach_new_dirs(repo, git_dir.as_deref(), &paths, &mut watched, &slot);
-        if overflow || paths.iter().any(|path| watched_relative(repo, path).is_some_and(|path| path == ".git/index" || path == ".git")) {
+        let rearm_submodules = paths.iter().any(|path| submodule_watch_needs_rearm(repo, path));
+        if overflow || rearm_submodules || paths.iter().any(|path| watched_relative(repo, path).is_some_and(|path| path == ".git/index" || path == ".git")) {
             if let Ok(mut guard) = slot.watcher.lock() {
-                if let Some(watcher) = guard.as_mut() { watch_tracked_directories(watcher, repo, &mut watched); }
+                if let Some(watcher) = guard.as_mut() {
+                    watch_tracked_directories(watcher, repo, &mut watched);
+                    if rearm_submodules { watch_submodule_metadata(watcher, repo, &mut watched); }
+                }
             }
         }
         if overflow {
@@ -1528,15 +1576,24 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
         if relative == ".git" {
             return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None });
         }
+        if relative == ".gitmodules" {
+            return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None });
+        }
         if let Some(inner) = relative.strip_prefix(".git/") {
             if inner.ends_with(".lock") { continue; }
             match inner.split('/').next().unwrap_or("") {
                 "index" => status = true,
+                "modules" if module_metadata_relevant(inner) => {
+                    return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None });
+                }
                 "objects" | "modules" | "lfs" | "logs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit" | "awegit-flow" | "gitnuro" | "fsmonitor--daemon"
                     if inner != "logs/refs/stash" => {}
                 _ => return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None }),
             }
             continue;
+        }
+        if is_submodule_worktree_path(repo, path) {
+            return Some(RepoChange { refs: false, path: repo.display().to_string(), revision: changes::revision(repo), paths: None });
         }
         files.push(relative);
     }
@@ -1578,7 +1635,8 @@ fn watch_relevant(repo: &Path, path: &Path) -> bool {
     if let Some(inner) = relative.strip_prefix(".git/") {
         if inner.ends_with(".lock") { return false; }
         return match inner.split('/').next().unwrap_or("") {
-            "objects" | "modules" | "lfs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit-flow" | "fsmonitor--daemon" => false,
+            "objects" | "lfs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit-flow" | "fsmonitor--daemon" => false,
+            "modules" => module_metadata_relevant(inner),
             "logs" => inner == "logs/refs/stash",
             _ => true,
         };
@@ -1586,6 +1644,19 @@ fn watch_relevant(repo: &Path, path: &Path) -> bool {
     // Heavy directories are never watched recursively. A directly watched tracked
     // parent must still report its files, even under build/ or node_modules/.
     true
+}
+
+fn module_metadata_relevant(inner: &str) -> bool {
+    let Some(rest) = inner.strip_prefix("modules/") else { return true };
+    !rest.split('/').any(|part| matches!(part, "objects" | "logs" | "lfs" | "info" | "hooks" | "FETCH_HEAD" | "ORIG_HEAD"))
+}
+
+fn is_submodule_worktree_path(repo: &Path, path: &Path) -> bool {
+    let path_key = watch_key(&lexical_clean(path));
+    submodule_worktrees(repo).into_iter().any(|checkout| {
+        let checkout_key = watch_key(&lexical_clean(&checkout));
+        path_key.starts_with(&checkout_key) && path_key != checkout_key
+    })
 }
 
 #[tauri::command]
@@ -3254,6 +3325,7 @@ mod watch_plan_tests {
         fs::create_dir_all(&gitdir).unwrap();
         fs::create_dir_all(&submodule).unwrap();
         fs::write(submodule.join(".git"), "gitdir: ../../.git/modules/Packages/HlwdFramework\n").unwrap();
+        fs::write(root.join(".gitmodules"), "[submodule \"framework\"]\n\tpath = Packages/HlwdFramework\n").unwrap();
         fs::write(gitdir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
         fs::write(submodule.join("note.txt"), "note\n").unwrap();
         let escaped = |name: &str| submodule.join(format!("../../.git/modules/Packages/HlwdFramework/{name}"));
@@ -3263,6 +3335,12 @@ mod watch_plan_tests {
         assert!(super::classify_changes(&submodule, &[escaped("index")]).is_some_and(|change| !change.refs && change.paths.is_none()));
         assert!(super::classify_changes(&root, &[escaped("FETCH_HEAD")]).is_none());
         assert!(super::classify_changes(&submodule, &[submodule.join("note.txt")]).is_some_and(|change| change.paths.as_deref() == Some(&["note.txt".into()][..])));
+        assert!(super::watch_relevant(&root, &escaped("HEAD")));
+        assert!(super::classify_changes(&root, &[escaped("HEAD")]).is_some_and(|change| change.refs && change.paths.is_none()));
+        assert!(!super::watch_relevant(&root, &escaped("logs/HEAD")));
+        assert!(super::classify_changes(&root, &[submodule.join("note.txt")]).is_some_and(|change| !change.refs && change.paths.is_none()));
+        assert!(super::classify_changes(&root, &[submodule.join(".git")]).is_some_and(|change| !change.refs && change.paths.is_none()));
+        assert!(super::classify_changes(&root, &[root.join(".gitmodules")]).is_some_and(|change| change.refs && change.paths.is_none()));
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -46,6 +46,7 @@ export function acceptTask(task: OperationTask, native = true, notify = true) {
         || (task.state === previous.state && (task.percent ?? 0) < (previous.percent ?? 0)))) return false;
   }
   const merged = { ...previous, ...task };
+  if (previous) merged.revision = Math.max(previous.revision, task.revision);
   // Keep exact paths for this window's optimistic writes while they are active.
   if (!taskDone(merged) && previous && localTasks.has(task.id) && previous.targets.length > task.targets.length) merged.targets = previous.targets;
   if (taskDone(merged) && merged.targets.length > 16) {
@@ -106,10 +107,11 @@ export async function runTask<T>(command: string, args: Record<string, unknown>,
   const started = performance.now();
   try {
     const value = await execute({ ...args, __task: id, __client: clientId, __after: after, __dependsOn: dependsOn });
-    const report = value as { outcome?: TaskState; refreshScope?: "status" | "full" } | null;
+    const report = value as { outcome?: TaskState; revision?: number; refreshScope?: "status" | "full" } | null;
     const outcome = report?.outcome ?? "completed";
     const current = records.get(id) ?? task;
     acceptTask({ ...current, state: taskDone(current) ? current.state : outcome,
+      ...(typeof report?.revision === "number" ? { revision: Math.max(current.revision, report.revision) } : {}),
       ...(report?.refreshScope ? { refreshScope: report.refreshScope } : {}), executeMs: current.executeMs || performance.now() - started }, false);
     return value;
   } catch (error) {
