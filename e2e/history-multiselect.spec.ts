@@ -32,19 +32,20 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await expect(selected).toHaveCount(2);
     await rows.nth(4).press("ArrowDown");
     await expect(selected).toHaveCount(1);
-    const filteredId = await rows.first().getAttribute("data-commit-id");
+    const selectedId = await selected.getAttribute("data-commit-id");
     const summary = (await rows.first().locator(".subject").innerText()).trim();
+    const beforeSearch = await rows.count();
     await page.getByRole("button", { name: "Find commits", exact: true }).click();
     const query = page.getByRole("textbox", { name: "Find commits", exact: true });
     await query.fill(summary);
-    await expect(rows).toHaveCount(1);
-    await expect(selected).toHaveCount(0);
-    await rows.first().click({ modifiers: ["Control"] });
+    await expect(rows).toHaveCount(beforeSearch);
+    await expect(page.locator(".history .commit-row.match")).toHaveCount(1);
     await expect(selected).toHaveCount(1);
+    await expect(selected).toHaveAttribute("data-commit-id", selectedId!);
     await query.fill("");
     await expect(rows.nth(5)).toBeVisible();
     await expect(selected).toHaveCount(1);
-    await expect(selected).toHaveAttribute("data-commit-id", filteredId!);
+    await expect(selected).toHaveAttribute("data-commit-id", selectedId!);
   });
 
   test(`history multiselect ${theme} shows the count and submits exactly the selected commits`, async ({ page }) => {
@@ -52,7 +53,7 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await pinLabSettings(page, { locale: "zh", theme });
     await page.route("**/__lab/invoke", async (route) => {
       const { cmd, args } = route.request().postDataJSON();
-      if (cmd !== "mutate" || args.request?.action !== "cherryPick") return route.continue();
+      if (cmd !== "mutate" || args.request?.action !== "cherryPick") return route.fallback();
       requests.push(args.request);
       return route.fulfill({ json: { ok: false, error: "Cherry-pick captured in UI test" } });
     });
