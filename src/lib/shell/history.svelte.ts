@@ -28,6 +28,9 @@ import type { CommitSelectionEvent } from "./commitSelection.svelte";
 
 const ERROR_KEY = "awegit-errors";
 const PATCH_CACHE_LIMIT = 100;
+/** The first page paints the list; older pages follow without blocking it. */
+const HISTORY_FIRST_PAGE = 500;
+const HISTORY_FILL_PAGE = 5000;
 
 function cachePatch(shell: ShellState, file: string, diff: FileDiff) {
     if (file in shell.patchCache || Object.keys(shell.patchCache).length < PATCH_CACHE_LIMIT) {
@@ -84,9 +87,10 @@ export function currentFilterRefs(shell: ShellState) {
     return names;
   }
 
-export async function loadCommits(shell: ShellState, path: string | undefined, operation?: string, offset = 0, limit = shell.logLimit) {
+export async function loadCommits(shell: ShellState, path: string | undefined, operation?: string, offset = 0, limit = shell.logLimit, background = false) {
     const order = shell.settings.commitSort === "topo" ? "topo" : "date";
     const query = shell.sideView === "search" ? shell.commitSearch.trim() : "";
+    const extra = background ? { __prefetch: true } : {};
     if (query && path) {
       return invoke<CommitRow[]>("search_log", {
         path,
@@ -95,24 +99,25 @@ export async function loadCommits(shell: ShellState, path: string | undefined, o
         query,
         limit, offset,
         order,
+        ...extra,
       }, undefined, operation);
     }
-    if (shell.historyFilter) return invoke<CommitRow[]>("file_history", { path, file: shell.historyFilter, limit, offset }, undefined, operation);
+    if (shell.historyFilter) return invoke<CommitRow[]>("file_history", { path, file: shell.historyFilter, limit, offset, ...extra }, undefined, operation);
     const revs = shell.exactRefs();
     if (!shell.allBranches && revs.length > 0) {
       try {
-        return await invoke<CommitRow[]>("commit_log", { path, limit, offset, order, revs }, undefined, operation);
+        return await invoke<CommitRow[]>("commit_log", { path, limit, offset, order, revs, ...extra }, undefined, operation);
       } catch (error) {
         if (shell.graphBranches?.length) throw error;
-        return invoke<CommitRow[]>("commit_log", { path, limit, offset, all: false, order }, undefined, operation);
+        return invoke<CommitRow[]>("commit_log", { path, limit, offset, all: false, order, ...extra }, undefined, operation);
       }
     }
-    return invoke<CommitRow[]>("commit_log", { path, limit, offset, all: shell.allBranches || revs.length === 0, order }, undefined, operation);
+    return invoke<CommitRow[]>("commit_log", { path, limit, offset, all: shell.allBranches || revs.length === 0, order, ...extra }, undefined, operation);
   }
 
 const moreReads = new WeakSet<ShellState>();
 export async function loadMoreHistory(shell: ShellState) {
-    if (shell.mode !== "live" || moreReads.has(shell)) return;
+    if (shell.mode !== "live" || moreReads.has(shell) || historyFills.get(shell)?.active) return;
     moreReads.add(shell);
     const path = shell.repoPath(), openGen = shell.openGen, contextGen = shell.contextGen, statusGen = shell.statusGen;
     const filter = shell.historyFilter, reflog = shell.reflogOn, order = shell.settings.commitSort;
@@ -128,9 +133,75 @@ export async function loadMoreHistory(shell: ShellState) {
         const existing = new Set(shell.commitsLive.map((row) => row.id));
         shell.commitsLive = [...shell.commitsLive, ...rows.filter((row) => !existing.has(row.id))];
         shell.logLimit = Math.min(100_000, Math.max(shell.logLimit, shell.commitsLive.length));
+        shell.historyFillPending = shell.commitsLive.length < shell.logLimit;
+        if (shell.historyFillPending) queueHistoryFill(shell);
       }
     } catch (error) { if (current()) shell.actionError = shell.message(error); }
     finally { moreReads.delete(shell); }
+}
+
+const historyFills = new WeakMap<ShellState, { token: number; active: boolean }>();
+
+function historyVisible(shell: ShellState) {
+    return shell.section === "history" || shell.standalone === "history";
+}
+
+/** Inputs that must stay put while older pages stream in. */
+function historyScope(shell: ShellState) {
+    return [shell.repoPath(), shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.allBranches, ...shell.exactRefs()];
+}
+
+/**
+ * Older pages load only after the first page has painted. Background priority
+ * keeps a long history from holding the slot a diff read needs.
+ */
+export function queueHistoryFill(shell: ShellState) {
+    if (!shell.historyFillPending || shell.mode !== "live" || shell.busy || shell.reflogOn || !historyVisible(shell)) return;
+    const path = shell.repoPath();
+    if (!path || shell.commitsLive.length === 0 || shell.commitsLive.length >= shell.logLimit) {
+      shell.historyFillPending = false;
+      return;
+    }
+    const previous = historyFills.get(shell);
+    if (previous?.active) return;
+    const state = { token: (previous?.token ?? 0) + 1, active: true };
+    historyFills.set(shell, state);
+    const openGen = shell.openGen, contextGen = shell.contextGen, statusGen = shell.statusGen;
+    const scope = historyScope(shell);
+    const current = () => historyFills.get(shell)?.token === state.token
+      && historyVisible(shell) && shell.viewing(path)
+      && shell.openGen === openGen && shell.contextGen === contextGen && shell.statusGen === statusGen
+      && shell.same(scope, historyScope(shell));
+    let failed = false;
+    void (async () => {
+      try {
+        while (current() && shell.commitsLive.length < shell.logLimit) {
+          const offset = shell.commitsLive.length;
+          const want = Math.min(HISTORY_FILL_PAGE, shell.logLimit - offset);
+          const rows = await loadCommits(shell, path, undefined, offset, want, true);
+          if (!current()) return;
+          const known = new Set(shell.commitsLive.map((row) => row.id));
+          const fresh = rows.filter((row) => !known.has(row.id));
+          if (fresh.length === 0) {
+            shell.historyFillPending = false;
+            return;
+          }
+          shell.commitsLive = [...shell.commitsLive, ...fresh];
+          if (rows.length < want) {
+            shell.historyFillPending = false;
+            return;
+          }
+        }
+        if (current()) shell.historyFillPending = false;
+      } catch (error) {
+        failed = true;
+        if (current() && !isReadSuperseded(error)) shell.actionError = shell.message(error);
+      } finally {
+        state.active = false;
+        // A refresh can replace the context while a page is in flight.
+        if (!failed && historyFills.get(shell)?.token === state.token && shell.historyFillPending) queueHistoryFill(shell);
+      }
+    })();
 }
 
 type ContextParts = { history: boolean; flow: boolean; deferHistory?: boolean };
@@ -210,14 +281,20 @@ async function readContext(shell: ShellState, operation?: string, parts: Context
         if (!remaining.length) shell.allBranches = true;
       }
     }
+    // Keep an already visible list intact; only a fresh view starts at one page.
+    const firstPage = Math.min(shell.logLimit, Math.max(HISTORY_FIRST_PAGE, shell.commitsLive.length));
     const [rows, state, merge] = await Promise.all([
-      parts.history ? shell.loadCommits(path, operation) : Promise.resolve(shell.commitsLive),
+      parts.history ? shell.loadCommits(path, operation, 0, firstPage) : Promise.resolve(shell.commitsLive),
       parts.flow ? invoke<InProgress | null>("in_progress", { path }, undefined, operation) : Promise.resolve(shell.progress),
       parts.flow ? invoke<MergeState | null>("merge_state", { path }, undefined, operation).catch(() => null) : Promise.resolve(shell.mergeState),
     ]);
     if (gen !== shell.contextGen || statusGen !== shell.statusGen || openGen !== shell.openGen || !shell.viewing(path)) return;
     shell.contextRevision = revision ?? 0;
     if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
+    if (parts.history) {
+      shell.historyFillPending = rows.length >= firstPage && firstPage < shell.logLimit;
+      if (shell.historyFillPending) queueHistoryFill(shell);
+    }
     shell.signOff = nextRefs.signOffSet ? !!nextRefs.signOff : shell.settings.signOff;
     shell.progress = state;
     const nextMerge = state === "merge" ? merge : null;
@@ -316,10 +393,13 @@ export function pickCommitScope(shell: ShellState, scope: "repository" | "branch
 
 async function refreshSearchedCommits(shell: ShellState, gen: number) {
     const path = shell.repoPath();
+    const firstPage = Math.min(shell.logLimit, HISTORY_FIRST_PAGE);
     try {
-      const rows = await loadCommits(shell, path);
+      const rows = await loadCommits(shell, path, undefined, 0, firstPage);
       if (gen !== shell.commitSearchGen) return;
       if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
+      shell.historyFillPending = rows.length >= firstPage && firstPage < shell.logLimit;
+      if (shell.historyFillPending) queueHistoryFill(shell);
     } catch (error) {
       if (gen !== shell.commitSearchGen) return;
       shell.actionError = shell.message(error);

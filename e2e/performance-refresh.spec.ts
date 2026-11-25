@@ -206,3 +206,111 @@ for (const switchRepo of [false, true]) {
     expect(logs[0].trace).toMatch(switchRepo ? /^operation-new-/ : /^operation-test-/);
   });
 }
+
+test("a repository switch paints one history page before older pages stream in", async ({ page }) => {
+  await page.goto("/?scene=clean");
+  await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();
+  const result = await page.evaluate(async () => {
+    const historyPath = "/src/lib/shell/history.svelte.ts";
+    const statePath = "/src/lib/shell/state.svelte.ts";
+    const { loadContext } = await import(/* @vite-ignore */ historyPath);
+    const { ShellState } = await import(/* @vite-ignore */ statePath);
+    const total = 2500;
+    const row = (index: number) => ({ id: `c${index}`, shortId: `c${index}`, summary: `commit ${index}`, author: "A", email: "a@e",
+      at: index, when: "now", parents: index + 1 < total ? [`c${index + 1}`] : [], refs: [], lane: 0, unpushed: false, remoteOnly: false });
+    const calls: { cmd: string; limit: number; offset: number; prefetch: boolean }[] = [];
+    const original = window.fetch;
+    window.fetch = async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+      const cmd = body.cmd ?? "";
+      if (!["repository_refs", "commit_log", "in_progress", "merge_state"].includes(cmd)) return original(input, init);
+      let value: unknown = null;
+      if (cmd === "repository_refs") value = { revision: 7, head: "c0", branches: [], remotes: [], tags: [], stashes: [], submodules: [], worktrees: [], hiddenRefs: [], expandedGroups: [] };
+      if (cmd === "commit_log") {
+        const limit = Number(body.args?.limit ?? 0), offset = Number(body.args?.offset ?? 0);
+        calls.push({ cmd, limit, offset, prefetch: body.args?.__prefetch === true });
+        value = Array.from({ length: Math.max(0, Math.min(limit, total - offset)) }, (_, index) => row(offset + index));
+      }
+      return new Response(JSON.stringify({ ok: true, value }), { headers: { "content-type": "application/json" } });
+    };
+    const shell: any = {
+      snapshot: { path: "D:/perf/history", staged: [], unstaged: [], revision: 10 }, repos: [], selectedPath: null,
+      statusGen: 0, contextGen: 0, openGen: 0, settings: { commitSort: "date", signOff: false },
+      commitsLive: [], mergeState: null, progress: null, sideView: "changes", commitSearch: "",
+      commitSearchField: "message", commitSearchScope: "repository", historyFilter: "", logLimit: total,
+      allBranches: true, section: "history", standalone: "", mode: "live", busy: false, reflogOn: false,
+      historyFillPending: false, actionError: null, contextRevision: 0, mergeProgressAutoSummary: "",
+      exactRefs: () => [], tr: String, message: String,
+    };
+    for (const method of ["repoPath", "jobKey", "viewing", "same", "loadCommits"] as const) shell[method] = ShellState.prototype[method].bind(shell);
+    try {
+      await loadContext(shell, "history-page");
+      const deadline = performance.now() + 3000;
+      while ((shell.commitsLive.length < total || calls.length < 2) && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+      return { calls, length: shell.commitsLive.length, pending: shell.historyFillPending };
+    } finally {
+      window.fetch = original;
+    }
+  });
+  expect(result.calls).toEqual([
+    { cmd: "commit_log", limit: 500, offset: 0, prefetch: false },
+    { cmd: "commit_log", limit: 2000, offset: 500, prefetch: true },
+  ]);
+  expect(result.length).toBe(2500);
+  expect(result.pending).toBe(false);
+});
+
+test("hidden history waits for the view before streaming older pages", async ({ page }) => {
+  await page.goto("/?scene=clean");
+  await expect(page.locator('[data-lab-scene="clean"]')).toBeVisible();
+  const result = await page.evaluate(async () => {
+    const historyPath = "/src/lib/shell/history.svelte.ts";
+    const statePath = "/src/lib/shell/state.svelte.ts";
+    const { loadContext, queueHistoryFill } = await import(/* @vite-ignore */ historyPath);
+    const { ShellState } = await import(/* @vite-ignore */ statePath);
+    const total = 2500;
+    const row = (index: number) => ({ id: `c${index}`, shortId: `c${index}`, summary: `commit ${index}`, author: "A", email: "a@e",
+      at: index, when: "now", parents: index + 1 < total ? [`c${index + 1}`] : [], refs: [], lane: 0, unpushed: false, remoteOnly: false });
+    const calls: { limit: number; offset: number }[] = [];
+    const original = window.fetch;
+    window.fetch = async (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+      const cmd = body.cmd ?? "";
+      if (!["repository_refs", "commit_log", "in_progress", "merge_state"].includes(cmd)) return original(input, init);
+      let value: unknown = null;
+      if (cmd === "repository_refs") value = { revision: 7, head: "c0", branches: [], remotes: [], tags: [], stashes: [], submodules: [], worktrees: [], hiddenRefs: [], expandedGroups: [] };
+      if (cmd === "commit_log") {
+        const limit = Number(body.args?.limit ?? 0), offset = Number(body.args?.offset ?? 0);
+        calls.push({ limit, offset });
+        value = Array.from({ length: Math.max(0, Math.min(limit, total - offset)) }, (_, index) => row(offset + index));
+      }
+      return new Response(JSON.stringify({ ok: true, value }), { headers: { "content-type": "application/json" } });
+    };
+    const shell: any = {
+      snapshot: { path: "D:/perf/history", staged: [], unstaged: [], revision: 10 }, repos: [], selectedPath: null,
+      statusGen: 0, contextGen: 0, openGen: 0, settings: { commitSort: "date", signOff: false },
+      commitsLive: [], mergeState: null, progress: null, sideView: "changes", commitSearch: "",
+      commitSearchField: "message", commitSearchScope: "repository", historyFilter: "", logLimit: total,
+      allBranches: true, section: "changes", standalone: "", mode: "live", busy: false, reflogOn: false,
+      historyFillPending: false, actionError: null, contextRevision: 0, mergeProgressAutoSummary: "",
+      exactRefs: () => [], tr: String, message: String,
+    };
+    for (const method of ["repoPath", "jobKey", "viewing", "same", "loadCommits"] as const) shell[method] = ShellState.prototype[method].bind(shell);
+    try {
+      await loadContext(shell, "history-hidden");
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const hidden = { calls: [...calls], length: shell.commitsLive.length, pending: shell.historyFillPending };
+      shell.section = "history";
+      queueHistoryFill(shell);
+      const deadline = performance.now() + 3000;
+      while (shell.commitsLive.length < total && performance.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+      return { hidden, calls, length: shell.commitsLive.length, pending: shell.historyFillPending };
+    } finally {
+      window.fetch = original;
+    }
+  });
+  expect(result.hidden).toEqual({ calls: [{ limit: 500, offset: 0 }], length: 500, pending: true });
+  expect(result.calls).toEqual([{ limit: 500, offset: 0 }, { limit: 2000, offset: 500 }]);
+  expect(result.length).toBe(2500);
+  expect(result.pending).toBe(false);
+});

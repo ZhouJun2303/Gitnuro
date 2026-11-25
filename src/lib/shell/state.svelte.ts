@@ -51,7 +51,7 @@ import {
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, selectFolder, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabDisplay, tabColor, pairSetting } from "./diff.svelte";
-import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, revealCommit, followCommitQuery, stepCommitMatch, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
+import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, revealCommit, followCommitQuery, stepCommitMatch, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, queueHistoryFill, readErrorLog, writeErrorLog } from "./history.svelte";
 import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, saveMergeDraft, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone, MergeFileEntry } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
@@ -73,6 +73,14 @@ const ERROR_ENTRY_ID = -1_000_000;
 
 /** Histories up to this length are drawn in one pass. Longer ones continue across frames. */
 const GRAPH_SYNC_LIMIT = 1500;
+
+/** Folded merges decide how many parents each lane follows, so a resumed graph needs the same set. */
+function sameNames(left: Set<string>, right: Set<string>) {
+  if (left === right) return true;
+  if (left.size !== right.size) return false;
+  for (const name of left) if (!right.has(name)) return false;
+  return true;
+}
 
 function standaloneView(): "" | "history" | "blob" | "merge" {
   if (typeof window === "undefined") return "";
@@ -1061,11 +1069,22 @@ export class ShellState {
   graphColumns: Array<string | null> = [];
 
 
+  /** Rows actually laid out; `graphItems` may already hold newer commits. */
+  graphCount = 0;
+
+
+  graphStraight: Set<string> | null = null;
+
+
   /** Plain counter: the graph effect must not read the signal it writes. */
   graphEpoch = 0;
 
 
   graphVersion = $state(0);
+
+
+  /** Older history pages are still waiting even though the first page painted. */
+  historyFillPending = false;
 
 
   commitNeedles: { rows: CommitRow[]; text: string[] } | null = null;
@@ -3525,8 +3544,8 @@ export class ShellState {
 
 
 
-  async loadCommits(path: string | undefined, operation?: string) {
-    return loadCommits(this, path, operation);
+  async loadCommits(path: string | undefined, operation?: string, offset = 0, limit = this.logLimit, background = false) {
+    return loadCommits(this, path, operation, offset, limit, background);
   }
 
 
@@ -3539,8 +3558,12 @@ export class ShellState {
   refreshPendingHistory() {
     const visible = this.section === "history" || this.standalone === "history";
     const path = this.repoPath();
-    if (!visible || !this.historyRefreshPending || this.mode !== "live" || this.busy || this.refreshing || !path
+    if (!visible || this.mode !== "live" || this.busy || this.refreshing || !path
       || this.backgroundFetch.has(this.jobKey(path))) return;
+    if (!this.historyRefreshPending) {
+      queueHistoryFill(this);
+      return;
+    }
     void this.loadContext(undefined, { history: true, flow: false }).catch((error) => {
       if (this.viewing(path)) this.actionError = this.message(error);
     });
@@ -5860,6 +5883,7 @@ export class ShellState {
       if (cached) { Object.assign(this, cached); this.mode = "live"; }
       else {
         this.snapshot = null; this.refs = null; this.commitsLive = []; this.mode = "loading";
+        this.historyFillPending = false;
         this.selectedPath = null; this.selectedCommit = null; this.commitDetail = null; this.commitFiles = [];
         this.progress = null; this.statusRevision = 0; this.statusObservedRevision = 0; this.stageStatusUnverified = false; this.contextRevision = 0;
       }
@@ -7973,20 +7997,37 @@ export class ShellState {
       if (items.length <= GRAPH_SYNC_LIMIT) {
         this.graphItems = null;
         this.graphRows = [];
+        this.graphCount = 0;
+        this.graphStraight = null;
         return;
       }
       const commits = laneCommits(items, straight);
       let count = 0;
       let resume: { columns: Array<string | null>; count: number; rows: GraphCell[][] } | undefined;
-      const publish = (rows: GraphCell[][], width: number, columns: Array<string | null>) => {
+      // Appending older pages keeps the lanes already drawn; only the new tail is laid out.
+      const previous = this.graphItems;
+      if (this.graphVersion > 0 && previous && this.graphStraight && sameNames(this.graphStraight, straight)) {
+        const built = Math.min(this.graphCount, previous.length, items.length);
+        let prefix = built > 0;
+        for (let index = 0; index < built; index += 1) {
+          if (previous[index].id !== items[index].id) { prefix = false; break; }
+        }
+        if (prefix) {
+          count = built;
+          resume = { columns: this.graphColumns.slice(), count, rows: this.graphRows.slice() };
+        }
+      }
+      const publish = (rows: GraphCell[][], width: number, columns: Array<string | null>, laidOut: number) => {
         this.graphRows = rows;
         this.graphWidth = width;
         this.graphColumns = columns;
         this.graphItems = items;
+        this.graphCount = laidOut;
+        this.graphStraight = straight;
         this.graphVersion = ++this.graphEpoch;
       };
       let frame = 0;
-      let first = true;
+      let first = count === 0;
       const pump = () => {
         if (count >= commits.length) return;
         const next = Math.min(commits.length, count + (first ? 2000 : 5000));
@@ -7994,7 +8035,7 @@ export class ShellState {
         const built = commitGraph(commits, resume, next);
         count = next;
         resume = { columns: built.columns, count, rows: built.rows };
-        publish(built.rows, built.width, built.columns);
+        publish(built.rows, built.width, built.columns, count);
         if (count < commits.length) frame = requestAnimationFrame(pump);
       };
       pump();
