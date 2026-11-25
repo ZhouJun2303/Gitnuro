@@ -268,7 +268,7 @@ export const zh: Messages = {
     updateCheckAgain: "重新检查",
     updatePanelIdle: "还没有检查更新。",
     updateReleaseNotes: "更新说明",
-    updateFileName: "安装包：{name}",
+    updateFileLabel: "安装包",
     updateCheckedAt: "上次检查 {time}",
     updateSilentInstall: "静默安装",
     updateSilentInstallHint: "点击“下载并安装”后不显示安装向导，完成后自动重新打开 AweGit。",

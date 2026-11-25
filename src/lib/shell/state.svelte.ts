@@ -4685,6 +4685,12 @@ export class ShellState {
       if (this.updatePhase === "available") this.updatePhase = "idle";
       return;
     }
+    if (this.updateNotice && (this.updateNotice.appVersion !== value.appVersion || this.updateNotice.downloadUrl !== value.downloadUrl)) {
+      this.updatePercent = null;
+      this.updateReceived = 0;
+      this.updateTotal = 0;
+      this.updateSpeed = null;
+    }
     this.updateNotice = value;
     if (this.updatePhase === "idle") this.updatePhase = "available";
   }

@@ -267,7 +267,7 @@ export const en: Messages = {
     updateCheckAgain: "Check again",
     updatePanelIdle: "Updates have not been checked yet.",
     updateReleaseNotes: "Release notes",
-    updateFileName: "Installer: {name}",
+    updateFileLabel: "Installer",
     updateCheckedAt: "Last checked {time}",
     updateSilentInstall: "Silent install",
     updateSilentInstallHint: "Install without the setup wizard and reopen AweGit when it finishes.",

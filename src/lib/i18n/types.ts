@@ -219,7 +219,7 @@ export type Messages = {
     updateCheckAgain: string;
     updatePanelIdle: string;
     updateReleaseNotes: string;
-    updateFileName: string;
+    updateFileLabel: string;
     updateCheckedAt: string;
     updateSilentInstall: string;
     updateSilentInstallHint: string;
