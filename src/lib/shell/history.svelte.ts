@@ -1,6 +1,6 @@
 import { onMount, tick } from "svelte";
 import { invoke, prefetch } from "../perf";
-import { cancelReads } from "../read-scheduler";
+import { cancelReads, isReadSuperseded } from "../read-scheduler";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { branchGroup, changedRanges, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, rowAtUnit, sameHistory, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
@@ -143,7 +143,13 @@ export function loadContext(shell: ShellState, operation?: string, parts: Contex
     if (current?.key === key) return current.promise;
     const path = shell.repoPath();
     if (path) cancelReads(path);
-    const promise = readContext(shell, operation, parts).finally(() => {
+    const promise = readContext(shell, operation, parts).catch((error) => {
+      // Changing the branch filter intentionally cancels the previous read.
+      // Callers often fire-and-forget this refresh, so an expected cancellation
+      // must not surface as an unhandled page error.
+      if (isReadSuperseded(error)) return;
+      throw error;
+    }).finally(() => {
       if (contextReads.get(shell)?.promise === promise) contextReads.delete(shell);
     });
     contextReads.set(shell, { key, promise });

@@ -5878,7 +5878,7 @@ export class ShellState {
     let held = false;
     try {
       const painted = () => this.mode === "live" && !!this.snapshot && (this.viewing(path) || this.viewing(this.snapshot.path));
-      if (!stayingOnRepo && !painted()) {
+      if (!stayingOnRepo && !painted() && !this.labPage) {
         try {
           const stored = await invoke<Parameters<ShellState["showStoredStatus"]>[0] | null>("load_status_cache", { path });
           if (gen !== this.openGen) return;
