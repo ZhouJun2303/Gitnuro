@@ -305,7 +305,7 @@
     align-items: center;
     gap: 12px;
     flex: none;
-    color: var(--text-secondary);
+    color: var(--commit-meta-color, var(--text-secondary));
   }
 
 .commit-author {
@@ -327,6 +327,7 @@
 
 .commit-side .meta {
     line-height: 16px;
+    color: inherit;
   }
 
 .commit-side .sha {
@@ -337,7 +338,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: color-mix(in srgb, var(--text-secondary) 85%, var(--accent));
+    color: color-mix(in srgb, var(--commit-meta-color, var(--text-secondary)) 85%, var(--accent));
     font-size: var(--commit-sha-font-size, 11px);
   }
 

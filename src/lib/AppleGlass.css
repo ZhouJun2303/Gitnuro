@@ -8,6 +8,7 @@
   --selection: rgba(63, 54, 64, 0.095);
   --text: #29262b;
   --text-secondary: #767078;
+  --commit-meta-color: #5f5861;
   --pane-height: 40px;
   --welcome-radius: 20px;
   --glass-backdrop:
@@ -20,6 +21,7 @@
 :root[data-theme="apple"][data-senior-mode="true"] {
   --text: #17151a;
   --text-secondary: #4d4650;
+  --commit-meta-color: #423c45;
   --line: rgba(52, 45, 52, 0.16);
   --selection: rgba(63, 54, 64, 0.14);
 }

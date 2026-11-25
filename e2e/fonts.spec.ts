@@ -137,6 +137,30 @@ for (const theme of ["apple", "light", "dark"] as const) {
 }
 
 for (const theme of ["apple", "light", "dark"] as const) {
+  test(`${theme}: sidebar nav labels stay one step smaller than sidebar rows`, async ({ page }) => {
+    await pinLabSettings(page, { theme, sidebarFontSize: 20 });
+    const history = scenes.find((scene) => scene.id === "history")!;
+    await openScene(page, history, `&locale=en&theme=${theme}`);
+    await expect(page.locator(".side.nav .name").first()).toHaveCSS("font-size", "15px");
+    await expect(page.locator(".side.nested .name").first()).toHaveCSS("font-size", "20px");
+    await openLabScene(page, "prefs-fonts", '[data-pref-tab="fonts"]', { locale: "en" });
+    await setSlider(page, "Sidebar item font size", 24);
+    const saved = page.waitForRequest((request) => {
+      if (!request.url().includes("/__lab/invoke")) return false;
+      try {
+        const body = request.postDataJSON();
+        return body?.cmd === "save_settings" && body.args?.values?.sidebarFontSize === 24;
+      } catch { return false; }
+    });
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+    await saved;
+    await openScene(page, history, `&locale=en&theme=${theme}`);
+    await expect(page.locator(".side.nav .name").first()).toHaveCSS("font-size", "18px");
+    await expect(page.locator(".side.nested .name").first()).toHaveCSS("font-size", "24px");
+  });
+}
+
+for (const theme of ["apple", "light", "dark"] as const) {
   test(`${theme}: optional fonts load on request and work from cache while offline`, async ({ page }) => {
     test.skip(!fixture, "No system test font installed");
     const source = "awegit-font:inter";

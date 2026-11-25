@@ -9,6 +9,7 @@
   /* Text */
   --text: #242424;
   --text-secondary: #707070;
+  --commit-meta-color: #5a5a62;
   /* Lines and interaction */
   --line: rgba(0, 0, 0, 0.09);
   --separator: rgba(0, 0, 0, 0.14);
@@ -118,6 +119,7 @@
   --panel-head: #222222;
   --text: #e5e5e5;
   --text-secondary: #a0a0a0;
+  --commit-meta-color: #b0b0b0;
   --line: rgba(255, 255, 255, 0.075);
   --separator: rgba(255, 255, 255, 0.13);
   --hover: rgba(255, 255, 255, 0.045);
@@ -253,6 +255,7 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
   --panel-head: #fafafa;
   --text: #18181b;
   --text-secondary: #65656d;
+  --commit-meta-color: #5a5a62;
   --line: rgba(24, 24, 27, 0.08);
   --separator: rgba(24, 24, 27, 0.08);
   --accent: #5b5bd6;
@@ -277,6 +280,7 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 :root[data-senior-mode="true"] {
   --text: #151515;
   --text-secondary: #454545;
+  --commit-meta-color: #3f3f3f;
   --line: rgba(0, 0, 0, 0.16);
   --separator: rgba(0, 0, 0, 0.24);
   --control-edge: rgba(0, 0, 0, 0.28);
@@ -286,6 +290,7 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 :root[data-theme="dark"][data-senior-mode="true"] {
   --text: #ffffff;
   --text-secondary: #d4d4d4;
+  --commit-meta-color: #dedede;
   --line: rgba(255, 255, 255, 0.16);
   --separator: rgba(255, 255, 255, 0.25);
   --control-edge: rgba(255, 255, 255, 0.3);
