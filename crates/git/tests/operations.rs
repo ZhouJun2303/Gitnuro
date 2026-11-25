@@ -1134,6 +1134,29 @@ fn discard_submodule_restores_checkout_without_touching_other_submodules() {
     assert_eq!(fs::read_to_string(vendor.join("lib.txt")).unwrap().replace("\r\n", "\n"), "first\n");
     assert_eq!(fs::read_to_string(vendor.join("local-only.txt")).unwrap(), "keep\n");
     assert_eq!(fs::read_to_string(other.join("lib.txt")).unwrap(), "keep this edit\n");
+    let action = git_at(&vendor, &["reflog", "-1", "--format=%gs"]);
+    assert!(action.trim().starts_with("checkout:"), "{action}");
+}
+
+#[test]
+fn discard_dirty_submodule_keeps_its_branch() {
+    let lib = repo();
+    commit_file(&lib, "lib.txt", "first\n", "first");
+    let app = repo();
+    commit_file(&app, "app.txt", "app\n", "app");
+    app.git(&["-c", "protocol.file.allow=always", "submodule", "add", &file_url(&lib.path), "vendor"]);
+    app.git(&["commit", "-m", "add submodule"]);
+    let vendor = app.path.join("vendor");
+    let branch = git_at(&vendor, &["symbolic-ref", "--short", "-q", "HEAD"]).trim().to_string();
+    let recorded = app.output(&["rev-parse", "HEAD:vendor"]).trim().to_string();
+    assert!(!branch.is_empty());
+
+    fs::write(vendor.join("lib.txt"), "edited\n").unwrap();
+    perform(&app.path, Mutation::Discard { file: "vendor".into() }).unwrap();
+
+    assert_eq!(fs::read_to_string(vendor.join("lib.txt")).unwrap().replace("\r\n", "\n"), "first\n");
+    assert_eq!(git_at(&vendor, &["rev-parse", "HEAD"]).trim(), recorded);
+    assert_eq!(git_at(&vendor, &["symbolic-ref", "--short", "-q", "HEAD"]).trim(), branch);
 }
 
 #[test]
@@ -1145,12 +1168,16 @@ fn discard_paths_restores_submodule_and_regular_file_together() {
     app.git(&["-c", "protocol.file.allow=always", "submodule", "add", &file_url(&lib.path), "vendor"]);
     app.git(&["commit", "-m", "add submodule"]);
     let vendor = app.path.join("vendor");
+    let branch = git_at(&vendor, &["symbolic-ref", "--short", "-q", "HEAD"]).trim().to_string();
+    let recorded = app.output(&["rev-parse", "HEAD:vendor"]).trim().to_string();
     fs::write(vendor.join("lib.txt"), "edited\n").unwrap();
     fs::write(app.path.join("app.txt"), "edited\n").unwrap();
 
     perform(&app.path, Mutation::DiscardPaths { files: vec!["vendor".into(), "app.txt".into()] }).unwrap();
     assert_eq!(fs::read_to_string(vendor.join("lib.txt")).unwrap().replace("\r\n", "\n"), "first\n");
     assert_eq!(fs::read_to_string(app.path.join("app.txt")).unwrap(), "original\n");
+    assert_eq!(git_at(&vendor, &["rev-parse", "HEAD"]).trim(), recorded);
+    assert_eq!(git_at(&vendor, &["symbolic-ref", "--short", "-q", "HEAD"]).trim(), branch);
     let after = status(&app.path).unwrap();
     assert!(after.unstaged.is_empty(), "{after:?}");
 }

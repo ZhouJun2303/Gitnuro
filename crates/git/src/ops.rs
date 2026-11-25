@@ -2383,6 +2383,9 @@ fn tag(repo: &Path, name: &str, rev: &str, message: &str) -> Result<(), Error> {
 fn discard(repo: &Path, file: &str) -> Result<(), Error> {
     let file = check_path(file)?;
     if in_index(repo, file)? {
+        if let Some(recorded) = gitlink_target(repo, file)? {
+            return discard_gitlink(repo, file, &recorded);
+        }
         run(
             repo,
             &[
@@ -2390,7 +2393,6 @@ fn discard(repo: &Path, file: &str) -> Result<(), Error> {
                 "restore",
                 "--worktree",
                 "--source=HEAD",
-                "--recurse-submodules",
                 "--",
                 file,
             ],
@@ -2429,11 +2431,17 @@ fn discard_paths(repo: &Path, files: &[String]) -> Result<(), Error> {
             remove_disk.push(path.clone());
         }
     }
-    git_arg_paths(
-        repo,
-        &["restore", "--worktree", "--source=HEAD", "--recurse-submodules", "--"],
-        &restore,
-    )?;
+    let gitlinks = gitlink_paths(repo, &restore)?;
+    let plain: Vec<String> = restore
+        .into_iter()
+        .filter(|path| !gitlinks.iter().any(|link| *link == slash(path)))
+        .collect();
+    git_arg_paths(repo, &["restore", "--worktree", "--source=HEAD", "--"], &plain)?;
+    for path in gitlinks {
+        if let Some(recorded) = gitlink_target(repo, &path)? {
+            discard_gitlink(repo, &path, &recorded)?;
+        }
+    }
     git_arg_paths(repo, &["rm", "-f", "--"], &remove_index)?;
     for path in remove_disk {
         match remove_worktree_file(repo, &path) {
@@ -2443,6 +2451,90 @@ fn discard_paths(repo: &Path, files: &[String]) -> Result<(), Error> {
         }
     }
     Ok(())
+}
+
+/// Gitlink commit recorded in `HEAD` for `path`, or `None` when the path is not a submodule.
+fn gitlink_target(repo: &Path, path: &str) -> Result<Option<String>, Error> {
+    let output = match run(repo, &["--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", path]) {
+        Ok(output) => output,
+        Err(_) => return Ok(None),
+    };
+    let wanted = slash(path);
+    for record in output.stdout.split(|byte| *byte == 0) {
+        if !record.starts_with(b"160000 commit ") {
+            continue;
+        }
+        let Some(tab) = record.iter().position(|byte| *byte == b'\t') else { continue };
+        if slash(&String::from_utf8_lossy(&record[tab + 1..])) != wanted {
+            continue;
+        }
+        let meta = String::from_utf8_lossy(&record[..tab]);
+        if let Some(oid) = meta.split_whitespace().nth(2) {
+            return Ok(Some(oid.to_string()));
+        }
+    }
+    Ok(None)
+}
+
+/// Gitlinks among the selected paths. A selected directory contributes the submodules below it.
+fn gitlink_paths(repo: &Path, paths: &[String]) -> Result<Vec<String>, Error> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let output = if paths.len() > 200 {
+        run(repo, &["--literal-pathspecs", "ls-files", "--stage", "-z"])?
+    } else {
+        let mut owned: Vec<String> = vec![
+            "--literal-pathspecs".into(),
+            "ls-files".into(),
+            "--stage".into(),
+            "-z".into(),
+            "--".into(),
+        ];
+        for path in paths {
+            owned.push(check_path(path)?.to_string());
+        }
+        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
+        run(repo, &args)?
+    };
+    let selected: Vec<String> = paths.iter().map(|path| slash(path)).collect();
+    let mut found = Vec::new();
+    for record in output.stdout.split(|byte| *byte == 0) {
+        if !record.starts_with(b"160000 ") {
+            continue;
+        }
+        let Some(tab) = record.iter().position(|byte| *byte == b'\t') else { continue };
+        let path = slash(&String::from_utf8_lossy(&record[tab + 1..]));
+        let covered = selected.iter().any(|item| {
+            path == *item || (path.starts_with(item.as_str()) && path.as_bytes().get(item.len()) == Some(&b'/'))
+        });
+        if covered {
+            found.push(path);
+        }
+    }
+    found.sort();
+    found.dedup();
+    Ok(found)
+}
+
+/// Discard one submodule checkout without dropping an already checked-out branch unnecessarily.
+fn discard_gitlink(repo: &Path, path: &str, recorded: &str) -> Result<(), Error> {
+    let checkout = repo.join(path);
+    if !checkout.join(".git").exists() {
+        return Ok(());
+    }
+    let head = match run(&checkout, &["rev-parse", "--verify", "--quiet", "HEAD"]) {
+        Ok(output) => String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        Err(_) => return Ok(()),
+    };
+    if head == recorded {
+        // Reset the index and worktree in place; this is what git's recursive restore does,
+        // minus the `update-ref HEAD` that would detach the checked-out branch.
+        run(&checkout, &["read-tree", "-u", "--reset", "HEAD"]).map(|_| ())
+    } else {
+        // The checkout itself differs; a porcelain checkout records the move in the reflog.
+        run(&checkout, &["checkout", "--quiet", "--force", recorded]).map(|_| ())
+    }
 }
 
 fn slash(path: &str) -> String {
