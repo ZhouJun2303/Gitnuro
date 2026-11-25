@@ -208,8 +208,8 @@
 {/snippet}
 
 {#if shell.dialog}
-    <div class="scrim" role="presentation" onclick={() => { if (shell.writeBlocked || shell.dialog === "prefs") return; closeDialog(); }}>
-      <div class="dialog {dialogSize(shell.dialog ?? "")}" class:prefs={shell.dialog === "prefs"} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} data-dialog={shell.dialog} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={trapTab}>
+    <div class="scrim" class:slider-preview={shell.dialog === "prefs" && shell.prefSliderDragging} role="presentation" onclick={() => { if (shell.writeBlocked || shell.dialog === "prefs") return; closeDialog(); }}>
+      <div class="dialog {dialogSize(shell.dialog ?? "")}" class:prefs={shell.dialog === "prefs"} class:slider-dragging={shell.dialog === "prefs" && shell.prefSliderDragging} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} data-dialog={shell.dialog} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={trapTab}>
       <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={closeDialog}>×</button>
       <form
         onchange={() => { if (shell.dialog === "prefs") void shell.savePrefs(false); }}

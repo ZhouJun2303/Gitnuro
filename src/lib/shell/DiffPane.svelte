@@ -3,15 +3,15 @@
   import { getShell } from "./context";
   import "./DiffPane.css";
   import { invoke } from "../perf";
-  import { sampleImages } from "../sample";
+  import { sampleConflictText, sampleImages } from "../sample";
   import { onVirtualScroll, type SplitRow } from "../view";
   import WrappedRows from "../WrappedRows.svelte";
-  import type { Row, Side } from "./types";
+  import type { MergePiece, MergePick, Row, Side } from "./types";
   import { applyConflictChoice, clearPixel, loadBlameRange, mergeToolLabel, mergeToolMissing, openConflictTool } from "./diff.svelte";
   import BinaryDiff from "./BinaryDiff.svelte";
   import ImageComparison from "./ImageComparison.svelte";
   import { formatBytes } from "../format";
-  import type { CommitRow, ConflictParty, DiffLine } from "../status";
+  import type { CommitRow, ConflictParty, ConflictSides, DiffLine } from "../status";
 
   const shell = getShell();
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
@@ -74,7 +74,7 @@
     if (row) return row;
     // A refs read can arrive after the diff read. Gitlink text still identifies the path.
     return shell.diff?.lines.some((line) => line.text.startsWith("-Subproject commit ") || line.text.startsWith("+Subproject commit "))
-      ? { path, id: "", ready: false }
+      ? { path, id: "", recorded: "", branch: "", configuredBranch: "", ready: false }
       : null;
   });
   const submoduleCommits = $derived.by(() => {
@@ -153,6 +153,50 @@
   let wrapped = $state<{ scrollTo: (index: number) => Promise<void> }>();
   const conflictSelection = $derived(shell.section === "changes" ? shell.pickedConflicts() : []);
   const activeAt = $derived(hunkList.findIndex((range) => range.index === activeHunk));
+  const conflictPreview = $derived.by<ConflictSides | null>(() => {
+    if (shell.settings.showConflictPreview !== true) return null;
+    if (shell.mode === "sample") return shell.selectedPath ? (sampleConflictText[shell.selectedPath] ?? null) : null;
+    return shell.conflictPreview;
+  });
+  const conflictPreviewPieces = $derived.by<MergePiece[]>(() => {
+    const sides = conflictPreview;
+    if (!sides) return [];
+    const pieces = shell.splitConflicts(sides.working);
+    if (pieces.some((piece) => piece.kind === "hunk")) return pieces;
+    if (sides.ours || sides.theirs) return [{ kind: "hunk", ours: sides.ours, theirs: sides.theirs, pick: "none" }];
+    return pieces;
+  });
+  const conflictPreviewHunks = $derived(
+    conflictPreviewPieces
+      .map((piece, index) => (piece.kind === "hunk" ? index : -1))
+      .filter((index) => index >= 0),
+  );
+  let conflictPreviewPicks = $state<Record<number, MergePick>>({});
+  const conflictPreviewPickedPieces = $derived(
+    conflictPreviewPieces.map((piece, index) => {
+      const pick = conflictPreviewPicks[index];
+      return piece.kind === "hunk" && pick ? { ...piece, pick } : piece;
+    }),
+  );
+  const conflictPreviewUnresolved = $derived(
+    conflictPreviewHunks.filter((index) => !conflictPreviewPicks[index] || conflictPreviewPicks[index] === "none").length,
+  );
+  let activeConflictPreview = $state(0);
+  let conflictPreviewPath = "";
+
+  $effect(() => {
+    const preview = conflictPreview;
+    const fingerprint = preview?.version ?? (preview ? `${preview.working.length}:${preview.working.slice(0, 24)}:${preview.working.slice(-24)}` : "");
+    const path = `${shell.repoPath() ?? ""}\0${shell.selectedPath ?? ""}\0${fingerprint}`;
+    if (path === conflictPreviewPath) return;
+    conflictPreviewPath = path;
+    activeConflictPreview = 0;
+    conflictPreviewPicks = {};
+  });
+
+  $effect(() => {
+    if (activeConflictPreview >= conflictPreviewHunks.length) activeConflictPreview = Math.max(0, conflictPreviewHunks.length - 1);
+  });
 
   $effect(() => {
     if (activeHunk != null && !hunkList.some((range) => range.index === activeHunk)) activeHunk = null;
@@ -308,6 +352,35 @@
     if (range) selectHunk(range.index);
   }
 
+  function revealConflictPreview(index: number) {
+    if (conflictPreviewHunks.length === 0) return;
+    const next = (index + conflictPreviewHunks.length) % conflictPreviewHunks.length;
+    activeConflictPreview = next;
+    const piece = conflictPreviewHunks[next];
+    if (piece == null) return;
+    queueMicrotask(() => document.querySelector<HTMLElement>(`[data-conflict-index="${piece}"]`)?.scrollIntoView({ block: "center" }));
+  }
+
+  function stepConflictPreview(delta: number) {
+    revealConflictPreview(activeConflictPreview + delta);
+  }
+
+  function openConflictPreviewMerge() {
+    const file = shell.selectedPath;
+    if (file) void shell.openTextMerge(file);
+  }
+
+  function pickConflictPreview(index: number, pick: MergePick) {
+    conflictPreviewPicks = { ...conflictPreviewPicks, [index]: pick };
+    activeConflictPreview = Math.max(0, conflictPreviewHunks.indexOf(index));
+  }
+
+  function applyConflictPreview() {
+    const file = shell.selectedPath;
+    if (!file || shell.mode !== "live" || shell.writeBlocked || conflictPreviewUnresolved > 0) return;
+    void shell.mutate({ action: "resolve", file, side: "text", text: shell.joinedPieces(conflictPreviewPickedPieces) });
+  }
+
   function stageActive() {
     const file = shell.selectedPath;
     if (!file || shell.writeBlocked || shell.pathPending(file)) return;
@@ -457,6 +530,70 @@
                   {/if}
                 </div>
                 </div>
+                {#if !view.binary && conflictPreview && conflictPreviewPieces.length > 0}
+                  <section class="conflict-preview" aria-label={shell.tr("chrome.conflictPreview")}>
+                    <div class="conflict-preview-head">
+                      <div>
+                        <strong>{shell.tr("chrome.conflictPreview")}</strong>
+                        <span class="conflict-preview-hint">{shell.tr("chrome.conflictPreviewHint")}</span>
+                      </div>
+                      {#if conflictPreviewHunks.length > 0}
+                        <div class="conflict-preview-nav" role="group" aria-label={shell.tr("chrome.conflictBlocks")}>
+                          <span>{shell.tr("chrome.conflictBlock", { current: String(activeConflictPreview + 1), count: String(conflictPreviewHunks.length) })}</span>
+                          <button type="button" aria-label={shell.tr("menu.prevHunk")} title={shell.tr("menu.prevHunk")} onclick={() => stepConflictPreview(-1)}>‹</button>
+                          <button type="button" aria-label={shell.tr("menu.nextHunk")} title={shell.tr("menu.nextHunk")} onclick={() => stepConflictPreview(1)}>›</button>
+                        </div>
+                      {/if}
+                    </div>
+                    <div class="conflict-preview-body">
+                      {#each conflictPreviewPieces as piece, index (index)}
+                        {#if piece.kind === "text"}
+                          {#if piece.text.length > 0}
+                            <pre class="conflict-preview-context">{piece.text}</pre>
+                          {/if}
+                        {:else}
+                          {@const hunkAt = conflictPreviewHunks.indexOf(index)}
+                          <article class="conflict-preview-block" class:active={hunkAt === activeConflictPreview} data-conflict-index={index}>
+                            <header class="conflict-preview-block-head">
+                              <span class="conflict-preview-number">{shell.tr("chrome.conflictBlock", { current: String(hunkAt + 1), count: String(conflictPreviewHunks.length) })}</span>
+                              <span class="conflict-preview-label">{view.theirs.label} ↔ {view.ours.label}</span>
+                              <button class="text-button" type="button" onclick={openConflictPreviewMerge}>{shell.tr("chrome.conflictOpenMerge")}</button>
+                            </header>
+                            <div class="conflict-preview-columns">
+                              <div class="conflict-preview-side theirs" class:selected={conflictPreviewPicks[index] === "theirs" || conflictPreviewPicks[index] === "both"}>
+                                <div class="conflict-preview-side-head">
+                                  <span>{view.theirs.label}</span>
+                                  <button type="button" onclick={() => pickConflictPreview(index, "theirs")}>{shell.tr("dialog.useTheirs")}</button>
+                                </div>
+                                <pre>{piece.theirs || shell.tr("dialog.mergeEmpty")}</pre>
+                              </div>
+                              <div class="conflict-preview-side ours" class:selected={conflictPreviewPicks[index] === "ours" || conflictPreviewPicks[index] === "both"}>
+                                <div class="conflict-preview-side-head">
+                                  <span>{view.ours.label}</span>
+                                  <button type="button" onclick={() => pickConflictPreview(index, "ours")}>{shell.tr("dialog.useOurs")}</button>
+                                </div>
+                                <pre>{piece.ours || shell.tr("dialog.mergeEmpty")}</pre>
+                              </div>
+                            </div>
+                            <div class="conflict-preview-block-actions">
+                              <button type="button" class:active={conflictPreviewPicks[index] === "both"} onclick={() => pickConflictPreview(index, "both")}>{shell.tr("dialog.useBoth")}</button>
+                              <span>{conflictPreviewPicks[index] && conflictPreviewPicks[index] !== "none" ? shell.tr("chrome.conflictChoiceSet") : shell.tr("chrome.conflictChoicePending")}</span>
+                            </div>
+                          </article>
+                        {/if}
+                      {/each}
+                    </div>
+                    <div class="conflict-preview-foot">
+                      <p class="conflict-preview-readonly">{shell.tr("chrome.conflictPreviewReadOnly")}</p>
+                      <div class="conflict-preview-actions">
+                        <button class="text-button" type="button" onclick={openConflictPreviewMerge}>{shell.tr("chrome.conflictOpenMerge")}</button>
+                        {#if shell.mode === "live"}
+                          <button class="conflict-merge" type="button" disabled={shell.writeBlocked || conflictPreviewUnresolved > 0} onclick={applyConflictPreview}>{shell.tr("chrome.conflictApplyBlocks", { count: String(conflictPreviewHunks.length) })}</button>
+                        {/if}
+                      </div>
+                    </div>
+                  </section>
+                {/if}
               </div>
             {:else if shell.diffError}
               <p class="diff-empty">{shell.diffError}</p>
@@ -487,6 +624,9 @@
                 <button class="pane-chip danger" type="button" disabled={shell.writeBlocked || !!shell.selectedPath && shell.pathPending(shell.selectedPath)} onclick={() => { const discard = shell.bindLineOps("discardLine", shell.discardableSelected); shell.ask(shell.tr("menu.discardLines"), shell.tr("dialog.discardLinesBody", { count: String(shell.discardableSelected.length) }), () => void discard(), [], { danger: true }); }}>{shell.tr("menu.discardLines")}</button>
               {/if}
             </header>
+            {#if !submodule}
+              {@render diffToolbar()}
+            {/if}
             {#if shell.diff && shell.diff.lines.length > 0 && !submodule}
               <div class="minimap" role="presentation">
                 {#each shell.minimapMarks as mark (`m-${mark.index}`)}
@@ -602,10 +742,10 @@
                 {/each}
                 {#if shell.splitWindow.afterPx > 0}<div class="split-gap" style:height="{shell.splitWindow.afterPx}px"></div>{/if}
                 {/if}
+                {#if shell.diff.truncated}<span class="meta split-meta">{shell.tr("chrome.truncated")}</span>{/if}
                 {@render splitBar()}
               </div>
               {@render hunkActions()}
-              {#if shell.diff.truncated}<span class="meta">{shell.tr("chrome.truncated")}</span>{/if}
               </div>
             {:else}
               <div class="diff-viewport">
@@ -631,6 +771,7 @@
             <header class="diff-head">
               <span>{shell.selectedPath}</span>
             </header>
+            {@render diffToolbar()}
             {#if shell.settings.diffStyle === "split"}
               <div class="diff-body split pick-{shell.splitPick}" class:select-all={shell.textWhere === "changes"} data-select-side={shell.textWhere === "changes" ? shell.textSide : undefined} role="presentation" onmousedown={shell.pickSplitSide.bind(shell)} use:splitScroller={shell.splitColumnsOf(shell.sampleSplit)}>
                 {#each shell.sampleSplit as row, index (index)}
@@ -728,4 +869,24 @@
 
 {#snippet imageCompare(before: string | null, after: string | null, oldBytes: number | null | undefined = null, newBytes: number | null | undefined = null)}
   <ImageComparison {before} {after} {oldBytes} {newBytes} mode={shell.imageMode} bind:position={shell.imagePos} pixelUrl={shell.pixelUrl} pixelStatus={shell.pixelStatus} onmodechange={(mode) => pickImageMode(mode, before, after)} />
+{/snippet}
+
+{#snippet diffToolbar()}
+  <div class="diff-toolbar" data-diff-toolbar role="toolbar" aria-label={shell.tr("chrome.diffToolbar")}>
+    <div class="diff-toolbar-group diff-toolbar-view" role="group" aria-label={shell.tr("chrome.diffView")}>
+      <button class:active={shell.settings.diffStyle === "split"} type="button" title={shell.tr("dialog.diffSplit")} aria-label={shell.tr("dialog.diffSplit")} onclick={() => shell.setDiffStyle("split")}>↔</button>
+      <button class:active={shell.settings.diffStyle !== "split"} type="button" title={shell.tr("dialog.diffUnified")} aria-label={shell.tr("dialog.diffUnified")} onclick={() => shell.setDiffStyle("unified")}>≡</button>
+    </div>
+    <div class="diff-toolbar-group diff-toolbar-context" role="group" aria-label={shell.tr("dialog.diffContext")}>
+      {#if !shell.settings.showEntireFile}
+        <span class="diff-toolbar-label">{shell.tr("dialog.diffContext")}</span>
+        <button type="button" aria-label={shell.tr("chrome.diffContextDecrease")} title={shell.tr("chrome.diffContextDecrease")} onclick={() => shell.setDiffContext(shell.settings.diffContext - 1)}>−</button>
+        <span class="diff-toolbar-value">{shell.settings.diffContext}</span>
+        <button type="button" aria-label={shell.tr("chrome.diffContextIncrease")} title={shell.tr("chrome.diffContextIncrease")} onclick={() => shell.setDiffContext(shell.settings.diffContext + 1)}>+</button>
+      {/if}
+      <button class:active={shell.settings.showEntireFile} type="button" title={shell.tr("chrome.diffShowWhole")} aria-pressed={shell.settings.showEntireFile} onclick={() => shell.toggleShowEntireFile()}>{shell.tr("chrome.diffShowWhole")}</button>
+    </div>
+    <button class:active={shell.settings.diffWordWrap} type="button" title={shell.tr("dialog.wordWrap")} aria-pressed={shell.settings.diffWordWrap} onclick={() => shell.toggleDiffWordWrap()}>{shell.tr("dialog.wordWrap")}</button>
+    <button class:active={shell.settings.ignoreSpace} type="button" title={shell.tr("dialog.ignoreSpace")} aria-pressed={shell.settings.ignoreSpace} onclick={() => shell.toggleIgnoreSpace()}>{shell.tr("dialog.ignoreSpace")}</button>
+  </div>
 {/snippet}

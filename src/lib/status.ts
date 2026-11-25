@@ -127,7 +127,18 @@ export type RemoteRow = {
 
 export type TagRow = { name: string; id: string };
 export type StashRow = { name: string; summary: string; id?: string; parent?: string };
-export type SubmoduleRow = { path: string; id: string; ready: boolean };
+export type SubmoduleRow = {
+  path: string;
+  /** Checked-out commit, or the index gitlink while the checkout is missing. */
+  id: string;
+  /** Gitlink commit recorded in the superproject index. */
+  recorded: string;
+  /** Checked-out branch. Empty for a detached HEAD or a missing checkout. */
+  branch: string;
+  /** Branch named in `.gitmodules`. Empty when the entry sets none. */
+  configuredBranch: string;
+  ready: boolean;
+};
 export type WorktreeRow = { path: string; branch: string | null; detached: boolean };
 
 export type RefSnapshot = {
@@ -152,7 +163,7 @@ export type InProgress = "merge" | "rebase" | "cherryPick" | "revert";
 export type MergeState = {
   source: string;
   into: string;
-  files: { status: string; path: string }[];
+  files: { status: string; path: string; previousPath?: string | null }[];
 };
 
 export type BlameLine = {
@@ -212,6 +223,20 @@ export type Settings = {
   codeFont: string;
   uiFontWeight: number;
   codeFontWeight: number;
+  commitRowHeight: number;
+  commitSubjectFontSize: number;
+  commitAuthorFontSize: number;
+  commitShaFontSize: number;
+  commitTimeFontSize: number;
+  changesRowHeight: number;
+  changesFontSize: number;
+  changesMetaFontSize: number;
+  changesIndentCh: number;
+  detailBodyFontSize: number;
+  detailTabFontSize: number;
+  detailMetaFontSize: number;
+  sidebarFontSize: number;
+  sidebarSectionFontSize: number;
   dateRelative: boolean;
   dateFormat: string;
   date24h: boolean;
@@ -339,8 +364,12 @@ export type Settings = {
   silentInstall: boolean;
   /** `pending` on a brand-new install, otherwise `seen`. */
   featuresIntro: string;
+  /** `pending` asks a new install to show the first-run setup once. */
+  onboarding: string;
   /** `recovered-backup` when the last load restored a damaged settings file. */
   recoveryNotice?: string;
+  /** Draw the full conflicted file and every block in the changes pane. Off, because large files stall the window. */
+  showConflictPreview: boolean;
 };
 
 export type ForkImport = {
@@ -433,6 +462,9 @@ export type CommandRecord = {
 };
 
 export type ConflictSides = {
+  /** Common ancestor from index stage 1. Empty when the conflict has no base blob. */
+  base?: string;
+  /** Backend fingerprint used to reject writes after an external change. */
   version?: string;
   ours: string;
   theirs: string;
@@ -460,6 +492,11 @@ export type ConflictView = {
   ours: ConflictParty;
   theirs: ConflictParty;
   binary: boolean;
+  /** Broad conflict class used by the workbench for a focused action card. */
+  kind?: "content" | "binary" | "deleteModify" | "rename" | "path";
+  basePath?: string | null;
+  oursPath?: string | null;
+  theirsPath?: string | null;
 };
 
 export type FilePreview = {

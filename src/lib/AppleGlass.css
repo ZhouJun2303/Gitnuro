@@ -8,6 +8,7 @@
   --selection: rgba(63, 54, 64, 0.095);
   --text: #29262b;
   --text-secondary: #767078;
+  --commit-meta-color: #5f5861;
   --pane-height: 40px;
   --welcome-radius: 20px;
   --glass-backdrop:
@@ -20,6 +21,7 @@
 :root[data-theme="apple"][data-senior-mode="true"] {
   --text: #17151a;
   --text-secondary: #4d4650;
+  --commit-meta-color: #423c45;
   --line: rgba(52, 45, 52, 0.16);
   --selection: rgba(63, 54, 64, 0.14);
 }
@@ -129,7 +131,6 @@
 :root[data-theme="apple"] .pane-title { font-size: 13px; letter-spacing: -0.01em; }
 :root[data-theme="apple"] .pane-chip { border-radius: 7px; background: rgba(255, 255, 255, 0.7); }
 :root[data-theme="apple"] .pane-chip.pane-go { color: var(--text); background: rgba(255, 255, 255, 0.88); }
-:root[data-theme="apple"] .commit-side .meta { font-size: 12px; }
 :root[data-theme="apple"] .history .commit-row { border-radius: 6px; }
 :root[data-theme="apple"] .history .commit-row.selected::before { display: none; }
 :root[data-theme="apple"] .commit-row.selected .subject { font-weight: 500; }

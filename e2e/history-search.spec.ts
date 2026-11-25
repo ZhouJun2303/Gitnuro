@@ -21,12 +21,16 @@ test("commit search scans a long history without dropping rows", async ({ page }
     const again = performance.now();
     const authorHits = commitHitIndexes(rows, "glow author", needles);
     const authorElapsed = performance.now() - again;
+    const bodyRows = [{ id: "bcca32716ce15043e4486929b3a354a4df41eac8", summary: "art: hero atlas", author: "周俊", email: "", refs: [] }];
+    const bodyNeedles = commitHaystacks(bodyRows);
+    const bodyHits = commitHitIndexes(bodyRows, "ID: 1002778", bodyNeedles, new Set([bodyRows[0].id]));
     return {
       hits: hits.length,
       first: hits[0] ?? -1,
       hasSecond: hitContains(hits, 17),
       missesPlain: hitContains(hits, 1),
       authorHits: authorHits.length,
+      bodyHit: bodyHits.length === 1 && bodyHits[0] === 0,
       content: commitHitIndexes(rows, "S:glow", needles).length,
       elapsed,
       authorElapsed,
@@ -41,6 +45,7 @@ test("commit search scans a long history without dropping rows", async ({ page }
   expect(result.hasSecond).toBe(true);
   expect(result.missesPlain).toBe(false);
   expect(result.authorHits).toBeGreaterThan(0);
+  expect(result.bodyHit).toBe(true);
   expect(result.content).toBe(0);
   expect(result.elapsed).toBeLessThan(80);
   expect(result.authorElapsed).toBeLessThan(80);

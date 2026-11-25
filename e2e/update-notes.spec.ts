@@ -26,7 +26,15 @@ for (const recheck of [false, true]) for (const fail of [false, true]) {
         return ++calls === 1 ? pending : Promise.resolve(new Response(JSON.stringify({ ok: true, value: { appVersion: "new" } })));
       };
       const shell: any = { updatePhase: "idle", updateBusy: false, updateCheckGen: 0, updateNotice: null, pendingUpdate: null,
-        updateCheckedAt: 0, settings: {}, dialog: "update", tr: String, message: String, savePrefs: async () => {} };
+        updateCheckedAt: 0, settings: {}, dialog: "update", tr: String, message: String, savePrefs: async () => {},
+        updateDay: () => {
+          const now = new Date();
+          return `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
+        },
+        finishUpdateCheck(generation = this.updateCheckGen) {
+          if (generation !== this.updateCheckGen) return;
+          this.updateCheckInFlight = false;
+        } };
       try {
         const checking = ShellState.prototype.checkForUpdate.call(shell);
         ShellState.prototype.dismissUpdate.call(shell);

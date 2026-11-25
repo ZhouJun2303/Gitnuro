@@ -7,6 +7,13 @@ commands.add("stash_patch"); immutableCommands.add("stash_patch");
 commands.add("blame_source");
 for (const command of ["workspace_status_paths", "search_commits", "search_log", "pick_history", "cherry_preview", "merge_preview", "rebase_conflicts"]) commands.add(command);
 
+/** Worktree scans. A history read can run beside them and must not cancel them. */
+export const STATUS_READS = ["workspace_status", "workspace_status_paths"];
+
+/** History and ref reads. A status refresh must not cancel the list already on its way. */
+export const HISTORY_READS = ["commit_log", "repository_refs", "file_history", "search_log", "reflog", "in_progress", "merge_state", "blame_source", "blame_file"];
+const alongsideStatus = new Set(HISTORY_READS);
+
 const flights = new Map<string, Promise<unknown>>();
 const cache = new Map<string, { value: unknown; bytes: number }>();
 const activeJobs = new Set<Job>();
@@ -14,12 +21,15 @@ let bytes = 0, active = 0, background = 0, mutableActive = 0;
 type Read = (signal: AbortSignal) => Promise<unknown>;
 type Job = {
   key: string;
+  command: string;
   repo: string;
   path: string;
   lane: string;
   start: () => void;
   prefetch: boolean;
   mutable: boolean;
+  /** History does not take the repository slot a worktree scan is holding. */
+  alongside: boolean;
   controller: AbortController;
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
@@ -67,7 +77,7 @@ function release(job: Job) {
   job.released = true;
   activeJobs.delete(job);
   active--;
-  if (job.mutable) {
+  if (job.mutable && !job.alongside) {
     mutableActive--;
     mutableRepositories.delete(job.repo);
   }
@@ -85,30 +95,34 @@ function cancelJob(job: Job) {
   if (job.started) release(job);
 }
 
-function cancelRepositoryJobs(path: string) {
+function cancelRepositoryJobs(path: string, keep = new Set<string>()) {
   const repo = repositoryKey(path);
-  const queued = waiting.filter((job) => job.repo === repo && job.mutable);
+  const spared = (job: Job) => keep.has(job.command);
+  const queued = waiting.filter((job) => job.repo === repo && job.mutable && !spared(job));
   for (const job of queued) {
     const index = waiting.indexOf(job);
     if (index >= 0) waiting.splice(index, 1);
     cancelJob(job);
   }
-  const active = [...activeJobs].filter((job) => job.repo === repo && job.mutable);
+  const active = [...activeJobs].filter((job) => job.repo === repo && job.mutable && !spared(job));
+  // A spared read is the merge panel body. Killing every Git process for the
+  // repository would abort it even though this scheduler kept the promise.
+  const sparedLive = [...activeJobs].some((job) => job.repo === repo && spared(job) && job.started && !job.released);
   const stableActive = [...activeJobs].some((job) => job.repo === repo && job.started && !job.released && !job.mutable);
-  if (active.length > 0 && !stableActive) requestRepositoryCancel(path);
+  if (active.length > 0 && !stableActive && !sparedLive) requestRepositoryCancel(path);
   for (const job of active) cancelJob(job);
 }
 
 function pump() {
   while (active < 4) {
     const eligible = (job: Job) => !repositoryCancels.has(job.repo)
-      && (!job.mutable || mutableActive < 2 && !mutableRepositories.has(job.repo))
+      && (job.alongside || !job.mutable || mutableActive < 2 && !mutableRepositories.has(job.repo))
       && (!job.prefetch || background < 1);
     let index = waiting.findIndex((job) => !job.prefetch && eligible(job));
     if (index < 0) index = waiting.findIndex(eligible);
     const next = index >= 0 ? waiting.splice(index, 1)[0] : undefined;
     if (!next) return;
-    active++; if (next.mutable) { mutableActive++; mutableRepositories.add(next.repo); }
+    active++; if (next.mutable && !next.alongside) { mutableActive++; mutableRepositories.add(next.repo); }
     next.countedBackground = next.prefetch; if (next.countedBackground) background++;
     next.start();
   }
@@ -127,15 +141,15 @@ function weight(value: unknown, limit = MAX_BYTES): number {
   return size;
 }
 
-export function invalidateReads(path: string) {
+export function invalidateReads(path: string, keep: readonly string[] = []) {
   const key = repositoryKey(path);
   versions.set(key, (versions.get(key) ?? 0) + 1);
-  cancelRepositoryJobs(path);
+  cancelRepositoryJobs(path, new Set(keep));
 }
 
 /** Cancel stale mutable reads before a newer view starts using the repository. */
-export function cancelReads(path: string) {
-  cancelRepositoryJobs(path);
+export function cancelReads(path: string, keep: readonly string[] = []) {
+  cancelRepositoryJobs(path, new Set(keep));
 }
 
 export function scheduleRead<T>(command: string, args: Record<string, unknown>, read: Read, prefetch = false): Promise<T> {
@@ -170,7 +184,7 @@ export function scheduleRead<T>(command: string, args: Record<string, unknown>, 
   const promise = new Promise<T>((resolve, reject) => {
     const controller = new AbortController();
     job = {
-      key, repo, path, lane, prefetch, mutable: !stable, controller,
+      key, command, repo, path, lane, prefetch, mutable: !stable, alongside: alongsideStatus.has(command), controller,
       resolve: resolve as (value: unknown) => void,
       reject,
       started: false,

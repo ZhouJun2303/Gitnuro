@@ -1174,15 +1174,8 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
             started.elapsed().as_millis()
         ),
     );
-    let _ = app.emit(
-        "repo-changed",
-        RepoChange {
-            refs: true,
-            path: repo.display().to_string(),
-            revision: changes::changed(&repo),
-            paths: None,
-        },
-    );
+    // Opening already decided whether to scan the work tree. Emitting a full
+    // refresh here starts a second scan and cancels the history read.
     let shared = Arc::new(WatchSlot {
         watcher: Mutex::new(Some(watcher)),
         alive: Arc::new(AtomicBool::new(true)),
@@ -1840,6 +1833,66 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
     {
         let _ = (start, program);
         Err("This system has no file picker.".into())
+    }
+}
+
+#[tauri::command]
+fn export_settings_backup() -> Result<Option<String>, String> {
+    let stamp = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let Some(target) = save_file_pick(&settings::backup_name(&stamp))? else {
+        return Ok(None);
+    };
+    settings::backup_to(Path::new(&target))?;
+    Ok(Some(target))
+}
+
+fn save_file_pick(default_name: &str) -> Result<Option<String>, String> {
+    #[cfg(windows)]
+    {
+        let script = r#"
+Add-Type -AssemblyName System.Windows.Forms | Out-Null
+$dialog = New-Object System.Windows.Forms.SaveFileDialog
+$dialog.Filter = "JSON (*.json)|*.json|All files (*.*)|*.*"
+$dialog.DefaultExt = "json"
+$dialog.AddExtension = $true
+$dialog.OverwritePrompt = $true
+$dialog.FileName = $env:AWEGIT_SAVE_NAME
+$start = [Environment]::GetFolderPath('MyDocuments')
+if ($start -and (Test-Path -LiteralPath $start)) { $dialog.InitialDirectory = $start }
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $dialog.FileName }
+"#;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-STA", "-Command", script])
+            .env("AWEGIT_SAVE_NAME", default_name)
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if err.is_empty() { "Could not open the save dialog.".into() } else { err });
+        }
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(if text.is_empty() { None } else { Some(text) });
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let name = default_name.replace('\\', "\\\\").replace('"', "\\\"");
+        let script = format!(
+            "try\nPOSIX path of (choose file name with prompt \"Save settings backup\" default name \"{name}\" default location (path to documents folder))\non error number -128\n\"\"\nend try"
+        );
+        let output = std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .output()
+            .map_err(|error| error.to_string())?;
+        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok(if text.is_empty() { None } else { Some(text) });
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = default_name;
+        Err("This system has no save dialog.".into())
     }
 }
 
@@ -2960,6 +3013,7 @@ pub fn run() {
             save_window_bounds,
             settings_path,
             import_fork_settings,
+            export_settings_backup,
             external_tools,
             common_tools,
             detect_terminal_clis,

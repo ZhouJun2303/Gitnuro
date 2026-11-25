@@ -228,6 +228,11 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.settings = { ...shell.settings, diffWordWrap: true, diffStyle: "unified" };
     return showChange(shell, "notes/wrap.txt", "unstaged");
   }
+  if (id === "diff-toolbar") return showChange(shell, "README.md", "unstaged");
+  if (id === "diff-whole-file") {
+    shell.settings = { ...shell.settings, showEntireFile: true };
+    return showChange(shell, "README.md", "unstaged");
+  }
   if (id === "history" || id === "commit" || id === "history-remote") return showHistory(shell);
   if (id === "history-multiselect" || id === "cherry-many-confirm") {
     await showHistory(shell);
@@ -239,6 +244,10 @@ async function fillSurface(shell: ShellState, id: string) {
   if (id === "commit-binary") {
     await showCommitBySummary(shell, "add the large pak");
     await shell.openHistoryTab("changes");
+    return;
+  }
+  if (id === "commit-long-ref") {
+    await showCommitBySummary(shell, "record the graph branch");
     return;
   }
   if (id === "commit-filter") {
@@ -446,6 +455,15 @@ async function fillSurface(shell: ShellState, id: string) {
     return;
   }
   if (id === "conflict") return showChange(shell, "src/both-sides.ts", "unstaged");
+  if (id === "conflict-preview" || id === "conflict-preview-compact") {
+    shell.settings = {
+      ...shell.settings,
+      showConflictPreview: true,
+      ...(id === "conflict-preview-compact" ? { verticalTabs: false } : {}),
+    };
+    if (id === "conflict-preview-compact") shell.changesWidth = 650;
+    return showChange(shell, id === "conflict-preview" ? "src/both-sides.ts" : "src/many-hunks.ts", "unstaged");
+  }
   if (id === "conflict-compact") {
     shell.sidebarCollapsed = false;
     shell.sidebarWidth = 280;
@@ -541,7 +559,18 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.openTextMerge("src/many-hunks.ts");
     return;
   }
-  if (id === "text-merge" || id === "text-merge-window") {
+  if (id === "text-merge-window") {
+    // The standalone window should become interactive while the initial
+    // conflict preview is still loading. A delayed conflict_sides response
+    // must not block the scene from opening the merge workbench.
+    shell.section = "changes";
+    shell.selectedSide = "unstaged";
+    shell.selectedPath = "src/both-sides.ts";
+    void shell.loadDiff();
+    await shell.openTextMerge("src/both-sides.ts");
+    return;
+  }
+  if (id === "text-merge") {
     await showChange(shell, "src/both-sides.ts", "unstaged");
     await shell.openTextMerge("src/both-sides.ts");
     return;

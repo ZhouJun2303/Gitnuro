@@ -1,4 +1,4 @@
-import type { ConflictCommit } from "./status";
+import type { ConflictCommit, ConflictSides } from "./status";
 
 export type FileChange = {
   path: string;
@@ -9,6 +9,10 @@ export type SampleConflictView = {
   ours: { label: string; state: "added" | "modified" | "deleted" | "unchanged"; bytes: number; commit?: ConflictCommit | null };
   theirs: { label: string; state: "added" | "modified" | "deleted" | "unchanged"; bytes: number; commit?: ConflictCommit | null };
   binary: boolean;
+  kind?: "content" | "binary" | "deleteModify" | "rename" | "path";
+  basePath?: string | null;
+  oursPath?: string | null;
+  theirsPath?: string | null;
 };
 
 const sampleAuthors = { name: "AweGit Lab", email: "lab@example.com" };
@@ -18,8 +22,9 @@ function sampleCommit(short: string, subject: string, at: number): ConflictCommi
 }
 
 /** Working copies with conflict markers, so sample data can open the text merger. */
-export const sampleConflictText: Record<string, { ours: string; theirs: string; working: string }> = {
+export const sampleConflictText: Record<string, ConflictSides> = {
   "src/merge/both-sides.ts": {
+    base: "export const rate = 3;\n  return rate + 2;",
     ours: "export const rate = 2;\n  return rate + 1;",
     theirs: "export const rate = 5;\n  return rate + 4;",
     working: [
@@ -39,11 +44,13 @@ export const sampleConflictText: Record<string, { ours: string; theirs: string; 
     ].join("\n"),
   },
   "src/merge/both-added.ts": {
+    base: "",
     ours: "export const created = \"main\";",
     theirs: "export const created = \"feature\";",
     working: ["<<<<<<< main", "export const created = \"main\";", "=======", "export const created = \"feature\";", ">>>>>>> feature", ""].join("\n"),
   },
   "docs/removed-there.md": {
+    base: "# old documentation",
     ours: "# still documented on main",
     theirs: "",
     working: ["<<<<<<< main", "# still documented on main", "=======", ">>>>>>> feature", ""].join("\n"),
@@ -54,6 +61,7 @@ export const sampleConflictText: Record<string, { ours: string; theirs: string; 
 export const sampleConflictViews: Record<string, SampleConflictView> = {
   "data/Y语言表_Data_Language.xlsx": {
     binary: true,
+    kind: "binary",
     theirs: {
       label: "stash/patch",
       state: "modified",
@@ -79,11 +87,13 @@ export const sampleConflictViews: Record<string, SampleConflictView> = {
   },
   "docs/removed-there.md": {
     binary: false,
+    kind: "deleteModify",
     theirs: { label: "feature", state: "deleted", bytes: 0, commit: sampleCommit("b2d9f41", "移除旧文档", 1793700000) },
     ours: { label: "main", state: "modified", bytes: 28, commit: sampleCommit("3f9a2c1", "更新文档标题", 1793600000) },
   },
   "art/removed-here.png": {
     binary: true,
+    kind: "binary",
     theirs: { label: "feature", state: "modified", bytes: 18432, commit: sampleCommit("b2d9f41", "替换标记图", 1793700000) },
     ours: { label: "main", state: "deleted", bytes: 0, commit: sampleCommit("3f9a2c1", "删除旧标记图", 1793600000) },
   },

@@ -2,6 +2,7 @@ import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { runTask } from "./tasks";
 import { invalidateReads, scheduleRead, setReadCanceller } from "./read-scheduler";
 import { repositoryWrites } from "./operation-policy";
+import { subscribeUpdate } from "./update-loop";
 
 type Args = Parameters<typeof rawInvoke>[1];
 type Options = Parameters<typeof rawInvoke>[2];
@@ -144,6 +145,6 @@ if (typeof window !== "undefined") {
   });
   window.addEventListener("error", (event) => push({ level: "error", kind: "error", name: event.message, detail: `${event.filename}:${event.lineno}` }));
   window.addEventListener("unhandledrejection", (event) => push({ level: "error", kind: "rejection", name: String(event.reason) }));
-  window.setInterval(flush, 2000);
+  subscribeUpdate(flush, 2000);
   window.addEventListener("beforeunload", flush);
 }

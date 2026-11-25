@@ -70,6 +70,12 @@
   }
 </script>
 
+<svelte:window
+  onpointerup={() => (shell.prefSliderDragging = false)}
+  onpointercancel={() => (shell.prefSliderDragging = false)}
+  onblur={() => (shell.prefSliderDragging = false)}
+ />
+
 {#snippet navIcon(id: PrefTab)}
   <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
     {#if id === "general"}
@@ -340,32 +346,55 @@
           <h3 class="pref-card-title">{shell.tr("dialog.prefSecDiffDisplay")}</h3>
           <div class="pref-card-body">
             <label class="pref-row pref-toggle">
+              <input
+                type="checkbox"
+                data-pref="show-conflict-preview"
+                checked={shell.settings.showConflictPreview}
+                onchange={(event) => {
+                  const enabled = event.currentTarget.checked;
+                  shell.settings = { ...shell.settings, showConflictPreview: enabled };
+                  if (!enabled) shell.conflictPreview = null;
+                  if (shell.section === "changes" && shell.selectedConflict) void shell.loadDiff();
+                }}
+              />
+              <span class="pref-label">{shell.tr("dialog.showConflictPreview")}</span>
+            </label>
+            <p class="pref-setting-hint">{shell.tr("dialog.showConflictPreviewHint")}</p>
+            <label class="pref-row pref-toggle">
               <input type="checkbox" bind:checked={shell.settings.showDiffMarks} />
               <span class="pref-label">{shell.tr("dialog.showMarks")}</span>
-            </label>
-            <label class="pref-row">
-              <span class="pref-label">{shell.tr("dialog.fontSize")}</span>
-              <span class="pref-control"><input type="number" min="8" max="32" bind:value={shell.settings.diffFontSize} /></span>
             </label>
             <label class="pref-row pref-toggle">
               <input type="checkbox" bind:checked={shell.settings.disableSyntaxHighlight} />
               <span class="pref-label">{shell.tr("dialog.disableHighlight")}</span>
             </label>
+          </div>
+        </section>
+
+        <section class="pref-card">
+          <h3 class="pref-card-title">{shell.tr("dialog.prefSecDiffReading")}</h3>
+          <div class="pref-card-body">
             <label class="pref-row pref-toggle">
               <input type="checkbox" bind:checked={shell.settings.diffWordWrap} />
               <span class="pref-label">{shell.tr("dialog.wordWrap")}</span>
             </label>
             <label class="pref-row pref-toggle">
-              <input type="checkbox" bind:checked={shell.settings.ignoreSpace} />
-              <span class="pref-label">{shell.tr("dialog.ignoreSpace")}</span>
-            </label>
-            <label class="pref-row pref-toggle">
               <input type="checkbox" bind:checked={shell.settings.showWhitespace} />
               <span class="pref-label">{shell.tr("dialog.showSpace")}</span>
             </label>
+          </div>
+        </section>
+
+        <section class="pref-card">
+          <h3 class="pref-card-title">{shell.tr("dialog.prefSecDiffCompare")}</h3>
+          <div class="pref-card-body">
             <label class="pref-row">
               <span class="pref-label">{shell.tr("dialog.diffContext")}</span>
-              <span class="pref-control"><input type="number" min="0" max="100" bind:value={shell.settings.diffContext} /></span>
+              <span class="pref-control"><input type="number" min="0" max="100" bind:value={shell.settings.diffContext} onchange={() => shell.setDiffContext(shell.settings.diffContext)} /></span>
+            </label>
+            <label class="pref-row pref-toggle">
+              <input type="checkbox" bind:checked={shell.settings.ignoreSpace} />
+              <span class="pref-label">{shell.tr("dialog.ignoreSpace")}</span>
             </label>
           </div>
         </section>
@@ -986,9 +1015,11 @@
             <p class="empty">{shell.tr("dialog.settingsFile")}</p>
             {#if shell.settingsPath}<p class="empty source-path" title={shell.settingsPath}>{shell.settingsPath}</p>{/if}
             <div class="pref-card-actions">
+              <button class="text-button export-settings" type="button" onclick={() => void shell.exportSettingsBackup()}>{shell.tr("dialog.exportBackup")}</button>
               <button class="text-button" type="button" onclick={() => void shell.importFork()}>{shell.tr("dialog.importFork")}</button>
               <button class="text-button" type="button" onclick={() => void shell.importForkFile()}>{shell.tr("dialog.importForkFile")}</button>
             </div>
+            {#if shell.settingsBackupNote}<p class="empty source-path settings-backup-note" title={shell.settingsBackupNote}>{shell.settingsBackupNote}</p>{/if}
             {#if shell.forkImportNote}<p class="empty">{shell.forkImportNote}</p>{/if}
           </div>
         </section>

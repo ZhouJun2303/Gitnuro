@@ -517,7 +517,12 @@ export function commitHaystacks(rows: readonly CommitMatchRow[]) {
 }
 
 /** Indexes of commits the find box should ring. `S:` and `G:` stay content searches and match nothing here. */
-export function commitHitIndexes(rows: readonly CommitMatchRow[], query: string, needles?: readonly string[]): readonly number[] {
+export function commitHitIndexes(
+  rows: readonly CommitMatchRow[],
+  query: string,
+  needles?: readonly string[],
+  messageHits?: ReadonlySet<string>,
+): readonly number[] {
   const needle = query.trim().toLowerCase();
   if (!needle || needle.startsWith("s:") || needle.startsWith("g:")) return NO_COMMIT_HITS;
   const hex = /^[0-9a-f]{4,}$/.test(needle);
@@ -526,7 +531,9 @@ export function commitHitIndexes(rows: readonly CommitMatchRow[], query: string,
     const row = rows[index];
     if (!row) continue;
     const haystack = needles ? (needles[index] ?? "") : commitHaystack(row);
-    if (haystack.includes(needle) || (hex && (row.id.toLowerCase().startsWith(needle) || (row.shortId ?? "").toLowerCase().startsWith(needle)))) hits.push(index);
+    if (haystack.includes(needle)
+      || messageHits?.has(row.id)
+      || (hex && (row.id.toLowerCase().startsWith(needle) || (row.shortId ?? "").toLowerCase().startsWith(needle)))) hits.push(index);
   }
   return hits;
 }
@@ -556,6 +563,68 @@ export function onVirtualScroll(apply: (top: number) => void) {
       frame = 0;
       if (latest.isConnected) apply(latest.scrollTop);
     });
+  };
+}
+
+export type VirtualScrollSync = {
+  contentKey?: unknown;
+  getTop: () => number;
+  setTop: (top: number) => void;
+};
+
+/** Reconcile a virtual list after its content or viewport changes. */
+export function syncVirtualScroll(node: HTMLElement, options: VirtualScrollSync) {
+  let current = options;
+  let frame = 0;
+  let pending = false;
+
+  const schedule = () => {
+    pending = true;
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      if (!pending || !node.isConnected) return;
+      pending = false;
+      const max = Math.max(0, node.scrollHeight - node.clientHeight);
+      const requested = current.getTop();
+      const next = Math.min(Math.max(0, Number.isFinite(requested) ? requested : 0), max);
+      if (Math.abs(node.scrollTop - next) > 1) node.scrollTop = next;
+      if (Math.abs(current.getTop() - next) > 1) current.setTop(next);
+    });
+  };
+
+  let resize: ResizeObserver;
+  let content: Element | null = null;
+  const observeContent = () => {
+    const next = node.querySelector<HTMLElement>(".commit-window");
+    if (next === content) return;
+    if (content) resize.unobserve(content);
+    content = next;
+    if (content) resize.observe(content);
+  };
+  resize = new ResizeObserver(() => {
+    observeContent();
+    schedule();
+  });
+  resize.observe(node);
+  const mutations = new MutationObserver(() => {
+    observeContent();
+    schedule();
+  });
+  mutations.observe(node, { childList: true });
+  observeContent();
+  schedule();
+
+  return {
+    update(next: VirtualScrollSync) {
+      if (next.contentKey !== current.contentKey) schedule();
+      current = next;
+    },
+    destroy() {
+      if (frame) cancelAnimationFrame(frame);
+      resize.disconnect();
+      mutations.disconnect();
+    },
   };
 }
 

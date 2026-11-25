@@ -18,14 +18,20 @@
     : shell.tr(!value ? "dialog.fontSystemPreview" : status === "loading" ? "dialog.fontLoading" : "dialog.fontNotDownloaded"));
 
   function setSize(input: HTMLInputElement) {
-    const next = Math.min(kind === "ui" ? 30 : 32, Math.max(kind === "ui" ? 11 : 8, Math.round(Number(input.value) || 14)));
+    const next = Math.min(kind === "ui" ? 30 : 32, Math.max(kind === "ui" ? 11 : 8, Math.round(Number(input.value) || (kind === "ui" ? 14 : 13))));
     if (kind === "ui") shell.settings.uiScale = next;
     else shell.settings.diffFontSize = next;
     input.value = String(next);
   }
-  function previewSize(input: HTMLInputElement) {
-    const value = Number(input.value);
-    if (input.value && value >= (kind === "ui" ? 11 : 8) && value <= (kind === "ui" ? 30 : 32)) setSize(input);
+  function beginSlider(event: PointerEvent) {
+    shell.prefSliderDragging = true;
+    (event.currentTarget as HTMLInputElement).focus({ preventScroll: true });
+  }
+  function setWeight(input: HTMLInputElement) {
+    const next = Math.min(600, Math.max(400, Math.round(Number(input.value) / 100) * 100));
+    if (kind === "ui") shell.settings.uiFontWeight = next;
+    else shell.settings.codeFontWeight = next;
+    input.value = String(next);
   }
 </script>
 
@@ -63,18 +69,14 @@
     <div class="font-metrics">
       <label for={`font-size-${kind}`}>{shell.tr(kind === "ui" ? "dialog.uiFontSize" : "dialog.codeFontSize")}</label>
       <div class="font-size-control">
-        <input type="range" aria-label={shell.tr(kind === "ui" ? "dialog.uiFontSize" : "dialog.codeFontSize")} min={kind === "ui" ? 11 : 8} max={kind === "ui" ? 30 : 32} value={size} oninput={(event) => setSize(event.currentTarget)} />
-        <input id={`font-size-${kind}`} type="number" min={kind === "ui" ? 11 : 8} max={kind === "ui" ? 30 : 32} value={size} oninput={(event) => previewSize(event.currentTarget)} onchange={(event) => setSize(event.currentTarget)} /><span>px</span>
+        <input id={`font-size-${kind}`} type="range" aria-label={shell.tr(kind === "ui" ? "dialog.uiFontSize" : "dialog.codeFontSize")} min={kind === "ui" ? 11 : 8} max={kind === "ui" ? 30 : 32} value={size} onpointerdown={beginSlider} oninput={(event) => setSize(event.currentTarget)} />
+        <output>{size} px</output>
       </div>
       <label for={`font-weight-${kind}`}>{shell.tr("dialog.fontWeight")}</label>
-      <select id={`font-weight-${kind}`} value={weight || 400} onchange={(event) => {
-        if (kind === "ui") shell.settings.uiFontWeight = Number(event.currentTarget.value);
-        else shell.settings.codeFontWeight = Number(event.currentTarget.value);
-      }}>
-        <option value="400">400 · {shell.tr("dialog.fontRegular")}</option>
-        <option value="500">500 · {shell.tr("dialog.fontMedium")}</option>
-        <option value="600">600 · {shell.tr("dialog.fontSemibold")}</option>
-      </select>
+      <div class="font-size-control font-weight-control">
+        <input id={`font-weight-${kind}`} type="range" aria-label={shell.tr("dialog.fontWeight")} min="400" max="600" step="100" value={weight || 400} onpointerdown={beginSlider} oninput={(event) => setWeight(event.currentTarget)} />
+        <output>{weight || 400}</output>
+      </div>
     </div>
     <div class="font-preview-label"><span>{shell.tr("dialog.fontPreview")}</span><span role="status">{previewStatus}</span></div>
     <div class="font-preview" data-font-preview={kind} style:font-family={kind === "ui" ? "var(--font)" : "var(--mono)"} style:font-size={`${previewFontSize}px`} style:font-weight={previewFontWeight}>

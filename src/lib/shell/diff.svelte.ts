@@ -1,5 +1,5 @@
 import { invoke } from "../perf";
-import { cancelReads } from "../read-scheduler";
+import { cancelReads, isReadSuperseded } from "../read-scheduler";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { highlight } from "../highlight";
 import { comparePixels, PixelDiffLimitError } from "../pixel-diff";
@@ -239,10 +239,16 @@ type DiffFlight = { key: string; promise: Promise<void> };
 const diffFlights = new WeakMap<ShellState, DiffFlight>();
 
 export async function loadDiff(shell: ShellState, loadLarge = false) {
+    // A standalone merge window owns the conflict reads for its workbench.
+    // Letting a status refresh start a normal diff here cancels conflict_view
+    // or conflict_sides through the shared read scheduler and leaves the
+    // merge panel with its headers but no pieces to render.
+    if (shell.standalone === "merge") return;
     if (shell.mode !== "live" || !shell.selectedPath || shell.section !== "changes") {
       shell.diff = null;
       shell.diffError = null;
       shell.conflictView = null;
+      shell.conflictPreview = null;
       return;
     }
     const file = shell.selectedPath;
@@ -251,6 +257,7 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
       shell.diff = null;
       shell.diffError = null;
       shell.conflictView = null;
+      shell.conflictPreview = null;
       shell.preview = null;
       shell.imageOld = null;
       shell.imageNew = null;
@@ -260,7 +267,9 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
     const path = shell.repoPath();
     const loadKey = `${path}\0${stagedSide ? "staged" : "unstaged"}\0${file}`;
     const load = loadLarge || shell.largeLoaded.has(loadKey);
-    const flightKey = `${loadKey}\0${load ? "large" : "text"}\0${shell.statusGen}`;
+    const unified = shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3);
+    const showPreview = shell.settings.showConflictPreview === true;
+    const flightKey = `${loadKey}\0${load ? "large" : "text"}\0${unified}\0${shell.settings.ignoreSpace ? "ignore-space" : "keep-space"}\0${shell.statusGen}\0${showPreview ? "preview" : "cards"}`;
     const existing = diffFlights.get(shell);
     if (existing?.key === flightKey) {
       await existing.promise;
@@ -271,12 +280,17 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
     const rows = stagedSide ? shell.snapshot?.staged : shell.snapshot?.unstaged;
     const conflicted = rows?.some((item) => item.path === file && item.kind === "conflict") ?? false;
     const flight: DiffFlight = { key: flightKey, promise: Promise.resolve() };
+    let retryAfterCancellation = false;
     const promise = shell.withWork(shell.tr("chrome.readingFile"), async () => {
     try {
       if (conflicted) {
         const view = await invoke<ConflictView>("conflict_view", { path, file });
+        const preview = showPreview
+          ? await invoke<ConflictSides>("conflict_sides", { path, file }).catch(() => null)
+          : null;
         if (token === shell.diffToken && shell.viewing(path) && shell.selectedPath === file) {
           shell.conflictView = view;
+          shell.conflictPreview = preview;
           shell.diff = null;
           shell.diffError = null;
           shell.preview = null;
@@ -286,11 +300,12 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
         return;
       }
       shell.conflictView = null;
+      shell.conflictPreview = null;
       const value = await invoke<FileDiff>("file_diff", {
         path,
         file,
         staged: stagedSide,
-        unified: shell.settings.showEntireFile ? 100000 : (shell.settings.diffContext ?? 3),
+        unified,
         ignoreSpace: shell.settings.ignoreSpace,
         load,
       });
@@ -318,14 +333,29 @@ export async function loadDiff(shell: ShellState, loadLarge = false) {
         }
       }
     } catch (error) {
+      if (isReadSuperseded(error)) {
+        retryAfterCancellation = token === shell.diffToken
+          && shell.viewing(path)
+          && shell.selectedPath === file
+          && shell.section === "changes";
+        return;
+      }
       if (token === shell.diffToken && shell.viewing(path)) {
         shell.diff = null;
         shell.conflictView = null;
+        shell.conflictPreview = null;
         shell.diffError = shell.message(error);
       }
     }
     }).finally(() => {
-      if (diffFlights.get(shell) === flight) diffFlights.delete(shell);
+      if (diffFlights.get(shell) !== flight) return;
+      diffFlights.delete(shell);
+      if (retryAfterCancellation) {
+        queueMicrotask(() => {
+          if (token !== shell.diffToken || !shell.viewing(path) || shell.selectedPath !== file || shell.section !== "changes") return;
+          void shell.loadDiff(loadLarge);
+        });
+      }
     });
     flight.promise = promise;
     diffFlights.set(shell, flight);
@@ -841,6 +871,10 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
     const repo = shell.repoPath();
     const file = rowOnSide(shell, path, side);
     if (!repo || !file) return;
+    // The optimistic stage projection moves the current row before Git returns.
+    const unstagedBefore = side === "unstaged" ? shell.shownUnstaged.map((item) => item.path) : [];
+    const selectedBefore = shell.selectedPath;
+    const sideBefore = shell.selectedSide;
     const key = `${shell.jobKey(repo)}\0${side}\0${path}`;
     const checking = file.letter === "C";
     if (checking && flipping.has(key)) return;
@@ -852,7 +886,13 @@ export async function flipStage(shell: ShellState, path: string, side: Side) {
         if (!rowOnSide(shell, path, side)) return;
       }
       const reading = readingOnly(shell);
-      await shell.runChange(side === "staged" ? "unstage_path" : "stage_path", { file: path }, reading);
+      const result = await shell.runChange(side === "staged" ? "unstage_path" : "stage_path", { file: path }, reading);
+      if (side !== "unstaged" || !result || shell.repoPath() !== repo || sideBefore !== "unstaged" || selectedBefore !== path || shell.selectedPath !== path) return;
+      const index = unstagedBefore.indexOf(path);
+      if (index < 0) return;
+      const remaining = shell.shownUnstaged.filter((item) => item.path !== path);
+      const next = remaining[index] ?? remaining[index - 1];
+      if (next) shell.selectFile(next.path, "unstaged");
     } finally {
       if (checking) flipping.delete(key);
     }
@@ -1410,40 +1450,53 @@ export function chosenDiffLines(shell: ShellState, clicked: number) {
 
 const hunkIndexCache = new WeakMap<object, Int32Array>();
 
+function changedHunkIndex(lines: DiffLine[]) {
+    let table = hunkIndexCache.get(lines);
+    if (table) return table;
+    table = new Int32Array(lines.length);
+    table.fill(-1);
+    let hunk = -1;
+    let inChange = false;
+    for (let cursor = 0; cursor < lines.length; cursor += 1) {
+      const changed = lines[cursor]?.kind === "add" || lines[cursor]?.kind === "delete";
+      if (changed && !inChange) {
+        hunk += 1;
+        inChange = true;
+      } else if (!changed) {
+        inChange = false;
+      }
+      if (changed) table[cursor] = hunk;
+    }
+    hunkIndexCache.set(lines, table);
+    return table;
+  }
+
 export function hunkOf(shell: ShellState, index: number) {
     const lines = shell.diffLines;
-    let table = hunkIndexCache.get(lines);
-    if (!table) {
-      table = new Int32Array(lines.length);
-      let hunk = -1;
-      for (let cursor = 0; cursor < lines.length; cursor += 1) {
-        if (lines[cursor]?.kind === "hunk") hunk += 1;
-        table[cursor] = hunk;
-      }
-      hunkIndexCache.set(lines, table);
-    }
+    const table = changedHunkIndex(lines);
     const hunk = table[Math.min(index, table.length - 1)] ?? -1;
     return hunk >= 0 ? hunk : null;
   }
 
-/** Inclusive start / exclusive end for each `@@` hunk in the current diff. */
+/** Inclusive start / exclusive end for each displayed hunk in the current diff. */
 export function hunkRanges(shell: ShellState) {
     const ranges: { index: number; start: number; end: number }[] = [];
+    const table = changedHunkIndex(shell.diffLines);
     let current: { index: number; start: number; end: number } | null = null;
-    let hunk = -1;
     for (let cursor = 0; cursor < shell.diffLines.length; cursor += 1) {
-      const kind = shell.diffLines[cursor]?.kind;
-      if (kind === "hunk") {
+      const index = table[cursor] ?? -1;
+      if (index < 0) {
         if (current) {
-          current.end = cursor;
           ranges.push(current);
+          current = null;
         }
-        hunk += 1;
-        current = { index: hunk, start: cursor, end: shell.diffLines.length };
-      } else if (kind === "meta" && current) {
-        current.end = cursor;
-        ranges.push(current);
-        current = null;
+        continue;
+      }
+      if (!current || current.index !== index) {
+        if (current) ranges.push(current);
+        current = { index, start: cursor, end: cursor + 1 };
+      } else {
+        current.end = cursor + 1;
       }
     }
     if (current) ranges.push(current);

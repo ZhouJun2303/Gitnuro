@@ -50,7 +50,7 @@ const pages: PanelPage[] = [
   { name: "update", scene: "update-available", panels: [".update-panel"] },
   { name: "preferences general", scene: "prefs-appearance", tab: "general", panels: [".pref-nav", ".pref-page", ".theme-styles"] },
   { name: "preferences workspace", scene: "prefs-workspace", tab: "workspace", panels: [".pref-nav", ".pref-page", ".pref-source-row"] },
-  { name: "preferences diff", scene: "prefs-diff", tab: "diff", panels: [".pref-page", "[data-pref=\"diff-style\"]"] },
+  { name: "preferences diff", scene: "prefs-diff", tab: "diff", panels: [".pref-page", "[data-pref=\"diff-style\"]", "[data-pref=\"show-conflict-preview\"]"] },
   { name: "preferences preview formats", scene: "prefs-preview-formats", tab: "previewFormats", panels: [".pref-page", ".preview-catalog", "[data-tool=\"unity\"]"] },
   { name: "preferences commit", scene: "prefs-commit", tab: "commit", panels: [".pref-page", ".commit-type-list"] },
   { name: "preferences ai", scene: "prefs-ai", tab: "ai", panels: [".pref-page", "[data-ai-field=\"enabled\"]"] },
@@ -146,6 +146,8 @@ for (const theme of themes) {
           await page.setViewportSize({ width: 320, height: 480 });
           await expectLauncherFiles(page);
         }
+        if (item.scene === "conflict") await expect(page.locator(".conflict-preview")).toHaveCount(0);
+        if (item.scene === "prefs-diff") await expect(page.locator("[data-pref=\"show-conflict-preview\"]")).not.toBeChecked();
         if (item.scene === "prefs-accounts") await expectAccountActions(page, theme.locale);
       });
     }
@@ -218,7 +220,32 @@ async function weight(node: ReturnType<Page["locator"]>) {
   return node.evaluate((element) => getComputedStyle(element).fontWeight);
 }
 
+const commitMetaColor: Record<ThemeName, string> = {
+  apple: "rgb(95, 88, 97)",
+  light: "rgb(90, 90, 98)",
+  dark: "rgb(176, 176, 176)",
+};
+
+const commitShaColor: Record<ThemeName, number[]> = {
+  apple: [89, 83, 90],
+  light: [90, 90, 115],
+  dark: [183, 183, 183],
+};
+
+async function expectCommitMetaColor(page: Page, theme: ThemeName) {
+  const row = page.locator(".history .commit-row").first();
+  await expect(row.locator(".commit-side .author")).toHaveCSS("color", commitMetaColor[theme]);
+  await expect(row.locator(".commit-side .date")).toHaveCSS("color", commitMetaColor[theme]);
+  const sha = await row.locator(".commit-side .sha").evaluate((element) => {
+    const value = getComputedStyle(element).color;
+    if (value.startsWith("color(")) return value.match(/[\d.]+/g)!.slice(0, 3).map((part) => Math.round(Number(part) * 255));
+    return value.match(/\d+/g)!.slice(0, 3).map(Number);
+  });
+  commitShaColor[theme].forEach((channel, index) => expect(Math.abs(sha[index] - channel)).toBeLessThanOrEqual(2));
+}
+
 async function expectHistoryWeights(page: Page, theme: ThemeName) {
+  await expectCommitMetaColor(page, theme);
   const selected = page.locator(".history .commit-row.selected .subject").first();
   await expect(selected).toBeVisible();
   expect(await weight(selected)).toBe(theme === "apple" ? "500" : "600");

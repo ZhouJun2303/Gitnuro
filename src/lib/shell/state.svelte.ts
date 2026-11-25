@@ -51,9 +51,9 @@ import {
   } from "../status";
 import { branchItems, fileViewMenu, fileMenu, commitMenu, reflogMenu, viewItems, stashItems, appearanceItems, repositoryItems, windowItems, helpItems, commitExtras, dirMenu, commandItems, workspaceItems, diffLineMenu, revisionFileMenu, historyFileMenu, externalItems } from "./menus";
 import { textColumns, cachedSplit, splitColumnsOf, sampleSplitOf, pickSplitSide, splitScroller, loadDiff, moveHunk, copyPatch, markedLine, patchOf, lineText, splitLineAt, selectDiffRange, toggleDiffLine, clickDiffLine, dragDiffLine, chosenDiffLines, hunkOf, hunkRanges, editorLineNo, removesOnApply, applyLineOps, showLineHistory, toggleAllDiffLines, fitImage, paintPixel, paint, selectFile, selectFolder, fileTargetRows, selectAllFiles, collapseFileSelection, selectAllHere, pathsForCopy, fullPath, diffSide, blockText, activeTextRoot, clearTextSelection, rememberPointer, discardableEntries, stageChosen, flipStage, stagePicked, unstagePicked, resolvePicked, pickedConflicts, discardPicked, deletePicked, confirmPicked, discardChosen, deleteChosen, pickedIn, showBlame, selectChangeFile, selectTreeFile, toggleDir, toggleCommitDir, setFolderFold, setLayout, setConflictsOnly, fileKind, expandParents, collapseTreeExcept, flatEntries, asTree, toRow, sampleRow, groupLabel, ignoreTargets, addIgnore, stageFolder, filesInDir, openStash, fileName, parentDir, folderName, normalPath, copyText, toggleFakeIgnore, openFileView, sampleBlob, tabText, tabDisplay, tabColor, pairSetting } from "./diff.svelte";
-import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, revealCommit, followCommitQuery, stepCommitMatch, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, readErrorLog, writeErrorLog } from "./history.svelte";
-import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
-import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone } from "./types";
+import { loadCommits, loadContext, selectCommit, pickCommitFile, ensurePatch, togglePatch, toggleAllPatches, toggleFold, showReflog, openHistoryTab, selectSample, showFileHistory, scrollToCommit, locateRef, revealCommit, followCommitQuery, stepCommitMatch, locateStash, openHistory, revealHead, dropCommits, toggleDrop, trackPatch, whenLabel, commitSubject, commitAuthorName, commitWhenShort, commitRefs, mergeRoute, differentCommitter, resetCommitView, openTreeFile, laneTone, activeLaneColor, exactRefs, soloBranch, toggleHistoryScope, clearHistoryFilter, isCommitUnpushed, branchRefLabels, plainRefLabels, refKind, stashParts, forkWhen, forkWhenFull, linkParts, issueHref, avatarColor, searchContent, currentFilterRefs, compareDrops, previewCherry, showSideRefs, showSideSearch, queueCommitSearch, pickCommitSearch, pickCommitScope, queueHistoryFill, readErrorLog, writeErrorLog } from "./history.svelte";
+import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, savePrefs, browseFolder, withSourceRoots, sourceRootList, addSourceRoot, removeSourceRoot, setSourceAlias, beginClone, onCloneUrl, onCloneFolder, rememberCloneRoot, pathsMatch, finishCloneOpen, cancelClone, browseCloneRoot, startClone, startInit, openResolve, openTextMerge, loadTextMerge, closeTextMerge, applyTextMerge, applyFileMerge, saveMergeDraft, takeMergeSide, toggleMergeSide, hunkIncludes, chosenHunkText, openRebase, submitCommit, suggestMessage, testAiEndpoint, loadAiModels, togglePromptStyle, fillFromMessage, fillTemplate, splitConflicts, joinedPieces, pickHunk, saveAccount, saveCommand, removeCommand, runCommand, sendCommand, fillCommand, openCommandLog, showCommandFilter, placeCommandLog, confirmSync, beginOpen, loadMergePreview, refreshMergeSummary, readClipboardText, pastePatch, requestCheckout, quickCheckout, quick, openForge, pullRequestUrl, commitWeb, bisectMark, setRebaseVerb, moveStep, hardReset, removeBranch, cancelOperation, keepPassphrase, saveWindow, openRepoSettings, createWorkspace, renameWorkspace, deleteWorkspace, switchWorkspace, selectWorkspace, loadExternalTools, applyToolSettings, applyCommitTypes, addCommitType, renameCommitType, setCommitTypeField, removeCommitType, resetCommitTypes, openEditorImport, detectEditors, toggleEditorCandidate, importEditorCandidates, closeEditorImport, type EditorTool, type ExternalTool, type ToolKind, composeTool, browseSourceRoot, openSourceRoot, openLocal, reopenClosed, liveOnly, toolsOf, applicableTools, resolvedTool, defaultTool, selectedTool, selectTool, addTool, removeTool, moveTool, setToolExtensions, setToolField, toolTypeRows, assignToolType, removeToolType, renameToolType, setFallbackTool, browseToolPath, importTools, toolTemplate, toolLabel, toolExtensionLabel, openToolSettings, type ToolSource } from "./dialogs.svelte";
+import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone, MergeFileEntry } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 import { statusPathBefore, type StatusFingerprint } from "../status";
 import { mergeWatchNote, planStatusRefresh, type StatusProbe, type WatchNote } from "./status-plan";
@@ -61,8 +61,9 @@ import { enqueueStage, projectStages, stageActions, type PendingStage } from "./
 import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../operation-policy";
 import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
 import { watchOperationTasks } from "./task-monitor";
-import { cancelReads, invalidateReads, isReadSuperseded } from "../read-scheduler";
-import { mergeResponse } from "../reconcile";
+import { cancelReads, HISTORY_READS, invalidateReads, isReadSuperseded } from "../read-scheduler";
+import { subscribeUpdate } from "../update-loop";
+import { mergeFields, mergeResponse } from "../reconcile";
 import { sceneById } from "../lab/scenes";
 
 const initialErrors = readErrorLog();
@@ -72,6 +73,14 @@ const ERROR_ENTRY_ID = -1_000_000;
 
 /** Histories up to this length are drawn in one pass. Longer ones continue across frames. */
 const GRAPH_SYNC_LIMIT = 1500;
+
+/** Folded merges decide how many parents each lane follows, so a resumed graph needs the same set. */
+function sameNames(left: Set<string>, right: Set<string>) {
+  if (left === right) return true;
+  if (left.size !== right.size) return false;
+  for (const name of left) if (!right.has(name)) return false;
+  return true;
+}
 
 function standaloneView(): "" | "history" | "blob" | "merge" {
   if (typeof window === "undefined") return "";
@@ -245,6 +254,19 @@ function sameValue(left: unknown, right: unknown): boolean {
   return true;
 }
 
+function boundedSetting(value: unknown, fallback: number, min: number, max: number) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
+}
+
+function boundedDecimalSetting(value: unknown, fallback: number, min: number, max: number, step = 0.1) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  const bounded = Math.min(max, Math.max(min, number));
+  const precision = Math.max(0, (String(step).split(".")[1] ?? "").length);
+  return Number((Math.round(bounded / step) * step).toFixed(precision));
+}
+
 export class ShellState {
 
 
@@ -269,6 +291,20 @@ export class ShellState {
     codeFont: "",
     uiFontWeight: 400,
     codeFontWeight: 400,
+    commitRowHeight: 30,
+    commitSubjectFontSize: 17,
+    commitAuthorFontSize: 14,
+    commitShaFontSize: 14,
+    commitTimeFontSize: 15,
+    changesRowHeight: 28,
+    changesFontSize: 14,
+    changesMetaFontSize: 11,
+    changesIndentCh: 0.8,
+    detailBodyFontSize: 14,
+    detailTabFontSize: 13,
+    detailMetaFontSize: 12,
+    sidebarFontSize: 20,
+    sidebarSectionFontSize: 22,
     dateRelative: true,
     dateFormat: "dd MMM yyyy",
     date24h: true,
@@ -324,7 +360,7 @@ export class ShellState {
     gitlabToken: "",
     gitlabHost: "",
     showDiffMarks: false,
-    diffFontSize: 14,
+    diffFontSize: 13,
     disableSyntaxHighlight: false,
     commitSort: "date",
     fetchAutomatically: false,
@@ -390,7 +426,9 @@ export class ShellState {
     dismissedUpdate: "",
     silentInstall: true,
     featuresIntro: "seen",
+    onboarding: "seen",
     recoveryNotice: "",
+    showConflictPreview: false,
   };
 
 
@@ -509,10 +547,16 @@ export class ShellState {
   commitSearchTimer = 0;
 
 
+  commitQuerySearchGen = 0;
+
+
+  commitQuerySearchTimer = 0;
+
+
   refreshing = false;
 
 
-  refreshQueued: "status" | "full" | null = null;
+  refreshQueued: { scope: "status" | "full"; path: string } | null = null;
 
 
   /** A watcher event that arrived while a write was running. */
@@ -528,6 +572,9 @@ export class ShellState {
 
 
   commitsLive = $state.raw<CommitRow[]>([]);
+
+  /** The first history page has not arrived. An empty list is not "no commits" yet. */
+  historyLoading = $state(false);
 
 
   progress = $state<InProgress | null>(null);
@@ -614,9 +661,9 @@ export class ShellState {
       }).catch(() => { /* The download itself reports network errors. */ }).finally(() => { reading = null; });
       return reading;
     };
-    const timer = setInterval(() => void poll(), 250);
+    const stopPolling = subscribeUpdate(poll, 250);
     return { requestId, finish: async (success: boolean) => {
-      clearInterval(timer);
+      stopPolling();
       await poll();
       active = false;
       const current = this.fontProgress;
@@ -667,6 +714,8 @@ export class ShellState {
 
 
   forkImportNote = $state("");
+  settingsBackupNote = $state("");
+  exportingSettings = $state(false);
 
 
   settings = $state<Settings>(
@@ -801,7 +850,7 @@ export class ShellState {
   mergeAutoSummary = $state("");
 
 
-  mergeFiles = $state<{ status: string; path: string }[]>([]);
+  mergeFiles = $state<{ status: string; path: string; previousPath?: string | null }[]>([]);
 
 
   mergeState = $state<MergeState | null>(null);
@@ -967,6 +1016,10 @@ export class ShellState {
 
   commitQuery = $state("");
 
+
+  /** Commit ids whose full message matched the history find query. */
+  commitQueryMessageHits = $state<string[]>([]);
+
   /** Index into `commitMatchIndexes`, not into the history list. */
   commitMatchCursor = $state(0);
 
@@ -1022,11 +1075,22 @@ export class ShellState {
   graphColumns: Array<string | null> = [];
 
 
+  /** Rows actually laid out; `graphItems` may already hold newer commits. */
+  graphCount = 0;
+
+
+  graphStraight: Set<string> | null = null;
+
+
   /** Plain counter: the graph effect must not read the signal it writes. */
   graphEpoch = 0;
 
 
   graphVersion = $state(0);
+
+
+  /** Older history pages are still waiting even though the first page painted. */
+  historyFillPending = false;
 
 
   commitNeedles: { rows: CommitRow[]; text: string[] } | null = null;
@@ -1066,6 +1130,9 @@ export class ShellState {
 
   updateCheckedAt = $state(0);
   private updateCheckGen = 0;
+  private updateCheckTimer: ReturnType<typeof setTimeout> | null = null;
+  private updateCheckDay = "";
+  private updateCheckInFlight = false;
 
   updateReleaseUrl = $state("");
 
@@ -1075,7 +1142,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.16");
+  appVersion = $state("2.0.18");
 
   appInfo = $state<AppInfo | null>(null);
 
@@ -1260,9 +1327,18 @@ export class ShellState {
 
   mergeFile = $state("");
   mergeSource = $state.raw<MergePiece[]>([]);
+  /** Complete base content is kept separately so it is never duplicated into every conflict hunk. */
+  mergeBase = $state.raw<MergePiece[]>([]);
+  mergeVersion = $state("");
+  mergeDraftSaved = $state(false);
+  /** Files resolved during the current workbench session, including lab sessions where Git is not mutated. */
+  mergeResolvedFiles = $state<string[]>([]);
+  /** Metadata loaded lazily for the file navigator. */
+  mergeFileMeta = $state<Record<string, { binary?: boolean; conflictKind?: ConflictView["kind"] }>>({});
   mergeDirty = $state(false);
   mergeEdited = $state(false);
   mergeEditing = $state(false);
+  mergeManualReady = $state(false);
   mergeError = $state("");
   mergeLoading = $state(false);
   mergeApplying = $state(false);
@@ -1374,6 +1450,9 @@ export class ShellState {
   prefTab = $state<PrefTab>("general");
 
 
+  prefSliderDragging = $state(false);
+
+
   prefPage = $state<HTMLElement | null>(null);
 
 
@@ -1425,6 +1504,9 @@ export class ShellState {
 
 
   conflict = $state<ConflictSides | null>(null);
+
+
+  conflictPreview = $state<ConflictSides | null>(null);
 
 
   conflictView = $state<ConflictView | null>(null);
@@ -1596,6 +1678,57 @@ export class ShellState {
     return count;
   });
 
+  /** Conflict files shown by the workbench. The list is cheap to derive and does not load file contents. */
+  conflictFiles = $derived.by<MergeFileEntry[]>(() => {
+    const entries = new Map<string, MergeFileEntry>();
+    const resolved = new Set(this.mergeResolvedFiles);
+    if (this.mode === "sample") {
+      for (const path of Object.keys(sampleConflictViews)) {
+        const meta = this.mergeFileMeta[path];
+        entries.set(path, {
+          path,
+          kind: resolved.has(path) ? "resolved" : path === this.mergeFile && this.mergeDraftSaved ? "draft" : "conflict",
+          binary: meta?.binary ?? sampleConflictViews[path]?.binary,
+          conflictKind: meta?.conflictKind,
+        });
+      }
+    } else {
+      for (const file of [...(this.snapshot?.staged ?? []), ...(this.snapshot?.unstaged ?? [])]) {
+        if (file.kind !== "conflict") continue;
+        const current = entries.get(file.path);
+        const meta = this.mergeFileMeta[file.path];
+        const flowFile = this.mergeState?.files.find((item) => item.path === file.path);
+        entries.set(file.path, {
+          path: file.path,
+          previousPath: file.previousPath ?? current?.previousPath ?? flowFile?.previousPath,
+          kind: resolved.has(file.path) ? "resolved" : file.path === this.mergeFile && this.mergeDraftSaved ? "draft" : current?.kind ?? "conflict",
+          binary: meta?.binary ?? current?.binary,
+          conflictKind: meta?.conflictKind,
+        });
+      }
+    }
+    for (const path of this.mergeResolvedFiles) {
+      if (!entries.has(path)) {
+        const meta = this.mergeFileMeta[path];
+        entries.set(path, { path, kind: "resolved", binary: meta?.binary, conflictKind: meta?.conflictKind });
+      }
+    }
+    if (this.mergeFile && !entries.has(this.mergeFile)) {
+      const meta = this.mergeFileMeta[this.mergeFile];
+      entries.set(this.mergeFile, {
+        path: this.mergeFile,
+        kind: resolved.has(this.mergeFile) ? "resolved" : "draft",
+        binary: meta?.binary,
+        conflictKind: meta?.conflictKind,
+      });
+    }
+    return [...entries.values()].sort((left, right) => {
+      if (statusPathBefore(left.path, right.path)) return -1;
+      if (statusPathBefore(right.path, left.path)) return 1;
+      return 0;
+    });
+  });
+
 
   conflicted = $derived(this.conflictCount > 0);
 
@@ -1622,7 +1755,9 @@ export class ShellState {
 
   viewing(path: string | null | undefined) {
     const key = this.jobKey(path);
-    return key !== "" && key === this.jobKey(this.snapshot?.path);
+    if (!key) return false;
+    if (key === this.jobKey(this.snapshot?.path)) return true;
+    return !this.snapshot && key === this.jobKey(this.focusPath);
   }
 
 
@@ -1959,7 +2094,7 @@ export class ShellState {
   effectiveUiScale = $derived(Math.max(this.settings.uiScale || 14, this.settings.seniorMode ? 18 : 0));
 
 
-  effectiveDiffFontSize = $derived(Math.max(this.settings.diffFontSize || 14, this.settings.seniorMode ? 16 : 0));
+  effectiveDiffFontSize = $derived(Math.max(this.settings.diffFontSize || 13, this.settings.seniorMode ? 16 : 0));
 
 
   effectiveUiFontWeight = $derived(Math.max(this.settings.uiFontWeight || 400, this.settings.seniorMode ? 600 : 0));
@@ -1968,10 +2103,10 @@ export class ShellState {
   effectiveCodeFontWeight = $derived(Math.max(this.settings.codeFontWeight || 400, this.settings.seniorMode ? 500 : 0));
 
 
-  rowCommit = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 36 : 28, 2.1));
+  rowCommit = $derived(boundedSetting(this.settings.commitRowHeight, 30, 20, 80));
 
 
-  rowFile = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 32 : 28, 2));
+  rowFile = $derived(boundedSetting(this.settings.changesRowHeight, 28, 20, 80));
 
 
   rowTree = $derived(this.rowHeight(this.settings.linesHeight === "spaced" ? 28 : 24, 1.8));
@@ -2286,7 +2421,7 @@ export class ShellState {
       cached = { rows, text: commitHaystacks(rows) };
       this.commitNeedles = cached;
     }
-    return commitHitIndexes(rows, query, cached.text);
+    return commitHitIndexes(rows, query, cached.text, new Set(this.commitQueryMessageHits));
   });
 
   commitMatchCurrent = $derived.by(() => {
@@ -2326,7 +2461,7 @@ export class ShellState {
   unstagedTree = $derived(this.fileLayout === "tree" ? this.asTree(this.shownUnstaged, this.collapsedDirs) : this.flatEntries(this.shownUnstaged));
 
 
-  fileStride = $derived(this.fileLayout === "tree" ? this.rowTree : this.rowFile);
+  fileStride = $derived(this.rowFile);
 
 
   fileWindow = $derived(windowSlice(this.unstagedTree, this.fileTop, this.fileStride));
@@ -3114,7 +3249,10 @@ export class ShellState {
         await this.openRepo(path);
         if (!this.snapshot) throw new Error(this.actionError || `打不开 ${item.repo}`);
         await this.loadContext();
-        await this.loadDiff();
+        // The standalone merge scene opens its workbench before the initial
+        // conflict preview finishes, so a gated conflict_sides read cannot
+        // prevent the scene from becoming editable.
+        if (item.id !== "text-merge-window") await this.loadDiff();
       } else {
         this.snapshot = null;
         this.mode = "error";
@@ -3137,7 +3275,8 @@ export class ShellState {
 
 
   repoPath() {
-    return this.snapshot?.path;
+    // While a switch has cleared the previous snapshot, history still needs the selected path.
+    return this.snapshot?.path ?? (this.focusPath || undefined);
   }
 
 
@@ -3272,6 +3411,17 @@ export class ShellState {
   applySnapshot(value: StatusSnapshot) {
     const revision = value.revision ?? 0;
     const partialUpdate = !!value.statusPaths;
+    const previousSelection = this.selectedPath;
+    const previousSide = this.selectedSide;
+    const query = typeof this.fileQuery === "string" ? this.fileQuery.trim().toLowerCase() : "";
+    const conflictsOnly = this.conflictsOnly === true;
+    const shown = (files: readonly StatusFile[]) => files.filter((file) =>
+      (!query || file.path.toLowerCase().includes(query)) && (!conflictsOnly || file.kind === "conflict"),
+    );
+    const previousRows = this.snapshot?.path === value.path
+      ? shown(previousSide === "staged" ? this.snapshot.staged : this.snapshot.unstaged)
+      : [];
+    const previousIndex = previousSelection ? previousRows.findIndex((file) => file.path === previousSelection) : -1;
     if (this.viewing(value.path) && value.revision != null && revision < Math.max(this.statusRevision, this.statusObservedRevision)) {
       // A late delta can cover an unrelated path; reconcile without rolling the list backward.
       this.scheduleStageRefresh();
@@ -3305,8 +3455,12 @@ export class ShellState {
     }
     if (!partialUpdate) {
       this.statusRevision = revision;
-      const noted = this.repoWatchNotes.get(this.jobKey(value.path));
-      if (!noted || noted.revision <= revision) this.repoWatchNotes.delete(this.jobKey(value.path));
+      const notes = this.repoWatchNotes;
+      if (notes) {
+        const key = this.jobKey(value.path);
+        const noted = notes.get(key);
+        if (!noted || noted.revision <= revision) notes.delete(key);
+      }
     }
     this.stageStatusUnverified = partialUpdate;
     if (revision > 0) this.statusObservedRevision = revision;
@@ -3333,6 +3487,16 @@ export class ShellState {
       this.selectedSide = otherSide;
       return;
     }
+    if (previousSelection && previousIndex >= 0) {
+      const adjacent = shown(previousSide === "staged" ? visible.staged : visible.unstaged);
+      const next = adjacent[previousIndex] ?? adjacent[previousIndex - 1];
+      if (next) {
+        this.selectedSide = previousSide;
+        this.selectedPath = next.path;
+        this.selectedIndex = adjacent.indexOf(next);
+        return;
+      }
+    }
     const conflict = visible.unstaged.find((file) => file.kind === "conflict");
     if (conflict) {
       this.selectedSide = "unstaged";
@@ -3354,6 +3518,33 @@ export class ShellState {
     return loadDiff(this, loadLarge);
   }
 
+  setDiffContext(value: number) {
+    const next = Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : 3;
+    this.settings.diffContext = next;
+    void this.savePrefs(false);
+  }
+
+  toggleShowEntireFile() {
+    this.settings.showEntireFile = !this.settings.showEntireFile;
+    void this.savePrefs(false);
+  }
+
+  toggleDiffWordWrap() {
+    this.settings.diffWordWrap = !this.settings.diffWordWrap;
+    void this.savePrefs(false);
+  }
+
+  toggleIgnoreSpace() {
+    this.settings.ignoreSpace = !this.settings.ignoreSpace;
+    void this.savePrefs(false);
+  }
+
+  setDiffStyle(style: "split" | "unified") {
+    if (this.settings.diffStyle === style) return;
+    this.settings.diffStyle = style;
+    void this.savePrefs(false);
+  }
+
 
 
   currentFilterRefs() {
@@ -3362,8 +3553,8 @@ export class ShellState {
 
 
 
-  async loadCommits(path: string | undefined, operation?: string) {
-    return loadCommits(this, path, operation);
+  async loadCommits(path: string | undefined, operation?: string, offset = 0, limit = this.logLimit, background = false) {
+    return loadCommits(this, path, operation, offset, limit, background);
   }
 
 
@@ -3376,8 +3567,12 @@ export class ShellState {
   refreshPendingHistory() {
     const visible = this.section === "history" || this.standalone === "history";
     const path = this.repoPath();
-    if (!visible || !this.historyRefreshPending || this.mode !== "live" || this.busy || this.refreshing || !path
+    if (!visible || this.mode !== "live" || this.busy || this.refreshing || !path
       || this.backgroundFetch.has(this.jobKey(path))) return;
+    if (!this.historyRefreshPending) {
+      queueHistoryFill(this);
+      return;
+    }
     void this.loadContext(undefined, { history: true, flow: false }).catch((error) => {
       if (this.viewing(path)) this.actionError = this.message(error);
     });
@@ -3430,12 +3625,21 @@ export class ShellState {
       this.queueWatch(scope, 0, paths); return;
     }
     if (this.refreshing) {
-      if (this.refreshQueued !== "full") this.refreshQueued = scope;
+      const queued = this.refreshQueued;
+      const sameRepo = !!queued && this.jobKey(queued.path) === this.jobKey(path);
+      const scopeNow = sameRepo && (queued.scope === "full" || scope === "full") ? "full" : scope;
+      this.refreshQueued = { scope: scopeNow, path };
       return;
     }
     this.refreshing = true;
     const openGen = this.openGen, statusGen = this.statusGen;
-    invalidateReads(path);
+    // The open conflict read is the merge panel body. Cancelling it leaves the
+    // headers up and the center on "no changes": the failure is "Preview superseded",
+    // and message() turns that into an empty string.
+    // A status scan must not cancel history that is already loading for this repository.
+    const keep = scope === "status" ? [...HISTORY_READS] : [];
+    if (this.textMerge) keep.push("conflict_view", "conflict_sides");
+    invalidateReads(path, keep);
     try {
       const gen = this.statusGen;
       const value = await invoke<StatusSnapshot>(paths?.length ? "workspace_status_paths" : "workspace_status", paths?.length ? { path, files: paths } : { path });
@@ -3454,7 +3658,7 @@ export class ShellState {
       this.refreshing = false;
       const next = this.refreshQueued;
       this.refreshQueued = null;
-      if (next && this.viewing(path)) await this.refresh(next, silent);
+      if (next && this.viewing(next.path)) await this.refresh(next.scope, silent);
       else if (this.viewing(path)) this.replayWatch();
     }
   }
@@ -3646,7 +3850,7 @@ export class ShellState {
       case "stashPop":
         return { title: this.tr("chrome.pop"), command: this.gitLine(["stash", "pop", text("name")]) };
       case "clone":
-        return { title: `${this.tr("chrome.clone")} ${text("url")}`, command: this.gitLine(["clone", text("url"), text("destination")]) };
+        return { title: `${this.tr("chrome.clone")} ${text("url")}`, command: this.gitLine(["clone", "--recurse-submodules", text("url"), text("destination")]) };
       case "init":
         return { title: this.tr("chrome.newRepo"), command: this.gitLine(["init", text("destination")]) };
       case "custom":
@@ -3954,7 +4158,11 @@ export class ShellState {
         report = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request, retryStash, __taskLabel: described.title,
           ...(["push", "pull"].includes(action) ? { __branch: expectedBranch } : {}),
           ...(patchActions.has(action) ? { __expectedDiff: expectedDiff } : {}),
-          ...(action === "resolve" && request.side === "text" && this.conflict?.version ? { __expectedConflict: { file: request.file, version: this.conflict.version } } : {}) }, undefined, operation);
+            ...(action === "resolve" && request.side === "text" ? (() => {
+              const file = String(request.file ?? "");
+              const version = this.mergeFile === file ? this.mergeVersion : this.selectedPath === file ? this.conflictPreview?.version ?? "" : "";
+              return version ? { __expectedConflict: { file: request.file, version } } : {};
+            })() : {}) }, undefined, operation);
         backendFinished = performance.now();
         const value = report;
         const output = value.output ?? "";
@@ -4440,6 +4648,23 @@ export class ShellState {
     if (this.settings.aiPromptStyle !== "long") this.settings = { ...this.settings, aiPromptStyle: "short" };
     if (!isCommitType(this.settings.commitType)) this.settings = { ...this.settings, commitType: this.preferredCommitType() };
     if (!this.settings.errorLogDays) this.settings = { ...this.settings, errorLogDays: 7 };
+    this.settings = {
+      ...this.settings,
+      commitRowHeight: boundedSetting(this.settings.commitRowHeight, 30, 20, 80),
+      commitSubjectFontSize: boundedSetting(this.settings.commitSubjectFontSize, 17, 8, 32),
+      commitAuthorFontSize: boundedSetting(this.settings.commitAuthorFontSize, 14, 8, 24),
+      commitShaFontSize: boundedSetting(this.settings.commitShaFontSize, 14, 8, 24),
+      commitTimeFontSize: boundedSetting(this.settings.commitTimeFontSize, 15, 8, 24),
+      changesRowHeight: boundedSetting(this.settings.changesRowHeight, 28, 20, 80),
+      changesFontSize: boundedSetting(this.settings.changesFontSize, 14, 8, 32),
+      changesMetaFontSize: boundedSetting(this.settings.changesMetaFontSize, 11, 8, 24),
+      changesIndentCh: boundedDecimalSetting(this.settings.changesIndentCh, 0.8, 0.2, 4),
+      detailBodyFontSize: boundedSetting(this.settings.detailBodyFontSize, 14, 8, 32),
+      detailTabFontSize: boundedSetting(this.settings.detailTabFontSize, 13, 8, 32),
+      detailMetaFontSize: boundedSetting(this.settings.detailMetaFontSize, 12, 8, 24),
+      sidebarFontSize: boundedSetting(this.settings.sidebarFontSize, 20, 8, 32),
+      sidebarSectionFontSize: boundedSetting(this.settings.sidebarSectionFontSize, 22, 8, 24),
+    };
     this.pruneErrorLog();
     if (!this.snapshot && isCommitType(this.settings.commitType)) this.commitType = this.settings.commitType;
     const limit = Math.min(100000, Math.max(1, this.settings.maxCommits || 500));
@@ -4464,6 +4689,64 @@ export class ShellState {
     if (this.updatePhase === "idle") this.updatePhase = "available";
   }
 
+  private updateDay(value = new Date()) {
+    return `${value.getFullYear()}-${value.getMonth()}-${value.getDate()}`;
+  }
+
+  private scheduleDailyUpdateCheck() {
+    if (this.updateCheckTimer !== null) clearTimeout(this.updateCheckTimer);
+    const now = new Date();
+    const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const delay = Math.max(1000, next.getTime() - now.getTime());
+    this.updateCheckTimer = setTimeout(() => {
+      this.updateCheckTimer = null;
+      this.checkUpdateForCurrentDay();
+      this.scheduleDailyUpdateCheck();
+    }, delay);
+  }
+
+  private stopDailyUpdateCheck() {
+    if (this.updateCheckTimer === null) return;
+    clearTimeout(this.updateCheckTimer);
+    this.updateCheckTimer = null;
+  }
+
+  private checkUpdateForCurrentDay() {
+    const day = this.updateDay();
+    if (day === this.updateCheckDay) return;
+    if (this.updateCheckInFlight || this.updateBusy) return;
+    this.updateCheckDay = day;
+    void this.checkForUpdateInBackground();
+  }
+
+  private finishUpdateCheck(generation = this.updateCheckGen) {
+    if (generation !== this.updateCheckGen) return;
+    this.updateCheckInFlight = false;
+    if (this.updateCheckDay !== this.updateDay()) queueMicrotask(() => this.checkUpdateForCurrentDay());
+  }
+
+  private async checkForUpdateInBackground() {
+    if (this.updateCheckInFlight || this.updateBusy) return;
+    this.updateCheckInFlight = true;
+    const generation = this.updateCheckGen;
+    try {
+      const value = await invoke<UpdateNotice | null>("check_for_update");
+      this.updateCheckedAt = Date.now();
+      this.pendingUpdate = value;
+      if (!value) {
+        this.updateNotice = null;
+        if (this.updatePhase === "available") this.updatePhase = "idle";
+        return;
+      }
+      if (this.updatePhase !== "available") this.updatePhase = "idle";
+      this.showPendingUpdate(false);
+    } catch {
+      // Automatic checks stay quiet. The next day boundary or a manual check can retry.
+    } finally {
+      this.finishUpdateCheck(generation);
+    }
+  }
+
   updateStatusLine = $derived.by(() => {
     if (this.updatePhase === "checking") return this.tr("chrome.updateChecking");
     if (this.updatePhase === "current") return this.tr("chrome.updateCurrent", { version: this.appVersion });
@@ -4478,13 +4761,15 @@ export class ShellState {
 
   openUpdatePanel(check = true) {
     this.dialog = "update";
-    if (!check || this.updateBusy || this.updatePhase === "checking") return;
+    if (!check || this.updateBusy || this.updateCheckInFlight || this.updatePhase === "checking") return;
     if (this.updateNotice) return;
     void this.checkForUpdate();
   }
 
   async checkForUpdate() {
-    if (this.updatePhase === "checking" || this.updateBusy) return;
+    if (this.updateCheckInFlight || this.updatePhase === "checking" || this.updateBusy) return;
+    this.updateCheckInFlight = true;
+    this.updateCheckDay = this.updateDay();
     const generation = ++this.updateCheckGen;
     this.updatePhase = "checking";
     this.updateMessage = this.tr("chrome.updateChecking");
@@ -4510,6 +4795,8 @@ export class ShellState {
       if (generation !== this.updateCheckGen) return;
       this.updatePhase = "error";
       this.updateMessage = this.message(error);
+    } finally {
+      this.finishUpdateCheck(generation);
     }
   }
 
@@ -4524,6 +4811,32 @@ export class ShellState {
     return true;
   }
 
+  /**
+   * A brand-new install prepares these once, in the background: accounts already
+   * signed in on this machine, Fork settings if present, the AI endpoint, and
+   * killer push. Nothing here blocks startup, and a failure is ignored. The older
+   * one-time guide prompt is folded in so a new install sees no setup dialog.
+   */
+  takeFirstRunSetup() {
+    if (!this.inApp() || this.labPage || this.standalone) return false;
+    if (this.settings.onboarding !== "pending") return false;
+    this.settings = { ...this.settings, onboarding: "seen", featuresIntro: "seen" };
+    return true;
+  }
+
+  async runFirstRunSetup() {
+    await this.syncAccounts().catch(() => {});
+    await this.importFork(null, false).catch(() => {});
+    this.forkImportNote = "";
+    this.settings = {
+      ...this.settings,
+      killerPush: true,
+      aiEnabled: true,
+      aiBaseUrl: this.settings.aiBaseUrl || "https://api.x.ai/v1",
+    };
+    await this.savePrefs(false).catch(() => {});
+  }
+
   openFeaturesPage() {
     if (this.inApp()) void openUrl(featuresPageUrl);
     else window.open(featuresPageUrl, "_blank", "noopener");
@@ -4531,6 +4844,7 @@ export class ShellState {
 
   dismissUpdate() {
     this.updateCheckGen++;
+    this.updateCheckInFlight = false;
     const version = this.updateNotice?.appVersion ?? "";
     this.updateNotice = null;
     this.updatePhase = "idle";
@@ -4582,6 +4896,7 @@ export class ShellState {
       this.updateBusy = false;
       this.updateCancelling = false;
       this.updateCancelRequested = false;
+      this.checkUpdateForCurrentDay();
     }
   }
 
@@ -4615,7 +4930,35 @@ export class ShellState {
 
 
 
-  async importFork(path?: string | null) {
+  /** Discover accounts already signed in on this machine. The caller asks the user first. */
+  async syncAccounts(): Promise<number> {
+    const before = $state.snapshot(this.settings) as Settings;
+    const saved = await invoke<Settings>("sync_accounts");
+    const same = this.same.bind(this);
+    const merged = mergeFields(this.settings, before, saved, same);
+    const synced = {
+      accounts: mergeResponse(this.settings.accounts, before.accounts, saved.accounts, same),
+      githubToken: merged.githubToken,
+      gitlabToken: merged.gitlabToken,
+      bitbucketToken: merged.bitbucketToken,
+      azureToken: merged.azureToken,
+    };
+    this.settings = { ...this.settings, ...synced };
+    // The backend already saved these fields. Preserve unrelated settings and
+    // write only edits made locally while the synchronization was in flight.
+    const persisted = {
+      accounts: saved.accounts,
+      githubToken: saved.githubToken,
+      gitlabToken: saved.gitlabToken,
+      bitbucketToken: saved.bitbucketToken,
+      azureToken: saved.azureToken,
+    };
+    this.prefsBaseline = { ...(this.prefsBaseline ?? before), ...persisted };
+    if (!same(synced, persisted)) await this.savePrefs(false);
+    return saved.accounts.length;
+  }
+
+  async importFork(path?: string | null, select = true) {
     if (!this.inApp()) return;
     const before = $state.snapshot(this.settings) as Settings;
     try {
@@ -4628,8 +4971,8 @@ export class ShellState {
         repositories: String(result.repositories),
         workspaces: String(result.workspaces),
       });
-      if (this.settings.currentWorkspace) await this.selectWorkspace();
-      if (this.mode === "live") void this.loadContext();
+      if (select && this.settings.currentWorkspace) await this.selectWorkspace();
+      if (select && this.mode === "live") void this.loadContext();
     } catch (error) {
       const text = this.message(error);
       this.forkImportNote = text.includes("fork-settings-missing") ? this.tr("dialog.forkMissing") : text;
@@ -4645,6 +4988,23 @@ export class ShellState {
       if (file) await this.importFork(file);
     } catch (error) {
       this.forkImportNote = this.message(error);
+    }
+  }
+
+  async exportSettingsBackup() {
+    if (!this.backend() || this.exportingSettings) return;
+    this.exportingSettings = true;
+    this.settingsBackupNote = "";
+    try {
+      // Write pending edits first so the copy matches what the dialog shows.
+      await this.savePrefs(false);
+      const target = await invoke<string | null>("export_settings_backup");
+      if (target) this.settingsBackupNote = this.tr("dialog.settingsExported", { path: target });
+    } catch (error) {
+      const text = this.message(error);
+      this.settingsBackupNote = text.includes("settings-missing") ? this.tr("dialog.settingsMissing") : text;
+    } finally {
+      this.exportingSettings = false;
     }
   }
 
@@ -5601,6 +5961,9 @@ export class ShellState {
     this.diffToken += 1;
     this.contextGen += 1;
     this.commitSearchGen += 1;
+    this.commitQuerySearchGen += 1;
+    window.clearTimeout(this.commitQuerySearchTimer);
+    this.commitQueryMessageHits = [];
     if (this.snapshot?.path && !this.viewing(path)) cancelReads(this.snapshot.path);
     this.focusPath = path;
     if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description, commitType: this.commitType });
@@ -5609,9 +5972,13 @@ export class ShellState {
       if (cached) { Object.assign(this, cached); this.mode = "live"; }
       else {
         this.snapshot = null; this.refs = null; this.commitsLive = []; this.mode = "loading";
+        this.historyFillPending = false;
         this.selectedPath = null; this.selectedCommit = null; this.commitDetail = null; this.commitFiles = [];
+        this.contentHits = null; this.expandedMerges = []; this.historyTop = 0;
         this.progress = null; this.statusRevision = 0; this.statusObservedRevision = 0; this.stageStatusUnverified = false; this.contextRevision = 0;
+        if (this.standalone !== "history") this.historyFilter = "";
       }
+      this.historyLoading = false;
       this.diff = null; this.diffError = null; this.conflictView = null; this.historyDiff = null;
       this.preview = null; this.imageOld = null; this.imageNew = null; this.blameLines = null;
       const draft = this.drafts.get(path);
@@ -5620,6 +5987,14 @@ export class ShellState {
       this.commitType = isCommitType(draftType) ? draftType : this.preferredCommitType();
       this.restoreHistoryFilter(path);
     }
+    let historyStarted = false;
+    const startHistory = (force: boolean) => {
+      if (historyStarted || (!force && this.commitsLive.length > 0 && this.refs)) return;
+      historyStarted = true;
+      void this.loadContext().catch((error) => {
+        if (gen === this.openGen && this.viewing(path)) this.actionError = this.message(error);
+      });
+    };
     const running = (this.jobs[this.jobKey(path)]?.depth ?? 0) > 0;
     let stopAt = path;
     this.actionError = null;
@@ -5627,7 +6002,7 @@ export class ShellState {
     let held = false;
     try {
       const painted = () => this.mode === "live" && !!this.snapshot && (this.viewing(path) || this.viewing(this.snapshot.path));
-      if (!stayingOnRepo && !painted()) {
+      if (!stayingOnRepo && !painted() && !this.labPage) {
         try {
           const stored = await invoke<Parameters<ShellState["showStoredStatus"]>[0] | null>("load_status_cache", { path });
           if (gen !== this.openGen) return;
@@ -5658,6 +6033,10 @@ export class ShellState {
         }
         if (gen !== this.openGen) return;
         this.armOpenExtras(path, gen);
+        // Commits do not wait on the work tree. A quiet index can still have history,
+        // and a painted status cache does not include the commit list.
+        const keepHistory = headSame && this.commitsLive.length > 0 && !!this.refs;
+        startHistory(!keepHistory);
         if (plan.kind === "trust") {
           this.stageStatusUnverified = false;
           void this.loadDiff();
@@ -5669,18 +6048,20 @@ export class ShellState {
           void this.validatePaths(path, gen, plan.paths, noted?.revision ?? 0);
           return;
         }
-        const keepHistory = headSame && this.commitsLive.length > 0 && !!this.refs;
-        void this.refresh(keepHistory ? "status" : "full", true, null);
+        void this.refresh("status", true, null);
         return;
       }
       if (!running) {
         held = true;
         this.startWork(this.tr("chrome.open"), path);
       }
+      if (!stayingOnRepo) startHistory(true);
       const value = await invoke<StatusSnapshot>("workspace_status", { path });
       if (gen !== this.openGen) return;
       // Reopening the repository already on screen keeps the message being written.
-      const staying = this.viewing(path) || this.viewing(value.path);
+      // focusPath stands in for the snapshot until status returns. That must not
+      // count as reopening the same repository and keep the previous scroll.
+      const staying = stayingOnRepo || (this.mode === "live" && (this.viewing(path) || this.viewing(value.path)));
       this.aliasJob(path, value.path);
       stopAt = value.path;
       this.applySnapshot(value);
@@ -5717,9 +6098,9 @@ export class ShellState {
         this.description = saved?.description ?? "";
         this.normalizeSummary();
       }
-      if (this.standalone !== "history") this.historyFilter = "";
-      void this.loadContext().catch((error) => { if (gen === this.openGen) this.actionError = this.message(error); });
-      void this.loadDiff();
+      if (!historyStarted && this.standalone !== "history") this.historyFilter = "";
+      if (!historyStarted) void this.loadContext().catch((error) => { if (gen === this.openGen) this.actionError = this.message(error); });
+      if (this.standalone !== "merge") void this.loadDiff();
       this.armOpenExtras(path, gen);
     } catch (error) {
       if (gen !== this.openGen) return;
@@ -5728,7 +6109,10 @@ export class ShellState {
       if (this.missingRepoPath(text)) await this.dropMissingRepo(path, text);
     } finally {
       if (held) this.stopWork(stopAt);
-      if (gen === this.openGen) this.focusPath = null;
+      if (gen === this.openGen) {
+        this.focusPath = null;
+        queueHistoryFill(this);
+      }
     }
   }
 
@@ -6671,12 +7055,40 @@ export class ShellState {
   }
 
 
+  beginMergeSession() {
+    this.mergeResolvedFiles = [];
+    this.mergeFileMeta = {};
+  }
+
+
+  markMergeResolved(file: string) {
+    if (!file || this.mergeResolvedFiles.includes(file)) return;
+    this.mergeResolvedFiles = [...this.mergeResolvedFiles, file];
+  }
+
+
+  nextMergeFile(current: string) {
+    const entries = this.conflictFiles;
+    const at = entries.findIndex((entry) => entry.path === current);
+    const start = at >= 0 ? at : -1;
+    for (let offset = 1; offset <= entries.length; offset += 1) {
+      const entry = entries[(start + offset + entries.length) % entries.length];
+      if (entry?.kind === "conflict") return entry.path;
+    }
+    return "";
+  }
+
+
   async openTextMerge(file: string) {
     return openTextMerge(this, file);
   }
 
   async loadTextMerge() {
     return loadTextMerge(this);
+  }
+
+  saveMergeDraft() {
+    return saveMergeDraft(this);
   }
 
 
@@ -7623,6 +8035,7 @@ export class ShellState {
   }
 
   constructor() {
+    let requestedDiffKey = "";
     $effect(() => {
       const path = this.repoPath();
       if (this.mode !== "live" || !path || (this.focusPath && !this.viewing(this.focusPath))) return;
@@ -7645,8 +8058,23 @@ export class ShellState {
     $effect(() => {
       // Leaving History cleared the diff; opening Changes again must start the read,
       // otherwise the pane sits on "Reading…" until the file is clicked again.
-      if (this.section !== "changes" || this.mode !== "live" || !this.selectedPath || this.switching) return;
-      if (!this.diff && !this.diffError && !this.conflictView) void this.loadDiff();
+      const section = this.section;
+      const mode = this.mode;
+      const selectedPath = this.selectedPath;
+      const selectedSide = this.selectedSide;
+      const repository = this.repoPath();
+      const standalone = this.standalone;
+      const showEntireFile = this.settings.showEntireFile;
+      const diffContext = this.settings.diffContext;
+      const ignoreSpace = this.settings.ignoreSpace;
+      if (section !== "changes" || mode !== "live" || standalone === "merge" || !selectedPath || this.switching || !repository) {
+        requestedDiffKey = "";
+        return;
+      }
+      const key = `${repository}\0${selectedSide}\0${selectedPath}\0${this.statusGen}\0${showEntireFile ? "all" : diffContext}\0${ignoreSpace ? "ignore" : "keep"}`;
+      if (key === requestedDiffKey && (this.diff || this.diffError || this.conflictView)) return;
+      requestedDiffKey = key;
+      void this.loadDiff();
     });
     $effect(() => {
       if (this.busy) return;
@@ -7678,20 +8106,37 @@ export class ShellState {
       if (items.length <= GRAPH_SYNC_LIMIT) {
         this.graphItems = null;
         this.graphRows = [];
+        this.graphCount = 0;
+        this.graphStraight = null;
         return;
       }
       const commits = laneCommits(items, straight);
       let count = 0;
       let resume: { columns: Array<string | null>; count: number; rows: GraphCell[][] } | undefined;
-      const publish = (rows: GraphCell[][], width: number, columns: Array<string | null>) => {
+      // Appending older pages keeps the lanes already drawn; only the new tail is laid out.
+      const previous = this.graphItems;
+      if (this.graphVersion > 0 && previous && this.graphStraight && sameNames(this.graphStraight, straight)) {
+        const built = Math.min(this.graphCount, previous.length, items.length);
+        let prefix = built > 0;
+        for (let index = 0; index < built; index += 1) {
+          if (previous[index].id !== items[index].id) { prefix = false; break; }
+        }
+        if (prefix) {
+          count = built;
+          resume = { columns: this.graphColumns.slice(), count, rows: this.graphRows.slice() };
+        }
+      }
+      const publish = (rows: GraphCell[][], width: number, columns: Array<string | null>, laidOut: number) => {
         this.graphRows = rows;
         this.graphWidth = width;
         this.graphColumns = columns;
         this.graphItems = items;
+        this.graphCount = laidOut;
+        this.graphStraight = straight;
         this.graphVersion = ++this.graphEpoch;
       };
       let frame = 0;
-      let first = true;
+      let first = count === 0;
       const pump = () => {
         if (count >= commits.length) return;
         const next = Math.min(commits.length, count + (first ? 2000 : 5000));
@@ -7699,7 +8144,7 @@ export class ShellState {
         const built = commitGraph(commits, resume, next);
         count = next;
         resume = { columns: built.columns, count, rows: built.rows };
-        publish(built.rows, built.width, built.columns);
+        publish(built.rows, built.width, built.columns, count);
         if (count < commits.length) frame = requestAnimationFrame(pump);
       };
       pump();
@@ -7707,16 +8152,16 @@ export class ShellState {
     });
     $effect(() => {
     if (!this.settings.fetchAutomatically) return;
-    const timer = window.setInterval(() => this.requestAutomaticFetch("periodic"), AUTOMATIC_FETCH_INTERVAL_MS);
-    return () => { window.clearInterval(timer); this.cancelAutomaticFetch(); };
+    const stop = subscribeUpdate(() => this.requestAutomaticFetch("periodic"), AUTOMATIC_FETCH_INTERVAL_MS);
+    return () => { stop(); this.cancelAutomaticFetch(); };
     });
     $effect(() => {
     const seconds = this.settings.statusInterval;
     if (!seconds || seconds < 1) return;
-    const timer = window.setInterval(() => {
+    const stop = subscribeUpdate(() => {
     if (!this.busy && this.snapshot && this.mode === "live") void this.refresh("status", true);
     }, seconds * 1000);
-    return () => window.clearInterval(timer);
+    return stop;
     });
     $effect(() => {
     const parts: string[] = [];
@@ -7753,6 +8198,18 @@ export class ShellState {
     root.style.setProperty("--row-commit", `${this.rowCommit}px`);
     root.style.setProperty("--row-side", `${this.rowSide}px`);
     root.style.setProperty("--row-tree", `${this.rowTree}px`);
+    root.style.setProperty("--commit-subject-font-size", `${boundedSetting(this.settings.commitSubjectFontSize, 17, 8, 32)}px`);
+    root.style.setProperty("--commit-author-font-size", `${boundedSetting(this.settings.commitAuthorFontSize, 14, 8, 24)}px`);
+    root.style.setProperty("--commit-sha-font-size", `${boundedSetting(this.settings.commitShaFontSize, 14, 8, 24)}px`);
+    root.style.setProperty("--commit-time-font-size", `${boundedSetting(this.settings.commitTimeFontSize, 15, 8, 24)}px`);
+    root.style.setProperty("--changes-font-size", `${boundedSetting(this.settings.changesFontSize, 14, 8, 32)}px`);
+    root.style.setProperty("--changes-meta-font-size", `${boundedSetting(this.settings.changesMetaFontSize, 11, 8, 24)}px`);
+    root.style.setProperty("--changes-indent-ch", String(boundedDecimalSetting(this.settings.changesIndentCh, 0.8, 0.2, 4)));
+    root.style.setProperty("--detail-body-font-size", `${boundedSetting(this.settings.detailBodyFontSize, 14, 8, 32)}px`);
+    root.style.setProperty("--detail-tab-font-size", `${boundedSetting(this.settings.detailTabFontSize, 13, 8, 32)}px`);
+    root.style.setProperty("--detail-meta-font-size", `${boundedSetting(this.settings.detailMetaFontSize, 12, 8, 24)}px`);
+    root.style.setProperty("--sidebar-font-size", `${boundedSetting(this.settings.sidebarFontSize, 20, 8, 32)}px`);
+    root.style.setProperty("--sidebar-section-font-size", `${boundedSetting(this.settings.sidebarSectionFontSize, 22, 8, 24)}px`);
     root.style.setProperty("--diff-row", `${this.diffRowHeight}px`);
     return () => media?.removeEventListener("change", paint);
     });
@@ -7824,10 +8281,16 @@ export class ShellState {
     };
     const onShortcut = this.onShortcut.bind(this);
     const onWindowFocus = () => {
-      if (this.inApp() && !document.hidden) this.requestAutomaticFetch("focus");
+      if (this.inApp() && !document.hidden) {
+        this.checkUpdateForCurrentDay();
+        this.requestAutomaticFetch("focus");
+      }
     };
     const onVisibilityChange = () => {
-      if (this.inApp() && !document.hidden) this.requestAutomaticFetch("focus");
+      if (this.inApp() && !document.hidden) {
+        this.checkUpdateForCurrentDay();
+        this.requestAutomaticFetch("focus");
+      }
     };
     const stopLocale = onLocaleChange((locale) => { this.settings.locale = locale; });
     const stopAppearance = onAppearanceChange((theme) => {
@@ -7849,6 +8312,7 @@ export class ShellState {
     stopTaskMonitor();
     stopLocale();
     stopAppearance();
+    this.stopDailyUpdateCheck();
     window.clearTimeout(historyTimer);
     window.removeEventListener("keydown", onShortcut);
     window.removeEventListener("focus", onWindowFocus);
@@ -7878,6 +8342,7 @@ export class ShellState {
     let unhistoryAction = () => {};
     let unupdate = () => {};
     let placeTimer = 0;
+    let firstRunTimer = 0;
     let stopped = false;
     this.mode = "loading";
     this.selectedPath = null;
@@ -7892,22 +8357,20 @@ export class ShellState {
       if (!value.version) this.actionError = this.tr("chrome.gitMissing");
       else if (!value.minimum) this.actionError = this.tr("chrome.gitOld", { version: value.version });
     }).catch(() => {});
-    invoke<UpdateNotice | null>("check_for_update")
-    .then((value) => {
-    this.pendingUpdate = value;
-    this.showPendingUpdate(false);
-    })
-    .catch(() => {});
+    this.scheduleDailyUpdateCheck();
+    this.checkUpdateForCurrentDay();
     let targeted = false;
     let introduce = false;
+    let onboard = false;
     void (async () => {
     try {
     const value = await invoke<Settings>("load_settings");
     if (stopped) return;
     this.adoptSettings(value);
     this.restoreAppearance(value.theme);
+    onboard = this.takeFirstRunSetup();
     introduce = this.takeFeaturesIntro();
-    if (introduce) void this.savePrefs(false);
+    if (introduce || onboard) void this.savePrefs(false);
     void invoke<string>("settings_path").then((path) => (this.settingsPath = path)).catch(() => {});
     await this.loadExternalTools();
     if (value.windowWidth > 200 && value.windowHeight > 200 && !this.standalone) {
@@ -8031,12 +8494,14 @@ export class ShellState {
     }
     } finally {
     if (!stopped && !targeted && introduce) this.dialog = "features";
+    if (!stopped && onboard) firstRunTimer = window.setTimeout(() => { if (!stopped) void this.runFirstRunSetup(); }, 2500);
     }
     })();
     return () => {
     stopped = true;
     detachNav();
     window.clearTimeout(placeTimer);
+    window.clearTimeout(firstRunTimer);
     unlisten();
     unprogress();
     unmoved();

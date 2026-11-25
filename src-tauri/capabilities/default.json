@@ -51,6 +51,7 @@
     "allow-save-window-bounds",
     "allow-settings-path",
     "allow-import-fork-settings",
+    "allow-export-settings-backup",
     "allow-external-tools",
     "allow-common-tools",
     "allow-detect-terminal-clis",

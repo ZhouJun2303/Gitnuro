@@ -100,7 +100,9 @@
 
 .diff-hunk-actions {
   position: absolute;
-  right: 16px;
+  /* Keep the action strip out of the code columns so row context menus and
+     line selection remain reachable while the strip is visible. */
+  left: 8px;
   z-index: 5;
   display: flex;
   gap: 6px;
@@ -185,6 +187,77 @@
     margin-left: auto;
     font-family: var(--font);
   }
+
+.diff-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-height: 34px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel-head) 78%, var(--canvas));
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.diff-toolbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.diff-toolbar-view {
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--field);
+}
+
+.diff-toolbar button {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+  flex: none;
+  white-space: nowrap;
+}
+
+.diff-toolbar button:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.diff-toolbar button.active {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line));
+  background: color-mix(in srgb, var(--accent) 16%, var(--field));
+  color: var(--accent);
+}
+
+.diff-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.diff-toolbar-label {
+  max-width: 11em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diff-toolbar-value {
+  min-width: 22px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
 
 .hunk-tools {
     display: flex;
@@ -796,6 +869,238 @@ section.diff > .diff-viewport {
     border-bottom-left-radius: 0;
   }
 
+.conflict-preview {
+  width: min(940px, 100%);
+  margin-top: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--canvas);
+  text-align: left;
+  overflow: hidden;
+}
+
+.conflict-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-head);
+}
+
+.conflict-preview-head > div:first-child {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.conflict-preview-hint {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.conflict-preview-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.conflict-preview-nav button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--elevated);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.conflict-preview-nav button:hover {
+  background: var(--hover);
+}
+
+.conflict-preview-body {
+  padding: 10px;
+}
+
+.conflict-preview-context {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 2px solid color-mix(in srgb, var(--line) 80%, transparent);
+  color: var(--text-secondary);
+  font: 12px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.conflict-preview-block {
+  margin: 8px 0;
+  border: 1px solid color-mix(in srgb, var(--modified) 48%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--modified) 5%, var(--canvas));
+  scroll-margin: 18px;
+}
+
+.conflict-preview-block.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.conflict-preview-block-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.conflict-preview-number {
+  color: var(--modified);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.conflict-preview-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conflict-preview-block-head .text-button {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.conflict-preview-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  background: var(--line);
+}
+
+.conflict-preview-side {
+  min-width: 0;
+  background: var(--canvas);
+}
+
+.conflict-preview-side.selected {
+  background: color-mix(in srgb, var(--accent) 6%, var(--canvas));
+}
+
+.conflict-preview-side.selected .conflict-preview-side-head {
+  color: var(--accent);
+}
+
+.conflict-preview-side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 8px;
+  background: color-mix(in srgb, var(--field) 74%, var(--canvas));
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.conflict-preview-side-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conflict-preview-side-head button,
+.conflict-preview-block-actions button {
+  flex: none;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--elevated);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.conflict-preview-side-head button:hover,
+.conflict-preview-block-actions button:hover,
+.conflict-preview-block-actions button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--elevated));
+  color: var(--accent);
+}
+
+.conflict-preview-side pre {
+  min-height: 48px;
+  margin: 0;
+  padding: 9px 10px 11px;
+  color: var(--text);
+  font: 12px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.conflict-preview-block-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 10px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.conflict-preview-block-actions span {
+  margin-left: auto;
+}
+
+.conflict-preview-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--panel-head);
+}
+
+.conflict-preview-readonly {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.conflict-preview-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  flex: none;
+}
+
 /* Stack each version beside its own checkbox when the diff pane is narrow. */
 @container (max-width: 520px) {
   .conflict-pane {
@@ -890,6 +1195,49 @@ section.diff > .diff-viewport {
   .conflict-card .conflict-pill { grid-column: 3; grid-row: 1; }
 
   .conflict-card .conflict-commit { grid-column: 2 / -1; grid-row: 2; justify-self: start; }
+}
+
+@container (max-width: 620px) {
+  .diff-toolbar {
+    align-items: stretch;
+    gap: 5px;
+    padding-inline: 8px;
+  }
+
+  .diff-toolbar-label {
+    display: none;
+  }
+
+  .diff-toolbar-context {
+    flex: 1 1 auto;
+  }
+
+  .conflict-preview-head,
+  .conflict-preview-foot {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .conflict-preview-nav,
+  .conflict-preview-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .conflict-preview-block-head .text-button {
+    width: 100%;
+    margin-left: 0;
+    text-align: left;
+  }
+
+  .conflict-preview-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .conflict-preview-block-actions span {
+    width: 100%;
+    margin-left: 0;
+  }
 }
 
 .split-gap { grid-column: 1 / -1; }

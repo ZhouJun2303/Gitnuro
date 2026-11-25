@@ -9,6 +9,7 @@
   /* Text */
   --text: #242424;
   --text-secondary: #707070;
+  --commit-meta-color: #5a5a62;
   /* Lines and interaction */
   --line: rgba(0, 0, 0, 0.09);
   --separator: rgba(0, 0, 0, 0.14);
@@ -44,12 +45,24 @@
   --font-display: var(--font);
   --mono: var(--mono-user,) "Cascadia Mono", "SFMono-Regular", "Consolas", "Liberation Mono", "PingFang SC", "Microsoft YaHei UI", monospace;
   --ui-scale: 14px;
-  --diff-font: 14px;
+  --diff-font: 13px;
   /* Rows */
   --row-file: 28px;
-  --row-commit: 28px;
+  --row-commit: 30px;
   --row-side: 28px;
   --row-tree: 24px;
+  --commit-subject-font-size: 17px;
+  --commit-author-font-size: 14px;
+  --commit-sha-font-size: 14px;
+  --commit-time-font-size: 15px;
+  --changes-font-size: 14px;
+  --changes-meta-font-size: 11px;
+  --changes-indent-ch: 0.8;
+  --detail-body-font-size: 14px;
+  --detail-tab-font-size: 13px;
+  --detail-meta-font-size: 12px;
+  --sidebar-font-size: 20px;
+  --sidebar-section-font-size: 22px;
   --split-row: 19px;
   --guide: 72;
   /* Radii, shadows, focus */
@@ -106,6 +119,7 @@
   --panel-head: #222222;
   --text: #e5e5e5;
   --text-secondary: #a0a0a0;
+  --commit-meta-color: #b0b0b0;
   --line: rgba(255, 255, 255, 0.075);
   --separator: rgba(255, 255, 255, 0.13);
   --hover: rgba(255, 255, 255, 0.045);
@@ -241,6 +255,7 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
   --panel-head: #fafafa;
   --text: #18181b;
   --text-secondary: #65656d;
+  --commit-meta-color: #5a5a62;
   --line: rgba(24, 24, 27, 0.08);
   --separator: rgba(24, 24, 27, 0.08);
   --accent: #5b5bd6;
@@ -265,6 +280,7 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 :root[data-senior-mode="true"] {
   --text: #151515;
   --text-secondary: #454545;
+  --commit-meta-color: #3f3f3f;
   --line: rgba(0, 0, 0, 0.16);
   --separator: rgba(0, 0, 0, 0.24);
   --control-edge: rgba(0, 0, 0, 0.28);
@@ -274,6 +290,7 @@ input[type="checkbox"], input[type="radio"], input[type="range"] { accent-color:
 :root[data-theme="dark"][data-senior-mode="true"] {
   --text: #ffffff;
   --text-secondary: #d4d4d4;
+  --commit-meta-color: #dedede;
   --line: rgba(255, 255, 255, 0.16);
   --separator: rgba(255, 255, 255, 0.25);
   --control-edge: rgba(255, 255, 255, 0.3);

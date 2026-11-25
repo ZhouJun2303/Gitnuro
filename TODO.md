@@ -6,6 +6,14 @@
 
 ## 最近完成
 
+- [x] 全新安装第一次启动后，在首屏绘制完成时后台自动同步本机已登录账号、导入 Fork 设置、启用 AI 提交说明接口并开启 Killer 推送；只执行一次，不弹窗、不阻塞打开仓库，失败就跳过。回归：`missing_onboarding_counts_as_seen`、`e2e/first-run.spec.ts`。实现：本条所在提交 `feat: 新装首次启动后台自动准备本地设置并更新功能页`。
+
+- [x] 切换仓库时全部提交不再停在「还没有提交」。历史和工作区同时读，状态刷新不会丢掉已经在读的提交列表；空列表在第一页到达前显示「正在读取…」。装上监听不再额外做一次全量扫描。回归：`cancelled_history_is_not_an_empty_repository`、`e2e/operation-scheduler.spec.ts` 的 `history is read while the same repository is still scanning status`、`e2e/performance-refresh.spec.ts` 的 `a status snapshot does not discard history for the open repository`、`e2e/lab.spec.ts` 的 `switching repositories clears the previous commit detail`。修复：本条所在提交 `fix: 切换仓库时立即读取全部提交`。
+
+- [x] 丢弃子模块时，如果子模块已经停在父仓库记录的提交上，只在该子模块内重置索引和工作区，不再把它改成游离 HEAD；未跟踪文件仍保留，提交不同时仍切到父仓库记录的提交，reflog 留下正常的 checkout 记录。回归：`discard_dirty_submodule_keeps_its_branch`、`discard_paths_restores_submodule_and_regular_file_together`、`discard_submodule_restores_checkout_without_touching_other_submodules`。修复：本条所在提交 `fix: 丢弃子模块修改时不再无故切换 HEAD`。
+
+- [x] `9fdf8a38`：冲突预览改为偏好设置 → 差异里的开关，默认关闭。关闭时不读取冲突全文，也不在面板里展开每一块；合并窗口不受影响。回归：`missing_conflict_preview_defaults_off_and_keeps_an_explicit_choice`，`e2e/conflict-preview-setting.spec.ts`。
+
 - [x] `f4b00316`、`b5023ddf`：新增 Killer 推送开关。直接推送成功仍只执行一条 `git push`；被远程新提交拒绝或 `--force-with-lease` 过期时，自动拉取并重试一次；合并或变基冲突会中止并恢复自动贮藏，本地分支与工作区保持原样。开启时推送图标变为实心。回归：`killer_push.rs` 的 `killer_push_merges_remote_commits_then_pushes_once`、`killer_push_aborts_a_conflicting_merge_and_keeps_local_history`、`killer_push_aborts_a_conflicting_rebase_and_keeps_local_history`、`killer_push_restores_uncommitted_changes_after_a_conflicting_pull`、`killer_push_off_keeps_the_plain_rejection`、`killer_push_recovers_a_stale_force_with_lease`、`push_ref_killer_replaces_a_commit_push_with_the_integrated_branch`；`e2e/killer-push.spec.ts`。
 
 - [x] `b6a6f53f`：工作区项目标签改用指针拖动，顺序随工作区保存；字号以界面字号为上限（放得下就用界面字号），放不下才按工作区逐级缩到 10px，仍放不下显示省略号。回归：`e2e/workspace-files.spec.ts` 的 `project tabs keep the dragged order in the workspace`、`project names shrink with the tab and ellipsize at the minimum`。

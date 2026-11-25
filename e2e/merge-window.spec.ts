@@ -39,6 +39,63 @@ test("merge preview preserves the manual draft and guards replacing it with side
   await expect(page.locator(".merge-result-edit")).toHaveValue(draft);
 });
 
+test("a manual result can resolve pending conflict blocks", async ({ page }) => {
+  await openLabScene(page, "text-merge", ".merge-panel");
+  await page.locator(".merge-edit-entry").click();
+  await page.locator(".merge-result-edit").fill("fully resolved by hand\n");
+  await expect(page.locator(".merge-panel .commit")).toBeEnabled();
+});
+
+test("merge drafts restore choices and the three-way base after reopening", async ({ page }) => {
+  await openLabScene(page, "text-merge", ".merge-panel");
+  await expect(page.locator(".merge-column.base")).toBeVisible();
+  await expect(page.locator(".merge-column")).toHaveCount(3);
+  await page.locator(".merge-side.left .merge-hover-btn").first().click();
+  await page.locator(".merge-draft-button").click();
+  await expect(page.locator(".merge-draft-button")).toHaveText(/Draft saved|草稿已保存/);
+  await page.locator(".merge-close").click();
+  await expect(page.locator(".merge-panel")).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".merge-panel")).toBeVisible();
+  await expect(page.locator(".merge-side.left .merge-hover-btn").first()).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".merge-draft-button")).toHaveText(/Draft saved|草稿已保存/);
+});
+
+test("a superseded conflict view is read again and the merge is drawn", async ({ page }) => {
+  let views = 0;
+  let repo = "";
+  let release!: () => void;
+  const gate = new Promise<void>((done) => { release = done; });
+  await page.route("**/__lab/invoke", async (route) => {
+    const { cmd, args } = route.request().postDataJSON();
+    if (cmd !== "conflict_view") return route.continue();
+    views += 1;
+    repo = String(args?.path ?? repo);
+    if (views === 1) {
+      await gate;
+      try { await route.continue(); } catch { /* this read was already superseded */ }
+      return;
+    }
+    return route.continue();
+  });
+  try {
+    const opened = page.goto("/?scene=text-merge-window&view=merge&theme=light", { waitUntil: "domcontentloaded" });
+    await page.locator(".merge-panel.standalone").waitFor({ timeout: 90_000 });
+    await expect.poll(() => views, { timeout: 90_000 }).toBe(1);
+    await page.evaluate(async (path) => {
+      const { invalidateReads } = await import("/src/lib/read-scheduler.ts");
+      invalidateReads(path);
+    }, repo);
+    await expect.poll(() => views, { timeout: 15_000 }).toBe(2);
+    release();
+    await opened;
+    await expect(page.locator(".merge-top")).toBeVisible();
+    await expect(page.locator(".merge-stage.merge-loading-state")).toHaveCount(0);
+    await expect(page.locator(".merge-party input").first()).not.toHaveAttribute("aria-label", "保留 ");
+    await expect(page.locator(".merge-panel .commit")).toBeDisabled();
+  } finally { release(); }
+});
+
 test("a late conflict read does not overwrite a draft typed while loading", async ({ page }) => {
   let release!: () => void;
   const gate = new Promise<void>((done) => { release = done; });
@@ -76,6 +133,7 @@ for (const kind of ["text", "file"]) test(`failed ${kind} merge keeps the draft 
     return route.fulfill({ json: { ok: true, value: { ...snapshot.value, outcome: "completed" } } });
   });
   await openLabScene(page, kind === "text" ? "text-merge" : "file-merge", ".merge-panel");
+  const firstFile = (await page.locator(".merge-title-file").innerText()).trim();
   await page.locator(".merge-party input").first().check();
   if (kind === "text") {
     await page.locator(".merge-edit-entry").click();
@@ -87,14 +145,16 @@ for (const kind of ["text", "file"]) test(`failed ${kind} merge keeps the draft 
   await expect(page.locator(".merge-party input").first()).toBeChecked();
   if (kind === "text") await expect(page.locator(".merge-result-edit")).toHaveValue("preserve this manual draft\n");
   await page.locator(".merge-panel .commit").click();
-  await expect(page.locator(".merge-panel")).toHaveCount(0);
+  await expect(page.locator(".merge-panel")).toHaveCount(1);
+  await expect.poll(async () => (await page.locator(".merge-title-file").innerText()).trim()).not.toBe(firstFile);
+  await expect(page.locator(".merge-file-nav-status.resolved")).toHaveCount(1);
   expect(requests).toHaveLength(2);
   expect(requests[1]).toEqual(requests[0]);
   expect(requests[0].side).toBe(kind === "text" ? "text" : "theirs");
   if (kind === "text") expect(requests[0].text).toBe("preserve this manual draft\n");
 });
 
-test("resolving one file while other conflicts remain closes the panel", async ({ page }) => {
+test("resolving one file advances to the next conflicted file", async ({ page }) => {
   await page.route("**/__lab/invoke", async (route) => {
     const { cmd, args } = route.request().postDataJSON();
     if (cmd !== "mutate") return route.continue();
@@ -105,9 +165,12 @@ test("resolving one file while other conflicts remain closes the panel", async (
     return route.fulfill({ json: { ok: true, value: { ...snapshot.value, outcome: "conflict", error: "" } } });
   });
   await openLabScene(page, "text-merge", ".merge-panel");
+  const firstFile = (await page.locator(".merge-title-file").innerText()).trim();
   await page.locator(".merge-party input").first().check();
   await page.locator(".merge-panel .commit").click();
-  await expect(page.locator(".merge-panel")).toHaveCount(0);
+  await expect(page.locator(".merge-panel")).toHaveCount(1);
+  await expect.poll(async () => (await page.locator(".merge-title-file").innerText()).trim()).not.toBe(firstFile);
+  await expect(page.locator(".merge-file-nav-status.resolved")).toHaveCount(1);
   await expect(page.locator(".merge-error")).toHaveCount(0);
 });
 

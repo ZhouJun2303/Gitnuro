@@ -40,6 +40,7 @@
     "allow-font-cache-info",
     "allow-save-settings",
     "allow-settings-path",
+    "allow-export-settings-backup",
     "allow-external-tools",
     "allow-editor-tools",
     "allow-program-exists",

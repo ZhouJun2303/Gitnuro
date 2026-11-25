@@ -78,6 +78,26 @@ test("preferences backdrop keeps the panel open and explicit controls close it",
   await expect(dialog).toHaveCount(0);
 });
 
+for (const theme of ["apple", "light", "dark"] as const) {
+  test(`settings file card exports a dated backup (${theme})`, async ({ page }) => {
+    await page.goto(`/?scene=prefs-advanced&theme=${theme}`);
+    await expect(page.locator('[data-lab-scene="prefs-advanced"]')).toBeVisible();
+    const dialog = page.locator('[data-dialog="prefs"]');
+    await expect(dialog.locator(".export-settings")).toBeVisible();
+    const exported = page.waitForResponse((response) => {
+      if (!response.url().endsWith("/__lab/invoke") || response.request().method() !== "POST") return false;
+      return response.request().postDataJSON().cmd === "export_settings_backup";
+    });
+    await dialog.locator(".export-settings").click();
+    const payload = await (await exported).json();
+    expect(payload.ok).toBe(true);
+    expect(payload.value).toMatch(/awegit-settings-\d{4}-\d{2}-\d{2}\.json$/);
+    const note = dialog.locator(".settings-backup-note");
+    await expect(note).toContainText(payload.value);
+    await expect(note).toBeVisible();
+  });
+}
+
 test("appearance menu shows the language shortcut and switches language", async ({ page }) => {
   await openPreferences(page);
   await page.locator(".dialog-close").click();

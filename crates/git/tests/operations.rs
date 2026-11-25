@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::{Duration, SystemTime};
 
 use awegit_git::{
-    blob_view, commit, commit_log, commits_from, conflict_view, discard_lines, file_diff,
+    blob_view, commit, commit_log, commits_from, conflict_sides, conflict_view, discard_lines, file_diff,
     file_diff_with, file_preview, in_progress, launch_merge_tool, merge_preview, perform,
     remove_stale_index_lock, repository_refs, search_commits, search_log, stage_all, stage_hunk,
     stage_line, stage_lines, stage_paths, stale_index_lock, stale_index_lock_for_error, status, stop_process_tree, unstage_paths, ChangeKind,
@@ -101,6 +101,56 @@ fn submodule_head_change_can_be_staged_and_committed() {
     let after = status(&superproject.path).unwrap();
     assert!(after.staged.is_empty(), "{after:?}");
     assert!(after.unstaged.is_empty(), "{after:?}");
+}
+
+#[test]
+fn clone_recursively_initializes_submodules() {
+    let module = repo();
+    commit_file(&module, "module.txt", "module\n", "test: module");
+
+    let source = repo();
+    source.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        &file_url(&module.path),
+        "vendor",
+    ]);
+    source.git(&["commit", "-m", "test: add submodule"]);
+
+    let destination = std::env::temp_dir().join(format!(
+        "awegit-recursive-clone-{}",
+        SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _cleanup = RemoveDir(destination.clone());
+
+    // Git protects recursive clones from file:// submodule URLs by default. The
+    // test opts into the local transport so it can use temporary repositories.
+    let previous = std::env::var_os("GIT_ALLOW_PROTOCOL");
+    std::env::set_var("GIT_ALLOW_PROTOCOL", "file");
+    let result = perform(
+        &source.path,
+        Mutation::Clone {
+            url: file_url(&source.path),
+            destination: destination.display().to_string(),
+        },
+    );
+    match previous {
+        Some(value) => std::env::set_var("GIT_ALLOW_PROTOCOL", value),
+        None => std::env::remove_var("GIT_ALLOW_PROTOCOL"),
+    }
+    result.unwrap();
+
+    assert_eq!(
+        fs::read_to_string(destination.join("vendor/module.txt"))
+            .unwrap()
+            .trim(),
+        "module"
+    );
 }
 
 fn commit_file(repo: &common::TempRepo, name: &str, body: &str, message: &str) {
@@ -1023,6 +1073,43 @@ fn submodule_and_worktree() {
 }
 
 #[test]
+fn submodule_rows_report_configured_and_checked_out_branches() {
+    let module = repo();
+    commit_file(&module, "module.txt", "one\n", "module base");
+    let superproject = repo();
+    superproject.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-b",
+        "main",
+        &file_url(&module.path),
+        "vendor",
+    ]);
+    superproject.git(&["commit", "-m", "add submodule"]);
+
+    let refs = repository_refs(&superproject.path).unwrap();
+    let row = refs.submodules.iter().find(|row| row.path == "vendor").expect("vendor");
+    assert!(row.ready);
+    assert_eq!(row.branch, "main");
+    assert_eq!(row.configured_branch, "main");
+    assert_eq!(row.recorded, row.id);
+
+    superproject.git(&["config", "-f", ".gitmodules", "submodule.vendor.branch", "topic"]);
+    let refs = repository_refs(&superproject.path).unwrap();
+    let row = refs.submodules.iter().find(|row| row.path == "vendor").expect("vendor");
+    assert_eq!(row.configured_branch, "topic");
+    assert_eq!(row.branch, "main");
+
+    superproject.git(&["-C", "vendor", "checkout", "--quiet", "--detach"]);
+    let refs = repository_refs(&superproject.path).unwrap();
+    let row = refs.submodules.iter().find(|row| row.path == "vendor").expect("vendor");
+    assert_eq!(row.branch, "");
+    assert!(!row.id.is_empty());
+}
+
+#[test]
 fn discard_submodule_restores_checkout_without_touching_other_submodules() {
     let lib = repo();
     commit_file(&lib, "lib.txt", "first\n", "first");
@@ -1047,6 +1134,29 @@ fn discard_submodule_restores_checkout_without_touching_other_submodules() {
     assert_eq!(fs::read_to_string(vendor.join("lib.txt")).unwrap().replace("\r\n", "\n"), "first\n");
     assert_eq!(fs::read_to_string(vendor.join("local-only.txt")).unwrap(), "keep\n");
     assert_eq!(fs::read_to_string(other.join("lib.txt")).unwrap(), "keep this edit\n");
+    let action = git_at(&vendor, &["reflog", "-1", "--format=%gs"]);
+    assert!(action.trim().starts_with("checkout:"), "{action}");
+}
+
+#[test]
+fn discard_dirty_submodule_keeps_its_branch() {
+    let lib = repo();
+    commit_file(&lib, "lib.txt", "first\n", "first");
+    let app = repo();
+    commit_file(&app, "app.txt", "app\n", "app");
+    app.git(&["-c", "protocol.file.allow=always", "submodule", "add", &file_url(&lib.path), "vendor"]);
+    app.git(&["commit", "-m", "add submodule"]);
+    let vendor = app.path.join("vendor");
+    let branch = git_at(&vendor, &["symbolic-ref", "--short", "-q", "HEAD"]).trim().to_string();
+    let recorded = app.output(&["rev-parse", "HEAD:vendor"]).trim().to_string();
+    assert!(!branch.is_empty());
+
+    fs::write(vendor.join("lib.txt"), "edited\n").unwrap();
+    perform(&app.path, Mutation::Discard { file: "vendor".into() }).unwrap();
+
+    assert_eq!(fs::read_to_string(vendor.join("lib.txt")).unwrap().replace("\r\n", "\n"), "first\n");
+    assert_eq!(git_at(&vendor, &["rev-parse", "HEAD"]).trim(), recorded);
+    assert_eq!(git_at(&vendor, &["symbolic-ref", "--short", "-q", "HEAD"]).trim(), branch);
 }
 
 #[test]
@@ -1058,12 +1168,16 @@ fn discard_paths_restores_submodule_and_regular_file_together() {
     app.git(&["-c", "protocol.file.allow=always", "submodule", "add", &file_url(&lib.path), "vendor"]);
     app.git(&["commit", "-m", "add submodule"]);
     let vendor = app.path.join("vendor");
+    let branch = git_at(&vendor, &["symbolic-ref", "--short", "-q", "HEAD"]).trim().to_string();
+    let recorded = app.output(&["rev-parse", "HEAD:vendor"]).trim().to_string();
     fs::write(vendor.join("lib.txt"), "edited\n").unwrap();
     fs::write(app.path.join("app.txt"), "edited\n").unwrap();
 
     perform(&app.path, Mutation::DiscardPaths { files: vec!["vendor".into(), "app.txt".into()] }).unwrap();
     assert_eq!(fs::read_to_string(vendor.join("lib.txt")).unwrap().replace("\r\n", "\n"), "first\n");
     assert_eq!(fs::read_to_string(app.path.join("app.txt")).unwrap(), "original\n");
+    assert_eq!(git_at(&vendor, &["rev-parse", "HEAD"]).trim(), recorded);
+    assert_eq!(git_at(&vendor, &["symbolic-ref", "--short", "-q", "HEAD"]).trim(), branch);
     let after = status(&app.path).unwrap();
     assert!(after.unstaged.is_empty(), "{after:?}");
 }
@@ -1186,6 +1300,45 @@ fn resolve_conflict_keeps_ours() {
     let text = fs::read_to_string(repo.path.join("a.txt")).unwrap();
     assert!(text.contains("main"), "{text}");
     assert!(!text.contains("<<<<<<<"), "{text}");
+}
+
+#[test]
+fn conflict_sides_include_the_base_and_keep_both_uses_incoming_first() {
+    let repo = repo();
+    commit_file(&repo, "a.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "side"]);
+    commit_file(&repo, "a.txt", "side\n", "side");
+    repo.git(&["checkout", "main"]);
+    commit_file(&repo, "a.txt", "main\n", "main");
+    assert!(perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "side".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .is_err());
+
+    let sides = conflict_sides(&repo.path, "a.txt").unwrap();
+    assert_eq!(sides.base, "base\n");
+    assert_eq!(sides.ours, "main\n");
+    assert_eq!(sides.theirs, "side\n");
+    assert!(sides.working.contains("<<<<<<<"));
+
+    perform(
+        &repo.path,
+        Mutation::Resolve {
+            file: "a.txt".into(),
+            side: "both".into(),
+            text: String::new(),
+        },
+    )
+    .unwrap();
+    assert_eq!(fs::read_to_string(repo.path.join("a.txt")).unwrap(), "side\nmain\n");
 }
 
 #[test]
@@ -2157,7 +2310,7 @@ fn search_commits_finds_added_text() {
 fn search_log_finds_message_and_diff() {
     let repo = repo();
     commit_file(&repo, "a.txt", "one\n", "base");
-    commit_file(&repo, "a.txt", "needle-token\n", "feat: add the needle");
+    commit_file(&repo, "a.txt", "needle-token\n", "feat: add the needle\n\nID: 1002778");
     repo.git(&["checkout", "-b", "side"]);
     commit_file(&repo, "b.txt", "side\n", "only-on-side");
     repo.git(&["checkout", "main"]);
@@ -2170,6 +2323,11 @@ fn search_log_finds_message_and_diff() {
     assert!(
         diffs.iter().any(|row| row.summary.contains("needle")),
         "{diffs:?}"
+    );
+    let body = search_log(&repo.path, "message", "repository", "ID: 1002778", 20, false).unwrap();
+    assert!(
+        body.iter().any(|row| row.summary.contains("needle")),
+        "{body:?}"
     );
     let here = search_log(&repo.path, "message", "branch", "only-on-side", 20, false).unwrap();
     assert!(here.is_empty(), "{here:?}");
@@ -2362,6 +2520,7 @@ fn merge_conflict_names_both_branches() {
     assert_eq!(edited.ours.state, "modified");
     assert_eq!(edited.theirs.label, "topic");
     assert_eq!(edited.theirs.state, "modified");
+    assert_eq!(edited.kind, "content");
     assert!(edited.ours.bytes > 0 && edited.theirs.bytes > 0);
     assert_eq!(edited.ours.commit.as_ref().unwrap().subject, "edit-gone");
     assert_eq!(edited.theirs.commit.as_ref().unwrap().subject, "drop");
@@ -2373,6 +2532,7 @@ fn merge_conflict_names_both_branches() {
     assert_eq!(removed.theirs.state, "deleted");
     assert_eq!(removed.theirs.bytes, 0);
     assert!(removed.ours.bytes > 0);
+    assert_eq!(removed.kind, "deleteModify");
 }
 
 #[test]
@@ -2403,6 +2563,7 @@ fn conflict_blob_probe_keeps_the_prefix_boundary_and_large_object_policy() {
         for _ in 0..3 {
             let view = conflict_view(&repo.path, "probe").unwrap();
             assert_eq!(view.binary, binary, "size={size}, nul={nul:?}");
+            assert_eq!(view.kind, if binary { "binary" } else { "content" });
             assert_eq!(view.ours.bytes, size as u64);
             assert_eq!(view.theirs.bytes, size as u64);
         }
@@ -2701,6 +2862,91 @@ fn merge_preview_fills_message() {
     let log = repo.output(&["log", "-1", "--format=%B"]);
     assert!(log.contains("Merge topic into main"), "{log}");
     assert!(log.contains("b.txt"), "{log}");
+}
+
+#[test]
+fn merge_preview_keeps_rename_paths_with_spaces() {
+    let repo = repo();
+    commit_file(&repo, "old name.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "topic"]);
+    repo.git(&["mv", "old name.txt", "new name.txt"]);
+    repo.git(&["commit", "-am", "chore: rename"]);
+    repo.git(&["checkout", "main"]);
+
+    let preview = merge_preview(&repo.path, "topic").unwrap();
+    let renamed = preview.files.iter().find(|file| file.path == "new name.txt").expect("renamed path");
+    assert_eq!(renamed.previous_path.as_deref(), Some("old name.txt"));
+}
+
+#[test]
+fn rename_delete_conflict_reports_the_three_paths() {
+    let repo = repo();
+    commit_file(&repo, "old.txt", "base\n", "base");
+    repo.git(&["checkout", "-b", "delete"]);
+    repo.git(&["rm", "old.txt"]);
+    repo.git(&["commit", "-m", "chore: delete"]);
+    repo.git(&["checkout", "main"]);
+    repo.git(&["checkout", "-b", "rename"]);
+    repo.git(&["mv", "old.txt", "new.txt"]);
+    repo.git(&["commit", "-m", "chore: rename"]);
+    repo.git(&["checkout", "delete"]);
+
+    assert!(perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "rename".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .is_err());
+
+    let view = conflict_view(&repo.path, "new.txt").unwrap();
+    assert_eq!(view.kind, "deleteModify");
+    assert_eq!(view.base_path.as_deref(), Some("old.txt"));
+    assert_eq!(view.ours_path.as_deref(), Some("old.txt"));
+    assert_eq!(view.theirs_path.as_deref(), Some("new.txt"));
+}
+
+#[test]
+fn rename_rename_conflict_reports_the_source_path() {
+    let repo = repo();
+    commit_file(&repo, "old.txt", "base\n", "feat: base");
+    repo.git(&["checkout", "-b", "ours"]);
+    repo.git(&["mv", "old.txt", "new.txt"]);
+    fs::write(repo.path.join("new.txt"), "ours\n").unwrap();
+    repo.git(&["add", "-A"]);
+    repo.git(&["commit", "-m", "feat: ours rename"]);
+    repo.git(&["checkout", "main"]);
+    repo.git(&["checkout", "-b", "theirs"]);
+    repo.git(&["mv", "old.txt", "new.txt"]);
+    fs::write(repo.path.join("new.txt"), "theirs\n").unwrap();
+    repo.git(&["add", "-A"]);
+    repo.git(&["commit", "-m", "feat: theirs rename"]);
+    repo.git(&["checkout", "main"]);
+    repo.git(&["merge", "--no-ff", "ours", "-m", "merge: ours"]);
+
+    assert!(perform(
+        &repo.path,
+        Mutation::Merge {
+            name: "theirs".into(),
+            squash: false,
+            no_ff: false,
+            autostash: false,
+            summary: String::new(),
+            description: String::new(),
+        },
+    )
+    .is_err());
+
+    let view = conflict_view(&repo.path, "new.txt").unwrap();
+    assert_eq!(view.kind, "rename");
+    assert_eq!(view.base_path.as_deref(), Some("old.txt"));
+    assert_eq!(view.ours_path.as_deref(), Some("new.txt"));
+    assert_eq!(view.theirs_path.as_deref(), Some("new.txt"));
 }
 
 fn large_asset(name: &str) -> String {

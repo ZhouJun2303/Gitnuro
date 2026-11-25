@@ -47,6 +47,31 @@ test("large text assets load their diff on demand", async ({ page }) => {
   await expect(page.locator(".merge-side").first()).toContainText("m_Entry_1:", { timeout: 30_000 });
 });
 
+test("diff toolbar hides context controls while showing the whole file", async ({ page }) => {
+  await openLabScene(page, "diff-whole-file", "[data-diff-toolbar]");
+  const toolbar = page.locator("[data-diff-toolbar]");
+  await expect(toolbar.locator(".diff-toolbar-value")).toHaveCount(0);
+  await expect(toolbar.getByRole("button", { name: /减少上下文行|Show less context lines/ })).toHaveCount(0);
+  await expect(toolbar.getByRole("button", { name: /增加上下文行|Show more context lines/ })).toHaveCount(0);
+  await expect(toolbar.locator("input[type=checkbox]")).toHaveCount(0);
+  const whole = toolbar.getByRole("button", { name: /显示整个文件|Show whole file/ });
+  await expect(whole).toHaveAttribute("aria-pressed", "true");
+  await whole.click();
+  await expect(toolbar.locator(".diff-toolbar-value")).toHaveText("3");
+  await toolbar.getByRole("button", { name: /增加上下文行|Show more context lines/ }).click();
+  await expect(toolbar.locator(".diff-toolbar-value")).toHaveText("4");
+  await whole.click();
+  await expect(toolbar.locator(".diff-toolbar-value")).toHaveCount(0);
+  await expect(whole).toHaveAttribute("aria-pressed", "true");
+
+  const wrap = toolbar.getByRole("button", { name: /差异长行自动换行|Wrap long diff lines/ });
+  const ignore = toolbar.getByRole("button", { name: /忽略空白|Ignore whitespace/ });
+  await wrap.click();
+  await ignore.click();
+  await expect(wrap).toHaveAttribute("aria-pressed", "true");
+  await expect(ignore).toHaveAttribute("aria-pressed", "true");
+});
+
 test("pushbox commits and pushes", async () => {
   const layout = (await lab("lab_layout")) as { pushbox: string; remotePush: string };
   const summary = `lab: record the push note ${Date.now()}`;
@@ -777,6 +802,16 @@ test("discard opened with Delete focuses the confirm button", async ({ page }) =
 });
 
 for (const theme of ["apple", "light", "dark"]) {
+  test(`submodule sidebar marks healthy and abnormal rows (${theme})`, async ({ page }) => {
+    await pinLabSettings(page, { theme });
+    await openLabScene(page, "submodule-health", ".sidebar .submodule-note", { locale: "en" });
+    await expect(page.locator(".sidebar .submodule-note.ok")).toHaveCount(2);
+    await expect(page.locator(".sidebar .submodule-note.bad")).toContainText("Branch mismatch");
+    await expect(page.locator(".sidebar .submodule-note.bad")).toContainText("uncommitted changes");
+    await expect(page.locator(".sidebar .submodule-note.warn")).toContainText("Commit mismatch");
+    await expect(page.locator(".sidebar .submodule-note.muted")).toContainText("Not initialized");
+  });
+
   test(`submodule menu updates one path and allows uninitialized entries (${theme})`, async ({ page }) => {
     await pinLabSettings(page, { theme });
     await openLabScene(page, "submodule", ".sidebar .side.nested", { locale: "en" });
@@ -825,6 +860,33 @@ test("commit patch renders each hunk header once", async ({ page }) => {
   await expect(meta.first()).toBeVisible();
   await expect(meta.filter({ hasText: "@@" })).toHaveCount(1);
   expect(await page.locator(".detail .split-row").count()).toBeGreaterThan(0);
+});
+
+test("diff panes do not draw the ---/+++ file header", async ({ page }) => {
+  await openLabScene(page, "diff-text", "section.diff .split-meta", { diffStyle: "split" });
+  const changes = await page.locator("section.diff .split-meta").allTextContents();
+  expect(changes.some((text) => text.startsWith("--- ") || text.startsWith("+++ "))).toBe(false);
+
+  for (const style of ["split", "unified"] as const) {
+    await openLabScene(page, "commit", ".detail", { diffStyle: style });
+    await page.locator(".patch-toggle").first().click();
+    const meta = page.locator(`.detail ${style === "split" ? ".split-meta" : ".virtual-row.meta"}`);
+    await expect(meta.first()).toBeVisible();
+    const texts = await meta.allTextContents();
+    expect(texts.some((text) => text.startsWith("--- ") || text.startsWith("+++ ")), style).toBe(false);
+  }
+});
+
+test("commit detail shows a long branch name in full", async ({ page }) => {
+  await pinLabSettings(page, { compactBranchLabels: true });
+  await openLabScene(page, "commit-long-ref", ".detail .fork-row .ref", { theme: "light" });
+  const chip = page.locator(".detail .fork-row .ref").filter({ hasText: "release/2026.11.24-candidate" });
+  await expect(chip).toBeVisible();
+  const clipped = await chip.evaluate((node) => {
+    const text = node.querySelector(".ref-text") ?? node;
+    return text.scrollWidth > text.clientWidth + 1;
+  });
+  expect(clipped, "the branch name must not be ellipsized").toBe(false);
 });
 
 test("commit detail filter narrows files in every tab", async ({ page }) => {
@@ -1038,9 +1100,11 @@ test("switching repositories clears the previous commit detail", async ({ page }
   await page.locator(".commit-row").nth(1).click();
   await expect(page.locator(".detail").getByText("AweGit Lab").first()).toBeVisible();
   await page.locator(".tab-add").click();
-  await page.locator(".repo-row").and(page.getByTitle(layout.even, { exact: true })).click();
+  await page.locator(".repo-row").and(page.getByTitle(layout.even, { exact: true })).first().click();
   await expect(page.locator(".chrome-side .tab.active")).toContainText("even", { timeout: 30_000 });
   await expect(page.locator(".detail .empty")).toContainText(/Select a file|选择/, { timeout: 20_000 });
+  await expect(page.locator(".history .commit-row").first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(".history > .empty")).toHaveCount(0);
   expect(layout.even).not.toBe("");
 });
 
@@ -1094,6 +1158,9 @@ test("batch conflict actions keep one side for the selected files", async ({ pag
     await expect(page.locator(".composer textarea")).not.toHaveValue(/conflict\/file-/);
     await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("topic");
     await expect(page.locator('.identity-floor[data-layer="conflicts"]')).toContainText("main");
+    await expect(page.locator(".unstaged-pane .pick-bar")).toBeVisible();
+    await expect(page.locator(".staged-pane .pick-bar")).toBeVisible();
+    await expect(page.locator(".unstaged-pane .pick-action").first()).toBeDisabled();
     const rows = page.locator(".unstaged-pane .file-list .file");
     const paths = await rows.evaluateAll((nodes) =>
       nodes.slice(0, 2).map((node) => node.querySelector<HTMLElement>(".file-select")?.title ?? ""),
@@ -1102,8 +1169,9 @@ test("batch conflict actions keep one side for the selected files", async ({ pag
     expect(paths.every((path) => path !== "")).toBe(true);
     await rows.nth(0).click();
     await rows.nth(1).click({ modifiers: ["Control"] });
-    await expect(page.locator(".pick-bar")).toBeVisible();
-    await expect(page.locator(".pick-count")).toHaveText(/2/);
+    const pickBar = page.locator(".unstaged-pane .pick-bar");
+    await expect(pickBar).toBeVisible();
+    await expect(pickBar.locator(".pick-count")).toHaveText(/2/);
     const pane = page.locator(".conflict-pane");
     await expect(pane.locator(".conflict-selection")).toContainText("2");
     await pane.locator("#conflict-theirs").click();
@@ -1139,6 +1207,31 @@ test("merge panel opens as a standalone page", async ({ page }) => {
   expect(Math.round(box!.width)).toBe(viewport!.width - inset);
   expect(Math.round(box!.height)).toBe(viewport!.height - inset);
   await expect(page.locator(".merge-scrim")).toHaveCount(0);
+});
+
+test("standalone merge keeps conflict data when a normal diff refresh is requested", async ({ page }) => {
+  await openLabScene(page, "text-merge-window", ".merge-panel.standalone");
+  const state = await page.evaluate(async () => {
+    const { ShellState } = await import(/* @vite-ignore */ "/src/lib/shell/state.svelte.ts");
+    const shell = {
+      standalone: "merge",
+      mode: "live",
+      section: "changes",
+      selectedPath: null,
+      diff: { path: "keep" },
+      diffError: "keep",
+      conflictView: { kind: "content" },
+      conflictPreview: { working: "keep" },
+    } as any;
+    await ShellState.prototype.loadDiff.call(shell);
+    return {
+      diff: shell.diff?.path,
+      diffError: shell.diffError,
+      conflictKind: shell.conflictView?.kind,
+      conflictText: shell.conflictPreview?.working,
+    };
+  });
+  expect(state).toEqual({ diff: "keep", diffError: "keep", conflictKind: "content", conflictText: "keep" });
 });
 
 test("unified diff keeps row nodes while scrolling", async ({ page }) => {

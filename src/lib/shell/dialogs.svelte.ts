@@ -1,5 +1,6 @@
 import { onMount, tick } from "svelte";
 import { invoke, traceOperation } from "../perf";
+import { isReadSuperseded } from "../read-scheduler";
 import { areasFor } from "../operation-policy";
 import { mergeResponse } from "../reconcile";
 import { broadcastLocale } from "../i18n/sync";
@@ -154,6 +155,10 @@ export async function fillTemplate(shell: ShellState) {
 
 const MERGE_CONFLICT_MARK = "--- Merge Conflict ---";
 
+export function mergeTextReady(text: string) {
+    return !/^(?:<<<<<<<.*|=======|>>>>>>>.*|--- Merge Conflict ---)\s*$/m.test(text);
+  }
+
 export function hunkIncludes(pick: MergePick, side: "ours" | "theirs") {
     if (pick === "both") return true;
     if (pick === "none") return false;
@@ -182,8 +187,10 @@ export function splitConflicts(shell: ShellState, working: string) {
     const pieces: MergePiece[] = [];
     let text: string[] = [];
     let ours: string[] = [];
+    let base: string[] = [];
     let theirs: string[] = [];
-    let mode: "text" | "ours" | "theirs" = "text";
+    let mode: "text" | "ours" | "base" | "theirs" = "text";
+    let conflictNumber = 0;
     const flush = () => {
       if (text.length > 0) pieces.push({ kind: "text", text: text.join("\n") });
       text = [];
@@ -193,19 +200,35 @@ export function splitConflicts(shell: ShellState, working: string) {
         flush();
         mode = "ours";
         ours = [];
+        base = [];
         theirs = [];
         continue;
       }
-      if (mode === "ours" && line.startsWith("=======")) {
+      if (mode === "ours" && line.startsWith("|||||||")) {
+        mode = "base";
+        continue;
+      }
+      if ((mode === "ours" || mode === "base") && line.startsWith("=======")) {
         mode = "theirs";
         continue;
       }
       if (mode === "theirs" && line.startsWith(">>>>>>>")) {
-        pieces.push({ kind: "hunk", ours: ours.join("\n"), theirs: theirs.join("\n"), oursLines: ours.length, theirsLines: theirs.length, pick: "none" });
+        pieces.push({
+          kind: "hunk",
+          id: `merge-hunk-${conflictNumber++}`,
+          base: base.join("\n"),
+          ours: ours.join("\n"),
+          theirs: theirs.join("\n"),
+          baseLines: base.length,
+          oursLines: ours.length,
+          theirsLines: theirs.length,
+          pick: "none",
+        });
         mode = "text";
         continue;
       }
       if (mode === "ours") ours.push(line);
+      else if (mode === "base") base.push(line);
       else if (mode === "theirs") theirs.push(line);
       else text.push(line);
     }
@@ -227,7 +250,9 @@ export function joinedPieces(shell: ShellState, pieces: MergePiece[]) {
 
 export function pickHunk(shell: ShellState, index: number, pick: MergePick) {
     shell.mergeDirty = true;
-    shell.mergePieces = shell.mergePieces.map((piece, at) => (piece.kind === "hunk" && at === index ? { ...piece, pick } : piece));
+    shell.mergeDraftSaved = false;
+    const piece = shell.mergePieces[index];
+    if (piece?.kind === "hunk") shell.mergePieces[index] = { ...piece, pick };
   }
 
 /** Toggle one side of a conflict hunk (Fork Select / Remove). */
@@ -242,18 +267,20 @@ export function toggleMergeSide(shell: ShellState, index: number, side: "ours" |
 /** Set or clear one side across every hunk (header checkboxes). */
 export function takeMergeSide(shell: ShellState, side: "ours" | "theirs", on: boolean) {
     shell.mergeDirty = true;
+    shell.mergeDraftSaved = false;
     shell.mergePieces = shell.mergePieces.map((piece) => {
       if (piece.kind !== "hunk") return piece;
       const theirs = side === "theirs" ? on : hunkIncludes(piece.pick, "theirs");
       const ours = side === "ours" ? on : hunkIncludes(piece.pick, "ours");
       return { ...piece, pick: pickFromIncludes(theirs, ours) };
     });
+    shell.mergeSource = shell.mergePieces;
   }
 
-function piecesFromSides(shell: ShellState, sides: { ours: string; theirs: string; working: string }) {
+function piecesFromSides(shell: ShellState, sides: { base?: string; ours: string; theirs: string; working: string }) {
     const pieces = shell.splitConflicts(sides.working);
     if (pieces.some((piece) => piece.kind === "hunk")) return pieces;
-    return [{ kind: "hunk" as const, ours: sides.ours, theirs: sides.theirs, pick: "none" as const }];
+    return [{ kind: "hunk" as const, id: "merge-hunk-0", base: sides.base ?? "", ours: sides.ours, theirs: sides.theirs, baseLines: sides.base ? sides.base.split("\n").length : 0, oursLines: sides.ours.split("\n").length, theirsLines: sides.theirs.split("\n").length, pick: "none" as const }];
   }
 
 /** Past this, moving the whole text through the window costs more than a merge view is worth. */
@@ -281,22 +308,150 @@ function textNeedsLoad(text: string) {
     return false;
   }
 
-function sidesTooBig(sides: { ours: string; theirs: string; working: string }) {
-    return textTooBig(sides.working) || textTooBig(sides.ours) || textTooBig(sides.theirs);
+function sidesTooBig(sides: { base?: string; ours: string; theirs: string; working: string }) {
+    return textTooBig(sides.working) || textTooBig(sides.base ?? "") || textTooBig(sides.ours) || textTooBig(sides.theirs);
   }
 
-function sidesNeedLoad(sides: { ours: string; theirs: string; working: string }) {
-    return textNeedsLoad(sides.working) || textNeedsLoad(sides.ours) || textNeedsLoad(sides.theirs);
+function sidesNeedLoad(sides: { base?: string; ours: string; theirs: string; working: string }) {
+    return textNeedsLoad(sides.working) || textNeedsLoad(sides.base ?? "") || textNeedsLoad(sides.ours) || textNeedsLoad(sides.theirs);
+  }
+
+function conflictReadTooLarge(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return /conflict (?:side|working file) exceeds|exceeds \d+ bytes/i.test(message);
+  }
+
+type MergeDraft = {
+  version?: string;
+  result: string;
+  edited: boolean;
+  /** Compact choice records keep localStorage from duplicating large side contents. */
+  choices?: { id: string; pick: MergePick }[];
+  /** Kept for drafts written by older builds. */
+  pieces?: MergePiece[];
+  signature?: string;
+  savedAt: number;
+};
+
+function mergeStorage(): Storage | null {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+function mergeDraftKey(shell: ShellState, file = shell.mergeFile) {
+  const repo = shell.repoPath() || (shell.mode === "sample" ? "sample" : "");
+  return `awegit.merge-draft.v1:${repo}\0${file}`;
+}
+
+function mergePieceSignature(pieces: MergePiece[]) {
+  return pieces.map((piece, index) => {
+    if (piece.kind === "text") return `t:${index}:${piece.text.length}:${piece.text.slice(0, 12)}:${piece.text.slice(-12)}`;
+    return `h:${index}:${piece.id ?? `merge-hunk-${index}`}:${piece.base?.length ?? 0}:${piece.ours.length}:${piece.theirs.length}:${piece.baseLines ?? 0}:${piece.oursLines ?? 0}:${piece.theirsLines ?? 0}`;
+  }).join("|");
+}
+
+function readMergeDraft(shell: ShellState, sides: { version?: string }, pieces: MergePiece[]) {
+  const storage = mergeStorage();
+  if (!storage || !shell.mergeFile) return false;
+  try {
+    const key = mergeDraftKey(shell);
+    const raw = storage.getItem(key);
+    if (!raw) return false;
+    const draft = JSON.parse(raw) as Partial<MergeDraft>;
+    if (typeof draft.result !== "string" || (!Array.isArray(draft.choices) && !Array.isArray(draft.pieces))) return false;
+    const currentVersion = sides.version?.trim() ?? "";
+    const savedVersion = draft.version?.trim() ?? "";
+    if ((currentVersion || savedVersion) && currentVersion !== savedVersion) {
+      storage.removeItem(key);
+      return false;
+    }
+    if (draft.signature && draft.signature !== mergePieceSignature(pieces)) {
+      storage.removeItem(key);
+      return false;
+    }
+    const savedById = new Map<string, MergePick>();
+    draft.choices?.forEach((choice) => {
+      if (choice && typeof choice.id === "string" && ["ours", "theirs", "both", "none"].includes(choice.pick)) savedById.set(choice.id, choice.pick);
+    });
+    draft.pieces?.forEach((piece, index) => {
+      if (piece?.kind === "hunk") savedById.set(piece.id ?? `merge-hunk-${index}`, piece.pick);
+    });
+    shell.mergePieces = pieces.map((piece, index) => {
+      if (piece.kind !== "hunk") return piece;
+      const saved = savedById.get(piece.id ?? `merge-hunk-${index}`);
+      return saved ? { ...piece, pick: saved } : piece;
+    });
+    shell.mergeSource = shell.mergePieces;
+    shell.mergeResult = draft.result;
+    shell.mergeEdited = draft.edited === true;
+    shell.mergeManualReady = shell.mergeEdited && mergeTextReady(draft.result);
+    shell.mergeEditing = false;
+    shell.mergeDirty = false;
+    shell.mergeDraftSaved = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function saveMergeDraft(shell: ShellState) {
+    if (!shell.mergeFile || shell.mergeKind !== "text" || shell.mergePieces.length === 0) return false;
+    const storage = mergeStorage();
+    if (!storage) {
+      shell.mergeError = shell.tr("dialog.mergeDraftFailed");
+      return false;
+    }
+    const draft: MergeDraft = {
+      version: shell.mergeVersion || shell.conflict?.version,
+      result: shell.mergeEditing || shell.mergeEdited ? shell.mergeResult : shell.joinedPieces(shell.mergePieces),
+      edited: shell.mergeEditing || shell.mergeEdited,
+      choices: shell.mergePieces.flatMap((piece, index) => piece.kind === "hunk" ? [{ id: piece.id ?? `merge-hunk-${index}`, pick: piece.pick }] : []),
+      signature: mergePieceSignature(shell.mergePieces),
+      savedAt: Date.now(),
+    };
+    try {
+      storage.setItem(mergeDraftKey(shell), JSON.stringify(draft));
+      shell.mergeDraftSaved = true;
+      shell.mergeDirty = false;
+      return true;
+    } catch {
+      shell.mergeError = shell.tr("dialog.mergeDraftFailed");
+      return false;
+    }
+  }
+
+function clearMergeDraft(shell: ShellState, file = shell.mergeFile) {
+  const storage = mergeStorage();
+  if (!storage || !file) return;
+  try { storage.removeItem(mergeDraftKey(shell, file)); } catch { /* storage can be unavailable in private windows */ }
+}
+
+function restoreMergeState(shell: ShellState, sides: ConflictSides, pieces: MergePiece[]) {
+    shell.mergeBase = sides.base ? [{ kind: "text", text: sides.base }] : [];
+    shell.mergeVersion = sides.version ?? "";
+    shell.mergePieces = pieces;
+    shell.mergeSource = shell.mergePieces;
+    shell.mergeDraftSaved = false;
+    shell.mergeManualReady = false;
+    const restored = readMergeDraft(shell, sides, pieces);
+    if (!restored && !shell.mergeEdited) shell.mergeResult = shell.joinedPieces(shell.mergePieces);
   }
 
 function showFileMerge(shell: ShellState, file: string) {
     shell.mergeFile = file;
     shell.mergeSource = [];
+    shell.mergeBase = [];
     shell.mergeKind = "file";
     shell.mergeLarge = false;
     shell.mergePieces = [];
     shell.mergeResult = "";
     shell.conflict = null;
+    shell.mergeVersion = "";
+    shell.mergeDraftSaved = false;
+    shell.mergeManualReady = false;
     shell.textMerge = true;
   }
 
@@ -315,22 +470,50 @@ export async function loadTextMerge(shell: ShellState) {
         return;
       }
       shell.conflict = sides;
-      shell.mergePieces = piecesFromSides(shell, sides);
-      shell.mergeSource = shell.mergePieces;
-      if (!shell.mergeEdited) shell.mergeResult = shell.joinedPieces(shell.mergePieces);
+      restoreMergeState(shell, sides, piecesFromSides(shell, sides));
       shell.mergeLarge = false;
     } catch (error) {
-      if (shell.mergeGeneration === generation) shell.mergeError = shell.message(error);
+      if (shell.mergeGeneration === generation) {
+        if (conflictReadTooLarge(error)) showFileMerge(shell, file);
+        else shell.mergeError = mergeReadFailure(shell, error);
+      }
     } finally {
       if (shell.mergeGeneration === generation) shell.mergeLoading = false;
     }
   }
 
+function mergeReadInterrupted(error: unknown) {
+  if (isReadSuperseded(error)) return true;
+  const raw = (error instanceof Error ? error.message : String(error)).trim();
+  return /^awegit:cancelled:/i.test(raw);
+}
+
+const MERGE_READ_ATTEMPTS = 8;
+
+/** A refresh or another window can cancel the Git process under this panel. Retry instead of showing an empty diff. */
+async function retryInterruptedMerge(shell: ShellState, error: unknown, stillOpen: () => boolean, retry: number, file: string, generation: number) {
+  if (!mergeReadInterrupted(error) || !stillOpen() || retry >= MERGE_READ_ATTEMPTS) return false;
+  await new Promise<void>((resolve) => setTimeout(resolve, Math.min(40 * (retry + 1), 240)));
+  if (!stillOpen()) return true;
+  let spins = 0;
+  while (shell.refreshing && stillOpen() && spins < 40) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    spins += 1;
+  }
+  if (!stillOpen()) return true;
+  await readTextMerge(shell, file, generation, false, retry + 1);
+  return true;
+}
+
+function mergeReadFailure(shell: ShellState, error: unknown) {
+  return shell.message(error) || shell.tr("error.cancelled");
+}
+
 export async function openTextMerge(shell: ShellState, file: string) {
     if (shell.inApp() && shell.standalone !== "merge") {
       try {
         let size: { width?: number; height?: number } = {};
-        try { size = JSON.parse(localStorage.getItem("awegit.mergeWindowSize") ?? "{}"); } catch { /* native defaults */ }
+        try { size = JSON.parse(mergeStorage()?.getItem("awegit.mergeWindowSize") ?? "{}"); } catch { /* native defaults */ }
         await invoke("open_window", { view: "merge", repo: shell.repoPath(), file,
           width: Number.isFinite(size?.width) ? size.width : null,
           height: Number.isFinite(size?.height) ? size.height : null });
@@ -338,6 +521,7 @@ export async function openTextMerge(shell: ShellState, file: string) {
       return;
     }
     if (shell.textMerge && shell.mergeFile === file) return;
+    if (!shell.textMerge) shell.beginMergeSession();
     shell.standalone = "merge";
     const generation = ++shell.mergeGeneration;
     shell.mergeLoading = true;
@@ -345,21 +529,33 @@ export async function openTextMerge(shell: ShellState, file: string) {
     finally { if (generation === shell.mergeGeneration) shell.mergeLoading = false; }
   }
 
-async function readTextMerge(shell: ShellState, file: string, generation: number) {
-    shell.mergeFile = file;
-    shell.mergeDirty = false;
-    shell.mergeEdited = false;
-    shell.mergeEditing = false;
-    shell.mergeError = "";
-    shell.textMerge = true;
-    shell.mergePieces = [];
-    shell.mergeSource = [];
-    shell.mergeResult = "";
+async function readTextMerge(shell: ShellState, file: string, generation: number, reset = true, retry = 0) {
+    if (reset) {
+      shell.mergeFile = file;
+      shell.mergeDirty = false;
+      shell.mergeEdited = false;
+      shell.mergeEditing = false;
+      shell.mergeError = "";
+      shell.textMerge = true;
+      shell.mergePieces = [];
+      shell.mergeSource = [];
+      shell.mergeBase = [];
+      shell.mergeResult = "";
+      shell.mergeVersion = "";
+      shell.mergeDraftSaved = false;
+      shell.mergeManualReady = false;
+      shell.conflictView = null;
+    } else {
+      shell.mergeError = "";
+      shell.textMerge = true;
+    }
     shell.section = "changes";
     const already = shell.selectedPath === file;
+    shell.mergeFile = file;
     shell.selectedPath = file;
     const path = shell.repoPath();
-    const stillOpen = () => generation === shell.mergeGeneration && (shell.mode !== "live" || (shell.viewing(path) && shell.selectedPath === file));
+    const stillOpen = () => generation === shell.mergeGeneration && shell.textMerge && shell.mergeFile === file
+      && (shell.mode !== "live" || shell.viewing(path));
     let view = shell.mode === "sample" ? sampleConflictViews[file] : already ? shell.activeConflict : null;
     if (shell.mode === "live" && !view) {
       try {
@@ -367,13 +563,22 @@ async function readTextMerge(shell: ShellState, file: string, generation: number
         if (!stillOpen()) return;
         shell.conflictView = view;
       } catch (error) {
-        if (stillOpen()) shell.mergeError = shell.message(error);
+        if (await retryInterruptedMerge(shell, error, stillOpen, retry, file, generation)) return;
+        if (stillOpen()) shell.mergeError = mergeReadFailure(shell, error);
         return;
       }
     }
     shell.mergeLeft = view?.theirs.label || shell.tr("dialog.useTheirs");
     shell.mergeRight = view?.ours.label || shell.branchLabel || shell.tr("dialog.useOurs");
-    const editable = shell.mode === "sample" ? !!sampleConflictText[file] : !view?.binary;
+    if (view) {
+      shell.mergeFileMeta = {
+        ...shell.mergeFileMeta,
+        [file]: { binary: view.binary, conflictKind: view.kind },
+      };
+    }
+    const editable = shell.mode === "sample"
+      ? !!sampleConflictText[file] && (view?.kind ?? "content") === "content"
+      : !view?.binary && (view?.kind ?? "content") === "content";
     if (!editable) {
       showFileMerge(shell, file);
       return;
@@ -389,12 +594,20 @@ async function readTextMerge(shell: ShellState, file: string, generation: number
       shell.mergeFile = file;
       shell.mergeKind = "text";
       shell.mergeLarge = sidesNeedLoad(sides);
-      shell.mergePieces = shell.mergeLarge ? [] : piecesFromSides(shell, sides);
-      shell.mergeSource = shell.mergePieces;
-      if (!shell.mergeEdited) shell.mergeResult = shell.mergeLarge ? "" : shell.joinedPieces(shell.mergePieces);
+      if (shell.mergeLarge) {
+        shell.mergeBase = [];
+        shell.mergeVersion = sides.version ?? "";
+        shell.mergePieces = [];
+        shell.mergeSource = shell.mergePieces;
+        shell.mergeDraftSaved = false;
+      } else restoreMergeState(shell, sides, piecesFromSides(shell, sides));
       shell.textMerge = true;
     } catch (error) {
-      if (stillOpen()) shell.mergeError = shell.message(error);
+      if (await retryInterruptedMerge(shell, error, stillOpen, retry, file, generation)) return;
+      if (stillOpen()) {
+        if (conflictReadTooLarge(error)) showFileMerge(shell, file);
+        else shell.mergeError = mergeReadFailure(shell, error);
+      }
     }
   }
 
@@ -405,6 +618,7 @@ export function closeTextMerge(shell: ShellState) {
       shell.textMerge = false;
       shell.mergeLarge = false;
       shell.mergeLoading = false;
+      shell.mergeBase = [];
       if (shell.inApp() && shell.standalone === "merge") void getCurrentWindow().close();
       else shell.standalone = "";
     });
@@ -424,7 +638,7 @@ export function buildRebaseSteps(steps: RebaseStep[], picked: string[]): RebaseS
 export async function applyTextMerge(shell: ShellState, text?: string): Promise<boolean> {
     const file = shell.mergeFile;
     if (!file || shell.mergeApplying || shell.mergeLarge || shell.mergePieces.length === 0) return false;
-    if (shell.mergePieces.some((piece) => piece.kind === "hunk" && piece.pick === "none")) return false;
+    if (shell.mergePieces.some((piece) => piece.kind === "hunk" && piece.pick === "none") && !shell.mergeManualReady) return false;
     return applyMerge(shell, { action: "resolve", file, side: "text", text: text ?? shell.mergeResult });
   }
 
@@ -436,6 +650,7 @@ export async function applyFileMerge(shell: ShellState, side: "ours" | "theirs")
 async function applyMerge(shell: ShellState, request: Record<string, unknown>): Promise<boolean> {
     const generation = shell.mergeGeneration, path = shell.repoPath();
     const current = () => generation === shell.mergeGeneration && (shell.mode === "sample" || shell.viewing(path));
+    const file = shell.mergeFile;
     shell.mergeError = "";
     shell.mergeApplying = true;
     try {
@@ -452,7 +667,18 @@ async function applyMerge(shell: ShellState, request: Record<string, unknown>): 
       if (current()) shell.mergeApplying = false;
     }
     shell.mergeDirty = false;
-    shell.closeTextMerge();
+    clearMergeDraft(shell, file);
+    shell.mergeDraftSaved = false;
+    shell.mergeEdited = false;
+    shell.mergeEditing = false;
+    shell.mergeManualReady = false;
+    shell.markMergeResolved(file);
+    const next = shell.nextMergeFile(file);
+    if (next) {
+      await shell.openTextMerge(next);
+    } else {
+      shell.closeTextMerge();
+    }
     return true;
   }
 
@@ -1875,7 +2101,7 @@ export async function loadMergePreview(shell: ShellState) {
       fillMergeText(shell, into, source);
       return;
     }
-    const preview = await invoke<{ into: string; files: { status: string; path: string }[] }>("merge_preview", {
+    const preview = await invoke<{ into: string; files: { status: string; path: string; previousPath?: string | null }[] }>("merge_preview", {
       path,
       name: source,
     }).catch(() => null);

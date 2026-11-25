@@ -222,6 +222,54 @@ test("Blame shows source before attribution and only reads visible ranges", asyn
   expect(result).toEqual({ opened: true, sourceCount: 600, visible: "v", ranges: [[1, 200], [201, 400]], staleIgnored: true });
 });
 
+test("diff retries when its active read is superseded while the selection stays current", async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { loadDiff } = await import(/* @vite-ignore */ "/src/lib/shell/diff.svelte.ts");
+    const { invalidateReads } = await import(/* @vite-ignore */ "/src/lib/read-scheduler.ts");
+    const original = window.fetch;
+    const path = "D:/diff-review";
+    let reads = 0;
+    window.fetch = (input, init) => {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : null;
+      if (body?.args?.path !== path) return original(input, init);
+      if (body.cmd === "cancel_reads") return Promise.resolve(new Response(JSON.stringify({ ok: true, value: null })));
+      if (body.cmd !== "file_diff") return original(input, init);
+      reads += 1;
+      if (reads === 1) {
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true, value: {
+        path: "file.txt", staged: false, binary: false, truncated: false, loadable: false,
+        lines: [{ kind: "add", text: "+new" }], hunks: 1, oldBytes: 3, newBytes: 4,
+      } })));
+    };
+    const shell: any = {
+      mode: "live", selectedPath: "file.txt", selectedSide: "unstaged", section: "changes", statusGen: 0,
+      diffToken: 0, diff: null, diffError: null, conflictView: null, conflictPreview: null,
+      preview: null, imageOld: null, imageNew: null, largeLoaded: new Set(),
+      settings: { showEntireFile: false, diffContext: 3, ignoreSpace: false },
+      snapshot: { path, staged: [], unstaged: [{ path: "file.txt", kind: "modified" }] },
+      repoPath: () => path, viewing: (value: string) => value === path, same: Object.is,
+      message: (error: unknown) => String(error), tr: (key: string) => key,
+      withWork: (_label: string, body: () => Promise<void>) => body(),
+    };
+    shell.loadDiff = (loadLarge = false) => loadDiff(shell, loadLarge);
+    try {
+      const first = loadDiff(shell);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      invalidateReads(path);
+      await first;
+      for (let attempt = 0; attempt < 20 && !shell.diff; attempt++) await new Promise((resolve) => setTimeout(resolve, 0));
+      return { reads, lines: shell.diff?.lines.map((line: any) => line.text) ?? [] };
+    } finally {
+      window.fetch = original;
+    }
+  });
+  expect(result).toEqual({ reads: 2, lines: ["+new"] });
+});
+
 for (const stage of ["file_history", "commit_tree"] as const) {
   for (const change of ["repository", "selection", "newer", "current"] as const) {
     for (const fail of [false, true]) {

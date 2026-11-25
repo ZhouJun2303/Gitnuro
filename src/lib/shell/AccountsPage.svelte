@@ -2,11 +2,12 @@
   import { onMount } from "svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { invoke } from "../perf";
-  import type { Account, Settings } from "../status";
+  import type { Account } from "../status";
   import { getShell } from "./context";
   import AccountAvatar from "./AccountAvatar.svelte";
   import "./AccountsPage.css";
-  import { mergeFields, mergeResponse } from "../reconcile";
+  import { mergeFields } from "../reconcile";
+  import { subscribeUpdate } from "../update-loop";
 
   const shell = getShell();
   let mounted = true;
@@ -33,7 +34,7 @@
   let deviceCode = $state("");
   let deviceUrl = $state("");
   let deviceTries = 0;
-  let deviceTimer: ReturnType<typeof setInterval> | undefined;
+  let stopDevicePolling: (() => void) | undefined;
   let draftService = $state("github");
   let draftHost = $state("github.com");
   let draftFamily = $state("github");
@@ -166,30 +167,8 @@
     if (syncing) return;
     syncing = true;
     notice = "";
-    const before = $state.snapshot(shell.settings) as Settings;
     try {
-      const saved = await invoke<Settings>("sync_accounts");
-      const same = shell.same.bind(shell);
-      const merged = mergeFields(shell.settings, before, saved, same);
-      const synced = {
-        accounts: mergeResponse(shell.settings.accounts, before.accounts, saved.accounts, same),
-        githubToken: merged.githubToken,
-        gitlabToken: merged.gitlabToken,
-        bitbucketToken: merged.bitbucketToken,
-        azureToken: merged.azureToken,
-      };
-      shell.settings = { ...shell.settings, ...synced };
-      // The backend already saved these fields. Preserve unrelated settings and
-      // write only edits made locally while the synchronization was in flight.
-      const persisted = {
-        accounts: saved.accounts,
-        githubToken: saved.githubToken,
-        gitlabToken: saved.gitlabToken,
-        bitbucketToken: saved.bitbucketToken,
-        azureToken: saved.azureToken,
-      };
-      shell.prefsBaseline = { ...(shell.prefsBaseline ?? before), ...persisted };
-      if (!same(synced, persisted)) await shell.savePrefs(false);
+      await shell.syncAccounts();
     } catch (error) {
       shell.actionError = shell.message(error);
     } finally {
@@ -387,8 +366,8 @@
   let deviceGeneration = 0;
   let devicePolling = false;
   function clearDeviceTimer() {
-    if (deviceTimer) clearInterval(deviceTimer);
-    deviceTimer = undefined;
+    stopDevicePolling?.();
+    stopDevicePolling = undefined;
   }
 
   function stopDevice() { deviceGeneration++; clearDeviceTimer(); }
@@ -429,7 +408,7 @@
       if (value.verificationUri) void openUrl(value.verificationUri);
       deviceTries = 0;
       clearDeviceTimer();
-      deviceTimer = setInterval(() => void pollDevice(), 3000);
+      stopDevicePolling = subscribeUpdate(pollDevice, 3000);
     } catch (error) {
       if (generation === deviceGeneration) shell.actionError = shell.message(error);
     }

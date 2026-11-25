@@ -25,6 +25,7 @@
     flex-direction: column;
     background: var(--elevated);
     overflow: hidden;
+    font-size: var(--detail-body-font-size, inherit);
   }
 
 .detail-tabs {
@@ -42,7 +43,7 @@
     border: 0;
     background: transparent;
     font: inherit;
-    font-size: 13px;
+    font-size: var(--detail-tab-font-size, 13px);
     padding: 0;
     color: var(--text-secondary);
     box-shadow: inset 0 -2px 0 transparent;
@@ -85,7 +86,7 @@
 
 .strip-author { font-weight: 600; flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.strip-sha, .strip-when { color: var(--text-secondary); flex: none; font-size: 12px; }
+.strip-sha, .strip-when { color: var(--text-secondary); flex: none; font-size: var(--detail-meta-font-size, 12px); }
 
 .strip-sha { font-family: var(--mono); }
 
@@ -104,6 +105,11 @@
 .fork-row { display: flex; gap: 12px; align-items: center; min-height: 22px; flex-wrap: wrap; }
 
 .fork-row .k { width: 72px; flex: none; }
+
+/* The detail card has room to wrap; never shorten a branch name here. */
+.fork-row .ref { max-width: 100%; height: auto; min-height: 18px; white-space: normal; }
+
+.fork-row .ref-text { overflow: visible; overflow-wrap: anywhere; }
 
 .sha-link {
     max-width: 100%;

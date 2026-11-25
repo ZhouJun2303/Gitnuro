@@ -60,7 +60,25 @@ export type MergePick = "ours" | "theirs" | "both" | "none";
 
 export type MergePiece =
     | { kind: "text"; text: string }
-    | { kind: "hunk"; ours: string; theirs: string; pick: MergePick; oursLines?: number; theirsLines?: number };
+    | {
+        kind: "hunk";
+        id?: string;
+        base?: string;
+        ours: string;
+        theirs: string;
+        pick: MergePick;
+        baseLines?: number;
+        oursLines?: number;
+        theirsLines?: number;
+      };
+
+export type MergeFileEntry = {
+  path: string;
+  previousPath?: string | null;
+  kind: "conflict" | "draft" | "resolved";
+  binary?: boolean;
+  conflictKind?: "content" | "binary" | "deleteModify" | "rename" | "path";
+};
 
 export type RepoFacts = {
     ignored: string[];

@@ -53,6 +53,9 @@ for (const theme of ["apple", "light", "dark"]) {
       const start = performance.now();
       await source.locator(`.file-select[title="${path}"]`).dblclick();
       await expect(destination.locator(`.file-select[title="${path}"]`)).toBeVisible();
+      if (action === "stage file") {
+        await expect(unstaged.locator('.file.selected .file-select')).toHaveAttribute("title", "loose/file-00001.txt");
+      }
       await expect(page.locator(".identity-floor.tone-busy")).toHaveCount(0);
       samples.push({ action, ms: performance.now() - start, calls: [...requests], longTasks: await page.evaluate(() => (window as any).__stageLongTasks) });
       expect(await unstaged.locator(".file").count()).toBeLessThan(200);

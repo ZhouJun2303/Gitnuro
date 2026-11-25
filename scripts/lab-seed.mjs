@@ -20,6 +20,7 @@ const shelf = join(repos, "shelf");
 const remote = join(lab, "remote.git");
 const remotePush = join(lab, "remote-push.git");
 const subBare = join(lab, "sub.git");
+const healthBare = join(lab, "sub-health.git");
 const editor = join(root, "scripts", "lab-break-editor.mjs");
 const FILL = 24;
 
@@ -628,6 +629,43 @@ function seedSubmoduleDiffRepo() {
   if (latest !== initial) git(join(path, "vendor"), ["checkout", "--detach", latest]);
 }
 
+function seedSubmoduleHealthRepo() {
+  const path = join(repos, "submodule-health");
+  wipe(path);
+  initWork(path);
+  commit(path, "README.md", "submodule health\n", "base");
+
+  const src = join(repos, "health-src");
+  wipe(src);
+  initWork(src);
+  commit(src, "health.txt", "shared\n", "health base");
+  git(src, ["remote", "add", "origin", fileUrl(healthBare)]);
+  git(src, ["push", "-u", "origin", "HEAD:main"]);
+  const mainSha = git(src, ["rev-parse", "HEAD"]).stdout.trim();
+
+  git(path, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", "-b", "main", fileUrl(healthBare), "Packages/Clean"]);
+
+  git(path, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", "-b", "main", fileUrl(healthBare), "Packages/WrongBranch"]);
+  const wrong = join(path, "Packages/WrongBranch");
+  git(wrong, ["checkout", "-q", "-b", "topic"]);
+  write(wrong, "health.txt", "local edit\n");
+
+  git(path, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", "-b", "main", fileUrl(healthBare), "Packages/Moved"]);
+  const moved = join(path, "Packages/Moved");
+  write(moved, "health.txt", "local commit\n");
+  git(moved, ["commit", "-qam", "test: move submodule"]);
+
+  git(path, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", fileUrl(healthBare), "Packages/Detached"]);
+  git(join(path, "Packages/Detached"), ["checkout", "-q", "--detach"]);
+
+  git(path, ["config", "-f", ".gitmodules", "submodule.Packages/Uninitialized.path", "Packages/Uninitialized"]);
+  git(path, ["config", "-f", ".gitmodules", "submodule.Packages/Uninitialized.url", fileUrl(healthBare)]);
+  git(path, ["update-index", "--add", "--cacheinfo", `160000,${mainSha},Packages/Uninitialized`]);
+  mkdirSync(join(path, "Packages/Uninitialized"), { recursive: true });
+  git(path, ["add", ".gitmodules"]);
+  git(path, ["commit", "-m", "test: submodules in every health state"]);
+}
+
 const restore = {
   "stage-many": seedStageManyRepo,
   "stage-dense": () => seedStageManyRepo("stage-dense", true),
@@ -638,6 +676,7 @@ const restore = {
   "unstage-initial": seedUnstageInitialRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
   "submodule-diff": seedSubmoduleDiffRepo,
+  "submodule-health": seedSubmoduleHealthRepo,
   "gone-upstream": seedGoneUpstreamRepo,
   "pull-deleted": seedPullDeletedRepo,
   "pull-noop": seedPullNoopRepo,
@@ -676,6 +715,7 @@ writeFileSync(join(lab, "gitconfig"), "");
 initBare(remote);
 initBare(remotePush);
 initBare(subBare);
+initBare(healthBare);
 const subSrc = join(repos, "sub-src");
 initWork(subSrc);
 commit(subSrc, "lib.txt", "library\n", "lib");
@@ -685,6 +725,7 @@ const subSha = git(subSrc, ["rev-parse", "HEAD"]).stdout.trim();
 commit(subSrc, "lib.txt", "library update\n", "lib update");
 git(subSrc, ["push", "origin", "HEAD:main"]);
 seedSubmoduleDiffRepo();
+seedSubmoduleHealthRepo();
 
 const writer = join(repos, "writer");
 initWork(writer);
@@ -723,6 +764,8 @@ dirtyBatch(ahead, "pending", FILL);
 commit(full, "src/keep.ts", "export const keep = true;\n", "keep a source file");
 git(full, ["checkout", "-b", "graph"]);
 commit(full, "docs/graph.md", "graph branch\n", "record the graph branch");
+// Long enough to be clipped by the compact ref chip anywhere the pane does not wrap.
+git(full, ["branch", "release/2026.11.24-candidate"]);
 git(full, ["checkout", "main"]);
 git(full, ["merge", "--no-ff", "graph", "-m", "merge graph"]);
 git(full, ["tag", "v1.0.0"]);

@@ -92,3 +92,47 @@ test("a stored snapshot paints the file list and stays unverified until a live r
   expect(result.revision).toBe(0);
   expect(result.unverified).toBe(true);
 });
+
+test("status refresh keeps the next or previous unstaged file selected after removal", async ({ page }) => {
+  await page.goto("/?scene=clean");
+  const result = await page.evaluate(async () => {
+    const modulePath = "/src/lib/shell/state.svelte.ts";
+    const { ShellState } = await import(/* @vite-ignore */ modulePath);
+    const shell: any = {
+      snapshot: null,
+      repos: [],
+      selectedPath: null,
+      selectedSide: "unstaged",
+      fileQuery: "",
+      conflictsOnly: false,
+      statusGen: 0,
+      statusRevision: 0,
+      statusObservedRevision: 0,
+      stageStatusUnverified: false,
+      contextRevision: 0,
+      watchQueued: null,
+      watchRevision: 0,
+      repoWatchNotes: new Map(),
+      mode: "loading",
+      loadError: "",
+      viewing: () => true,
+      jobKey: (path: string) => path.toLowerCase(),
+      scheduleStageRefresh: () => {},
+    };
+    shell.applySnapshot = ShellState.prototype.applySnapshot.bind(shell);
+    const status = (unstaged: string[], revision: number) => ({
+      path: "D:/perf/one",
+      branch: "main",
+      staged: [],
+      unstaged: unstaged.map((path) => ({ path, kind: "modified", previousPath: null })),
+      revision,
+    });
+    shell.applySnapshot(status(["a.txt", "b.txt", "c.txt"], 1));
+    shell.selectedPath = "b.txt";
+    shell.applySnapshot(status(["a.txt", "c.txt"], 2));
+    const next = shell.selectedPath;
+    shell.applySnapshot(status(["a.txt"], 3));
+    return { next, previous: shell.selectedPath };
+  });
+  expect(result).toEqual({ next: "c.txt", previous: "a.txt" });
+});

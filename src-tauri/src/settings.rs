@@ -61,6 +61,34 @@ pub struct Settings {
     pub ui_font_weight: u32,
     #[serde(default = "font_weight")]
     pub code_font_weight: u32,
+    #[serde(default = "commit_row_height")]
+    pub commit_row_height: u32,
+    #[serde(default = "commit_subject_font")]
+    pub commit_subject_font_size: u32,
+    #[serde(default = "commit_meta_font")]
+    pub commit_author_font_size: u32,
+    #[serde(default = "commit_meta_font")]
+    pub commit_sha_font_size: u32,
+    #[serde(default = "commit_time_font")]
+    pub commit_time_font_size: u32,
+    #[serde(default = "changes_row_height")]
+    pub changes_row_height: u32,
+    #[serde(default = "changes_font")]
+    pub changes_font_size: u32,
+    #[serde(default = "changes_meta_font")]
+    pub changes_meta_font_size: u32,
+    #[serde(default = "changes_indent")]
+    pub changes_indent_ch: f32,
+    #[serde(default = "detail_body_font")]
+    pub detail_body_font_size: u32,
+    #[serde(default = "detail_tab_font")]
+    pub detail_tab_font_size: u32,
+    #[serde(default = "detail_meta_font")]
+    pub detail_meta_font_size: u32,
+    #[serde(default = "sidebar_font")]
+    pub sidebar_font_size: u32,
+    #[serde(default = "sidebar_section_font")]
+    pub sidebar_section_font_size: u32,
     #[serde(default = "default_true")]
     pub date_relative: bool,
     #[serde(default)]
@@ -346,6 +374,14 @@ pub struct Settings {
     /// existing file means the install predates the guide, so it stays `seen`.
     #[serde(default = "features_intro_seen")]
     pub features_intro: String,
+    /// `pending` asks a new install to show the first-run setup once. Missing on
+    /// an existing file means the install predates it, so it stays `seen`.
+    #[serde(default = "onboarding_seen")]
+    pub onboarding: String,
+    /// Draw the full conflicted file and every block in the changes pane.
+    /// Off by default: a large file stalls the window while that text is split and painted.
+    #[serde(default)]
+    pub show_conflict_preview: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -511,9 +547,22 @@ fn recent_workspace_limit() -> u32 {
     5
 }
 fn diff_font() -> u32 {
-    14
+    13
 }
 fn font_weight() -> u32 { 400 }
+fn commit_row_height() -> u32 { 30 }
+fn commit_subject_font() -> u32 { 17 }
+fn commit_meta_font() -> u32 { 14 }
+fn commit_time_font() -> u32 { 15 }
+fn changes_row_height() -> u32 { 28 }
+fn changes_font() -> u32 { 14 }
+fn changes_meta_font() -> u32 { 11 }
+fn changes_indent() -> f32 { 0.8 }
+fn detail_body_font() -> u32 { 14 }
+fn detail_tab_font() -> u32 { 13 }
+fn detail_meta_font() -> u32 { 12 }
+fn sidebar_font() -> u32 { 20 }
+fn sidebar_section_font() -> u32 { 22 }
 fn date_sort() -> String {
     "date".into()
 }
@@ -576,6 +625,20 @@ impl Default for Settings {
             code_font: String::new(),
             ui_font_weight: font_weight(),
             code_font_weight: font_weight(),
+            commit_row_height: commit_row_height(),
+            commit_subject_font_size: commit_subject_font(),
+            commit_author_font_size: commit_meta_font(),
+            commit_sha_font_size: commit_meta_font(),
+            commit_time_font_size: commit_time_font(),
+            changes_row_height: changes_row_height(),
+            changes_font_size: changes_font(),
+            changes_meta_font_size: changes_meta_font(),
+            changes_indent_ch: changes_indent(),
+            detail_body_font_size: detail_body_font(),
+            detail_tab_font_size: detail_tab_font(),
+            detail_meta_font_size: detail_meta_font(),
+            sidebar_font_size: sidebar_font(),
+            sidebar_section_font_size: sidebar_section_font(),
             date_relative: true,
             date_format: String::new(),
             date_24h: true,
@@ -697,11 +760,16 @@ impl Default for Settings {
             dismissed_update: String::new(),
             silent_install: true,
             features_intro: features_intro_seen(),
+            onboarding: onboarding_seen(),
+            show_conflict_preview: false,
         }
     }
 }
 
 fn features_intro_seen() -> String {
+    "seen".into()
+}
+fn onboarding_seen() -> String {
     "seen".into()
 }
 
@@ -732,6 +800,25 @@ pub fn load() -> Result<Settings, String> {
 
 pub fn save(settings: &Settings) -> Result<(), String> {
     save_at(&path()?, settings)
+}
+
+/// The suggested name for an exported copy, dated by the caller's stamp.
+pub fn backup_name(stamp: &str) -> String {
+    format!("awegit-settings-{stamp}.json")
+}
+
+/// Copy the settings file to `target`. Secrets already live in the vault and
+/// are absent from the on-disk file, so the copy carries preferences only.
+pub fn backup_to(target: &Path) -> Result<(), String> {
+    let source = path()?;
+    if !source.is_file() {
+        return Err("settings-missing".into());
+    }
+    if let Some(parent) = target.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::copy(&source, target).map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 /// Patch only the window geometry. Window moves happen while a slow sync is
@@ -806,6 +893,7 @@ fn load_at(path: &Path) -> Result<Settings, String> {
     if !path.exists() {
         let mut fresh = Settings::default();
         fresh.features_intro = "pending".into();
+        fresh.onboarding = "pending".into();
         crate::secrets::fill(&mut fresh)?;
         return Ok(fresh);
     }
@@ -1567,9 +1655,23 @@ mod tests {
         assert_eq!(defaults.code_font, "");
         assert_eq!(defaults.ui_scale, 14);
         assert!(!defaults.senior_mode);
-        assert_eq!(defaults.diff_font_size, 14);
+        assert_eq!(defaults.diff_font_size, 13);
         assert_eq!(defaults.ui_font_weight, 400);
         assert_eq!(defaults.code_font_weight, 400);
+        assert_eq!(defaults.commit_row_height, 30);
+        assert_eq!(defaults.commit_subject_font_size, 17);
+        assert_eq!(defaults.commit_author_font_size, 14);
+        assert_eq!(defaults.commit_sha_font_size, 14);
+        assert_eq!(defaults.commit_time_font_size, 15);
+        assert_eq!(defaults.changes_row_height, 28);
+        assert_eq!(defaults.changes_font_size, 14);
+        assert_eq!(defaults.changes_meta_font_size, 11);
+        assert_eq!(defaults.changes_indent_ch, 0.8);
+        assert_eq!(defaults.detail_body_font_size, 14);
+        assert_eq!(defaults.detail_tab_font_size, 13);
+        assert_eq!(defaults.detail_meta_font_size, 12);
+        assert_eq!(defaults.sidebar_font_size, 20);
+        assert_eq!(defaults.sidebar_section_font_size, 22);
         let saved: super::Settings = serde_json::from_str(r#"{"uiScale":13,"diffFontSize":16,"uiFont":"inter","codeFont":"jetbrains-mono","uiFontWeight":500,"codeFontWeight":600}"#).unwrap();
         assert_eq!(saved.ui_scale, 13);
         let senior: super::Settings = serde_json::from_str(r#"{"seniorMode":true}"#).unwrap();
@@ -1579,6 +1681,8 @@ mod tests {
         assert_eq!(saved.code_font, "jetbrains-mono");
         assert_eq!(saved.ui_font_weight, 500);
         assert_eq!(saved.code_font_weight, 600);
+        let decimal: super::Settings = serde_json::from_str(r#"{"changesIndentCh":0.6}"#).unwrap();
+        assert!((decimal.changes_indent_ch - 0.6).abs() < f32::EPSILON);
     }
 
     use super::*;
@@ -1731,6 +1835,22 @@ mod tests {
     fn missing_features_intro_counts_as_seen() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings.features_intro, "seen");
+    }
+
+    #[test]
+    fn missing_onboarding_counts_as_seen() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.onboarding, "seen");
+    }
+
+    #[test]
+    fn missing_conflict_preview_defaults_off_and_keeps_an_explicit_choice() {
+        assert!(!serde_json::from_str::<Settings>("{}").unwrap().show_conflict_preview);
+        assert!(!Settings::default().show_conflict_preview);
+        let settings: Settings = serde_json::from_str(r#"{"showConflictPreview":true}"#).unwrap();
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(saved["showConflictPreview"], true);
+        assert!(serde_json::from_value::<Settings>(saved).unwrap().show_conflict_preview);
     }
 
     #[test]
@@ -1932,6 +2052,26 @@ mod tests {
         assert_eq!(loaded.theme, "dark");
         assert_eq!(loaded.github_token, "secret");
         assert!(loaded.recovery_notice.is_empty());
+    }
+
+    #[test]
+    fn backup_copies_the_settings_file_without_secrets() {
+        let dir = TempSettings::new();
+        save_at(&dir.path, &sample_settings()).unwrap();
+        let target = dir.dir.join("backups").join(backup_name("2026-11-25"));
+        assert_eq!(target.file_name().unwrap(), "awegit-settings-2026-11-25.json");
+        backup_to(&target).unwrap();
+        let text = std::fs::read_to_string(&target).unwrap();
+        assert!(text.contains("\"theme\": \"dark\""), "{text}");
+        assert!(!text.contains("secret"), "{text}");
+    }
+
+    #[test]
+    fn backup_needs_a_saved_settings_file() {
+        let dir = TempSettings::new();
+        let target = dir.dir.join("missing.json");
+        assert!(backup_to(&target).is_err());
+        assert!(!target.exists());
     }
 
     #[test]
