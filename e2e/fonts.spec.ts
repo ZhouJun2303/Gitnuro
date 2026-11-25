@@ -86,6 +86,8 @@ for (const theme of ["apple", "light", "dark"] as const) {
     const globalSize = page.getByRole("slider", { name: "Overall font size" });
     await globalSize.dispatchEvent("pointerdown");
     await expect(page.locator('[data-dialog="prefs"]')).toHaveClass(/slider-dragging/);
+    await expect(page.locator('[data-dialog="prefs"]')).toHaveCSS("backdrop-filter", "none");
+    await expect(page.locator(".scrim.slider-preview")).toHaveCSS("backdrop-filter", "none");
     await setSlider(page, "Overall font size", 2);
     await expect.poll(() => page.evaluate(() => ({
       subject: getComputedStyle(document.documentElement).getPropertyValue("--commit-subject-font-size").trim(),

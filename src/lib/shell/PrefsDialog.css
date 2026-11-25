@@ -199,6 +199,8 @@
 .dialog.prefs { transition: opacity 120ms ease; }
 .dialog.prefs.slider-dragging { opacity: 0.46; }
 .scrim.slider-preview { background: rgba(0, 0, 0, 0.16); backdrop-filter: none; }
+:root[data-theme="apple"] .scrim:not(.menu-dismiss).slider-preview { background: rgba(0, 0, 0, 0.16); backdrop-filter: none; }
+:root[data-theme="apple"] .dialog.prefs.slider-dragging { backdrop-filter: none; }
 
 .pref-control > select { width: 190px; }
 
