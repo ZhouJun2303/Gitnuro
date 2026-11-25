@@ -1015,9 +1015,11 @@
             <p class="empty">{shell.tr("dialog.settingsFile")}</p>
             {#if shell.settingsPath}<p class="empty source-path" title={shell.settingsPath}>{shell.settingsPath}</p>{/if}
             <div class="pref-card-actions">
+              <button class="text-button export-settings" type="button" onclick={() => void shell.exportSettingsBackup()}>{shell.tr("dialog.exportBackup")}</button>
               <button class="text-button" type="button" onclick={() => void shell.importFork()}>{shell.tr("dialog.importFork")}</button>
               <button class="text-button" type="button" onclick={() => void shell.importForkFile()}>{shell.tr("dialog.importForkFile")}</button>
             </div>
+            {#if shell.settingsBackupNote}<p class="empty source-path settings-backup-note" title={shell.settingsBackupNote}>{shell.settingsBackupNote}</p>{/if}
             {#if shell.forkImportNote}<p class="empty">{shell.forkImportNote}</p>{/if}
           </div>
         </section>

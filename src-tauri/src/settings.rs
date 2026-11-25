@@ -802,6 +802,25 @@ pub fn save(settings: &Settings) -> Result<(), String> {
     save_at(&path()?, settings)
 }
 
+/// The suggested name for an exported copy, dated by the caller's stamp.
+pub fn backup_name(stamp: &str) -> String {
+    format!("awegit-settings-{stamp}.json")
+}
+
+/// Copy the settings file to `target`. Secrets already live in the vault and
+/// are absent from the on-disk file, so the copy carries preferences only.
+pub fn backup_to(target: &Path) -> Result<(), String> {
+    let source = path()?;
+    if !source.is_file() {
+        return Err("settings-missing".into());
+    }
+    if let Some(parent) = target.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::copy(&source, target).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 /// Patch only the window geometry. Window moves happen while a slow sync is
 /// running, and they must never write back an older copy of the other fields.
 pub fn save_window_bounds(width: u32, height: u32, x: i32, y: i32) -> Result<(), String> {
@@ -2033,6 +2052,26 @@ mod tests {
         assert_eq!(loaded.theme, "dark");
         assert_eq!(loaded.github_token, "secret");
         assert!(loaded.recovery_notice.is_empty());
+    }
+
+    #[test]
+    fn backup_copies_the_settings_file_without_secrets() {
+        let dir = TempSettings::new();
+        save_at(&dir.path, &sample_settings()).unwrap();
+        let target = dir.dir.join("backups").join(backup_name("2026-11-25"));
+        assert_eq!(target.file_name().unwrap(), "awegit-settings-2026-11-25.json");
+        backup_to(&target).unwrap();
+        let text = std::fs::read_to_string(&target).unwrap();
+        assert!(text.contains("\"theme\": \"dark\""), "{text}");
+        assert!(!text.contains("secret"), "{text}");
+    }
+
+    #[test]
+    fn backup_needs_a_saved_settings_file() {
+        let dir = TempSettings::new();
+        let target = dir.dir.join("missing.json");
+        assert!(backup_to(&target).is_err());
+        assert!(!target.exists());
     }
 
     #[test]

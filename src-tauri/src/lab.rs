@@ -345,6 +345,14 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "open_font_folder" => Ok(Value::Null),
         "save_settings" => super::on_settings_lane({ let values = req(args, "values")?; let fields = req(args, "fields")?; let before = req(args, "before")?; move || done_result(super::save_settings(values, fields, before)) })?,
         "settings_path" => done_result(super::settings_path()),
+        "export_settings_backup" => {
+            let dir = lab_root()?.join("backups");
+            std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+            let stamp = chrono::Local::now().format("%Y-%m-%d").to_string();
+            let target = dir.join(super::settings::backup_name(&stamp));
+            super::settings::backup_to(&target)?;
+            done(Some(target.display().to_string()))
+        }
         "import_fork_settings" => {
             let path: Option<String> = req(args, "path")?;
             if path.as_deref().map(str::trim).unwrap_or("").is_empty() {

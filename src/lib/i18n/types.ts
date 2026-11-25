@@ -1039,6 +1039,9 @@ export type Messages = {
     applyStashDelete: string;
     pushTagOnCreate: string;
     settingsFile: string;
+    exportBackup: string;
+    settingsExported: string;
+    settingsMissing: string;
     importFork: string;
     importForkFile: string;
     forkImported: string;

@@ -84,6 +84,7 @@ fn main() {
             "save_window_bounds",
             "settings_path",
             "import_fork_settings",
+            "export_settings_backup",
             "external_tools",
             "common_tools",
             "detect_terminal_clis",

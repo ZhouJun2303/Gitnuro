@@ -714,6 +714,8 @@ export class ShellState {
 
 
   forkImportNote = $state("");
+  settingsBackupNote = $state("");
+  exportingSettings = $state(false);
 
 
   settings = $state<Settings>(
@@ -4983,6 +4985,23 @@ export class ShellState {
       if (file) await this.importFork(file);
     } catch (error) {
       this.forkImportNote = this.message(error);
+    }
+  }
+
+  async exportSettingsBackup() {
+    if (!this.backend() || this.exportingSettings) return;
+    this.exportingSettings = true;
+    this.settingsBackupNote = "";
+    try {
+      // Write pending edits first so the copy matches what the dialog shows.
+      await this.savePrefs(false);
+      const target = await invoke<string | null>("export_settings_backup");
+      if (target) this.settingsBackupNote = this.tr("dialog.settingsExported", { path: target });
+    } catch (error) {
+      const text = this.message(error);
+      this.settingsBackupNote = text.includes("settings-missing") ? this.tr("dialog.settingsMissing") : text;
+    } finally {
+      this.exportingSettings = false;
     }
   }
 
