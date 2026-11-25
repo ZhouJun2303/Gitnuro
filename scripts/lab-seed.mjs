@@ -764,6 +764,8 @@ dirtyBatch(ahead, "pending", FILL);
 commit(full, "src/keep.ts", "export const keep = true;\n", "keep a source file");
 git(full, ["checkout", "-b", "graph"]);
 commit(full, "docs/graph.md", "graph branch\n", "record the graph branch");
+// Long enough to be clipped by the compact ref chip anywhere the pane does not wrap.
+git(full, ["branch", "release/2026.11.24-candidate"]);
 git(full, ["checkout", "main"]);
 git(full, ["merge", "--no-ff", "graph", "-m", "merge graph"]);
 git(full, ["tag", "v1.0.0"]);

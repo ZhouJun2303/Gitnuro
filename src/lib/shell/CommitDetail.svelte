@@ -89,7 +89,7 @@
                   {#if shell.commitRefs().length > 0}
                     {@const refs = [...shell.branchRefLabels(shell.commitRefs()), ...shell.plainRefLabels(shell.commitRefs())]}
                     <div class="fork-row"><span class="k">{shell.tr("chrome.refsLabel")}</span>
-                      {#each refs as label (label)}<RefChip {label} kind={shell.refKind(label)} compact={shell.settings.compactBranchLabels} />{/each}
+                      {#each refs as label (label)}<RefChip {label} kind={shell.refKind(label)} />{/each}
                     </div>
                   {/if}
                   {#if plate}

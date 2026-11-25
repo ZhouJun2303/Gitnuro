@@ -877,6 +877,18 @@ test("diff panes do not draw the ---/+++ file header", async ({ page }) => {
   }
 });
 
+test("commit detail shows a long branch name in full", async ({ page }) => {
+  await pinLabSettings(page, { compactBranchLabels: true });
+  await openLabScene(page, "commit-long-ref", ".detail .fork-row .ref", { theme: "light" });
+  const chip = page.locator(".detail .fork-row .ref").filter({ hasText: "release/2026.11.24-candidate" });
+  await expect(chip).toBeVisible();
+  const clipped = await chip.evaluate((node) => {
+    const text = node.querySelector(".ref-text") ?? node;
+    return text.scrollWidth > text.clientWidth + 1;
+  });
+  expect(clipped, "the branch name must not be ellipsized").toBe(false);
+});
+
 test("commit detail filter narrows files in every tab", async ({ page }) => {
   await openLabScene(page, "commit-filter", ".detail .detail-filter");
   const paths = page.locator(".commit-files .patch-path");

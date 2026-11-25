@@ -246,6 +246,10 @@ async function fillSurface(shell: ShellState, id: string) {
     await shell.openHistoryTab("changes");
     return;
   }
+  if (id === "commit-long-ref") {
+    await showCommitBySummary(shell, "record the graph branch");
+    return;
+  }
   if (id === "commit-filter") {
     await showCommitBySummary(shell, "add lab submodules");
     shell.searchOpen.detail = true;

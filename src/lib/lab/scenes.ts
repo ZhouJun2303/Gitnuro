@@ -120,6 +120,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "history-multiselect", group: "主界面", title: "全部提交 · 多选与批量拣选", repo: "full", ready: ".commit-row.selected" }),
   scene({ id: "history-remote", group: "主界面", title: "远程未拉取历史", repo: "behind", ready: ".commit-row.remote-only" }),
   scene({ id: "commit", group: "主界面", title: "提交详情", repo: "full", ready: ".detail" }),
+  scene({ id: "commit-long-ref", group: "主界面", title: "提交详情 · 长分支名", repo: "full", ready: ".detail .fork-row .ref" }),
   scene({ id: "commit-filter", group: "主界面", title: "提交详情过滤文件", repo: "full", ready: ".detail .detail-filter" }),
   scene({ id: "commit-binary", group: "主界面", title: "提交中的二进制差异", repo: "full", ready: ".binary-summary" }),
   scene({ id: "tree", group: "主界面", title: "文件树", repo: "full", ready: ".tree-row" }),
