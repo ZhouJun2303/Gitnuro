@@ -105,6 +105,7 @@
     .subject { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: 14px var(--mono); min-height: 38px; }
     .gen { background: var(--accent); color: white; border: 0; justify-self: start; }
     .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .grid.two { grid-template-columns: repeat(2, 1fr); }
     article { background: var(--elevated); border: 1px solid var(--line); border-radius: 14px; padding: 14px 14px 12px; }
     article h3 { margin: 0 0 6px; font-size: 16px; }
     article p { margin: 0; color: var(--muted); font-size: 14px; }
@@ -121,7 +122,7 @@
     .kbd { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; background: #fafafa; white-space: nowrap; }
     footer { padding: 28px 0 48px; color: var(--muted); font-size: 14px; }
     @media (max-width: 860px) {
-      .hero, .feature, .feature.reverse, .grid, .split, .shots { grid-template-columns: 1fr; direction: ltr; }
+      .hero, .feature, .feature.reverse, .grid, .grid.two, .split, .shots { grid-template-columns: 1fr; direction: ltr; }
       .shot.wide { grid-column: auto; }
       .keys td:last-child { white-space: normal; }
       nav { display: none; }
@@ -142,6 +143,7 @@
         AweGit
       </a>
       <nav>
+        <a href="#first-run" data-zh>首次启动</a><a href="#first-run" data-en>First run</a>
         <a href="#fakeignore">fakeignore</a>
         <a href="#workspaces" data-zh>工作区</a><a href="#workspaces" data-en>Workspaces</a>
         <a href="#conflicts" data-zh>冲突</a><a href="#conflicts" data-en>Conflicts</a>
@@ -172,7 +174,8 @@
           <span class="pill" data-zh>冲突合并</span><span class="pill" data-en>Conflict merge</span>
           <span class="pill" data-zh>提交说明</span><span class="pill" data-en>Commit messages</span>
           <span class="pill" data-zh>操作流程</span><span class="pill" data-en>Pipeline</span>
-          <span class="pill" data-zh>11 个偏好页签</span><span class="pill" data-en>11 preference tabs</span>
+          <span class="pill" data-zh>14 个偏好页签</span><span class="pill" data-en>14 preference tabs</span>
+          <span class="pill" data-zh>首次后台准备</span><span class="pill" data-en>First-run setup</span>
         </div>
       </div>
       <div class="stage" aria-hidden="true">
@@ -211,6 +214,38 @@
           <figcaption><span data-zh>冲突：选择一侧、保留两边合并，或交给外部合并工具。</span><span data-en>Conflicts: keep one side, keep both, or hand the file to an external merge tool.</span></figcaption>
         </figure>
       </div>
+    </section>
+
+    <section id="first-run">
+      <p class="kicker" data-zh>首次启动</p><p class="kicker" data-en>First run</p>
+      <h2 data-zh>新装第一次打开，后台准备好这四件事</h2>
+      <h2 data-en>On the first launch, four things are prepared in the background</h2>
+      <p class="sub" data-zh>全新安装第一次启动时，AweGit 在首屏画出后依次在后台完成下面四项。不弹窗、不需要确认，也不阻塞打开仓库；某一项失败就跳过，不影响使用。这些步骤只执行一次，不常驻，也不增加安装包体积。</p>
+      <p class="sub" data-en>On the first launch of a fresh install, after the first screen is drawn, AweGit prepares the four items below in the background. There is no dialog and no confirmation, and opening a repository is never blocked; a failed item is skipped. The steps run once, do not stay resident, and add nothing to the installer size.</p>
+      <div class="grid two">
+        <article>
+          <h3 data-zh>同步本机账号</h3><h3 data-en>Sync local accounts</h3>
+          <p data-zh>读取这台电脑上 Git 和托管服务已经登录的账号，HTTPS 远程直接使用，不用再手动添加。</p>
+          <p data-en>Read the accounts Git and hosted services already signed in on this machine, so HTTPS remotes can use them without adding anything by hand.</p>
+        </article>
+        <article>
+          <h3 data-zh>导入 Fork 设置</h3><h3 data-en>Import Fork settings</h3>
+          <p data-zh>找到 Fork 的配置就导入偏好、仓库和工作区，不切换当前工作区。</p>
+          <p data-en>If Fork settings are found, import its preferences, repositories, and workspaces without switching the current workspace.</p>
+        </article>
+        <article>
+          <h3 data-zh>启用模型接口</h3><h3 data-en>Enable the model endpoint</h3>
+          <p data-zh>AI 提交说明按默认接口启用；密钥仍在偏好设置 → AI 里填写。</p>
+          <p data-en>AI commit messages are enabled against the default endpoint; the key is still entered under Preferences → AI.</p>
+        </article>
+        <article>
+          <h3 data-zh>开启 Killer 推送</h3><h3 data-en>Turn on killer push</h3>
+          <p data-zh>推送被远程新提交拒绝时，自动拉取后重推一次；冲突会中止并恢复现场。</p>
+          <p data-en>When the remote has newer commits, pull and retry the push once; a conflict aborts and restores the scene.</p>
+        </article>
+      </div>
+      <p class="note" data-zh>账号、Fork 导入结果、AI 接口和推送开关都可以在偏好设置里查看和修改。</p>
+      <p class="note" data-en>Accounts, the Fork import, the AI endpoint, and the push switch can all be reviewed and changed in Preferences.</p>
     </section>
 
     <section id="fakeignore">
@@ -306,15 +341,15 @@ bonus = 1</pre>
 
     <section id="prefs">
       <p class="kicker" data-zh>偏好设置</p><p class="kicker" data-en>Preferences</p>
-      <h2 data-zh>11 个页签，修改即时生效</h2>
-      <h2 data-en>Eleven tabs, saved as you change them</h2>
-      <p class="sub" data-zh>左侧按「常规 / 工作流 / 系统」三组排列：通用、工作区、差异、提交、AI、Git、集成、命令、网络、账户、高级，每个页签里再按功能卡片分区。语言、主题、日期格式、差异显示、提交选项、AI 接口、代理、证书、账户和更新开关都在这里。点面板外空白不会关闭，用右上角关闭、完成或 Escape 退出。</p>
-      <p class="sub" data-en>The left column groups eleven tabs under General, Workflow, and System: General, Workspaces, Diff, Commit, AI, Git, Integrations, Commands, Network, Accounts, and Advanced. Each tab is split into cards for language, theme, date format, diff display, commit options, AI endpoint, proxies, certificates, accounts, and updates. Clicking outside does not close the panel; use the close button, Done, or Escape.</p>
-      <p class="sub" data-zh>Ctrl+Alt+L 在中文和英文之间切换，独立的历史、文件内容、合并和流程窗口会同步换语言，同时保留正在查看的内容和编辑草稿。AI 未启用、接口未填写或后端报告缺少密钥时，点「生成提交说明」会跳到 AI 页签并定位到对应配置项。更新面板可以下载并启动安装包，静默安装默认开启。</p>
-      <p class="sub" data-en>Ctrl+Alt+L switches between Chinese and English. Separate history, file, merge, and pipeline windows follow the change while keeping what they are viewing and any draft. If AI is off, the endpoint is empty, or the backend reports a missing key, Generate commit message opens the AI tab and focuses the setting that needs attention. The update panel downloads and launches the installer, with silent install on by default.</p>
+      <h2 data-zh>14 个页签，修改即时生效</h2>
+      <h2 data-en>Fourteen tabs, saved as you change them</h2>
+      <p class="sub" data-zh>左侧按「常规 / 工作流 / 系统」三组排列：通用、字体、工作区、差异、历史预览、键盘快捷键、提交、AI、Git、集成、自定义命令、网络、账户、高级，每个页签里再按功能卡片分区。语言、主题、字体、日期格式、差异显示、提交选项、AI 接口、代理、证书、账户和更新开关都在这里。点面板外空白不会关闭，用右上角关闭、完成或 Escape 退出。</p>
+      <p class="sub" data-en>The left column groups fourteen tabs under General, Workflow, and System: General, Fonts, Workspace, Diff, History previews, Shortcuts, Commit, AI, Git, Integration, Custom Commands, Network, Accounts, and Advanced. Each tab is split into cards for language, theme, fonts, date format, diff display, commit options, AI endpoint, proxies, certificates, accounts, and updates. Clicking outside does not close the panel; use the close button, Done, or Escape.</p>
+      <p class="sub" data-zh>Ctrl+Alt+L 在中文和英文之间切换，独立的历史、文件内容、合并和流程窗口会同步换语言，同时保留正在查看的内容和编辑草稿。键盘快捷键页可以录制、清除和恢复默认按键，按到被占用的组合会提示占用者。AI 未启用、接口未填写或后端报告缺少密钥时，点「生成提交说明」会跳到 AI 页签并定位到对应配置项。更新面板可以下载并启动安装包，静默安装默认开启，程序每天自动检查一次新版本。</p>
+      <p class="sub" data-en>Ctrl+Alt+L switches between Chinese and English. Separate history, file, merge, and pipeline windows follow the change while keeping what they are viewing and any draft. The Shortcuts tab records, clears, and resets keys, and reports the command already holding a combination. If AI is off, the endpoint is empty, or the backend reports a missing key, Generate commit message opens the AI tab and focuses the setting that needs attention. The update panel downloads and launches the installer with silent install on by default, and the app checks for a new version once a day.</p>
       <figure class="shot wide">
         <img src="screenshots/preferences.png" alt="AweGit preferences" loading="lazy" />
-        <figcaption><span data-zh>通用页：语言、主题、日期与时间、界面。更改会自动保存。</span><span data-en>General: language, theme, dates and time, interface. Changes save automatically.</span></figcaption>
+        <figcaption><span data-zh>字体页：老年人模式、整体字号和从 Google Fonts 添加字体；分区字号与文件缩进在同一页。更改会自动保存。</span><span data-en>Fonts: senior mode, the overall size slider, and Google Fonts; per-section sizes and file indentation sit on the same page. Changes save automatically.</span></figcaption>
       </figure>
     </section>
 
@@ -343,8 +378,8 @@ bonus = 1</pre>
       <p class="kicker" data-zh>历史与差异</p><p class="kicker" data-en>History and diffs</p>
       <h2 data-zh>图、文件和每一行从哪来</h2>
       <h2 data-en>The graph, the file, and the line</h2>
-      <p class="sub" data-zh>提交图可以只看当前分支、所有分支，也可以勾选多个分支自定义筛选，一键清除。领先和落后记在分支上。远程还没有的本地分支会在历史和侧栏标出来。文件历史、追溯、某一次的文件内容、引用日志都能打开。提交可以按说明或内容搜索。文件历史和提交详情直接展示图片前后版本；工作区图片差异有并排、滑动、洋葱皮和像素差分。</p>
-      <p class="sub" data-en>The graph can follow the current branch, all branches, or a custom set of branches with one-click clearing. Ahead and behind sit on the branch. A local branch the remote does not have is marked in history and in the sidebar. File history, blame, a file at one revision, and the reflog each open. Commits can be searched by message or by content. File history and commit details display before/after images directly; working-tree image diffs include side by side, swipe, onion skin, and pixel difference.</p>
+      <p class="sub" data-zh>提交图可以只看当前分支、所有分支，也可以勾选多个分支自定义筛选，一键清除。领先和落后记在分支上。远程还没有的本地分支会在历史和侧栏标出来。文件历史、追溯、某一次的文件内容、引用日志都能打开。提交可以按说明或内容搜索，搜索保留整张提交表，匹配项用光标出，上一个和下一个显示总数并滚到对应提交。文件历史和提交详情直接展示图片前后版本；工作区图片差异有并排、滑动、洋葱皮和像素差分。历史里的任意版本可以按格式生成临时副本，交给 Excel、Unity 等程序打开，支持的格式清单在偏好设置 → 历史预览。</p>
+      <p class="sub" data-en>The graph can follow the current branch, all branches, or a custom set of branches with one-click clearing. Ahead and behind sit on the branch. A local branch the remote does not have is marked in history and in the sidebar. File history, blame, a file at one revision, and the reflog each open. Commits can be searched by message or by content; search keeps the whole commit table, marks matches with a caret, and steps through them with a total count, scrolling to the commit. File history and commit details display before/after images directly; working-tree image diffs include side by side, swipe, onion skin, and pixel difference. Any revision can be turned into a temporary file copy for Excel, Unity, and similar programs; the supported formats are listed under Preferences → History previews.</p>
       <div class="grid">
         <article>
           <h3 data-zh>文本差异</h3><h3 data-en>Text diff</h3>
@@ -368,8 +403,8 @@ bonus = 1</pre>
       <p class="kicker" data-zh>快捷键</p><p class="kicker" data-en>Shortcuts</p>
       <h2 data-zh>键盘上能做完的事</h2>
       <h2 data-en>Most things have a key</h2>
-      <p class="sub" data-zh>下面是 Windows 上的按键。macOS 上，除了切换标签的 Ctrl+Tab 和 Ctrl+Shift+Tab，其余带 Ctrl 的组合改为 Command；方向键仍是上、下。Escape 关闭当前对话框。终端从仓库菜单打开，没有单独的快捷键。</p>
-      <p class="sub" data-en>These are the Windows keys. On macOS, every Ctrl combination becomes Command except Ctrl+Tab and Ctrl+Shift+Tab for tab switching; the arrow keys stay the same. Escape closes the current dialog. The terminal opens from the repository menu and has no shortcut.</p>
+      <p class="sub" data-zh>下面是 Windows 上的按键。macOS 上，除了切换标签的 Ctrl+Tab 和 Ctrl+Shift+Tab，其余带 Ctrl 的组合改为 Command；方向键仍是上、下。Escape 关闭当前对话框。快捷键可以在偏好设置 → 键盘快捷键里录制、清除和恢复默认。终端可以在仓库菜单或 Ctrl+Alt+Shift+T 打开。</p>
+      <p class="sub" data-en>These are the Windows keys. On macOS, every Ctrl combination becomes Command except Ctrl+Tab and Ctrl+Shift+Tab for tab switching; the arrow keys stay the same. Escape closes the current dialog. Shortcuts can be recorded, cleared, and reset under Preferences → Shortcuts. The terminal opens from the repository menu or with Ctrl+Alt+Shift+T.</p>
       <table class="keys">
         <tbody>
           <tr><td><span data-zh>刷新</span><span data-en>Refresh</span></td><td><span class="kbd">F5</span> / <span class="kbd">Ctrl+R</span></td></tr>
@@ -395,12 +430,15 @@ bonus = 1</pre>
           <tr><td><span data-zh>变更 / 历史</span><span data-en>Changes / history</span></td><td><span class="kbd">Ctrl+1</span> / <span class="kbd">Ctrl+2</span></td></tr>
           <tr><td><span data-zh>当前分支 / 所有分支</span><span data-en>Current / all branches</span></td><td><span class="kbd">Ctrl+Shift+A</span></td></tr>
           <tr><td><span data-zh>定位当前分支</span><span data-en>Reveal current branch</span></td><td><span class="kbd">Ctrl+0</span></td></tr>
-          <tr><td><span data-zh>快速启动</span><span data-en>Quick launch</span></td><td><span class="kbd">Ctrl+K</span></td></tr>
+          <tr><td><span data-zh>快速启动</span><span data-en>Quick launch</span></td><td><span class="kbd">Ctrl+K</span> / <span class="kbd">Ctrl+P</span></td></tr>
           <tr><td><span data-zh>搜索提交</span><span data-en>Search commits</span></td><td><span class="kbd">Ctrl+F</span></td></tr>
           <tr><td><span data-zh>后退 / 前进</span><span data-en>Back / forward</span></td><td><span class="kbd">Alt+Left</span> / <span class="kbd">Alt+Right</span></td></tr>
           <tr><td><span data-zh>设置</span><span data-en>Settings</span></td><td><span class="kbd">Ctrl+,</span></td></tr>
           <tr><td><span data-zh>切换中英文</span><span data-en>Switch Chinese / English</span></td><td><span class="kbd">Ctrl+Alt+L</span></td></tr>
           <tr><td><span data-zh>在文件管理器中显示</span><span data-en>Reveal in file manager</span></td><td><span class="kbd">Ctrl+Alt+O</span></td></tr>
+          <tr><td><span data-zh>打开终端</span><span data-en>Open terminal</span></td><td><span class="kbd">Ctrl+Alt+Shift+T</span></td></tr>
+          <tr><td><span data-zh>复制所选内容或路径</span><span data-en>Copy selection or path</span></td><td><span class="kbd">Ctrl+C</span></td></tr>
+          <tr><td><span data-zh>性能面板</span><span data-en>Performance panel</span></td><td><span class="kbd">Ctrl+Alt+P</span></td></tr>
           <tr><td><span data-zh>放大 / 缩小</span><span data-en>Zoom in / out</span></td><td><span class="kbd">Ctrl+=</span> / <span class="kbd">Ctrl+-</span></td></tr>
         </tbody>
       </table>
@@ -413,13 +451,13 @@ bonus = 1</pre>
       <div class="grid">
         <article>
           <h3 data-zh>合并和改写</h3><h3 data-en>Merge and rewrite</h3>
-          <p data-zh>交互变基、拣选、还原、压缩。压缩时选中范围之后的提交会重放，范围里不能有合并提交。重置有软、混合、硬。二分查找可以标好和坏。贮藏可以只收选中的文件，也可以从贮藏拉出分支。操作被本地修改挡住时，可以先贮藏再重试。</p>
-          <p data-en>Interactive rebase, cherry-pick, revert, and squash. Squash replays the commits after the range, and the range cannot contain a merge. Reset is soft, mixed, or hard. Bisect marks good and bad. A stash can take only the selected files, or grow a branch. When local edits block an action, stash them and retry.</p>
+          <p data-zh>交互变基、拣选、还原、压缩。历史里可以多选提交，按依赖顺序批量拣选，冲突后继续、跳过或中止。压缩时选中范围之后的提交会重放，范围里不能有合并提交。重置有软、混合、硬。二分查找可以标好和坏。贮藏可以只收选中的文件，也可以从贮藏拉出分支。操作被本地修改挡住时，可以先贮藏再重试。</p>
+          <p data-en>Interactive rebase, cherry-pick, revert, and squash. Several commits can be selected in history and cherry-picked in dependency order, then continued, skipped, or aborted after a conflict. Squash replays the commits after the range, and the range cannot contain a merge. Reset is soft, mixed, or hard. Bisect marks good and bad. A stash can take only the selected files, or grow a branch. When local edits block an action, stash them and retry.</p>
         </article>
         <article>
           <h3 data-zh>仓库本身</h3><h3 data-en>The repository</h3>
-          <p data-zh>后台克隆，新建仓库，Git Flow。子模块和工作树列在侧栏。LFS 文件可以查看，也可以锁定和解锁。已合并的分支可以一批删掉。自定义命令可以给所有仓库，也可以只给当前仓库，需要时再提问。SSH 配置可以在这里改。终端和资源管理器从仓库菜单打开。</p>
-          <p data-en>Clone in the background, create a repository, or use Git Flow. Submodules and worktrees sit in the sidebar. LFS files can be listed, locked, and unlocked. Merged branches can be deleted together. A custom command can be shared or limited to one repository, and it can ask for a value. The SSH config can be edited here. Terminal and the file manager open from the repository menu.</p>
+          <p data-zh>后台克隆，新建仓库，Git Flow。克隆会连同子模块一起检出。子模块和工作树列在侧栏，子模块会标出分支与配置不符、游离 HEAD、提交与主仓库记录不一致、未初始化和未提交改动，正常时显示所在分支或固定提交。LFS 文件可以查看，也可以锁定和解锁。已合并的分支可以一批删掉。自定义命令可以给所有仓库，也可以只给当前仓库，需要时再提问。SSH 配置可以在这里改。终端和资源管理器从仓库菜单打开。</p>
+          <p data-en>Clone in the background, create a repository, or use Git Flow; a clone checks out its submodules too. Submodules and worktrees sit in the sidebar. A submodule is marked when its branch differs from the configuration, when it sits on a detached HEAD, when its commit differs from the superproject record, when it is not initialized, or when it has uncommitted changes; a healthy one shows its branch or pinned commit. LFS files can be listed, locked, and unlocked. Merged branches can be deleted together. A custom command can be shared or limited to one repository, and it can ask for a value. The SSH config can be edited here. Terminal and the file manager open from the repository menu.</p>
         </article>
         <article>
           <h3 data-zh>获取、拉取、推送</h3><h3 data-en>Fetch, pull, push</h3>
@@ -447,14 +485,14 @@ bonus = 1</pre>
           <p data-en>Sidebar tags run newest first: annotated tags use the tag date and lightweight tags use the commit date. Directory groups sort by their newest tag and stay in date order inside. Local branches missing on the remote, unpushed commits, and ahead/behind counts are marked, and frequent branches can be pinned.</p>
         </article>
         <article>
-          <h3 data-zh>字体下载与预览</h3><h3 data-en>Font downloads and previews</h3>
-          <p data-zh>偏好设置 → 字体分别调整界面和代码字体、字号与字重，有中英文和代码即时预览及恢复默认。到 Google Fonts 官网浏览全部字体，粘贴名称或页面链接，显示「已识别，可下载」后在应用内下载并添加。下载显示进度条、百分比与大小，提供保存路径和打开目录按钮；字体缓存在本地，可离线使用，不放进安装包。</p>
-          <p data-en>Preferences → Fonts adjusts interface and code fonts, sizes, and weights, with live Chinese/English/code previews and a default reset. Browse every family on Google Fonts, paste a name or specimen link, and download once it is recognized as available. Downloads show a progress bar, percentage, and size, with save locations and an open-folder button. Fonts stay cached offline and are not bundled in the installer.</p>
+          <h3 data-zh>字体与字号</h3><h3 data-en>Fonts and sizes</h3>
+          <p data-zh>偏好设置 → 字体用一个滑块整体放大或缩小全部字号，也可以单独调差异、历史、变更、详情和侧栏的字号；界面与代码字体、字重分开设置，变更树的文件缩进可调。字体页有中英文和代码即时预览及恢复默认，老年人模式一次放大并提高对比度。到 Google Fonts 官网浏览全部字体，粘贴名称或页面链接，显示「已识别，可下载」后在应用内下载并添加。下载显示进度条、百分比与大小，提供保存路径和打开目录按钮；字体缓存在本地，可离线使用，不放进安装包。</p>
+          <p data-en>Preferences → Fonts uses one slider to scale every size in the window, with separate sizes for diffs, history, changes, details, and the sidebar. Interface and code fonts and weights are set apart, and the file indentation in the change tree is adjustable. The page previews Chinese, English, and code live and can restore defaults; senior mode enlarges the window and raises contrast in one step. Browse every family on Google Fonts, paste a name or specimen link, and download once it is recognized as available. Downloads show a progress bar, percentage, and size, with save locations and an open-folder button. Fonts stay cached offline and are not bundled in the installer.</p>
         </article>
         <article>
           <h3 data-zh>界面一直能点</h3><h3 data-en>The window stays usable</h3>
-          <p data-zh>长列表只画窗口里的行。写操作按仓库排队，后台慢的时候界面先保持可操作。语言可以中文、英文或跟随系统。主题提供 Apple Liquid Glass（默认）、经典白色和 VS Code 黑色，也支持跟随系统。Windows 安装包自带 MinGit，macOS 使用系统 Git。</p>
-          <p data-en>A long list draws the rows in the window. Writes queue per repository, so a slow git leaves the window usable. Language is Chinese, English, or the system. Choose Apple Liquid Glass (default), Classic White, VS Code Dark, or follow the system. Windows builds include MinGit. macOS uses the system Git.</p>
+          <p data-zh>长列表只画窗口里的行。耗时的获取、拉取、推送和检出会显示阶段百分比进度，切换仓库先画一页历史，其余在后台补齐。写操作按仓库排队，后台慢的时候界面先保持可操作。语言可以中文、英文或跟随系统。主题提供 Apple Liquid Glass（默认）、经典白色和 VS Code 黑色，也支持跟随系统。Windows 安装包自带 MinGit，macOS 使用系统 Git。</p>
+          <p data-en>A long list draws the rows in the window. Long fetches, pulls, pushes, and checkouts show phase percentages, and switching repositories draws the first page of history before the rest arrives in the background. Writes queue per repository, so a slow git leaves the window usable. Language is Chinese, English, or the system. Choose Apple Liquid Glass (default), Classic White, VS Code Dark, or follow the system. Windows builds include MinGit. macOS uses the system Git.</p>
         </article>
       </div>
     </section>
@@ -467,8 +505,8 @@ bonus = 1</pre>
       <div class="grid">
         <article>
           <h3>Windows</h3>
-          <p data-zh>NSIS 的 <code>AweGit_&lt;版本&gt;_x64-setup.exe</code> 和 MSI 使用同一个版本号。安装包自带 MinGit 2.56.0，日常操作不需要另装 Git。当前版本是 2.0.7。</p>
-          <p data-en>The NSIS <code>AweGit_&lt;version&gt;_x64-setup.exe</code> and the MSI share one version number. The installer bundles MinGit 2.56.0, so no separate Git is needed. The current version is 2.0.7.</p>
+          <p data-zh>NSIS 的 <code>AweGit_&lt;版本&gt;_x64-setup.exe</code> 和 MSI 使用同一个版本号。安装包自带 MinGit 2.56.0，日常操作不需要另装 Git。当前版本是 2.0.17。</p>
+          <p data-en>The NSIS <code>AweGit_&lt;version&gt;_x64-setup.exe</code> and the MSI share one version number. The installer bundles MinGit 2.56.0, so no separate Git is needed. The current version is 2.0.17.</p>
         </article>
         <article>
           <h3>macOS</h3>

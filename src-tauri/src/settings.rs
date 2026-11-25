@@ -374,6 +374,10 @@ pub struct Settings {
     /// existing file means the install predates the guide, so it stays `seen`.
     #[serde(default = "features_intro_seen")]
     pub features_intro: String,
+    /// `pending` asks a new install to show the first-run setup once. Missing on
+    /// an existing file means the install predates it, so it stays `seen`.
+    #[serde(default = "onboarding_seen")]
+    pub onboarding: String,
     /// Draw the full conflicted file and every block in the changes pane.
     /// Off by default: a large file stalls the window while that text is split and painted.
     #[serde(default)]
@@ -756,12 +760,16 @@ impl Default for Settings {
             dismissed_update: String::new(),
             silent_install: true,
             features_intro: features_intro_seen(),
+            onboarding: onboarding_seen(),
             show_conflict_preview: false,
         }
     }
 }
 
 fn features_intro_seen() -> String {
+    "seen".into()
+}
+fn onboarding_seen() -> String {
     "seen".into()
 }
 
@@ -866,6 +874,7 @@ fn load_at(path: &Path) -> Result<Settings, String> {
     if !path.exists() {
         let mut fresh = Settings::default();
         fresh.features_intro = "pending".into();
+        fresh.onboarding = "pending".into();
         crate::secrets::fill(&mut fresh)?;
         return Ok(fresh);
     }
@@ -1807,6 +1816,12 @@ mod tests {
     fn missing_features_intro_counts_as_seen() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert_eq!(settings.features_intro, "seen");
+    }
+
+    #[test]
+    fn missing_onboarding_counts_as_seen() {
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.onboarding, "seen");
     }
 
     #[test]

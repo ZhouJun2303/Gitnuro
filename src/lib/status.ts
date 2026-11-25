@@ -364,6 +364,8 @@ export type Settings = {
   silentInstall: boolean;
   /** `pending` on a brand-new install, otherwise `seen`. */
   featuresIntro: string;
+  /** `pending` asks a new install to show the first-run setup once. */
+  onboarding: string;
   /** `recovered-backup` when the last load restored a damaged settings file. */
   recoveryNotice?: string;
   /** Draw the full conflicted file and every block in the changes pane. Off, because large files stall the window. */

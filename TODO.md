@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 全新安装第一次启动后，在首屏绘制完成时后台自动同步本机已登录账号、导入 Fork 设置、启用 AI 提交说明接口并开启 Killer 推送；只执行一次，不弹窗、不阻塞打开仓库，失败就跳过。回归：`missing_onboarding_counts_as_seen`、`e2e/first-run.spec.ts`。实现：本条所在提交 `feat: 新装首次启动后台自动准备本地设置并更新功能页`。
+
 - [x] 切换仓库时全部提交不再停在「还没有提交」。历史和工作区同时读，状态刷新不会丢掉已经在读的提交列表；空列表在第一页到达前显示「正在读取…」。装上监听不再额外做一次全量扫描。回归：`cancelled_history_is_not_an_empty_repository`、`e2e/operation-scheduler.spec.ts` 的 `history is read while the same repository is still scanning status`、`e2e/performance-refresh.spec.ts` 的 `a status snapshot does not discard history for the open repository`、`e2e/lab.spec.ts` 的 `switching repositories clears the previous commit detail`。修复：本条所在提交 `fix: 切换仓库时立即读取全部提交`。
 
 - [x] 丢弃子模块时，如果子模块已经停在父仓库记录的提交上，只在该子模块内重置索引和工作区，不再把它改成游离 HEAD；未跟踪文件仍保留，提交不同时仍切到父仓库记录的提交，reflog 留下正常的 checkout 记录。回归：`discard_dirty_submodule_keeps_its_branch`、`discard_paths_restores_submodule_and_regular_file_together`、`discard_submodule_restores_checkout_without_touching_other_submodules`。修复：本条所在提交 `fix: 丢弃子模块修改时不再无故切换 HEAD`。

@@ -63,7 +63,7 @@ import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type O
 import { watchOperationTasks } from "./task-monitor";
 import { cancelReads, HISTORY_READS, invalidateReads, isReadSuperseded } from "../read-scheduler";
 import { subscribeUpdate } from "../update-loop";
-import { mergeResponse } from "../reconcile";
+import { mergeFields, mergeResponse } from "../reconcile";
 import { sceneById } from "../lab/scenes";
 
 const initialErrors = readErrorLog();
@@ -426,6 +426,7 @@ export class ShellState {
     dismissedUpdate: "",
     silentInstall: true,
     featuresIntro: "seen",
+    onboarding: "seen",
     recoveryNotice: "",
     showConflictPreview: false,
   };
@@ -4806,6 +4807,32 @@ export class ShellState {
     return true;
   }
 
+  /**
+   * A brand-new install prepares these once, in the background: accounts already
+   * signed in on this machine, Fork settings if present, the AI endpoint, and
+   * killer push. Nothing here blocks startup, and a failure is ignored. The older
+   * one-time guide prompt is folded in so a new install sees no setup dialog.
+   */
+  takeFirstRunSetup() {
+    if (!this.inApp() || this.labPage || this.standalone) return false;
+    if (this.settings.onboarding !== "pending") return false;
+    this.settings = { ...this.settings, onboarding: "seen", featuresIntro: "seen" };
+    return true;
+  }
+
+  async runFirstRunSetup() {
+    await this.syncAccounts().catch(() => {});
+    await this.importFork(null, false).catch(() => {});
+    this.forkImportNote = "";
+    this.settings = {
+      ...this.settings,
+      killerPush: true,
+      aiEnabled: true,
+      aiBaseUrl: this.settings.aiBaseUrl || "https://api.x.ai/v1",
+    };
+    await this.savePrefs(false).catch(() => {});
+  }
+
   openFeaturesPage() {
     if (this.inApp()) void openUrl(featuresPageUrl);
     else window.open(featuresPageUrl, "_blank", "noopener");
@@ -4898,7 +4925,35 @@ export class ShellState {
 
 
 
-  async importFork(path?: string | null) {
+  /** Discover accounts already signed in on this machine. The caller asks the user first. */
+  async syncAccounts(): Promise<number> {
+    const before = $state.snapshot(this.settings) as Settings;
+    const saved = await invoke<Settings>("sync_accounts");
+    const same = this.same.bind(this);
+    const merged = mergeFields(this.settings, before, saved, same);
+    const synced = {
+      accounts: mergeResponse(this.settings.accounts, before.accounts, saved.accounts, same),
+      githubToken: merged.githubToken,
+      gitlabToken: merged.gitlabToken,
+      bitbucketToken: merged.bitbucketToken,
+      azureToken: merged.azureToken,
+    };
+    this.settings = { ...this.settings, ...synced };
+    // The backend already saved these fields. Preserve unrelated settings and
+    // write only edits made locally while the synchronization was in flight.
+    const persisted = {
+      accounts: saved.accounts,
+      githubToken: saved.githubToken,
+      gitlabToken: saved.gitlabToken,
+      bitbucketToken: saved.bitbucketToken,
+      azureToken: saved.azureToken,
+    };
+    this.prefsBaseline = { ...(this.prefsBaseline ?? before), ...persisted };
+    if (!same(synced, persisted)) await this.savePrefs(false);
+    return saved.accounts.length;
+  }
+
+  async importFork(path?: string | null, select = true) {
     if (!this.inApp()) return;
     const before = $state.snapshot(this.settings) as Settings;
     try {
@@ -4911,8 +4966,8 @@ export class ShellState {
         repositories: String(result.repositories),
         workspaces: String(result.workspaces),
       });
-      if (this.settings.currentWorkspace) await this.selectWorkspace();
-      if (this.mode === "live") void this.loadContext();
+      if (select && this.settings.currentWorkspace) await this.selectWorkspace();
+      if (select && this.mode === "live") void this.loadContext();
     } catch (error) {
       const text = this.message(error);
       this.forkImportNote = text.includes("fork-settings-missing") ? this.tr("dialog.forkMissing") : text;
@@ -8265,6 +8320,7 @@ export class ShellState {
     let unhistoryAction = () => {};
     let unupdate = () => {};
     let placeTimer = 0;
+    let firstRunTimer = 0;
     let stopped = false;
     this.mode = "loading";
     this.selectedPath = null;
@@ -8283,14 +8339,16 @@ export class ShellState {
     this.checkUpdateForCurrentDay();
     let targeted = false;
     let introduce = false;
+    let onboard = false;
     void (async () => {
     try {
     const value = await invoke<Settings>("load_settings");
     if (stopped) return;
     this.adoptSettings(value);
     this.restoreAppearance(value.theme);
+    onboard = this.takeFirstRunSetup();
     introduce = this.takeFeaturesIntro();
-    if (introduce) void this.savePrefs(false);
+    if (introduce || onboard) void this.savePrefs(false);
     void invoke<string>("settings_path").then((path) => (this.settingsPath = path)).catch(() => {});
     await this.loadExternalTools();
     if (value.windowWidth > 200 && value.windowHeight > 200 && !this.standalone) {
@@ -8414,12 +8472,14 @@ export class ShellState {
     }
     } finally {
     if (!stopped && !targeted && introduce) this.dialog = "features";
+    if (!stopped && onboard) firstRunTimer = window.setTimeout(() => { if (!stopped) void this.runFirstRunSetup(); }, 2500);
     }
     })();
     return () => {
     stopped = true;
     detachNav();
     window.clearTimeout(placeTimer);
+    window.clearTimeout(firstRunTimer);
     unlisten();
     unprogress();
     unmoved();

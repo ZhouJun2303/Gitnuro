@@ -2,11 +2,11 @@
   import { onMount } from "svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { invoke } from "../perf";
-  import type { Account, Settings } from "../status";
+  import type { Account } from "../status";
   import { getShell } from "./context";
   import AccountAvatar from "./AccountAvatar.svelte";
   import "./AccountsPage.css";
-  import { mergeFields, mergeResponse } from "../reconcile";
+  import { mergeFields } from "../reconcile";
   import { subscribeUpdate } from "../update-loop";
 
   const shell = getShell();
@@ -167,30 +167,8 @@
     if (syncing) return;
     syncing = true;
     notice = "";
-    const before = $state.snapshot(shell.settings) as Settings;
     try {
-      const saved = await invoke<Settings>("sync_accounts");
-      const same = shell.same.bind(shell);
-      const merged = mergeFields(shell.settings, before, saved, same);
-      const synced = {
-        accounts: mergeResponse(shell.settings.accounts, before.accounts, saved.accounts, same),
-        githubToken: merged.githubToken,
-        gitlabToken: merged.gitlabToken,
-        bitbucketToken: merged.bitbucketToken,
-        azureToken: merged.azureToken,
-      };
-      shell.settings = { ...shell.settings, ...synced };
-      // The backend already saved these fields. Preserve unrelated settings and
-      // write only edits made locally while the synchronization was in flight.
-      const persisted = {
-        accounts: saved.accounts,
-        githubToken: saved.githubToken,
-        gitlabToken: saved.gitlabToken,
-        bitbucketToken: saved.bitbucketToken,
-        azureToken: saved.azureToken,
-      };
-      shell.prefsBaseline = { ...(shell.prefsBaseline ?? before), ...persisted };
-      if (!same(synced, persisted)) await shell.savePrefs(false);
+      await shell.syncAccounts();
     } catch (error) {
       shell.actionError = shell.message(error);
     } finally {
