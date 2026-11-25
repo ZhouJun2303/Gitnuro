@@ -69,7 +69,7 @@ pub struct Settings {
     pub commit_author_font_size: u32,
     #[serde(default = "commit_meta_font")]
     pub commit_sha_font_size: u32,
-    #[serde(default = "commit_meta_font")]
+    #[serde(default = "commit_time_font")]
     pub commit_time_font_size: u32,
     #[serde(default = "changes_row_height")]
     pub changes_row_height: u32,
@@ -543,21 +543,22 @@ fn recent_workspace_limit() -> u32 {
     5
 }
 fn diff_font() -> u32 {
-    14
+    13
 }
 fn font_weight() -> u32 { 400 }
 fn commit_row_height() -> u32 { 30 }
-fn commit_subject_font() -> u32 { 14 }
-fn commit_meta_font() -> u32 { 11 }
+fn commit_subject_font() -> u32 { 17 }
+fn commit_meta_font() -> u32 { 14 }
+fn commit_time_font() -> u32 { 15 }
 fn changes_row_height() -> u32 { 28 }
 fn changes_font() -> u32 { 14 }
 fn changes_meta_font() -> u32 { 11 }
-fn changes_indent() -> f32 { 2.0 }
+fn changes_indent() -> f32 { 0.8 }
 fn detail_body_font() -> u32 { 14 }
 fn detail_tab_font() -> u32 { 13 }
 fn detail_meta_font() -> u32 { 12 }
-fn sidebar_font() -> u32 { 14 }
-fn sidebar_section_font() -> u32 { 11 }
+fn sidebar_font() -> u32 { 20 }
+fn sidebar_section_font() -> u32 { 22 }
 fn date_sort() -> String {
     "date".into()
 }
@@ -624,7 +625,7 @@ impl Default for Settings {
             commit_subject_font_size: commit_subject_font(),
             commit_author_font_size: commit_meta_font(),
             commit_sha_font_size: commit_meta_font(),
-            commit_time_font_size: commit_meta_font(),
+            commit_time_font_size: commit_time_font(),
             changes_row_height: changes_row_height(),
             changes_font_size: changes_font(),
             changes_meta_font_size: changes_meta_font(),
@@ -1626,10 +1627,23 @@ mod tests {
         assert_eq!(defaults.code_font, "");
         assert_eq!(defaults.ui_scale, 14);
         assert!(!defaults.senior_mode);
-        assert_eq!(defaults.diff_font_size, 14);
+        assert_eq!(defaults.diff_font_size, 13);
         assert_eq!(defaults.ui_font_weight, 400);
         assert_eq!(defaults.code_font_weight, 400);
-        assert_eq!(defaults.changes_indent_ch, 2.0);
+        assert_eq!(defaults.commit_row_height, 30);
+        assert_eq!(defaults.commit_subject_font_size, 17);
+        assert_eq!(defaults.commit_author_font_size, 14);
+        assert_eq!(defaults.commit_sha_font_size, 14);
+        assert_eq!(defaults.commit_time_font_size, 15);
+        assert_eq!(defaults.changes_row_height, 28);
+        assert_eq!(defaults.changes_font_size, 14);
+        assert_eq!(defaults.changes_meta_font_size, 11);
+        assert_eq!(defaults.changes_indent_ch, 0.8);
+        assert_eq!(defaults.detail_body_font_size, 14);
+        assert_eq!(defaults.detail_tab_font_size, 13);
+        assert_eq!(defaults.detail_meta_font_size, 12);
+        assert_eq!(defaults.sidebar_font_size, 20);
+        assert_eq!(defaults.sidebar_section_font_size, 22);
         let saved: super::Settings = serde_json::from_str(r#"{"uiScale":13,"diffFontSize":16,"uiFont":"inter","codeFont":"jetbrains-mono","uiFontWeight":500,"codeFontWeight":600}"#).unwrap();
         assert_eq!(saved.ui_scale, 13);
         let senior: super::Settings = serde_json::from_str(r#"{"seniorMode":true}"#).unwrap();

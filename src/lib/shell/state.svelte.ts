@@ -284,19 +284,19 @@ export class ShellState {
     uiFontWeight: 400,
     codeFontWeight: 400,
     commitRowHeight: 30,
-    commitSubjectFontSize: 14,
-    commitAuthorFontSize: 11,
-    commitShaFontSize: 11,
-    commitTimeFontSize: 11,
+    commitSubjectFontSize: 17,
+    commitAuthorFontSize: 14,
+    commitShaFontSize: 14,
+    commitTimeFontSize: 15,
     changesRowHeight: 28,
     changesFontSize: 14,
     changesMetaFontSize: 11,
-    changesIndentCh: 2,
+    changesIndentCh: 0.8,
     detailBodyFontSize: 14,
     detailTabFontSize: 13,
     detailMetaFontSize: 12,
-    sidebarFontSize: 14,
-    sidebarSectionFontSize: 11,
+    sidebarFontSize: 20,
+    sidebarSectionFontSize: 22,
     dateRelative: true,
     dateFormat: "dd MMM yyyy",
     date24h: true,
@@ -352,7 +352,7 @@ export class ShellState {
     gitlabToken: "",
     gitlabHost: "",
     showDiffMarks: false,
-    diffFontSize: 14,
+    diffFontSize: 13,
     disableSyntaxHighlight: false,
     commitSort: "date",
     fetchAutomatically: false,
@@ -1425,6 +1425,9 @@ export class ShellState {
   prefTab = $state<PrefTab>("general");
 
 
+  prefSliderDragging = $state(false);
+
+
   prefPage = $state<HTMLElement | null>(null);
 
 
@@ -2064,7 +2067,7 @@ export class ShellState {
   effectiveUiScale = $derived(Math.max(this.settings.uiScale || 14, this.settings.seniorMode ? 18 : 0));
 
 
-  effectiveDiffFontSize = $derived(Math.max(this.settings.diffFontSize || 14, this.settings.seniorMode ? 16 : 0));
+  effectiveDiffFontSize = $derived(Math.max(this.settings.diffFontSize || 13, this.settings.seniorMode ? 16 : 0));
 
 
   effectiveUiFontWeight = $derived(Math.max(this.settings.uiFontWeight || 400, this.settings.seniorMode ? 600 : 0));
@@ -4610,19 +4613,19 @@ export class ShellState {
     this.settings = {
       ...this.settings,
       commitRowHeight: boundedSetting(this.settings.commitRowHeight, 30, 20, 80),
-      commitSubjectFontSize: boundedSetting(this.settings.commitSubjectFontSize, 14, 8, 32),
-      commitAuthorFontSize: boundedSetting(this.settings.commitAuthorFontSize, 11, 8, 24),
-      commitShaFontSize: boundedSetting(this.settings.commitShaFontSize, 11, 8, 24),
-      commitTimeFontSize: boundedSetting(this.settings.commitTimeFontSize, 11, 8, 24),
+      commitSubjectFontSize: boundedSetting(this.settings.commitSubjectFontSize, 17, 8, 32),
+      commitAuthorFontSize: boundedSetting(this.settings.commitAuthorFontSize, 14, 8, 24),
+      commitShaFontSize: boundedSetting(this.settings.commitShaFontSize, 14, 8, 24),
+      commitTimeFontSize: boundedSetting(this.settings.commitTimeFontSize, 15, 8, 24),
       changesRowHeight: boundedSetting(this.settings.changesRowHeight, 28, 20, 80),
       changesFontSize: boundedSetting(this.settings.changesFontSize, 14, 8, 32),
       changesMetaFontSize: boundedSetting(this.settings.changesMetaFontSize, 11, 8, 24),
-      changesIndentCh: boundedDecimalSetting(this.settings.changesIndentCh, 2, 0.2, 4),
+      changesIndentCh: boundedDecimalSetting(this.settings.changesIndentCh, 0.8, 0.2, 4),
       detailBodyFontSize: boundedSetting(this.settings.detailBodyFontSize, 14, 8, 32),
       detailTabFontSize: boundedSetting(this.settings.detailTabFontSize, 13, 8, 32),
       detailMetaFontSize: boundedSetting(this.settings.detailMetaFontSize, 12, 8, 24),
-      sidebarFontSize: boundedSetting(this.settings.sidebarFontSize, 14, 8, 32),
-      sidebarSectionFontSize: boundedSetting(this.settings.sidebarSectionFontSize, 11, 8, 24),
+      sidebarFontSize: boundedSetting(this.settings.sidebarFontSize, 20, 8, 32),
+      sidebarSectionFontSize: boundedSetting(this.settings.sidebarSectionFontSize, 22, 8, 24),
     };
     this.pruneErrorLog();
     if (!this.snapshot && isCommitType(this.settings.commitType)) this.commitType = this.settings.commitType;
@@ -8045,18 +8048,18 @@ export class ShellState {
     root.style.setProperty("--row-commit", `${this.rowCommit}px`);
     root.style.setProperty("--row-side", `${this.rowSide}px`);
     root.style.setProperty("--row-tree", `${this.rowTree}px`);
-    root.style.setProperty("--commit-subject-font-size", `${boundedSetting(this.settings.commitSubjectFontSize, 14, 8, 32)}px`);
-    root.style.setProperty("--commit-author-font-size", `${boundedSetting(this.settings.commitAuthorFontSize, 11, 8, 24)}px`);
-    root.style.setProperty("--commit-sha-font-size", `${boundedSetting(this.settings.commitShaFontSize, 11, 8, 24)}px`);
-    root.style.setProperty("--commit-time-font-size", `${boundedSetting(this.settings.commitTimeFontSize, 11, 8, 24)}px`);
+    root.style.setProperty("--commit-subject-font-size", `${boundedSetting(this.settings.commitSubjectFontSize, 17, 8, 32)}px`);
+    root.style.setProperty("--commit-author-font-size", `${boundedSetting(this.settings.commitAuthorFontSize, 14, 8, 24)}px`);
+    root.style.setProperty("--commit-sha-font-size", `${boundedSetting(this.settings.commitShaFontSize, 14, 8, 24)}px`);
+    root.style.setProperty("--commit-time-font-size", `${boundedSetting(this.settings.commitTimeFontSize, 15, 8, 24)}px`);
     root.style.setProperty("--changes-font-size", `${boundedSetting(this.settings.changesFontSize, 14, 8, 32)}px`);
     root.style.setProperty("--changes-meta-font-size", `${boundedSetting(this.settings.changesMetaFontSize, 11, 8, 24)}px`);
-    root.style.setProperty("--changes-indent-ch", String(boundedDecimalSetting(this.settings.changesIndentCh, 2, 0.2, 4)));
+    root.style.setProperty("--changes-indent-ch", String(boundedDecimalSetting(this.settings.changesIndentCh, 0.8, 0.2, 4)));
     root.style.setProperty("--detail-body-font-size", `${boundedSetting(this.settings.detailBodyFontSize, 14, 8, 32)}px`);
     root.style.setProperty("--detail-tab-font-size", `${boundedSetting(this.settings.detailTabFontSize, 13, 8, 32)}px`);
     root.style.setProperty("--detail-meta-font-size", `${boundedSetting(this.settings.detailMetaFontSize, 12, 8, 24)}px`);
-    root.style.setProperty("--sidebar-font-size", `${boundedSetting(this.settings.sidebarFontSize, 14, 8, 32)}px`);
-    root.style.setProperty("--sidebar-section-font-size", `${boundedSetting(this.settings.sidebarSectionFontSize, 11, 8, 24)}px`);
+    root.style.setProperty("--sidebar-font-size", `${boundedSetting(this.settings.sidebarFontSize, 20, 8, 32)}px`);
+    root.style.setProperty("--sidebar-section-font-size", `${boundedSetting(this.settings.sidebarSectionFontSize, 22, 8, 24)}px`);
     root.style.setProperty("--diff-row", `${this.diffRowHeight}px`);
     return () => media?.removeEventListener("change", paint);
     });

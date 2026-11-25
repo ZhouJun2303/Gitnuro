@@ -196,6 +196,10 @@
   color: var(--text-secondary);
 }
 
+.dialog.prefs { transition: opacity 120ms ease; }
+.dialog.prefs.slider-dragging { opacity: 0.46; }
+.scrim.slider-preview { background: rgba(0, 0, 0, 0.16); backdrop-filter: none; }
+
 .pref-control > select { width: 190px; }
 
 .pref-control > input { width: 200px; }
@@ -213,8 +217,9 @@
 .font-card .pref-control > select { flex: 1; width: auto; min-width: 140px; }
 .font-card .text-button { margin: 0; min-width: 115px; }
 .font-panel-card .pref-card-body { padding-top: 4px; }
-.font-panel-grid .pref-control > input[type="number"] { width: 72px; }
-.font-panel-grid .pref-control > span { color: var(--text-secondary); font-size: 12px; }
+.font-slider-control { flex: 1 1 280px; }
+.font-slider-control input[type="range"] { flex: 1; min-width: 80px; width: 100%; padding: 0; cursor: pointer; }
+.font-slider-control output, .font-size-control output { flex: none; min-width: 58px; color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
 .dialog .font-file-path { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px; font-size: 11px; color: var(--text-secondary); white-space: normal; max-height: none; }
 .font-file-path code, .font-cache-path { user-select: text; overflow-wrap: anywhere; font-family: var(--mono); font-size: 11px; }
 .font-cache-path { display: block; margin: 6px 0 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--field); }
@@ -223,7 +228,6 @@
 .font-metrics > select { width: 100%; }
 .font-size-control { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .font-size-control input[type="range"] { flex: 1; min-width: 40px; width: 100%; padding: 0; cursor: pointer; }
-.font-size-control input[type="number"] { flex: none; width: 64px; }
 .font-preview-label { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 6px; color: var(--text-secondary); font-size: 11px; }
 .font-preview { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); color: var(--text); line-height: 1.7; overflow: auto; }
 .dialog .font-preview p { margin: 0; max-height: none; white-space: normal; color: inherit; font: inherit; }

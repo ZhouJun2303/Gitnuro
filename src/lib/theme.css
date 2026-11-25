@@ -44,23 +44,24 @@
   --font-display: var(--font);
   --mono: var(--mono-user,) "Cascadia Mono", "SFMono-Regular", "Consolas", "Liberation Mono", "PingFang SC", "Microsoft YaHei UI", monospace;
   --ui-scale: 14px;
-  --diff-font: 14px;
+  --diff-font: 13px;
   /* Rows */
   --row-file: 28px;
-  --row-commit: 28px;
+  --row-commit: 30px;
   --row-side: 28px;
   --row-tree: 24px;
-  --commit-subject-font-size: 14px;
-  --commit-author-font-size: 11px;
-  --commit-sha-font-size: 11px;
-  --commit-time-font-size: 11px;
+  --commit-subject-font-size: 17px;
+  --commit-author-font-size: 14px;
+  --commit-sha-font-size: 14px;
+  --commit-time-font-size: 15px;
   --changes-font-size: 14px;
   --changes-meta-font-size: 11px;
+  --changes-indent-ch: 0.8;
   --detail-body-font-size: 14px;
   --detail-tab-font-size: 13px;
   --detail-meta-font-size: 12px;
-  --sidebar-font-size: 14px;
-  --sidebar-section-font-size: 11px;
+  --sidebar-font-size: 20px;
+  --sidebar-section-font-size: 22px;
   --split-row: 19px;
   --guide: 72;
   /* Radii, shadows, focus */

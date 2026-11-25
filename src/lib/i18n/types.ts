@@ -509,6 +509,8 @@ export type Messages = {
     systemFont: string;
     uiFontSize: string;
     codeFontSize: string;
+    fontGlobalSize: string;
+    fontGlobalSizeHint: string;
     fontWeight: string;
     fontRegular: string;
     fontMedium: string;

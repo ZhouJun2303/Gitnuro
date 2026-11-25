@@ -6,6 +6,19 @@ import catalog from "../src/lib/font-catalog.json" with { type: "json" };
 // Use an installed test font so UI tests never need the Google network or ship font binaries.
 const fixture = ["C:/Windows/Fonts/segoeui.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf"].find(existsSync);
 
+async function setSliderInput(input: import("@playwright/test").Locator, value: number) {
+  await input.evaluate((element, next) => {
+    const input = element as HTMLInputElement;
+    input.value = String(next);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, value);
+}
+
+async function setSlider(page: import("@playwright/test").Page, name: string, value: number) {
+  await setSliderInput(page.getByRole("slider", { name }), value);
+}
+
 test.beforeEach(async ({ page }) => {
   // Register settings first: its final continue() must run after our font mocks.
   await pinLabSettings(page, {});
@@ -30,7 +43,6 @@ for (const theme of ["apple", "light", "dark"] as const) {
     });
     await openLabScene(page, "prefs-fonts", '[data-pref-tab="fonts"]', { locale: "en" });
     await expect(page.getByRole("slider", { name: "Interface font size" })).toHaveAttribute("max", "30");
-    await expect(page.getByRole("spinbutton", { name: "Interface font size" })).toHaveAttribute("max", "30");
     const toggle = page.getByRole("checkbox", { name: "Large text mode" });
     await expect(toggle).not.toBeChecked();
     await expect(page.locator('[data-font-preview="ui"]')).toHaveCSS("font-size", "14px");
@@ -59,12 +71,11 @@ for (const theme of ["apple", "light", "dark"] as const) {
   test(`${theme}: panel typography settings apply and reset together`, async ({ page }) => {
     await pinLabSettings(page, { theme });
     await openLabScene(page, "prefs-fonts", '[data-pref-tab="fonts"]', { locale: "en" });
-    await page.getByRole("spinbutton", { name: "Commit item height" }).fill("42");
-    await page.getByRole("spinbutton", { name: "Commit description font size" }).fill("17");
-    await page.getByRole("spinbutton", { name: "Author font size" }).fill("12");
-    await page.getByRole("spinbutton", { name: "File name font size" }).fill("16");
-    await page.getByRole("spinbutton", { name: "Tree indentation" }).fill("0.6");
-    await page.getByRole("spinbutton", { name: "Tree indentation" }).press("Tab");
+    await setSlider(page, "Commit item height", 42);
+    await setSlider(page, "Commit description font size", 17);
+    await setSlider(page, "Author font size", 12);
+    await setSlider(page, "File name font size", 16);
+    await setSlider(page, "Tree indentation", 0.6);
     await expect.poll(() => page.evaluate(() => ({
       row: getComputedStyle(document.documentElement).getPropertyValue("--row-commit").trim(),
       subject: getComputedStyle(document.documentElement).getPropertyValue("--commit-subject-font-size").trim(),
@@ -72,6 +83,16 @@ for (const theme of ["apple", "light", "dark"] as const) {
       changes: getComputedStyle(document.documentElement).getPropertyValue("--changes-font-size").trim(),
       indent: getComputedStyle(document.documentElement).getPropertyValue("--changes-indent-ch").trim(),
     }))).toEqual({ row: "42px", subject: "17px", author: "12px", changes: "16px", indent: "0.6" });
+    const globalSize = page.getByRole("slider", { name: "Overall font size" });
+    await globalSize.dispatchEvent("pointerdown");
+    await expect(page.locator('[data-dialog="prefs"]')).toHaveClass(/slider-dragging/);
+    await setSlider(page, "Overall font size", 2);
+    await expect.poll(() => page.evaluate(() => ({
+      subject: getComputedStyle(document.documentElement).getPropertyValue("--commit-subject-font-size").trim(),
+      changes: getComputedStyle(document.documentElement).getPropertyValue("--changes-font-size").trim(),
+    }))).toEqual({ subject: "19px", changes: "18px" });
+    await page.evaluate(() => window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })));
+    await expect(page.locator('[data-dialog="prefs"]')).not.toHaveClass(/slider-dragging/);
     await page.getByRole("button", { name: "Restore font defaults", exact: true }).click();
     await expect.poll(() => page.evaluate(() => ({
       row: getComputedStyle(document.documentElement).getPropertyValue("--row-commit").trim(),
@@ -79,7 +100,7 @@ for (const theme of ["apple", "light", "dark"] as const) {
       author: getComputedStyle(document.documentElement).getPropertyValue("--commit-author-font-size").trim(),
       changes: getComputedStyle(document.documentElement).getPropertyValue("--changes-font-size").trim(),
       indent: getComputedStyle(document.documentElement).getPropertyValue("--changes-indent-ch").trim(),
-    }))).toEqual({ row: "30px", subject: "14px", author: "11px", changes: "14px", indent: "2" });
+    }))).toEqual({ row: "30px", subject: "17px", author: "14px", changes: "14px", indent: "0.8" });
   });
 }
 
@@ -130,8 +151,8 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await button.click();
     await expect(picker.getByRole("button", { name: "Downloading…", exact: true })).toBeDisabled();
     // Preferences remain interactive while the network request is held open.
-    await page.getByRole("spinbutton", { name: "Interface font size" }).fill("15");
-    await page.locator("#font-weight-ui").selectOption("500");
+    await setSlider(page, "Interface font size", 15);
+    await setSliderInput(page.locator("#font-weight-ui"), 500);
     await page.getByRole("button", { name: "Diff", exact: true }).click();
     await page.getByRole("button", { name: "Fonts", exact: true }).click();
     release();
@@ -143,8 +164,8 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await expect(preview).toHaveCSS("font-size", "15px");
     await expect(preview).toHaveCSS("font-weight", "500");
     await expect(preview).toHaveCSS("font-family", /AweGit inter/);
-    await page.getByRole("spinbutton", { name: "Diff font size" }).fill("18");
-    await page.locator("#font-weight-code").selectOption("600");
+    await setSlider(page, "Diff font size", 18);
+    await setSliderInput(page.locator("#font-weight-code"), 600);
     await expect(page.locator('[data-font-preview="code"]')).toHaveCSS("font-size", "18px");
     await expect(page.locator('[data-font-preview="code"]')).toHaveCSS("font-weight", "600");
     expect(downloads).toBe(1);
@@ -166,7 +187,7 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await expect(page.locator("#font-code")).toHaveValue("");
     await expect(preview).toHaveCSS("font-size", "14px");
     await expect(preview).toHaveCSS("font-weight", "400");
-    await expect(page.locator('[data-font-preview="code"]')).toHaveCSS("font-size", "14px");
+    await expect(page.locator('[data-font-preview="code"]')).toHaveCSS("font-size", "13px");
     await expect(page.locator('[data-font-preview="code"]')).toHaveCSS("font-weight", "400");
     await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue("--font-user"))).toBe("");
     await page.locator("#font-ui").selectOption("inter");
@@ -227,7 +248,7 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await expect(page.locator(".font-download-progress")).toContainText("50%");
     await expect(page.locator(".font-download-progress")).toContainText(`${Math.ceil(Math.floor(bytes.length / 2) / 1024)} KB / ${Math.ceil(bytes.length / 1024)} KB`);
     await page.screenshot({ path: `.lab/screenshots/fonts-progress-${theme}.png`, fullPage: true });
-    await page.locator("#font-weight-ui").selectOption("500");
+    await setSliderInput(page.locator("#font-weight-ui"), 500);
     release();
     await expect(page.locator("#font-ui")).toHaveValue(font.id);
     await expect(progress).toHaveAttribute("value", "100");
