@@ -196,11 +196,29 @@
   color: var(--text-secondary);
 }
 
-.dialog.prefs { transition: opacity 120ms ease; }
-.dialog.prefs.slider-dragging { opacity: 0.46; }
-.scrim.slider-preview { background: rgba(0, 0, 0, 0.16); backdrop-filter: none; }
-:root[data-theme="apple"] .scrim:not(.menu-dismiss).slider-preview { background: rgba(0, 0, 0, 0.16); backdrop-filter: none; }
-:root[data-theme="apple"] .dialog.prefs.slider-dragging { backdrop-filter: none; }
+.dialog.prefs.slider-dragging {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+:root[data-theme="apple"] .dialog.prefs.slider-dragging {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.dialog.prefs.slider-dragging * { visibility: hidden; }
+.dialog.prefs.slider-dragging .pref-card:has(input[type="range"]:focus),
+.dialog.prefs.slider-dragging .pref-card:has(input[type="range"]:focus) * { visibility: visible; }
+.dialog.prefs.slider-dragging .pref-card:has(input[type="range"]:focus) {
+  background: color-mix(in srgb, var(--elevated) 70%, transparent);
+  border-color: color-mix(in srgb, var(--line) 60%, transparent);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14);
+}
+.dialog.prefs.slider-dragging .pref-card:has(input[type="range"]:focus) .pref-card-title { background: transparent; }
+.scrim.slider-preview { background: transparent; backdrop-filter: none; }
+:root[data-theme="apple"] .scrim:not(.menu-dismiss).slider-preview { background: transparent; backdrop-filter: none; }
 
 .pref-control > select { width: 190px; }
 

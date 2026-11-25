@@ -23,8 +23,9 @@
     else shell.settings.diffFontSize = next;
     input.value = String(next);
   }
-  function beginSlider() {
+  function beginSlider(event: PointerEvent) {
     shell.prefSliderDragging = true;
+    (event.currentTarget as HTMLInputElement).focus({ preventScroll: true });
   }
   function setWeight(input: HTMLInputElement) {
     const next = Math.min(600, Math.max(400, Math.round(Number(input.value) / 100) * 100));

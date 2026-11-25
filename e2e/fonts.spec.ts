@@ -85,16 +85,22 @@ for (const theme of ["apple", "light", "dark"] as const) {
     }))).toEqual({ row: "42px", subject: "17px", author: "12px", changes: "16px", indent: "0.6" });
     const globalSize = page.getByRole("slider", { name: "Overall font size" });
     await globalSize.dispatchEvent("pointerdown");
-    await expect(page.locator('[data-dialog="prefs"]')).toHaveClass(/slider-dragging/);
-    await expect(page.locator('[data-dialog="prefs"]')).toHaveCSS("backdrop-filter", "none");
+    const prefsDialog = page.locator('[data-dialog="prefs"]');
+    await expect(prefsDialog).toHaveClass(/slider-dragging/);
+    await expect(prefsDialog).toHaveCSS("backdrop-filter", "none");
+    await expect(prefsDialog).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await expect(page.locator(".scrim.slider-preview")).toHaveCSS("backdrop-filter", "none");
+    await expect(page.locator(".scrim.slider-preview")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(page.locator(".pref-card:visible")).toHaveCount(1);
+    await expect(page.locator(".font-global-card:visible")).toHaveCount(1);
     await setSlider(page, "Overall font size", 2);
     await expect.poll(() => page.evaluate(() => ({
       subject: getComputedStyle(document.documentElement).getPropertyValue("--commit-subject-font-size").trim(),
       changes: getComputedStyle(document.documentElement).getPropertyValue("--changes-font-size").trim(),
     }))).toEqual({ subject: "19px", changes: "18px" });
     await page.evaluate(() => window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })));
-    await expect(page.locator('[data-dialog="prefs"]')).not.toHaveClass(/slider-dragging/);
+    await expect(prefsDialog).not.toHaveClass(/slider-dragging/);
+    await expect(page.locator(".senior-mode-card")).toBeVisible();
     await page.getByRole("button", { name: "Restore font defaults", exact: true }).click();
     await expect.poll(() => page.evaluate(() => ({
       row: getComputedStyle(document.documentElement).getPropertyValue("--row-commit").trim(),

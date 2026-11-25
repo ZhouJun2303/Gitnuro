@@ -107,8 +107,9 @@
     shell.settings[key] = next;
     input.value = String(next);
   }
-  function beginSlider(_event: PointerEvent) {
+  function beginSlider(event: PointerEvent) {
     shell.prefSliderDragging = true;
+    (event.currentTarget as HTMLInputElement).focus({ preventScroll: true });
   }
   function setGlobalFontSize(input: HTMLInputElement) {
     const next = Math.min(8, Math.max(-8, Math.round(Number(input.value) || 0)));
