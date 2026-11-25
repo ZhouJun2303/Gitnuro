@@ -217,6 +217,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "blame", group: "仓库状态", title: "追溯", repo: "full", ready: "[data-layer=\"blame\"]" }),
   scene({ id: "reflog", group: "仓库状态", title: "引用日志", repo: "full", ready: "[data-layer=\"reflog\"]" }),
   scene({ id: "submodule", group: "仓库状态", title: "子模块", repo: "full", ready: "text=vendor" }),
+  scene({ id: "submodule-health", group: "仓库状态", title: "子模块状态 · 正常、分支不符、提交不符、未初始化", repo: "submodule-health", ready: ".sidebar .submodule-note.ok" }),
   scene({ id: "submodule-diff", group: "仓库状态", title: "子模块差异", repo: "submodule-diff", ready: ".submodule-diff" }),
   scene({ id: "worktree", group: "仓库状态", title: "工作区列表", repo: "full", ready: "text=extra" }),
   scene({ id: "clone-progress", group: "仓库状态", title: "克隆进度", repo: "even", ready: "[data-layer=\"clone\"]" }),

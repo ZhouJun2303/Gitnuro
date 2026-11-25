@@ -379,7 +379,12 @@
             { label: shell.tr("menu.update"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "submoduleUpdatePath", path: row.path }) },
             { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), shell.tr("dialog.removeSubmoduleBody"), shell.bindMutation({ action: "submoduleRemove", path: row.path }), [], { subject: row.path, danger: true }) },
           ])}>
-            <button class="file-select" type="button" title={row.path} onclick={() => (shell.sideSelected = `submodule:${row.path}`)} ondblclick={() => !shell.pendingReference(row.path) && row.ready && shell.openRepo(shell.fullPath(row.path))}><span class="twist"></span>{@render glyph("submodule")}<span class="name">{row.path}</span>{#if shell.pendingReference(row.path)}<span class="reference-pending" role="status" aria-label={shell.tr("chrome.taskQueued")}></span>{/if}</button>
+            <button class="file-select" type="button" title={row.path} onclick={() => (shell.sideSelected = `submodule:${row.path}`)} ondblclick={() => !shell.pendingReference(row.path) && row.ready && shell.openRepo(shell.fullPath(row.path))}><span class="twist"></span>{@render glyph("submodule")}<span class="name">{row.path}</span><span class="submodule-dot {row.tone}" aria-hidden="true"></span>{#if shell.pendingReference(row.path)}<span class="reference-pending" role="status" aria-label={shell.tr("chrome.taskQueued")}></span>{/if}</button>
+          </div>
+        {:else if row.kind === "submoduleNote"}
+          <div class="side nested quiet submodule-note {row.tone}" role="note" title={row.title}>
+            <span class="submodule-dot {row.tone}" aria-hidden="true"></span>
+            <span class="name">{row.note}</span>
           </div>
         {:else if row.kind === "worktree"}
           <div class="side nested" class:selected={shell.sideSelected === `worktree:${row.path}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [

@@ -84,6 +84,39 @@
 
 .side.nested { position: relative; }
 
+.submodule-dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--text-secondary);
+    opacity: 0.55;
+  }
+
+.side > .file-select .submodule-dot { margin-left: auto; }
+
+.submodule-dot.ok { background: var(--added); opacity: 1; }
+
+.submodule-dot.warn { background: var(--modified); opacity: 1; }
+
+.submodule-dot.bad { background: var(--deleted); opacity: 1; }
+
+.side.nested.submodule-note {
+    padding-left: 44px;
+    gap: 5px;
+    color: var(--text-secondary);
+    font-size: 11px;
+    cursor: default;
+  }
+
+.side.submodule-note.ok { color: var(--added); }
+
+.side.submodule-note.warn { color: var(--modified); }
+
+.side.submodule-note.bad { color: var(--deleted); }
+
+.side.submodule-note .name { flex: 1; min-width: 0; }
+
 .track-dot {
     width: 6px;
     height: 6px;

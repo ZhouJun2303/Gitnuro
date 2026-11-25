@@ -127,7 +127,17 @@ pub struct StashRow {
 #[serde(rename_all = "camelCase")]
 pub struct SubmoduleRow {
     pub path: String,
+    /// Checked-out commit, or the index gitlink while the checkout is missing.
     pub id: String,
+    /// Gitlink commit recorded in the superproject index.
+    #[serde(default)]
+    pub recorded: String,
+    /// Checked-out branch. Empty for a detached HEAD or a missing checkout.
+    #[serde(default)]
+    pub branch: String,
+    /// Branch named in `.gitmodules`. Empty when the entry sets none.
+    #[serde(default)]
+    pub configured_branch: String,
     pub ready: bool,
 }
 
@@ -776,6 +786,32 @@ fn refs_stamp(repo: &Path) -> String {
     }
     stamp.push('|');
     stamp.push_str(&file_mark(&repo.join(".gitmodules")));
+    // The sidebar shows each submodule's checked-out branch and commit, and their refs change
+    // without touching the superproject's own refs.
+    if let Ok(text) = std::fs::read_to_string(repo.join(".gitmodules")) {
+        for line in text.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            if key.trim() != "path" {
+                continue;
+            }
+            let path = value.trim().trim_matches('"');
+            let Some(git) = git_dir_of(&repo.join(path)) else {
+                continue;
+            };
+            stamp.push_str("|sub:");
+            stamp.push_str(path);
+            stamp.push(':');
+            stamp.push_str(&file_mark(&git.join("HEAD")));
+            stamp.push(':');
+            stamp.push_str(&file_mark(&git.join("packed-refs")));
+            for relative in ["refs/heads", "refs/remotes"] {
+                stamp.push(':');
+                stamp.push_str(&tree_mark(&git.join(relative)));
+            }
+        }
+    }
     stamp
 }
 
@@ -2237,24 +2273,48 @@ fn submodules(repo: &Path) -> Result<Vec<SubmoduleRow>, Error> {
             "--file",
             ".gitmodules",
             "--get-regexp",
-            r"^submodule\..*\.path$",
+            r"^submodule\..*\.(path|branch)$",
         ],
     )?;
-    let paths: Vec<String> = config
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter_map(|record| {
-            let record = String::from_utf8_lossy(record);
-            let (_, path) = record.split_once('\n')?;
-            let path = path.trim();
-            (!path.is_empty()).then(|| path.to_string())
-        })
+    // Section names may contain dots, so split the key from the fixed suffix instead of
+    // treating dots as separators. `branch = .` means the remote's HEAD and is not a ref.
+    let mut modules: Vec<(String, String)> = Vec::new();
+    let mut positions: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for record in config.stdout.split(|byte| *byte == 0) {
+        let record = String::from_utf8_lossy(record);
+        let Some((key, value)) = record.split_once('\n') else {
+            continue;
+        };
+        let Some(rest) = key.strip_prefix("submodule.") else {
+            continue;
+        };
+        let (name, is_branch) = if let Some(name) = rest.strip_suffix(".path") {
+            (name, false)
+        } else if let Some(name) = rest.strip_suffix(".branch") {
+            (name, true)
+        } else {
+            continue;
+        };
+        let index = *positions.entry(name.to_string()).or_insert_with(|| {
+            modules.push((String::new(), String::new()));
+            modules.len() - 1
+        });
+        let value = value.trim();
+        if is_branch {
+            modules[index].1 = if value == "." { String::new() } else { value.to_string() };
+        } else {
+            modules[index].0 = value.to_string();
+        }
+    }
+    let paths: Vec<(String, String)> = modules
+        .into_iter()
+        .filter(|(path, _)| !path.is_empty())
         .collect();
     if paths.is_empty() {
         return Ok(Vec::new());
     }
     let mut args = vec!["--literal-pathspecs", "ls-files", "--stage", "-z", "--"];
-    args.extend(paths.iter().map(String::as_str));
+    args.extend(paths.iter().map(|(path, _)| path.as_str()));
     let output = run(repo, &args)?;
     let mut rows: Vec<SubmoduleRow> = Vec::new();
     for record in output.stdout.split(|byte| *byte == 0) {
@@ -2267,16 +2327,25 @@ fn submodules(repo: &Path) -> Result<Vec<SubmoduleRow>, Error> {
             continue;
         }
         let staged = fields.next().unwrap_or("").to_string();
+        let configured = paths
+            .iter()
+            .find(|(item, _)| item == path)
+            .map(|(_, branch)| branch.clone())
+            .unwrap_or_default();
         let checkout = repo.join(path);
         let ready = checkout.join(".git").exists();
-        let id = if ready {
-            checked_out(&checkout).unwrap_or(staged)
+        let (branch, head) = if ready {
+            checked_out(&checkout).unwrap_or_default()
         } else {
-            staged
+            (String::new(), String::new())
         };
+        let id = if head.is_empty() { staged.clone() } else { head };
         rows.push(SubmoduleRow {
             path: path.to_string(),
             id,
+            recorded: staged,
+            branch,
+            configured_branch: configured,
             ready,
         });
     }
@@ -2284,40 +2353,56 @@ fn submodules(repo: &Path) -> Result<Vec<SubmoduleRow>, Error> {
     Ok(rows)
 }
 
-fn checked_out(dir: &Path) -> Option<String> {
-    if let Some(id) = head_from_files(dir) {
-        return Some(id);
+fn checked_out(dir: &Path) -> Option<(String, String)> {
+    if let Some(head) = head_from_files(dir) {
+        return Some(head);
     }
     let repo = gix::open(dir).ok()?;
-    let id = repo.head_id().ok()?;
-    Some(id.to_string())
+    let branch = repo
+        .head()
+        .ok()?
+        .referent_name()
+        .map(|name| name.shorten().to_string())
+        .unwrap_or_default();
+    let id = repo.head_id().ok()?.to_string();
+    Some((branch, id))
 }
 
-/// Read `HEAD` without opening the whole repository. Submodule refs are small, and
-/// doing this for every gitlink on each refs refresh was the dominant cost.
-fn head_from_files(dir: &Path) -> Option<String> {
-    let dot = dir.join(".git");
-    let git_dir = if dot.is_dir() {
-        dot
-    } else {
-        let text = std::fs::read_to_string(&dot).ok()?;
-        let line = text.lines().find(|line| !line.trim().is_empty())?;
-        let rest = line.trim().strip_prefix("gitdir:")?.trim();
-        let path = PathBuf::from(rest);
-        if path.is_absolute() {
-            path
-        } else {
-            dir.join(path)
-        }
-    };
+/// Branch and commit of `HEAD`, read without opening the whole repository. Submodule refs are
+/// small, and doing this for every gitlink on each refs refresh was the dominant cost.
+fn head_from_files(dir: &Path) -> Option<(String, String)> {
+    let git_dir = git_dir_of(dir)?;
     let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
     let head = head.trim();
-    let candidate = match head.strip_prefix("ref:") {
-        Some(name) => read_ref(&git_dir, name.trim())?,
-        None => head.to_string(),
+    let (branch, candidate) = match head.strip_prefix("ref:") {
+        Some(name) => {
+            let name = name.trim();
+            (
+                name.strip_prefix("refs/heads/").unwrap_or_default().to_string(),
+                read_ref(&git_dir, name)?,
+            )
+        }
+        None => (String::new(), head.to_string()),
     };
     let id = candidate.split_whitespace().next().unwrap_or("");
-    (id.len() >= 7 && id.bytes().all(|byte| byte.is_ascii_hexdigit())).then(|| id.to_string())
+    (id.len() >= 7 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| (branch, id.to_string()))
+}
+
+fn git_dir_of(dir: &Path) -> Option<PathBuf> {
+    let dot = dir.join(".git");
+    if dot.is_dir() {
+        return Some(dot);
+    }
+    let text = std::fs::read_to_string(&dot).ok()?;
+    let line = text.lines().find(|line| !line.trim().is_empty())?;
+    let rest = line.trim().strip_prefix("gitdir:")?.trim();
+    let path = PathBuf::from(rest);
+    Some(if path.is_absolute() {
+        path
+    } else {
+        dir.join(path)
+    })
 }
 
 fn read_ref(git_dir: &Path, name: &str) -> Option<String> {

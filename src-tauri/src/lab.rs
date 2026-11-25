@@ -199,6 +199,7 @@ fn layout() -> Result<Value, String> {
         "unstage-initial": text(repos.join("unstage-initial")),
         "stage-conflict-paths": text(repos.join("stage-conflict-paths")),
         "submodule-diff": text(repos.join("submodule-diff")),
+        "submodule-health": text(repos.join("submodule-health")),
         "cherry": text(repos.join("cherry")),
         "revert": text(repos.join("revert")),
         "detached": text(repos.join("detached")),

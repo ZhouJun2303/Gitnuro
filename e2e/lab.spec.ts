@@ -802,6 +802,16 @@ test("discard opened with Delete focuses the confirm button", async ({ page }) =
 });
 
 for (const theme of ["apple", "light", "dark"]) {
+  test(`submodule sidebar marks healthy and abnormal rows (${theme})`, async ({ page }) => {
+    await pinLabSettings(page, { theme });
+    await openLabScene(page, "submodule-health", ".sidebar .submodule-note", { locale: "en" });
+    await expect(page.locator(".sidebar .submodule-note.ok")).toHaveCount(2);
+    await expect(page.locator(".sidebar .submodule-note.bad")).toContainText("Branch mismatch");
+    await expect(page.locator(".sidebar .submodule-note.bad")).toContainText("uncommitted changes");
+    await expect(page.locator(".sidebar .submodule-note.warn")).toContainText("Commit mismatch");
+    await expect(page.locator(".sidebar .submodule-note.muted")).toContainText("Not initialized");
+  });
+
   test(`submodule menu updates one path and allows uninitialized entries (${theme})`, async ({ page }) => {
     await pinLabSettings(page, { theme });
     await openLabScene(page, "submodule", ".sidebar .side.nested", { locale: "en" });

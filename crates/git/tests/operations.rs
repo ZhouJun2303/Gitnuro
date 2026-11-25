@@ -1073,6 +1073,43 @@ fn submodule_and_worktree() {
 }
 
 #[test]
+fn submodule_rows_report_configured_and_checked_out_branches() {
+    let module = repo();
+    commit_file(&module, "module.txt", "one\n", "module base");
+    let superproject = repo();
+    superproject.git(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-b",
+        "main",
+        &file_url(&module.path),
+        "vendor",
+    ]);
+    superproject.git(&["commit", "-m", "add submodule"]);
+
+    let refs = repository_refs(&superproject.path).unwrap();
+    let row = refs.submodules.iter().find(|row| row.path == "vendor").expect("vendor");
+    assert!(row.ready);
+    assert_eq!(row.branch, "main");
+    assert_eq!(row.configured_branch, "main");
+    assert_eq!(row.recorded, row.id);
+
+    superproject.git(&["config", "-f", ".gitmodules", "submodule.vendor.branch", "topic"]);
+    let refs = repository_refs(&superproject.path).unwrap();
+    let row = refs.submodules.iter().find(|row| row.path == "vendor").expect("vendor");
+    assert_eq!(row.configured_branch, "topic");
+    assert_eq!(row.branch, "main");
+
+    superproject.git(&["-C", "vendor", "checkout", "--quiet", "--detach"]);
+    let refs = repository_refs(&superproject.path).unwrap();
+    let row = refs.submodules.iter().find(|row| row.path == "vendor").expect("vendor");
+    assert_eq!(row.branch, "");
+    assert!(!row.id.is_empty());
+}
+
+#[test]
 fn discard_submodule_restores_checkout_without_touching_other_submodules() {
     let lib = repo();
     commit_file(&lib, "lib.txt", "first\n", "first");

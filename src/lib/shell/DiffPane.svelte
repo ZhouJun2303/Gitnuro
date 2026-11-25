@@ -74,7 +74,7 @@
     if (row) return row;
     // A refs read can arrive after the diff read. Gitlink text still identifies the path.
     return shell.diff?.lines.some((line) => line.text.startsWith("-Subproject commit ") || line.text.startsWith("+Subproject commit "))
-      ? { path, id: "", ready: false }
+      ? { path, id: "", recorded: "", branch: "", configuredBranch: "", ready: false }
       : null;
   });
   const submoduleCommits = $derived.by(() => {

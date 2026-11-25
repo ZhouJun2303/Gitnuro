@@ -1,8 +1,10 @@
 import type { ShellState } from "./state.svelte";
 import { branchGroup, orderRefNames } from "../view";
+import type { SubmoduleRow } from "../status";
 
 export type SideAdd = "branch" | "remote" | "submodule" | "worktree";
 type PagedSection = "tags" | "stashes";
+export type SubmoduleTone = "ok" | "warn" | "bad" | "muted";
 
 export type SideRow =
   | { key: string; kind: "section"; id: string; label: string; count: number | null; filter: boolean; add: SideAdd | null; showAll: boolean; empty: boolean }
@@ -14,8 +16,45 @@ export type SideRow =
   | { key: string; kind: "remoteBranch"; remote: string; name: string; label: string; deeper: boolean }
   | { key: string; kind: "tag"; name: string; label: string; deep: boolean }
   | { key: string; kind: "stash"; name: string; summary: string; id?: string }
-  | { key: string; kind: "submodule"; path: string; ready: boolean }
+  | { key: string; kind: "submodule"; path: string; ready: boolean; tone: SubmoduleTone; title: string }
+  | { key: string; kind: "submoduleNote"; path: string; tone: SubmoduleTone; note: string; title: string }
   | { key: string; kind: "worktree"; path: string; branch: string | null };
+
+type SubmoduleHealth = { tone: SubmoduleTone; note: string; title: string };
+
+/**
+ * Whether the submodule is used the way the superproject expects. Detached HEAD is normal when
+ * `.gitmodules` names no branch: the gitlink pins one commit. A named branch must be checked out.
+ */
+function submoduleHealth(shell: ShellState, row: SubmoduleRow): SubmoduleHealth {
+  const short = (id: string) => (id ? id.slice(0, 7) : "—");
+  if (!row.ready) {
+    const note = shell.tr("chrome.submoduleUninitialized");
+    return { tone: "muted", note, title: `${note}\n${shell.tr("chrome.submoduleHealthUninitialized")}` };
+  }
+  // The superproject lists an unstaged submodule path for worktree changes only while the
+  // checkout commit still matches the gitlink; a different commit is reported as its own state.
+  const dirty = row.id === row.recorded && (shell.snapshot?.unstaged ?? []).some((file) => file.path === row.path);
+  const suffix = dirty ? shell.tr("chrome.submoduleDirtySuffix") : "";
+  if (row.configuredBranch && row.branch && row.branch !== row.configuredBranch) {
+    const note = shell.tr("chrome.submoduleBranchMismatch", { configured: row.configuredBranch, actual: row.branch }) + suffix;
+    return { tone: "bad", note, title: `${note}\n${shell.tr("chrome.submoduleHealthBranch", { configured: row.configuredBranch })}` };
+  }
+  if (row.configuredBranch && !row.branch) {
+    const note = shell.tr("chrome.submoduleDetached", { branch: row.configuredBranch }) + suffix;
+    return { tone: "warn", note, title: `${note}\n${shell.tr("chrome.submoduleHealthDetached", { branch: row.configuredBranch })}` };
+  }
+  if (row.id !== row.recorded) {
+    const note = shell.tr("chrome.submoduleCommitMismatch", { recorded: short(row.recorded), actual: short(row.id) }) + suffix;
+    return { tone: "warn", note, title: `${note}\n${shell.tr("chrome.submoduleHealthCommit")}` };
+  }
+  if (dirty) {
+    const note = shell.tr("chrome.submoduleDirty");
+    return { tone: "warn", note, title: `${note}\n${shell.tr("chrome.submoduleHealthDirty")}` };
+  }
+  const note = row.branch ? shell.tr("chrome.submoduleHealthyBranch", { branch: row.branch }) : shell.tr("chrome.submoduleHealthyPinned", { id: short(row.id) });
+  return { tone: "ok", note, title: `${note}\n${shell.tr("chrome.submoduleHealthOk")}` };
+}
 
 /** Flat sidebar rows. The view draws only the ones inside the scroll window. */
 export function liveSideRows(shell: ShellState, limits: Record<PagedSection, number>): SideRow[] {
@@ -197,7 +236,9 @@ export function liveSideRows(shell: ShellState, limits: Record<PagedSection, num
   if (shell.sideOpen("submodules")) {
     for (const row of refs.submodules) {
       if (!shell.matchesQuery(row.path, query)) continue;
-      rows.push({ key: `submodule:${row.path}`, kind: "submodule", path: row.path, ready: row.ready });
+      const health = submoduleHealth(shell, row);
+      rows.push({ key: `submodule:${row.path}`, kind: "submodule", path: row.path, ready: row.ready, tone: health.tone, title: health.title });
+      rows.push({ key: `submodule-note:${row.path}`, kind: "submoduleNote", path: row.path, tone: health.tone, note: health.note, title: health.title });
     }
   }
 

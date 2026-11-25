@@ -127,7 +127,18 @@ export type RemoteRow = {
 
 export type TagRow = { name: string; id: string };
 export type StashRow = { name: string; summary: string; id?: string; parent?: string };
-export type SubmoduleRow = { path: string; id: string; ready: boolean };
+export type SubmoduleRow = {
+  path: string;
+  /** Checked-out commit, or the index gitlink while the checkout is missing. */
+  id: string;
+  /** Gitlink commit recorded in the superproject index. */
+  recorded: string;
+  /** Checked-out branch. Empty for a detached HEAD or a missing checkout. */
+  branch: string;
+  /** Branch named in `.gitmodules`. Empty when the entry sets none. */
+  configuredBranch: string;
+  ready: boolean;
+};
 export type WorktreeRow = { path: string; branch: string | null; detached: boolean };
 
 export type RefSnapshot = {
