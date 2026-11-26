@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// On-disk shape of `settings.json`. Bump this when a migration has to rewrite fields.
-pub const SETTINGS_SCHEMA: u32 = 1;
+/// Schema 2 stores terminal CLIs as objects; schema 1 files carried bare names.
+pub const SETTINGS_SCHEMA: u32 = 2;
 
 fn schema_current() -> u32 {
     SETTINGS_SCHEMA
@@ -2192,11 +2193,23 @@ mod tests {
         assert_eq!(loaded.schema, SETTINGS_SCHEMA);
         assert!(loaded.recovery_notice.is_empty());
         let disk = std::fs::read_to_string(&dir.path).unwrap();
-        assert!(disk.contains("\"schema\": 1") || disk.contains("\"schema\":1"), "{disk}");
+        assert!(disk.contains(&format!("\"schema\": {SETTINGS_SCHEMA}")), "{disk}");
         assert!(!disk.contains("abc"), "{disk}");
         let again = load_at(&dir.path).unwrap();
         assert!(again.recovery_notice.is_empty());
         assert_eq!(again.github_token, "abc");
+    }
+
+    #[test]
+    fn settings_old_terminal_clis_migrate_to_presets_at_the_new_schema() {
+        let dir = TempSettings::new();
+        std::fs::write(&dir.path, r#"{"schema":1,"terminalClis":["codex","claude"]}"#).unwrap();
+        let loaded = load_at(&dir.path).unwrap();
+        assert_eq!(loaded.schema, SETTINGS_SCHEMA);
+        assert!(loaded.terminal_clis.iter().any(|cli| cli.id == "codex"));
+        let disk: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&dir.path).unwrap()).unwrap();
+        assert_eq!(disk["schema"], SETTINGS_SCHEMA as u64);
+        assert!(disk["terminalClis"][0].is_object(), "{disk}");
     }
 
     #[test]
