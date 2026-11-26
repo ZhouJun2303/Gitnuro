@@ -5,6 +5,8 @@ export const en: Messages = {
     tabBadge: "Worktree",
     manage: "Manage Worktrees", add: "Add Worktree", open: "Open Worktree", history: "View Worktree Commits",
     main: "Main worktree", current: "Current", bare: "Bare repository", detached: "Detached HEAD", missing: "Missing directory",
+    mergeInto: "Merge into {branch}", mergeMain: "Merge into Main Worktree",
+    mergeTargetUnavailable: "Check out a branch with commits in the main worktree before merging.",
     locked: "Locked", prunable: "Prunable", pending: "Working…", unavailable: "Worktree directory unavailable: {path}",
     existing: "Check out an existing local branch", new: "Create a new branch", checkoutMode: "Checkout mode", start: "Start point",
     path: "Worktree directory", pathHint: "Absolute path or relative to the current repository", openAfter: "Open as a tab after creation",

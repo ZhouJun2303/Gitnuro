@@ -13,6 +13,7 @@ fn repository() -> common::TempRepo {
     let repo = common::TempRepo::new();
     repo.git(&["init", "-b", "main"]);
     repo.git(&["config", "core.hooksPath", ".git/no-hooks"]);
+    repo.git(&["config", "core.autocrlf", "false"]);
     repo.git(&["config", "commit.gpgsign", "false"]);
     fs::write(repo.path.join(".gitignore"), "ignored/\n").unwrap();
     repo.git(&["add", ".gitignore"]);
@@ -31,6 +32,101 @@ fn add(repo: &common::TempRepo, path: &str, branch: &str, mode: AddMode, start: 
         },
     )
     .unwrap();
+}
+
+fn merge_worktree(repo: &common::TempRepo, path: &str) -> Mutation {
+    Mutation::MergeWorktree {
+        path: path.into(),
+        head: repo.output(&["-C", path, "rev-parse", "HEAD"]).trim().into(),
+        into: "main".into(),
+        no_ff: false,
+        summary: "chore: Merge worktree".into(),
+    }
+}
+
+#[test]
+fn worktree_merge_preserves_local_changes_and_is_repeatable() {
+    let repo = repository();
+    let path = "ignored/topic";
+    add(&repo, path, "topic", AddMode::New, None);
+    fs::write(repo.path.join(path).join("topic.txt"), "incoming\n").unwrap();
+    repo.git(&["-C", path, "add", "topic.txt"]);
+    repo.git(&["-C", path, "commit", "-m", "incoming"]);
+    let merge = merge_worktree(&repo, path);
+    let incoming = repo.output(&["-C", path, "rev-parse", "HEAD"]);
+
+    fs::write(repo.path.join(".gitignore"), "ignored/\n# staged\n").unwrap();
+    repo.git(&["add", ".gitignore"]);
+    let local = "ignored/\n# staged\n# unstaged\n";
+    fs::write(repo.path.join(".gitignore"), local).unwrap();
+    let staged = repo.output(&["show", ":.gitignore"]);
+
+    perform(&repo.path, merge.clone()).unwrap();
+    perform(&repo.path, merge).unwrap();
+    assert_eq!(repo.output(&["rev-parse", "HEAD"]), incoming);
+    assert_eq!(repo.output(&["-C", path, "rev-parse", "HEAD"]), incoming);
+    assert_eq!(repo.output(&["-C", path, "status", "--porcelain"]), "");
+    assert_eq!(repo.output(&["show", ":.gitignore"]), staged);
+    assert_eq!(fs::read_to_string(repo.path.join(".gitignore")).unwrap().replace("\r\n", "\n"), local);
+    assert!(repo.output(&["stash", "list"]).is_empty());
+}
+
+#[test]
+fn worktree_merge_rejects_dirty_missing_and_changed_checkouts() {
+    let repo = repository();
+    let path = "ignored/task";
+    add(&repo, path, "task", AddMode::New, None);
+    repo.git(&["-C", path, "commit", "--allow-empty", "-m", "incoming"]);
+    let merge = merge_worktree(&repo, path);
+    let main_head = repo.output(&["rev-parse", "HEAD"]);
+    let local = repo.path.join(path).join("unfinished.txt");
+    fs::write(&local, "unfinished\n").unwrap();
+    assert!(perform(&repo.path, merge.clone()).unwrap_err().to_string().contains("请先提交源工作树"));
+    assert!(local.is_file());
+    fs::remove_file(local).unwrap();
+
+    repo.git(&["switch", "-c", "other"]);
+    assert!(perform(&repo.path, merge.clone()).unwrap_err().to_string().contains("主工作树的分支已变化"));
+    repo.git(&["switch", "main"]);
+    repo.git(&["-C", path, "commit", "--allow-empty", "-m", "new tip"]);
+    assert!(perform(&repo.path, merge).unwrap_err().to_string().contains("源工作树的 HEAD 已变化"));
+
+    let merge = merge_worktree(&repo, path);
+    fs::rename(repo.path.join(path), repo.path.join("ignored/relocated")).unwrap();
+    assert!(perform(&repo.path, merge).unwrap_err().to_string().contains("源工作树不可用"));
+    assert_eq!(repo.output(&["rev-parse", "HEAD"]), main_head);
+    assert!(repo.output(&["status", "--porcelain"]).is_empty());
+}
+
+#[test]
+fn worktree_merge_conflict_can_abort_and_restore_main_changes() {
+    let repo = repository();
+    let file = repo.path.join("shared.txt");
+    fs::write(&file, "base\n").unwrap();
+    repo.git(&["add", "shared.txt"]);
+    repo.git(&["commit", "-m", "shared"]);
+    let path = "ignored/detached";
+    add(&repo, path, "", AddMode::Detached, None);
+    fs::write(repo.path.join(path).join("shared.txt"), "source\n").unwrap();
+    repo.git(&["-C", path, "commit", "-am", "source"]);
+    fs::write(&file, "target\n").unwrap();
+    repo.git(&["commit", "-am", "target"]);
+    let main_head = repo.output(&["rev-parse", "HEAD"]);
+    let incoming = repo.output(&["-C", path, "rev-parse", "HEAD"]);
+    let local = repo.path.join("staged.txt");
+    fs::write(&local, "local\n").unwrap();
+    repo.git(&["add", "staged.txt"]);
+    let merge = merge_worktree(&repo, path);
+    assert!(perform(&repo.path, merge.clone()).is_err());
+    assert_eq!(repo.output(&["rev-parse", "MERGE_HEAD"]), incoming);
+    assert!(repo.output(&["ls-files", "-u"]).contains("shared.txt"));
+    assert!(perform(&repo.path, merge).unwrap_err().to_string().contains("merge is in progress"));
+    perform(&repo.path, Mutation::Abort).unwrap();
+    assert_eq!(repo.output(&["rev-parse", "HEAD"]), main_head);
+    assert!(repo.output(&["diff", "--cached", "--name-only"]).contains("staged.txt"));
+    assert!(local.is_file());
+    assert!(repo.output(&["stash", "list"]).is_empty());
+    assert_eq!(repo.output(&["-C", path, "rev-parse", "HEAD"]), incoming);
 }
 
 #[test]

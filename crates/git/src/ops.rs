@@ -137,6 +137,15 @@ pub enum Mutation {
         #[serde(default)]
         description: String,
     },
+    MergeWorktree {
+        path: String,
+        head: String,
+        into: String,
+        #[serde(default)]
+        no_ff: bool,
+        #[serde(default)]
+        summary: String,
+    },
     Rebase {
         onto: String,
         #[serde(default)]
@@ -515,7 +524,7 @@ impl Mutation {
                 | SetHidden { .. } | SetExpanded { .. } | SetSignOff { .. } => &["config"],
             StashPatch { .. } | LfsPush => &[],
             Reset { mode: ResetMode::Soft, .. } => &["refs", "history", "flow"],
-            Pull { .. } | PullRef { .. } | Checkout { .. } | CheckoutRemote { .. } | Merge { .. } | Rebase { .. }
+            Pull { .. } | PullRef { .. } | Checkout { .. } | CheckoutRemote { .. } | Merge { .. } | MergeWorktree { .. } | Rebase { .. }
                 | RebaseInteractive { .. } | Abort | Continue { .. } | Skip | Reset { .. } | CherryPick { .. }
                 | Revert { .. } | Reword { .. } | Bisect { .. } | GitFlowStart { .. } | GitFlowFinish { .. }
                 | Squash { .. } | Clone { .. } | Init { .. } | Custom { .. } => &["worktree", "index", "refs", "history", "flow"],
@@ -839,6 +848,7 @@ fn starts_flow(mutation: &Mutation) -> bool {
         Mutation::Pull { .. }
             | Mutation::PullRef { .. }
             | Mutation::Merge { .. }
+            | Mutation::MergeWorktree { .. }
             | Mutation::Rebase { .. }
             | Mutation::RebaseInteractive { .. }
             | Mutation::CherryPick { .. }
@@ -954,6 +964,17 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             } else {
                 merge(repo, &name, squash, no_ff, &summary, &description)
             }
+        }
+        Mutation::MergeWorktree { path, head, into, no_ff, summary } => {
+            crate::worktree::validate_merge(repo, &path, &head, &into)?;
+            apply_unguarded(repo, Mutation::Merge {
+                name: head,
+                squash: false,
+                no_ff,
+                autostash: true,
+                summary,
+                description: String::new(),
+            })
         }
         Mutation::Rebase { onto, autostash } => {
             let label = format!("rebase onto {}", short_rev(&onto));

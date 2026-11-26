@@ -712,9 +712,9 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
     };
     let _turn = repo_turn(&next);
     tasks::validate_intent(&repo)?;
-    use awegit_git::Mutation::{AddWorktree, MoveWorktree, PruneWorktrees, RemoveWorktree, RepairWorktree, SetWorktreeLock};
+    use awegit_git::Mutation::{AddWorktree, MergeWorktree, MoveWorktree, PruneWorktrees, RemoveWorktree, RepairWorktree, SetWorktreeLock};
     if matches!(&request, AddWorktree { .. } | MoveWorktree { .. } | PruneWorktrees { .. } |
-        RemoveWorktree { .. } | RepairWorktree { .. } | SetWorktreeLock { .. }) {
+        RemoveWorktree { .. } | RepairWorktree { .. } | SetWorktreeLock { .. } | MergeWorktree { .. }) {
         ensure_worktree_lab_repo(&repo)?;
     }
     let worktree_target = |path: &str| -> Result<PathBuf, String> {
@@ -731,7 +731,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             lab::ensure_lab_path(&target)?;
             Some(target)
         }
-        RemoveWorktree { path, .. } | SetWorktreeLock { path, .. } | RepairWorktree { path: Some(path) } => {
+        RemoveWorktree { path, .. } | SetWorktreeLock { path, .. } | RepairWorktree { path: Some(path) } | MergeWorktree { path, .. } => {
             worktree_target(path)?;
             None
         }
@@ -896,7 +896,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::Checkout { .. } => "checkout",
         awegit_git::Mutation::CreateBranch { .. } => "createBranch",
         awegit_git::Mutation::DeleteBranch { .. } => "deleteBranch",
-        awegit_git::Mutation::Merge { .. } => "merge",
+        awegit_git::Mutation::Merge { .. } | awegit_git::Mutation::MergeWorktree { .. } => "merge",
         awegit_git::Mutation::Rebase { .. } => "rebase",
         awegit_git::Mutation::RebaseInteractive { .. } => "rebaseInteractive",
         awegit_git::Mutation::Abort => "abort",
@@ -987,6 +987,9 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::CreateBranch { name, start } => join([scrub(name), opt(start)]),
         Mutation::Merge { name, squash, no_ff, autostash, summary, description } => {
             join([scrub(name), flag("squash", *squash), flag("noFf", *no_ff), flag("autostash", *autostash), bytes("summary", summary), bytes("description", description)])
+        }
+        Mutation::MergeWorktree { path, head, into, no_ff, summary } => {
+            join([scrub(path), scrub(head), scrub(into), flag("noFf", *no_ff), bytes("summary", summary)])
         }
         Mutation::Rebase { onto, autostash } => join([scrub(onto), flag("autostash", *autostash)]),
         Mutation::RebaseInteractive { onto, drop, steps, autostash, update_refs } => {

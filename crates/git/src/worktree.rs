@@ -231,6 +231,70 @@ fn registered<'a>(
         })
 }
 
+pub(crate) fn validate_merge(
+    repo: &Path,
+    path: &str,
+    expected_head: &str,
+    into: &str,
+) -> Result<(), Error> {
+    let rows = list(repo)?;
+    let target = registered(repo, &rows, ".")?;
+    if !target.main || target.bare || target.missing || target.head.is_none() {
+        return Err(Error::Git(
+            "Merge requires a main worktree with an existing branch / 合并需要主工作树检出有提交的分支".into(),
+        ));
+    }
+    let source = registered(repo, &rows, path)?;
+    if source.main || source.bare || source.missing {
+        return Err(Error::Git(format!(
+            "Source worktree is unavailable / 源工作树不可用: {path}"
+        )));
+    }
+    let root = Path::new(&source.path);
+    let checkout = crate::open_repo(root)?;
+    if !same_path(checkout.common_dir(), &common_dir(repo)?) {
+        return Err(Error::Git(format!(
+            "Directory belongs to another repository / 目录属于其他仓库: {path}"
+        )));
+    }
+    if crate::in_progress(root)?.is_some() {
+        return Err(Error::Git(
+            "Finish the Git operation in the source worktree first / 请先结束源工作树中正在进行的 Git 操作".into(),
+        ));
+    }
+    let changes = run_env(
+        root,
+        &[
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=normal",
+            "--ignore-submodules=none",
+        ],
+        &[("GIT_OPTIONAL_LOCKS", "0")],
+    )?;
+    if !changes.stdout.is_empty() {
+        return Err(Error::Git(
+            "Commit the source worktree changes before merging / 请先提交源工作树的改动，再合并".into(),
+        ));
+    }
+    if source.head.as_deref() != Some(expected_head)
+        || checkout.head_id().ok().map(|id| id.to_string()).as_deref() != Some(expected_head)
+    {
+        return Err(Error::Git(
+            "Source worktree HEAD changed. Refresh and try again / 源工作树的 HEAD 已变化，请刷新后重试".into(),
+        ));
+    }
+    if target.branch.as_deref() != Some(into)
+        || crate::current_branch(repo)?.as_deref() != Some(into)
+    {
+        return Err(Error::Git(
+            "The main worktree branch changed. Refresh and try again / 主工作树的分支已变化，请刷新后重试".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub(crate) fn add(
     repo: &Path,
     path: &str,

@@ -5,6 +5,8 @@ export const zh: Messages = {
     tabBadge: "工作树",
     manage: "管理工作树", add: "新增工作树", open: "打开工作树", history: "查看工作树提交",
     main: "主工作树", current: "当前", bare: "裸仓库", detached: "游离 HEAD", missing: "目录缺失",
+    mergeInto: "合并到 {branch}", mergeMain: "合并到主工作树",
+    mergeTargetUnavailable: "请先在主工作树检出一个有提交的分支，再合并。",
     locked: "已锁定", prunable: "可清理", pending: "正在处理…", unavailable: "工作树目录不可用：{path}",
     existing: "检出已有本地分支", new: "创建新分支", checkoutMode: "检出方式", start: "起点",
     path: "工作树目录", pathHint: "绝对路径，或相对于当前仓库的路径", openAfter: "创建后打开标签页",

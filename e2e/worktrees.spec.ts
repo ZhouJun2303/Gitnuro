@@ -16,6 +16,12 @@ async function worktreeAction(page: Page, name: string, action: string) {
   await page.getByRole("menuitem", { name: action, exact: true }).click();
 }
 
+function tabCount(page: Page, suffix: string) {
+  return page.locator(".tab[data-repo]").evaluateAll((tabs, name) => tabs.filter((tab) =>
+    tab.getAttribute("data-repo")?.replaceAll("\\", "/").replace(/\/+$/, "").endsWith("/" + name),
+  ).length, suffix);
+}
+
 test.beforeEach(async ({ request }) => {
   // A background Git read from the previous page can briefly hold a Windows directory handle.
   await expect.poll(async () => {
@@ -27,6 +33,54 @@ test.beforeEach(async ({ request }) => {
 });
 
 for (const theme of ["apple", "light", "dark"] as const) {
+  test(`one-click worktree merge reuses tabs (${theme})`, async ({ page }) => {
+    test.setTimeout(90_000);
+    await openLabScene(page, "worktree-tabs", '[data-worktree-path$="/detached"]', { theme, locale: "zh" });
+    const detached = resolve(checkouts, "detached");
+    const tip = git(detached, "rev-parse", "HEAD");
+    const base = git(main, "rev-parse", "HEAD");
+    const action = "合并到 main";
+    await worktreeAction(page, "topic", action);
+    await expect(page.locator('.identity-floor[data-layer="error"]')).toContainText("请先提交源工作树的改动");
+    expect(git(main, "rev-parse", "HEAD")).toBe(base);
+
+    // The registry and status responses may spell the same checkout path differently.
+    let openReads = 0;
+    await page.route("**/__lab/invoke", async (route) => {
+      const body = route.request().postDataJSON();
+      if (body.cmd !== "workspace_status" || !body.args?.path?.replaceAll("\\", "/").endsWith("/detached")) return route.fallback();
+      const response = await route.fetch();
+      const payload = await response.json();
+      if (payload.ok) {
+        openReads += 1;
+        payload.value.path = detached + "/";
+      }
+      await route.fulfill({ response, json: payload });
+    });
+    await row(page, "detached").dblclick();
+    await expect(row(page, "detached")).toHaveAttribute("aria-current", "true");
+    await expect.poll(() => openReads).toBeGreaterThan(0);
+    await expect.poll(() => tabCount(page, "detached")).toBe(1);
+
+    await worktreeAction(page, "detached", action);
+    await expect(row(page, "worktree")).toHaveAttribute("aria-current", "true");
+    await expect.poll(() => git(main, "rev-parse", "HEAD")).not.toBe(base);
+    expect(git(main, "show", "HEAD:detached.txt")).toBe("detached history");
+    expect(git(detached, "rev-parse", "HEAD")).toBe(tip);
+    await expect.poll(() => tabCount(page, "worktree")).toBe(1);
+
+    await expect(row(page, "detached").locator(".reference-pending")).toHaveCount(0);
+    await worktreeAction(page, "detached", "打开工作树");
+    await expect(row(page, "detached")).toHaveAttribute("aria-current", "true");
+    await expect.poll(() => tabCount(page, "detached")).toBe(1);
+    await page.getByRole("button", { name: "关闭 detached", exact: true }).click();
+    await expect(row(page, "worktree")).toHaveAttribute("aria-current", "true");
+    await expect.poll(() => tabCount(page, "detached")).toBe(0);
+    await worktreeAction(page, "detached", "打开工作树");
+    await expect(row(page, "detached")).toHaveAttribute("aria-current", "true");
+    await expect.poll(() => tabCount(page, "detached")).toBe(1);
+  });
+
   test(`worktree tab badges (${theme})`, async ({ page }) => {
     const locale = theme === "dark" ? "en" : "zh";
     const badge = locale === "zh" ? "工作树" : "Worktree";
@@ -168,6 +222,23 @@ test("worktree unlock, stale removal review, move, repair and prune", async ({ p
   await button(page, "清理记录").click();
   await expect(row(page, "missing")).toHaveCount(0);
   expect(git(main, "show-ref", "--verify", "refs/heads/missing")).toContain("refs/heads/missing");
+});
+
+test("one-click worktree merge opens the conflict dialog in the main checkout", async ({ page }) => {
+  const detached = resolve(checkouts, "detached");
+  const tip = git(detached, "rev-parse", "HEAD");
+  writeFileSync(resolve(main, "detached.txt"), "different on main\n");
+  git(main, "add", "detached.txt");
+  git(main, "commit", "-m", "test: conflicting addition");
+  await openLabScene(page, "worktree", '[data-worktree-path$="/detached"]', { theme: "dark", locale: "zh" });
+  await row(page, "detached").dblclick();
+  await expect(row(page, "detached")).toHaveAttribute("aria-current", "true");
+
+  await worktreeAction(page, "detached", "合并到 main");
+  await expect(page.locator('[data-dialog="mergeConflict"]')).toContainText("detached.txt");
+  await expect(row(page, "worktree")).toHaveAttribute("aria-current", "true");
+  expect(git(main, "rev-parse", "MERGE_HEAD")).toBe(tip);
+  expect(git(detached, "status", "--porcelain")).toBe("");
 });
 
 test("worktree creation opens a checkout from a bare repository", async ({ page }) => {

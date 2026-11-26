@@ -1795,7 +1795,7 @@ export class ShellState {
   refView = $derived(projectRefs(this.refs, this.operationTasks, this.repoPath() ?? "", this.contextRevision));
   writeBlocked = $derived(this.switching || this.mode !== "live");
   commitPending = $derived(this.operationTasks.some((task) => !taskDone(task) && task.action === "commit_changes" && this.jobKey(task.path) === this.jobKey(this.repoPath())));
-  flowPending = $derived(this.writeBlocked || this.operationTasks.some((task) => !taskDone(task) && ["merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "abort", "continue", "skip", "bisect"].includes(task.action) && this.jobKey(task.path) === this.jobKey(this.repoPath())));
+  flowPending = $derived(this.writeBlocked || this.operationTasks.some((task) => !taskDone(task) && ["merge", "mergeWorktree", "rebase", "rebaseInteractive", "cherryPick", "revert", "abort", "continue", "skip", "bisect"].includes(task.action) && this.jobKey(task.path) === this.jobKey(this.repoPath())));
   aiPending = $derived(this.operationTasks.some((task) => !taskDone(task) && task.action === "suggest_commit_message" && this.jobKey(task.path) === this.jobKey(this.repoPath())));
 
   pendingPaths = $derived.by(() => {
@@ -1805,7 +1805,7 @@ export class ShellState {
     for (const task of this.operationTasks) {
       if (task.kind === "service" || taskDone(task) || this.jobKey(task.path) !== this.jobKey(this.repoPath())) continue;
       if (!areasFor(task.action).some((area) => area === "worktree" || area === "index")) continue;
-      if (!task.targets.length || (task.targetCount ?? 0) > task.targets.length || ["checkout", "checkoutRemote", "pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "reset", "abort", "continue", "skip", "stash", "stashPop", "stashApply", "stashBranch", "gitFlowStart", "gitFlowFinish", "custom", "lfsPull"].includes(task.action)) all = true;
+      if (!task.targets.length || (task.targetCount ?? 0) > task.targets.length || ["checkout", "checkoutRemote", "pull", "pullRef", "merge", "mergeWorktree", "rebase", "rebaseInteractive", "cherryPick", "revert", "reset", "abort", "continue", "skip", "stash", "stashPop", "stashApply", "stashBranch", "gitFlowStart", "gitFlowFinish", "custom", "lfsPull"].includes(task.action)) all = true;
       for (const target of task.targets) {
         let parent = target.replaceAll("\\", "/");
         targets.add(parent);
@@ -3495,7 +3495,8 @@ export class ShellState {
     }
     this.mode = "live";
     this.loadError = "";
-    if (value.path && !this.repos.includes(value.path)) this.repos = [...this.repos, value.path];
+    const tabKey = this.jobKey(value.path);
+    if (tabKey && !this.repos.some((path) => this.jobKey(path) === tabKey)) this.repos = [...this.repos, value.path];
     const visible = this.pendingStages?.length ? this.stageView : value;
     const sameSide = (this.selectedSide === "staged" ? visible.staged : visible.unstaged).some(
       (file) => file.path === this.selectedPath,
@@ -3849,6 +3850,8 @@ export class ShellState {
         return { title: `${this.tr("menu.checkout")} ${remote}/${text("branch")}`, command: "" };
       case "merge":
         return { title: `${this.tr("menu.merge")} ${text("name")}`, command: this.gitLine(["merge", request.squash ? "--squash" : "", request.noFf ? "--no-ff" : "", text("summary") ? "-m" : "", text("summary"), text("name")]) };
+      case "mergeWorktree":
+        return { title: this.tr("worktree.mergeInto", { branch: text("into") }), command: this.gitLine(["merge", request.noFf ? "--no-ff" : "", "-m", text("summary"), text("head")]) };
       case "revert":
         return { title: this.tr("dialog.revert"), command: this.gitLine(["revert", request.noCommit ? "--no-commit" : "", text("rev")]) };
       case "discard":
@@ -4297,7 +4300,7 @@ export class ShellState {
 
   /** True when git refused a write because the work tree has changes it would overwrite. */
   stashBlocked(action: string, text: string) {
-    const retryable = ["checkout", "checkoutRemote", "merge", "pull", "pullRef", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashApply", "stashPop", "applyPatch", "continue", "gitFlowFinish"];
+    const retryable = ["checkout", "checkoutRemote", "merge", "mergeWorktree", "pull", "pullRef", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashApply", "stashPop", "applyPatch", "continue", "gitFlowFinish"];
     if (!retryable.includes(action)) return false;
     const lower = text.toLowerCase();
     return lower.includes("would be overwritten") || lower.includes("please commit your changes") || lower.includes("please move or remove");
@@ -4486,6 +4489,7 @@ export class ShellState {
 
   /** Pull/merge-style writes that leave unmerged paths get Fork-style conflict dialog. */
   shouldShowMergeConflict(action: string, text: string) {
+    if (action === "mergeWorktree") return this.conflictCount > 0;
     const ops = new Set(["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashPop", "stashApply", "continue", "skip", "gitFlowFinish"]);
     if (!ops.has(action)) return false;
     if (this.conflictCount > 0) return true;
@@ -4545,13 +4549,13 @@ export class ShellState {
 
   /** Writes that start a new flow; a paused flow owns HEAD until it ends. */
   startsFlow(action: string) {
-    return ["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "checkout", "checkoutRemote", "reset", "reword", "squash", "stashBranch", "gitFlowStart", "gitFlowFinish"].includes(action);
+    return ["pull", "pullRef", "merge", "mergeWorktree", "rebase", "rebaseInteractive", "cherryPick", "revert", "checkout", "checkoutRemote", "reset", "reword", "squash", "stashBranch", "gitFlowStart", "gitFlowFinish"].includes(action);
   }
 
 
   /** Writes whose autostash can conflict after the operation itself finished. */
   flowConflictAction(action: string) {
-    return ["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "checkout", "checkoutRemote", "cherryPick", "revert", "continue", "skip", "abort", "squash", "gitFlowFinish"].includes(action);
+    return ["pull", "pullRef", "merge", "mergeWorktree", "rebase", "rebaseInteractive", "checkout", "checkoutRemote", "cherryPick", "revert", "continue", "skip", "abort", "squash", "gitFlowFinish"].includes(action);
   }
 
 
@@ -4638,10 +4642,20 @@ export class ShellState {
       ...value,
       recent: value.recent ?? [],
       recentRepoPins: value.recentRepoPins ?? [],
-      workspaces: (value.workspaces ?? []).map((item) => ({
-        ...item,
-        tabWidth: item.tabWidth || workspaceTabWidth(item.repositories?.length || item.openTabs?.length || 0),
-      })),
+      workspaces: (value.workspaces ?? []).map((item) => {
+        const savedTabs = item.openTabs?.length ? item.openTabs : item.repositories ?? [];
+        const selected = savedTabs[Math.min(item.selectedTab, savedTabs.length - 1)];
+        const repositories = this.dedupeRepos(item.repositories ?? []);
+        const openTabs = this.dedupeRepos(item.openTabs ?? []);
+        const tabs = openTabs.length ? openTabs : repositories;
+        return {
+          ...item,
+          repositories,
+          openTabs,
+          selectedTab: Math.max(0, tabs.findIndex((path) => this.jobKey(path) === this.jobKey(selected))),
+          tabWidth: item.tabWidth || workspaceTabWidth(repositories.length || openTabs.length),
+        };
+      }),
       commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })),
       shortcuts: value.shortcuts ?? {},
       expandedGroups: value.expandedGroups ?? [],
@@ -5710,15 +5724,16 @@ export class ShellState {
     const historySize = Math.max(12, this.settings.recentWorkspaceLimit, this.settings.recent.length);
     const recent = this.dedupeRepos([path, ...this.settings.recent]).slice(0, historySize);
     const currentId = this.settings.currentWorkspace;
+    const key = this.jobKey(path);
     const workspaces = this.settings.workspaces.map((workspace) => {
       if (!currentId || currentId === recentWorkspaceId || workspace.id !== currentId) return workspace;
-      const openTabs = workspace.openTabs.includes(path) ? workspace.openTabs : [...workspace.openTabs, path];
-      const repositories = workspace.repositories.includes(path) ? workspace.repositories : [...workspace.repositories, path];
+      const openTabs = this.dedupeRepos([...workspace.openTabs, path]);
+      const repositories = this.dedupeRepos([...workspace.repositories, path]);
       return {
         ...workspace,
         repositories,
         openTabs,
-        selectedTab: Math.max(0, openTabs.indexOf(path)),
+        selectedTab: Math.max(0, openTabs.findIndex((tab) => this.jobKey(tab) === key)),
         tabWidth: workspaceTabWidth(repositories.length),
       };
     });
@@ -5788,7 +5803,7 @@ export class ShellState {
   relocateRepo(path: string, destination: string) {
     const match = (value: string) => this.jobKey(value) === this.jobKey(path);
     const replace = (value: string) => match(value) ? destination : value;
-    const rewrite = (paths: string[]) => [...new Set(paths.map(replace))];
+    const rewrite = (paths: string[]) => this.dedupeRepos(paths.map(replace));
     const keyed = (items: string[]) => items.map((item) => {
       const tab = item.indexOf("\t");
       return tab < 0 ? replace(item) : replace(item.slice(0, tab)) + item.slice(tab);
@@ -5803,7 +5818,8 @@ export class ShellState {
           ...workspace,
           repositories: rewrite(workspace.repositories),
           openTabs,
-          selectedTab: Math.max(0, openTabs.indexOf(replace(workspace.openTabs[workspace.selectedTab] ?? ""))),
+          selectedTab: Math.max(0, openTabs.findIndex((tab) =>
+            this.jobKey(tab) === this.jobKey(replace(workspace.openTabs[workspace.selectedTab] ?? "")))),
         };
       }),
       tabLabels: keyed(this.settings.tabLabels),
@@ -6204,7 +6220,7 @@ export class ShellState {
       .catch(() => {
         if (gen === this.openGen) this.lfsAvailable = false;
       });
-    void this.rememberRepo(path);
+    void this.rememberRepo(this.snapshot?.path ?? path);
     this.facts = null;
     this.factsPath = "";
     void this.fillTemplate();
@@ -7304,7 +7320,7 @@ export class ShellState {
     const seen = new Set<string>();
     const unique: string[] = [];
     for (const path of paths) {
-      const key = this.normalPath(path);
+      const key = this.jobKey(path);
       if (!key || seen.has(key)) continue;
       seen.add(key);
       unique.push(path);
@@ -7607,7 +7623,7 @@ export class ShellState {
 
   cycleTab(delta: number) {
     if (this.repos.length < 2 || !this.snapshot) return;
-    const index = this.repos.indexOf(this.snapshot.path);
+    const index = this.repos.findIndex((path) => this.viewing(path));
     const next = this.repos[(index + delta + this.repos.length) % this.repos.length];
     void this.openRepo(next);
   }
@@ -7639,8 +7655,10 @@ export class ShellState {
 
 
   closeTab(path: string) {
-    this.closedTabs = [path, ...this.closedTabs.filter((item) => item !== path)].slice(0, 12);
-    const next = this.repos.filter((repo) => repo !== path);
+    const key = this.jobKey(path);
+    const isTab = (item: string) => this.jobKey(item) === key;
+    this.closedTabs = [path, ...this.closedTabs.filter((item) => !isTab(item))].slice(0, 12);
+    const next = this.repos.filter((repo) => !isTab(repo));
     this.repos = next;
     const currentId = this.settings.currentWorkspace;
     if (currentId) {
@@ -7648,12 +7666,12 @@ export class ShellState {
         ...this.settings,
         workspaces: this.settings.workspaces.map((workspace) => {
           if (workspace.id !== currentId) return workspace;
-          const openTabs = workspace.openTabs.filter((item) => item !== path);
+          const openTabs = workspace.openTabs.filter((item) => !isTab(item));
           return { ...workspace, openTabs, selectedTab: Math.min(workspace.selectedTab, Math.max(0, openTabs.length - 1)) };
         }),
       };
     }
-    if (this.snapshot?.path !== path) {
+    if (!this.viewing(path)) {
       if (currentId) void this.savePrefs(false);
       return;
     }

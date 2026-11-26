@@ -6,7 +6,7 @@ const history: RefreshArea[] = [...work, "refs", "history", "flow"];
 export const operationAreas = {
   fetch: refs, pull: history, push: refs, stash: [...work, "stashes"], stashPop: [...work, "stashes"],
   stashApply: work, stashDrop: ["stashes"], stashRename: ["stashes"], stashBranch: [...history, "stashes"], stashPatch: [], stashPaths: [...work, "stashes"],
-  checkout: history, createBranch: refs, deleteBranch: refs, merge: history, rebase: history, rebaseInteractive: history,
+  checkout: history, createBranch: refs, deleteBranch: refs, merge: history, mergeWorktree: history, rebase: history, rebaseInteractive: history,
   abort: history, continue: history, skip: history, reset: history, cherryPick: history, revert: history, reword: history,
   tag: refs, deleteTag: refs, deleteRemoteTag: refs, restoreFile: work, bisect: history,
   writeGitignore: [...work, "config"], appendIgnore: [...work, "config"], writeMailmap: ["worktree", "config", "history"],

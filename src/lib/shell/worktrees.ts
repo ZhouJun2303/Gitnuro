@@ -131,14 +131,47 @@ export function suggestedWorktreePath(shell: ShellState, label: string) {
   return path;
 }
 
+async function mergeWorktree(shell: ShellState, source: WorktreeRow, target: WorktreeRow | undefined) {
+  if (shell.mode !== "live" || shell.pendingReference(source.path)) return;
+  if (source.missing) {
+    shell.actionError = shell.tr("worktree.unavailable", { path: source.path });
+    return;
+  }
+  if (!source.head) {
+    shell.actionError = shell.tr("worktree.noHead");
+    return;
+  }
+  if (!target?.branch || !target.head || target.bare || target.missing) {
+    shell.actionError = shell.tr("worktree.mergeTargetUnavailable");
+    return;
+  }
+  if (!shell.viewing(target.path)) {
+    const expected = shell.openGen + 1;
+    await openWorktree(shell, target);
+    if (shell.openGen !== expected || shell.mode !== "live" || !shell.viewing(target.path)) return;
+  }
+  const type = shell.commitTypeList().some((item) => item.name === "chore") ? "chore" : shell.preferredCommitType();
+  const summary = shell.tr("dialog.mergeTitleLine", { source: source.branch ?? source.head.slice(0, 8), into: target.branch });
+  await shell.mutate({
+    action: "mergeWorktree", path: source.path, head: source.head, into: target.branch,
+    noFf: shell.settings.mergeNoFf, summary: `${type}: ${summary}`,
+  });
+}
+
 export function worktreeMenu(shell: ShellState, row: WorktreeRow): MenuItem[] {
   const pending = shell.pendingReference(row.path);
   const unavailable = row.missing || pending;
   const changePath = row.main || row.locked != null || pending;
+  const main = shell.refs?.worktrees.find((worktree) => worktree.main);
   const worktreeAction = (kind: WorktreeDialogState["kind"]) => () => beginWorktree(shell, { kind, path: row.path });
   return [
     { label: shell.tr("worktree.open"), disabled: unavailable, run: () => void openWorktree(shell, row) },
     { label: shell.tr("worktree.history"), disabled: !row.head, run: () => viewWorktreeHistory(shell, row) },
+    ...(!row.main ? [{
+      label: main?.branch ? shell.tr("worktree.mergeInto", { branch: main.branch }) : shell.tr("worktree.mergeMain"),
+      disabled: pending || (shell.viewing(main?.path) && !!shell.progress),
+      run: () => void mergeWorktree(shell, row, main),
+    }] : []),
     { label: shell.tr("worktree.manage"), run: worktreeAction("manage") },
     { label: shell.tr("chrome.explorer"), disabled: unavailable, run: () => void shell.openLocal(row.path, true) },
     { label: shell.tr("chrome.terminal"), disabled: unavailable, run: () =>

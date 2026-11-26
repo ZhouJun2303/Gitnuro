@@ -2,9 +2,13 @@
 
 ## 待处理
 
+- [ ] Fetch 等待远端时，切换修改文件应立即加载差异。
+
 - [ ] 正式安装包实机复测：记录启动、点击到 Git 完成及界面刷新耗时、真实远端网络长尾和系统峰值内存；补原生窗口重启和多屏/DPI 验证。按启动测量决定是否拆分主界面及试验台入口。现有本地基准不涵盖这些结果，历史 TLS 失败也尚未用真实远端复核。
 
 ## 最近完成
+
+- [x] 工作树右键直接合并到主工作树当前分支，并按规范化路径复用标签页。本条所在提交 `feat: 新增工作树一键合并并修复重复标签页`。回归见 `worktree_merge_preserves_local_changes_and_is_repeatable`、`worktree_merge_rejects_dirty_missing_and_changed_checkouts`、`worktree_merge_conflict_can_abort_and_restore_main_changes` 及 `e2e/worktrees.spec.ts`。
 
 - [x] 关联工作树的项目标签显示独立徽标，空间不足时缩为 `WT`。实现提交 `feat: 为工作树项目标签添加徽标`。回归见 `e2e/worktrees.spec.ts` 的 `worktree tab badges` 和 `worktree creation, branch switching and removal`。
 
