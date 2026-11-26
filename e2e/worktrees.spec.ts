@@ -51,6 +51,16 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await page.getByRole("menuitem", { name: "打开工作树", exact: true }).click();
     await expect(row(page, "topic")).toHaveAttribute("aria-current", "true");
     await expect(page.locator(".unstaged-pane")).toContainText("local.txt");
+
+    await row(page, "worktree").dblclick();
+    await expect(row(page, "worktree")).toHaveAttribute("aria-current", "true");
+    const remotes = page.locator('[data-section="remotes"] .file-select');
+    if (await remotes.getAttribute("aria-expanded") === "false") await remotes.click();
+    const origin = page.locator(".sidebar").getByRole("button", { name: "origin", exact: true });
+    if (await origin.getAttribute("aria-expanded") === "false") await origin.click();
+    await page.locator('.sidebar .file-select[title="origin/topic"]').click({ button: "right" });
+    await page.getByRole("menuitem", { name: "打开工作树", exact: true }).click();
+    await expect(row(page, "topic")).toHaveAttribute("aria-current", "true");
     expect(git(main, "branch", "--show-current")).toBe("main");
   });
 
@@ -138,11 +148,30 @@ test("worktree creation opens a checkout from a bare repository", async ({ page 
   test.setTimeout(90_000);
   await openLabScene(page, "worktree-bare", "[data-worktree-path]", { theme: "apple", locale: "zh" });
   await expect(row(page, "worktree-bare.git")).toContainText("裸仓库");
-  await page.locator(".sidebar").getByRole("button", { name: "新增工作树", exact: true }).click();
-  await dialog(page).getByLabel("检出方式").selectOption("existing");
-  await dialog(page).getByLabel("分支", { exact: true }).fill("main");
+  await page.locator('.sidebar .file-select[title^="main"]').click({ button: "right" });
+  await page.getByRole("menuitem", { name: "检出", exact: true }).click();
+  await expect(dialog(page).getByLabel("检出方式")).toHaveValue("existing");
+  await expect(dialog(page).getByLabel("分支", { exact: true })).toHaveValue("main");
   await dialog(page).getByLabel("工作树目录", { exact: true }).fill("../worktree-checkouts/from-bare");
   await button(page, "创建").click();
   await expect(row(page, "from-bare")).toHaveAttribute("aria-current", "true");
   expect(git(resolve(checkouts, "from-bare"), "branch", "--show-current")).toBe("main");
+});
+
+test("checking out a commit in a bare repository creates a detached worktree", async ({ page }) => {
+  test.setTimeout(90_000);
+  const bare = resolve(".lab/repos/worktree-bare.git");
+  const head = git(bare, "rev-parse", "HEAD");
+  await openLabScene(page, "worktree-bare", "[data-worktree-path]", { theme: "light", locale: "zh" });
+  await page.locator(".sidebar").getByRole("button", { name: "全部提交", exact: true }).click();
+  await page.locator(".commit-row").filter({ hasText: "worktree main commit" }).click({ button: "right" });
+  await page.getByRole("menuitem", { name: "检出", exact: true }).click();
+  await expect(dialog(page).getByLabel("检出方式")).toHaveValue("detached");
+  await expect(dialog(page).getByLabel("起点", { exact: true })).toHaveValue(head);
+  await dialog(page).getByLabel("工作树目录", { exact: true }).fill("../worktree-checkouts/detached-from-bare");
+  await button(page, "创建").click();
+  await expect(row(page, "detached-from-bare")).toHaveAttribute("aria-current", "true");
+  const checkout = resolve(checkouts, "detached-from-bare");
+  expect(git(checkout, "branch", "--show-current")).toBe("");
+  expect(git(checkout, "rev-parse", "HEAD")).toBe(head);
 });

@@ -16,8 +16,9 @@
   const immediatelyOccupied = initialRows.some((row) => row.branch === initial.branch);
   const suggestion = untrack(() => nextWorktreeBranch(shell,
     initial.branch || (initial.source?.startsWith("refs/") ? initial.source : shell.snapshot?.branch) || "worktree"));
+  const detached = initial.detached || (initial.source && !initial.source.startsWith("refs/"));
   let mode = $state<"new" | "existing" | "detached">(
-    initial.branch && !immediatelyOccupied ? "existing" : initial.source && !initial.source.startsWith("refs/") ? "detached" : "new",
+    initial.branch && !immediatelyOccupied ? "existing" : detached ? "detached" : "new",
   );
   let branch = $state(initial.branch && !immediatelyOccupied ? initial.branch : suggestion);
   let start = $state(initial.source ?? "HEAD");

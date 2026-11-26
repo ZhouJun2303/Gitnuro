@@ -437,6 +437,8 @@ function seedWorktreeRepo() {
   wipe(missing);
   commit(main, "main.txt", "only on main\n", "worktree main commit");
   git(main, ["clone", "--bare", main, bare]);
+  git(main, ["remote", "add", "origin", bare]);
+  git(main, ["update-ref", "refs/remotes/origin/topic", "refs/heads/topic"]);
 }
 
 function seedStageConflictPathsRepo() {

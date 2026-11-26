@@ -736,10 +736,17 @@ export function requestCheckout(shell: ShellState, name: string) {
 export async function quickCheckout(shell: ShellState, name: string, remote?: { remote: string; branch: string }) {
     if (shell.mode !== "live" || shell.pendingReference(name) || (remote && shell.pendingReference(remote.branch))) return;
     shell.locateSeq += 1;
-    const occupied = !remote && occupiedWorktree(shell, name);
+    const branch = remote?.branch ?? name;
+    const occupied = occupiedWorktree(shell, branch);
     if (occupied) return openWorktree(shell, occupied);
-    if (!remote && shell.refs?.worktrees.some((row) => row.bare && shell.viewing(row.path))) {
-      beginWorktree(shell, { kind: "add", source: "refs/heads/" + name, branch: name });
+    if (shell.refs?.worktrees.some((row) => row.bare && shell.viewing(row.path))) {
+      if (remote) {
+        beginWorktree(shell, { kind: "add", source: `refs/remotes/${remote.remote}/${remote.branch}` });
+      } else if (shell.refs.branches.some((row) => row.name === branch)) {
+        beginWorktree(shell, { kind: "add", source: "refs/heads/" + branch, branch });
+      } else {
+        beginWorktree(shell, { kind: "add", source: name, detached: true });
+      }
       return;
     }
     // One backend write owns saving, checkout and restoration by stash commit id.

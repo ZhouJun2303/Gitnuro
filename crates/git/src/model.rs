@@ -1889,11 +1889,12 @@ pub fn in_progress(repo: &Path) -> Result<Option<InProgress>, Error> {
 }
 
 fn local_branches(repo: &Path) -> Result<Vec<BranchRow>, Error> {
+    let has_checkout = !crate::open_repo(repo).is_ok_and(|repo| repo.is_bare());
     let output = run(
         repo,
         &[
             "for-each-ref",
-            "--format=%(refname:short)%09%(upstream:short)%09%(upstream:track)%09%(HEAD)",
+            "--format=%(refname:lstrip=2)%09%(upstream:short)%09%(upstream:track)%09%(HEAD)",
             "refs/heads",
         ],
     )?;
@@ -1910,7 +1911,7 @@ fn local_branches(repo: &Path) -> Result<Vec<BranchRow>, Error> {
             .filter(|item| !item.is_empty())
             .map(str::to_string);
         let track = fields.next().unwrap_or("");
-        let current = fields.next().unwrap_or("") == "*";
+        let current = has_checkout && fields.next().unwrap_or("") == "*";
         let (ahead, behind) = parse_track(track);
         branches.push(BranchRow {
             name,

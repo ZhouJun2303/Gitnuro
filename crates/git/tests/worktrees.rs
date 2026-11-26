@@ -277,10 +277,14 @@ fn worktree_lock_move_repair_and_protected_prune() {
 #[test]
 fn worktree_can_be_created_from_bare_repository() {
     let source = repository();
+    source.git(&["tag", "main"]);
     let bare = common::TempRepo::new();
     source.git(&["clone", "--bare", ".", bare.path.to_str().unwrap()]);
     assert!(status(&bare.path).unwrap().unstaged.is_empty());
-    assert!(repository_refs(&bare.path).unwrap().worktrees[0].bare);
+    let refs = repository_refs(&bare.path).unwrap();
+    assert!(refs.worktrees[0].bare);
+    assert_eq!(refs.branches[0].name, "main");
+    assert!(!refs.branches[0].current);
     assert_eq!(commit_log(&bare.path, 10).unwrap().len(), 1);
     let holder = common::TempRepo::new();
     let checkout = holder.path.join("linked");
@@ -292,4 +296,5 @@ fn worktree_can_be_created_from_bare_repository() {
         None,
     );
     assert_eq!(status(&checkout).unwrap().branch.as_deref(), Some("main"));
+    assert!(repository_refs(&checkout).unwrap().branches[0].current);
 }

@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 远程分支的检出入口会打开同名本地分支所在的工作树。裸仓库可从本地分支、远程分支、标签或提交的检出入口创建工作树。实现提交 `fix: 衔接远程分支与裸仓库的工作树检出`。回归见 `worktree_can_be_created_from_bare_repository` 和 `e2e/worktrees.spec.ts`。
+
 - [x] 侧栏支持新建、切换和管理工作树。提交图标记各工作树的 HEAD，并支持独立历史和基准比较。删除前复核文件和游离提交，移动、修复、锁定及清理使用 Git 的工作树操作。实现提交 `feat: 完善工作树管理和提交比较`。回归见 `worktree_modes_history_and_shared_registry`、`worktree_remove_requires_current_review_and_preserves_branch`、`worktree_lock_move_repair_and_protected_prune`、`e2e/worktrees.spec.ts`。
 
 - [x] 仓库状态、子模块工作区和子模块 Git 元数据变更会及时通知界面；切换回仓库会比较子模块指纹，checkout 完成后的分支等待标记会在引用快照到达后清除。修复提交：本条所在提交 `fix: 修复仓库状态刷新延迟`。回归：`watch_plan_tests::submodule_gitdir_fetch_head_is_metadata_not_a_worktree_path`、`fingerprint::tests::submodule_checkout_changes_move_the_fingerprint`、`e2e/status-switch.spec.ts`、`e2e/checkout.spec.ts`、`e2e/operation-scheduler.spec.ts`。

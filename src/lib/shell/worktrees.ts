@@ -9,6 +9,7 @@ export type WorktreeDialogState = {
   path?: string;
   source?: string;
   branch?: string;
+  detached?: boolean;
 };
 export type WorktreeDetails = {
   changes: { code: string; path: string }[];
