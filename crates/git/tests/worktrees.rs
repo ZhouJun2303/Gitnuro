@@ -1,6 +1,8 @@
 mod common;
 
 use std::fs;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use awegit_git::worktree::{self, AddMode};
 use awegit_git::{
@@ -148,6 +150,51 @@ fn worktree_modes_history_and_shared_registry() {
         }
     )
     .is_err());
+}
+
+#[test]
+fn worktree_details_preserves_checkout_and_submodule_indexes() {
+    let repo = repository();
+    let submodule_source = repository();
+    let allow_local = "protocol.file.allow=always";
+    repo.git(&[
+        "-c",
+        allow_local,
+        "submodule",
+        "add",
+        submodule_source.path.to_str().unwrap(),
+        "vendor",
+    ]);
+    repo.git(&["commit", "-m", "add submodule"]);
+    add(&repo, "checkout", "", AddMode::Detached, None);
+    repo.git(&[
+        "-C", "checkout", "-c", allow_local, "submodule", "update", "--init",
+    ]);
+
+    let indexes = ["checkout", "checkout/vendor"].map(|dir| {
+        // A changed stat entry normally makes Git refresh a clean index on disk.
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .open(repo.path.join(dir).join(".gitignore"))
+            .unwrap();
+        let mtime = file.metadata().unwrap().modified().unwrap();
+        file.set_modified(mtime - Duration::from_secs(60)).unwrap();
+        let path = repo.output(&[
+            "-C", dir, "rev-parse", "--path-format=absolute", "--git-path", "index",
+        ]);
+        let path = PathBuf::from(path.trim());
+        let bytes = fs::read(&path).unwrap();
+        let mtime = fs::metadata(&path).unwrap().modified().unwrap();
+        (path, bytes, mtime)
+    });
+
+    let details = worktree::details(&repo.path, "checkout").unwrap();
+    assert!(details.has_submodules);
+    assert_eq!(details.change_count, 0);
+    for (path, bytes, mtime) in indexes {
+        assert!(fs::read(&path).unwrap() == bytes, "rewrote {}", path.display());
+        assert_eq!(fs::metadata(path).unwrap().modified().unwrap(), mtime);
+    }
 }
 
 #[test]

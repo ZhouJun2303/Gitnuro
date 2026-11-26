@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::cli::{check_name, check_rev, repo_key, run, run_output, with_read};
+use crate::cli::{check_name, check_rev, repo_key, run, run_env, run_output, with_read};
 use crate::Error;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -318,7 +318,8 @@ fn removal_details(
             .iter()
             .any(|entry| entry.mode == gix::index::entry::Mode::COMMIT);
         let bytes = with_read(|| {
-            run(
+            // Optional index writes can notify the watcher and start another review.
+            run_env(
                 root,
                 &[
                     "status",
@@ -328,6 +329,7 @@ fn removal_details(
                     "--ignored=matching",
                     "--ignore-submodules=none",
                 ],
+                &[("GIT_OPTIONAL_LOCKS", "0")],
             )
         })?
         .stdout;
