@@ -877,7 +877,7 @@ mod tests {
         repo.git(&["commit", "-m", "test: seed"]);
         for staged in [false, true] {
             std::fs::write(&file, "selected version\n").unwrap();
-            let args = json!({ "path": repo.0, "request": { "action": "discard", "file": "tracked.txt" } });
+            let args = json!({ "path": repo.0, "request": { "action": "discardUnstaged", "files": ["tracked.txt"] } });
             let earlier = enqueue("mutate", &repo.args()).unwrap();
             let id = enqueue("mutate", &args).unwrap();
             run(&earlier, || {

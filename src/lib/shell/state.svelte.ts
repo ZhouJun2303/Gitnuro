@@ -1842,7 +1842,7 @@ export class ShellState {
       addRemote: "chrome.remotes", removeRemote: "menu.remove", setRemoteUrl: "chrome.remotes",
       stash: "chrome.stash", stashPaths: "chrome.stash", stashRename: "menu.renameStash", stashPatch: "menu.stashPatch",
       stageHunk: "menu.stageHunk", stageLine: "menu.stageLine", stageLines: "menu.stageLines", stagePaths: "menu.stage",
-      discardHunk: "menu.discardHunk", discardLine: "menu.discardLine", discardLines: "menu.discardLines", discard: "chrome.discardSelected", discardPaths: "chrome.discardSelected",
+      discardHunk: "menu.discardHunk", discardLine: "menu.discardLine", discardLines: "menu.discardLines", discard: "chrome.discardSelected", discardPaths: "chrome.discardSelected", discardUnstaged: "chrome.discardSelected",
       delete: "chrome.deleteSelected", deletePaths: "chrome.deleteSelected", restoreFile: "menu.restoreFile", reword: "dialog.rewordAction", bisect: "chrome.bisect",
       appendIgnore: "dialog.gitignore", writeGitignore: "dialog.gitignore", writeMailmap: "chrome.mailmap", applyPatch: "flow.applyPatch",
       abort: "chrome.abort", continue: "chrome.continueAction", skip: "chrome.skip", resolve: "flow.resolveFile", resolvePaths: "flow.resolvePaths",
@@ -3856,9 +3856,11 @@ export class ShellState {
         return { title: this.tr("dialog.revert"), command: this.gitLine(["revert", request.noCommit ? "--no-commit" : "", text("rev")]) };
       case "discard":
         return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--recurse-submodules", "--", text("file")]) };
-      case "discardPaths": {
+      case "discardPaths":
+      case "discardUnstaged": {
         const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
-        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--recurse-submodules", "--", ...files.slice(0, 8)]) };
+        const source = action === "discardPaths" ? ["--source=HEAD", "--recurse-submodules"] : [];
+        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", ...source, "--", ...files.slice(0, 8)]) };
       }
       case "resolvePaths": {
         const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
@@ -6966,8 +6968,8 @@ export class ShellState {
 
 
 
-  discardChosen(files: string[], focusConfirm = false, candidates = files) {
-    return discardChosen(this, files, focusConfirm, candidates);
+  discardChosen(files: string[], focusConfirm = false, candidates = files, side: Side = "unstaged") {
+    return discardChosen(this, files, focusConfirm, candidates, side);
   }
 
 

@@ -91,7 +91,7 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(file.path) },
       { sep: true, label: "" },
       { label: many ? `${shell.tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected")} (${count})` : shell.tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked || shell.stageDisabled, shortcut: shortcutLabel("stageToggle"), run: () => shell.stageChosen(side, targets) },
-      { label: many ? shell.tr("menu.discardSelected", { count }) : shell.tr("menu.discard"), disabled: locked || (side === "staged" && many), shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(targets, false, side === "staged" ? shell.shownStaged.map((item) => item.path) : shell.shownUnstaged.map((item) => item.path)) },
+      { label: many ? shell.tr("menu.discardSelected", { count }) : shell.tr("menu.discard"), disabled: locked || (side === "staged" && many), shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(targets, false, (side === "staged" ? shell.shownStaged : shell.shownUnstaged).map((item) => item.path), side) },
       { label: many ? shell.tr("menu.deleteSelected", { count }) : shell.tr("menu.deleteFile"), disabled: locked, run: () => shell.deleteChosen(targets, side === "staged" ? shell.shownStaged.map((item) => item.path) : shell.shownUnstaged.map((item) => item.path)) },
       { sep: true, label: "" },
       { label: many ? shell.tr("menu.addGitignoreSelected", { count }) : shell.tr("menu.addGitignore"), disabled: locked, run: () => void shell.addIgnore(targets, false, false) },

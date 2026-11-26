@@ -13,7 +13,7 @@ export const operationAreas = {
   stageHunk: ["index"], stageLine: ["index"], stageLines: ["index"], stagePaths: ["index"],
   discardHunk: ["worktree"], discardLine: ["worktree"], discardLines: ["worktree"], resolve: [...work, "flow"], resolvePaths: [...work, "flow"],
   renameBranch: [...refs, "config"], setUpstream: [...refs, "config"], deleteRemoteBranch: refs, checkoutRemote: history,
-  pushRef: refs, pullRef: history, discard: work, discardPaths: work, delete: work, deletePaths: work, applyPatch: work,
+  pushRef: refs, pullRef: history, discard: work, discardPaths: work, discardUnstaged: ["worktree"], delete: work, deletePaths: work, applyPatch: work,
   addRemote: [...refs, "config"], removeRemote: [...refs, "config"], setRemoteUrl: [...refs, "config"],
   addWorktree: [...refs, "history"], removeWorktree: [...refs, "history"], pruneWorktrees: [...refs, "history"],
   setWorktreeLock: refs, moveWorktree: refs, repairWorktree: refs, submoduleUpdate: [...work, "refs"], submoduleUpdatePath: [...work, "refs"],

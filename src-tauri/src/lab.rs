@@ -217,6 +217,7 @@ fn layout() -> Result<Value, String> {
         "checkout-index": text(repos.join("checkout-index")),
         "checkout-conflict": text(repos.join("checkout-conflict")),
         "unstage-initial": text(repos.join("unstage-initial")),
+        "discard-unstaged": text(repos.join("discard-unstaged")),
         "worktree": text(repos.join("worktree")),
         "worktree-bare.git": text(repos.join("worktree-bare.git")),
         "stage-conflict-paths": text(repos.join("stage-conflict-paths")),

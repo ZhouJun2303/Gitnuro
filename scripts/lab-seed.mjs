@@ -412,6 +412,21 @@ function seedUnstageInitialRepo() {
   write(path, "new.txt", "edited after staging\n");
 }
 
+function seedDiscardUnstagedRepo() {
+  const path = join(repos, "discard-unstaged");
+  wipe(path); initWork(path);
+  for (const name of ["first", "third"]) {
+    commit(path, `Assets/${name}.txt`, `committed ${name}\n`, `base ${name}`);
+  }
+  for (const name of ["first", "second", "third"]) {
+    const file = `Assets/${name}.txt`;
+    write(path, file, `staged ${name}\n`);
+    git(path, ["add", "--", file]);
+    write(path, file, `edited after staging ${name}\n`);
+  }
+  write(path, "other.txt", "keep this file\n");
+}
+
 function seedWorktreeRepo() {
   const main = join(repos, "worktree");
   const checkouts = join(repos, "worktree-checkouts");
@@ -725,6 +740,7 @@ const restore = {
   "checkout-index": () => seedCheckoutRepo("checkout-index"),
   "checkout-conflict": () => seedCheckoutRepo("checkout-conflict"),
   "unstage-initial": seedUnstageInitialRepo,
+  "discard-unstaged": seedDiscardUnstagedRepo,
   worktree: seedWorktreeRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
   "submodule-diff": seedSubmoduleDiffRepo,
@@ -948,6 +964,7 @@ seedMergeRepo();
 seedRebaseRepo();
 seedOperationRepo();
 seedUnstageInitialRepo();
+seedDiscardUnstagedRepo();
 seedWorktreeRepo();
 seedStageConflictPathsRepo();
 seedPullDeletedRepo();

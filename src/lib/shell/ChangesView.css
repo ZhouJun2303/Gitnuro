@@ -1,11 +1,15 @@
-.file.picked,
-  .side.picked {
-    background: color-mix(in srgb, var(--selection) 55%, transparent);
-  }
+.changes-column .file.picked,
+.changes-column .tree-row.dir-row.picked {
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
 
-.tree-row.dir-row.picked > .file-select {
-    background: color-mix(in srgb, var(--selection) 55%, transparent);
-  }
+.changes-column .file.selected {
+  background: color-mix(in srgb, var(--text) 22%, transparent);
+}
+
+.side.picked {
+  background: color-mix(in srgb, var(--selection) 55%, transparent);
+}
 
 .changes-column {
     flex: none;

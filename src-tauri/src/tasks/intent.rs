@@ -28,7 +28,7 @@ impl Intent {
         let request = &args["request"];
         let mut files: Vec<String> = match request["action"].as_str() {
             Some("discard" | "delete" | "restoreFile") => vec![super::arg(request, "file")?],
-            Some("discardPaths" | "deletePaths") => super::arg(request, "files")?,
+            Some("discardPaths" | "discardUnstaged" | "deletePaths") => super::arg(request, "files")?,
             _ => return Ok(None),
         };
         for file in &mut files {

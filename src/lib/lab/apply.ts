@@ -184,9 +184,9 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.sideQuery = "";
     return;
   }
-  if (["changes", "stage-many", "stage-queue", "stage-dense", "pull-deleted", "pull-noop", "pull-disjoint", "unstage-initial", "stage-conflict-paths"].includes(id)) {
+  if (["changes", "stage-many", "stage-queue", "stage-dense", "pull-deleted", "pull-noop", "pull-disjoint", "unstage-initial", "stage-conflict-paths", "discard-unstaged"].includes(id)) {
     shell.section = "changes";
-    if (id === "stage-many") shell.settings = { ...shell.settings, fileLayout: "tree" };
+    if (id === "stage-many" || id === "discard-unstaged") shell.settings = { ...shell.settings, fileLayout: "tree" };
     return;
   }
   if (id === "commit-too-long" || id === "commit-no-staged") {

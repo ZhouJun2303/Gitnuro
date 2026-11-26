@@ -343,8 +343,12 @@ pub enum Mutation {
     Discard {
         file: String,
     },
-    /// Drop worktree changes for many paths in one pass.
+    /// Restore worktree paths using HEAD for tracked files.
     DiscardPaths {
+        files: Vec<String>,
+    },
+    /// Restore selected worktree paths from the index and remove untracked paths.
+    DiscardUnstaged {
         files: Vec<String>,
     },
     Delete {
@@ -514,7 +518,7 @@ impl Mutation {
                 | ApplyPatch { .. } => &["worktree", "index"],
             SubmoduleUpdate | SubmoduleUpdatePath { .. } => &["worktree", "index", "refs"],
             StageHunk { .. } | StageLine { .. } | StageLines { .. } | StagePaths { .. } => &["index"],
-            DiscardHunk { .. } | DiscardLine { .. } | DiscardLines { .. } | LfsPull => &["worktree"],
+            DiscardUnstaged { .. } | DiscardHunk { .. } | DiscardLine { .. } | DiscardLines { .. } | LfsPull => &["worktree"],
             Resolve { .. } | ResolvePaths { .. } => &["worktree", "index", "flow"],
             WriteGitignore { .. } | AppendIgnore { .. } => &["worktree", "index", "config"],
             SubmoduleAdd { .. } | SubmoduleRemove { .. } => &["worktree", "index", "refs", "config"],
@@ -1167,6 +1171,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         }
         Mutation::Discard { file } => discard(repo, &file),
         Mutation::DiscardPaths { files } => discard_paths(repo, &files),
+        Mutation::DiscardUnstaged { files } => discard_unstaged(repo, &files),
         Mutation::Delete { file } => delete_path(repo, &file),
         Mutation::DeletePaths { files } => delete_paths(repo, &files),
         Mutation::ApplyPatch { patch } => {
@@ -2495,14 +2500,55 @@ fn discard_paths(repo: &Path, files: &[String]) -> Result<(), Error> {
         }
     }
     git_arg_paths(repo, &["rm", "-f", "--"], &remove_index)?;
-    for path in remove_disk {
-        match remove_worktree_file(repo, &path) {
-            Ok(()) => {}
-            Err(Error::Read { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
+    remove_untracked_paths(repo, remove_disk.iter().map(String::as_str))
+}
+
+fn discard_unstaged(repo: &Path, files: &[String]) -> Result<(), Error> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    for file in files {
+        let path = check_path(file)?;
+        let path = if cfg!(windows) { slash(path) } else { path.to_owned() };
+        if seen.insert(path.clone()) {
+            paths.push(path);
         }
     }
-    Ok(())
+
+    let output = list_index_paths(repo, &paths, true)?;
+    let mut indexed = HashSet::new();
+    let mut restore = Vec::new();
+    let mut gitlinks = Vec::new();
+    for record in output.stdout.split(|byte| *byte == 0) {
+        let record = String::from_utf8_lossy(record);
+        let Some((meta, path)) = record.split_once('\t') else { continue };
+        // A selected directory can cover several index paths. Keep it on disk.
+        let mut selected = false;
+        for name in std::iter::once(path).chain(path.match_indices('/').map(|(at, _)| &path[..at])) {
+            if seen.contains(name) {
+                indexed.insert(name.to_owned());
+                selected = true;
+            }
+        }
+        if !selected {
+            continue;
+        }
+        let mut fields = meta.split_ascii_whitespace();
+        match (fields.next(), fields.next(), fields.next()) {
+            (Some("160000"), Some(oid), Some("0")) => gitlinks.push((path.to_owned(), oid.to_owned())),
+            _ => restore.push(path.to_owned()),
+        }
+    }
+    restore.sort_unstable();
+    restore.dedup();
+    // An unmerged path is rejected by Git before any untracked files are removed.
+    git_arg_paths(repo, &["restore", "--worktree", "--no-recurse-submodules"], &restore)?;
+    for (path, oid) in gitlinks {
+        discard_gitlink(repo, check_path(&path)?, &oid)?;
+    }
+    remove_untracked_paths(repo, paths.iter().filter(|path| !indexed.contains(*path)).map(String::as_str))
 }
 
 /// Gitlink commit recorded in `HEAD` for `path`, or `None` when the path is not a submodule.
@@ -2533,22 +2579,7 @@ fn gitlink_paths(repo: &Path, paths: &[String]) -> Result<Vec<String>, Error> {
     if paths.is_empty() {
         return Ok(Vec::new());
     }
-    let output = if paths.len() > 200 {
-        run(repo, &["--literal-pathspecs", "ls-files", "--stage", "-z"])?
-    } else {
-        let mut owned: Vec<String> = vec![
-            "--literal-pathspecs".into(),
-            "ls-files".into(),
-            "--stage".into(),
-            "-z".into(),
-            "--".into(),
-        ];
-        for path in paths {
-            owned.push(check_path(path)?.to_string());
-        }
-        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-        run(repo, &args)?
-    };
+    let output = list_index_paths(repo, paths, true)?;
     let selected: Vec<String> = paths.iter().map(|path| slash(path)).collect();
     let mut found = Vec::new();
     for record in output.stdout.split(|byte| *byte == 0) {
@@ -2593,24 +2624,22 @@ fn slash(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+fn list_index_paths(repo: &Path, paths: &[String], staged: bool) -> Result<std::process::Output, Error> {
+    let mut args = vec!["--literal-pathspecs", "ls-files", "-z"];
+    if staged {
+        args.push("--stage");
+    }
+    // A full index listing avoids passing large selections through the command line.
+    if paths.len() <= 200 && paths.iter().map(|path| path.len() + 3).sum::<usize>() <= 8_000 {
+        args.push("--");
+        args.extend(paths.iter().map(String::as_str));
+    }
+    run(repo, &args)
+}
+
 fn paths_in_index(repo: &Path, paths: &[String]) -> Result<HashSet<String>, Error> {
     let wanted: HashSet<String> = paths.iter().map(|path| slash(path)).collect();
-    let output = if paths.len() > 200 {
-        // One index listing beats hundreds of `ls-files` processes on a large selection.
-        run(repo, &["--literal-pathspecs", "ls-files", "-z"])?
-    } else {
-        let mut owned: Vec<String> = vec![
-            "--literal-pathspecs".into(),
-            "ls-files".into(),
-            "-z".into(),
-            "--".into(),
-        ];
-        for path in paths {
-            owned.push(check_path(path)?.to_string());
-        }
-        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-        run(repo, &args)?
-    };
+    let output = list_index_paths(repo, paths, false)?;
     let mut found = HashSet::new();
     for path in output.stdout.split(|byte| *byte == 0) {
         if path.is_empty() {
@@ -2702,8 +2731,12 @@ fn delete_paths(repo: &Path, files: &[String]) -> Result<(), Error> {
         }
     }
     git_arg_paths(repo, &["rm", "-f"], &tracked)?;
-    for path in untracked {
-        match remove_worktree_file(repo, &path) {
+    remove_untracked_paths(repo, untracked.iter().map(String::as_str))
+}
+
+fn remove_untracked_paths<'a>(repo: &Path, paths: impl IntoIterator<Item = &'a str>) -> Result<(), Error> {
+    for path in paths {
+        match remove_worktree_file(repo, path) {
             Ok(()) => {}
             Err(Error::Read { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
