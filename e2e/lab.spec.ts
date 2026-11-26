@@ -587,6 +587,32 @@ test("command log keeps focus inside and closes with Escape", async ({ page }) =
   await expect(page.locator('[data-layer="commands"]')).toHaveCount(0);
 });
 
+test("command log stays open while its buttons are clicked", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  for (const theme of ["apple", "light", "dark"] as const) {
+    await openLabScene(page, "commands", '[data-layer="commands"]', { theme });
+    const userFilter = page.locator(".command-filters button").nth(1);
+    await userFilter.click();
+    await expect(userFilter).toHaveClass(/\bon\b/);
+    await expect(page.locator('[data-layer="commands"]')).toHaveCount(1);
+    await page.mouse.click(4, 600);
+    await expect(page.locator('[data-layer="commands"]')).toHaveCount(0);
+  }
+  await openLabScene(page, "commands-errors", '[data-layer="commands"]');
+  await page.locator(".command-detail header button").click();
+  await expect(page.locator('[data-layer="commands"]')).toHaveCount(1);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("lab error text");
+});
+
+test("repo picker stays open while it is clicked", async ({ page }) => {
+  await openLabScene(page, "picker", '[data-layer="repos"]');
+  const recent = page.locator('[data-layer="repos"] .repo-section').first();
+  const expanded = await recent.getAttribute("aria-expanded");
+  await recent.click();
+  await expect(recent).toHaveAttribute("aria-expanded", expanded === "true" ? "false" : "true");
+  await expect(page.locator('[data-layer="repos"]')).toHaveCount(1);
+});
+
 test("command log opens on the newest row even when a stale id matches an old error", async ({ page }) => {
   await openLabScene(page, "commands-errors", '[data-layer="commands"]');
   const state = await page.evaluate(() => {
