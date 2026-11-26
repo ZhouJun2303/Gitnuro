@@ -172,6 +172,23 @@ function Stop-OpenMerge {
     }
 }
 
+# A shallow clone marks each fetched branch tip as a history boundary.
+# release and the development branch then have no common ancestor locally,
+# so git merge refuses to run and leaves no conflict files behind.
+function Ensure-MergeBase([string]$branch) {
+    & git -C $root merge-base $branch release | Out-Null
+    if ($LASTEXITCODE -eq 0) { return $true }
+    $shallow = (& git -C $root rev-parse --is-shallow-repository).Trim()
+    if ($shallow -ne "true") { return $false }
+    Write-PublishLog "本地是浅克隆，release 和 $branch 没有共同历史，先补全历史"
+    & git -C $root fetch --progress --unshallow origin
+    if ($LASTEXITCODE -ne 0) {
+        throw "没能补全本地历史（git fetch --unshallow origin 失败）。版本号提交还留在 $branch 上。"
+    }
+    & git -C $root merge-base $branch release | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
 # release keeps the published manifest (download URL, notes, appCode).
 # The branch being merged only has a version stub, so latest.json conflicts on every publish.
 # Keep release's file and move appVersion to the version about to ship.
@@ -568,8 +585,21 @@ function Invoke-ReleaseFlow {
             Invoke-Git checkout release
             $switched = $true
             $releaseBefore = (& git -C $root rev-parse HEAD).Trim()
-            & git -C $root merge -m "chore: 合并 $branch" $branch
-            if ($LASTEXITCODE -ne 0) {
+            if (-not (Ensure-MergeBase $branch)) {
+                Stop-OpenMerge
+                throw "没能把 $branch 合并进 release。版本号提交还留在 $branch 上。`nrelease 和 $branch 没有共同历史，不是普通冲突：本地仓库缺少完整历史，先运行 git fetch --unshallow origin 再重新发布。"
+            }
+            # Windows PowerShell 5.1 makes captured native stderr a terminating
+            # error under Stop, and the git message is what explains a failure.
+            $previous = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            try {
+                $mergeOutput = @(& git -C $root merge -m "chore: 合并 $branch" $branch 2>&1)
+                $mergeCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $previous
+            }
+            if ($mergeCode -ne 0) {
                 $names = @(Get-UnmergedPaths)
                 $onlyLatest = $names.Count -eq 1 -and $names[0] -eq "latest.json"
                 if ($onlyLatest) {
@@ -583,9 +613,12 @@ function Invoke-ReleaseFlow {
                     }
                     Write-Host "latest.json 保留 release 上已发布的下载地址和 appCode，版本号改为 $target"
                 } else {
+                    $mergeText = ($mergeOutput | ForEach-Object { "$_".Trim() } | Where-Object { $_ }) -join "`n"
                     Stop-OpenMerge
-                    $list = if ($names.Count) { $names -join "、" } else { "没有列出冲突文件" }
-                    throw "没能把 $branch 合并进 release。版本号提交还留在 $branch 上。`n$list"
+                    if ($mergeText) { Write-Host $mergeText }
+                    $list = if ($names.Count) { $names -join "、" } else { "没有冲突文件" }
+                    $detail = if (-not $names.Count -and $mergeText) { "`n$mergeText" } else { "" }
+                    throw "没能把 $branch 合并进 release。版本号提交还留在 $branch 上。`n$list$detail"
                 }
             }
         }
