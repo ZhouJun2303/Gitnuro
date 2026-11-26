@@ -25,6 +25,7 @@ import { launchExternal } from "./diff.svelte";
 import { previewCherrySelection } from "./cherrySelection";
 import { loadMoreHistory } from "./history.svelte";
 import { openFile, openInEditor } from "./dialogs.svelte";
+import { beginWorktree } from "./worktrees";
 
 export function branchItems(shell: ShellState) {
     const rows = shell.refs?.branches ?? [];
@@ -33,7 +34,7 @@ export function branchItems(shell: ShellState) {
       label: branch.name,
       checked: branch.current,
       disabled: branch.current || shell.writeBlocked,
-      run: () => void shell.mutate({ action: "checkout", name: branch.name }),
+      run: () => shell.requestCheckout(branch.name),
     }));
   }
 
@@ -137,6 +138,7 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
     return [
       ...selection,
       { label: shell.tr("menu.checkout"), disabled: locked || !!shell.progress, run: () => shell.requestCheckout(commit.id) },
+      { label: shell.tr("worktree.add"), disabled: locked, run: () => beginWorktree(shell, { kind: "add", source: commit.id }) },
       { label: shell.tr("menu.cherryPick"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, false, commit.summary) },
       { label: shell.tr("menu.cherryPickRecord"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, true, commit.summary) },
       { label: shell.tr("menu.revert"), disabled: locked || !!shell.progress, run: () => shell.confirmRevert(commit.id, commit.summary) },
@@ -248,6 +250,7 @@ export function repositoryItems(shell: ShellState) {
       { label: shell.tr("chrome.newRepo"), run: () => void shell.beginClone("init") },
       { sep: true, label: "" },
       { label: shell.tr("chrome.terminal"), disabled: locked, run: () => void invoke("open_terminal", { path: shell.repoPath() }) },
+      { label: shell.tr("worktree.manage"), disabled: locked, run: () => beginWorktree(shell, { kind: "manage" }) },
       { label: shell.tr("chrome.explorer"), disabled: !shell.snapshot, run: () => shell.snapshot && void shell.openLocal(shell.snapshot.path) },
     ];
   }

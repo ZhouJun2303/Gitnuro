@@ -360,3 +360,19 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+.worktree-chips {
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 4px;
+}
+.worktree-chip {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0 5px;
+  color: var(--text-secondary);
+  font-size: 0.82em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -561,6 +561,39 @@ fn repository_refs(path: Option<String>) -> Result<awegit_git::RefSnapshot, Stri
 }
 
 #[tauri::command]
+fn worktree_details(path: Option<String>, target: String) -> Result<awegit_git::worktree::WorktreeDetails, String> {
+    let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
+    ensure_worktree_lab_repo(&repo)?;
+    let target_path = awegit_git::worktree::destination(&repo, &target).map_err(|error| error.to_string())?;
+    lab::ensure_lab_path(&target_path)?;
+    awegit_git::worktree::details(&repo, &target).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn worktree_compare(path: Option<String>, head: String, base: String) -> Result<awegit_git::worktree::WorktreeComparison, String> {
+    let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
+    awegit_git::worktree::compare(&repo, &head, &base).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn worktree_prune_preview(path: Option<String>) -> Result<awegit_git::worktree::WorktreePrunePreview, String> {
+    let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
+    ensure_worktree_lab_repo(&repo)?;
+    awegit_git::worktree::prune_preview(&repo).map_err(|error| error.to_string())
+}
+
+fn ensure_worktree_lab_repo(repo: &Path) -> Result<(), String> {
+    if lab::lab_guarded() {
+        let common = awegit_git::worktree::common_dir(repo).map_err(|error| error.to_string())?;
+        lab::ensure_lab_path(&common)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn commit_files(path: Option<String>, id: String) -> Result<Vec<awegit_git::FileChange>, String> {
     let repo = repo_from(path)?;
     awegit_git::commit_files(&repo, &id).map_err(|error| error.to_string())
@@ -630,6 +663,8 @@ struct MutationReport {
     flow: Option<flows::Summary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     refresh_scope: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    worktree_path: Option<String>,
     revision: u64,
 }
 
@@ -664,6 +699,37 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
     };
     let _turn = repo_turn(&next);
     tasks::validate_intent(&repo)?;
+    use awegit_git::Mutation::{AddWorktree, MoveWorktree, PruneWorktrees, RemoveWorktree, RepairWorktree, SetWorktreeLock};
+    if matches!(&request, AddWorktree { .. } | MoveWorktree { .. } | PruneWorktrees { .. } |
+        RemoveWorktree { .. } | RepairWorktree { .. } | SetWorktreeLock { .. }) {
+        ensure_worktree_lab_repo(&repo)?;
+    }
+    let worktree_target = |path: &str| -> Result<PathBuf, String> {
+        let target = awegit_git::worktree::destination(&repo, path).map_err(|error| error.to_string())?;
+        lab::ensure_lab_path(&target)?;
+        Ok(target)
+    };
+    let worktree_path = match &request {
+        AddWorktree { path, .. } => Some(worktree_target(path)?),
+        MoveWorktree { path, to } => {
+            worktree_target(path)?;
+            worktree_target(to)?;
+            let target = awegit_git::worktree::move_destination(&repo, path, to).map_err(|error| error.to_string())?;
+            lab::ensure_lab_path(&target)?;
+            Some(target)
+        }
+        RemoveWorktree { path, .. } | SetWorktreeLock { path, .. } | RepairWorktree { path: Some(path) } => {
+            worktree_target(path)?;
+            None
+        }
+        RepairWorktree { path: None } if lab::lab_guarded() => {
+            for row in awegit_git::worktree::list(&repo).map_err(|error| error.to_string())? {
+                lab::ensure_lab_path(Path::new(&row.path))?;
+            }
+            None
+        }
+        _ => None,
+    };
     let killer_push = matches!(&request,
         awegit_git::Mutation::Push { killer_push: true, .. } | awegit_git::Mutation::PushRef { killer_push: true, .. });
     let mut refresh_areas = request.refresh_areas().to_vec();
@@ -740,6 +806,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         let conflicted = conflict_capable && status.as_ref().is_some_and(|status| status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict));
         let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
         let error = result.as_ref().err().map(ToString::to_string).unwrap_or_default();
+        let worktree_path = worktree_path.filter(|_| result.is_ok()).as_deref().map(awegit_git::worktree::display_path);
         let mut output = result.unwrap_or_default();
         if let Some(error) = excel_restore_error {
             if !output.trim().is_empty() {
@@ -758,6 +825,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             stale_lock,
             flow,
             refresh_scope,
+            worktree_path,
             revision: changes::revision(&next),
         })
     });
@@ -857,6 +925,10 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::SetRemoteUrl { .. } => "setRemoteUrl",
         awegit_git::Mutation::AddWorktree { .. } => "addWorktree",
         awegit_git::Mutation::RemoveWorktree { .. } => "removeWorktree",
+        awegit_git::Mutation::SetWorktreeLock { .. } => "setWorktreeLock",
+        awegit_git::Mutation::MoveWorktree { .. } => "moveWorktree",
+        awegit_git::Mutation::RepairWorktree { .. } => "repairWorktree",
+        awegit_git::Mutation::PruneWorktrees { .. } => "pruneWorktrees",
         awegit_git::Mutation::SubmoduleUpdate => "submoduleUpdate",
         awegit_git::Mutation::SubmoduleUpdatePath { .. } => "submoduleUpdatePath",
         awegit_git::Mutation::SubmoduleAdd { .. } => "submoduleAdd",
@@ -947,8 +1019,11 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         | Mutation::PullRef { remote, branch, .. } => join([scrub(remote), scrub(branch)]),
         Mutation::ApplyPatch { patch } => format!("bytes={}", patch.len()),
         Mutation::AddRemote { name, url } | Mutation::SetRemoteUrl { name, url } => join([scrub(name), public_url(url)]),
-        Mutation::AddWorktree { path, branch } => join([scrub(path), scrub(branch)]),
-        Mutation::RemoveWorktree { path } => scrub(path),
+        Mutation::AddWorktree { path, branch, .. } => join([scrub(path), scrub(branch)]),
+        Mutation::RemoveWorktree { path, .. } | Mutation::SetWorktreeLock { path, .. } => scrub(path),
+        Mutation::MoveWorktree { path, to } => join([scrub(path), scrub(to)]),
+        Mutation::RepairWorktree { path } => path.as_deref().map(scrub).unwrap_or_default(),
+        Mutation::PruneWorktrees { .. } => String::new(),
         Mutation::SubmoduleAdd { url, path } => join([scrub(path), public_url(url)]),
         Mutation::SubmoduleInit { path } | Mutation::SubmoduleUpdatePath { path } | Mutation::SubmoduleSync { path } | Mutation::SubmoduleRemove { path } => scrub(path),
         Mutation::GitFlowStart { name, kind } | Mutation::GitFlowFinish { name, kind } => join([scrub(name), scrub(kind)]),
@@ -1434,6 +1509,9 @@ fn git_metadata_dir(repo: &Path) -> Option<PathBuf> {
     if git.is_dir() {
         return Some(lexical_clean(&git));
     }
+    if !git.is_file() && repo.join("HEAD").is_file() && repo.join("objects").is_dir() {
+        return Some(lexical_clean(repo));
+    }
     let text = std::fs::read_to_string(&git).ok()?;
     let line = text.lines().find(|line| !line.trim().is_empty())?;
     let rest = line.trim().strip_prefix("gitdir:")?.trim();
@@ -1532,11 +1610,23 @@ fn settle_changes(
         let paths: Vec<_> = unique.into_iter().collect();
         attach_new_dirs(repo, git_dir.as_deref(), &paths, &mut watched, &slot);
         let rearm_submodules = paths.iter().any(|path| submodule_watch_needs_rearm(repo, path));
-        if overflow || rearm_submodules || paths.iter().any(|path| watched_relative(repo, path).is_some_and(|path| path == ".git/index" || path == ".git")) {
+        let rearm_git = paths.iter().any(|path| watched_relative(repo, path).is_some_and(|path| path == ".git/worktrees"));
+        if overflow || rearm_git || rearm_submodules || paths.iter().any(|path| watched_relative(repo, path).is_some_and(|path| path == ".git/index" || path == ".git")) {
             if let Ok(mut guard) = slot.watcher.lock() {
                 if let Some(watcher) = guard.as_mut() {
                     watch_tracked_directories(watcher, repo, &mut watched);
                     if rearm_submodules { watch_submodule_metadata(watcher, repo, &mut watched); }
+                    if let Some(git) = git_dir.as_ref().filter(|_| rearm_git || overflow) {
+                        let common = common_metadata_dir(git);
+                        // The worktree directory can disappear after the final removal.
+                        let registry = common.join("worktrees");
+                        let key = watch_key(&registry);
+                        if rearm_git && watched.exact.remove(&key) {
+                            watched.recursive.retain(|path| path != &key);
+                            let _ = watcher.unwatch(&registry);
+                        }
+                        watch_git_metadata(watcher, &common, &mut watched);
+                    }
                 }
             }
         }
@@ -1611,10 +1701,15 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
 fn watched_relative(repo: &Path, path: &Path) -> Option<String> {
     let path = lexical_clean(path);
     let repo_root = lexical_clean(repo);
+    let git = git_metadata_dir(repo);
+    if git.as_ref() == Some(&repo_root) {
+        let relative = path.strip_prefix(&repo_root).ok()?.to_string_lossy().replace('\\', "/");
+        return Some(if relative.is_empty() { ".git".into() } else { format!(".git/{relative}") });
+    }
     if let Ok(relative) = path.strip_prefix(&repo_root) {
         return Some(relative.to_string_lossy().replace('\\', "/"));
     }
-    let git = git_metadata_dir(repo)?;
+    let git = git?;
     for root in [git.clone(), common_metadata_dir(&git)] {
         if let Ok(relative) = path.strip_prefix(&lexical_clean(&root)) {
             let relative = relative.to_string_lossy().replace('\\', "/");
@@ -1638,6 +1733,11 @@ fn watch_relevant(repo: &Path, path: &Path) -> bool {
             "objects" | "lfs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit-flow" | "fsmonitor--daemon" => false,
             "modules" => module_metadata_relevant(inner),
             "logs" => inner == "logs/refs/stash",
+            "worktrees" => {
+                let mut segments = inner.split('/').skip(2);
+                matches!(segments.next(), None | Some("HEAD" | "gitdir" | "commondir" | "locked" | "config.worktree"))
+                    && segments.next().is_none()
+            }
             _ => true,
         };
     }
@@ -2676,6 +2776,20 @@ fn open_editor(path: Option<String>, file: String, line: u32, tool: Option<Strin
     Ok(())
 }
 
+#[tauri::command]
+fn open_worktree_editor(path: Option<String>, tool: Option<String>) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    if let Some(tool) = tool.filter(|item| !item.trim().is_empty()) {
+        return awegit_git::launch_folder_editor(&repo, &tool).map_err(|error| error.to_string());
+    }
+    for program in ["cursor", "code", "zed"] {
+        let mut command = std::process::Command::new(program);
+        awegit_git::hide_console(&mut command);
+        if command.arg(&repo).spawn().is_ok() { return Ok(()); }
+    }
+    Err("No editor found / 找不到可打开目录的编辑器".into())
+}
+
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WindowNav {
@@ -3061,6 +3175,9 @@ pub fn run() {
             commit_detail,
             locate_ref,
             repository_refs,
+            worktree_details,
+            worktree_compare,
+            worktree_prune_preview,
             commit_files,
             show_commit_file,
             in_progress,
@@ -3164,6 +3281,7 @@ pub fn run() {
             read_ssh_config,
             write_ssh_config,
             open_editor,
+            open_worktree_editor,
             open_window,
             reveal_commit,
             request_history_action,
@@ -3311,6 +3429,13 @@ mod watch_plan_tests {
         assert!(!super::watch_relevant(&worktree, &common.join("objects/ab/cd")));
         assert!(super::classify_changes(&worktree, &[git.join("index")]).is_some_and(|change| !change.refs));
         assert!(super::classify_changes(&worktree, &[common.join("refs/heads/main")]).is_some_and(|change| change.refs));
+        let other = common.join("worktrees/other");
+        for name in ["HEAD", "gitdir", "locked"] {
+            let path = other.join(name);
+            assert!(super::watch_relevant(&worktree, &path));
+            assert!(super::classify_changes(&worktree, &[path]).is_some_and(|change| change.refs));
+        }
+        assert!(!super::watch_relevant(&worktree, &other.join("index")));
         assert!(super::classify_changes(&worktree, &[worktree.join(".git")]).is_some_and(|change| change.refs));
         fs::remove_dir_all(root).unwrap();
     }

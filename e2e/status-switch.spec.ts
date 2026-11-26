@@ -8,7 +8,7 @@ test("a quiet watcher keeps the painted status and a named edit refreshes only t
     const statePath = "/src/lib/shell/state.svelte.ts";
     const { planStatusRefresh, mergeWatchNote } = await import(/* @vite-ignore */ planPath);
     const { ShellState } = await import(/* @vite-ignore */ statePath);
-    const fingerprint = { head: "ref: refs/heads/main", refId: "abc", indexLen: 10, indexSum: "ff", submoduleSum: "child-one" };
+    const fingerprint = { head: "ref: refs/heads/main", refId: "abc", indexLen: 10, indexSum: "ff", submoduleSum: "child-one", worktreeSum: "checkout-one" };
     const probe = { fingerprint, revision: 4, watcherAlive: true };
     const trust = planStatusRefresh({ fingerprint, seen: 4, unverified: false, probe, note: null });
     const staleIndex = planStatusRefresh({
@@ -18,6 +18,10 @@ test("a quiet watcher keeps the painted status and a named edit refreshes only t
     const staleSubmodule = planStatusRefresh({
       fingerprint, seen: 4, unverified: false,
       probe: { ...probe, fingerprint: { ...fingerprint, submoduleSum: "child-two" } }, note: null,
+    });
+    const staleWorktree = planStatusRefresh({
+      fingerprint, seen: 4, unverified: false,
+      probe: { ...probe, fingerprint: { ...fingerprint, worktreeSum: "checkout-two" } }, note: null,
     });
     const cold = planStatusRefresh({ fingerprint, seen: 0, unverified: true, probe: { ...probe, watcherAlive: false, revision: 0 }, note: null });
     const noted = mergeWatchNote(null, "status", 5, ["src/a.ts"]);
@@ -37,11 +41,12 @@ test("a quiet watcher keeps the painted status and a named edit refreshes only t
     shell.noteRepoWatch("D:/Two", "full", 4, null);
     const one = shell.repoWatchNotes.get("d:/one");
     const two = shell.repoWatchNotes.get("d:/two");
-    return { trust, staleIndex, staleSubmodule, cold, paths, overflow, missed, one, two };
+    return { trust, staleIndex, staleSubmodule, staleWorktree, cold, paths, overflow, missed, one, two };
   });
   expect(result.trust).toEqual({ kind: "trust" });
   expect(result.staleIndex).toEqual({ kind: "full" });
   expect(result.staleSubmodule).toEqual({ kind: "full" });
+  expect(result.staleWorktree).toEqual({ kind: "full" });
   expect(result.cold).toEqual({ kind: "full" });
   expect(result.paths).toEqual({ kind: "paths", paths: ["src/a.ts"] });
   expect(result.overflow).toEqual({ kind: "full" });

@@ -143,6 +143,7 @@ mod tests {
             index_len: 120,
             index_sum: "ff".into(),
             submodule_sum: "none".into(),
+            worktree_sum: "none".into(),
         }
     }
 

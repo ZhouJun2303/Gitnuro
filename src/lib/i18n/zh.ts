@@ -1,6 +1,30 @@
 import type { Messages } from "./types";
 
 export const zh: Messages = {
+  worktree: {
+    manage: "管理工作树", add: "新增工作树", open: "打开工作树", history: "查看工作树提交",
+    main: "主工作树", current: "当前", bare: "裸仓库", detached: "游离 HEAD", missing: "目录缺失",
+    locked: "已锁定", prunable: "可清理", pending: "正在处理…", unavailable: "工作树目录不可用：{path}",
+    existing: "检出已有本地分支", new: "创建新分支", checkoutMode: "检出方式", start: "起点",
+    path: "工作树目录", pathHint: "绝对路径，或相对于当前仓库的路径", openAfter: "创建后打开标签页",
+    occupied: "分支已在此工作树检出：{path}", branchExists: "本地分支已存在。可以选择检出已有分支。",
+    chooseExisting: "请选择已有的本地分支。", select: "选择工作树", clean: "没有未提交改动",
+    ignored: "忽略", untracked: "未跟踪", staged: "暂存", unstaged: "未暂存", conflicts: "冲突",
+    remove: "删除工作树", removeBody: "Git 将删除此目录并保留本地分支。",
+    removeMissing: "Git 将移除此工作树的登记并保留本地分支。", hasSubmodules: "此工作树包含子模块。",
+    force: "强制删除并丢弃本地内容", forceHint: "此目录中的暂存、未暂存、未跟踪或忽略文件可能被删除。",
+    saveFirst: "此工作树的游离 HEAD 有独有提交。保存为分支后即可删除。", saveBranch: "保存为分支",
+    switchFirst: "操作前会切换到另一个可用工作树。", noFallback: "找不到可以切换的工作树。",
+    lock: "锁定工作树", unlock: "解锁工作树", reason: "锁定原因（可选）",
+    move: "移动工作树", repair: "修复工作树", repairAll: "修复链接", repairPath: "搬迁后的工作树目录",
+    moveHint: "选择已有目录时，Git 会将工作树移入该目录。",
+    prune: "清理失效记录", pruneBody: "Git 将清理以下已失效的工作树记录。已搬迁的工作树可以先修复。",
+    pruneEmpty: "没有可清理的记录。", confirmPrune: "清理记录",
+    scope: "工作树历史：{name}", owned: "只看相对基准的独有提交", base: "比较基准",
+    baseHint: "填写分支、标签或提交", compare: "比较", files: "比较文件",
+    distance: "领先 {ahead} · 落后 {behind}", lost: "该工作树已从仓库移除。", noHead: "该工作树还没有提交。",
+    copyPath: "复制工作树路径", editor: "在编辑器中打开工作树", moreChanges: "另有 {count} 项",
+  },
   repoInfo: {
     title: "仓库信息", path: "路径", kind: "项目类型", generic: "普通 Git 仓库", unity: "Unity", android: "Android",
     files: "工作区文件", directories: "目录", worktreeSize: "工作区大小", gitSize: "Git 数据大小",

@@ -15,6 +15,7 @@ export type StatusFingerprint = {
   indexSum: string;
   /** Stable signature of the checked-out submodule HEADs and indexes. */
   submoduleSum?: string;
+  worktreeSum?: string;
 };
 
 export type StatusSnapshot = {
@@ -141,7 +142,17 @@ export type SubmoduleRow = {
   configuredBranch: string;
   ready: boolean;
 };
-export type WorktreeRow = { path: string; branch: string | null; detached: boolean };
+export type WorktreeRow = {
+  path: string;
+  branch: string | null;
+  head: string | null;
+  detached: boolean;
+  main: boolean;
+  bare: boolean;
+  missing: boolean;
+  locked: string | null;
+  prunable: string | null;
+};
 
 export type RefSnapshot = {
   labels?: Record<string, string[]>;

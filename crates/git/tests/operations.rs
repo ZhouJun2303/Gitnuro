@@ -1058,6 +1058,8 @@ fn submodule_and_worktree() {
         Mutation::AddWorktree {
             path: wt.display().to_string(),
             branch: "extra".into(),
+            mode: Default::default(),
+            start: None,
         },
     )
     .unwrap();

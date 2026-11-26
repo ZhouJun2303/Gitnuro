@@ -22,7 +22,8 @@ const PATH_LIMIT = 512;
 
 export function sameFingerprint(left: StatusFingerprint | null | undefined, right: StatusFingerprint | null | undefined) {
   return !!left && !!right && left.head === right.head && left.refId === right.refId && left.indexLen === right.indexLen
-    && left.indexSum === right.indexSum && (left.submoduleSum ?? "") === (right.submoduleSum ?? "");
+    && left.indexSum === right.indexSum && (left.submoduleSum ?? "") === (right.submoduleSum ?? "")
+    && (left.worktreeSum ?? "") === (right.worktreeSum ?? "");
 }
 
 /**

@@ -2280,6 +2280,11 @@ pub fn launch_editor(repo: &Path, template: &str, file: &str, line: u32) -> Resu
     )
 }
 
+pub fn launch_folder_editor(repo: &Path, template: &str) -> Result<(), Error> {
+    let absolute = repo.display().to_string();
+    launch_template(repo, template, ".", &[("{file}", &absolute), ("{line}", "1")])
+}
+
 fn stage_bytes(repo: &Path, path: &str, stage: u8) -> Vec<u8> {
     match run(repo, &["show", &format!(":{stage}:{path}")]) {
         Ok(output) => output.stdout,

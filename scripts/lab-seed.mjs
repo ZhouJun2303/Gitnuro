@@ -412,6 +412,33 @@ function seedUnstageInitialRepo() {
   write(path, "new.txt", "edited after staging\n");
 }
 
+function seedWorktreeRepo() {
+  const main = join(repos, "worktree");
+  const checkouts = join(repos, "worktree-checkouts");
+  const bare = join(repos, "worktree-bare.git");
+  for (const path of [main, checkouts, bare]) wipe(path);
+  initWork(main);
+  mkdirSync(checkouts, { recursive: true });
+  commit(main, ".gitignore", "ignored.txt\n", "worktree base");
+  git(main, ["branch", "available"]);
+  git(main, ["tag", "base"]);
+  const topic = join(checkouts, "topic");
+  const detached = join(checkouts, "detached");
+  const missing = join(checkouts, "missing");
+  git(main, ["worktree", "add", "-b", "topic", topic]);
+  commit(topic, "topic.txt", "committed on topic\n", "worktree topic commit");
+  write(topic, "topic.txt", "modified in topic\n");
+  write(topic, "local.txt", "untracked in topic\n");
+  write(topic, "ignored.txt", "ignored in topic\n");
+  git(main, ["worktree", "lock", "--reason", "external disk", topic]);
+  git(main, ["worktree", "add", "--detach", detached, "base"]);
+  commit(detached, "detached.txt", "detached history\n", "worktree detached commit");
+  git(main, ["worktree", "add", "-b", "missing", missing]);
+  wipe(missing);
+  commit(main, "main.txt", "only on main\n", "worktree main commit");
+  git(main, ["clone", "--bare", main, bare]);
+}
+
 function seedStageConflictPathsRepo() {
   const path = join(repos, "stage-conflict-paths");
   wipe(path); initWork(path);
@@ -674,6 +701,7 @@ const restore = {
   "checkout-index": () => seedCheckoutRepo("checkout-index"),
   "checkout-conflict": () => seedCheckoutRepo("checkout-conflict"),
   "unstage-initial": seedUnstageInitialRepo,
+  worktree: seedWorktreeRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
   "submodule-diff": seedSubmoduleDiffRepo,
   "submodule-health": seedSubmoduleHealthRepo,
@@ -894,6 +922,7 @@ seedMergeRepo();
 seedRebaseRepo();
 seedOperationRepo();
 seedUnstageInitialRepo();
+seedWorktreeRepo();
 seedStageConflictPathsRepo();
 seedPullDeletedRepo();
 seedPullNoopRepo();

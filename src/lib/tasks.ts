@@ -132,16 +132,15 @@ export function projectRefs(snapshot: RefSnapshot | null, tasks: readonly Operat
   if (!snapshot) return snapshot;
   const pending = tasks.filter((task) => repositoryKey(task.path) === repositoryKey(path) && taskRefsPending(task, revision));
   if (!pending.length) return snapshot;
-  let branches = snapshot.branches, tags = snapshot.tags, remotes = snapshot.remotes, stashes = snapshot.stashes, worktrees = snapshot.worktrees, submodules = snapshot.submodules;
+  let branches = snapshot.branches, tags = snapshot.tags, remotes = snapshot.remotes, stashes = snapshot.stashes, submodules = snapshot.submodules;
   for (const task of pending) {
     const preview = task.preview ?? {}, name = preview.name ?? "";
     if (task.action === "createBranch" && name && !branches.some((branch) => branch.name === name)) branches = [...branches, { name, current: false, upstream: null, ahead: 0, behind: 0 }];
     if (task.action === "renameBranch" && preview.to) branches = branches.map((branch) => branch.name === name ? { ...branch, name: preview.to } : branch);
     if (task.action === "tag" && name && !tags.some((tag) => tag.name === name)) tags = [{ name, id: "" }, ...tags];
     if (task.action === "addRemote" && name && !remotes.some((remote) => remote.name === name)) remotes = [...remotes, { name, url: null, head: null, branches: [] }];
-    if (task.action === "addWorktree" && preview.path && !worktrees.some((row) => row.path === preview.path)) worktrees = [...worktrees, { path: preview.path, branch: preview.branch || null, detached: false }];
     if (task.action === "submoduleAdd" && preview.path && !submodules.some((row) => row.path === preview.path)) submodules = [...submodules, { path: preview.path, id: "", recorded: "", branch: "", configuredBranch: "", ready: false }];
     if (task.action === "stashRename" && preview.message) stashes = stashes.map((stash) => stash.name === name || stash.id === name ? { ...stash, summary: preview.message } : stash);
   }
-  return branches === snapshot.branches && tags === snapshot.tags && remotes === snapshot.remotes && stashes === snapshot.stashes && worktrees === snapshot.worktrees && submodules === snapshot.submodules ? snapshot : { ...snapshot, branches, tags, remotes, stashes, worktrees, submodules };
+  return branches === snapshot.branches && tags === snapshot.tags && remotes === snapshot.remotes && stashes === snapshot.stashes && submodules === snapshot.submodules ? snapshot : { ...snapshot, branches, tags, remotes, stashes, submodules };
 }

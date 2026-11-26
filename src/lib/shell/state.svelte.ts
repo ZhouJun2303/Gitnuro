@@ -59,6 +59,7 @@ import { statusPathBefore, type StatusFingerprint } from "../status";
 import { mergeWatchNote, planStatusRefresh, type StatusProbe, type WatchNote } from "./status-plan";
 import { enqueueStage, projectStages, stageActions, type PendingStage } from "./staging";
 import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../operation-policy";
+import { beginWorktree, finishWorktreeMutation, type WorktreeDialogState, type WorktreeHistory } from "./worktrees";
 import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
 import { watchOperationTasks } from "./task-monitor";
 import { cancelReads, HISTORY_READS, invalidateReads, isReadSuperseded } from "../read-scheduler";
@@ -974,6 +975,20 @@ export class ShellState {
 
   graphBranches = $state<string[]>([]);
 
+  worktreeDialog = $state.raw<WorktreeDialogState>({ kind: "add" });
+  worktreeHistory = $state.raw<WorktreeHistory | null>(null);
+  worktreeHistoryRow = $derived(this.refs?.worktrees.find((row) => this.jobKey(row.path) === this.jobKey(this.worktreeHistory?.path)));
+  worktreeHeads = $derived.by(() => {
+    const byCommit = new Map<string, NonNullable<ShellState["refs"]>["worktrees"]>();
+    for (const row of this.refs?.worktrees ?? []) {
+      if (!row.head || (row.main && (this.refs?.worktrees.length ?? 0) < 2)) continue;
+      const rows = byCommit.get(row.head);
+      if (rows) rows.push(row);
+      else byCommit.set(row.head, [row]);
+    }
+    return byCommit;
+  });
+
   branchFilterSet = $derived(new Set(this.allBranches ? [] : this.graphBranches.length ? this.graphBranches : this.graphSolo ? [this.graphSolo] : []));
 
   storedHistoryFilter = "";
@@ -1471,7 +1486,7 @@ export class ShellState {
   collapsedDirs = $state<string[]>([]);
 
 
-  collapsedSide = $state<string[]>(["tags", "stashes", "submodules", "worktrees"]);
+  collapsedSide = $state<string[]>(["tags", "stashes", "submodules"]);
 
 
   sideSelected = $state<string | null>(null);
@@ -1831,7 +1846,9 @@ export class ShellState {
       delete: "chrome.deleteSelected", deletePaths: "chrome.deleteSelected", restoreFile: "menu.restoreFile", reword: "dialog.rewordAction", bisect: "chrome.bisect",
       appendIgnore: "dialog.gitignore", writeGitignore: "dialog.gitignore", writeMailmap: "chrome.mailmap", applyPatch: "flow.applyPatch",
       abort: "chrome.abort", continue: "chrome.continueAction", skip: "chrome.skip", resolve: "flow.resolveFile", resolvePaths: "flow.resolvePaths",
-      addWorktree: "chrome.worktrees", removeWorktree: "chrome.worktrees", submoduleAdd: "chrome.submodules", submoduleRemove: "chrome.submodules",
+      addWorktree: "worktree.add", removeWorktree: "worktree.remove", setWorktreeLock: "worktree.lock",
+      moveWorktree: "worktree.move", repairWorktree: "worktree.repair", pruneWorktrees: "worktree.prune",
+      submoduleAdd: "chrome.submodules", submoduleRemove: "chrome.submodules",
       submoduleInit: "chrome.submodules", submoduleSync: "chrome.submodules", submoduleUpdate: "chrome.submodules", submoduleUpdatePath: "chrome.submodules",
       gitFlowInit: "menu.initialize", gitFlowStart: "shortcuts.branch", gitFlowFinish: "flow.gitFlowFinish", lfsPull: "dialog.lfsPull", lfsPush: "dialog.lfsPush", lfsLock: "menu.lfsLock", lfsUnlock: "menu.lfsUnlock",
       setHidden: "chrome.repoSettings", setExpanded: "chrome.repoSettings", setSignOff: "chrome.repoSettings", custom: "chrome.activity",
@@ -2722,6 +2739,8 @@ export class ShellState {
       cmd("chrome.stash", () => this.openStash([])),
       cmd("chrome.pop", () => this.confirmPopStash()),
       cmd("chrome.refresh", () => void this.refresh()),
+      cmd("worktree.add", () => beginWorktree(this)),
+      cmd("worktree.manage", () => beginWorktree(this, { kind: "manage" })),
       cmd("chrome.stageAll", () => void this.runChange("stage_all")),
       cmd("chrome.commit", () => void this.submitCommit(false)),
       cmd("chrome.commitAndPush", () => void this.submitCommit(true)),
@@ -4136,7 +4155,7 @@ export class ShellState {
       if (!background) this.mergeConflictRestore = false;
       const described = this.describeRequest(request);
       const dialogBefore = this.dialog;
-      if (!background && dialogBefore && dialogBefore !== "prefs") this.dialog = null;
+      if (!background && dialogBefore && dialogBefore !== "prefs" && dialogBefore !== "worktree") this.dialog = null;
       const dialogAfter = this.dialog;
       const refreshContext = this.needsContext(action);
       const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
@@ -4207,8 +4226,8 @@ export class ShellState {
             this.dialog = "mergeConflict";
             this.actionError = null;
             this.stashRetry = null;
-          } else if (dialogBefore === "prefs") {
-            // Preferences stay open for LFS/author actions; the operation is recorded below.
+          } else if (dialogBefore === "prefs" || dialogBefore === "worktree") {
+            // Dialogs with their own action flows keep their current form.
           } else if (output) {
             this.commandOutput = output;
             this.dialog = "output";
@@ -4216,6 +4235,7 @@ export class ShellState {
             this.dialog = null;
           }
         }
+        finishWorktreeMutation(this, request, value, current() && this.dialog === dialogAfter);
         return "completed" as const;
       } catch (error) {
         if (!backendFinished) backendFinished = performance.now();
@@ -5765,6 +5785,47 @@ export class ShellState {
     void this.savePrefs(false);
   }
 
+  relocateRepo(path: string, destination: string) {
+    const match = (value: string) => this.jobKey(value) === this.jobKey(path);
+    const replace = (value: string) => match(value) ? destination : value;
+    const rewrite = (paths: string[]) => [...new Set(paths.map(replace))];
+    const keyed = (items: string[]) => items.map((item) => {
+      const tab = item.indexOf("\t");
+      return tab < 0 ? replace(item) : replace(item.slice(0, tab)) + item.slice(tab);
+    });
+    this.settings = {
+      ...this.settings,
+      recent: rewrite(this.settings.recent),
+      recentRepoPins: this.settings.recentRepoPins.map((pin) => ({ ...pin, path: replace(pin.path) })),
+      workspaces: this.settings.workspaces.map((workspace) => {
+        const openTabs = rewrite(workspace.openTabs);
+        return {
+          ...workspace,
+          repositories: rewrite(workspace.repositories),
+          openTabs,
+          selectedTab: Math.max(0, openTabs.indexOf(replace(workspace.openTabs[workspace.selectedTab] ?? ""))),
+        };
+      }),
+      tabLabels: keyed(this.settings.tabLabels),
+      tabColors: keyed(this.settings.tabColors),
+      pinnedRefs: keyed(this.settings.pinnedRefs),
+    };
+    this.repos = rewrite(this.repos);
+    this.closedTabs = rewrite(this.closedTabs);
+    for (const [key, draft] of this.drafts) {
+      if (!match(key)) continue;
+      this.drafts.delete(key);
+      this.drafts.set(destination, draft);
+      break;
+    }
+    if (this.worktreeHistory && match(this.worktreeHistory.path)) {
+      this.worktreeHistory = { ...this.worktreeHistory, path: destination };
+    }
+    this.repositoryViews.delete(this.jobKey(path));
+    this.syncRecentWorkspace();
+    void this.savePrefs(false);
+  }
+
   /** Show the missing-repository error, then drop that path. Open another tab when this one was on screen. */
   async dropMissingRepo(path: string, text: string) {
     this.forgetRepo(path);
@@ -5903,7 +5964,7 @@ export class ShellState {
 
 
 
-  repositoryViews = new Map<string, Pick<ShellState, "snapshot" | "refs" | "commitsLive" | "progress" | "selectedPath" | "selectedSide" | "selectedCommit" | "commitDetail" | "commitFiles" | "historyFile" | "historyFilter" | "sideTop" | "historyTop" | "fileTop" | "stagedTop" | "combinedTop" | "commitScrollTop" | "commitListTop" | "diffTop" | "historyDiffTop" | "selectedIndex" | "statusRevision" | "statusObservedRevision" | "stageStatusUnverified" | "contextRevision">>();
+  repositoryViews = new Map<string, Pick<ShellState, "snapshot" | "refs" | "commitsLive" | "progress" | "selectedPath" | "selectedSide" | "selectedCommit" | "commitDetail" | "commitFiles" | "historyFile" | "historyFilter" | "worktreeHistory" | "sideTop" | "historyTop" | "fileTop" | "stagedTop" | "combinedTop" | "commitScrollTop" | "commitListTop" | "diffTop" | "historyDiffTop" | "selectedIndex" | "statusRevision" | "statusObservedRevision" | "stageStatusUnverified" | "contextRevision">>();
 
   /** Watcher events for a repository that is not on screen. Capped with the view cache. */
   repoWatchNotes = new Map<string, WatchNote>();
@@ -5916,6 +5977,7 @@ export class ShellState {
       snapshot: this.snapshot, refs: this.refs, commitsLive: this.commitsLive, progress: this.progress,
       selectedPath: this.selectedPath, selectedSide: this.selectedSide, selectedCommit: this.selectedCommit,
       commitDetail: this.commitDetail, commitFiles: this.commitFiles, historyFile: this.historyFile, historyFilter: this.historyFilter,
+      worktreeHistory: this.worktreeHistory,
       sideTop: this.sideTop, historyTop: this.historyTop, fileTop: this.fileTop, stagedTop: this.stagedTop, combinedTop: this.combinedTop,
       commitScrollTop: this.commitScrollTop, commitListTop: this.commitListTop, diffTop: this.diffTop, historyDiffTop: this.historyDiffTop,
       selectedIndex: this.selectedIndex, statusRevision: this.statusRevision, statusObservedRevision: this.statusObservedRevision, stageStatusUnverified: this.stageStatusUnverified, contextRevision: this.contextRevision,
@@ -5981,6 +6043,7 @@ export class ShellState {
       const cached = this.repositoryViews.get(this.jobKey(path));
       if (cached) { Object.assign(this, cached); this.mode = "live"; }
       else {
+        this.worktreeHistory = null;
         this.snapshot = null; this.refs = null; this.commitsLive = []; this.mode = "loading";
         this.historyFillPending = false;
         this.selectedPath = null; this.selectedCommit = null; this.commitDetail = null; this.commitFiles = [];
@@ -6031,7 +6094,8 @@ export class ShellState {
           if (gen !== this.openGen) return;
           const previous = this.snapshot?.fingerprint;
           headSame = !!previous && previous.head === probe.fingerprint.head && previous.refId === probe.fingerprint.refId
-            && (previous.submoduleSum ?? "") === (probe.fingerprint.submoduleSum ?? "");
+            && (previous.submoduleSum ?? "") === (probe.fingerprint.submoduleSum ?? "")
+            && (previous.worktreeSum ?? "") === (probe.fingerprint.worktreeSum ?? "");
           plan = planStatusRefresh({
             fingerprint: previous,
             seen: this.snapshot?.revision ?? 0,

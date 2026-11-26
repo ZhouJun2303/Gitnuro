@@ -1,5 +1,6 @@
 import { onMount, tick } from "svelte";
 import { invoke, traceOperation } from "../perf";
+import { beginWorktree, occupiedWorktree, openWorktree } from "./worktrees";
 import { isReadSuperseded } from "../read-scheduler";
 import { areasFor } from "../operation-policy";
 import { mergeResponse } from "../reconcile";
@@ -735,6 +736,12 @@ export function requestCheckout(shell: ShellState, name: string) {
 export async function quickCheckout(shell: ShellState, name: string, remote?: { remote: string; branch: string }) {
     if (shell.mode !== "live" || shell.pendingReference(name) || (remote && shell.pendingReference(remote.branch))) return;
     shell.locateSeq += 1;
+    const occupied = !remote && occupiedWorktree(shell, name);
+    if (occupied) return openWorktree(shell, occupied);
+    if (!remote && shell.refs?.worktrees.some((row) => row.bare && shell.viewing(row.path))) {
+      beginWorktree(shell, { kind: "add", source: "refs/heads/" + name, branch: name });
+      return;
+    }
     // One backend write owns saving, checkout and restoration by stash commit id.
     // Pending references absorb repeated double-clicks while other writes can queue.
     if (remote) await shell.mutate({ action: "checkoutRemote", remote: remote.remote, branch: remote.branch });

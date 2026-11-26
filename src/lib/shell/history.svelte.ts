@@ -91,6 +91,13 @@ export async function loadCommits(shell: ShellState, path: string | undefined, o
     const order = shell.settings.commitSort === "topo" ? "topo" : "date";
     const query = shell.sideView === "search" ? shell.commitSearch.trim() : "";
     const extra = background ? { __prefetch: true } : {};
+    if (shell.worktreeHistory) {
+      const head = shell.worktreeHistoryRow?.head;
+      if (!head) return [];
+      const revs = [head];
+      if (shell.worktreeHistory.base) revs.push("^" + shell.worktreeHistory.base);
+      return invoke<CommitRow[]>("commit_log", { path, limit, offset, order, revs, ...extra }, undefined, operation);
+    }
     if (query && path) {
       return invoke<CommitRow[]>("search_log", {
         path,
@@ -148,7 +155,8 @@ function historyVisible(shell: ShellState) {
 
 /** Inputs that must stay put while older pages stream in. */
 function historyScope(shell: ShellState) {
-    return [shell.repoPath(), shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.allBranches, ...shell.exactRefs()];
+    return [shell.repoPath(), shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope,
+      shell.historyFilter, shell.allBranches, shell.worktreeHistory?.path, shell.worktreeHistory?.base, shell.worktreeHistoryRow?.head, ...shell.exactRefs()];
 }
 
 /**
@@ -215,7 +223,7 @@ function readCancelled(error: unknown) {
 
 export function loadContext(shell: ShellState, operation?: string, parts: ContextParts = { history: true, flow: true }): Promise<void> {
     // Status generation is not part of the key. A worktree scan must not start a second history read.
-    const key = JSON.stringify([shell.repoPath(), shell.snapshot?.fingerprint?.refId ?? "", shell.snapshot?.branch ?? "", shell.settings.commitSort, shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.logLimit, shell.allBranches, shell.exactRefs(), parts]);
+    const key = JSON.stringify([historyScope(shell), shell.snapshot?.fingerprint?.refId ?? "", shell.snapshot?.branch ?? "", shell.settings.commitSort, shell.logLimit, parts]);
     const current = contextReads.get(shell);
     if (current?.key === key) return current.promise;
     const path = shell.repoPath();
@@ -247,6 +255,15 @@ async function readContext(shell: ShellState, operation?: string, parts: Context
     const loaded = new Set(shell.commitsLive.map((row) => row.id));
     const previousTips = new Set(Object.keys(shell.refs?.labels ?? {}));
     if (!parts.history && !parts.deferHistory && Object.keys(nextRefs.labels ?? {}).some((id) => !loaded.has(id) && !previousTips.has(id))) parts = { ...parts, history: true };
+    if (!parts.history && !parts.deferHistory) {
+      const detached = (refs: RefSnapshot | null) => (refs?.worktrees ?? []).filter((row) => row.detached).map((row) => row.head);
+      const scoped = shell.worktreeHistory;
+      const nextHead = nextRefs.worktrees.find((row) => shell.jobKey(row.path) === shell.jobKey(scoped?.path))?.head;
+      if ((shell.allBranches && !shell.same(detached(shell.refs), detached(nextRefs))) ||
+        (scoped && (nextHead !== shell.worktreeHistoryRow?.head || (!!scoped.base && !shell.same(shell.refs?.labels, nextRefs.labels))))) {
+        parts = { ...parts, history: true };
+      }
+    }
     if (!shell.same(shell.refs, visibleRefs)) shell.refs = visibleRefs;
     shell.contextRevision = revision ?? 0;
     if (!parts.history && nextRefs.labels) {
@@ -534,6 +551,7 @@ export function exactRefs(shell: ShellState): string[] {
   }
 
 export function soloBranch(shell: ShellState, name: string) {
+    shell.worktreeHistory = null;
     const selected = shell.allBranches ? [] : shell.graphBranches?.length ? shell.graphBranches : shell.graphSolo ? [shell.graphSolo] : [];
     shell.graphBranches = selected.includes(name) ? selected.filter((item) => item !== name) : [...selected, name];
     shell.graphSolo = null;
@@ -542,6 +560,7 @@ export function soloBranch(shell: ShellState, name: string) {
   }
 
 export function toggleHistoryScope(shell: ShellState) {
+    shell.worktreeHistory = null;
     shell.allBranches = !shell.allBranches;
     if (shell.allBranches) {
       shell.graphSolo = null;
@@ -551,6 +570,7 @@ export function toggleHistoryScope(shell: ShellState) {
   }
 
 export function clearHistoryFilter(shell: ShellState) {
+    shell.worktreeHistory = null;
     shell.allBranches = true;
     shell.graphSolo = null;
     shell.graphBranches = [];
@@ -1254,6 +1274,7 @@ export async function locateRef(shell: ShellState, name: string) {
     const current = () => seq === shell.locateSeq && openGen === shell.openGen && shell.viewing(path);
     const waiting = () => current() && selectionGen === shell.patchGen;
     shell.openHistory();
+    shell.worktreeHistory = null;
     if (shell.commitQuery.trim()) shell.commitQuery = "";
     if (shell.historyFilter) shell.historyFilter = "";
     shell.actionError = null;

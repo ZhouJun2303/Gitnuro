@@ -1,6 +1,30 @@
 import type { Messages } from "./types";
 
 export const en: Messages = {
+  worktree: {
+    manage: "Manage Worktrees", add: "Add Worktree", open: "Open Worktree", history: "View Worktree Commits",
+    main: "Main worktree", current: "Current", bare: "Bare repository", detached: "Detached HEAD", missing: "Missing directory",
+    locked: "Locked", prunable: "Prunable", pending: "Working…", unavailable: "Worktree directory unavailable: {path}",
+    existing: "Check out an existing local branch", new: "Create a new branch", checkoutMode: "Checkout mode", start: "Start point",
+    path: "Worktree directory", pathHint: "Absolute path or relative to the current repository", openAfter: "Open as a tab after creation",
+    occupied: "This branch is already checked out at {path}", branchExists: "This branch exists. Select the existing branch checkout mode to use it.",
+    chooseExisting: "Select an existing local branch.", select: "Select Worktree", clean: "No uncommitted changes",
+    ignored: "Ignored", untracked: "Untracked", staged: "Staged", unstaged: "Unstaged", conflicts: "Conflicts",
+    remove: "Remove Worktree", removeBody: "Git will remove this directory and keep the local branch.",
+    removeMissing: "Git will remove the worktree registration and keep the local branch.", hasSubmodules: "This worktree contains submodules.",
+    force: "Force removal and discard local contents", forceHint: "Removal can delete staged, unstaged, untracked or ignored files in this directory.",
+    saveFirst: "The detached HEAD has unique commits. Save it as a branch before removing the worktree.", saveBranch: "Save as Branch",
+    switchFirst: "AweGit will switch to another available worktree first.", noFallback: "No other worktree is available.",
+    lock: "Lock Worktree", unlock: "Unlock Worktree", reason: "Lock reason (optional)",
+    move: "Move Worktree", repair: "Repair Worktree", repairAll: "Repair Links", repairPath: "New location of the moved worktree",
+    moveHint: "When you choose an existing directory, Git moves the worktree into it.",
+    prune: "Prune Missing Worktrees", pruneBody: "Git will prune the entries below. You can repair worktrees that have moved.",
+    pruneEmpty: "There are no entries to prune.", confirmPrune: "Prune Entries",
+    scope: "Worktree history: {name}", owned: "Show only commits unique to this worktree", base: "Compare with",
+    baseHint: "Enter a branch, tag or commit", compare: "Compare", files: "Compare Files",
+    distance: "{ahead} ahead · {behind} behind", lost: "This worktree was removed from the repository.", noHead: "This worktree has no commits yet.",
+    copyPath: "Copy Worktree Path", editor: "Open Worktree in Editor", moreChanges: "{count} more",
+  },
   repoInfo: {
     title: "Repository info", path: "Path", kind: "Project type", generic: "Git repository", unity: "Unity", android: "Android",
     files: "Worktree files", directories: "Directories", worktreeSize: "Worktree size", gitSize: "Git data size",

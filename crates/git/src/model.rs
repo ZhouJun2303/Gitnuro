@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::change::{parse_diff, spec_size, FileDiff};
 use crate::cli::{check_path, check_rev, run, run_capped, run_output, run_stdin_output, with_read};
+use crate::worktree::{self, WorktreeRow};
 use crate::{ChangeKind, Error, FileChange};
 
 static GIT_DIRS: Mutex<BTreeMap<PathBuf, PathBuf>> = Mutex::new(BTreeMap::new());
@@ -139,14 +140,6 @@ pub struct SubmoduleRow {
     #[serde(default)]
     pub configured_branch: String,
     pub ready: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorktreeRow {
-    pub path: String,
-    pub branch: Option<String>,
-    pub detached: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -421,16 +414,14 @@ fn log_page(
     offset: usize,
     revision: Option<u64>,
 ) -> Result<Vec<CommitRow>, Error> {
-    let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]));
-    match head {
-        Err(error) => return Err(error),
-        Ok(output) if output.status.success() => {}
-        // An unborn repository has no commits. A cancelled or failed Git process does not.
-        Ok(_) => return Ok(Vec::new()),
+    if revs.is_empty() && (!all || !path.is_empty()) {
+        let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]))?;
+        if !head.status.success() { return Ok(Vec::new()); }
     }
     let limit = limit.clamp(1, 100_000).to_string();
     let order = if topo { "--topo-order" } else { "--date-order" };
     let skip = format!("--skip={}", offset.min(100_000));
+    let detached_heads;
     let mut args = vec![
         "--literal-pathspecs",
         "log",
@@ -444,10 +435,14 @@ fn log_page(
     if !revs.is_empty() {
         // Named revisions only. Extra remote tips would walk the whole remote set.
         args.extend_from_slice(revs);
+        args.push("--");
     } else if path.is_empty() && all {
         // Branches and remotes, not `--all`: tags and notes would bury the tips.
         args.insert(2, "--branches");
         args.insert(3, "--remotes");
+        detached_heads = worktree::detached_heads(repo)?;
+        args.extend(detached_heads.iter().map(String::as_str));
+        args.push("--");
     } else if !path.is_empty() {
         args.push("--");
         args.extend_from_slice(path);
@@ -740,7 +735,7 @@ fn repository_refs_uncached(repo: &Path) -> Result<RefSnapshot, Error> {
         let tags = scope.spawn(crate::timing::inherit(|| tags(repo)));
         let stashes = scope.spawn(crate::timing::inherit(|| stashes(repo)));
         let submodules = scope.spawn(crate::timing::inherit(|| submodules(repo)));
-        let worktrees = worktrees(repo);
+        let worktrees = worktree::list(repo);
         Ok(RefSnapshot {
             revision: 0,
             head,
@@ -764,30 +759,22 @@ fn refs_stamp(repo: &Path) -> String {
     let Ok(git) = absolute_git_dir(repo) else {
         return format!("missing:{}", repo.display());
     };
-    let mut stamp = String::new();
-    for relative in [
-        "HEAD",
-        "config",
-        "packed-refs",
-        "index",
-        "logs/refs/stash",
-        "awegit",
-        "gitnuro",
+    let common = worktree::common_dir(repo).unwrap_or_else(|_| git.clone());
+    let mut stamp = worktree::registry_stamp(&common).to_string();
+    for (root, files) in [
+        (&git, &["HEAD", "index", "config.worktree", "awegit", "gitnuro"][..]),
+        (&common, &["HEAD", "config", "packed-refs", "logs/refs/stash"][..]),
     ] {
-        if !stamp.is_empty() {
+        for relative in files {
             stamp.push('|');
+            stamp.push_str(&file_mark(&root.join(relative)));
         }
-        stamp.push_str(relative);
-        stamp.push(':');
-        stamp.push_str(&file_mark(&git.join(relative)));
     }
-    for relative in ["refs/heads", "refs/remotes", "refs/tags", "worktrees"] {
-        if !stamp.is_empty() {
-            stamp.push('|');
-        }
+    for relative in ["refs/heads", "refs/remotes", "refs/tags"] {
+        stamp.push('|');
         stamp.push_str(relative);
         stamp.push(':');
-        stamp.push_str(&tree_mark(&git.join(relative)));
+        stamp.push_str(&tree_mark(&common.join(relative)));
     }
     stamp.push('|');
     stamp.push_str(&file_mark(&repo.join(".gitmodules")));
@@ -2023,6 +2010,9 @@ fn tags(repo: &Path) -> Result<Vec<TagRow>, Error> {
 }
 
 fn stashes(repo: &Path) -> Result<Vec<StashRow>, Error> {
+    if crate::open_repo(repo).is_ok_and(|repo| repo.is_bare()) {
+        return Ok(Vec::new());
+    }
     let output = run(
         repo,
         &["stash", "list", "--pretty=format:%H%x09%P%x09%gd%x09%gs"],
@@ -2436,37 +2426,6 @@ fn read_ref(git_dir: &Path, name: &str) -> Option<String> {
             let (id, path) = line.split_once(' ')?;
             (path.trim() == name).then(|| id.to_string())
         })
-}
-
-fn worktrees(repo: &Path) -> Result<Vec<WorktreeRow>, Error> {
-    let output = run(repo, &["worktree", "list", "--porcelain"])?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut rows = Vec::new();
-    let mut current: Option<WorktreeRow> = None;
-    for line in text.lines() {
-        if let Some(path) = line.strip_prefix("worktree ") {
-            if let Some(row) = current.take() {
-                rows.push(row);
-            }
-            current = Some(WorktreeRow {
-                path: path.to_string(),
-                branch: None,
-                detached: false,
-            });
-        } else if let Some(branch) = line.strip_prefix("branch ") {
-            if let Some(row) = current.as_mut() {
-                row.branch = branch.strip_prefix("refs/heads/").map(str::to_string);
-            }
-        } else if line == "detached" {
-            if let Some(row) = current.as_mut() {
-                row.detached = true;
-            }
-        }
-    }
-    if let Some(row) = current {
-        rows.push(row);
-    }
-    Ok(rows)
 }
 
 fn parse_track(text: &str) -> (u32, u32) {

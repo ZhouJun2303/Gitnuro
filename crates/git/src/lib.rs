@@ -14,6 +14,7 @@ mod ops;
 mod proc;
 mod pull;
 mod timing;
+pub mod worktree;
 
 use std::path::{Path, PathBuf};
 
@@ -23,7 +24,7 @@ pub use pull::{refresh_state as pull_refresh_state, RefreshState as PullRefreshS
 pub use change::{
     blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line,
     discard_lines, file_diff, file_diff_with, file_preview, index_preview, launch_diff_pair, launch_diff_tool,
-    launch_editor, launch_merge_tool, porcelain_z_paths, range_diff, resolve_conflict,
+    launch_editor, launch_folder_editor, launch_merge_tool, porcelain_z_paths, range_diff, resolve_conflict,
     compact_directory_paths, resolve_conflicts, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths,
     staged_diff, unstage_all, unstage_paths, workspace_diff, BlobView, CommitRequest,
     ConflictSides, ConflictView, DiffLine, DiffLineKind, FileDiff, FilePreview, LineEdit,
@@ -46,8 +47,9 @@ pub use model::{
     BlameSource, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, LocatedRef, RefSnapshot,
     commit_log_page, commit_log_page_with_revision, file_history_page, file_history_page_with_revision,
     search_log_page, search_log_page_with_revision, reflog_page,
-    ReflogRow, RemoteRow, RepoSummary, StaleIndexLock, StashRow, SubmoduleRow, TagRow, WorktreeRow,
+    ReflogRow, RemoteRow, RepoSummary, StaleIndexLock, StashRow, SubmoduleRow, TagRow,
 };
+pub use worktree::WorktreeRow;
 pub use ops::{
     approve_credential, cherry_preview, merge_preview, merge_state, merged_branches, perform, perform_stashed,
     pick_history, push_commit_target, push_is_up_to_date, repo_facts, repo_facts_brief, scan_repositories, search_commits, set_repo_author,
@@ -213,6 +215,17 @@ fn status_patterns(path: &Path, fakeignore: bool, patterns: Vec<gix::bstr::BStri
     let branch = head
         .referent_name()
         .map(|name| name.shorten().to_string());
+    if repo.is_bare() {
+        return Ok(StatusSnapshot {
+            revision: 0,
+            path: worktree.display().to_string(),
+            branch,
+            commit_intent: CommitIntent { head: head.id().map(|id| id.to_string()), index: String::new() },
+            staged: Vec::new(),
+            unstaged: Vec::new(),
+            fingerprint: None,
+        });
+    }
     let commit_intent = index_intent(&repo, head.id().map(|id| id.to_string()), None)?;
 
     let mut staged = Vec::new();
@@ -298,11 +311,11 @@ fn classify_open(path: &Path, source: gix::open::Error) -> Error {
     }
 }
 
-/// Walk upward from `start` until a repository work tree is found.
+/// Walk upward from `start` until a worktree or bare repository is found.
 pub fn discover(start: impl AsRef<Path>) -> Option<PathBuf> {
     let mut dir = start.as_ref().to_path_buf();
     loop {
-        if dir.join(".git").exists() {
+        if dir.join(".git").exists() || (dir.join("HEAD").is_file() && dir.join("objects").is_dir() && dir.join("refs").is_dir()) {
             return Some(dir);
         }
         if !dir.pop() {

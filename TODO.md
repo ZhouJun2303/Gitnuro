@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 侧栏支持新建、切换和管理工作树。提交图标记各工作树的 HEAD，并支持独立历史和基准比较。删除前复核文件和游离提交，移动、修复、锁定及清理使用 Git 的工作树操作。实现提交 `feat: 完善工作树管理和提交比较`。回归见 `worktree_modes_history_and_shared_registry`、`worktree_remove_requires_current_review_and_preserves_branch`、`worktree_lock_move_repair_and_protected_prune`、`e2e/worktrees.spec.ts`。
+
 - [x] 仓库状态、子模块工作区和子模块 Git 元数据变更会及时通知界面；切换回仓库会比较子模块指纹，checkout 完成后的分支等待标记会在引用快照到达后清除。修复提交：本条所在提交 `fix: 修复仓库状态刷新延迟`。回归：`watch_plan_tests::submodule_gitdir_fetch_head_is_metadata_not_a_worktree_path`、`fingerprint::tests::submodule_checkout_changes_move_the_fingerprint`、`e2e/status-switch.spec.ts`、`e2e/checkout.spec.ts`、`e2e/operation-scheduler.spec.ts`。
 
 - [x] 全新安装第一次启动后，在首屏绘制完成时后台自动同步本机已登录账号、导入 Fork 设置、启用 AI 提交说明接口并开启 Killer 推送；只执行一次，不弹窗、不阻塞打开仓库，失败就跳过。回归：`missing_onboarding_counts_as_seen`、`e2e/first-run.spec.ts`。实现：本条所在提交 `feat: 新装首次启动后台自动准备本地设置并更新功能页`。

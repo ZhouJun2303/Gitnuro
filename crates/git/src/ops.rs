@@ -361,10 +361,34 @@ pub enum Mutation {
     },
     AddWorktree {
         path: String,
+        #[serde(default)]
         branch: String,
+        #[serde(default)]
+        mode: crate::worktree::AddMode,
+        #[serde(default)]
+        start: Option<String>,
     },
     RemoveWorktree {
         path: String,
+        #[serde(default)]
+        force: bool,
+        #[serde(default)]
+        expected: Option<String>,
+    },
+    SetWorktreeLock {
+        path: String,
+        locked: bool,
+        reason: Option<String>,
+    },
+    MoveWorktree {
+        path: String,
+        to: String,
+    },
+    RepairWorktree {
+        path: Option<String>,
+    },
+    PruneWorktrees {
+        expected: String,
     },
     SubmoduleUpdate,
     SubmoduleUpdatePath {
@@ -472,7 +496,9 @@ impl Mutation {
             Fetch { .. } | Push { .. } | PushRef { .. } | CreateBranch { .. } | DeleteBranch { .. }
                 | Tag { .. } | DeleteTag { .. } | DeleteRemoteTag { .. } | DeleteRemoteBranch { .. } => &["refs"],
             RenameBranch { .. } | SetUpstream { .. } | AddRemote { .. } | RemoveRemote { .. } | SetRemoteUrl { .. }
-                | AddWorktree { .. } | RemoveWorktree { .. } => &["refs", "config"],
+                => &["refs", "config"],
+            AddWorktree { .. } | RemoveWorktree { .. } | PruneWorktrees { .. } => &["refs", "history"],
+            SetWorktreeLock { .. } | MoveWorktree { .. } | RepairWorktree { .. } => &["refs"],
             StashDrop { .. } | StashRename { .. } => &["stashes"],
             Stash { .. } | StashPop { .. } | StashPaths { .. } => &["worktree", "index", "stashes"],
             StashApply { .. } | RestoreFile { .. } | Discard { .. } | DiscardPaths { .. } | Delete { .. } | DeletePaths { .. }
@@ -1138,10 +1164,12 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             &["remote", "set-url", check_name(&name)?, check_url(&url)?],
         )
         .map(|_| ()),
-        Mutation::AddWorktree { path, branch } => add_worktree(repo, &path, &branch),
-        Mutation::RemoveWorktree { path } => {
-            run(repo, &["worktree", "remove", check_external(&path)?]).map(|_| ())
-        }
+        Mutation::AddWorktree { path, branch, mode, start } => crate::worktree::add(repo, &path, &branch, mode, start.as_deref()),
+        Mutation::RemoveWorktree { path, force, expected } => crate::worktree::remove(repo, &path, force, expected.as_deref()),
+        Mutation::SetWorktreeLock { path, locked, reason } => crate::worktree::set_lock(repo, &path, locked, reason.as_deref()),
+        Mutation::MoveWorktree { path, to } => crate::worktree::move_to(repo, &path, &to),
+        Mutation::RepairWorktree { path } => crate::worktree::repair(repo, path.as_deref()),
+        Mutation::PruneWorktrees { expected } => crate::worktree::prune(repo, &expected),
         Mutation::SubmoduleUpdate => {
             run(repo, &["submodule", "update", "--init", "--recursive"]).map(|_| ())
         }
@@ -2682,26 +2710,6 @@ fn remove_worktree_file(repo: &Path, file: &str) -> Result<(), Error> {
         path: file.to_string(),
         source,
     })
-}
-
-fn add_worktree(repo: &Path, path: &str, branch: &str) -> Result<(), Error> {
-    let path = check_external(path)?;
-    let branch = check_name(branch)?;
-    let exists = run(
-        repo,
-        &[
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            &format!("refs/heads/{branch}"),
-        ],
-    )
-    .is_ok();
-    if exists {
-        run(repo, &["worktree", "add", path, branch]).map(|_| ())
-    } else {
-        run(repo, &["worktree", "add", "-b", branch, path]).map(|_| ())
-    }
 }
 
 fn git_flow_init(

@@ -1,6 +1,6 @@
 import type { ShellState } from "./state.svelte";
 import { branchGroup, orderRefNames } from "../view";
-import type { SubmoduleRow } from "../status";
+import type { SubmoduleRow, WorktreeRow } from "../status";
 
 export type SideAdd = "branch" | "remote" | "submodule" | "worktree";
 type PagedSection = "tags" | "stashes";
@@ -18,7 +18,7 @@ export type SideRow =
   | { key: string; kind: "stash"; name: string; summary: string; id?: string }
   | { key: string; kind: "submodule"; path: string; ready: boolean; tone: SubmoduleTone; title: string }
   | { key: string; kind: "submoduleNote"; path: string; tone: SubmoduleTone; note: string; title: string }
-  | { key: string; kind: "worktree"; path: string; branch: string | null };
+  | { key: string; kind: "worktree"; worktree: WorktreeRow };
 
 type SubmoduleHealth = { tone: SubmoduleTone; note: string; title: string };
 
@@ -257,7 +257,7 @@ export function liveSideRows(shell: ShellState, limits: Record<PagedSection, num
     if (shell.sideOpen("worktrees")) {
       for (const row of refs.worktrees) {
         if (!shell.matchesQuery(row.path, query) && !shell.matchesQuery(row.branch ?? "", query)) continue;
-        rows.push({ key: `worktree:${row.path}`, kind: "worktree", path: row.path, branch: row.branch });
+        rows.push({ key: `worktree:${row.path}`, kind: "worktree", worktree: row });
       }
     }
   }

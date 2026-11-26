@@ -4,6 +4,7 @@ import { recentWorkspaceId, type CommandRecord, type ToolRecord } from "../statu
 import type { ShellState } from "../shell/state.svelte";
 import type { LabDialog, LabScene } from "./scenes";
 import { previewCherrySelection } from "../shell/cherrySelection";
+import { beginWorktree, viewWorktreeHistory } from "../shell/worktrees";
 
 const FILL = 24;
 
@@ -495,9 +496,14 @@ async function fillSurface(shell: ShellState, id: string) {
   if (id === "submodule-diff") {
     return showChange(shell, "vendor", "unstaged");
   }
-  if (id === "worktree") {
-    shell.collapsedSide = [];
-    shell.sideQuery = "extra";
+  if (id === "worktree" || id.startsWith("worktree-")) {
+    shell.collapsedSide = ["tags", "remotes", "stashes", "submodules"];
+    const rows = shell.refs?.worktrees ?? [];
+    const detached = rows.find((row) => row.detached);
+    if (id === "worktree-manage") beginWorktree(shell, { kind: "manage", path: rows.find((row) => row.branch === "topic")?.path });
+    if (id === "worktree-remove" && detached) beginWorktree(shell, { kind: "remove", path: detached.path });
+    if (id === "worktree-prune") beginWorktree(shell, { kind: "prune" });
+    if (id === "worktree-history" && detached) viewWorktreeHistory(shell, detached);
     return;
   }
   if (id === "blame") {
@@ -945,9 +951,8 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draftExtra = "vendor";
       break;
     case "worktree":
-      shell.draft = parent ? `${parent}/extra-wt` : "";
-      shell.draftExtra = "extra";
-      break;
+      beginWorktree(shell);
+      return;
     case "output":
       shell.commandOutput = lines(FILL, "实验室审查输出");
       break;

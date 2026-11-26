@@ -1,8 +1,7 @@
 //! A status fingerprint reads `HEAD`, the branch ref, the index trailer, and
-//! the checked-out state of submodules.
+//! the checked-out state of submodules and linked worktrees.
 //!
-//! It does not stat the work tree. A matching fingerprint means the branch and
-//! the index are unchanged. Work tree edits stay the file watcher's job.
+//! Work tree edits stay the file watcher's job.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -23,9 +22,11 @@ pub struct StatusFingerprint {
     pub index_sum: String,
     #[serde(default)]
     pub submodule_sum: String,
+    #[serde(default)]
+    pub worktree_sum: String,
 }
 
-/// Read the fingerprint. A few small files, never the work tree.
+/// Read the fingerprint from checkout and registry metadata.
 pub fn status_fingerprint(repo: &Path) -> Result<StatusFingerprint, Error> {
     let git = git_metadata(repo)?;
     let head = read_capped(&git.join("HEAD"), 512)?;
@@ -36,7 +37,9 @@ pub fn status_fingerprint(repo: &Path) -> Result<StatusFingerprint, Error> {
         head.clone()
     };
     let (index_len, index_sum) = index_tail(&git.join("index"));
-    Ok(StatusFingerprint { head, ref_id, index_len, index_sum, submodule_sum: submodule_sum(repo) })
+    let common = common_dir(&git);
+    let worktree_sum = crate::worktree::registry_stamp(&common).to_string();
+    Ok(StatusFingerprint { head, ref_id, index_len, index_sum, submodule_sum: submodule_sum(repo), worktree_sum })
 }
 
 /// A superproject's own `HEAD` and index stay unchanged while a submodule
@@ -144,6 +147,9 @@ fn git_metadata(repo: &Path) -> Result<PathBuf, Error> {
         return Ok(dot);
     }
     if !dot.is_file() {
+        if repo.join("HEAD").is_file() && repo.join("objects").is_dir() {
+            return Ok(repo.to_path_buf());
+        }
         return Err(Error::Missing { path: repo.display().to_string() });
     }
     let text = std::fs::read_to_string(&dot).map_err(|source| Error::Read { path: dot.display().to_string(), source })?;
@@ -174,7 +180,7 @@ fn common_dir(git: &Path) -> PathBuf {
 }
 
 /// The loose ref only. `packed-refs` can be large, so a missing loose ref records its size and mtime.
-fn loose_ref(git: &Path, name: &str) -> Option<String> {
+pub(crate) fn loose_ref(git: &Path, name: &str) -> Option<String> {
     if !safe_ref(name) {
         return Some(String::new());
     }
@@ -204,7 +210,7 @@ fn read_ref_file(path: &Path) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-fn packed_stat(git: &Path) -> String {
+pub(crate) fn packed_stat(git: &Path) -> String {
     let path = common_dir(git).join("packed-refs");
     match path.metadata() {
         Ok(meta) => {
@@ -217,7 +223,7 @@ fn packed_stat(git: &Path) -> String {
 }
 
 /// Last 32 bytes of the index. That covers the SHA-1 trailer and a SHA-256 trailer without reading the body.
-fn index_tail(path: &Path) -> (u64, String) {
+pub(crate) fn index_tail(path: &Path) -> (u64, String) {
     let Ok(mut file) = File::open(path) else {
         return (0, String::new());
     };
