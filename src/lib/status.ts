@@ -211,8 +211,13 @@ export type ToolRecord = {
   fallback: boolean;
 };
 
-export const terminalCliNames = ["codex", "grok", "cursor-agent", "claude"] as const;
-export type TerminalCli = (typeof terminalCliNames)[number];
+/** One configured terminal CLI: a label and the command or path to launch. */
+export type TerminalCli = {
+  id: string;
+  name: string;
+  /** A command on PATH or an absolute executable path. Empty launches `name`. */
+  path: string;
+};
 
 export type Settings = {
   theme: string;
@@ -328,7 +333,10 @@ export type Settings = {
   shellKind: string;
   shellPath: string;
   shellArgs: string;
-  terminalClis: TerminalCli[] | null;
+  /** Configured terminal CLIs, in launch-menu order. */
+  terminalClis: TerminalCli[];
+  /** CLI id to the executable found by the last scan. null means not scanned yet. */
+  terminalCliFound: Record<string, string> | null;
   diffToolName: string;
   diffToolPath: string;
   diffToolArgs: string;

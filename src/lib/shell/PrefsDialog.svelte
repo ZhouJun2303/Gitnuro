@@ -5,7 +5,6 @@
   import ShortcutPage from "./ShortcutPage.svelte";
   import RevisionPreviewFormats from "./RevisionPreviewFormats.svelte";
   import FontSettings from "./FontSettings.svelte";
-  import { terminalCliNames } from "../status";
   import type { MenuItem, PrefTab } from "./types";
 
   const shell = getShell();
@@ -694,19 +693,30 @@
         <section class="pref-card" aria-labelledby="terminal-clis-title">
           <h3 class="pref-card-title" id="terminal-clis-title">{shell.tr("dialog.terminalClis")}</h3>
           <div class="pref-card-body" aria-busy={shell.detectingTerminalClis}>
-            {#each terminalCliNames as cli (cli)}
-              <div class="pref-row" data-cli={cli}>
-                <span class="pref-label">{cli}</span>
-                <span class="pref-control">
-                  {shell.tr(shell.settings.terminalClis == null ? "dialog.terminalCliUnchecked" : shell.settings.terminalClis.includes(cli) ? "dialog.terminalCliFound" : "dialog.terminalCliMissing")}
-                </span>
-              </div>
-            {/each}
-            <div class="pref-row">
+            <div class="cli-list">
+              {#each shell.settings.terminalClis as cli (cli.id)}
+                {@const foundPath = shell.settings.terminalCliFound?.[cli.id]}
+                <div class="cli-row" data-cli={cli.id}>
+                  <input class="cli-name" value={cli.name} placeholder={shell.tr("dialog.terminalCliName")} aria-label={shell.tr("dialog.terminalCliName")} onchange={(event) => shell.setTerminalCliField(cli.id, "name", event.currentTarget.value)} />
+                  <input class="cli-command" value={cli.path} placeholder={shell.tr("dialog.terminalCliCommand")} title={foundPath ?? ""} aria-label={shell.tr("dialog.terminalCliCommand")} onchange={(event) => shell.setTerminalCliField(cli.id, "path", event.currentTarget.value)} />
+                  <span class="cli-status" class:found={!!foundPath} title={foundPath ?? ""}>
+                    {shell.tr(shell.settings.terminalCliFound == null ? "dialog.terminalCliUnchecked" : foundPath ? "dialog.terminalCliFound" : "dialog.terminalCliMissing")}
+                  </span>
+                  <button class="text-button cli-remove" type="button" title={shell.tr("dialog.toolRemove")} aria-label={shell.tr("dialog.toolRemove")} onclick={() => shell.removeTerminalCli(cli.id)}>×</button>
+                </div>
+              {:else}
+                <p class="empty">{shell.tr("dialog.terminalCliEmpty")}</p>
+              {/each}
+            </div>
+            <div class="pref-card-actions">
+              <button class="text-button" type="button" onclick={() => shell.addTerminalCli()}>{shell.tr("dialog.terminalCliAdd")}</button>
+              <button class="text-button" type="button" onclick={() => void shell.restoreTerminalCliPresets()}>{shell.tr("dialog.terminalCliPresets")}</button>
+              <span class="grow"></span>
               <button class="text-button" type="button" disabled={shell.detectingTerminalClis} onclick={() => void shell.detectTerminalClis()}>
                 {shell.tr(shell.detectingTerminalClis ? "dialog.detectingTerminalClis" : "dialog.detectTerminalClis")}
               </button>
             </div>
+            <p class="pref-setting-hint">{shell.tr("dialog.terminalCliHint")}</p>
           </div>
         </section>
         <section class="pref-card">

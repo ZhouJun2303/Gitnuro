@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getShell } from "./context";
-  import { fillWorkspaceTabs, workspaceTabFontDefault, workspaceTabFontMin, terminalCliNames, type TerminalCli } from "../status";
+  import { fillWorkspaceTabs, workspaceTabFontDefault, workspaceTabFontMin, type TerminalCli } from "../status";
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
@@ -31,8 +31,13 @@
     } catch (error) {
       const message = shell.message(error);
       if (cli && message === "terminal-cli-missing") {
-        shell.settings.terminalClis = shell.settings.terminalClis?.filter((name) => name !== cli) ?? [];
-        shell.actionError = shell.tr("dialog.terminalCliLaunchMissing", { cli });
+        const found = shell.settings.terminalCliFound;
+        if (found?.[cli.id]) {
+          const next = { ...found };
+          delete next[cli.id];
+          shell.settings.terminalCliFound = next;
+        }
+        shell.actionError = shell.tr("dialog.terminalCliLaunchMissing", { cli: cli.name.trim() || cli.path.trim() || cli.id });
         void shell.savePrefs(false);
       } else {
         shell.actionError = message;
@@ -43,13 +48,14 @@
   function terminalMenu(path: string): MenuItem {
     const plain = { label: shell.tr("chrome.terminal"), disabled: shell.mode !== "live", run: () => openTerminal(path) };
     if (plain.disabled) return plain;
-    const installed = terminalCliNames.filter((cli) => shell.settings.terminalClis?.includes(cli));
+    const found = shell.settings.terminalCliFound;
+    const installed = shell.settings.terminalClis.filter((cli) => found?.[cli.id]);
     if (installed.length === 0) return plain;
     return {
       label: plain.label,
       children: [
         { label: shell.tr("shortcuts.terminal"), run: plain.run },
-        ...installed.map((cli) => ({ label: cli, run: () => openTerminal(path, cli) })),
+        ...installed.map((cli) => ({ label: cli.name.trim() || cli.path.trim() || cli.id, run: () => openTerminal(path, cli) })),
       ],
     };
   }

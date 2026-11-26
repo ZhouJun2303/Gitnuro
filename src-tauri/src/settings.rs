@@ -259,8 +259,13 @@ pub struct Settings {
     pub shell_path: String,
     #[serde(default)]
     pub shell_args: String,
+    /// Configured terminal CLIs. Older files stored the bare names of detected
+    /// CLIs; `terminal_clis_from_value` turns those into the preset list.
+    #[serde(default = "crate::tools::default_terminal_clis", deserialize_with = "terminal_clis_from_value")]
+    pub terminal_clis: Vec<crate::tools::TerminalCli>,
+    /// CLI id to resolved executable path from the last scan. Missing means unchecked.
     #[serde(default)]
-    pub terminal_clis: Option<Vec<crate::tools::TerminalCli>>,
+    pub terminal_cli_found: Option<BTreeMap<String, String>>,
     #[serde(default)]
     pub diff_tool_name: String,
     #[serde(default)]
@@ -600,6 +605,14 @@ fn commit_type_default() -> String {
     "feat".into()
 }
 
+fn terminal_clis_from_value<'de, D>(deserializer: D) -> Result<Vec<crate::tools::TerminalCli>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(crate::tools::terminal_clis_from_json(value))
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -716,7 +729,8 @@ impl Default for Settings {
             shell_kind: shell_default(),
             shell_path: String::new(),
             shell_args: String::new(),
-            terminal_clis: None,
+            terminal_clis: crate::tools::default_terminal_clis(),
+            terminal_cli_found: None,
             diff_tool_name: String::new(),
             diff_tool_path: String::new(),
             diff_tool_args: String::new(),

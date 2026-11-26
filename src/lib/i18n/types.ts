@@ -835,6 +835,12 @@ export type Messages = {
     terminalCliFound: string;
     terminalCliMissing: string;
     terminalCliLaunchMissing: string;
+    terminalCliName: string;
+    terminalCliCommand: string;
+    terminalCliAdd: string;
+    terminalCliPresets: string;
+    terminalCliEmpty: string;
+    terminalCliHint: string;
     prefSecShell: string;
     prefSecProxy: string;
     prefSecCertificate: string;

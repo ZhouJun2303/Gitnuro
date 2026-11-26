@@ -3,6 +3,7 @@
 //! A built-in Fork type is kept only when the file on disk is that program.
 //! A path that is missing, or a Beyond Compare entry that points at another executable, is dropped.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -44,39 +45,106 @@ pub struct EditorTool {
     pub args: String,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum TerminalCli {
-    Codex,
-    Grok,
-    CursorAgent,
-    Claude,
+/// A terminal CLI entry. The label is shown in Preferences and the launch
+/// menu; `path` is a command on PATH or an absolute executable path, and an
+/// empty path launches the name itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalCli {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub path: String,
+}
+
+struct TerminalCliPreset {
+    id: &'static str,
+    name: &'static str,
+    command: &'static str,
+}
+
+/// Mainstream agent CLIs offered on a fresh install. The id stays stable
+/// across label and command edits, so detection results follow renames.
+const TERMINAL_CLI_PRESETS: &[TerminalCliPreset] = &[
+    TerminalCliPreset { id: "claude", name: "Claude Code", command: "claude" },
+    TerminalCliPreset { id: "codex", name: "OpenAI Codex", command: "codex" },
+    TerminalCliPreset { id: "gemini", name: "Gemini CLI", command: "gemini" },
+    TerminalCliPreset { id: "cursor-agent", name: "Cursor Agent", command: "cursor-agent" },
+    TerminalCliPreset { id: "copilot", name: "GitHub Copilot", command: "copilot" },
+    TerminalCliPreset { id: "qwen", name: "Qwen Code", command: "qwen" },
+    TerminalCliPreset { id: "kimi", name: "Kimi CLI", command: "kimi" },
+    TerminalCliPreset { id: "aider", name: "Aider", command: "aider" },
+    TerminalCliPreset { id: "opencode", name: "OpenCode", command: "opencode" },
+    TerminalCliPreset { id: "crush", name: "Crush", command: "crush" },
+    TerminalCliPreset { id: "goose", name: "Goose", command: "goose" },
+    TerminalCliPreset { id: "grok", name: "Grok CLI", command: "grok" },
+    TerminalCliPreset { id: "amp", name: "Amp", command: "amp" },
+    TerminalCliPreset { id: "droid", name: "Factory Droid", command: "droid" },
+    TerminalCliPreset { id: "auggie", name: "Auggie", command: "auggie" },
+    TerminalCliPreset { id: "codebuddy", name: "CodeBuddy", command: "codebuddy" },
+    TerminalCliPreset { id: "iflow", name: "iFlow CLI", command: "iflow" },
+];
+
+pub fn default_terminal_clis() -> Vec<TerminalCli> {
+    TERMINAL_CLI_PRESETS
+        .iter()
+        .map(|preset| TerminalCli { id: preset.id.into(), name: preset.name.into(), path: preset.command.into() })
+        .collect()
+}
+
+/// Settings used to store the bare names of detected CLIs. Those files migrate
+/// to the full preset list: the field now means "configured", so an old
+/// detection result cannot be carried over.
+pub fn terminal_clis_from_json(value: Value) -> Vec<TerminalCli> {
+    let Value::Array(items) = value else {
+        return default_terminal_clis();
+    };
+    let mut clis = Vec::new();
+    for item in items {
+        let Ok(cli) = serde_json::from_value::<TerminalCli>(item) else {
+            return default_terminal_clis();
+        };
+        if !cli.id.trim().is_empty() {
+            clis.push(cli);
+        }
+    }
+    clis
 }
 
 impl TerminalCli {
-    const ALL: [Self; 4] = [Self::Codex, Self::Grok, Self::CursorAgent, Self::Claude];
+    fn command(&self) -> &str {
+        let path = self.path.trim();
+        if path.is_empty() { self.name.trim() } else { path }
+    }
 
-    fn name(self) -> &'static str {
-        match self {
-            Self::Codex => "codex",
-            Self::Grok => "grok",
-            Self::CursorAgent => "cursor-agent",
-            Self::Claude => "claude",
+    fn resolve(&self, paths: &[PathBuf]) -> Option<PathBuf> {
+        let command = self.command();
+        if command.is_empty() {
+            return None;
+        }
+        let direct = Path::new(command);
+        if direct.is_absolute() || command.contains(['/', '\\']) {
+            return launcher_file(direct);
+        }
+        paths.iter().filter(|dir| dir.is_absolute()).find_map(|dir| launcher_file(&dir.join(command)))
+    }
+}
+
+/// A file that can be started from a terminal, trying the Windows launcher
+/// extensions when the command has none.
+fn launcher_file(path: &Path) -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        if path.extension().is_none() {
+            for extension in ["exe", "cmd", "bat"] {
+                let candidate = path.with_extension(extension);
+                if executable_file(&candidate) {
+                    return Some(candidate);
+                }
+            }
         }
     }
-
-    fn resolve(self, paths: &[PathBuf]) -> Option<PathBuf> {
-        #[cfg(windows)]
-        let extensions = ["exe", "cmd", "bat"];
-        #[cfg(not(windows))]
-        let extensions = [""];
-        paths.iter().filter(|dir| dir.is_absolute()).find_map(|dir| {
-            extensions.iter().find_map(|extension| {
-                let path = dir.join(self.name()).with_extension(extension);
-                executable_file(&path).then_some(path)
-            })
-        })
-    }
+    executable_file(path).then(|| path.to_path_buf())
 }
 
 fn executable_file(path: &Path) -> bool {
@@ -115,9 +183,12 @@ fn terminal_cli_paths() -> Vec<PathBuf> {
     paths
 }
 
-pub fn detected_terminal_clis() -> Vec<TerminalCli> {
+/// Resolved executable per CLI id. Empty when nothing was found.
+pub fn detected_terminal_clis(clis: &[TerminalCli]) -> BTreeMap<String, String> {
     let paths = terminal_cli_paths();
-    TerminalCli::ALL.into_iter().filter(|cli| cli.resolve(&paths).is_some()).collect()
+    clis.iter()
+        .filter_map(|cli| cli.resolve(&paths).map(|path| (cli.id.clone(), path.display().to_string())))
+        .collect()
 }
 
 #[cfg(windows)]
@@ -151,7 +222,7 @@ fn windows_terminal_cli(tool: &Path, repo: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn open_terminal_cli(cli: TerminalCli, repo: &Path) -> Result<(), String> {
+pub fn open_terminal_cli(cli: &TerminalCli, repo: &Path) -> Result<(), String> {
     let tool = cli.resolve(&terminal_cli_paths()).ok_or_else(|| "terminal-cli-missing".to_string())?;
     #[cfg(windows)]
     windows_terminal_cli(&tool, repo).map_err(|error| error.to_string())?;
@@ -879,31 +950,55 @@ mod tests {
     use super::{pick_tool, tools_from_fork_json};
 
     #[test]
-    fn terminal_cli_detection_accepts_launchers_and_skips_missing_or_removed_files() {
-        use super::TerminalCli;
+    fn terminal_cli_detection_accepts_commands_paths_and_skips_missing_files() {
+        use super::{detected_terminal_clis, TerminalCli};
         use std::fs;
 
         let directory = std::env::temp_dir().join(format!("awegit-cli detection-{}", std::process::id()));
         fs::create_dir_all(&directory).unwrap();
         #[cfg(windows)]
-        let launcher = directory.join("codex.cmd");
+        let launcher = directory.join("my-cli.cmd");
         #[cfg(not(windows))]
-        let launcher = directory.join("codex");
+        let launcher = directory.join("my-cli");
         fs::write(&launcher, "").unwrap();
-        let paths = std::slice::from_ref(&directory);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&launcher, fs::Permissions::from_mode(0o644)).unwrap();
-            assert_eq!(TerminalCli::Codex.resolve(paths), None);
+            assert_eq!(TerminalCli { id: "mine".into(), name: "Mine".into(), path: "my-cli".into() }.resolve(std::slice::from_ref(&directory)), None);
             fs::set_permissions(&launcher, fs::Permissions::from_mode(0o755)).unwrap();
         }
-        assert_eq!(TerminalCli::Codex.resolve(paths), Some(launcher.clone()));
-        assert_eq!(TerminalCli::Grok.resolve(paths), None);
-        assert_eq!(serde_json::to_string(&TerminalCli::CursorAgent).unwrap(), "\"cursor-agent\"");
-        fs::remove_file(launcher).unwrap();
-        assert_eq!(TerminalCli::Codex.resolve(paths), None);
+        let previous = std::env::var_os("PATH");
+        std::env::set_var("PATH", &directory);
+        let cli = |id: &str, path: &str| TerminalCli { id: id.into(), name: id.into(), path: path.into() };
+        let found = detected_terminal_clis(&[
+            cli("mine", "my-cli"),
+            cli("missing", "no-such-cli"),
+            cli("direct", &launcher.display().to_string()),
+            TerminalCli { id: "named".into(), name: "my-cli".into(), path: String::new() },
+        ]);
+        match previous {
+            Some(value) => std::env::set_var("PATH", value),
+            None => std::env::remove_var("PATH"),
+        }
+        assert_eq!(found.get("mine").map(|path| std::path::Path::new(path)), Some(launcher.as_path()));
+        assert_eq!(found.get("direct").map(|path| std::path::Path::new(path)), Some(launcher.as_path()));
+        assert_eq!(found.get("named").map(|path| std::path::Path::new(path)), Some(launcher.as_path()));
+        assert!(!found.contains_key("missing"));
+        fs::remove_file(&launcher).unwrap();
+        assert!(!detected_terminal_clis(&[cli("mine", "my-cli")]).contains_key("mine"));
         fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn old_detected_cli_names_upgrade_to_the_preset_list() {
+        use super::{default_terminal_clis, terminal_clis_from_json};
+        assert_eq!(terminal_clis_from_json(serde_json::json!(["codex", "claude"])), default_terminal_clis());
+        assert_eq!(terminal_clis_from_json(serde_json::json!(null)), default_terminal_clis());
+        let custom = terminal_clis_from_json(serde_json::json!([
+            { "id": "mine", "name": "Mine", "path": "C:/tools/mine.exe" },
+        ]));
+        assert_eq!(custom, vec![super::TerminalCli { id: "mine".into(), name: "Mine".into(), path: "C:/tools/mine.exe".into() }]);
     }
 
     #[cfg(windows)]

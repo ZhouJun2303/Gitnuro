@@ -40,6 +40,7 @@ import {
     type Suggestion,
     type GitRuntime,
     type RepoScan,
+    type TerminalCli,
     type ToolRecord,
     type UpdateNotice,
     type UpdateProgress,
@@ -68,6 +69,13 @@ import { mergeFields, mergeResponse } from "../reconcile";
 import { sceneById } from "../lab/scenes";
 
 const initialErrors = readErrorLog();
+
+function withoutTerminalCli(found: Record<string, string> | null, id: string) {
+  if (!found || !(id in found)) return found;
+  const next = { ...found };
+  delete next[id];
+  return next;
+}
 
 /** Ids below this belong only to error rows. Notices use small negatives (-101…-106). */
 const ERROR_ENTRY_ID = -1_000_000;
@@ -383,7 +391,8 @@ export class ShellState {
     shellKind: "default",
     shellPath: "",
     shellArgs: "",
-    terminalClis: null,
+    terminalClis: [],
+    terminalCliFound: null,
     diffToolName: "",
     diffToolPath: "",
     diffToolArgs: "",
@@ -6267,17 +6276,51 @@ export class ShellState {
 
   detectingTerminalClis = $state(false);
 
-  async detectTerminalClis() {
+  async detectTerminalClis(silent = false) {
     if (this.detectingTerminalClis) return;
     this.detectingTerminalClis = true;
-    this.actionError = null;
+    if (!silent) this.actionError = null;
     try {
-      this.settings.terminalClis = await invoke<NonNullable<Settings["terminalClis"]>>("detect_terminal_clis");
+      this.settings.terminalCliFound = await invoke<Record<string, string>>("detect_terminal_clis", { clis: this.settings.terminalClis });
       await this.savePrefs(false);
     } catch (error) {
-      this.actionError = this.message(error);
+      if (!silent) this.actionError = this.message(error);
     } finally {
       this.detectingTerminalClis = false;
+    }
+  }
+
+  addTerminalCli() {
+    const cli: TerminalCli = { id: `cli-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name: "", path: "" };
+    this.settings.terminalClis = [...this.settings.terminalClis, cli];
+    void this.savePrefs(false);
+  }
+
+  removeTerminalCli(id: string) {
+    this.settings.terminalClis = this.settings.terminalClis.filter((cli) => cli.id !== id);
+    this.settings.terminalCliFound = withoutTerminalCli(this.settings.terminalCliFound, id);
+    void this.savePrefs(false);
+  }
+
+  setTerminalCliField(id: string, field: "name" | "path", value: string) {
+    const cli = this.settings.terminalClis.find((item) => item.id === id);
+    if (!cli || cli[field] === value) return;
+    this.settings.terminalClis = this.settings.terminalClis.map((item) => (item.id === id ? { ...item, [field]: value } : item));
+    this.settings.terminalCliFound = withoutTerminalCli(this.settings.terminalCliFound, id);
+    void this.savePrefs(false);
+  }
+
+  /** Adds the preset CLIs that are missing, keeping custom entries and their order. */
+  async restoreTerminalCliPresets() {
+    try {
+      const presets = await invoke<TerminalCli[]>("terminal_cli_presets");
+      const existing = new Set(this.settings.terminalClis.map((cli) => cli.id));
+      const missing = presets.filter((cli) => !existing.has(cli.id));
+      if (missing.length === 0) return;
+      this.settings.terminalClis = [...this.settings.terminalClis, ...missing];
+      void this.savePrefs(false);
+    } catch (error) {
+      this.actionError = this.message(error);
     }
   }
 
@@ -8468,6 +8511,7 @@ export class ShellState {
     if (introduce || onboard) void this.savePrefs(false);
     void invoke<string>("settings_path").then((path) => (this.settingsPath = path)).catch(() => {});
     await this.loadExternalTools();
+    if (this.settings.terminalCliFound == null && this.settings.terminalClis.length > 0) void this.detectTerminalClis(true);
     if (value.windowWidth > 200 && value.windowHeight > 200 && !this.standalone) {
     try {
     const win = getCurrentWindow();

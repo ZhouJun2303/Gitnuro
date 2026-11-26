@@ -92,6 +92,7 @@ fn main() {
             "external_tools",
             "common_tools",
             "detect_terminal_clis",
+            "terminal_cli_presets",
             "editor_tools",
             "program_exists",
             "watch_repository",

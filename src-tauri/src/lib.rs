@@ -1187,8 +1187,13 @@ async fn common_tools() -> Result<Vec<tools::CommonTool>, String> {
 }
 
 #[tauri::command]
-async fn detect_terminal_clis() -> Result<Vec<tools::TerminalCli>, String> {
-    tauri::async_runtime::spawn_blocking(tools::detected_terminal_clis).await.map_err(|error| error.to_string())
+async fn detect_terminal_clis(clis: Vec<tools::TerminalCli>) -> Result<std::collections::BTreeMap<String, String>, String> {
+    tauri::async_runtime::spawn_blocking(move || tools::detected_terminal_clis(&clis)).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn terminal_cli_presets() -> Vec<tools::TerminalCli> {
+    tools::default_terminal_clis()
 }
 
 #[tauri::command]
@@ -1779,7 +1784,7 @@ fn is_submodule_worktree_path(repo: &Path, path: &Path) -> bool {
 #[tauri::command]
 async fn open_terminal(path: Option<String>, cli: Option<tools::TerminalCli>) -> Result<(), String> {
     if let Some(cli) = cli {
-        return tauri::async_runtime::spawn_blocking(move || tools::open_terminal_cli(cli, &repo_from(path)?))
+        return tauri::async_runtime::spawn_blocking(move || tools::open_terminal_cli(&cli, &repo_from(path)?))
             .await.map_err(|error| error.to_string())?;
     }
     let repo = repo_from(path)?;
@@ -3223,6 +3228,7 @@ pub fn run() {
             external_tools,
             common_tools,
             detect_terminal_clis,
+            terminal_cli_presets,
             editor_tools,
             program_exists,
             watch_repository,
