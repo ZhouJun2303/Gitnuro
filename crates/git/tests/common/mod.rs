@@ -10,13 +10,18 @@ pub struct TempRepo {
 }
 
 impl TempRepo {
+    #[allow(dead_code)]
     pub fn new() -> Self {
+        Self::new_in(&std::env::temp_dir())
+    }
+
+    pub fn new_in(root: &std::path::Path) -> Self {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("awegit-git-{nanos}"));
-        let gitconfig = std::env::temp_dir().join(format!("awegit-git-{nanos}.gitconfig"));
+        let path = root.join(format!("awegit-git-{nanos}"));
+        let gitconfig = root.join(format!("awegit-git-{nanos}.gitconfig"));
         fs::create_dir_all(&path).unwrap();
         fs::write(&gitconfig, "").unwrap();
         Self { path, gitconfig }

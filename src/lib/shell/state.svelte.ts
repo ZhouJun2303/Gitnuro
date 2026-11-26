@@ -37,6 +37,7 @@ import {
     type Settings,
     type StatusFile,
     type StatusSnapshot,
+    type SubmoduleRemoteRow,
     type Suggestion,
     type GitRuntime,
     type RepoScan,
@@ -153,7 +154,7 @@ function sameCommitRows(left: readonly CommitRow[], right: readonly CommitRow[])
 }
 
 function sameStatusFile(left: StatusFile, right: StatusFile): boolean {
-  return left.path === right.path && left.kind === right.kind && left.previousPath === right.previousPath;
+  return left.path === right.path && left.kind === right.kind && left.previousPath === right.previousPath && left.submoduleDirty === right.submoduleDirty;
 }
 
 function sameStatusFiles(left: readonly StatusFile[], right: readonly StatusFile[]): boolean {
@@ -580,6 +581,10 @@ export class ShellState {
 
   refs = $state<RefSnapshot | null>(null);
 
+  submoduleRemote = $state.raw<{ repo: string; rows: SubmoduleRemoteRow[]; pending: boolean; error: string }>({
+    repo: "", rows: [], pending: false, error: "",
+  });
+  submoduleRemoteRequest = 0;
 
   commitsLive = $state.raw<CommitRow[]>([]);
 
@@ -3736,6 +3741,9 @@ export class ShellState {
       if (described) this.recordCommand("stagePaths", described, value.log ?? "", true, "user");
       if (openGen === this.openGen && this.viewing(path)) {
         this.applySnapshot(value);
+        if (this.refs?.submodules.length && ["stage_path", "unstage_path", "stage_all", "unstage_all"].includes(command)) {
+          this.scheduleAuxiliary(["refs"]);
+        }
         if (allowReads) refreshDiff = true;
         else refreshDiff = true;
       }
@@ -4215,6 +4223,11 @@ export class ShellState {
         }
         // Only a Git error from this action fails it.
         if (value.outcome === "failed" || (value.outcome === "conflict" && value.error)) throw new Error(value.error || value.log || "Git conflict");
+        if (current() && ["fetch", "pull", "pullRef"].includes(action)) void this.checkSubmoduleRemote();
+        if (current() && ["addRemote", "removeRemote", "setRemoteUrl", "setUpstream"].includes(action)) {
+          ++this.submoduleRemoteRequest;
+          this.submoduleRemote = { repo: "", rows: [], pending: false, error: "" };
+        }
         if (followSubmodules) {
           const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } }, undefined, operation);
           if (follow.outcome === "failed") {
@@ -4475,6 +4488,32 @@ export class ShellState {
         this.requestAutomaticFetch("idle");
       }
     });
+  }
+
+  async checkSubmoduleRemote(submodule?: string) {
+    const path = this.repoPath();
+    if (!path || !this.backend() || this.refs?.submodules.length === 0) return;
+    const repo = this.jobKey(path);
+    const openGen = this.openGen;
+    const previous = this.submoduleRemote.repo === repo ? this.submoduleRemote.rows : [];
+    const request = ++this.submoduleRemoteRequest;
+    const current = () => request === this.submoduleRemoteRequest && openGen === this.openGen && this.viewing(path);
+    this.submoduleRemote = { repo, rows: previous, pending: true, error: "" };
+    try {
+      const rows = await invoke<SubmoduleRemoteRow[]>("submodule_remote_status", { path, submodule });
+      if (!current()) return;
+      this.submoduleRemote = {
+        repo, rows: submodule ? [...previous.filter((row) => row.path !== submodule), ...rows] : rows, pending: false, error: "",
+      };
+    } catch (error) {
+      if (current()) {
+        this.submoduleRemote = { repo, rows: submodule ? previous.filter((row) => row.path !== submodule) : [], pending: false, error: this.message(error) };
+      }
+    } finally {
+      if (request === this.submoduleRemoteRequest && this.submoduleRemote.pending) {
+        this.submoduleRemote = { ...this.submoduleRemote, pending: false };
+      }
+    }
   }
 
   cancelAutomaticFetch() {

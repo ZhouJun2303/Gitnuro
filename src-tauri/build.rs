@@ -61,6 +61,7 @@ fn main() {
             "commit_detail",
             "locate_ref",
             "repository_refs",
+            "submodule_remote_status",
             "linked_worktree_paths",
             "worktree_details",
             "worktree_compare",

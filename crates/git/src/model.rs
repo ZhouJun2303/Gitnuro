@@ -128,18 +128,26 @@ pub struct StashRow {
 #[serde(rename_all = "camelCase")]
 pub struct SubmoduleRow {
     pub path: String,
-    /// Checked-out commit, or the index gitlink while the checkout is missing.
+    /// Checked-out commit. Empty if HEAD is unavailable.
     pub id: String,
     /// Gitlink commit recorded in the superproject index.
     #[serde(default)]
     pub recorded: String,
+    /// The competing gitlinks in an unmerged index (base, ours, theirs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conflict: Option<[Option<String>; 3]>,
     /// Checked-out branch. Empty for a detached HEAD or a missing checkout.
     #[serde(default)]
     pub branch: String,
-    /// Branch named in `.gitmodules`. Empty when the entry sets none.
+    /// Target branch named in `.gitmodules`, with "." resolved against the superproject.
     #[serde(default)]
     pub configured_branch: String,
+    pub inherits_branch: bool,
     pub ready: bool,
+    pub broken_checkout: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_error: Option<String>,
+    pub config_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1583,6 +1591,7 @@ fn parse_name_status(bytes: &[u8]) -> Vec<FileChange> {
             path: String::from_utf8_lossy(path).into_owned(),
             kind,
             previous_path: previous,
+            submodule_dirty: None,
         });
     }
     files
@@ -2258,101 +2267,78 @@ fn ignored_paths_native(path: &Path, paths: &[String]) -> Option<Vec<String>> {
 /// Gitlinks named in `.gitmodules`. `git submodule status` also describes each commit, which costs
 /// about half a second on Windows, so the index and each checkout are read directly instead.
 fn submodules(repo: &Path) -> Result<Vec<SubmoduleRow>, Error> {
-    if !repo.join(".gitmodules").is_file() {
-        return Ok(Vec::new());
-    }
-    let config = run_output(
-        repo,
-        &[
-            "config",
-            "-z",
-            "--file",
-            ".gitmodules",
-            "--get-regexp",
-            r"^submodule\..*\.(path|branch)$",
-        ],
-    )?;
-    // Section names may contain dots, so split the key from the fixed suffix instead of
-    // treating dots as separators. `branch = .` means the remote's HEAD and is not a ref.
-    let mut modules: Vec<(String, String)> = Vec::new();
-    let mut positions: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    for record in config.stdout.split(|byte| *byte == 0) {
-        let record = String::from_utf8_lossy(record);
-        let Some((key, value)) = record.split_once('\n') else {
-            continue;
-        };
-        let Some(rest) = key.strip_prefix("submodule.") else {
-            continue;
-        };
-        let (name, is_branch) = if let Some(name) = rest.strip_suffix(".path") {
-            (name, false)
-        } else if let Some(name) = rest.strip_suffix(".branch") {
-            (name, true)
-        } else {
-            continue;
-        };
-        let index = *positions.entry(name.to_string()).or_insert_with(|| {
-            modules.push((String::new(), String::new()));
-            modules.len() - 1
-        });
-        let value = value.trim();
-        if is_branch {
-            modules[index].1 = if value == "." { String::new() } else { value.to_string() };
-        } else {
-            modules[index].0 = value.to_string();
+    submodules_with_config(repo).map(|(rows, _)| rows)
+}
+
+pub(crate) fn submodules_with_config(
+    repo: &Path,
+) -> Result<(Vec<SubmoduleRow>, BTreeMap<String, crate::submodule::ModuleConfig>), Error> {
+    use crate::submodule::{config_key, module_config, ModuleConfig};
+
+    let opened = crate::open_repo(repo)?;
+    let index = opened.index_or_empty().map_err(|error| Error::Git(error.to_string()))?;
+    let mut links = BTreeMap::<String, [Option<String>; 4]>::new();
+    for entry in index.entries() {
+        if entry.mode == gix::index::entry::Mode::COMMIT {
+            let path = entry.path(&index).to_string();
+            links.entry(path).or_default()[entry.stage_raw() as usize] = Some(entry.id.to_string());
         }
     }
-    let paths: Vec<(String, String)> = modules
-        .into_iter()
-        .filter(|(path, _)| !path.is_empty())
-        .collect();
-    if paths.is_empty() {
-        return Ok(Vec::new());
+    if links.is_empty() {
+        return Ok((Vec::new(), BTreeMap::new()));
     }
-    let mut args = vec!["--literal-pathspecs", "ls-files", "--stage", "-z", "--"];
-    args.extend(paths.iter().map(|(path, _)| path.as_str()));
-    let output = run(repo, &args)?;
-    let mut rows: Vec<SubmoduleRow> = Vec::new();
-    for record in output.stdout.split(|byte| *byte == 0) {
-        let record = String::from_utf8_lossy(record);
-        let Some((meta, path)) = record.split_once('\t') else {
-            continue;
-        };
-        let mut fields = meta.split_whitespace();
-        if fields.next() != Some("160000") || rows.iter().any(|row| row.path == path) {
-            continue;
+    let (config, parse_error) = if repo.join(".gitmodules").is_file() {
+        match module_config(repo, &["--file", ".gitmodules"]) {
+            Ok(config) => (config, None),
+            Err(error) => (BTreeMap::new(), Some(error.to_string())),
         }
-        let staged = fields.next().unwrap_or("").to_string();
-        let configured = paths
-            .iter()
-            .find(|(item, _)| item == path)
-            .map(|(_, branch)| branch.clone())
-            .unwrap_or_default();
-        let checkout = repo.join(path);
-        let ready = checkout.join(".git").exists();
-        let (branch, head) = if ready {
-            checked_out(&checkout).unwrap_or_default()
+    } else {
+        (BTreeMap::new(), None)
+    };
+    let parent_branch = crate::current_branch(repo)?.unwrap_or_default();
+    let mut rows = Vec::with_capacity(links.len());
+    for (path, [staged, base, ours, theirs]) in links {
+        let conflict = [base, ours, theirs];
+        let conflict = conflict.iter().any(Option::is_some).then_some(conflict);
+        let recorded = staged.unwrap_or_default();
+        let checkout = crate::cli::check_path(&path).ok().map(|path| repo.join(path));
+        let present = checkout.as_ref().is_some_and(|path| path.join(".git").symlink_metadata().is_ok());
+        let head = checkout.filter(|_| present).and_then(|checkout| checked_out(&checkout));
+        let ready = head.is_some();
+        let (branch, id) = head.unwrap_or_default();
+        let module = config.get(&path);
+        let configured = module.map_or("", |module: &ModuleConfig| module.branch.as_str());
+        let inherits_branch = configured == ".";
+        let configured_branch = if inherits_branch { parent_branch.clone() } else { configured.into() };
+        let config_error = if parse_error.is_some() {
+            parse_error.clone()
+        } else if module.is_none_or(|module| module.url.is_empty()) {
+            Some("Missing path or URL in .gitmodules / .gitmodules 缺少对应路径或 URL".into())
         } else {
-            (String::new(), String::new())
+            None
         };
-        let id = if head.is_empty() { staged.clone() } else { head };
         rows.push(SubmoduleRow {
-            path: path.to_string(),
+            config_key: config_key(module, &parent_branch),
+            path,
             id,
-            recorded: staged,
+            recorded,
+            conflict,
             branch,
-            configured_branch: configured,
+            configured_branch,
+            inherits_branch,
             ready,
+            broken_checkout: present && !ready,
+            config_error,
         });
     }
-    rows.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(rows)
+    Ok((rows, config))
 }
 
 fn checked_out(dir: &Path) -> Option<(String, String)> {
     if let Some(head) = head_from_files(dir) {
         return Some(head);
     }
+    git_dir_of(dir)?.is_dir().then_some(())?;
     let repo = gix::open(dir).ok()?;
     let branch = repo
         .head()
@@ -2381,8 +2367,7 @@ fn head_from_files(dir: &Path) -> Option<(String, String)> {
         None => (String::new(), head.to_string()),
     };
     let id = candidate.split_whitespace().next().unwrap_or("");
-    (id.len() >= 7 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .then(|| (branch, id.to_string()))
+    crate::submodule::valid_oid(id).then(|| (branch, id.to_string()))
 }
 
 fn git_dir_of(dir: &Path) -> Option<PathBuf> {

@@ -673,6 +673,31 @@ function seedSubmoduleDiffRepo() {
   if (latest !== initial) git(join(path, "vendor"), ["checkout", "--detach", latest]);
 }
 
+function seedSubmoduleRemoteRepo() {
+  const path = join(repos, "submodule-remote");
+  const source = join(repos, "submodule-remote-author");
+  const parentRemote = join(lab, "submodule-remote-parent.git");
+  const childRemote = join(lab, "submodule-remote-child.git");
+  for (const repo of [path, source, parentRemote, childRemote]) wipe(repo);
+  initBare(parentRemote);
+  initBare(childRemote);
+  initWork(source);
+  commit(source, "lib.txt", "base\n", "child base");
+  git(source, ["remote", "add", "origin", fileUrl(childRemote)]);
+  git(source, ["push", "-u", "origin", "main"]);
+  initWork(path);
+  git(path, ["remote", "add", "origin", fileUrl(parentRemote)]);
+  git(path, ["-c", "protocol.file.allow=always", "submodule", "add", "-b", "main", "../submodule-remote-child.git", "vendor"]);
+  git(path, ["commit", "-m", "add submodule"]);
+  git(path, ["push", "-u", "origin", "main"]);
+  const vendor = join(path, "vendor");
+  git(vendor, ["checkout", "-b", "topic"]);
+  commit(vendor, "lib.txt", "feature\n", "child feature");
+  git(vendor, ["push", "-u", "origin", "topic"]);
+  git(path, ["add", "vendor"]);
+  git(path, ["commit", "-m", "pin the feature commit"]);
+}
+
 function seedSubmoduleForeignPathRepo() {
   const path = join(repos, "submodule-foreign-path");
   wipe(path);
@@ -702,6 +727,8 @@ function seedSubmoduleHealthRepo() {
   commit(path, "README.md", "submodule health\n", "base");
 
   const src = join(repos, "health-src");
+  wipe(healthBare);
+  initBare(healthBare);
   wipe(src);
   initWork(src);
   commit(src, "health.txt", "shared\n", "health base");
@@ -744,6 +771,7 @@ const restore = {
   worktree: seedWorktreeRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
   "submodule-diff": seedSubmoduleDiffRepo,
+  "submodule-remote": seedSubmoduleRemoteRepo,
   "submodule-foreign-path": seedSubmoduleForeignPathRepo,
   "submodule-health": seedSubmoduleHealthRepo,
   "gone-upstream": seedGoneUpstreamRepo,
@@ -784,7 +812,6 @@ writeFileSync(join(lab, "gitconfig"), "");
 initBare(remote);
 initBare(remotePush);
 initBare(subBare);
-initBare(healthBare);
 const subSrc = join(repos, "sub-src");
 initWork(subSrc);
 commit(subSrc, "lib.txt", "library\n", "lib");
@@ -796,6 +823,7 @@ git(subSrc, ["push", "origin", "HEAD:main"]);
 seedSubmoduleDiffRepo();
 seedSubmoduleForeignPathRepo();
 seedSubmoduleHealthRepo();
+seedSubmoduleRemoteRepo();
 
 const writer = join(repos, "writer");
 initWork(writer);

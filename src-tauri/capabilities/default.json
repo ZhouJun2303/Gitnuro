@@ -32,6 +32,7 @@
     "allow-commit-detail",
     "allow-locate-ref",
     "allow-repository-refs",
+    "allow-submodule-remote-status",
     "allow-linked-worktree-paths",
     "allow-worktree-details",
     "allow-worktree-compare",

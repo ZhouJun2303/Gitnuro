@@ -139,7 +139,10 @@ export function projectRefs(snapshot: RefSnapshot | null, tasks: readonly Operat
     if (task.action === "renameBranch" && preview.to) branches = branches.map((branch) => branch.name === name ? { ...branch, name: preview.to } : branch);
     if (task.action === "tag" && name && !tags.some((tag) => tag.name === name)) tags = [{ name, id: "" }, ...tags];
     if (task.action === "addRemote" && name && !remotes.some((remote) => remote.name === name)) remotes = [...remotes, { name, url: null, head: null, branches: [] }];
-    if (task.action === "submoduleAdd" && preview.path && !submodules.some((row) => row.path === preview.path)) submodules = [...submodules, { path: preview.path, id: "", recorded: "", branch: "", configuredBranch: "", ready: false }];
+    if (task.action === "submoduleAdd" && preview.path && !submodules.some((row) => row.path === preview.path)) submodules = [...submodules, {
+      path: preview.path, id: "", recorded: "", branch: "", configuredBranch: "", ready: false,
+      inheritsBranch: false, brokenCheckout: false, configKey: "",
+    }];
     if (task.action === "stashRename" && preview.message) stashes = stashes.map((stash) => stash.name === name || stash.id === name ? { ...stash, summary: preview.message } : stash);
   }
   return branches === snapshot.branches && tags === snapshot.tags && remotes === snapshot.remotes && stashes === snapshot.stashes && submodules === snapshot.submodules ? snapshot : { ...snapshot, branches, tags, remotes, stashes, submodules };

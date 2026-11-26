@@ -385,6 +385,8 @@
           <div class="side nested" class:selected={shell.sideSelected === `submodule:${row.path}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.initialize"), disabled: shell.mode !== "live" || row.ready, run: () => shell.mutate({ action: "submoduleInit", path: row.path }) },
             { label: shell.tr("menu.openFile"), disabled: !row.ready, run: () => shell.openRepo(shell.fullPath(row.path)) },
+            { label: shell.tr("chrome.submoduleCheckRemote"), disabled: shell.mode !== "live", run: () => void shell.checkSubmoduleRemote(row.path) },
+            { label: shell.tr("chrome.submoduleDiagnostics"), run: () => { shell.commandOutput = row.title; shell.dialog = "output"; } },
             { label: shell.tr("menu.sync"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "submoduleSync", path: row.path }) },
             { label: shell.tr("menu.update"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "submoduleUpdatePath", path: row.path }) },
             { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), shell.tr("dialog.removeSubmoduleBody"), shell.bindMutation({ action: "submoduleRemove", path: row.path }), [], { subject: row.path, danger: true }) },

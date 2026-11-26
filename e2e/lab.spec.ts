@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { scenes } from "../src/lib/lab/scenes";
@@ -806,9 +806,9 @@ for (const theme of ["apple", "light", "dark"]) {
     await pinLabSettings(page, { theme });
     await openLabScene(page, "submodule-health", ".sidebar .submodule-note", { locale: "en" });
     await expect(page.locator(".sidebar .submodule-note.ok")).toHaveCount(2);
-    await expect(page.locator(".sidebar .submodule-note.bad")).toContainText("Branch mismatch");
-    await expect(page.locator(".sidebar .submodule-note.bad")).toContainText("uncommitted changes");
-    await expect(page.locator(".sidebar .submodule-note.warn")).toContainText("Commit mismatch");
+    const wrong = page.locator(".sidebar .submodule-note.warn").filter({ hasText: "Branch mismatch" });
+    await expect(wrong).toContainText("uncommitted changes");
+    await expect(page.locator(".sidebar .submodule-note.warn").filter({ hasText: "Commit mismatch" })).toHaveCount(1);
     await expect(page.locator(".sidebar .submodule-note.muted")).toContainText("Not initialized");
   });
 
@@ -819,6 +819,9 @@ for (const theme of ["apple", "light", "dark"]) {
     await page.locator('.sidebar .side.nested:has(button[title="vendor"])').last().click({ button: "right" });
     await expect(menu.getByRole("menuitem", { name: "Update", exact: true })).toBeEnabled();
     await expect(menu.getByRole("menuitem", { name: "Initialize", exact: true })).toBeDisabled();
+    await expect(menu.getByRole("menuitem", { name: "Check submodule remote", exact: true })).toBeEnabled();
+    await menu.getByRole("menuitem", { name: "View submodule diagnostics", exact: true }).click();
+    await expect(page.locator('[data-dialog="output"] pre')).toContainText(/Superproject index commit [a-f0-9]{40}/);
     await page.keyboard.press("Escape");
     await page.locator(".sidebar .side-filter input").first().fill("libs/lib-01");
     await page.locator('.sidebar .side.nested:has(button[title="libs/lib-01"])').last().click({ button: "right" });
@@ -834,13 +837,69 @@ for (const theme of ["apple", "light", "dark"]) {
     await expect(page.locator("[data-submodule-commit]").first()).toBeVisible();
     await expect(page.locator("[data-submodule-commit]").first()).toContainText("AweGit Lab");
     await expect(page.locator("[data-submodule-commit-detail]")).toBeVisible();
-    await expect(page.locator("[data-submodule-uncommitted]")).toHaveText("1 uncommitted file");
+    await expect(page.locator("[data-submodule-uncommitted]")).toHaveCount(0);
     await expect(page.locator("[data-submodule-old] code")).toHaveText(/^[0-9a-f]{40}$/);
     await expect(page.locator("[data-submodule-new] code")).toHaveText(/^[0-9a-f]{40}$/);
     await expect(page.locator("[data-submodule-open]")).toBeEnabled();
+    const diag = page.locator(".submodule-diff-diagnostic");
+    const oldId = await page.locator("[data-submodule-old] code").innerText();
+    const newId = await page.locator("[data-submodule-new] code").innerText();
+    await diag.locator("summary").click();
+    await expect(diag.locator("p")).toContainText(`Superproject index commit ${oldId}`);
     await page.locator("[data-submodule-stage]").click();
     await expect(page.locator('.staged-pane .file-select[title="vendor"]')).toHaveCount(1);
     await expect(page.locator('.unstaged-pane .file-select[title="vendor"]')).toHaveCount(0);
+    await expect(diag.locator("p")).toContainText(`Superproject index commit ${newId}`);
+    await page.locator("[data-submodule-stage]").click();
+    await expect(diag.locator("p")).toContainText(`Superproject index commit ${oldId}`);
+  });
+
+  test(`submodule diff counts child files and loads dirty history (${theme})`, async ({ page }) => {
+    await lab("lab_restore", { name: "submodule-diff" });
+    const child = resolve(".lab/repos/submodule-diff/vendor");
+    appendFileSync(resolve(child, "lib.txt"), "local edit\n");
+    writeFileSync(resolve(child, "new.txt"), "untracked\n");
+    await pinLabSettings(page, { theme });
+    await openLabScene(page, "submodule-diff", ".submodule-diff", { locale: "en" });
+    await expect(page.locator("[data-submodule-uncommitted]")).toHaveText("2 uncommitted files");
+    await expect(page.locator("[data-submodule-commit-detail]")).toBeVisible();
+    await expect(page.locator("[data-submodule-new] code")).toHaveText(/^[0-9a-f]{40}$/);
+  });
+
+  test(`submodule Fetch updates availability after a server-side merge (${theme})`, async ({ page }) => {
+    await lab("lab_restore", { name: "submodule-remote" });
+    await pinLabSettings(page, { theme });
+    await openLabScene(page, "submodule-remote", ".sidebar .submodule-note", { locale: "en" });
+    const note = page.locator(".sidebar .submodule-note");
+    await page.clock.install();
+    await page.keyboard.press("Control+,");
+    const prefs = page.locator('[data-dialog="prefs"]');
+    await prefs.getByRole("button", { name: "Git", exact: true }).click();
+    await prefs.getByRole("checkbox", { name: "Fetch remotes automatically" }).check();
+    const saved = page.waitForResponse((response) => response.url().endsWith("/__lab/invoke") && response.request().postDataJSON()?.cmd === "save_settings");
+    await prefs.getByRole("button", { name: "Done", exact: true }).click();
+    expect((await (await saved).json()).value.fetchAutomatically).toBe(true);
+    await expect(prefs).toBeHidden();
+    await page.clock.runFor(200);
+    await page.clock.fastForward(10 * 60 * 1000 + 1000);
+    await page.clock.runFor(1100);
+    await page.clock.resume();
+    await expect(note).toContainText("Index commit available, outside main", { timeout: 20_000 });
+    const child = resolve(".lab/repos/submodule-remote/vendor");
+    const parent = resolve(".lab/repos/submodule-remote");
+    const pinned = execFileSync("git", ["-C", child, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const parentHead = execFileSync("git", ["-C", parent, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    const upstream = resolve(".lab/repos/submodule-remote-author");
+    const git = (...args: string[]) => execFileSync("git", ["-C", upstream, ...args], { stdio: "pipe" });
+    git("fetch", "origin");
+    git("merge", "--no-ff", "origin/topic", "-m", "test: merge submodule PR");
+    git("push", "origin", "main", ":topic");
+    await page.locator(".chrome-left").getByTitle("Fetch", { exact: true }).click();
+    await page.locator('[data-dialog="fetch"]').getByRole("button", { name: "Fetch", exact: true }).click();
+    await expect(note).toContainText("Index commit included in main", { timeout: 20_000 });
+    await expect(note).toHaveAttribute("title", new RegExp(`Superproject index commit ${pinned}`));
+    expect(execFileSync("git", ["-C", child, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()).toBe(pinned);
+    expect(execFileSync("git", ["-C", parent, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()).toBe(parentHead);
   });
 
   test(`submodule diff opens the checked out repository (${theme})`, async ({ page }) => {

@@ -556,6 +556,22 @@ section.diff > .diff-viewport {
   text-align: center;
 }
 
+.submodule-diff-diagnostic {
+  max-width: min(100%, 560px);
+  margin: 12px auto 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.submodule-diff-diagnostic summary {
+  cursor: pointer;
+}
+
+.submodule-diff-diagnostic p {
+  white-space: pre-wrap;
+}
+
 .submodule-range {
   display: flex;
   align-items: center;

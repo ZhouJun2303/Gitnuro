@@ -98,6 +98,7 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
   const file = typeof extra.file === "string" ? extra.file : "";
   const files = [...new Set(selected ?? (command.endsWith("_all") ? rows.map((row) => row.path) : rows.filter((row) => row.path === file || row.path.startsWith(`${file}/`)).map((row) => row.path)))];
   if (files.length === 0) return undefined;
+  const updateSubmodules = files.some((path) => path === ".gitmodules" || shell.refs?.submodules.some((row) => row.path === path || row.path.startsWith(`${path}/`)));
   const operation = traceOperation();
   // Only stages chosen from the same speculative list require a previous write to succeed.
   const pending = shell.pendingStages ?? [];
@@ -130,10 +131,10 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
   const remove = () => {
     if (shell.pendingStages.some((item) => item.id === change.id)) shell.pendingStages = shell.pendingStages.filter((item) => item.id !== change.id);
   };
+  let report: StageReport | null = null;
   try {
     const startedAt = performance.now();
     let backendFinished = 0;
-    let report: StageReport | null = null;
     const executionLog = (output: string) => {
       const now = performance.now();
       return `${output.trim()}\n\n[AweGit] backend=${Math.round((backendFinished || now) - startedAt)} ms; refresh=${backendFinished ? Math.round(now - backendFinished) : 0} ms; wait=${Math.round(startedAt - queuedAt)} ms; total=${Math.round(now - queuedAt)} ms`.trim();
@@ -174,6 +175,7 @@ export async function enqueueStage(shell: ShellState, command: string, extra: Re
     remove();
     shell.stopWork(path);
     if (current()) {
+      if (updateSubmodules && report) shell.scheduleAuxiliary(["refs"]);
       if (!shell.pendingStages.some((item) => item.repo === repo)) void shell.loadDiff();
       shell.replayWatch();
     }

@@ -561,6 +561,14 @@ fn repository_refs(path: Option<String>) -> Result<awegit_git::RefSnapshot, Stri
 }
 
 #[tauri::command]
+fn submodule_remote_status(path: Option<String>, submodule: Option<String>) -> Result<Vec<awegit_git::SubmoduleRemoteRow>, String> {
+    let repo = repo_from(path)?;
+    apply_session();
+    let _https = accounts::install_submodule_https(&repo);
+    awegit_git::submodule_remote_status(&repo, submodule.as_deref()).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn linked_worktree_paths(paths: Vec<String>) -> Vec<String> {
     paths
         .into_iter()
@@ -1338,6 +1346,9 @@ fn safe_submodule_path(path: &str) -> bool {
 fn submodule_watch_needs_rearm(repo: &Path, path: &Path) -> bool {
     let Some(relative) = watched_relative(repo, path) else { return false };
     if relative == ".gitmodules" { return true; }
+    if relative.ends_with("/.git") && submodule_relative(&submodule_worktrees(repo), path).as_deref() == Some(".git") {
+        return true;
+    }
     let Some(inner) = relative.strip_prefix(".git/modules") else { return false };
     if inner.is_empty() { return true; }
     let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
@@ -1680,32 +1691,46 @@ fn settle_changes(
 fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
     let mut status = false;
     let mut files = Vec::new();
+    let mut submodules = None;
+    let event = |refs, paths| RepoChange { refs, path: repo.display().to_string(), revision: changes::revision(repo), paths };
     for path in paths {
         let Some(relative) = watched_relative(repo, path) else { continue };
         if relative.is_empty() {
             continue;
         }
-        if relative == ".git" {
-            return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None });
-        }
-        if relative == ".gitmodules" {
-            return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None });
+        if matches!(relative.as_str(), ".git" | ".gitmodules") {
+            return Some(event(true, None));
         }
         if let Some(inner) = relative.strip_prefix(".git/") {
             if inner.ends_with(".lock") { continue; }
             match inner.split('/').next().unwrap_or("") {
-                "index" => status = true,
+                "index" => {
+                    if !submodules.get_or_insert_with(|| submodule_worktrees(repo)).is_empty() {
+                        return Some(event(true, None));
+                    }
+                    status = true;
+                }
                 "modules" if module_metadata_relevant(inner) => {
-                    return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None });
+                    return Some(event(true, None));
                 }
                 "objects" | "modules" | "lfs" | "logs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit" | "awegit-flow" | "gitnuro" | "fsmonitor--daemon"
                     if inner != "logs/refs/stash" => {}
-                _ => return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None }),
+                _ => return Some(event(true, None)),
             }
             continue;
         }
-        if is_submodule_worktree_path(repo, path) {
-            return Some(RepoChange { refs: false, path: repo.display().to_string(), revision: changes::revision(repo), paths: None });
+        if let Some(relative) = submodule_relative(submodules.get_or_insert_with(|| submodule_worktrees(repo)), path) {
+            if relative == ".git" {
+                return Some(event(true, None));
+            }
+            if let Some(metadata) = relative.strip_prefix(".git/") {
+                if matches!(metadata, "HEAD" | "packed-refs" | "config" | "index") || metadata.starts_with("refs/") && !metadata.ends_with(".lock") {
+                    return Some(event(true, None));
+                }
+                continue;
+            }
+            status = true;
+            continue;
         }
         files.push(relative);
     }
@@ -1717,7 +1742,7 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
         files.retain(|file| !ignored.contains(file));
         status |= !files.is_empty();
     }
-    status.then_some(RepoChange { refs: false, path: repo.display().to_string(), revision: changes::revision(repo), paths: (!entire_index).then_some(files) })
+    status.then(|| event(false, (!entire_index).then_some(files)))
 }
 
 fn watched_relative(repo: &Path, path: &Path) -> Option<String> {
@@ -1773,11 +1798,13 @@ fn module_metadata_relevant(inner: &str) -> bool {
     !rest.split('/').any(|part| matches!(part, "objects" | "logs" | "lfs" | "info" | "hooks" | "FETCH_HEAD" | "ORIG_HEAD"))
 }
 
-fn is_submodule_worktree_path(repo: &Path, path: &Path) -> bool {
+fn submodule_relative(checkouts: &[PathBuf], path: &Path) -> Option<String> {
     let path_key = watch_key(&lexical_clean(path));
-    submodule_worktrees(repo).into_iter().any(|checkout| {
-        let checkout_key = watch_key(&lexical_clean(&checkout));
-        path_key.starts_with(&checkout_key) && path_key != checkout_key
+    checkouts.iter().find_map(|checkout| {
+        let checkout = lexical_clean(checkout);
+        let checkout_key = watch_key(&checkout);
+        let relative = path_key.strip_prefix(checkout_key).ok()?;
+        (!relative.as_os_str().is_empty()).then(|| relative.to_string_lossy().replace('\\', "/"))
     })
 }
 
@@ -3197,6 +3224,7 @@ pub fn run() {
             commit_detail,
             locate_ref,
             repository_refs,
+            submodule_remote_status,
             linked_worktree_paths,
             worktree_details,
             worktree_compare,
@@ -3486,9 +3514,17 @@ mod watch_plan_tests {
         assert!(super::classify_changes(&submodule, &[submodule.join("note.txt")]).is_some_and(|change| change.paths.as_deref() == Some(&["note.txt".into()][..])));
         assert!(super::watch_relevant(&root, &escaped("HEAD")));
         assert!(super::classify_changes(&root, &[escaped("HEAD")]).is_some_and(|change| change.refs && change.paths.is_none()));
+        for events in [
+            [submodule.join("note.txt"), escaped("HEAD")],
+            [escaped("HEAD"), submodule.join("note.txt")],
+        ] {
+            assert!(super::classify_changes(&root, &events).is_some_and(|change| change.refs && change.paths.is_none()));
+        }
+        assert!(super::classify_changes(&root, &[root.join(".git/index")]).is_some_and(|change| change.refs));
         assert!(!super::watch_relevant(&root, &escaped("logs/HEAD")));
         assert!(super::classify_changes(&root, &[submodule.join("note.txt")]).is_some_and(|change| !change.refs && change.paths.is_none()));
-        assert!(super::classify_changes(&root, &[submodule.join(".git")]).is_some_and(|change| !change.refs && change.paths.is_none()));
+        assert!(super::classify_changes(&root, &[submodule.join(".git")]).is_some_and(|change| change.refs && change.paths.is_none()));
+        assert!(super::submodule_watch_needs_rearm(&root, &submodule.join(".git")));
         assert!(super::classify_changes(&root, &[root.join(".gitmodules")]).is_some_and(|change| change.refs && change.paths.is_none()));
         fs::remove_dir_all(root).unwrap();
     }

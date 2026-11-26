@@ -190,6 +190,7 @@ fn status_reads_a_submodule_with_windows_incompatible_tree_paths() {
         path: "新 name.txt".into(),
         kind: ChangeKind::Renamed,
         previous_path: Some("old name.txt".into()),
+        submodule_dirty: None,
     }]);
     assert_has(&snapshot.unstaged, "新 name.txt", ChangeKind::Modified);
     assert_has(&snapshot.unstaged, submodule, ChangeKind::Modified);

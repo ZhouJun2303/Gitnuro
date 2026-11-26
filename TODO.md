@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 子模块暂存、取消暂存和外部提交会刷新指针状态，差异按子模块实际改动统计文件。Fetch 复查远端提交，并显示目标分支、完整 SHA、冲突阶段和 Git 错误。推送校验提交历史中的子模块指针。修复见本条所在提交 `fix: 修复子模块状态刷新并完善远端诊断`。回归见 `submodule_remote_status_tracks_merge_without_moving_pins_or_using_cached_refs`、`submodule_squash_keeps_old_sha_outside_target_and_checks_unpublished_history`、`submodule_status_keeps_dirty_counts_separate_and_reports_index_conflict_stages`、`submodule_gitdir_fetch_head_is_metadata_not_a_worktree_path` 及 `e2e/lab.spec.ts` 的子模块用例，覆盖三套主题。
+
 - [x] 在管理工作树等弹窗里右键工作树时，菜单被对话框遮罩盖住，只在窗口底部露出一截。菜单层改为位于对话框之上、确认框之下，点遮罩关闭菜单。本条所在提交 `fix: 修复弹窗内右键菜单被对话框遮罩盖住`。回归见 `e2e/worktrees.spec.ts` 的 `worktree dialog context menu stays above the dialog`，覆盖三套主题。
 
 - [x] 未暂存列表的单文件和批量丢弃从索引恢复工作区，保留已暂存版本。加深已暂存、未暂存两栏的选中文件和目录背景，当前预览行的高亮更明显。修复见本条所在提交 `fix: 丢弃未暂存时保留暂存版本并加深选中背景`。回归见 `discard_unstaged_restores_only_the_worktree`、`discard_unstaged_uses_index_gitlink`、`queued_discard_preserves_later_disk_and_index_changes` 及 `e2e/common-operations.spec.ts` 的 `discard unstaged restores the index and highlights selections`，覆盖三套主题。

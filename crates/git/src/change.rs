@@ -1522,6 +1522,7 @@ pub fn file_diff_with(
         "diff",
         "--no-ext-diff",
         "--no-color",
+        "--submodule=short",
         unified.as_str(),
     ];
     if ignore_space {

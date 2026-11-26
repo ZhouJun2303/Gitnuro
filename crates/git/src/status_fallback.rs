@@ -83,6 +83,22 @@ pub(crate) fn read_changes(
         restrict_to_scope(&mut staged, &mut scope, ChangeKind::Added);
         restrict_to_scope(&mut unstaged, &mut scope, ChangeKind::Untracked);
     }
+    let index = repo.index_or_empty().map_err(|error| Error::Git(error.to_string()))?;
+    for file in &mut unstaged {
+        if file.kind != ChangeKind::Modified
+            || !index.entry_by_path(file.path.as_str().into()).is_some_and(|entry| entry.mode == gix::index::entry::Mode::COMMIT)
+        {
+            continue;
+        }
+        let checkout = worktree.join(&file.path);
+        if !checkout.join(".git").exists() { continue; }
+        file.submodule_dirty = cli::run_env(&checkout, &["status", "--porcelain=v1", "-z", "--untracked-files=all"], &[("GIT_OPTIONAL_LOCKS", "0")])
+            .ok().and_then(|output| parse_status(&output.stdout).ok())
+            .map(|(staged, unstaged)| {
+                staged.into_iter().chain(unstaged).map(|file| file.path)
+                    .collect::<std::collections::HashSet<_>>().len()
+            });
+    }
     Ok((staged, unstaged))
 }
 

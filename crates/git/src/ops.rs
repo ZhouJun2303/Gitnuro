@@ -1565,9 +1565,8 @@ fn push_args(repo: &Path, args: &[String]) -> Result<(), Error> {
     surface(run(repo, &borrowed).map(|_| ()))
 }
 
-/// Run exactly one push on the normal path. A rejected push pays for one
-/// fetch and integration, then one retry; successful pushes start no extra
-/// command and read no repository state.
+/// A rejected push can fetch, integrate, and retry once. Both attempts verify
+/// the committed submodule pointers before starting the actual push.
 fn push_with_killer(
     repo: &Path,
     args: Vec<String>,
@@ -1578,6 +1577,7 @@ fn push_with_killer(
     force: bool,
     target: impl FnOnce() -> Option<KillerPushTarget>,
 ) -> Result<(), Error> {
+    crate::submodule::check_push(repo, &args)?;
     let error = match push_args(repo, &args) {
         Ok(()) => return Ok(()),
         Err(error) => error,
@@ -1603,7 +1603,9 @@ fn push_with_killer(
                 detail: format!("{}/{}", target.remote, target.branch),
                 ..Default::default()
             });
-            push_args(repo, retry_args.as_ref().unwrap_or(&args))
+            let retry = retry_args.as_ref().unwrap_or(&args);
+            crate::submodule::check_push(repo, retry)?;
+            push_args(repo, retry)
         }
         Err(pull_error) => {
             let recovery = abort_killer_pull(repo);

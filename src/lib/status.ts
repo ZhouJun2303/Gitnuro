@@ -5,6 +5,7 @@ export type StatusFile = {
   path: string;
   kind: ChangeKind;
   previousPath: string | null;
+  submoduleDirty?: number;
 };
 
 /** HEAD text, branch id, and the index trailer. A match means those files did not change. */
@@ -132,15 +133,34 @@ export type TagRow = { name: string; id: string };
 export type StashRow = { name: string; summary: string; id?: string; parent?: string };
 export type SubmoduleRow = {
   path: string;
-  /** Checked-out commit, or the index gitlink while the checkout is missing. */
+  /** Checked-out commit. Empty if HEAD is unavailable. */
   id: string;
   /** Gitlink commit recorded in the superproject index. */
   recorded: string;
+  conflict?: [string | null, string | null, string | null];
   /** Checked-out branch. Empty for a detached HEAD or a missing checkout. */
   branch: string;
-  /** Branch named in `.gitmodules`. Empty when the entry sets none. */
+  /** Target branch named in `.gitmodules`, with "." resolved against the superproject. */
   configuredBranch: string;
+  inheritsBranch: boolean;
   ready: boolean;
+  brokenCheckout: boolean;
+  configError?: string;
+  configKey: string;
+};
+export type SubmoduleRemoteCommit = {
+  id: string;
+  state: "inTarget" | "outsideTarget" | "targetMissing" | "reachable" | "unreachable";
+  ref?: string;
+};
+export type SubmoduleRemoteRow = {
+  path: string;
+  configKey: string;
+  target: string;
+  url: string;
+  recorded?: SubmoduleRemoteCommit;
+  checkout?: SubmoduleRemoteCommit;
+  error?: string;
 };
 export type WorktreeRow = {
   path: string;

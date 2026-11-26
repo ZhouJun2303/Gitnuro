@@ -15,6 +15,7 @@ mod ops;
 mod proc;
 mod pull;
 mod status_fallback;
+mod submodule;
 mod timing;
 pub mod worktree;
 
@@ -38,6 +39,7 @@ pub use cli::{
     common_repo_key, check_cancelled, cancel_token, check_path, with_cancellation, without_cancellation, with_operation_repo, GitRuntime, HttpsCredential, Session, Trace,
 };
 pub use fingerprint::{status_fingerprint, StatusFingerprint};
+pub use submodule::{submodule_remote_status, submodule_urls, SubmoduleRemoteRow};
 pub use model::{
     blame_file, blame_source, blame_file_range, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log,
     commit_log_sorted, commit_tree, commits_from, compare_file, compare_files, file_history,
@@ -69,6 +71,9 @@ pub struct FileChange {
     pub path: String,
     pub kind: ChangeKind,
     pub previous_path: Option<String>,
+    /// Number of changed paths inside a modified submodule, independent of its gitlink.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submodule_dirty: Option<usize>,
 }
 
 /// How a path changed, matching what `git status` would show.
@@ -383,11 +388,23 @@ fn push_unstaged(out: &mut Vec<FileChange>, change: gix::status::index_worktree:
             EntryStatus::Change(Change::Removed) => {
                 push(out, rela_path.as_ref(), ChangeKind::Deleted, None)
             }
-            EntryStatus::Change(
-                Change::Modification { .. }
-                | Change::Type { .. }
-                | Change::SubmoduleModification(_),
-            ) => push(out, rela_path.as_ref(), ChangeKind::Modified, None),
+            EntryStatus::Change(Change::SubmoduleModification(status)) => {
+                let submodule_dirty = status.changes.as_ref().map(|changes| {
+                    let mut paths = std::collections::HashSet::new();
+                    for change in changes {
+                        match change {
+                            gix::status::Item::TreeIndex(change) => { paths.insert(change.location()); }
+                            gix::status::Item::IndexWorktree(change) => { paths.insert(change.rela_path()); }
+                        }
+                    }
+                    paths.len()
+                });
+                push(out, rela_path.as_ref(), ChangeKind::Modified, None);
+                if let Some(file) = out.last_mut() { file.submodule_dirty = submodule_dirty; }
+            }
+            EntryStatus::Change(Change::Modification { .. } | Change::Type { .. }) => {
+                push(out, rela_path.as_ref(), ChangeKind::Modified, None)
+            }
             EntryStatus::IntentToAdd => push(out, rela_path.as_ref(), ChangeKind::Added, None),
             EntryStatus::NeedsUpdate(_) => {}
         },
@@ -426,6 +443,7 @@ fn push(out: &mut Vec<FileChange>, path: &BStr, kind: ChangeKind, previous: Opti
         path: path.to_string(),
         kind,
         previous_path: previous.map(ToString::to_string),
+        submodule_dirty: None,
     });
 }
 

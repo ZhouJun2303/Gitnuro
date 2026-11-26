@@ -128,10 +128,25 @@ impl Drop for HttpsSession {
 pub fn install_https(repo: &Path, request: &awegit_git::Mutation) -> HttpsSession {
     awegit_git::set_https_credentials(Vec::new());
     if let Ok(settings) = crate::settings::load() {
-        let creds = credentials_for(&settings, &targets_for(repo, request), &overrides_for(repo, request));
+        let mut targets = targets_for(repo, request);
+        if matches!(request, awegit_git::Mutation::Push { .. } | awegit_git::Mutation::PushRef { .. }) {
+            targets.extend(submodule_targets(repo));
+        }
+        let creds = credentials_for(&settings, &targets, &overrides_for(repo, request));
         awegit_git::set_https_credentials(creds);
     }
     HttpsSession
+}
+
+pub fn install_submodule_https(repo: &Path) -> HttpsSession {
+    let credentials = crate::settings::load()
+        .map(|settings| credentials_for(&settings, &submodule_targets(repo), &[])).unwrap_or_default();
+    awegit_git::set_https_credentials(credentials);
+    HttpsSession
+}
+
+fn submodule_targets(repo: &Path) -> Vec<RemoteTarget> {
+    awegit_git::submodule_urls(repo).into_iter().map(|url| RemoteTarget { name: String::new(), url }).collect()
 }
 
 pub fn services() -> Vec<ServiceInfo> {
@@ -1212,7 +1227,7 @@ fn fresh_id() -> String {
 
 fn targets_for(repo: &Path, request: &awegit_git::Mutation) -> Vec<RemoteTarget> {
     match request {
-        awegit_git::Mutation::Fetch { remote: Some(name), .. } | awegit_git::Mutation::Push { remote: Some(name), .. } | awegit_git::Mutation::DeleteRemoteTag { remote: name, .. } => named_remote(repo, name),
+        awegit_git::Mutation::Fetch { remote: Some(name), .. } | awegit_git::Mutation::Push { remote: Some(name), .. } | awegit_git::Mutation::PushRef { remote: name, .. } | awegit_git::Mutation::DeleteRemoteTag { remote: name, .. } => named_remote(repo, name),
         awegit_git::Mutation::Fetch { remote: None, .. }
         | awegit_git::Mutation::Pull { .. }
         | awegit_git::Mutation::Push { remote: None, .. }
