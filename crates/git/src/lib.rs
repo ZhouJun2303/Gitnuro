@@ -1,6 +1,7 @@
 //! Repository status, diffs, and the writes that change the index or `HEAD`.
 //!
-//! Status is read with gitoxide. Staging, committing, and diff text go through `git`.
+//! Status uses gitoxide with a Git fallback for unsupported trees and submodules.
+//! Staging, committing, and diff text go through `git`.
 
 mod autostash;
 mod change;
@@ -13,6 +14,7 @@ mod model;
 mod ops;
 mod proc;
 mod pull;
+mod status_fallback;
 mod timing;
 pub mod worktree;
 
@@ -228,19 +230,13 @@ fn status_patterns(path: &Path, fakeignore: bool, patterns: Vec<gix::bstr::BStri
     }
     let commit_intent = index_intent(&repo, head.id().map(|id| id.to_string()), None)?;
 
-    let mut staged = Vec::new();
-    let mut unstaged = Vec::new();
-    let iter = repo
-        .status(gix::progress::Discard)?
-        .untracked_files(gix::status::UntrackedFiles::Files)
-        .into_iter(patterns)?;
-
-    for item in iter {
-        match item? {
-            gix::status::Item::TreeIndex(change) => push_staged(&mut staged, change),
-            gix::status::Item::IndexWorktree(change) => push_unstaged(&mut unstaged, change),
+    let (mut staged, mut unstaged) = match gitoxide_changes(&repo, &patterns) {
+        Ok(changes) => changes,
+        Err(error) if status_fallback::can_retry(&error) => {
+            status_fallback::read_changes(&repo, &worktree, &patterns)?
         }
-    }
+        Err(error) => return Err(error),
+    };
 
     sort_changes(&mut staged);
     sort_changes(&mut unstaged);
@@ -258,6 +254,25 @@ fn status_patterns(path: &Path, fakeignore: bool, patterns: Vec<gix::bstr::BStri
         unstaged,
         fingerprint: None,
     })
+}
+
+fn gitoxide_changes(
+    repo: &gix::Repository,
+    patterns: &[gix::bstr::BString],
+) -> Result<(Vec<FileChange>, Vec<FileChange>), Error> {
+    let mut staged = Vec::new();
+    let mut unstaged = Vec::new();
+    let iter = repo
+        .status(gix::progress::Discard)?
+        .untracked_files(gix::status::UntrackedFiles::Files)
+        .into_iter(patterns.iter().cloned())?;
+    for item in iter {
+        match item? {
+            gix::status::Item::TreeIndex(change) => push_staged(&mut staged, change),
+            gix::status::Item::IndexWorktree(change) => push_unstaged(&mut unstaged, change),
+        }
+    }
+    Ok((staged, unstaged))
 }
 
 /// Codex artifact directories (`.tmp_artifact`, `.tmp_artifact2`, …). They are not repository changes.

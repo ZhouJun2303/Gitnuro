@@ -220,6 +220,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "submodule", group: "仓库状态", title: "子模块", repo: "full", ready: "text=vendor" }),
   scene({ id: "submodule-health", group: "仓库状态", title: "子模块状态 · 正常、分支不符、提交不符、未初始化", repo: "submodule-health", ready: ".sidebar .submodule-note.ok" }),
   scene({ id: "submodule-diff", group: "仓库状态", title: "子模块差异", repo: "submodule-diff", ready: ".submodule-diff" }),
+  scene({ id: "submodule-foreign-path", group: "仓库状态", title: "子模块历史含 Windows 不支持的文件名", repo: "submodule-foreign-path", ready: ".file-select[title='regular.txt']" }),
   scene({ id: "worktree", group: "仓库状态", title: "工作树列表", repo: "worktree", ready: '[data-worktree-path$="/detached"]' }),
   scene({ id: "worktree-tabs", group: "仓库状态", title: "工作树项目标签", repo: "worktree", ready: ".tab-worktree" }),
   scene({ id: "worktree-manage", group: "仓库状态", title: "管理工作树", repo: "worktree", ready: ".checkout-list-row.active" }),

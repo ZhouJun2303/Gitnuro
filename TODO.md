@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 打开或从下拉列表切换到含跨平台子模块文件名的仓库时，状态读取回退到只读的 Git 命令，保留子模块和普通文件的改动。修复提交 `fix: 修复子模块路径导致的仓库打开失败`。回归见 `status_reads_a_submodule_with_windows_incompatible_tree_paths` 和 `e2e/status-switch.spec.ts`。
+
 - [x] Fetch 等待远端时可以切换修改文件并加载差异，Fetch 完成时保留正在读取的预览。本条所在提交 `fix: Fetch 期间并行加载文件差异`。回归见 `file_diff_waits_for_a_queued_index_write` 及 `e2e/operation-responsiveness.spec.ts` 的 `file diffs update while fetch waits for the remote`。
 
 - [x] 工作树右键直接合并到主工作树当前分支，并按规范化路径复用标签页。本条所在提交 `feat: 新增工作树一键合并并修复重复标签页`。回归见 `worktree_merge_preserves_local_changes_and_is_repeatable`、`worktree_merge_rejects_dirty_missing_and_changed_checkouts`、`worktree_merge_conflict_can_abort_and_restore_main_changes` 及 `e2e/worktrees.spec.ts`。

@@ -1,4 +1,22 @@
 import { expect, test } from "@playwright/test";
+import { openLabScene } from "./helpers";
+
+for (const theme of ["apple", "light", "dark"] as const) {
+  test(`${theme} opens and switches to a repository with a Windows-incompatible submodule path`, async ({ page }) => {
+    const regularChange = ".file .file-select[title='regular.txt']";
+    const submoduleChange = ".file .file-select[title='third_party/child']";
+    await openLabScene(page, "submodule-foreign-path", regularChange, { theme });
+    await expect(page.locator(submoduleChange)).toBeVisible();
+
+    const picker = "[data-layer='repos']";
+    await openLabScene(page, "picker", picker, { theme });
+    await page.locator(`${picker} .repo-row[title$='submodule-foreign-path']`).click();
+    await expect(page.locator(picker)).toBeHidden();
+    await expect(page.locator(regularChange)).toBeVisible();
+    await expect(page.locator(submoduleChange)).toBeVisible();
+    await expect(page.getByText("Could not determine status for submodule", { exact: false })).toHaveCount(0);
+  });
+}
 
 test("a quiet watcher keeps the painted status and a named edit refreshes only those paths", async ({ page }) => {
   await page.goto("/?scene=clean");

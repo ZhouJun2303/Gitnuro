@@ -137,6 +137,90 @@ fn scoped_status_is_literal_and_keeps_unrelated_directories_out() {
 }
 
 #[test]
+fn status_reads_a_submodule_with_windows_incompatible_tree_paths() {
+    let source = common::TempRepo::new();
+    source.git(&["init", "-b", "main"]);
+    fs::write(source.path.join("base.txt"), "base\n").unwrap();
+    source.git(&["add", "base.txt"]);
+    source.git(&["commit", "-m", "submodule base"]);
+
+    let repo = common::TempRepo::new();
+    let submodule = "third_party/child [1]";
+    repo.git(&["init", "-b", "main"]);
+    repo.git(&["config", "core.ignorecase", "true"]);
+    repo.git(&[
+        "-c", "protocol.file.allow=always", "submodule", "add", "--",
+        source.path.to_str().unwrap(), submodule,
+    ]);
+    let in_submodule = |args: &[&str]| {
+        let mut command = vec!["-C", submodule];
+        command.extend_from_slice(args);
+        repo.output(&command).trim().to_string()
+    };
+    in_submodule(&["config", "gitoxide.core.protectWindows", "true"]);
+
+    // Put a foreign filename only in the commit tree, without checking it out.
+    let blob = in_submodule(&["rev-parse", "HEAD:base.txt"]);
+    let blob = gix::ObjectId::from_hex(blob.as_bytes()).unwrap();
+    let mut tree = b"100644 base.txt\0".to_vec();
+    tree.extend_from_slice(blob.as_slice());
+    tree.extend_from_slice(b"100644 fixture?.txt\0");
+    tree.extend_from_slice(blob.as_slice());
+    let tree_file = repo.path.join(".git/foreign-tree");
+    fs::write(&tree_file, tree).unwrap();
+    let tree = in_submodule(&["hash-object", "-t", "tree", "-w", tree_file.to_str().unwrap()]);
+    let head = in_submodule(&["commit-tree", &tree, "-p", "HEAD", "-m", "foreign filename"]);
+    in_submodule(&["update-ref", "HEAD", &head]);
+
+    fs::write(repo.path.join("old name.txt"), "base\n").unwrap();
+    repo.git(&["add", "."]);
+    repo.git(&["commit", "-m", "add submodule"]);
+    repo.git(&["mv", "old name.txt", "新 name.txt"]);
+    fs::write(repo.path.join("新 name.txt"), "working\n").unwrap();
+    fs::write(repo.path.join(".fakeignore"), "*.log\n").unwrap();
+    fs::write(repo.path.join("local.log"), "ignored\n").unwrap();
+
+    let index = repo.path.join(".git/index");
+    let submodule_index = repo.path.join(".git/modules").join(submodule).join("index");
+    let index_before = fs::read(&index).unwrap();
+    let submodule_index_before = fs::read(&submodule_index).unwrap();
+    let snapshot = status_with(&repo.path, true).unwrap();
+    assert_eq!(snapshot.branch.as_deref(), Some("main"));
+    assert_eq!(snapshot.staged, vec![FileChange {
+        path: "新 name.txt".into(),
+        kind: ChangeKind::Renamed,
+        previous_path: Some("old name.txt".into()),
+    }]);
+    assert_has(&snapshot.unstaged, "新 name.txt", ChangeKind::Modified);
+    assert_has(&snapshot.unstaged, submodule, ChangeKind::Modified);
+    assert_has(&snapshot.unstaged, ".fakeignore", ChangeKind::Untracked);
+    assert_eq!(snapshot.unstaged.len(), 3);
+
+    let scoped = awegit_git::status_paths_with(&repo.path, true, &[submodule.into()]).unwrap();
+    assert!(scoped.staged.is_empty());
+    assert_eq!(scoped.unstaged.len(), 1);
+    assert_has(&scoped.unstaged, submodule, ChangeKind::Modified);
+    let different_case = awegit_git::status_paths_with(
+        &repo.path, true, &[submodule.to_ascii_uppercase()],
+    ).unwrap();
+    assert_eq!(different_case, scoped);
+
+    let mut wide_scope: Vec<_> = (0..256)
+        .map(|number| format!("unrelated/{number}-{}", "x".repeat(128)))
+        .collect();
+    wide_scope.extend([submodule.into(), "old name.txt".into()]);
+    let wide = awegit_git::status_paths_with(&repo.path, true, &wide_scope).unwrap();
+    assert_eq!(wide.unstaged, scoped.unstaged);
+    assert_eq!(wide.staged.len(), 1);
+    assert_has(&wide.staged, "old name.txt", ChangeKind::Deleted);
+
+    let child = status(repo.path.join(submodule)).unwrap();
+    assert_has(&child.staged, "fixture?.txt", ChangeKind::Deleted);
+    assert_eq!(fs::read(&index).unwrap(), index_before);
+    assert_eq!(fs::read(&submodule_index).unwrap(), submodule_index_before);
+}
+
+#[test]
 fn fakeignore_hides_the_same_paths_git_would_and_keeps_them_out_of_the_index() {
     let repo = common::TempRepo::new();
     repo.git(&["init", "-b", "main"]);

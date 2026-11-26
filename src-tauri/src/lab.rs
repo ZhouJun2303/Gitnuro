@@ -221,6 +221,7 @@ fn layout() -> Result<Value, String> {
         "worktree-bare.git": text(repos.join("worktree-bare.git")),
         "stage-conflict-paths": text(repos.join("stage-conflict-paths")),
         "submodule-diff": text(repos.join("submodule-diff")),
+        "submodule-foreign-path": text(repos.join("submodule-foreign-path")),
         "submodule-health": text(repos.join("submodule-health")),
         "cherry": text(repos.join("cherry")),
         "revert": text(repos.join("revert")),

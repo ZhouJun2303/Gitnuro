@@ -658,6 +658,28 @@ function seedSubmoduleDiffRepo() {
   if (latest !== initial) git(join(path, "vendor"), ["checkout", "--detach", latest]);
 }
 
+function seedSubmoduleForeignPathRepo() {
+  const path = join(repos, "submodule-foreign-path");
+  wipe(path);
+  initWork(path);
+  const child = join(path, "third_party", "child");
+  git(path, ["-c", "protocol.file.allow=always", "submodule", "add", fileUrl(subBare), "third_party/child"]);
+  git(child, ["config", "gitoxide.core.protectWindows", "true"]);
+  // A commit created on another platform can contain a filename Windows cannot check out.
+  const blob = Buffer.from(git(child, ["rev-parse", "HEAD:lib.txt"]).stdout.trim(), "hex");
+  const treeFile = join(path, ".git", "foreign-tree");
+  writeFileSync(treeFile, Buffer.concat([
+    Buffer.from("100644 fixture?.txt\0"), blob, Buffer.from("100644 lib.txt\0"), blob,
+  ]));
+  const tree = git(child, ["hash-object", "-w", "-t", "tree", treeFile]).stdout.trim();
+  const head = git(child, ["commit-tree", tree, "-p", "HEAD", "-m", "test: foreign filename"]).stdout.trim();
+  git(child, ["update-ref", "HEAD", head]);
+  write(path, "regular.txt", "base\n");
+  git(path, ["add", "."]);
+  git(path, ["commit", "-m", "test: add submodule and regular file"]);
+  write(path, "regular.txt", "local edit\n");
+}
+
 function seedSubmoduleHealthRepo() {
   const path = join(repos, "submodule-health");
   wipe(path);
@@ -706,6 +728,7 @@ const restore = {
   worktree: seedWorktreeRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
   "submodule-diff": seedSubmoduleDiffRepo,
+  "submodule-foreign-path": seedSubmoduleForeignPathRepo,
   "submodule-health": seedSubmoduleHealthRepo,
   "gone-upstream": seedGoneUpstreamRepo,
   "pull-deleted": seedPullDeletedRepo,
@@ -755,6 +778,7 @@ const subSha = git(subSrc, ["rev-parse", "HEAD"]).stdout.trim();
 commit(subSrc, "lib.txt", "library update\n", "lib update");
 git(subSrc, ["push", "origin", "HEAD:main"]);
 seedSubmoduleDiffRepo();
+seedSubmoduleForeignPathRepo();
 seedSubmoduleHealthRepo();
 
 const writer = join(repos, "writer");
