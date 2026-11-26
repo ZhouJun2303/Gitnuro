@@ -61,6 +61,7 @@ fn main() {
             "commit_detail",
             "locate_ref",
             "repository_refs",
+            "linked_worktree_paths",
             "worktree_details",
             "worktree_compare",
             "worktree_prune_preview",

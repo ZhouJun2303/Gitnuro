@@ -309,6 +309,7 @@
   }
 
 .tab > .file-select {
+    container: tab-label / inline-size;
     flex: 1 1 auto;
     gap: 6px;
     min-width: 0;
@@ -493,6 +494,25 @@
     width: 12px;
     height: 12px;
     flex: none;
+  }
+
+.tab-worktree {
+    flex: none;
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    background: var(--accent);
+    color: var(--on-accent);
+    font-size: max(10px, 0.8em);
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+.tab-worktree-short { display: none; }
+
+@container tab-label (max-width: 88px) {
+    .tab-worktree { padding-inline: 3px; }
+    .tab-worktree-full { display: none; }
+    .tab-worktree-short { display: inline; }
   }
 
 .tab-job {

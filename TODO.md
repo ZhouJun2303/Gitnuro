@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 关联工作树的项目标签显示独立徽标，空间不足时缩为 `WT`。实现提交 `feat: 为工作树项目标签添加徽标`。回归见 `e2e/worktrees.spec.ts` 的 `worktree tab badges` 和 `worktree creation, branch switching and removal`。
+
 - [x] 管理工作树和删除确认以只读方式检查 Git 状态，消除了索引写入触发的循环刷新。修复提交 `fix: 修复工作树弹窗循环刷新`。回归见 `worktree_details_preserves_checkout_and_submodule_indexes` 和 `e2e/worktrees.spec.ts`。
 
 - [x] 远程分支的检出入口会打开同名本地分支所在的工作树。裸仓库可从本地分支、远程分支、标签或提交的检出入口创建工作树。实现提交 `fix: 衔接远程分支与裸仓库的工作树检出`。回归见 `worktree_can_be_created_from_bare_repository` 和 `e2e/worktrees.spec.ts`。

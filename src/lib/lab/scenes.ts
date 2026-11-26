@@ -221,6 +221,7 @@ export const surfaceScenes: LabScene[] = [
   scene({ id: "submodule-health", group: "仓库状态", title: "子模块状态 · 正常、分支不符、提交不符、未初始化", repo: "submodule-health", ready: ".sidebar .submodule-note.ok" }),
   scene({ id: "submodule-diff", group: "仓库状态", title: "子模块差异", repo: "submodule-diff", ready: ".submodule-diff" }),
   scene({ id: "worktree", group: "仓库状态", title: "工作树列表", repo: "worktree", ready: '[data-worktree-path$="/detached"]' }),
+  scene({ id: "worktree-tabs", group: "仓库状态", title: "工作树项目标签", repo: "worktree", ready: ".tab-worktree" }),
   scene({ id: "worktree-manage", group: "仓库状态", title: "管理工作树", repo: "worktree", ready: ".checkout-list-row.active" }),
   scene({ id: "worktree-remove", group: "仓库状态", title: "删除工作树 · 保留游离提交", repo: "worktree", ready: '[data-dialog="worktree"] .checkout-save' }),
   scene({ id: "worktree-prune", group: "仓库状态", title: "清理失效工作树", repo: "worktree", ready: ".checkout-prune" }),

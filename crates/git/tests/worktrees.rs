@@ -36,6 +36,7 @@ fn add(repo: &common::TempRepo, path: &str, branch: &str, mode: AddMode, start: 
 #[test]
 fn worktree_modes_history_and_shared_registry() {
     let repo = repository();
+    assert!(!worktree::is_linked(&repo.path).unwrap());
     let base = repo.output(&["rev-parse", "HEAD"]).trim().to_string();
     let before = status_fingerprint(&repo.path).unwrap();
     repo.git(&["branch", "existing"]);
@@ -47,6 +48,7 @@ fn worktree_modes_history_and_shared_registry() {
         None,
     );
     let existing = repo.path.join("existing with space");
+    assert!(worktree::is_linked(&existing).unwrap());
     let cached = repository_refs(&existing).unwrap();
     assert_eq!(cached.worktrees.len(), 2);
     assert_eq!(cached.worktrees[1].branch.as_deref(), Some("existing"));
@@ -170,6 +172,7 @@ fn worktree_details_preserves_checkout_and_submodule_indexes() {
     repo.git(&[
         "-C", "checkout", "-c", allow_local, "submodule", "update", "--init",
     ]);
+    assert!(!worktree::is_linked(&repo.path.join("checkout/vendor")).unwrap());
 
     let indexes = ["checkout", "checkout/vendor"].map(|dir| {
         // A changed stat entry normally makes Git refresh a clean index on disk.
@@ -327,6 +330,7 @@ fn worktree_can_be_created_from_bare_repository() {
     source.git(&["tag", "main"]);
     let bare = common::TempRepo::new();
     source.git(&["clone", "--bare", ".", bare.path.to_str().unwrap()]);
+    assert!(!worktree::is_linked(&bare.path).unwrap());
     assert!(status(&bare.path).unwrap().unstaged.is_empty());
     let refs = repository_refs(&bare.path).unwrap();
     assert!(refs.worktrees[0].bare);
@@ -342,6 +346,7 @@ fn worktree_can_be_created_from_bare_repository() {
         AddMode::Existing,
         None,
     );
+    assert!(worktree::is_linked(&checkout).unwrap());
     assert_eq!(status(&checkout).unwrap().branch.as_deref(), Some("main"));
     assert!(repository_refs(&checkout).unwrap().branches[0].current);
 }

@@ -343,6 +343,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "commit_detail" => done_result(super::commit_detail(req(args, "path")?, req(args, "id")?)),
         "locate_ref" => done_result(super::locate_ref(req(args, "path")?, req(args, "name")?, req(args, "order")?)),
         "repository_refs" => done_result(super::repository_refs(req(args, "path")?)),
+        "linked_worktree_paths" => done(super::linked_worktree_paths(req(args, "paths")?)),
         "worktree_details" => done_result(super::worktree_details(req(args, "path")?, req(args, "target")?)),
         "worktree_compare" => done_result(super::worktree_compare(req(args, "path")?, req(args, "head")?, req(args, "base")?)),
         "worktree_prune_preview" => done_result(super::worktree_prune_preview(req(args, "path")?)),

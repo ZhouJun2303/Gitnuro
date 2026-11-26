@@ -8,8 +8,22 @@
 
   const shell = getShell();
   const launchShortcut = $derived.by(() => { shell.settings.shortcuts; return shortcutLabel("launch"); });
-  /** Workspace identity for the tab strip: a switch, rename, open or close must re-fit the labels. */
-  const tabSignature = $derived(shell.repos.map((repo) => `${repo}\t${shell.tabText(repo)}`).join("\n"));
+  const tabPaths = $derived([...shell.repos].sort().join("\0"));
+  let linkedWorktrees = $state.raw<Set<string>>(new Set());
+  const worktreeBadge = $derived(shell.tr("worktree.tabBadge"));
+  /** Re-fit names after tab labels or badge widths change. */
+  const tabSignature = $derived(shell.repos.map((repo) =>
+    `${repo}\t${shell.tabText(repo)}\t${linkedWorktrees.has(repo) ? worktreeBadge : ""}`).join("\n"));
+
+  $effect(() => {
+    const paths = tabPaths;
+    if (!paths || !shell.backend()) return;
+    let current = true;
+    void invoke<string[]>("linked_worktree_paths", { paths: paths.split("\0") }).then((linked) => {
+      if (current) linkedWorktrees = new Set(linked);
+    }).catch(() => {});
+    return () => { current = false; };
+  });
 
   async function openTerminal(path: string, cli?: TerminalCli) {
     try {
@@ -360,6 +374,12 @@
           { label: shell.tr("chrome.close"), run: () => shell.closeTab(repo) },
         ])}>
           <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabDisplay(repo)} onclick={() => shell.openRepo(repo)}>
+            {#if linkedWorktrees.has(repo)}
+              <span class="tab-worktree" role="img" aria-label={worktreeBadge} title={worktreeBadge}>
+                <span class="tab-worktree-full" aria-hidden="true">{worktreeBadge}</span>
+                <span class="tab-worktree-short" aria-hidden="true">WT</span>
+              </span>
+            {/if}
             {#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}
             {#if shell.isRecentRepoPinned(repo)}
               <svg class="line-icon tab-pin" viewBox="0 0 24 24" role="img" aria-label={shell.tr("chrome.pinnedInRecent")}>

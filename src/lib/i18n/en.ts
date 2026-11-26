@@ -2,6 +2,7 @@ import type { Messages } from "./types";
 
 export const en: Messages = {
   worktree: {
+    tabBadge: "Worktree",
     manage: "Manage Worktrees", add: "Add Worktree", open: "Open Worktree", history: "View Worktree Commits",
     main: "Main worktree", current: "Current", bare: "Bare repository", detached: "Detached HEAD", missing: "Missing directory",
     locked: "Locked", prunable: "Prunable", pending: "Working…", unavailable: "Worktree directory unavailable: {path}",

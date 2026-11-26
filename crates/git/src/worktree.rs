@@ -71,6 +71,12 @@ pub fn common_dir(repo: &Path) -> Result<PathBuf, Error> {
     Ok(crate::open_repo(repo)?.common_dir().to_path_buf())
 }
 
+pub fn is_linked(repo: &Path) -> Result<bool, Error> {
+    Ok(crate::open_repo(repo)?
+        .worktree()
+        .is_some_and(|worktree| !worktree.is_main()))
+}
+
 /// Index writes and per-worktree reflogs leave the registry stamp unchanged.
 pub(crate) fn registry_stamp(common: &Path) -> u64 {
     let mut stamp = DefaultHasher::new();

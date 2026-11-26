@@ -27,6 +27,31 @@ test.beforeEach(async ({ request }) => {
 });
 
 for (const theme of ["apple", "light", "dark"] as const) {
+  test(`worktree tab badges (${theme})`, async ({ page }) => {
+    const locale = theme === "dark" ? "en" : "zh";
+    const badge = locale === "zh" ? "工作树" : "Worktree";
+    await openLabScene(page, "worktree-tabs", ".tab-worktree", { theme, locale });
+    const mainTab = page.locator('.tab[data-repo$="worktree"]');
+    const topicTab = page.locator('.tab[data-repo$="/topic"]');
+    const detachedTab = page.locator('.tab[data-repo$="/detached"]');
+
+    await expect(mainTab).toHaveClass(/\bactive\b/);
+    await expect(mainTab.locator(".tab-worktree")).toHaveCount(0);
+    await expect(topicTab.locator(".tab-worktree-full")).toHaveText(badge);
+    await expect(topicTab.locator(".tab-worktree-full")).toBeVisible();
+    await expect(detachedTab.getByRole("img", { name: badge, exact: true })).toBeVisible();
+
+    await topicTab.locator(".file-select").click();
+    await expect(topicTab).toHaveClass(/\bactive\b/);
+    await expect(topicTab.locator(".tab-worktree-full")).toBeVisible();
+    await expect(detachedTab.locator(".tab-worktree-full")).toBeVisible();
+
+    await page.setViewportSize({ width: 360, height: 800 });
+    await expect(topicTab.locator(".tab-worktree-short")).toBeVisible();
+    await expect(topicTab.getByRole("img", { name: badge, exact: true })).toBeVisible();
+    await expect(topicTab.locator(".tab-name")).toBeVisible();
+  });
+
   test(`worktree creation, branch switching and removal (${theme})`, async ({ page }) => {
     test.setTimeout(90_000);
     await openLabScene(page, "worktree", '[data-worktree-path$="/topic"]', { theme, locale: "zh" });
@@ -36,6 +61,7 @@ for (const theme of ["apple", "light", "dark"] as const) {
     await dialog(page).getByLabel("工作树目录", { exact: true }).fill("../worktree-checkouts/created");
     await button(page, "创建").click();
     await expect(row(page, "created")).toHaveAttribute("aria-current", "true");
+    await expect(page.locator('.tab[data-repo$="created"] .tab-worktree')).toBeVisible();
     expect(git(resolve(checkouts, "created"), "branch", "--show-current")).toBe(branch);
 
     await worktreeAction(page, "created", "删除工作树");

@@ -561,6 +561,19 @@ fn repository_refs(path: Option<String>) -> Result<awegit_git::RefSnapshot, Stri
 }
 
 #[tauri::command]
+fn linked_worktree_paths(paths: Vec<String>) -> Vec<String> {
+    paths
+        .into_iter()
+        .filter(|path| {
+            let Ok(repo) = repo_from(Some(path.clone())) else {
+                return false;
+            };
+            awegit_git::worktree::is_linked(&repo).unwrap_or(false)
+        })
+        .collect()
+}
+
+#[tauri::command]
 fn worktree_details(path: Option<String>, target: String) -> Result<awegit_git::worktree::WorktreeDetails, String> {
     let repo = repo_from(path)?;
     tasks::wait_for_writes(&repo);
@@ -3175,6 +3188,7 @@ pub fn run() {
             commit_detail,
             locate_ref,
             repository_refs,
+            linked_worktree_paths,
             worktree_details,
             worktree_compare,
             worktree_prune_preview,

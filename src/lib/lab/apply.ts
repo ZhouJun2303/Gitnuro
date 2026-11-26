@@ -500,6 +500,10 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.collapsedSide = ["tags", "remotes", "stashes", "submodules"];
     const rows = shell.refs?.worktrees ?? [];
     const detached = rows.find((row) => row.detached);
+    if (id === "worktree-tabs") {
+      shell.settings.verticalTabs = false;
+      shell.repos = [...shell.repos, ...rows.filter((row) => !row.main && !row.missing).map((row) => row.path)];
+    }
     if (id === "worktree-manage") beginWorktree(shell, { kind: "manage", path: rows.find((row) => row.branch === "topic")?.path });
     if (id === "worktree-remove" && detached) beginWorktree(shell, { kind: "remove", path: detached.path });
     if (id === "worktree-prune") beginWorktree(shell, { kind: "prune" });

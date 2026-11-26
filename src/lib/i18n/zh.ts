@@ -2,6 +2,7 @@ import type { Messages } from "./types";
 
 export const zh: Messages = {
   worktree: {
+    tabBadge: "工作树",
     manage: "管理工作树", add: "新增工作树", open: "打开工作树", history: "查看工作树提交",
     main: "主工作树", current: "当前", bare: "裸仓库", detached: "游离 HEAD", missing: "目录缺失",
     locked: "已锁定", prunable: "可清理", pending: "正在处理…", unavailable: "工作树目录不可用：{path}",
