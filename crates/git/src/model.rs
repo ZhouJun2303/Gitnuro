@@ -6,13 +6,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::ScopedJoinHandle;
 
 use serde::{Deserialize, Serialize};
 
 use crate::change::{parse_diff, spec_size, FileDiff};
 use crate::cli::{check_path, check_rev, run, run_capped, run_output, run_stdin_output, with_read};
+use crate::worktree::{self, WorktreeRow};
 use crate::{ChangeKind, Error, FileChange};
 
 static GIT_DIRS: Mutex<BTreeMap<PathBuf, PathBuf>> = Mutex::new(BTreeMap::new());
@@ -26,8 +27,8 @@ fn capped_output_error(limit: usize) -> Error {
 
 struct RemoteStateCache {
     has_remotes: bool,
-    local_only: HashSet<String>,
-    remote_only: HashMap<String, HashSet<String>>,
+    local_only: Arc<HashSet<String>>,
+    remote_only: HashMap<String, Arc<HashSet<String>>>,
 }
 
 fn remote_state_cache() -> &'static Mutex<BTreeMap<String, RemoteStateCache>> {
@@ -127,26 +128,26 @@ pub struct StashRow {
 #[serde(rename_all = "camelCase")]
 pub struct SubmoduleRow {
     pub path: String,
-    /// Checked-out commit, or the index gitlink while the checkout is missing.
+    /// Checked-out commit. Empty if HEAD is unavailable.
     pub id: String,
     /// Gitlink commit recorded in the superproject index.
     #[serde(default)]
     pub recorded: String,
+    /// The competing gitlinks in an unmerged index (base, ours, theirs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conflict: Option<[Option<String>; 3]>,
     /// Checked-out branch. Empty for a detached HEAD or a missing checkout.
     #[serde(default)]
     pub branch: String,
-    /// Branch named in `.gitmodules`. Empty when the entry sets none.
+    /// Target branch named in `.gitmodules`, with "." resolved against the superproject.
     #[serde(default)]
     pub configured_branch: String,
+    pub inherits_branch: bool,
     pub ready: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorktreeRow {
-    pub path: String,
-    pub branch: Option<String>,
-    pub detached: bool,
+    pub broken_checkout: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_error: Option<String>,
+    pub config_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -210,6 +211,34 @@ pub fn branch_commits_sorted(
     log_with(repo, limit, false, &[], &[], topo)
 }
 
+/// History of the checked-out branch and its visible upstream. An empty scope
+/// asks the caller for all branches, including detached worktree tips.
+pub fn current_branch_log_revisions(repo: &Path) -> Result<Vec<String>, Error> {
+    let opened = crate::open_repo(repo)?;
+    let head = opened.head()?;
+    let Some(current) = head.referent_name().filter(|_| !opened.is_bare() && head.id().is_some()) else {
+        return Ok(Vec::new());
+    };
+    let current_ref = current.as_bstr().to_string();
+    let mut revisions = vec![current_ref.clone()];
+    if opened.branch_remote_ref_name(current, gix::remote::Direction::Fetch).is_none() {
+        return Ok(revisions);
+    }
+    let upstream = with_read(|| run_output(repo, &["rev-parse", "--verify", "--quiet", "--symbolic-full-name", "@{upstream}"]))?;
+    if upstream.status.success() {
+        let output = String::from_utf8_lossy(&upstream.stdout);
+        let upstream_ref = output.trim();
+        let name = upstream_ref.strip_prefix("refs/remotes/").or_else(|| upstream_ref.strip_prefix("refs/heads/"));
+        let visible = name.is_some_and(|name| {
+            !hidden_refs(repo).iter().any(|hidden| name == hidden || (hidden.ends_with('/') && name.starts_with(hidden)))
+        });
+        if upstream_ref != current_ref && visible {
+            revisions.push(upstream_ref.to_string());
+        }
+    }
+    Ok(revisions)
+}
+
 /// Commits reachable from the named revisions, such as the current branch and its upstream.
 pub fn commits_from(
     repo: &Path,
@@ -261,11 +290,8 @@ pub fn search_log_page_with_revision(
     if field == "path" && query.contains("..") {
         return Err(Error::Path(query.to_string()));
     }
-    let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]));
-    match head {
-        Err(error) => return Err(error),
-        Ok(output) if output.status.success() => {}
-        Ok(_) => return Ok(Vec::new()),
+    if scope == "branch" && !has_head(repo)? {
+        return Ok(Vec::new());
     }
     let limit_text = limit.clamp(1, 100_000).to_string();
     let order = if topo { "--topo-order" } else { "--date-order" };
@@ -306,7 +332,7 @@ pub fn search_log_page_with_revision(
     }
     let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
     assign_lanes(&mut commits);
-    mark_remote_state(repo, &mut commits, &[], revision);
+    with_read(|| mark_remote_state(repo, &mut commits, &[], revision));
     Ok(commits)
 }
 
@@ -421,16 +447,13 @@ fn log_page(
     offset: usize,
     revision: Option<u64>,
 ) -> Result<Vec<CommitRow>, Error> {
-    let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]));
-    match head {
-        Err(error) => return Err(error),
-        Ok(output) if output.status.success() => {}
-        // An unborn repository has no commits. A cancelled or failed Git process does not.
-        Ok(_) => return Ok(Vec::new()),
+    if revs.is_empty() && (!all || !path.is_empty()) && !has_head(repo)? {
+        return Ok(Vec::new());
     }
     let limit = limit.clamp(1, 100_000).to_string();
     let order = if topo { "--topo-order" } else { "--date-order" };
     let skip = format!("--skip={}", offset.min(100_000));
+    let detached_heads;
     let mut args = vec![
         "--literal-pathspecs",
         "log",
@@ -444,10 +467,14 @@ fn log_page(
     if !revs.is_empty() {
         // Named revisions only. Extra remote tips would walk the whole remote set.
         args.extend_from_slice(revs);
+        args.push("--");
     } else if path.is_empty() && all {
         // Branches and remotes, not `--all`: tags and notes would bury the tips.
         args.insert(2, "--branches");
         args.insert(3, "--remotes");
+        detached_heads = worktree::detached_heads(repo)?;
+        args.extend(detached_heads.iter().map(String::as_str));
+        args.push("--");
     } else if !path.is_empty() {
         args.push("--");
         args.extend_from_slice(path);
@@ -460,6 +487,13 @@ fn log_page(
     assign_lanes(&mut commits);
     with_read(|| mark_remote_state(repo, &mut commits, &revs, revision));
     Ok(commits)
+}
+
+fn has_head(repo: &Path) -> Result<bool, Error> {
+    if let Ok(head) = crate::open_repo(repo).and_then(|opened| Ok(opened.head()?.id().is_some())) {
+        return Ok(head);
+    }
+    with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]).map(|output| output.status.success()))
 }
 
 fn mark_remote_state(repo: &Path, commits: &mut [CommitRow], revs: &[&str], revision: Option<u64>) {
@@ -484,7 +518,7 @@ fn remote_sets(
     repo: &Path,
     scope: &Option<(Vec<String>, Vec<String>)>,
     revision: Option<u64>,
-) -> Option<(HashSet<String>, HashSet<String>)> {
+) -> Option<(Arc<HashSet<String>>, Arc<HashSet<String>>)> {
     let cache_key = match revision {
         Some(revision) if revision > 0 => Some(format!("{}:revision:{revision}", crate::repo_key(repo))),
         Some(_) => {
@@ -499,6 +533,7 @@ fn remote_sets(
         .as_ref()
         .map(|(remote, local)| format!("r:{}|l:{}", remote.join("\x1f"), local.join("\x1f")))
         .unwrap_or_else(|| "all".into());
+    let mut local_only = None;
     if let Some(key) = cache_key.as_deref() {
         if let Some(cached) = remote_state_cache().lock().ok()?.get(key) {
             if !cached.has_remotes {
@@ -507,12 +542,13 @@ fn remote_sets(
             if let Some(remote_only) = cached.remote_only.get(&scope_key) {
                 return Some((cached.local_only.clone(), remote_only.clone()));
             }
+            local_only = Some(cached.local_only.clone());
         }
     }
-    if !has_remotes(repo) {
+    if local_only.is_none() && !has_remotes(repo) {
         if let Some(key) = cache_key {
             if let Ok(mut cache) = remote_state_cache().lock() {
-                cache.insert(key, RemoteStateCache { has_remotes: false, local_only: HashSet::new(), remote_only: HashMap::new() });
+                cache.insert(key, RemoteStateCache { has_remotes: false, local_only: Arc::default(), remote_only: HashMap::new() });
                 while cache.len() > 64 {
                     let Some(oldest) = cache.keys().next().cloned() else { break };
                     cache.remove(&oldest);
@@ -521,20 +557,10 @@ fn remote_sets(
         }
         return None;
     }
-    let local_only = run(
-        repo,
-        &["rev-list", "--all", "--not", "--remotes", "--max-count=20000"],
-    )
-    .ok()
-    .map(|output| {
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-            .map(str::to_string)
-            .collect::<HashSet<_>>()
-    })
-    .unwrap_or_default();
+    let local_only = match local_only {
+        Some(cached) => cached,
+        None => read_commit_ids(repo, &["rev-list", "--all", "--not", "--remotes", "--max-count=20000"])?,
+    };
     let mut remote_only_args = vec!["rev-list", "--max-count=20000"];
     match scope {
         Some((remote, local)) => {
@@ -542,19 +568,14 @@ fn remote_sets(
             remote_only_args.push("--not");
             remote_only_args.extend(local.iter().map(String::as_str));
         }
-        None => remote_only_args.extend(["--remotes", "--not", "--branches", "HEAD"]),
+        None => {
+            remote_only_args.extend(["--remotes", "--not", "--branches"]);
+            if has_head(repo).ok()? {
+                remote_only_args.push("HEAD");
+            }
+        }
     }
-    let remote_only = run(repo, &remote_only_args)
-        .ok()
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .map(str::to_string)
-                .collect::<HashSet<_>>()
-        })
-        .unwrap_or_default();
+    let remote_only = read_commit_ids(repo, &remote_only_args)?;
     if let Some(key) = cache_key {
         if let Ok(mut cache) = remote_state_cache().lock() {
             let entry = cache.entry(key).or_insert_with(|| RemoteStateCache { has_remotes: true, local_only: local_only.clone(), remote_only: HashMap::new() });
@@ -570,23 +591,38 @@ fn remote_sets(
     Some((local_only, remote_only))
 }
 
+fn read_commit_ids(repo: &Path, args: &[&str]) -> Option<Arc<HashSet<String>>> {
+    let output = run(repo, args).ok()?;
+    let ids = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect();
+    Some(Arc::new(ids))
+}
+
 /// Remote and local refs among the revisions a filtered view walks. `None` when the view is
 /// not scoped to refs (all branches, file history), so the comparison covers the repository.
 fn remote_scope(repo: &Path, revs: &[&str]) -> Option<(Vec<String>, Vec<String>)> {
     if revs.is_empty() {
         return None;
     }
-    let mut args = vec!["rev-parse", "--symbolic-full-name"];
-    args.extend_from_slice(revs);
-    let output = run(repo, &args).ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
+    let resolved;
+    let refs: Vec<&str> = if revs.iter().all(|rev| rev.starts_with("refs/")) {
+        revs.to_vec()
+    } else {
+        let mut args = vec!["rev-parse", "--symbolic-full-name"];
+        args.extend_from_slice(revs);
+        resolved = String::from_utf8_lossy(&run(repo, &args).ok()?.stdout).into_owned();
+        resolved.lines().collect()
+    };
     let mut remote = Vec::new();
     let mut local = Vec::new();
-    for (rev, full) in revs.iter().zip(text.lines()) {
+    for full in refs {
         if full.starts_with("refs/remotes/") {
-            remote.push((*rev).to_string());
+            remote.push(full.to_string());
         } else if full.starts_with("refs/heads/") {
-            local.push((*rev).to_string());
+            local.push(full.to_string());
         }
     }
     if remote.is_empty() || local.is_empty() {
@@ -730,23 +766,33 @@ fn repository_refs_uncached(repo: &Path) -> Result<RefSnapshot, Error> {
             .unwrap_or_default()
     };
     let sign_off = first(&local, "signoff", "enabled");
-    let head = run(repo, &["rev-parse", "--verify", "--quiet", "HEAD"])
-        .ok()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .filter(|id| !id.is_empty());
+    let head = crate::open_repo(repo)
+        .and_then(|opened| Ok(opened.head()?.id().map(|id| id.to_string())))
+        .unwrap_or_else(|_| {
+            run(repo, &["rev-parse", "--verify", "--quiet", "HEAD"])
+                .ok()
+                .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+                .filter(|id| !id.is_empty())
+        });
     std::thread::scope(|scope| {
         let branches = scope.spawn(crate::timing::inherit(|| local_branches(repo)));
-        let remotes = scope.spawn(crate::timing::inherit(|| remotes(repo)));
+        let remotes = scope.spawn(crate::timing::inherit(|| remote_urls(repo)));
+        let refs = scope.spawn(crate::timing::inherit(|| {
+            run(repo, &["for-each-ref", "--format=%(objectname)%09%(*objectname)%09%(refname)%09%(symref)",
+                "refs/heads", "refs/remotes", "refs/tags", "refs/stash"])
+        }));
         let tags = scope.spawn(crate::timing::inherit(|| tags(repo)));
         let stashes = scope.spawn(crate::timing::inherit(|| stashes(repo)));
         let submodules = scope.spawn(crate::timing::inherit(|| submodules(repo)));
-        let worktrees = worktrees(repo);
+        let worktrees = worktree::list(repo);
+        let mut remotes = joined(remotes)?;
+        let labels = read_ref_inventory(&joined(refs)?.stdout, &mut remotes);
         Ok(RefSnapshot {
             revision: 0,
             head,
             branches: joined(branches)?,
-            labels: ref_labels(repo)?,
-            remotes: joined(remotes)?,
+            labels,
+            remotes,
             tags: joined(tags)?,
             stashes: joined(stashes)?,
             submodules: joined(submodules)?,
@@ -764,30 +810,22 @@ fn refs_stamp(repo: &Path) -> String {
     let Ok(git) = absolute_git_dir(repo) else {
         return format!("missing:{}", repo.display());
     };
-    let mut stamp = String::new();
-    for relative in [
-        "HEAD",
-        "config",
-        "packed-refs",
-        "index",
-        "logs/refs/stash",
-        "awegit",
-        "gitnuro",
+    let common = worktree::common_dir(repo).unwrap_or_else(|_| git.clone());
+    let mut stamp = worktree::registry_stamp(&common).to_string();
+    for (root, files) in [
+        (&git, &["HEAD", "index", "config.worktree", "awegit", "gitnuro"][..]),
+        (&common, &["HEAD", "config", "packed-refs", "refs/stash", "logs/refs/stash"][..]),
     ] {
-        if !stamp.is_empty() {
+        for relative in files {
             stamp.push('|');
+            stamp.push_str(&file_mark(&root.join(relative)));
         }
-        stamp.push_str(relative);
-        stamp.push(':');
-        stamp.push_str(&file_mark(&git.join(relative)));
     }
-    for relative in ["refs/heads", "refs/remotes", "refs/tags", "worktrees"] {
-        if !stamp.is_empty() {
-            stamp.push('|');
-        }
+    for relative in ["refs/heads", "refs/remotes", "refs/tags"] {
+        stamp.push('|');
         stamp.push_str(relative);
         stamp.push(':');
-        stamp.push_str(&tree_mark(&git.join(relative)));
+        stamp.push_str(&tree_mark(&common.join(relative)));
     }
     stamp.push('|');
     stamp.push_str(&file_mark(&repo.join(".gitmodules")));
@@ -872,19 +910,45 @@ fn tree_mark(root: &Path) -> String {
     entries.join("|")
 }
 
-/// Ref decorations are small metadata; changing a label never requires another log walk.
-fn ref_labels(repo: &Path) -> Result<BTreeMap<String, Vec<String>>, Error> {
-    let output = run(repo, &["for-each-ref", "--format=%(objectname)%09%(*objectname)%09%(refname)"])?;
+/// Use one ref enumeration for decorations and remote branch names.
+fn read_ref_inventory(bytes: &[u8], remotes: &mut [RemoteRow]) -> BTreeMap<String, Vec<String>> {
     let mut labels: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
+    let indexes: HashMap<String, usize> = remotes.iter().enumerate()
+        .map(|(index, remote)| (remote.name.clone(), index))
+        .collect();
+    for line in String::from_utf8_lossy(bytes).lines() {
         let mut fields = line.split('\t');
-        let object = fields.next().unwrap_or(""); let peeled = fields.next().unwrap_or(""); let name = fields.next().unwrap_or("");
-        if name.ends_with("/HEAD") { continue; }
-        let short = name.strip_prefix("refs/heads/").or_else(|| name.strip_prefix("refs/remotes/")).or_else(|| name.strip_prefix("refs/tags/"))
+        let object = fields.next().unwrap_or("");
+        let peeled = fields.next().unwrap_or("");
+        let name = fields.next().unwrap_or("");
+        let symref = fields.next().unwrap_or("");
+        let remote = name.strip_prefix("refs/remotes/");
+        if let Some(remote_ref) = remote {
+            for (split, _) in remote_ref.rmatch_indices('/') {
+                let remote_name = &remote_ref[..split];
+                let Some(&index) = indexes.get(remote_name) else { continue };
+                let branch = &remote_ref[split + 1..];
+                if branch == "HEAD" {
+                    let prefix = format!("refs/remotes/{remote_name}/");
+                    remotes[index].head = symref.strip_prefix(&prefix).map(str::to_string);
+                } else {
+                    remotes[index].branches.push(branch.to_string());
+                }
+                break;
+            }
+        }
+        if remote.is_some_and(|name| name.ends_with("/HEAD") && !symref.is_empty()) { continue; }
+        let short = name.strip_prefix("refs/heads/").or(remote).or_else(|| name.strip_prefix("refs/tags/"))
             .or_else(|| (name == "refs/stash").then_some("stash"));
-        if let Some(short) = short { labels.entry(if peeled.is_empty() { object } else { peeled }.to_string()).or_default().push(short.to_string()); }
+        if let Some(short) = short {
+            let id = if peeled.is_empty() { object } else { peeled };
+            labels.entry(id.to_string()).or_default().push(short.to_string());
+        }
     }
-    Ok(labels)
+    for remote in remotes {
+        remote.branches.sort_unstable();
+    }
+    labels
 }
 
 fn joined<T>(handle: ScopedJoinHandle<'_, Result<T, Error>>) -> Result<T, Error> {
@@ -1122,12 +1186,18 @@ pub(crate) fn absolute_git_dir(repo: &Path) -> Result<PathBuf, Error> {
             return Ok(dir);
         }
     }
-    let output = run(repo, &["rev-parse", "--absolute-git-dir"])?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if text.is_empty() {
-        return Err(Error::Git("could not find the git directory".into()));
-    }
-    let dir = PathBuf::from(text);
+    let dir = match crate::open_repo(repo).ok().and_then(|opened| std::path::absolute(opened.git_dir()).ok()) {
+        Some(dir) => dir,
+        None => {
+            let output = run(repo, &["rev-parse", "--absolute-git-dir"])?;
+            let text = String::from_utf8_lossy(&output.stdout);
+            let text = text.trim();
+            if text.is_empty() {
+                return Err(Error::Git("could not find the git directory".into()));
+            }
+            PathBuf::from(text)
+        }
+    };
     if let Ok(mut dirs) = GIT_DIRS.lock() {
         dirs.insert(repo.to_path_buf(), dir.clone());
     }
@@ -1308,6 +1378,12 @@ pub fn write_expanded_groups(repo: &Path, names: &[String]) -> Result<(), Error>
 /// `signoff.format` from `.git/awegit`. Empty when this repository has not set one.
 pub fn repo_sign_off_format(repo: &Path) -> String {
     value_key(repo, "signoff", "format")
+}
+
+/// The repository's sign-off override, if configured.
+pub fn repo_sign_off_enabled(repo: &Path) -> Option<bool> {
+    let value = value_key(repo, "signoff", "enabled");
+    (!value.is_empty()).then(|| value.eq_ignore_ascii_case("true"))
 }
 
 /// `remote<TAB>account` pairs from `.git/awegit`. Empty when this repository has not chosen any.
@@ -1522,27 +1598,10 @@ fn push_sign_off(out: &mut String, enabled: bool, format: &str) {
     }
 }
 
-/// For a merge commit (a stash is one too), the first parent to diff against.
-/// Plain `diff-tree` and `show` print nothing for such commits.
-fn merge_base_of(repo: &Path, id: &str) -> Option<String> {
-    let second = format!("{id}^2");
-    let output = run_output(repo, &["rev-parse", "--verify", "-q", &second]).ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(format!("{id}^1"))
-}
-
 pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
     let id = check_rev(id)?;
-    let base = merge_base_of(repo, id);
-    let (output, truncated) = with_read(|| match base {
-        Some(ref base) => run_capped(
-            repo,
-            &["diff", "--name-status", "-z", "-r", "-M", base, id],
-            8_000_000,
-        ),
-        None => run_capped(
+    let (output, truncated) = with_read(|| {
+        run_capped(
             repo,
             &[
                 "diff-tree",
@@ -1552,10 +1611,11 @@ pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
                 "-r",
                 "-M",
                 "--root",
+                "--diff-merges=first-parent",
                 id,
             ],
             8_000_000,
-        ),
+        )
     })?;
     if truncated {
         return Err(capped_output_error(8_000_000));
@@ -1596,6 +1656,7 @@ fn parse_name_status(bytes: &[u8]) -> Vec<FileChange> {
             path: String::from_utf8_lossy(path).into_owned(),
             kind,
             previous_path: previous,
+            submodule_dirty: None,
         });
     }
     files
@@ -1715,24 +1776,8 @@ pub fn show_commit_file_with(
     let id = check_rev(id)?;
     let path = check_path(path)?;
     let unified = format!("--unified={}", context.min(1_000_000));
-    let base = merge_base_of(repo, id);
-    let (output, capped) = with_read(|| match base {
-        Some(ref base) => run_capped(
-            repo,
-            &[
-                "--literal-pathspecs",
-                "diff",
-                "--no-ext-diff",
-                "--no-color",
-                &unified,
-                base,
-                id,
-                "--",
-                path,
-            ],
-            8_000_000,
-        ),
-        None => run_capped(
+    let (output, capped) = with_read(|| {
+        run_capped(
             repo,
             &[
                 "--literal-pathspecs",
@@ -1741,18 +1786,18 @@ pub fn show_commit_file_with(
                 "--no-color",
                 &unified,
                 "--format=",
+                "--diff-merges=first-parent",
                 id,
                 "--",
                 path,
             ],
             8_000_000,
-        ),
+        )
     })?;
     let mut parsed = parse_diff(path, false, &String::from_utf8_lossy(&output.stdout));
     parsed.truncated |= capped;
     if parsed.binary {
-        let old_rev = base.unwrap_or_else(|| format!("{id}^"));
-        parsed.old_bytes = spec_size(repo, &format!("{old_rev}:{path}"));
+        parsed.old_bytes = spec_size(repo, &format!("{id}^1:{path}"));
         parsed.new_bytes = spec_size(repo, &format!("{id}:{path}"));
     }
     Ok(parsed)
@@ -1902,11 +1947,12 @@ pub fn in_progress(repo: &Path) -> Result<Option<InProgress>, Error> {
 }
 
 fn local_branches(repo: &Path) -> Result<Vec<BranchRow>, Error> {
+    let has_checkout = !crate::open_repo(repo).is_ok_and(|repo| repo.is_bare());
     let output = run(
         repo,
         &[
             "for-each-ref",
-            "--format=%(refname:short)%09%(upstream:short)%09%(upstream:track)%09%(HEAD)",
+            "--format=%(refname:lstrip=2)%09%(upstream:short)%09%(upstream:track)%09%(HEAD)",
             "refs/heads",
         ],
     )?;
@@ -1923,7 +1969,7 @@ fn local_branches(repo: &Path) -> Result<Vec<BranchRow>, Error> {
             .filter(|item| !item.is_empty())
             .map(str::to_string);
         let track = fields.next().unwrap_or("");
-        let current = fields.next().unwrap_or("") == "*";
+        let current = has_checkout && fields.next().unwrap_or("") == "*";
         let (ahead, behind) = parse_track(track);
         branches.push(BranchRow {
             name,
@@ -1936,61 +1982,18 @@ fn local_branches(repo: &Path) -> Result<Vec<BranchRow>, Error> {
     Ok(branches)
 }
 
-fn remotes(repo: &Path) -> Result<Vec<RemoteRow>, Error> {
+fn remote_urls(repo: &Path) -> Result<Vec<RemoteRow>, Error> {
     let output = run(repo, &["remote", "-v"])?;
     let text = String::from_utf8_lossy(&output.stdout);
     let mut rows: Vec<RemoteRow> = Vec::new();
     for line in text.lines() {
-        let mut parts = line.split_whitespace();
-        let name = parts.next().unwrap_or("");
-        let url = parts.next().unwrap_or("");
-        let kind = parts.next().unwrap_or("");
-        if name.is_empty() || kind != "(fetch)" {
-            continue;
-        }
+        let Some((name, url)) = line.strip_suffix(" (fetch)").and_then(|entry| entry.split_once('\t')) else { continue };
         rows.push(RemoteRow {
             name: name.to_string(),
             url: Some(url.to_string()),
             head: None,
             branches: Vec::new(),
         });
-    }
-    let refs = run(
-        repo,
-        &[
-            "for-each-ref",
-            "--format=%(refname:short)%09%(symref:short)",
-            "refs/remotes",
-        ],
-    )?;
-    let refs = String::from_utf8_lossy(&refs.stdout);
-    for line in refs.lines() {
-        let mut fields = line.split('\t');
-        let name = fields.next().unwrap_or("");
-        let symref = fields.next().unwrap_or("");
-        let Some((remote, branch)) = name.split_once('/') else {
-            continue;
-        };
-        let Some(row) = rows.iter_mut().find(|row| row.name == remote) else {
-            continue;
-        };
-        if branch == "HEAD" {
-            row.head = symref
-                .split_once('/')
-                .map(|(_, branch)| branch.to_string())
-                .or_else(|| {
-                    if symref.is_empty() {
-                        None
-                    } else {
-                        Some(symref.to_string())
-                    }
-                });
-        } else {
-            row.branches.push(branch.to_string());
-        }
-    }
-    for row in &mut rows {
-        row.branches.sort();
     }
     Ok(rows)
 }
@@ -2023,6 +2026,11 @@ fn tags(repo: &Path) -> Result<Vec<TagRow>, Error> {
 }
 
 fn stashes(repo: &Path) -> Result<Vec<StashRow>, Error> {
+    if crate::open_repo(repo).is_ok_and(|opened| {
+        opened.is_bare() || matches!(opened.try_find_reference("refs/stash"), Ok(None))
+    }) {
+        return Ok(Vec::new());
+    }
     let output = run(
         repo,
         &["stash", "list", "--pretty=format:%H%x09%P%x09%gd%x09%gs"],
@@ -2267,101 +2275,78 @@ fn ignored_paths_native(path: &Path, paths: &[String]) -> Option<Vec<String>> {
 /// Gitlinks named in `.gitmodules`. `git submodule status` also describes each commit, which costs
 /// about half a second on Windows, so the index and each checkout are read directly instead.
 fn submodules(repo: &Path) -> Result<Vec<SubmoduleRow>, Error> {
-    if !repo.join(".gitmodules").is_file() {
-        return Ok(Vec::new());
-    }
-    let config = run_output(
-        repo,
-        &[
-            "config",
-            "-z",
-            "--file",
-            ".gitmodules",
-            "--get-regexp",
-            r"^submodule\..*\.(path|branch)$",
-        ],
-    )?;
-    // Section names may contain dots, so split the key from the fixed suffix instead of
-    // treating dots as separators. `branch = .` means the remote's HEAD and is not a ref.
-    let mut modules: Vec<(String, String)> = Vec::new();
-    let mut positions: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
-    for record in config.stdout.split(|byte| *byte == 0) {
-        let record = String::from_utf8_lossy(record);
-        let Some((key, value)) = record.split_once('\n') else {
-            continue;
-        };
-        let Some(rest) = key.strip_prefix("submodule.") else {
-            continue;
-        };
-        let (name, is_branch) = if let Some(name) = rest.strip_suffix(".path") {
-            (name, false)
-        } else if let Some(name) = rest.strip_suffix(".branch") {
-            (name, true)
-        } else {
-            continue;
-        };
-        let index = *positions.entry(name.to_string()).or_insert_with(|| {
-            modules.push((String::new(), String::new()));
-            modules.len() - 1
-        });
-        let value = value.trim();
-        if is_branch {
-            modules[index].1 = if value == "." { String::new() } else { value.to_string() };
-        } else {
-            modules[index].0 = value.to_string();
+    submodules_with_config(repo).map(|(rows, _)| rows)
+}
+
+pub(crate) fn submodules_with_config(
+    repo: &Path,
+) -> Result<(Vec<SubmoduleRow>, BTreeMap<String, crate::submodule::ModuleConfig>), Error> {
+    use crate::submodule::{config_key, module_config, ModuleConfig};
+
+    let opened = crate::open_repo(repo)?;
+    let index = opened.index_or_empty().map_err(|error| Error::Git(error.to_string()))?;
+    let mut links = BTreeMap::<String, [Option<String>; 4]>::new();
+    for entry in index.entries() {
+        if entry.mode == gix::index::entry::Mode::COMMIT {
+            let path = entry.path(&index).to_string();
+            links.entry(path).or_default()[entry.stage_raw() as usize] = Some(entry.id.to_string());
         }
     }
-    let paths: Vec<(String, String)> = modules
-        .into_iter()
-        .filter(|(path, _)| !path.is_empty())
-        .collect();
-    if paths.is_empty() {
-        return Ok(Vec::new());
+    if links.is_empty() {
+        return Ok((Vec::new(), BTreeMap::new()));
     }
-    let mut args = vec!["--literal-pathspecs", "ls-files", "--stage", "-z", "--"];
-    args.extend(paths.iter().map(|(path, _)| path.as_str()));
-    let output = run(repo, &args)?;
-    let mut rows: Vec<SubmoduleRow> = Vec::new();
-    for record in output.stdout.split(|byte| *byte == 0) {
-        let record = String::from_utf8_lossy(record);
-        let Some((meta, path)) = record.split_once('\t') else {
-            continue;
-        };
-        let mut fields = meta.split_whitespace();
-        if fields.next() != Some("160000") || rows.iter().any(|row| row.path == path) {
-            continue;
+    let (config, parse_error) = if repo.join(".gitmodules").is_file() {
+        match module_config(repo, &["--file", ".gitmodules"]) {
+            Ok(config) => (config, None),
+            Err(error) => (BTreeMap::new(), Some(error.to_string())),
         }
-        let staged = fields.next().unwrap_or("").to_string();
-        let configured = paths
-            .iter()
-            .find(|(item, _)| item == path)
-            .map(|(_, branch)| branch.clone())
-            .unwrap_or_default();
-        let checkout = repo.join(path);
-        let ready = checkout.join(".git").exists();
-        let (branch, head) = if ready {
-            checked_out(&checkout).unwrap_or_default()
+    } else {
+        (BTreeMap::new(), None)
+    };
+    let parent_branch = crate::current_branch(repo)?.unwrap_or_default();
+    let mut rows = Vec::with_capacity(links.len());
+    for (path, [staged, base, ours, theirs]) in links {
+        let conflict = [base, ours, theirs];
+        let conflict = conflict.iter().any(Option::is_some).then_some(conflict);
+        let recorded = staged.unwrap_or_default();
+        let checkout = crate::cli::check_path(&path).ok().map(|path| repo.join(path));
+        let present = checkout.as_ref().is_some_and(|path| path.join(".git").symlink_metadata().is_ok());
+        let head = checkout.filter(|_| present).and_then(|checkout| checked_out(&checkout));
+        let ready = head.is_some();
+        let (branch, id) = head.unwrap_or_default();
+        let module = config.get(&path);
+        let configured = module.map_or("", |module: &ModuleConfig| module.branch.as_str());
+        let inherits_branch = configured == ".";
+        let configured_branch = if inherits_branch { parent_branch.clone() } else { configured.into() };
+        let config_error = if parse_error.is_some() {
+            parse_error.clone()
+        } else if module.is_none_or(|module| module.url.is_empty()) {
+            Some("Missing path or URL in .gitmodules / .gitmodules 缺少对应路径或 URL".into())
         } else {
-            (String::new(), String::new())
+            None
         };
-        let id = if head.is_empty() { staged.clone() } else { head };
         rows.push(SubmoduleRow {
-            path: path.to_string(),
+            config_key: config_key(module, &parent_branch),
+            path,
             id,
-            recorded: staged,
+            recorded,
+            conflict,
             branch,
-            configured_branch: configured,
+            configured_branch,
+            inherits_branch,
             ready,
+            broken_checkout: present && !ready,
+            config_error,
         });
     }
-    rows.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(rows)
+    Ok((rows, config))
 }
 
 fn checked_out(dir: &Path) -> Option<(String, String)> {
     if let Some(head) = head_from_files(dir) {
         return Some(head);
     }
+    git_dir_of(dir)?.is_dir().then_some(())?;
     let repo = gix::open(dir).ok()?;
     let branch = repo
         .head()
@@ -2390,8 +2375,7 @@ fn head_from_files(dir: &Path) -> Option<(String, String)> {
         None => (String::new(), head.to_string()),
     };
     let id = candidate.split_whitespace().next().unwrap_or("");
-    (id.len() >= 7 && id.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .then(|| (branch, id.to_string()))
+    crate::submodule::valid_oid(id).then(|| (branch, id.to_string()))
 }
 
 fn git_dir_of(dir: &Path) -> Option<PathBuf> {
@@ -2436,37 +2420,6 @@ fn read_ref(git_dir: &Path, name: &str) -> Option<String> {
             let (id, path) = line.split_once(' ')?;
             (path.trim() == name).then(|| id.to_string())
         })
-}
-
-fn worktrees(repo: &Path) -> Result<Vec<WorktreeRow>, Error> {
-    let output = run(repo, &["worktree", "list", "--porcelain"])?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut rows = Vec::new();
-    let mut current: Option<WorktreeRow> = None;
-    for line in text.lines() {
-        if let Some(path) = line.strip_prefix("worktree ") {
-            if let Some(row) = current.take() {
-                rows.push(row);
-            }
-            current = Some(WorktreeRow {
-                path: path.to_string(),
-                branch: None,
-                detached: false,
-            });
-        } else if let Some(branch) = line.strip_prefix("branch ") {
-            if let Some(row) = current.as_mut() {
-                row.branch = branch.strip_prefix("refs/heads/").map(str::to_string);
-            }
-        } else if line == "detached" {
-            if let Some(row) = current.as_mut() {
-                row.detached = true;
-            }
-        }
-    }
-    if let Some(row) = current {
-        rows.push(row);
-    }
-    Ok(rows)
 }
 
 fn parse_track(text: &str) -> (u32, u32) {

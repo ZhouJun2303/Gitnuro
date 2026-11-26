@@ -1106,7 +1106,7 @@ pub fn begin_kind(repo: &Path, kind: &str, request: Option<&Mutation>) -> Option
             Mutation::CherryPick { rev, revs, .. } => flow::commit(repo, revs.last().map(String::as_str).unwrap_or(rev)),
             Mutation::Revert { rev, .. }
             | Mutation::Reset { rev, .. } => flow::commit(repo, rev),
-            Mutation::Merge { name, .. } => flow::commit(repo, name),
+            Mutation::Merge { name, .. } | Mutation::MergeWorktree { head: name, .. } => flow::commit(repo, name),
             Mutation::Rebase { onto, .. } | Mutation::RebaseInteractive { onto, .. } => {
                 flow::commit(repo, onto)
             }
@@ -1149,7 +1149,7 @@ pub fn begin_kind(repo: &Path, kind: &str, request: Option<&Mutation>) -> Option
         );
     }
     let preview = request.and_then(|request| match request {
-        Mutation::Merge { name, .. } => Some((name.clone(), false, Vec::new())),
+        Mutation::Merge { name, .. } | Mutation::MergeWorktree { head: name, .. } => Some((name.clone(), false, Vec::new())),
         Mutation::Rebase { onto, .. } => Some((onto.clone(), true, Vec::new())),
         Mutation::RebaseInteractive { onto, steps, .. } => {
             Some((onto.clone(), true, steps.clone()))

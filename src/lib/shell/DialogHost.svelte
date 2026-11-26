@@ -1,4 +1,5 @@
 <script lang="ts">
+  import WorktreeDialog from "./WorktreeDialog.svelte";
   import { getShell } from "./context";
   import "./DialogHost.css";
   import PrefsDialog from "./PrefsDialog.svelte";
@@ -95,6 +96,7 @@
   const largeDialogs = new Set(["prefs", "stats", "rebase", "output", "mergeConflict"]);
   const smallDialogs = new Set(["reset", "branch", "tag", "rename", "upstream", "reword", "remote", "submodule", "worktree", "continue", "about", "features", "checkoutNotice", "stashRename", "stashBranch", "renameTab", "colorTab", "groupRename", "askInput", "workspace", "credential"]);
   function dialogSize(kind: string) {
+    if (kind === "worktree" && shell.worktreeDialog.kind === "manage") return "lg";
     if (largeDialogs.has(kind)) return "lg";
     if (smallDialogs.has(kind)) return "sm";
     return "md";
@@ -211,6 +213,11 @@
     <div class="scrim" class:slider-preview={shell.dialog === "prefs" && shell.prefSliderDragging} role="presentation" onclick={() => { if (shell.writeBlocked || shell.dialog === "prefs") return; closeDialog(); }}>
       <div class="dialog {dialogSize(shell.dialog ?? "")}" class:prefs={shell.dialog === "prefs"} class:slider-dragging={shell.dialog === "prefs" && shell.prefSliderDragging} class:path-dialog={shell.dialog === "clone"} class:workspace={shell.dialog === "workspace"} data-dialog={shell.dialog} role="dialog" tabindex="-1" onclick={(event) => event.stopPropagation()} onkeydown={trapTab}>
       <button class="dialog-close" type="button" aria-label={shell.tr("chrome.close")} title={shell.tr("chrome.close")} onclick={closeDialog}>×</button>
+      {#if shell.dialog === "worktree"}
+        {#key shell.worktreeDialog}
+          <WorktreeDialog view={shell.worktreeDialog} />
+        {/key}
+      {:else}
       <form
         onchange={() => { if (shell.dialog === "prefs") void shell.savePrefs(false); }}
         onsubmit={async (event) => {
@@ -308,7 +315,6 @@
           }
           else if (shell.dialog === "patch") void shell.mutate({ action: "applyPatch", patch: shell.draft });
           else if (shell.dialog === "submodule") void shell.mutate({ action: "submoduleAdd", url: shell.draft, path: shell.draftExtra });
-          else if (shell.dialog === "worktree") void shell.mutate({ action: "addWorktree", path: shell.draft, branch: shell.draftExtra });
           else if (shell.dialog === "workspace") {
             if (shell.draft.trim()) {
               shell.dialog = null;
@@ -718,14 +724,6 @@
             <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
             <button class="commit" type="submit" disabled={loading}>{shell.tr("dialog.create")}</button>
           </div>
-        {:else if shell.dialog === "worktree"}
-          <h2>{shell.tr("dialog.addWorktree")}</h2>
-          <label>{shell.tr("dialog.path")}<input bind:value={shell.draft} /></label>
-          <label>{shell.tr("dialog.branch")}<input bind:value={shell.draftExtra} /></label>
-          <div class="composer-row actions">
-            <button class="text-button" type="button" onclick={closeDialog}>{shell.tr("dialog.cancel")}</button>
-            <button class="commit" type="submit" disabled={loading}>{shell.tr("dialog.create")}</button>
-          </div>
         {:else if shell.dialog === "workspace"}
           <h2>{shell.tr("chrome.workspace")}</h2>
           <div class="workspace-list">
@@ -1118,6 +1116,7 @@
           </div>
         {/if}
       </form>
+      {/if}
       {#if shell.actionError}<p class="dialog-error" role="alert">{shell.actionError}</p>{/if}
       </div>
     </div>

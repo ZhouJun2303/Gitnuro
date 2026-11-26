@@ -11,7 +11,8 @@
   import BinaryDiff from "./BinaryDiff.svelte";
   import ImageComparison from "./ImageComparison.svelte";
   import { formatBytes } from "../format";
-  import type { CommitRow, ConflictParty, ConflictSides, DiffLine } from "../status";
+  import type { CommitRow, ConflictParty, ConflictSides, DiffLine, SubmoduleRow } from "../status";
+  import { submoduleHealth } from "./sideRows";
 
   const shell = getShell();
   const splitScroller = (node: HTMLElement, columns?: { left: number; right: number }) => shell.splitScroller(node, columns);
@@ -67,28 +68,27 @@
     if (mode === "pixel" && before && after) void shell.paintPixel(before, after);
   }
 
-  const selectedSubmodule = $derived.by(() => {
+  const selectedSubmodule = $derived.by<SubmoduleRow | null>(() => {
     const path = shell.selectedPath;
     if (shell.mode !== "live" || shell.section !== "changes" || !path) return null;
     const row = shell.refs?.submodules.find((item) => item.path === path);
     if (row) return row;
     // A refs read can arrive after the diff read. Gitlink text still identifies the path.
-    return shell.diff?.lines.some((line) => line.text.startsWith("-Subproject commit ") || line.text.startsWith("+Subproject commit "))
-      ? { path, id: "", recorded: "", branch: "", configuredBranch: "", ready: false }
+    return shell.diff?.path === path && shell.diff.lines.some((line) => /^(?:index [a-f\d.]+ |(?:new file|deleted file|old|new) mode )160000$/i.test(line.text))
+      ? { path, id: "", recorded: "", branch: "", configuredBranch: "", inheritsBranch: false, ready: false, brokenCheckout: false, configKey: "" }
       : null;
   });
   const submoduleCommits = $derived.by(() => {
-    if (!selectedSubmodule) return { oldId: "", newId: "" };
+    if (!selectedSubmodule || shell.diff?.path !== selectedSubmodule.path) return { oldId: "", newId: "" };
     let oldId = "";
     let newId = "";
     for (const line of shell.diff?.lines ?? []) {
-      if (line.text.startsWith("-Subproject commit ")) oldId = line.text.slice("-Subproject commit ".length).trim();
-      if (line.text.startsWith("+Subproject commit ")) newId = line.text.slice("+Subproject commit ".length).trim();
+      const match = /^([+-])Subproject commit ((?:[a-f\d]{40}|[a-f\d]{64}))(?:-dirty)?$/i.exec(line.text.trimEnd());
+      if (match?.[1] === "-") oldId = match[2]!;
+      if (match?.[1] === "+") newId = match[2]!;
     }
     return { oldId, newId };
   });
-  let submoduleDetailsKey = $state("");
-  let submoduleDetailsToken = 0;
   let submoduleHistory = $state<CommitRow[]>([]);
   let submoduleDetailsLoading = $state(false);
   let submoduleDetailsError = $state("");
@@ -98,56 +98,40 @@
   const submoduleUncommittedCount = $derived.by(() => {
     const path = selectedSubmodule?.path;
     if (!path) return 0;
-    const parentRows = [...(shell.snapshot?.staged ?? []), ...(shell.snapshot?.unstaged ?? [])];
-    return parentRows.some((file) => file.path === path) ? 1 : 0;
+    return shell.snapshot?.unstaged.find((file) => file.path === path)?.submoduleDirty ?? 0;
   });
+  const submoduleDiagnostic = $derived(selectedSubmodule ? submoduleHealth(shell, selectedSubmodule) : null);
+  const submoduleFilesOnly = $derived(shell.selectedSide === "unstaged" && submoduleUncommittedCount > 0 &&
+    selectedSubmodule?.ready && selectedSubmodule.id === selectedSubmodule.recorded && !selectedSubmodule.conflict);
+  const submoduleHistoryPath = $derived(selectedSubmodule?.ready ? shell.fullPath(selectedSubmodule.path) : "");
+  const submoduleOldId = $derived(submoduleCommits.oldId);
+  const submoduleNewId = $derived(submoduleCommits.newId);
 
   $effect(() => {
-    const submodule = selectedSubmodule;
-    const path = submodule?.ready ? shell.fullPath(submodule.path) : "";
-    const oldId = submoduleCommits.oldId;
-    const newId = submoduleCommits.newId;
-    if (!path || !newId) {
-      submoduleDetailsKey = "";
-      submoduleHistory = [];
-      submoduleDetailsLoading = false;
-      submoduleDetailsError = "";
-      submoduleSelectedCommitId = "";
-      return;
-    }
-    const key = `${path}\0${oldId}\0${newId}`;
-    if (key === submoduleDetailsKey) return;
-    submoduleDetailsKey = key;
-    submoduleDetailsToken += 1;
-    const token = submoduleDetailsToken;
+    const path = submoduleHistoryPath;
+    const oldId = submoduleOldId;
+    const newId = submoduleNewId;
+    let current = true;
     submoduleHistory = [];
-    submoduleDetailsLoading = true;
+    submoduleDetailsLoading = !!path && !!newId && oldId !== newId;
     submoduleDetailsError = "";
     submoduleSelectedCommitId = "";
-
-    const revs = oldId && oldId !== newId ? [newId, `^${oldId}`] : [newId];
+    if (!path || !newId || oldId === newId) return;
+    const revs = oldId ? [newId, `^${oldId}`] : [newId];
     void (async () => {
-      let history: CommitRow[] = [];
-      let failed = false;
       try {
-        history = await invoke<CommitRow[]>("commit_log", { path, limit: 20, all: false, order: "date", revs });
-      } catch {
-        failed = true;
-      }
-      if (history.length === 0 && oldId && oldId !== newId) {
-        try {
-          history = await invoke<CommitRow[]>("commit_log", { path, limit: 20, all: false, order: "date", revs: [newId] });
-          failed = false;
-        } catch {
-          failed = true;
+        const history = await invoke<CommitRow[]>("commit_log", { path, limit: 20, all: false, order: "date", revs });
+        if (current) {
+          submoduleHistory = history;
+          submoduleSelectedCommitId = history[0]?.id ?? "";
         }
+      } catch (error) {
+        if (current) submoduleDetailsError = shell.message(error);
+      } finally {
+        if (current) submoduleDetailsLoading = false;
       }
-      if (token !== submoduleDetailsToken) return;
-      submoduleHistory = history;
-      submoduleSelectedCommitId = history[0]?.id ?? "";
-      submoduleDetailsError = failed && history.length === 0 ? shell.tr("chrome.submoduleDetailsUnavailable") : "";
-      submoduleDetailsLoading = false;
     })();
+    return () => { current = false; };
   });
   const hunkList = $derived(shell.mode === "live" && shell.section === "changes" && !selectedSubmodule ? shell.hunkRanges() : []);
   let wrapped = $state<{ scrollTo: (index: number) => Promise<void> }>();
@@ -608,7 +592,7 @@
                 <button class="pane-chip" type="button" disabled={shell.writeBlocked} title={shell.tr("menu.externalDiff")} onclick={(event) => shell.openExternalToolMenu(event, "diff", shell.selectedPath ?? "")}>{shell.tr("chrome.externalDiff")}</button>
               {/if}
               {#if submodule}
-                <button class="pane-chip" data-submodule-stage type="button" disabled={shell.stageDisabled || shell.pathPending(shell.selectedPath)} title={shell.tr(submoduleActionLabel())} onclick={stageActive}>{shell.tr(submoduleActionLabel())}</button>
+                <button class="pane-chip" data-submodule-stage type="button" disabled={shell.stageDisabled || shell.pathPending(shell.selectedPath) || submoduleFilesOnly} title={shell.tr(submoduleFilesOnly ? "chrome.submoduleOnlyFiles" : submoduleActionLabel())} onclick={stageActive}>{shell.tr(submoduleActionLabel())}</button>
               {:else if hunkList.length > 0}
                 <div class="hunk-tools" role="group" aria-label={shell.tr("chrome.hunkActions")}>
                   <button class="hunk-step" type="button" disabled={shell.writeBlocked} aria-label={shell.tr("menu.prevHunk")} title={shell.tr("menu.prevHunk")} onclick={() => stepHunk(-1)}>‹</button>
@@ -651,10 +635,16 @@
                       {shell.tr(submoduleUncommittedCount === 1 ? "chrome.submoduleUncommittedOne" : "chrome.submoduleUncommittedMany", { count: String(submoduleUncommittedCount) })}
                     </p>
                   {/if}
+                  {#if submoduleDiagnostic && submodule.configKey}
+                    <details class="submodule-diff-diagnostic">
+                      <summary>{submoduleDiagnostic.note}</summary>
+                      <p>{submoduleDiagnostic.title}</p>
+                    </details>
+                  {/if}
                   {#if !submodule.ready}
-                    <p class="submodule-diff-hint">{shell.tr("chrome.submoduleNotReady")}</p>
+                    <p class="submodule-diff-hint">{shell.tr(submodule.brokenCheckout ? "chrome.submoduleBrokenDetail" : "chrome.submoduleNotReady")}</p>
                   {:else if submoduleDetailsError}
-                    <p class="submodule-diff-hint">{submoduleDetailsError}</p>
+                    <p class="submodule-diff-hint" title={submoduleDetailsError}>{shell.tr("chrome.submoduleDetailsUnavailable")} {submoduleDetailsError}</p>
                   {:else if submoduleDetailsLoading}
                     <p class="submodule-diff-hint">{shell.tr("chrome.submoduleHistoryLoading")}</p>
                   {:else if submoduleHistory.length === 0}
@@ -695,7 +685,7 @@
                     <div data-submodule-new><span>{shell.tr("chrome.submoduleNew")}</span><code title={submoduleCommits.newId}>{submoduleCommits.newId || "—"}</code></div>
                   </div>
                   <div class="submodule-footer">
-                    <span class="submodule-footer-hint">{shell.tr(submodule.ready ? "chrome.submoduleChangeHint" : "chrome.submoduleNotReady")}</span>
+                    <span class="submodule-footer-hint">{shell.tr(submoduleFilesOnly ? "chrome.submoduleOnlyFiles" : "chrome.submoduleChangeHint")}</span>
                     <button class="pane-chip submodule-open" data-submodule-open type="button" disabled={!submodule.ready} title={shell.tr("chrome.openSubmodule")} onclick={() => void shell.openRepo(shell.fullPath(submodule.path))}>{shell.tr("chrome.openSubmodule")}</button>
                   </div>
                   </div>

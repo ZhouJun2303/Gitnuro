@@ -1,6 +1,6 @@
 import type { ShellState } from "./state.svelte";
 import { branchGroup, orderRefNames } from "../view";
-import type { SubmoduleRow } from "../status";
+import type { SubmoduleRemoteCommit, SubmoduleRow, WorktreeRow } from "../status";
 
 export type SideAdd = "branch" | "remote" | "submodule" | "worktree";
 type PagedSection = "tags" | "stashes";
@@ -18,42 +18,95 @@ export type SideRow =
   | { key: string; kind: "stash"; name: string; summary: string; id?: string }
   | { key: string; kind: "submodule"; path: string; ready: boolean; tone: SubmoduleTone; title: string }
   | { key: string; kind: "submoduleNote"; path: string; tone: SubmoduleTone; note: string; title: string }
-  | { key: string; kind: "worktree"; path: string; branch: string | null };
+  | { key: string; kind: "worktree"; worktree: WorktreeRow };
 
 type SubmoduleHealth = { tone: SubmoduleTone; note: string; title: string };
 
-/**
- * Whether the submodule is used the way the superproject expects. Detached HEAD is normal when
- * `.gitmodules` names no branch: the gitlink pins one commit. A named branch must be checked out.
- */
-function submoduleHealth(shell: ShellState, row: SubmoduleRow): SubmoduleHealth {
+export function submoduleHealth(shell: ShellState, row: SubmoduleRow): SubmoduleHealth {
   const short = (id: string) => (id ? id.slice(0, 7) : "—");
-  if (!row.ready) {
-    const note = shell.tr("chrome.submoduleUninitialized");
-    return { tone: "muted", note, title: `${note}\n${shell.tr("chrome.submoduleHealthUninitialized")}` };
+  const details = [
+    shell.tr("chrome.submodulePathValue", { path: row.path }),
+    shell.tr("chrome.submoduleIndexValue", { id: row.recorded || "—" }),
+    shell.tr("chrome.submoduleCheckoutValue", { id: row.id || "—", branch: row.branch || (row.ready ? "HEAD" : "—") }),
+  ];
+  const issues: { tone: SubmoduleTone; note: string }[] = [];
+  const add = (tone: SubmoduleTone, note: string, detail?: string) => {
+    issues.push({ tone, note });
+    if (detail) details.push(detail);
+  };
+  if (row.conflict) {
+    add("bad", shell.tr("chrome.submoduleConflict"), shell.tr("chrome.submoduleConflictDetail", {
+      base: row.conflict[0] ?? "—", ours: row.conflict[1] ?? "—", theirs: row.conflict[2] ?? "—",
+    }));
   }
-  // The superproject lists an unstaged submodule path for worktree changes only while the
-  // checkout commit still matches the gitlink; a different commit is reported as its own state.
-  const dirty = row.id === row.recorded && (shell.snapshot?.unstaged ?? []).some((file) => file.path === row.path);
-  const suffix = dirty ? shell.tr("chrome.submoduleDirtySuffix") : "";
-  if (row.configuredBranch && row.branch && row.branch !== row.configuredBranch) {
-    const note = shell.tr("chrome.submoduleBranchMismatch", { configured: row.configuredBranch, actual: row.branch }) + suffix;
-    return { tone: "bad", note, title: `${note}\n${shell.tr("chrome.submoduleHealthBranch", { configured: row.configuredBranch })}` };
+  if (row.brokenCheckout) {
+    add("bad", shell.tr("chrome.submoduleBroken"), shell.tr("chrome.submoduleBrokenDetail"));
+  } else if (!row.ready) {
+    add("muted", shell.tr("chrome.submoduleUninitialized"), shell.tr("chrome.submoduleHealthUninitialized"));
   }
-  if (row.configuredBranch && !row.branch) {
-    const note = shell.tr("chrome.submoduleDetached", { branch: row.configuredBranch }) + suffix;
-    return { tone: "warn", note, title: `${note}\n${shell.tr("chrome.submoduleHealthDetached", { branch: row.configuredBranch })}` };
+  if (row.configError) {
+    add("bad", shell.tr("chrome.submoduleConfigIssue"), row.configError);
   }
-  if (row.id !== row.recorded) {
-    const note = shell.tr("chrome.submoduleCommitMismatch", { recorded: short(row.recorded), actual: short(row.id) }) + suffix;
-    return { tone: "warn", note, title: `${note}\n${shell.tr("chrome.submoduleHealthCommit")}` };
+  const remote = shell.submoduleRemote.repo === shell.jobKey(shell.repoPath()) ? shell.submoduleRemote : undefined;
+  const result = remote?.rows.find((item) => item.path === row.path && item.configKey === row.configKey);
+  const target = result?.target || row.configuredBranch;
+  details.push(shell.tr("chrome.submoduleTargetValue", { branch: target || "—" }));
+  if (row.inheritsBranch) {
+    if (row.configuredBranch) details.push(shell.tr("chrome.submoduleInherited"));
+    else add("warn", shell.tr("chrome.submoduleInheritedDetached"), shell.tr("chrome.submoduleInheritedDetachedDetail"));
   }
-  if (dirty) {
-    const note = shell.tr("chrome.submoduleDirty");
-    return { tone: "warn", note, title: `${note}\n${shell.tr("chrome.submoduleHealthDirty")}` };
+  if (result?.url) details.push(shell.tr("chrome.submoduleRemoteValue", { url: result.url }));
+  const showRemote = (commit: SubmoduleRemoteCommit | undefined, id: string, role: string) => {
+    if (!id) return;
+    if (commit?.id !== id) {
+      if (!remote?.pending && !result?.error && !remote?.error) {
+        details.push(shell.tr("chrome.submoduleRemoteUnchecked", { role, id }));
+      }
+      return;
+    }
+    const values = { role, id, branch: target || "—", ref: commit.ref ? ` (${commit.ref})` : "" };
+    switch (commit.state) {
+      case "inTarget":
+        add("ok", shell.tr("chrome.submoduleRemoteInTarget", values), shell.tr("chrome.submoduleRemoteInTargetDetail", values));
+        break;
+      case "outsideTarget":
+        add("warn", shell.tr("chrome.submoduleRemoteOutside", values), shell.tr("chrome.submoduleRemoteOutsideDetail", values));
+        break;
+      case "targetMissing":
+        add("warn", shell.tr("chrome.submoduleRemoteTargetMissing", values), shell.tr("chrome.submoduleRemoteTargetMissingDetail", values));
+        break;
+      case "reachable":
+        add("ok", shell.tr("chrome.submoduleRemoteReachable", values), shell.tr("chrome.submoduleRemoteReachableDetail", values));
+        break;
+      case "unreachable":
+        add("bad", shell.tr("chrome.submoduleRemoteUnreachable", values), shell.tr("chrome.submoduleRemoteUnreachableDetail", values));
+        break;
+    }
+  };
+  if (remote?.pending) details.push(shell.tr("chrome.submoduleRemoteChecking"));
+  if (result?.error || remote?.error) {
+    add("warn", shell.tr("chrome.submoduleRemoteFailed"), shell.tr("chrome.submoduleRemoteFailedDetail", { error: result?.error || remote?.error || "" }));
   }
-  const note = row.branch ? shell.tr("chrome.submoduleHealthyBranch", { branch: row.branch }) : shell.tr("chrome.submoduleHealthyPinned", { id: short(row.id) });
-  return { tone: "ok", note, title: `${note}\n${shell.tr("chrome.submoduleHealthOk")}` };
+  showRemote(result?.recorded, row.recorded, shell.tr("chrome.submoduleIndexRole"));
+  if (row.id !== row.recorded) showRemote(result?.checkout, row.id, shell.tr("chrome.submoduleCheckoutRole"));
+
+  if (row.ready && row.configuredBranch && row.branch && row.branch !== row.configuredBranch) {
+    add("warn", shell.tr("chrome.submoduleBranchMismatch", { configured: row.configuredBranch, actual: row.branch }), shell.tr("chrome.submoduleHealthBranch"));
+  } else if (row.ready && !row.branch && row.configuredBranch) {
+    details.push(shell.tr("chrome.submoduleHealthDetached", { branch: row.configuredBranch }));
+  }
+  if (row.ready && row.recorded && row.id !== row.recorded) {
+    add("warn", shell.tr("chrome.submoduleCommitMismatch", { recorded: short(row.recorded), actual: short(row.id) }), shell.tr("chrome.submoduleHealthCommit"));
+  }
+  const dirty = shell.snapshot?.unstaged.find((file) => file.path === row.path)?.submoduleDirty ?? 0;
+  if (dirty > 0) {
+    add("warn", shell.tr("chrome.submoduleDirty", { count: String(dirty) }), shell.tr("chrome.submoduleHealthDirty"));
+  }
+  const tone = (["bad", "warn", "muted", "ok"] as const).find((tone) => issues.some((issue) => issue.tone === tone)) ?? "ok";
+  const local = row.branch ? shell.tr("chrome.submoduleHealthyBranch", { branch: row.branch }) : shell.tr("chrome.submoduleHealthyPinned", { id: short(row.id) });
+  const notes = issues.map((issue) => issue.note);
+  const note = notes.join(" · ") || local;
+  return { tone, note, title: [note, ...details].join("\n") };
 }
 
 /** Flat sidebar rows. The view draws only the ones inside the scroll window. */
@@ -257,7 +310,7 @@ export function liveSideRows(shell: ShellState, limits: Record<PagedSection, num
     if (shell.sideOpen("worktrees")) {
       for (const row of refs.worktrees) {
         if (!shell.matchesQuery(row.path, query) && !shell.matchesQuery(row.branch ?? "", query)) continue;
-        rows.push({ key: `worktree:${row.path}`, kind: "worktree", path: row.path, branch: row.branch });
+        rows.push({ key: `worktree:${row.path}`, kind: "worktree", worktree: row });
       }
     }
   }

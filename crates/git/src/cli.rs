@@ -692,6 +692,15 @@ pub(crate) fn run_stdin_output(
     run_prepared(repo, args, &[], Some(stdin), AuthorMode::Both, true)
 }
 
+pub(crate) fn run_graph(
+    repo: &Path,
+    args: &[&str],
+    stdin: Option<&[u8]>,
+) -> Result<std::process::Output, Error> {
+    run_prepared(repo, args, &[("GIT_NO_REPLACE_OBJECTS", "1"), ("GIT_NO_LAZY_FETCH", "1")],
+        stdin, AuthorMode::Repo, true)
+}
+
 /// Like `run_stdin`, but keeps a repository-local `user.name`.
 pub(crate) fn run_stdin_repo_author(
     repo: &Path,

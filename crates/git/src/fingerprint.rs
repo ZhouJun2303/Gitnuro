@@ -1,7 +1,7 @@
-//! A status fingerprint reads `HEAD`, the branch ref, and the index trailer.
+//! A status fingerprint reads `HEAD`, the branch ref, the index trailer, and
+//! the checked-out state of submodules and linked worktrees.
 //!
-//! It does not stat the work tree. A matching fingerprint means the branch and
-//! the index are unchanged. Work tree edits stay the file watcher's job.
+//! Work tree edits stay the file watcher's job.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::Error;
 
-/// Identity of `HEAD` and the index. Equal values mean neither has changed.
+/// Identity of `HEAD`, the index, and checked-out submodules. Equal values mean
+/// neither the superproject's branch/index nor a submodule's checkout changed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusFingerprint {
@@ -19,9 +20,13 @@ pub struct StatusFingerprint {
     pub ref_id: String,
     pub index_len: u64,
     pub index_sum: String,
+    #[serde(default)]
+    pub submodule_sum: String,
+    #[serde(default)]
+    pub worktree_sum: String,
 }
 
-/// Read the fingerprint. A few small files, never the work tree.
+/// Read the fingerprint from checkout and registry metadata.
 pub fn status_fingerprint(repo: &Path) -> Result<StatusFingerprint, Error> {
     let git = git_metadata(repo)?;
     let head = read_capped(&git.join("HEAD"), 512)?;
@@ -32,7 +37,108 @@ pub fn status_fingerprint(repo: &Path) -> Result<StatusFingerprint, Error> {
         head.clone()
     };
     let (index_len, index_sum) = index_tail(&git.join("index"));
-    Ok(StatusFingerprint { head, ref_id, index_len, index_sum })
+    let common = common_dir(&git);
+    let worktree_sum = crate::worktree::registry_stamp(&common).to_string();
+    Ok(StatusFingerprint { head, ref_id, index_len, index_sum, submodule_sum: submodule_sum(repo), worktree_sum })
+}
+
+/// A superproject's own `HEAD` and index stay unchanged while a submodule
+/// moves to another commit. Hash the small metadata files that describe each
+/// checkout so switching back to the superproject cannot reuse its old status.
+fn submodule_sum(repo: &Path) -> String {
+    let mut hash = StableHash::new();
+    let modules = repo.join(".gitmodules");
+    let Ok(text) = std::fs::read_to_string(&modules) else {
+        hash.write(b"gitmodules:missing");
+        return hash.finish();
+    };
+    hash.write(b"gitmodules:");
+    hash.write(text.as_bytes());
+    for path in submodule_paths(&text) {
+        hash.write(b"|path:");
+        hash.write(path.as_bytes());
+        let checkout = repo.join(&path);
+        let Ok(git) = git_metadata(&checkout) else {
+            hash.write(b"|checkout:missing");
+            continue;
+        };
+        hash.write(b"|gitdir:");
+        feed_file(&mut hash, &checkout.join(".git"), 4 * 1024);
+        hash.write(b"|HEAD:");
+        let head = read_capped(&git.join("HEAD"), 512).unwrap_or_default();
+        hash.write(head.trim().as_bytes());
+        let ref_id = head
+            .trim()
+            .strip_prefix("ref:")
+            .and_then(|name| loose_ref(&git, name.trim()))
+            .unwrap_or_else(|| packed_stat(&git));
+        hash.write(b"|ref:");
+        hash.write(ref_id.as_bytes());
+        let (index_len, index_sum) = index_tail(&git.join("index"));
+        hash.write(b"|index:");
+        hash.write(index_len.to_string().as_bytes());
+        hash.write(b":");
+        hash.write(index_sum.as_bytes());
+    }
+    hash.finish()
+}
+
+fn submodule_paths(text: &str) -> Vec<String> {
+    let mut paths = text
+        .lines()
+        .filter_map(|line| {
+            let (key, value) = line.trim().split_once('=')?;
+            (key.trim() == "path").then(|| value.trim().trim_matches('"').to_string())
+        })
+        .filter(|path| safe_submodule_path(path))
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn safe_submodule_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.contains('\0')
+        && !Path::new(path).is_absolute()
+        && !path.split(['/', '\\']).any(|part| part.is_empty() || part == "." || part == "..")
+}
+
+fn feed_file(hash: &mut StableHash, path: &Path, cap: usize) {
+    let Ok(meta) = std::fs::metadata(path) else {
+        hash.write(b"missing");
+        return;
+    };
+    hash.write(meta.len().to_string().as_bytes());
+    if let Ok(modified) = meta.modified() {
+        if let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) {
+            hash.write(duration.as_nanos().to_string().as_bytes());
+        }
+    }
+    if meta.is_file() {
+        if let Ok(bytes) = std::fs::read(path) {
+            hash.write(&bytes[..bytes.len().min(cap)]);
+        }
+    }
+}
+
+struct StableHash(u64);
+
+impl StableHash {
+    fn new() -> Self {
+        Self(14_695_981_039_346_656_037)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(1_099_511_628_211);
+        }
+    }
+
+    fn finish(self) -> String {
+        format!("{:016x}", self.0)
+    }
 }
 
 fn git_metadata(repo: &Path) -> Result<PathBuf, Error> {
@@ -41,6 +147,9 @@ fn git_metadata(repo: &Path) -> Result<PathBuf, Error> {
         return Ok(dot);
     }
     if !dot.is_file() {
+        if repo.join("HEAD").is_file() && repo.join("objects").is_dir() {
+            return Ok(repo.to_path_buf());
+        }
         return Err(Error::Missing { path: repo.display().to_string() });
     }
     let text = std::fs::read_to_string(&dot).map_err(|source| Error::Read { path: dot.display().to_string(), source })?;
@@ -71,7 +180,7 @@ fn common_dir(git: &Path) -> PathBuf {
 }
 
 /// The loose ref only. `packed-refs` can be large, so a missing loose ref records its size and mtime.
-fn loose_ref(git: &Path, name: &str) -> Option<String> {
+pub(crate) fn loose_ref(git: &Path, name: &str) -> Option<String> {
     if !safe_ref(name) {
         return Some(String::new());
     }
@@ -101,7 +210,7 @@ fn read_ref_file(path: &Path) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-fn packed_stat(git: &Path) -> String {
+pub(crate) fn packed_stat(git: &Path) -> String {
     let path = common_dir(git).join("packed-refs");
     match path.metadata() {
         Ok(meta) => {
@@ -114,7 +223,7 @@ fn packed_stat(git: &Path) -> String {
 }
 
 /// Last 32 bytes of the index. That covers the SHA-1 trailer and a SHA-256 trailer without reading the body.
-fn index_tail(path: &Path) -> (u64, String) {
+pub(crate) fn index_tail(path: &Path) -> (u64, String) {
     let Ok(mut file) = File::open(path) else {
         return (0, String::new());
     };
@@ -234,6 +343,23 @@ mod tests {
         repo.git(&["commit", "-m", "two"]);
         let next = status_fingerprint(&repo.path).unwrap();
         assert_ne!(staged.ref_id, next.ref_id);
+    }
+
+    #[test]
+    fn submodule_checkout_changes_move_the_fingerprint() {
+        let repo = TempRepo::new();
+        let child = repo.path.join("libs").join("child");
+        let child_git = repo.path.join(".git").join("modules").join("libs").join("child");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::create_dir_all(child_git.join("refs").join("heads")).unwrap();
+        std::fs::write(repo.path.join(".gitmodules"), "[submodule \"child\"]\n\tpath = libs/child\n").unwrap();
+        std::fs::write(child.join(".git"), "gitdir: ../../.git/modules/libs/child\n").unwrap();
+        std::fs::write(child_git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::write(child_git.join("refs").join("heads").join("main"), "1111111111111111111111111111111111111111\n").unwrap();
+        let first = status_fingerprint(&repo.path).unwrap();
+        std::fs::write(child_git.join("refs").join("heads").join("main"), "2222222222222222222222222222222222222222\n").unwrap();
+        let second = status_fingerprint(&repo.path).unwrap();
+        assert_ne!(first.submodule_sum, second.submodule_sum);
     }
 
     #[test]

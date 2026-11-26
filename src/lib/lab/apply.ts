@@ -4,6 +4,7 @@ import { recentWorkspaceId, type CommandRecord, type ToolRecord } from "../statu
 import type { ShellState } from "../shell/state.svelte";
 import type { LabDialog, LabScene } from "./scenes";
 import { previewCherrySelection } from "../shell/cherrySelection";
+import { beginWorktree, viewWorktreeHistory } from "../shell/worktrees";
 
 const FILL = 24;
 
@@ -183,9 +184,9 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.sideQuery = "";
     return;
   }
-  if (["changes", "stage-many", "stage-queue", "stage-dense", "pull-deleted", "pull-noop", "pull-disjoint", "unstage-initial", "stage-conflict-paths"].includes(id)) {
+  if (["changes", "stage-many", "stage-queue", "stage-dense", "pull-deleted", "pull-noop", "pull-disjoint", "unstage-initial", "stage-conflict-paths", "discard-unstaged"].includes(id)) {
     shell.section = "changes";
-    if (id === "stage-many") shell.settings = { ...shell.settings, fileLayout: "tree" };
+    if (id === "stage-many" || id === "discard-unstaged") shell.settings = { ...shell.settings, fileLayout: "tree" };
     return;
   }
   if (id === "commit-too-long" || id === "commit-no-staged") {
@@ -495,9 +496,22 @@ async function fillSurface(shell: ShellState, id: string) {
   if (id === "submodule-diff") {
     return showChange(shell, "vendor", "unstaged");
   }
-  if (id === "worktree") {
-    shell.collapsedSide = [];
-    shell.sideQuery = "extra";
+  if (id === "worktree" || id.startsWith("worktree-")) {
+    shell.collapsedSide = ["tags", "remotes", "stashes", "submodules"];
+    const rows = shell.refs?.worktrees ?? [];
+    const detached = rows.find((row) => row.detached);
+    if (id === "worktree-tabs") {
+      shell.settings.verticalTabs = false;
+      shell.repos = [...shell.repos, ...rows.filter((row) => !row.main && !row.missing).map((row) => row.path)];
+    }
+    if (id === "worktree-manage") beginWorktree(shell, { kind: "manage", path: rows.find((row) => row.branch === "topic")?.path });
+    if (id === "worktree-remove" && detached) beginWorktree(shell, { kind: "remove", path: detached.path });
+    if (id === "worktree-remove-branch") {
+      const missing = rows.find((row) => row.branch === "missing");
+      if (missing) beginWorktree(shell, { kind: "remove", path: missing.path });
+    }
+    if (id === "worktree-prune") beginWorktree(shell, { kind: "prune" });
+    if (id === "worktree-history" && detached) viewWorktreeHistory(shell, detached);
     return;
   }
   if (id === "blame") {
@@ -552,6 +566,10 @@ async function fillSurface(shell: ShellState, id: string) {
   }
   if (id === "settings-recovered") {
     shell.adoptSettings({ ...shell.settings, recoveryNotice: "recovered-backup" });
+    return;
+  }
+  if (id === "settings-reset-corrupt") {
+    shell.adoptSettings({ ...shell.settings, recoveryNotice: "reset-corrupt" });
     return;
   }
   if (id === "text-merge-many") {
@@ -945,9 +963,8 @@ async function fillDialog(shell: ShellState, dialog: LabDialog, sceneId = "") {
       shell.draftExtra = "vendor";
       break;
     case "worktree":
-      shell.draft = parent ? `${parent}/extra-wt` : "";
-      shell.draftExtra = "extra";
-      break;
+      beginWorktree(shell);
+      return;
     case "output":
       shell.commandOutput = lines(FILL, "实验室审查输出");
       break;

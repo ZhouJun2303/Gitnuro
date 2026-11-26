@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getShell } from "./context";
-  import { fillWorkspaceTabs, workspaceTabFontDefault, workspaceTabFontMin, terminalCliNames, type TerminalCli } from "../status";
+  import { fillWorkspaceTabs, workspaceTabFontDefault, workspaceTabFontMin, type TerminalCli } from "../status";
   import "./Chrome.css";
   import { shortcutLabel } from "../keys";
   import { invoke } from "../perf";
@@ -8,8 +8,22 @@
 
   const shell = getShell();
   const launchShortcut = $derived.by(() => { shell.settings.shortcuts; return shortcutLabel("launch"); });
-  /** Workspace identity for the tab strip: a switch, rename, open or close must re-fit the labels. */
-  const tabSignature = $derived(shell.repos.map((repo) => `${repo}\t${shell.tabText(repo)}`).join("\n"));
+  const tabPaths = $derived([...shell.repos].sort().join("\0"));
+  let linkedWorktrees = $state.raw<Set<string>>(new Set());
+  const worktreeBadge = $derived(shell.tr("worktree.tabBadge"));
+  /** Re-fit names after tab labels or badge widths change. */
+  const tabSignature = $derived(shell.repos.map((repo) =>
+    `${repo}\t${shell.tabText(repo)}\t${linkedWorktrees.has(repo) ? worktreeBadge : ""}`).join("\n"));
+
+  $effect(() => {
+    const paths = tabPaths;
+    if (!paths || !shell.backend()) return;
+    let current = true;
+    void invoke<string[]>("linked_worktree_paths", { paths: paths.split("\0") }).then((linked) => {
+      if (current) linkedWorktrees = new Set(linked);
+    }).catch(() => {});
+    return () => { current = false; };
+  });
 
   async function openTerminal(path: string, cli?: TerminalCli) {
     try {
@@ -17,8 +31,13 @@
     } catch (error) {
       const message = shell.message(error);
       if (cli && message === "terminal-cli-missing") {
-        shell.settings.terminalClis = shell.settings.terminalClis?.filter((name) => name !== cli) ?? [];
-        shell.actionError = shell.tr("dialog.terminalCliLaunchMissing", { cli });
+        const found = shell.settings.terminalCliFound;
+        if (found?.[cli.id]) {
+          const next = { ...found };
+          delete next[cli.id];
+          shell.settings.terminalCliFound = next;
+        }
+        shell.actionError = shell.tr("dialog.terminalCliLaunchMissing", { cli: cli.name.trim() || cli.path.trim() || cli.id });
         void shell.savePrefs(false);
       } else {
         shell.actionError = message;
@@ -29,13 +48,14 @@
   function terminalMenu(path: string): MenuItem {
     const plain = { label: shell.tr("chrome.terminal"), disabled: shell.mode !== "live", run: () => openTerminal(path) };
     if (plain.disabled) return plain;
-    const installed = terminalCliNames.filter((cli) => shell.settings.terminalClis?.includes(cli));
+    const found = shell.settings.terminalCliFound;
+    const installed = shell.settings.terminalClis.filter((cli) => found?.[cli.id]);
     if (installed.length === 0) return plain;
     return {
       label: plain.label,
       children: [
         { label: shell.tr("shortcuts.terminal"), run: plain.run },
-        ...installed.map((cli) => ({ label: cli, run: () => openTerminal(path, cli) })),
+        ...installed.map((cli) => ({ label: cli.name.trim() || cli.path.trim() || cli.id, run: () => openTerminal(path, cli) })),
       ],
     };
   }
@@ -360,6 +380,12 @@
           { label: shell.tr("chrome.close"), run: () => shell.closeTab(repo) },
         ])}>
           <button class="file-select" type="button" title={job && job.depth > 0 ? (job.percent != null ? `${job.label} ${job.percent}%` : job.label) : shell.tabDisplay(repo)} onclick={() => shell.openRepo(repo)}>
+            {#if linkedWorktrees.has(repo)}
+              <span class="tab-worktree" role="img" aria-label={worktreeBadge} title={worktreeBadge}>
+                <span class="tab-worktree-full" aria-hidden="true">{worktreeBadge}</span>
+                <span class="tab-worktree-short" aria-hidden="true">WT</span>
+              </span>
+            {/if}
             {#if job && job.depth > 0}<i class="tab-job" aria-hidden="true"></i>{/if}
             {#if shell.isRecentRepoPinned(repo)}
               <svg class="line-icon tab-pin" viewBox="0 0 24 24" role="img" aria-label={shell.tr("chrome.pinnedInRecent")}>

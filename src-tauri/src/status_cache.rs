@@ -92,6 +92,7 @@ fn cache_dir() -> Result<PathBuf, String> {
 
 fn file_name(repo: &Path) -> String {
     let mut hasher = Sha256::new();
+    hasher.update(b"submodule-dirty-v1\0");
     hasher.update(awegit_git::repo_key(repo).as_bytes());
     format!("{:x}.json", hasher.finalize())
 }
@@ -142,6 +143,8 @@ mod tests {
             ref_id: "abc".into(),
             index_len: 120,
             index_sum: "ff".into(),
+            submodule_sum: "none".into(),
+            worktree_sum: "none".into(),
         }
     }
 
@@ -150,6 +153,7 @@ mod tests {
             path: format!("file-{index}.txt"),
             kind: ChangeKind::Modified,
             previous_path: None,
+            submodule_dirty: None,
         };
         StatusSnapshot {
             revision: 4,
@@ -157,7 +161,7 @@ mod tests {
             branch: Some("main".into()),
             commit_intent: CommitIntent { head: Some("abc".into()), index: "intent".into() },
             staged: (0..count).map(file).collect(),
-            unstaged: vec![FileChange { path: "new.txt".into(), kind: ChangeKind::Untracked, previous_path: None }],
+            unstaged: vec![FileChange { path: "new.txt".into(), kind: ChangeKind::Untracked, previous_path: None, submodule_dirty: None }],
             fingerprint: None,
         }
     }

@@ -1,4 +1,82 @@
 import { expect, test } from "@playwright/test";
+import { openLabScene, pinLabSettings } from "./helpers";
+
+for (const theme of ["apple", "light", "dark"] as const) {
+  test(`${theme} reads and selects history while the initial file status and refs are pending`, async ({ page }) => {
+    let finishStatus!: () => void;
+    const gate = new Promise<void>((resolve) => { finishStatus = resolve; });
+    const commands: string[] = [];
+    await openLabScene(page, "welcome", ".recent-card", { theme });
+    await page.route("**/__lab/invoke", async (route) => {
+      const { cmd } = route.request().postDataJSON();
+      commands.push(cmd);
+      if (cmd === "workspace_status" || cmd === "repository_refs") await gate;
+      await route.fallback();
+    });
+    try {
+      await page.locator(".recent-card").first().click();
+      const pending = page.locator(".body > section[aria-busy='true']");
+      await expect(pending).toBeVisible();
+      await page.locator('.sidebar [data-section="history"]').click();
+      const commit = page.locator(".commit-row[data-commit-id]").first();
+      await expect(commit).toBeVisible();
+      await commit.click();
+      await expect(commit).toHaveAttribute("aria-pressed", "true");
+      expect(commands).not.toContain("merge_state");
+      finishStatus();
+      await expect(page.locator(".sidebar [data-section='branches']")).toBeVisible();
+      await expect(commit).toHaveAttribute("aria-pressed", "true");
+      await page.locator('.sidebar [data-section="changes"]').click();
+      await expect(pending).toHaveCount(0);
+      await expect(page.locator(".unstaged-pane")).toBeVisible();
+    } finally {
+      finishStatus();
+    }
+  });
+
+  test(`${theme} submits an amend with the repository sign-off choice while refs are pending`, async ({ page }) => {
+    let releaseRefs!: () => void;
+    const refsPending = new Promise<void>((resolve) => { releaseRefs = resolve; });
+    const commits: Record<string, unknown>[] = [];
+    await pinLabSettings(page, { pushOnCommit: false });
+    await openLabScene(page, "welcome", ".recent-card", { theme });
+    await page.route("**/__lab/invoke", async (route) => {
+      const { cmd, args } = route.request().postDataJSON();
+      if (cmd === "repository_refs") await refsPending;
+      if (cmd === "commit_changes") {
+        commits.push(args);
+        await route.fulfill({ json: { ok: false, error: "fixture: leave the index unchanged" } });
+        return;
+      }
+      await route.fallback();
+    });
+    try {
+      await page.locator(".recent-card").first().click();
+      await page.locator('.composer .check input[type="checkbox"]').check();
+      await page.locator(".composer .summary-input").fill("commit while loading refs");
+      await page.locator(".composer button.commit").click();
+      await expect.poll(() => commits.length).toBe(1);
+      expect(commits[0]).not.toHaveProperty("signOff");
+    } finally {
+      releaseRefs();
+    }
+  });
+
+  test(`${theme} opens and switches to a repository with a Windows-incompatible submodule path`, async ({ page }) => {
+    const regularChange = ".file .file-select[title='regular.txt']";
+    const submoduleChange = ".file .file-select[title='third_party/child']";
+    await openLabScene(page, "submodule-foreign-path", regularChange, { theme });
+    await expect(page.locator(submoduleChange)).toBeVisible();
+
+    const picker = "[data-layer='repos']";
+    await openLabScene(page, "picker", picker, { theme });
+    await page.locator(`${picker} .repo-row[title$='submodule-foreign-path']`).click();
+    await expect(page.locator(picker)).toBeHidden();
+    await expect(page.locator(regularChange)).toBeVisible();
+    await expect(page.locator(submoduleChange)).toBeVisible();
+    await expect(page.getByText("Could not determine status for submodule", { exact: false })).toHaveCount(0);
+  });
+}
 
 test("a quiet watcher keeps the painted status and a named edit refreshes only those paths", async ({ page }) => {
   await page.goto("/?scene=clean");
@@ -8,12 +86,20 @@ test("a quiet watcher keeps the painted status and a named edit refreshes only t
     const statePath = "/src/lib/shell/state.svelte.ts";
     const { planStatusRefresh, mergeWatchNote } = await import(/* @vite-ignore */ planPath);
     const { ShellState } = await import(/* @vite-ignore */ statePath);
-    const fingerprint = { head: "ref: refs/heads/main", refId: "abc", indexLen: 10, indexSum: "ff" };
+    const fingerprint = { head: "ref: refs/heads/main", refId: "abc", indexLen: 10, indexSum: "ff", submoduleSum: "child-one", worktreeSum: "checkout-one" };
     const probe = { fingerprint, revision: 4, watcherAlive: true };
     const trust = planStatusRefresh({ fingerprint, seen: 4, unverified: false, probe, note: null });
     const staleIndex = planStatusRefresh({
       fingerprint, seen: 4, unverified: false,
       probe: { ...probe, fingerprint: { ...fingerprint, indexSum: "ee" } }, note: null,
+    });
+    const staleSubmodule = planStatusRefresh({
+      fingerprint, seen: 4, unverified: false,
+      probe: { ...probe, fingerprint: { ...fingerprint, submoduleSum: "child-two" } }, note: null,
+    });
+    const staleWorktree = planStatusRefresh({
+      fingerprint, seen: 4, unverified: false,
+      probe: { ...probe, fingerprint: { ...fingerprint, worktreeSum: "checkout-two" } }, note: null,
     });
     const cold = planStatusRefresh({ fingerprint, seen: 0, unverified: true, probe: { ...probe, watcherAlive: false, revision: 0 }, note: null });
     const noted = mergeWatchNote(null, "status", 5, ["src/a.ts"]);
@@ -33,10 +119,12 @@ test("a quiet watcher keeps the painted status and a named edit refreshes only t
     shell.noteRepoWatch("D:/Two", "full", 4, null);
     const one = shell.repoWatchNotes.get("d:/one");
     const two = shell.repoWatchNotes.get("d:/two");
-    return { trust, staleIndex, cold, paths, overflow, missed, one, two };
+    return { trust, staleIndex, staleSubmodule, staleWorktree, cold, paths, overflow, missed, one, two };
   });
   expect(result.trust).toEqual({ kind: "trust" });
   expect(result.staleIndex).toEqual({ kind: "full" });
+  expect(result.staleSubmodule).toEqual({ kind: "full" });
+  expect(result.staleWorktree).toEqual({ kind: "full" });
   expect(result.cold).toEqual({ kind: "full" });
   expect(result.paths).toEqual({ kind: "paths", paths: ["src/a.ts"] });
   expect(result.overflow).toEqual({ kind: "full" });

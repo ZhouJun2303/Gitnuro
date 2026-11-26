@@ -137,6 +137,15 @@ pub enum Mutation {
         #[serde(default)]
         description: String,
     },
+    MergeWorktree {
+        path: String,
+        head: String,
+        into: String,
+        #[serde(default)]
+        no_ff: bool,
+        #[serde(default)]
+        summary: String,
+    },
     Rebase {
         onto: String,
         #[serde(default)]
@@ -334,8 +343,12 @@ pub enum Mutation {
     Discard {
         file: String,
     },
-    /// Drop worktree changes for many paths in one pass.
+    /// Restore worktree paths using HEAD for tracked files.
     DiscardPaths {
+        files: Vec<String>,
+    },
+    /// Restore selected worktree paths from the index and remove untracked paths.
+    DiscardUnstaged {
         files: Vec<String>,
     },
     Delete {
@@ -361,10 +374,36 @@ pub enum Mutation {
     },
     AddWorktree {
         path: String,
+        #[serde(default)]
         branch: String,
+        #[serde(default)]
+        mode: crate::worktree::AddMode,
+        #[serde(default)]
+        start: Option<String>,
     },
     RemoveWorktree {
         path: String,
+        #[serde(default)]
+        force: bool,
+        #[serde(default)]
+        expected: Option<String>,
+        #[serde(default)]
+        delete_branch: Option<String>,
+    },
+    SetWorktreeLock {
+        path: String,
+        locked: bool,
+        reason: Option<String>,
+    },
+    MoveWorktree {
+        path: String,
+        to: String,
+    },
+    RepairWorktree {
+        path: Option<String>,
+    },
+    PruneWorktrees {
+        expected: String,
     },
     SubmoduleUpdate,
     SubmoduleUpdatePath {
@@ -472,21 +511,26 @@ impl Mutation {
             Fetch { .. } | Push { .. } | PushRef { .. } | CreateBranch { .. } | DeleteBranch { .. }
                 | Tag { .. } | DeleteTag { .. } | DeleteRemoteTag { .. } | DeleteRemoteBranch { .. } => &["refs"],
             RenameBranch { .. } | SetUpstream { .. } | AddRemote { .. } | RemoveRemote { .. } | SetRemoteUrl { .. }
-                | AddWorktree { .. } | RemoveWorktree { .. } => &["refs", "config"],
+                => &["refs", "config"],
+            AddWorktree { .. } | RemoveWorktree { .. } | PruneWorktrees { .. } => &["refs", "history"],
+            SetWorktreeLock { .. } | MoveWorktree { .. } | RepairWorktree { .. } => &["refs"],
             StashDrop { .. } | StashRename { .. } => &["stashes"],
             Stash { .. } | StashPop { .. } | StashPaths { .. } => &["worktree", "index", "stashes"],
             StashApply { .. } | RestoreFile { .. } | Discard { .. } | DiscardPaths { .. } | Delete { .. } | DeletePaths { .. }
-                | ApplyPatch { .. } | SubmoduleUpdate | SubmoduleUpdatePath { .. } => &["worktree", "index"],
+                | ApplyPatch { .. } => &["worktree", "index"],
+            SubmoduleUpdate | SubmoduleUpdatePath { .. } => &["worktree", "index", "refs"],
             StageHunk { .. } | StageLine { .. } | StageLines { .. } | StagePaths { .. } => &["index"],
-            DiscardHunk { .. } | DiscardLine { .. } | DiscardLines { .. } | LfsPull => &["worktree"],
+            DiscardUnstaged { .. } | DiscardHunk { .. } | DiscardLine { .. } | DiscardLines { .. } | LfsPull => &["worktree"],
             Resolve { .. } | ResolvePaths { .. } => &["worktree", "index", "flow"],
-            WriteGitignore { .. } | AppendIgnore { .. } | SubmoduleAdd { .. } | SubmoduleRemove { .. } => &["worktree", "index", "config"],
+            WriteGitignore { .. } | AppendIgnore { .. } => &["worktree", "index", "config"],
+            SubmoduleAdd { .. } | SubmoduleRemove { .. } => &["worktree", "index", "refs", "config"],
             WriteMailmap { .. } => &["worktree", "config", "history"],
-            SubmoduleInit { .. } | SubmoduleSync { .. } | GitFlowInit { .. } | LfsLock { .. } | LfsUnlock { .. }
+            SubmoduleInit { .. } => &["refs", "config"],
+            SubmoduleSync { .. } | GitFlowInit { .. } | LfsLock { .. } | LfsUnlock { .. }
                 | SetHidden { .. } | SetExpanded { .. } | SetSignOff { .. } => &["config"],
             StashPatch { .. } | LfsPush => &[],
             Reset { mode: ResetMode::Soft, .. } => &["refs", "history", "flow"],
-            Pull { .. } | PullRef { .. } | Checkout { .. } | CheckoutRemote { .. } | Merge { .. } | Rebase { .. }
+            Pull { .. } | PullRef { .. } | Checkout { .. } | CheckoutRemote { .. } | Merge { .. } | MergeWorktree { .. } | Rebase { .. }
                 | RebaseInteractive { .. } | Abort | Continue { .. } | Skip | Reset { .. } | CherryPick { .. }
                 | Revert { .. } | Reword { .. } | Bisect { .. } | GitFlowStart { .. } | GitFlowFinish { .. }
                 | Squash { .. } | Clone { .. } | Init { .. } | Custom { .. } => &["worktree", "index", "refs", "history", "flow"],
@@ -512,6 +556,9 @@ pub fn perform(repo: &Path, mutation: Mutation) -> Result<String, Error> {
     }
     if let Mutation::StashPatch { name } = &mutation {
         return stash_patch(repo, name);
+    }
+    if let Mutation::RemoveWorktree { path, force, expected, delete_branch } = &mutation {
+        return crate::worktree::remove(repo, path, *force, expected.as_deref(), delete_branch.as_deref());
     }
     apply(repo, mutation).map(|_| String::new())
 }
@@ -810,6 +857,7 @@ fn starts_flow(mutation: &Mutation) -> bool {
         Mutation::Pull { .. }
             | Mutation::PullRef { .. }
             | Mutation::Merge { .. }
+            | Mutation::MergeWorktree { .. }
             | Mutation::Rebase { .. }
             | Mutation::RebaseInteractive { .. }
             | Mutation::CherryPick { .. }
@@ -925,6 +973,17 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             } else {
                 merge(repo, &name, squash, no_ff, &summary, &description)
             }
+        }
+        Mutation::MergeWorktree { path, head, into, no_ff, summary } => {
+            crate::worktree::validate_merge(repo, &path, &head, &into)?;
+            apply_unguarded(repo, Mutation::Merge {
+                name: head,
+                squash: false,
+                no_ff,
+                autostash: true,
+                summary,
+                description: String::new(),
+            })
         }
         Mutation::Rebase { onto, autostash } => {
             let label = format!("rebase onto {}", short_rev(&onto));
@@ -1117,6 +1176,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         }
         Mutation::Discard { file } => discard(repo, &file),
         Mutation::DiscardPaths { files } => discard_paths(repo, &files),
+        Mutation::DiscardUnstaged { files } => discard_unstaged(repo, &files),
         Mutation::Delete { file } => delete_path(repo, &file),
         Mutation::DeletePaths { files } => delete_paths(repo, &files),
         Mutation::ApplyPatch { patch } => {
@@ -1135,10 +1195,12 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
             &["remote", "set-url", check_name(&name)?, check_url(&url)?],
         )
         .map(|_| ()),
-        Mutation::AddWorktree { path, branch } => add_worktree(repo, &path, &branch),
-        Mutation::RemoveWorktree { path } => {
-            run(repo, &["worktree", "remove", check_external(&path)?]).map(|_| ())
-        }
+        Mutation::AddWorktree { path, branch, mode, start } => crate::worktree::add(repo, &path, &branch, mode, start.as_deref()),
+        Mutation::RemoveWorktree { .. } => Ok(()),
+        Mutation::SetWorktreeLock { path, locked, reason } => crate::worktree::set_lock(repo, &path, locked, reason.as_deref()),
+        Mutation::MoveWorktree { path, to } => crate::worktree::move_to(repo, &path, &to),
+        Mutation::RepairWorktree { path } => crate::worktree::repair(repo, path.as_deref()),
+        Mutation::PruneWorktrees { expected } => crate::worktree::prune(repo, &expected),
         Mutation::SubmoduleUpdate => {
             run(repo, &["submodule", "update", "--init", "--recursive"]).map(|_| ())
         }
@@ -1508,9 +1570,8 @@ fn push_args(repo: &Path, args: &[String]) -> Result<(), Error> {
     surface(run(repo, &borrowed).map(|_| ()))
 }
 
-/// Run exactly one push on the normal path. A rejected push pays for one
-/// fetch and integration, then one retry; successful pushes start no extra
-/// command and read no repository state.
+/// A rejected push can fetch, integrate, and retry once. Both attempts verify
+/// the committed submodule pointers before starting the actual push.
 fn push_with_killer(
     repo: &Path,
     args: Vec<String>,
@@ -1521,6 +1582,7 @@ fn push_with_killer(
     force: bool,
     target: impl FnOnce() -> Option<KillerPushTarget>,
 ) -> Result<(), Error> {
+    crate::submodule::check_push(repo, &args)?;
     let error = match push_args(repo, &args) {
         Ok(()) => return Ok(()),
         Err(error) => error,
@@ -1546,7 +1608,9 @@ fn push_with_killer(
                 detail: format!("{}/{}", target.remote, target.branch),
                 ..Default::default()
             });
-            push_args(repo, retry_args.as_ref().unwrap_or(&args))
+            let retry = retry_args.as_ref().unwrap_or(&args);
+            crate::submodule::check_push(repo, retry)?;
+            push_args(repo, retry)
         }
         Err(pull_error) => {
             let recovery = abort_killer_pull(repo);
@@ -2443,14 +2507,55 @@ fn discard_paths(repo: &Path, files: &[String]) -> Result<(), Error> {
         }
     }
     git_arg_paths(repo, &["rm", "-f", "--"], &remove_index)?;
-    for path in remove_disk {
-        match remove_worktree_file(repo, &path) {
-            Ok(()) => {}
-            Err(Error::Read { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
+    remove_untracked_paths(repo, remove_disk.iter().map(String::as_str))
+}
+
+fn discard_unstaged(repo: &Path, files: &[String]) -> Result<(), Error> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let mut paths = Vec::new();
+    let mut seen = HashSet::new();
+    for file in files {
+        let path = check_path(file)?;
+        let path = if cfg!(windows) { slash(path) } else { path.to_owned() };
+        if seen.insert(path.clone()) {
+            paths.push(path);
         }
     }
-    Ok(())
+
+    let output = list_index_paths(repo, &paths, true)?;
+    let mut indexed = HashSet::new();
+    let mut restore = Vec::new();
+    let mut gitlinks = Vec::new();
+    for record in output.stdout.split(|byte| *byte == 0) {
+        let record = String::from_utf8_lossy(record);
+        let Some((meta, path)) = record.split_once('\t') else { continue };
+        // A selected directory can cover several index paths. Keep it on disk.
+        let mut selected = false;
+        for name in std::iter::once(path).chain(path.match_indices('/').map(|(at, _)| &path[..at])) {
+            if seen.contains(name) {
+                indexed.insert(name.to_owned());
+                selected = true;
+            }
+        }
+        if !selected {
+            continue;
+        }
+        let mut fields = meta.split_ascii_whitespace();
+        match (fields.next(), fields.next(), fields.next()) {
+            (Some("160000"), Some(oid), Some("0")) => gitlinks.push((path.to_owned(), oid.to_owned())),
+            _ => restore.push(path.to_owned()),
+        }
+    }
+    restore.sort_unstable();
+    restore.dedup();
+    // An unmerged path is rejected by Git before any untracked files are removed.
+    git_arg_paths(repo, &["restore", "--worktree", "--no-recurse-submodules"], &restore)?;
+    for (path, oid) in gitlinks {
+        discard_gitlink(repo, check_path(&path)?, &oid)?;
+    }
+    remove_untracked_paths(repo, paths.iter().filter(|path| !indexed.contains(*path)).map(String::as_str))
 }
 
 /// Gitlink commit recorded in `HEAD` for `path`, or `None` when the path is not a submodule.
@@ -2481,22 +2586,7 @@ fn gitlink_paths(repo: &Path, paths: &[String]) -> Result<Vec<String>, Error> {
     if paths.is_empty() {
         return Ok(Vec::new());
     }
-    let output = if paths.len() > 200 {
-        run(repo, &["--literal-pathspecs", "ls-files", "--stage", "-z"])?
-    } else {
-        let mut owned: Vec<String> = vec![
-            "--literal-pathspecs".into(),
-            "ls-files".into(),
-            "--stage".into(),
-            "-z".into(),
-            "--".into(),
-        ];
-        for path in paths {
-            owned.push(check_path(path)?.to_string());
-        }
-        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-        run(repo, &args)?
-    };
+    let output = list_index_paths(repo, paths, true)?;
     let selected: Vec<String> = paths.iter().map(|path| slash(path)).collect();
     let mut found = Vec::new();
     for record in output.stdout.split(|byte| *byte == 0) {
@@ -2541,24 +2631,22 @@ fn slash(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+fn list_index_paths(repo: &Path, paths: &[String], staged: bool) -> Result<std::process::Output, Error> {
+    let mut args = vec!["--literal-pathspecs", "ls-files", "-z"];
+    if staged {
+        args.push("--stage");
+    }
+    // A full index listing avoids passing large selections through the command line.
+    if paths.len() <= 200 && paths.iter().map(|path| path.len() + 3).sum::<usize>() <= 8_000 {
+        args.push("--");
+        args.extend(paths.iter().map(String::as_str));
+    }
+    run(repo, &args)
+}
+
 fn paths_in_index(repo: &Path, paths: &[String]) -> Result<HashSet<String>, Error> {
     let wanted: HashSet<String> = paths.iter().map(|path| slash(path)).collect();
-    let output = if paths.len() > 200 {
-        // One index listing beats hundreds of `ls-files` processes on a large selection.
-        run(repo, &["--literal-pathspecs", "ls-files", "-z"])?
-    } else {
-        let mut owned: Vec<String> = vec![
-            "--literal-pathspecs".into(),
-            "ls-files".into(),
-            "-z".into(),
-            "--".into(),
-        ];
-        for path in paths {
-            owned.push(check_path(path)?.to_string());
-        }
-        let args: Vec<&str> = owned.iter().map(String::as_str).collect();
-        run(repo, &args)?
-    };
+    let output = list_index_paths(repo, paths, false)?;
     let mut found = HashSet::new();
     for path in output.stdout.split(|byte| *byte == 0) {
         if path.is_empty() {
@@ -2650,8 +2738,12 @@ fn delete_paths(repo: &Path, files: &[String]) -> Result<(), Error> {
         }
     }
     git_arg_paths(repo, &["rm", "-f"], &tracked)?;
-    for path in untracked {
-        match remove_worktree_file(repo, &path) {
+    remove_untracked_paths(repo, untracked.iter().map(String::as_str))
+}
+
+fn remove_untracked_paths<'a>(repo: &Path, paths: impl IntoIterator<Item = &'a str>) -> Result<(), Error> {
+    for path in paths {
+        match remove_worktree_file(repo, path) {
             Ok(()) => {}
             Err(Error::Read { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
@@ -2679,26 +2771,6 @@ fn remove_worktree_file(repo: &Path, file: &str) -> Result<(), Error> {
         path: file.to_string(),
         source,
     })
-}
-
-fn add_worktree(repo: &Path, path: &str, branch: &str) -> Result<(), Error> {
-    let path = check_external(path)?;
-    let branch = check_name(branch)?;
-    let exists = run(
-        repo,
-        &[
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            &format!("refs/heads/{branch}"),
-        ],
-    )
-    .is_ok();
-    if exists {
-        run(repo, &["worktree", "add", path, branch]).map(|_| ())
-    } else {
-        run(repo, &["worktree", "add", "-b", branch, path]).map(|_| ())
-    }
 }
 
 fn git_flow_init(

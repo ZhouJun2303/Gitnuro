@@ -46,6 +46,7 @@ export function acceptTask(task: OperationTask, native = true, notify = true) {
         || (task.state === previous.state && (task.percent ?? 0) < (previous.percent ?? 0)))) return false;
   }
   const merged = { ...previous, ...task };
+  if (previous) merged.revision = Math.max(previous.revision, task.revision);
   // Keep exact paths for this window's optimistic writes while they are active.
   if (!taskDone(merged) && previous && localTasks.has(task.id) && previous.targets.length > task.targets.length) merged.targets = previous.targets;
   if (taskDone(merged) && merged.targets.length > 16) {
@@ -106,10 +107,11 @@ export async function runTask<T>(command: string, args: Record<string, unknown>,
   const started = performance.now();
   try {
     const value = await execute({ ...args, __task: id, __client: clientId, __after: after, __dependsOn: dependsOn });
-    const report = value as { outcome?: TaskState; refreshScope?: "status" | "full" } | null;
+    const report = value as { outcome?: TaskState; revision?: number; refreshScope?: "status" | "full" } | null;
     const outcome = report?.outcome ?? "completed";
     const current = records.get(id) ?? task;
     acceptTask({ ...current, state: taskDone(current) ? current.state : outcome,
+      ...(typeof report?.revision === "number" ? { revision: Math.max(current.revision, report.revision) } : {}),
       ...(report?.refreshScope ? { refreshScope: report.refreshScope } : {}), executeMs: current.executeMs || performance.now() - started }, false);
     return value;
   } catch (error) {
@@ -130,16 +132,18 @@ export function projectRefs(snapshot: RefSnapshot | null, tasks: readonly Operat
   if (!snapshot) return snapshot;
   const pending = tasks.filter((task) => repositoryKey(task.path) === repositoryKey(path) && taskRefsPending(task, revision));
   if (!pending.length) return snapshot;
-  let branches = snapshot.branches, tags = snapshot.tags, remotes = snapshot.remotes, stashes = snapshot.stashes, worktrees = snapshot.worktrees, submodules = snapshot.submodules;
+  let branches = snapshot.branches, tags = snapshot.tags, remotes = snapshot.remotes, stashes = snapshot.stashes, submodules = snapshot.submodules;
   for (const task of pending) {
     const preview = task.preview ?? {}, name = preview.name ?? "";
     if (task.action === "createBranch" && name && !branches.some((branch) => branch.name === name)) branches = [...branches, { name, current: false, upstream: null, ahead: 0, behind: 0 }];
     if (task.action === "renameBranch" && preview.to) branches = branches.map((branch) => branch.name === name ? { ...branch, name: preview.to } : branch);
     if (task.action === "tag" && name && !tags.some((tag) => tag.name === name)) tags = [{ name, id: "" }, ...tags];
     if (task.action === "addRemote" && name && !remotes.some((remote) => remote.name === name)) remotes = [...remotes, { name, url: null, head: null, branches: [] }];
-    if (task.action === "addWorktree" && preview.path && !worktrees.some((row) => row.path === preview.path)) worktrees = [...worktrees, { path: preview.path, branch: preview.branch || null, detached: false }];
-    if (task.action === "submoduleAdd" && preview.path && !submodules.some((row) => row.path === preview.path)) submodules = [...submodules, { path: preview.path, id: "", recorded: "", branch: "", configuredBranch: "", ready: false }];
+    if (task.action === "submoduleAdd" && preview.path && !submodules.some((row) => row.path === preview.path)) submodules = [...submodules, {
+      path: preview.path, id: "", recorded: "", branch: "", configuredBranch: "", ready: false,
+      inheritsBranch: false, brokenCheckout: false, configKey: "",
+    }];
     if (task.action === "stashRename" && preview.message) stashes = stashes.map((stash) => stash.name === name || stash.id === name ? { ...stash, summary: preview.message } : stash);
   }
-  return branches === snapshot.branches && tags === snapshot.tags && remotes === snapshot.remotes && stashes === snapshot.stashes && worktrees === snapshot.worktrees && submodules === snapshot.submodules ? snapshot : { ...snapshot, branches, tags, remotes, stashes, worktrees, submodules };
+  return branches === snapshot.branches && tags === snapshot.tags && remotes === snapshot.remotes && stashes === snapshot.stashes && submodules === snapshot.submodules ? snapshot : { ...snapshot, branches, tags, remotes, stashes, submodules };
 }

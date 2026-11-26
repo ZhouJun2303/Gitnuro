@@ -1,5 +1,5 @@
 import { onMount, tick } from "svelte";
-import { invoke, prefetch } from "../perf";
+import { invoke } from "../perf";
 import { cancelReads, isReadSuperseded, STATUS_READS } from "../read-scheduler";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
 import { branchGroup, changedRanges, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, rowAtUnit, sameHistory, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
@@ -87,10 +87,21 @@ export function currentFilterRefs(shell: ShellState) {
     return names;
   }
 
+function defaultBranchHistory(shell: ShellState) {
+    return !shell.allBranches && !shell.graphSolo && !shell.graphBranches?.length;
+}
+
 export async function loadCommits(shell: ShellState, path: string | undefined, operation?: string, offset = 0, limit = shell.logLimit, background = false) {
     const order = shell.settings.commitSort === "topo" ? "topo" : "date";
     const query = shell.sideView === "search" ? shell.commitSearch.trim() : "";
     const extra = background ? { __prefetch: true } : {};
+    if (shell.worktreeHistory) {
+      const head = shell.worktreeHistoryRow?.head;
+      if (!head) return [];
+      const revs = [head];
+      if (shell.worktreeHistory.base) revs.push("^" + shell.worktreeHistory.base);
+      return invoke<CommitRow[]>("commit_log", { path, limit, offset, order, revs, ...extra }, undefined, operation);
+    }
     if (query && path) {
       return invoke<CommitRow[]>("search_log", {
         path,
@@ -103,16 +114,17 @@ export async function loadCommits(shell: ShellState, path: string | undefined, o
       }, undefined, operation);
     }
     if (shell.historyFilter) return invoke<CommitRow[]>("file_history", { path, file: shell.historyFilter, limit, offset, ...extra }, undefined, operation);
-    const revs = shell.exactRefs();
-    if (!shell.allBranches && revs.length > 0) {
+    if (defaultBranchHistory(shell)) return invoke<CommitRow[]>("commit_log", { path, limit, offset, order, defaultBranch: true, ...extra }, undefined, operation);
+    const revs = shell.allBranches ? [] : shell.exactRefs();
+    if (revs.length > 0) {
       try {
         return await invoke<CommitRow[]>("commit_log", { path, limit, offset, order, revs, ...extra }, undefined, operation);
       } catch (error) {
-        if (shell.graphBranches?.length) throw error;
+        if (readCancelled(error) || shell.graphBranches?.length) throw error;
         return invoke<CommitRow[]>("commit_log", { path, limit, offset, all: false, order, ...extra }, undefined, operation);
       }
     }
-    return invoke<CommitRow[]>("commit_log", { path, limit, offset, all: shell.allBranches || revs.length === 0, order, ...extra }, undefined, operation);
+    return invoke<CommitRow[]>("commit_log", { path, limit, offset, all: true, order, ...extra }, undefined, operation);
   }
 
 const moreReads = new WeakSet<ShellState>();
@@ -147,8 +159,13 @@ function historyVisible(shell: ShellState) {
 }
 
 /** Inputs that must stay put while older pages stream in. */
+function historyInputs(shell: ShellState) {
+    return [shell.repoPath(), shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope,
+      shell.historyFilter, shell.allBranches, shell.graphBranches, shell.graphSolo, shell.worktreeHistory?.path, shell.worktreeHistory?.base];
+}
+
 function historyScope(shell: ShellState) {
-    return [shell.repoPath(), shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.allBranches, ...shell.exactRefs()];
+    return [...historyInputs(shell), shell.worktreeHistoryRow?.head, ...(shell.allBranches || defaultBranchHistory(shell) ? [] : shell.exactRefs())];
 }
 
 /**
@@ -214,12 +231,12 @@ function readCancelled(error: unknown) {
 }
 
 export function loadContext(shell: ShellState, operation?: string, parts: ContextParts = { history: true, flow: true }): Promise<void> {
-    // Status generation is not part of the key. A worktree scan must not start a second history read.
-    const key = JSON.stringify([shell.repoPath(), shell.snapshot?.fingerprint?.refId ?? "", shell.snapshot?.branch ?? "", shell.settings.commitSort, shell.sideView, shell.commitSearch, shell.commitSearchField, shell.commitSearchScope, shell.historyFilter, shell.logLimit, shell.allBranches, shell.exactRefs(), parts]);
+    // Publishing the status and refs changes the resolved branch scope during an open.
+    const key = JSON.stringify([shell.openGen, historyInputs(shell), shell.settings.commitSort, shell.logLimit, parts, operation]);
     const current = contextReads.get(shell);
     if (current?.key === key) return current.promise;
     const path = shell.repoPath();
-    if (path) cancelReads(path, STATUS_READS);
+    if (path) cancelReads(path, [...STATUS_READS, "repository_refs", "in_progress", "merge_state"]);
     const promise = readContext(shell, operation, parts).catch((error) => {
       // Changing the branch filter intentionally cancels the previous read.
       // Callers often fire-and-forget this refresh, so an expected cancellation
@@ -237,19 +254,56 @@ async function readContext(shell: ShellState, operation?: string, parts: Context
     const path = shell.repoPath();
     const openGen = shell.openGen;
     const gen = ++shell.contextGen;
+    const current = () => gen === shell.contextGen && openGen === shell.openGen && shell.viewing(path);
+    const firstPage = Math.min(shell.logLimit, Math.max(HISTORY_FIRST_PAGE, shell.commitsLive.length));
     // An empty list is still loading. A later status snapshot must not turn that into "no commits".
     const trackLoading = parts.history && shell.commitsLive.length === 0;
     if (trackLoading) shell.historyLoading = true;
+    const publishHistory = async () => {
+      const rows = await shell.loadCommits(path, operation, 0, firstPage);
+      if (!current()) return;
+      if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
+      shell.historyFillPending = rows.length >= firstPage && firstPage < shell.logLimit;
+      if (trackLoading) shell.historyLoading = false;
+      if (shell.historyFillPending) queueHistoryFill(shell);
+    };
+    // Only explicitly selected branches and worktrees need the sidebar's full inventory.
+    const hasSearch = shell.sideView === "search" && !!shell.commitSearch.trim();
+    const earlyHistory = parts.history && !shell.worktreeHistory && (shell.allBranches || defaultBranchHistory(shell) || shell.historyFilter || hasSearch)
+      ? Promise.allSettled([publishHistory()]) : null;
+    const progress = parts.flow ? Promise.allSettled([(async () => {
+      const state = await invoke<InProgress | null>("in_progress", { path }, undefined, operation);
+      if (!current()) return;
+      const merge = state === "merge"
+        ? await invoke<MergeState | null>("merge_state", { path }, undefined, operation).catch(() => null)
+        : null;
+      if (!current()) return;
+      shell.progress = state;
+      if (!sameMergeState(shell.mergeState, merge)) shell.mergeState = merge;
+      if (merge) fillMergeProgress(shell, merge);
+      else clearMergeProgress(shell);
+    })()]) : null;
     try {
     const nextRefs = await invoke<RefSnapshot>("repository_refs", { path }, undefined, operation);
-    if (gen !== shell.contextGen || openGen !== shell.openGen || !shell.viewing(path)) return;
+    if (!current()) return;
     const { revision, ...visibleRefs } = nextRefs;
-    const loaded = new Set(shell.commitsLive.map((row) => row.id));
-    const previousTips = new Set(Object.keys(shell.refs?.labels ?? {}));
-    if (!parts.history && !parts.deferHistory && Object.keys(nextRefs.labels ?? {}).some((id) => !loaded.has(id) && !previousTips.has(id))) parts = { ...parts, history: true };
-    if (!shell.same(shell.refs, visibleRefs)) shell.refs = visibleRefs;
-    shell.contextRevision = revision ?? 0;
-    if (!parts.history && nextRefs.labels) {
+    const refsChanged = !shell.same(shell.refs, visibleRefs);
+    if (!parts.history && !parts.deferHistory) {
+      if (refsChanged) {
+        const loaded = new Set(shell.commitsLive.map((row) => row.id));
+        const previousTips = shell.refs?.labels ?? {};
+        if (Object.keys(nextRefs.labels ?? {}).some((id) => !loaded.has(id) && !Object.hasOwn(previousTips, id))) parts = { ...parts, history: true };
+      }
+      const detached = (refs: RefSnapshot | null) => (refs?.worktrees ?? []).filter((row) => row.detached).map((row) => row.head);
+      const scoped = shell.worktreeHistory;
+      const nextHead = nextRefs.worktrees.find((row) => shell.jobKey(row.path) === shell.jobKey(scoped?.path))?.head;
+      if ((shell.allBranches && !shell.same(detached(shell.refs), detached(nextRefs))) ||
+        (scoped && (nextHead !== shell.worktreeHistoryRow?.head || (!!scoped.base && !shell.same(shell.refs?.labels, nextRefs.labels))))) {
+        parts = { ...parts, history: true };
+      }
+    }
+    if (refsChanged) shell.refs = visibleRefs;
+    if (!parts.history && refsChanged && nextRefs.labels) {
       const labels = nextRefs.labels;
       const localNames = new Set(nextRefs.branches.map((branch) => branch.name));
       const remoteNames = new Set(nextRefs.remotes.flatMap((remote) => remote.branches.map((branch) => `${remote.name}/${branch}`)));
@@ -290,26 +344,16 @@ async function readContext(shell: ShellState, operation?: string, parts: Context
         if (!remaining.length) shell.allBranches = true;
       }
     }
-    // Keep an already visible list intact; only a fresh view starts at one page.
-    const firstPage = Math.min(shell.logLimit, Math.max(HISTORY_FIRST_PAGE, shell.commitsLive.length));
-    const [rows, state, merge] = await Promise.all([
-      parts.history ? shell.loadCommits(path, operation, 0, firstPage) : Promise.resolve(shell.commitsLive),
-      parts.flow ? invoke<InProgress | null>("in_progress", { path }, undefined, operation) : Promise.resolve(shell.progress),
-      parts.flow ? invoke<MergeState | null>("merge_state", { path }, undefined, operation).catch(() => null) : Promise.resolve(shell.mergeState),
-    ]);
-    if (gen !== shell.contextGen || openGen !== shell.openGen || !shell.viewing(path)) return;
-    shell.contextRevision = revision ?? 0;
-    if (!sameHistory(shell.commitsLive, rows)) shell.commitsLive = rows;
-    if (parts.history) {
-      shell.historyFillPending = rows.length >= firstPage && firstPage < shell.logLimit;
-      if (shell.historyFillPending) queueHistoryFill(shell);
-    }
     shell.signOff = nextRefs.signOffSet ? !!nextRefs.signOff : shell.settings.signOff;
-    shell.progress = state;
-    const nextMerge = state === "merge" ? merge : null;
-    if (!sameMergeState(shell.mergeState, nextMerge)) shell.mergeState = nextMerge;
-    if (nextMerge) fillMergeProgress(shell, nextMerge);
-    else clearMergeProgress(shell);
+    const results = await Promise.all([
+      earlyHistory ?? (parts.history ? Promise.allSettled([publishHistory()]) : []),
+      progress ?? [],
+    ]);
+    if (!current()) return;
+    for (const [result] of results) {
+      if (result?.status === "rejected") throw result.reason;
+    }
+    shell.contextRevision = revision ?? 0;
     } finally {
       if (trackLoading && shell.contextGen === gen) shell.historyLoading = false;
     }
@@ -530,10 +574,12 @@ export function exactRefs(shell: ShellState): string[] {
       if (local?.upstream && !names.includes(local.upstream) && upstreamExists(shell, local.upstream)) names.push(local.upstream);
       return names.filter((name, index) => visible(name, index === 0));
     }
-    return shell.currentFilterRefs().filter((name, index) => visible(name, index === 0));
+    return shell.currentFilterRefs().filter((name, index) => visible(name, index === 0)).map((name, index) =>
+      index === 0 || shell.refs?.branches.some((branch) => branch.name === name) ? "refs/heads/" + name : "refs/remotes/" + name);
   }
 
 export function soloBranch(shell: ShellState, name: string) {
+    shell.worktreeHistory = null;
     const selected = shell.allBranches ? [] : shell.graphBranches?.length ? shell.graphBranches : shell.graphSolo ? [shell.graphSolo] : [];
     shell.graphBranches = selected.includes(name) ? selected.filter((item) => item !== name) : [...selected, name];
     shell.graphSolo = null;
@@ -542,6 +588,7 @@ export function soloBranch(shell: ShellState, name: string) {
   }
 
 export function toggleHistoryScope(shell: ShellState) {
+    shell.worktreeHistory = null;
     shell.allBranches = !shell.allBranches;
     if (shell.allBranches) {
       shell.graphSolo = null;
@@ -551,6 +598,7 @@ export function toggleHistoryScope(shell: ShellState) {
   }
 
 export function clearHistoryFilter(shell: ShellState) {
+    shell.worktreeHistory = null;
     shell.allBranches = true;
     shell.graphSolo = null;
     shell.graphBranches = [];
@@ -657,8 +705,6 @@ export async function selectCommit(shell: ShellState, id: string, event?: Commit
     const path = shell.repoPath();
     const openGen = shell.openGen;
     const current = () => gen === shell.patchGen && shell.selectedCommit === id && openGen === shell.openGen && shell.viewing(path);
-    const neighbour = shell.commitsLive[rowAt + 1];
-    if (neighbour && /^[0-9a-f]{40,64}$/i.test(neighbour.id)) prefetch("commit_detail", { path, id: neighbour.id });
     await shell.withWork(shell.tr("chrome.readingCommit"), async () => {
     shell.commitDetail = {
       id,
@@ -1165,13 +1211,15 @@ async function loadCommitPage(shell: ShellState, path: string, id: string, curre
     let limit = Math.max(shell.logLimit, shell.commitsLive.length, 500);
     if (shell.commitsLive.length >= limit) limit = Math.min(REVEAL_LIMIT, Math.max(limit * 4, limit + 1));
     while (current() && limit <= REVEAL_LIMIT) {
-      const revs = shell.allBranches ? [] : shell.exactRefs();
+      const defaultBranch = defaultBranchHistory(shell);
+      const revs = shell.allBranches || defaultBranch ? [] : shell.exactRefs();
       const rows = await invoke<CommitRow[]>("commit_log", {
         path,
         limit,
         order,
         all: shell.allBranches || revs.length === 0,
         revs,
+        defaultBranch,
       });
       if (!current()) return null;
       const hit = rows.find((commit) => commit.id === id || commit.id.startsWith(id));
@@ -1254,6 +1302,7 @@ export async function locateRef(shell: ShellState, name: string) {
     const current = () => seq === shell.locateSeq && openGen === shell.openGen && shell.viewing(path);
     const waiting = () => current() && selectionGen === shell.patchGen;
     shell.openHistory();
+    shell.worktreeHistory = null;
     if (shell.commitQuery.trim()) shell.commitQuery = "";
     if (shell.historyFilter) shell.historyFilter = "";
     shell.actionError = null;

@@ -25,6 +25,7 @@ import { launchExternal } from "./diff.svelte";
 import { previewCherrySelection } from "./cherrySelection";
 import { loadMoreHistory } from "./history.svelte";
 import { openFile, openInEditor } from "./dialogs.svelte";
+import { beginWorktree } from "./worktrees";
 
 export function branchItems(shell: ShellState) {
     const rows = shell.refs?.branches ?? [];
@@ -33,7 +34,7 @@ export function branchItems(shell: ShellState) {
       label: branch.name,
       checked: branch.current,
       disabled: branch.current || shell.writeBlocked,
-      run: () => void shell.mutate({ action: "checkout", name: branch.name }),
+      run: () => shell.requestCheckout(branch.name),
     }));
   }
 
@@ -90,7 +91,7 @@ export function fileMenu(shell: ShellState, file: Row, side: Side) {
       { label: shell.tr("menu.copyRelative"), run: () => shell.copyText(file.path) },
       { sep: true, label: "" },
       { label: many ? `${shell.tr(side === "staged" ? "chrome.unstageSelected" : "chrome.stageSelected")} (${count})` : shell.tr(side === "staged" ? "menu.unstage" : "menu.stage"), disabled: locked || shell.stageDisabled, shortcut: shortcutLabel("stageToggle"), run: () => shell.stageChosen(side, targets) },
-      { label: many ? shell.tr("menu.discardSelected", { count }) : shell.tr("menu.discard"), disabled: locked || (side === "staged" && many), shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(targets, false, side === "staged" ? shell.shownStaged.map((item) => item.path) : shell.shownUnstaged.map((item) => item.path)) },
+      { label: many ? shell.tr("menu.discardSelected", { count }) : shell.tr("menu.discard"), disabled: locked || (side === "staged" && many), shortcut: shortcutLabel("discard"), run: () => shell.discardChosen(targets, false, (side === "staged" ? shell.shownStaged : shell.shownUnstaged).map((item) => item.path), side) },
       { label: many ? shell.tr("menu.deleteSelected", { count }) : shell.tr("menu.deleteFile"), disabled: locked, run: () => shell.deleteChosen(targets, side === "staged" ? shell.shownStaged.map((item) => item.path) : shell.shownUnstaged.map((item) => item.path)) },
       { sep: true, label: "" },
       { label: many ? shell.tr("menu.addGitignoreSelected", { count }) : shell.tr("menu.addGitignore"), disabled: locked, run: () => void shell.addIgnore(targets, false, false) },
@@ -137,13 +138,14 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
     return [
       ...selection,
       { label: shell.tr("menu.checkout"), disabled: locked || !!shell.progress, run: () => shell.requestCheckout(commit.id) },
+      { label: shell.tr("worktree.add"), disabled: locked, run: () => beginWorktree(shell, { kind: "add", source: commit.id }) },
       { label: shell.tr("menu.cherryPick"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, false, commit.summary) },
       { label: shell.tr("menu.cherryPickRecord"), disabled: locked || !!shell.progress, run: () => void shell.previewCherry(commit.id, true, commit.summary) },
       { label: shell.tr("menu.revert"), disabled: locked || !!shell.progress, run: () => shell.confirmRevert(commit.id, commit.summary) },
       { label: shell.tr("menu.reset"), disabled: locked || !!shell.progress, run: () => shell.openReset(commit.id, commit.summary) },
       { sep: true, label: "" },
-      { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "branch"; } },
-      { label: shell.tr("menu.createTag"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "tag"; } },
+      { label: shell.tr("menu.createBranch"), disabled: shell.mode === "loading", run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "branch"; } },
+      { label: shell.tr("menu.createTag"), disabled: shell.mode === "loading", run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "tag"; } },
       { label: shell.tr("menu.editMessage"), disabled: locked || !!shell.progress || !shell.refs?.head || commit.id !== shell.refs.head, run: () => { shell.draft = commit.summary; shell.draftExtra = commit.id; shell.dialog = "reword"; } },
       { label: shell.tr("menu.interactiveRebase"), disabled: locked || !!shell.progress, run: () => { shell.selectedCommit = commit.id; shell.openRebase(); } },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },
@@ -248,6 +250,7 @@ export function repositoryItems(shell: ShellState) {
       { label: shell.tr("chrome.newRepo"), run: () => void shell.beginClone("init") },
       { sep: true, label: "" },
       { label: shell.tr("chrome.terminal"), disabled: locked, run: () => void invoke("open_terminal", { path: shell.repoPath() }) },
+      { label: shell.tr("worktree.manage"), disabled: locked, run: () => beginWorktree(shell, { kind: "manage" }) },
       { label: shell.tr("chrome.explorer"), disabled: !shell.snapshot, run: () => shell.snapshot && void shell.openLocal(shell.snapshot.path) },
     ];
   }
@@ -289,7 +292,7 @@ export function helpItems(shell: ShellState) {
 
 export function commitExtras(shell: ShellState) {
     return [
-      { label: `${shell.signOff ? "✓ " : ""}${shell.tr("chrome.signOff")}`, run: () => { shell.signOff = !shell.signOff; if (shell.mode === "live") void shell.mutate({ action: "setSignOff", enabled: shell.signOff, format: shell.refs?.signOffFormat || shell.settings.signOffFormat }); } },
+      { label: `${shell.signOff ? "✓ " : ""}${shell.tr("chrome.signOff")}`, disabled: shell.mode === "live" && !shell.refs, run: () => { shell.signOff = !shell.signOff; if (shell.mode === "live") void shell.mutate({ action: "setSignOff", enabled: shell.signOff, format: shell.refs?.signOffFormat || shell.settings.signOffFormat }); } },
       { label: `${shell.skipHooks ? "✓ " : ""}${shell.tr("chrome.skipHooks")}`, run: () => (shell.skipHooks = !shell.skipHooks) },
       { label: shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") }), disabled: shell.writeBlocked || shell.staged.length === 0, run: () => void shell.suggestMessage() },
       { label: shell.tr("chrome.commitAndPush"), disabled: !shell.canCommit, run: () => void shell.submitCommit(true) },

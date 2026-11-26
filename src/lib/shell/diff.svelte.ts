@@ -1,7 +1,7 @@
 import { invoke } from "../perf";
 import { cancelReads, isReadSuperseded } from "../read-scheduler";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
-import { highlight } from "../highlight";
+import type { Token } from "../highlight";
 import { comparePixels, PixelDiffLimitError } from "../pixel-diff";
 import { branchGroup, changedRanges, commitGraph, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
@@ -674,8 +674,16 @@ export function toggleCommitDir(shell: ShellState, path: string) {
     shell.commitCollapsed = shell.commitCollapsed.includes(path) ? shell.commitCollapsed.filter((item) => item !== path) : [...shell.commitCollapsed, path];
   }
 
-export function paint(shell: ShellState, text: string, path: string) {
-    const tokens = shell.settings.disableSyntaxHighlight || shell.heavyWrap ? [{ text, cls: "" }] : highlight(text, path);
+let highlighter = $state.raw<typeof import("../highlight")>();
+let highlightRequested = false;
+
+export function paint(shell: ShellState, text: string, path: string): Token[] {
+    const syntax = !shell.settings.disableSyntaxHighlight && !shell.heavyWrap;
+    if (syntax && text && !highlightRequested) {
+      highlightRequested = true;
+      void import("../highlight").then((value) => { highlighter = value; }).catch(() => {});
+    }
+    const tokens = (syntax && highlighter?.highlight(text, path)) || [{ text, cls: "" }];
     if (!shell.settings.showWhitespace) return tokens;
     return tokens.map((token) => ({ ...token, text: token.text.replace(/ /g, "·").replace(/\t/g, "→") }));
   }
@@ -770,8 +778,7 @@ export function unpickFiles(shell: ShellState, files: readonly string[]) {
 export async function discardPicked(shell: ShellState, files = [...shell.picked]) {
     const names = [...new Set(files.filter((path) => path.length > 0))];
     if (names.length === 0 || shell.writeBlocked) return;
-    if (names.length === 1) await shell.mutate({ action: "discard", file: names[0] });
-    else await shell.mutate({ action: "discardPaths", files: names });
+    await shell.mutate({ action: "discardUnstaged", files: names });
     if (!shell.actionError) unpickFiles(shell, names);
   }
 
@@ -917,7 +924,7 @@ function pathSelection(files: string[], candidates: string[] = files) {
     return { names, listed };
   }
 
-export function discardChosen(shell: ShellState, files: string[], focusConfirm = false, candidates = files) {
+export function discardChosen(shell: ShellState, files: string[], focusConfirm = false, candidates = files, side: Side = "unstaged") {
     const { names, listed } = pathSelection(files, candidates);
     if (names.length === 0 || shell.mode !== "live") return;
     const includesSubmodule = shell.refs?.submodules.some((row) => names.includes(row.path));
@@ -925,7 +932,10 @@ export function discardChosen(shell: ShellState, files: string[], focusConfirm =
     shell.ask(shell.tr("chrome.discardSelected"), shell.tr(includesSubmodule ? "dialog.discardSubmoduleBody" : "dialog.discardFilesBody"), (selectedFiles = names) => {
       const chosen = [...new Set(selectedFiles.filter((file) => listed.includes(file)))];
       if (chosen.length === 0) return;
-      const discard = shell.bindMutation(chosen.length === 1 ? { action: "discard", file: chosen[0] } : { action: "discardPaths", files: chosen });
+      const request = side === "unstaged"
+        ? { action: "discardUnstaged", files: chosen }
+        : chosen.length === 1 ? { action: "discard", file: chosen[0] } : { action: "discardPaths", files: chosen };
+      const discard = shell.bindMutation(request);
       void discard().then((outcome) => {
         if (outcome === "completed" && openGen === shell.openGen && shell.viewing(path)) unpickFiles(shell, chosen);
       });

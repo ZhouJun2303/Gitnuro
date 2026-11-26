@@ -6,6 +6,8 @@
   import "./HistoryView.css";
   import SplitHandle from "../SplitHandle.svelte";
   import CommitDetail from "./CommitDetail.svelte";
+  import WorktreeHistoryBar from "./WorktreeHistoryBar.svelte";
+  import { worktreeName } from "./worktrees";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { sampleReflog } from "../sample";
   import { gravatarUrl, laneColors, onVirtualScroll, rowGraph, syncVirtualScroll, windowSlice, type GraphCell } from "../view";
@@ -44,7 +46,9 @@
 
 <div class="history-stage flex-fill">
         <div class="history-head">
-          {#if shell.filterNames.length > 0}
+          {#if shell.worktreeHistory}
+            {#key shell.worktreeHistory.path}<WorktreeHistoryBar />{/key}
+          {:else if shell.filterNames.length > 0}
             <div class="filter-bar">
               <span>{shell.tr("chrome.filteredBy", { name: shell.filterNames.map((name) => `'${name}'`).join(", ") })}</span>
               <button class="text-button" type="button" onclick={() => shell.clearHistoryFilter()}>{shell.tr("chrome.clearFilter")}</button>
@@ -65,7 +69,7 @@
                 {/if}
               {/if}
             {:else}
-              <span class="pane-title">{shell.tr("chrome.allCommits")}</span>
+              <span class="pane-title">{shell.tr(shell.worktreeHistory ? "worktree.history" : "chrome.allCommits")}</span>
             {/if}
             {@render searchToggle("commit", shell.tr("chrome.findCommits"))}
             {#if shell.historyFilter}
@@ -98,13 +102,14 @@
             {/if}
           {:else if shell.mode !== "sample"}
             {#if shell.historyItems.length === 0}
-              <p class="empty">{shell.historyFilter ? shell.tr("chrome.noMatch") : shell.historyLoading ? shell.tr("chrome.reading") : shell.tr("chrome.noCommits")}</p>
+              <p class="empty">{shell.historyLoading ? shell.tr("chrome.reading") : shell.historyFilter ? shell.tr("chrome.noMatch") : shell.tr("chrome.noCommits")}</p>
             {:else}
               <div class="commit-window" style:height="{shell.historyItems.length * shell.rowCommit}px">
                 {#each shell.historyRows as commit, index (commit.id)}
                   {@const graphRow = shell.liveGraph.rows[shell.historyStart + index] ?? []}
                 {@const tone = shell.laneTone(graphRow)}
                 {@const plate = shell.stashParts(commit.summary, commit.refs)}
+                  {@const worktrees = shell.worktreeHeads.get(commit.id) ?? []}
                   <div
                     class="commit-row virtual"
                     class:match={shell.commitHit(shell.historyStart + index)}
@@ -142,6 +147,16 @@
                     {@render laneGraph(graphRow, commit.id)}
                     <span class="commit-copy">
                       {@render branchChips(shell.branchRefLabels(commit.refs), tone, activeColor)}
+                      {#if worktrees.length}
+                        <span class="worktree-chips">
+                          {#each worktrees.slice(0, 2) as row (row.path)}
+                            <span class="worktree-chip" data-worktree-head title={row.path}>{shell.tr("chrome.worktrees")} · {worktreeName(shell, row)}</span>
+                          {/each}
+                          {#if worktrees.length > 2}
+                            <span class="worktree-chip" title={worktrees.slice(2).map((row) => row.path).join("\n")}>+{worktrees.length - 2}</span>
+                          {/if}
+                        </span>
+                      {/if}
                       {#if shell.plainRefLabels(commit.refs).length > 0}
                         <span class="badges">
                           {#each shell.plainRefLabels(commit.refs) as label (label)}<RefChip {label} kind={shell.refKind(label)} compact={shell.settings.compactBranchLabels} />{/each}

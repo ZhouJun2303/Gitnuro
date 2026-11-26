@@ -94,6 +94,58 @@ fn repository_refs_notice_a_loose_branch_value_change() {
 }
 
 #[test]
+fn remote_inventory_preserves_names_and_local_urls_with_spaces() {
+    let repo = repo();
+    repo.git(&["commit", "--allow-empty", "-m", "base"]);
+    repo.git(&["remote", "add", "team/shared", "../origin copy"]);
+    repo.git(&["update-ref", "refs/remotes/team/shared/main", "HEAD"]);
+    repo.git(&["symbolic-ref", "refs/remotes/team/shared/HEAD", "refs/remotes/team/shared/main"]);
+    repo.git(&["branch", "team/shared/main"]);
+    let refs = repository_refs(&repo.path).unwrap();
+    let remote = refs.remotes.iter().find(|remote| remote.name == "team/shared").unwrap();
+    assert_eq!(remote.url.as_deref(), Some("../origin copy"));
+    assert_eq!(remote.branches, ["main"]);
+    assert_eq!(remote.head.as_deref(), Some("main"));
+    let labels = &refs.labels[refs.head.as_ref().unwrap()];
+    assert!(labels.iter().any(|name| name == "team/shared/main"));
+    assert!(!labels.iter().any(|name| name == "team/shared/HEAD"));
+}
+
+#[test]
+fn current_history_uses_existing_visible_upstream() {
+    let repo = repo();
+    repo.git(&["commit", "--allow-empty", "-m", "base"]);
+    let scope = || awegit_git::current_branch_log_revisions(&repo.path).unwrap();
+    assert_eq!(scope(), ["refs/heads/main"]);
+    repo.git(&["remote", "add", "team/shared", "../origin copy"]);
+    repo.git(&["update-ref", "refs/remotes/team/shared/main", "HEAD"]);
+    repo.git(&["config", "branch.main.remote", "team/shared"]);
+    repo.git(&["config", "branch.main.merge", "refs/heads/main"]);
+    assert_eq!(scope(), ["refs/heads/main", "refs/remotes/team/shared/main"]);
+    awegit_git::write_hidden_refs(&repo.path, &["team/".into()]).unwrap();
+    assert_eq!(scope(), ["refs/heads/main"]);
+    awegit_git::write_hidden_refs(&repo.path, &[]).unwrap();
+    repo.git(&["update-ref", "-d", "refs/remotes/team/shared/main"]);
+    assert_eq!(scope(), ["refs/heads/main"]);
+    repo.git(&["branch", "local"]);
+    repo.git(&["branch", "--set-upstream-to=local"]);
+    assert_eq!(scope(), ["refs/heads/main", "refs/heads/local"]);
+    repo.git(&["checkout", "--detach"]);
+    assert!(scope().is_empty());
+}
+
+#[test]
+fn repository_search_can_read_other_branches_with_an_unborn_head() {
+    let repo = repo();
+    repo.git(&["commit", "--allow-empty", "-m", "searchable commit"]);
+    repo.git(&["symbolic-ref", "HEAD", "refs/heads/unborn"]);
+    let commits = awegit_git::search_log(&repo.path, "message", "repository", "searchable", 20, false).unwrap();
+    assert_eq!(commits.len(), 1);
+    assert_eq!(commits[0].summary, "searchable commit");
+    assert!(awegit_git::search_log(&repo.path, "message", "branch", "searchable", 20, false).unwrap().is_empty());
+}
+
+#[test]
 fn branch_log_hides_other_branches() {
     let repo = repo();
     fs::write(repo.path.join("a.txt"), "one\n").unwrap();

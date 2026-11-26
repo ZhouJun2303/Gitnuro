@@ -175,7 +175,7 @@ fn report_path(given: Option<String>, repo: &Path) -> PathBuf {
 /// Settings keep their call order. Writes run together, and each repository keeps its own order.
 fn dispatch(command: &str, job: Job) {
     let lane = match command {
-        "load_settings" | "save_settings" | "save_window_bounds" | "settings_path" | "import_fork_settings" | "watch_repository" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
+        "load_settings" | "save_settings" | "save_window_bounds" | "settings_path" | "import_fork_settings" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
         | "log_client" => Some((&SETTINGS_LANE, "awegit-settings")),
         _ => None,
     };
@@ -351,7 +351,7 @@ fn watcher_alive(state: &RepoWatch, repo: &Path) -> bool {
     let key = watch_key(repo);
     state
         .0
-        .lock()
+        .try_lock()
         .ok()
         .and_then(|slots| slots.get(&key).map(|slot| slot.alive.load(Ordering::Acquire)))
         .unwrap_or(false)
@@ -442,14 +442,19 @@ fn commit_changes(
     summary: String,
     description: String,
     amend: bool,
-    sign_off: bool,
+    sign_off: Option<bool>,
     skip_hooks: Option<bool>,
 ) -> Result<ChangeReport, String> {
     let repo = repo_from(path.clone())?;
+    let preferences = settings::load().ok();
+    let sign_off = sign_off.unwrap_or_else(|| {
+        awegit_git::repo_sign_off_enabled(&repo)
+            .unwrap_or_else(|| preferences.as_ref().is_some_and(|values| values.sign_off))
+    });
     let sign_off_format = if sign_off {
         let local = awegit_git::repo_sign_off_format(&repo);
         if local.trim().is_empty() {
-            settings::load().map(|values| values.sign_off_format).unwrap_or_default()
+            preferences.as_ref().map(|values| values.sign_off_format.clone()).unwrap_or_default()
         } else {
             local
         }
@@ -458,7 +463,7 @@ fn commit_changes(
     };
     let peel = use_fakeignore();
     let skip_hooks = skip_hooks.unwrap_or(false);
-    let types = settings::load()
+    let types = preferences
         .map(|values| {
             values
                 .commit_types
@@ -494,7 +499,7 @@ fn commit_changes(
 #[tauri::command]
 fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u32>, ignore_space: Option<bool>, load: Option<bool>) -> Result<DiffReport, String> {
     let repo = repo_from(path)?;
-    tasks::wait_for_writes(&repo);
+    tasks::wait_for_file_writes(&repo);
     let diff = awegit_git::file_diff_with(&repo, &file, staged, unified.unwrap_or(3), ignore_space.unwrap_or(false), load.unwrap_or(false)).map_err(|error| error.to_string())?;
     Ok(DiffReport { version: tasks::diff_version(&diff), diff })
 }
@@ -523,15 +528,21 @@ fn commit_log(
     order: Option<String>,
     revs: Option<Vec<String>>,
     offset: Option<usize>,
+    default_branch: Option<bool>,
 ) -> Result<Vec<awegit_git::CommitRow>, String> {
     let repo = repo_from(path)?;
     tasks::wait_for_writes(&repo);
     let limit = limit.unwrap_or(500);
     let topo = order.as_deref() == Some("topo");
     let revision = changes::revision(&repo);
-    let key = format!("log:{}:{revision}:{limit}:{topo}:{all:?}:{revs:?}:{offset:?}", awegit_git::repo_key(&repo));
+    let default_branch = default_branch.unwrap_or(false);
+    let key = format!("log:{}:{revision}:{limit}:{topo}:{all:?}:{revs:?}:{offset:?}:{default_branch}", awegit_git::repo_key(&repo));
     reads::shared(key, || {
-        awegit_git::commit_log_page_with_revision(&repo, limit, all.unwrap_or(true), &revs.unwrap_or_default(), topo, offset.unwrap_or(0), Some(revision)).map_err(|error| error.to_string())
+        let mut revisions = revs.unwrap_or_default();
+        if default_branch && revisions.is_empty() {
+            revisions = awegit_git::current_branch_log_revisions(&repo).map_err(|error| error.to_string())?;
+        }
+        awegit_git::commit_log_page_with_revision(&repo, limit, all.unwrap_or(true), &revisions, topo, offset.unwrap_or(0), Some(revision)).map_err(|error| error.to_string())
     })
 }
 
@@ -558,6 +569,60 @@ fn repository_refs(path: Option<String>) -> Result<awegit_git::RefSnapshot, Stri
         refs.revision = revision;
         Ok(refs)
     })
+}
+
+#[tauri::command]
+fn submodule_remote_status(path: Option<String>, submodule: Option<String>) -> Result<Vec<awegit_git::SubmoduleRemoteRow>, String> {
+    let repo = repo_from(path)?;
+    apply_session();
+    let _https = accounts::install_submodule_https(&repo);
+    awegit_git::submodule_remote_status(&repo, submodule.as_deref()).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn linked_worktree_paths(paths: Vec<String>) -> Vec<String> {
+    paths
+        .into_iter()
+        .filter(|path| {
+            let Ok(repo) = repo_from(Some(path.clone())) else {
+                return false;
+            };
+            awegit_git::worktree::is_linked(&repo).unwrap_or(false)
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn worktree_details(path: Option<String>, target: String) -> Result<awegit_git::worktree::WorktreeDetails, String> {
+    let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
+    ensure_worktree_lab_repo(&repo)?;
+    let target_path = awegit_git::worktree::destination(&repo, &target).map_err(|error| error.to_string())?;
+    lab::ensure_lab_path(&target_path)?;
+    awegit_git::worktree::details(&repo, &target).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn worktree_compare(path: Option<String>, head: String, base: String) -> Result<awegit_git::worktree::WorktreeComparison, String> {
+    let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
+    awegit_git::worktree::compare(&repo, &head, &base).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn worktree_prune_preview(path: Option<String>) -> Result<awegit_git::worktree::WorktreePrunePreview, String> {
+    let repo = repo_from(path)?;
+    tasks::wait_for_writes(&repo);
+    ensure_worktree_lab_repo(&repo)?;
+    awegit_git::worktree::prune_preview(&repo).map_err(|error| error.to_string())
+}
+
+fn ensure_worktree_lab_repo(repo: &Path) -> Result<(), String> {
+    if lab::lab_guarded() {
+        let common = awegit_git::worktree::common_dir(repo).map_err(|error| error.to_string())?;
+        lab::ensure_lab_path(&common)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -630,6 +695,9 @@ struct MutationReport {
     flow: Option<flows::Summary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     refresh_scope: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    worktree_path: Option<String>,
+    revision: u64,
 }
 
 #[derive(serde::Serialize)]
@@ -663,6 +731,37 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
     };
     let _turn = repo_turn(&next);
     tasks::validate_intent(&repo)?;
+    use awegit_git::Mutation::{AddWorktree, MergeWorktree, MoveWorktree, PruneWorktrees, RemoveWorktree, RepairWorktree, SetWorktreeLock};
+    if matches!(&request, AddWorktree { .. } | MoveWorktree { .. } | PruneWorktrees { .. } |
+        RemoveWorktree { .. } | RepairWorktree { .. } | SetWorktreeLock { .. } | MergeWorktree { .. }) {
+        ensure_worktree_lab_repo(&repo)?;
+    }
+    let worktree_target = |path: &str| -> Result<PathBuf, String> {
+        let target = awegit_git::worktree::destination(&repo, path).map_err(|error| error.to_string())?;
+        lab::ensure_lab_path(&target)?;
+        Ok(target)
+    };
+    let worktree_path = match &request {
+        AddWorktree { path, .. } => Some(worktree_target(path)?),
+        MoveWorktree { path, to } => {
+            worktree_target(path)?;
+            worktree_target(to)?;
+            let target = awegit_git::worktree::move_destination(&repo, path, to).map_err(|error| error.to_string())?;
+            lab::ensure_lab_path(&target)?;
+            Some(target)
+        }
+        RemoveWorktree { path, .. } | SetWorktreeLock { path, .. } | RepairWorktree { path: Some(path) } | MergeWorktree { path, .. } => {
+            worktree_target(path)?;
+            None
+        }
+        RepairWorktree { path: None } if lab::lab_guarded() => {
+            for row in awegit_git::worktree::list(&repo).map_err(|error| error.to_string())? {
+                lab::ensure_lab_path(Path::new(&row.path))?;
+            }
+            None
+        }
+        _ => None,
+    };
     let killer_push = matches!(&request,
         awegit_git::Mutation::Push { killer_push: true, .. } | awegit_git::Mutation::PushRef { killer_push: true, .. });
     let mut refresh_areas = request.refresh_areas().to_vec();
@@ -739,6 +838,7 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
         let conflicted = conflict_capable && status.as_ref().is_some_and(|status| status.staged.iter().chain(&status.unstaged).any(|file| file.kind == awegit_git::ChangeKind::Conflict));
         let outcome = if conflicted { "conflict" } else if result.is_err() { "failed" } else { "completed" }.to_string();
         let error = result.as_ref().err().map(ToString::to_string).unwrap_or_default();
+        let worktree_path = worktree_path.filter(|_| result.is_ok()).as_deref().map(awegit_git::worktree::display_path);
         let mut output = result.unwrap_or_default();
         if let Some(error) = excel_restore_error {
             if !output.trim().is_empty() {
@@ -757,6 +857,8 @@ fn mutate(path: Option<String>, request: awegit_git::Mutation, retry_stash: Opti
             stale_lock,
             flow,
             refresh_scope,
+            worktree_path,
+            revision: changes::revision(&next),
         })
     });
     let log = perf::redact(&log);
@@ -813,7 +915,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::Checkout { .. } => "checkout",
         awegit_git::Mutation::CreateBranch { .. } => "createBranch",
         awegit_git::Mutation::DeleteBranch { .. } => "deleteBranch",
-        awegit_git::Mutation::Merge { .. } => "merge",
+        awegit_git::Mutation::Merge { .. } | awegit_git::Mutation::MergeWorktree { .. } => "merge",
         awegit_git::Mutation::Rebase { .. } => "rebase",
         awegit_git::Mutation::RebaseInteractive { .. } => "rebaseInteractive",
         awegit_git::Mutation::Abort => "abort",
@@ -847,6 +949,7 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::PushRef { .. } => "pushRef",
         awegit_git::Mutation::PullRef { .. } => "pullRef",
         awegit_git::Mutation::Discard { .. } | awegit_git::Mutation::DiscardPaths { .. } => "discard",
+        awegit_git::Mutation::DiscardUnstaged { .. } => "discardUnstaged",
         awegit_git::Mutation::Delete { .. } => "delete",
         awegit_git::Mutation::DeletePaths { .. } => "deletePaths",
         awegit_git::Mutation::ApplyPatch { .. } => "applyPatch",
@@ -855,6 +958,10 @@ fn action_label(request: &awegit_git::Mutation) -> &'static str {
         awegit_git::Mutation::SetRemoteUrl { .. } => "setRemoteUrl",
         awegit_git::Mutation::AddWorktree { .. } => "addWorktree",
         awegit_git::Mutation::RemoveWorktree { .. } => "removeWorktree",
+        awegit_git::Mutation::SetWorktreeLock { .. } => "setWorktreeLock",
+        awegit_git::Mutation::MoveWorktree { .. } => "moveWorktree",
+        awegit_git::Mutation::RepairWorktree { .. } => "repairWorktree",
+        awegit_git::Mutation::PruneWorktrees { .. } => "pruneWorktrees",
         awegit_git::Mutation::SubmoduleUpdate => "submoduleUpdate",
         awegit_git::Mutation::SubmoduleUpdatePath { .. } => "submoduleUpdatePath",
         awegit_git::Mutation::SubmoduleAdd { .. } => "submoduleAdd",
@@ -901,6 +1008,9 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::Merge { name, squash, no_ff, autostash, summary, description } => {
             join([scrub(name), flag("squash", *squash), flag("noFf", *no_ff), flag("autostash", *autostash), bytes("summary", summary), bytes("description", description)])
         }
+        Mutation::MergeWorktree { path, head, into, no_ff, summary } => {
+            join([scrub(path), scrub(head), scrub(into), flag("noFf", *no_ff), bytes("summary", summary)])
+        }
         Mutation::Rebase { onto, autostash } => join([scrub(onto), flag("autostash", *autostash)]),
         Mutation::RebaseInteractive { onto, drop, steps, autostash, update_refs } => {
             join([scrub(onto), format!("drop={}", drop.len()), format!("steps={}", steps.len()), flag("autostash", *autostash), flag("updateRefs", *update_refs)])
@@ -933,7 +1043,7 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         Mutation::DiscardHunk { file, index, .. } => join([scrub(file), format!("hunk={index}")]),
         Mutation::DiscardLine { file, .. } | Mutation::Discard { file } | Mutation::Delete { file } => scrub(file),
         Mutation::DiscardLines { file, lines } => join([scrub(file), format!("lines={}", lines.len())]),
-        Mutation::DiscardPaths { files } => format!("files={}", files.len()),
+        Mutation::DiscardPaths { files } | Mutation::DiscardUnstaged { files } => format!("files={}", files.len()),
         Mutation::DeletePaths { files } => format!("files={}", files.len()),
         Mutation::Resolve { file, side, text } => join([scrub(file), scrub(side), format!("bytes={}", text.len())]),
         Mutation::ResolvePaths { files, side } => join([format!("files={}", files.len()), scrub(side)]),
@@ -945,8 +1055,11 @@ fn action_detail(request: &awegit_git::Mutation) -> String {
         | Mutation::PullRef { remote, branch, .. } => join([scrub(remote), scrub(branch)]),
         Mutation::ApplyPatch { patch } => format!("bytes={}", patch.len()),
         Mutation::AddRemote { name, url } | Mutation::SetRemoteUrl { name, url } => join([scrub(name), public_url(url)]),
-        Mutation::AddWorktree { path, branch } => join([scrub(path), scrub(branch)]),
-        Mutation::RemoveWorktree { path } => scrub(path),
+        Mutation::AddWorktree { path, branch, .. } => join([scrub(path), scrub(branch)]),
+        Mutation::RemoveWorktree { path, .. } | Mutation::SetWorktreeLock { path, .. } => scrub(path),
+        Mutation::MoveWorktree { path, to } => join([scrub(path), scrub(to)]),
+        Mutation::RepairWorktree { path } => path.as_deref().map(scrub).unwrap_or_default(),
+        Mutation::PruneWorktrees { .. } => String::new(),
         Mutation::SubmoduleAdd { url, path } => join([scrub(path), public_url(url)]),
         Mutation::SubmoduleInit { path } | Mutation::SubmoduleUpdatePath { path } | Mutation::SubmoduleSync { path } | Mutation::SubmoduleRemove { path } => scrub(path),
         Mutation::GitFlowStart { name, kind } | Mutation::GitFlowFinish { name, kind } => join([scrub(name), scrub(kind)]),
@@ -1093,8 +1206,13 @@ async fn common_tools() -> Result<Vec<tools::CommonTool>, String> {
 }
 
 #[tauri::command]
-async fn detect_terminal_clis() -> Result<Vec<tools::TerminalCli>, String> {
-    tauri::async_runtime::spawn_blocking(tools::detected_terminal_clis).await.map_err(|error| error.to_string())
+async fn detect_terminal_clis(clis: Vec<tools::TerminalCli>) -> Result<std::collections::BTreeMap<String, String>, String> {
+    tauri::async_runtime::spawn_blocking(move || tools::detected_terminal_clis(&clis)).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn terminal_cli_presets() -> Vec<tools::TerminalCli> {
+    tools::default_terminal_clis()
 }
 
 #[tauri::command]
@@ -1162,6 +1280,7 @@ fn watch_repository(app: tauri::AppHandle, state: tauri::State<'_, RepoWatch>, p
         let common = common_metadata_dir(git);
         if common != *git { watch_git_metadata(&mut watcher, &common, &mut watched); }
     }
+    watch_submodule_metadata(&mut watcher, &repo, &mut watched);
     watch_tracked_directories(&mut watcher, &repo, &mut watched);
     perf::write(
         "INFO",
@@ -1201,6 +1320,50 @@ fn watch_tracked_directories(watcher: &mut RecommendedWatcher, repo: &Path, watc
             perf::write("WARN", "watch", &error);
         }
     }
+}
+
+/// Watch initialized submodules through the parent repository's watcher. Their gitdirs live
+/// below `.git/modules`, so the normal superproject metadata watch does not reach them.
+fn watch_submodule_metadata(watcher: &mut RecommendedWatcher, repo: &Path, watched: &mut WatchSet) {
+    for checkout in submodule_worktrees(repo) {
+        if !checkout.is_dir() { continue; }
+        if let Some(git) = git_metadata_dir(&checkout) {
+            watch_git_metadata(watcher, &git, watched);
+            watch_tracked_directories(watcher, &checkout, watched);
+        }
+    }
+}
+
+fn submodule_worktrees(repo: &Path) -> Vec<PathBuf> {
+    let Ok(text) = std::fs::read_to_string(repo.join(".gitmodules")) else { return Vec::new() };
+    let mut paths = text.lines().filter_map(|line| {
+        let (key, value) = line.trim().split_once('=')?;
+        if key.trim() != "path" { return None; }
+        let path = value.trim().trim_matches('"');
+        safe_submodule_path(path).then(|| repo.join(path))
+    }).collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn safe_submodule_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.contains('\0')
+        && !Path::new(path).is_absolute()
+        && !path.split(['/', '\\']).any(|part| part.is_empty() || part == "." || part == "..")
+}
+
+fn submodule_watch_needs_rearm(repo: &Path, path: &Path) -> bool {
+    let Some(relative) = watched_relative(repo, path) else { return false };
+    if relative == ".gitmodules" { return true; }
+    if relative.ends_with("/.git") && submodule_relative(&submodule_worktrees(repo), path).as_deref() == Some(".git") {
+        return true;
+    }
+    let Some(inner) = relative.strip_prefix(".git/modules") else { return false };
+    if inner.is_empty() { return true; }
+    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+    path.is_dir() && !matches!(name, "refs" | "logs" | "objects" | "info" | "hooks" | "worktrees")
 }
 
 /// Directories that are huge or rewrite themselves. A recursive watch of the work tree
@@ -1390,6 +1553,9 @@ fn git_metadata_dir(repo: &Path) -> Option<PathBuf> {
     if git.is_dir() {
         return Some(lexical_clean(&git));
     }
+    if !git.is_file() && repo.join("HEAD").is_file() && repo.join("objects").is_dir() {
+        return Some(lexical_clean(repo));
+    }
     let text = std::fs::read_to_string(&git).ok()?;
     let line = text.lines().find(|line| !line.trim().is_empty())?;
     let rest = line.trim().strip_prefix("gitdir:")?.trim();
@@ -1487,9 +1653,25 @@ fn settle_changes(
         }
         let paths: Vec<_> = unique.into_iter().collect();
         attach_new_dirs(repo, git_dir.as_deref(), &paths, &mut watched, &slot);
-        if overflow || paths.iter().any(|path| watched_relative(repo, path).is_some_and(|path| path == ".git/index" || path == ".git")) {
+        let rearm_submodules = paths.iter().any(|path| submodule_watch_needs_rearm(repo, path));
+        let rearm_git = paths.iter().any(|path| watched_relative(repo, path).is_some_and(|path| path == ".git/worktrees"));
+        if overflow || rearm_git || rearm_submodules || paths.iter().any(|path| watched_relative(repo, path).is_some_and(|path| path == ".git/index" || path == ".git")) {
             if let Ok(mut guard) = slot.watcher.lock() {
-                if let Some(watcher) = guard.as_mut() { watch_tracked_directories(watcher, repo, &mut watched); }
+                if let Some(watcher) = guard.as_mut() {
+                    watch_tracked_directories(watcher, repo, &mut watched);
+                    if rearm_submodules { watch_submodule_metadata(watcher, repo, &mut watched); }
+                    if let Some(git) = git_dir.as_ref().filter(|_| rearm_git || overflow) {
+                        let common = common_metadata_dir(git);
+                        // The worktree directory can disappear after the final removal.
+                        let registry = common.join("worktrees");
+                        let key = watch_key(&registry);
+                        if rearm_git && watched.exact.remove(&key) {
+                            watched.recursive.retain(|path| path != &key);
+                            let _ = watcher.unwatch(&registry);
+                        }
+                        watch_git_metadata(watcher, &common, &mut watched);
+                    }
+                }
             }
         }
         if overflow {
@@ -1520,22 +1702,45 @@ fn settle_changes(
 fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
     let mut status = false;
     let mut files = Vec::new();
+    let mut submodules = None;
+    let event = |refs, paths| RepoChange { refs, path: repo.display().to_string(), revision: changes::revision(repo), paths };
     for path in paths {
         let Some(relative) = watched_relative(repo, path) else { continue };
         if relative.is_empty() {
             continue;
         }
-        if relative == ".git" {
-            return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None });
+        if matches!(relative.as_str(), ".git" | ".gitmodules") {
+            return Some(event(true, None));
         }
         if let Some(inner) = relative.strip_prefix(".git/") {
             if inner.ends_with(".lock") { continue; }
             match inner.split('/').next().unwrap_or("") {
-                "index" => status = true,
+                "index" => {
+                    if !submodules.get_or_insert_with(|| submodule_worktrees(repo)).is_empty() {
+                        return Some(event(true, None));
+                    }
+                    status = true;
+                }
+                "modules" if module_metadata_relevant(inner) => {
+                    return Some(event(true, None));
+                }
                 "objects" | "modules" | "lfs" | "logs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit" | "awegit-flow" | "gitnuro" | "fsmonitor--daemon"
                     if inner != "logs/refs/stash" => {}
-                _ => return Some(RepoChange { refs: true, path: repo.display().to_string(), revision: changes::revision(repo), paths: None }),
+                _ => return Some(event(true, None)),
             }
+            continue;
+        }
+        if let Some(relative) = submodule_relative(submodules.get_or_insert_with(|| submodule_worktrees(repo)), path) {
+            if relative == ".git" {
+                return Some(event(true, None));
+            }
+            if let Some(metadata) = relative.strip_prefix(".git/") {
+                if matches!(metadata, "HEAD" | "packed-refs" | "config" | "index") || metadata.starts_with("refs/") && !metadata.ends_with(".lock") {
+                    return Some(event(true, None));
+                }
+                continue;
+            }
+            status = true;
             continue;
         }
         files.push(relative);
@@ -1548,16 +1753,21 @@ fn classify_changes(repo: &Path, paths: &[PathBuf]) -> Option<RepoChange> {
         files.retain(|file| !ignored.contains(file));
         status |= !files.is_empty();
     }
-    status.then_some(RepoChange { refs: false, path: repo.display().to_string(), revision: changes::revision(repo), paths: (!entire_index).then_some(files) })
+    status.then(|| event(false, (!entire_index).then_some(files)))
 }
 
 fn watched_relative(repo: &Path, path: &Path) -> Option<String> {
     let path = lexical_clean(path);
     let repo_root = lexical_clean(repo);
+    let git = git_metadata_dir(repo);
+    if git.as_ref() == Some(&repo_root) {
+        let relative = path.strip_prefix(&repo_root).ok()?.to_string_lossy().replace('\\', "/");
+        return Some(if relative.is_empty() { ".git".into() } else { format!(".git/{relative}") });
+    }
     if let Ok(relative) = path.strip_prefix(&repo_root) {
         return Some(relative.to_string_lossy().replace('\\', "/"));
     }
-    let git = git_metadata_dir(repo)?;
+    let git = git?;
     for root in [git.clone(), common_metadata_dir(&git)] {
         if let Ok(relative) = path.strip_prefix(&lexical_clean(&root)) {
             let relative = relative.to_string_lossy().replace('\\', "/");
@@ -1578,8 +1788,14 @@ fn watch_relevant(repo: &Path, path: &Path) -> bool {
     if let Some(inner) = relative.strip_prefix(".git/") {
         if inner.ends_with(".lock") { return false; }
         return match inner.split('/').next().unwrap_or("") {
-            "objects" | "modules" | "lfs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit-flow" | "fsmonitor--daemon" => false,
+            "objects" | "lfs" | "FETCH_HEAD" | "COMMIT_EDITMSG" | "awegit-flow" | "fsmonitor--daemon" => false,
+            "modules" => module_metadata_relevant(inner),
             "logs" => inner == "logs/refs/stash",
+            "worktrees" => {
+                let mut segments = inner.split('/').skip(2);
+                matches!(segments.next(), None | Some("HEAD" | "gitdir" | "commondir" | "locked" | "config.worktree"))
+                    && segments.next().is_none()
+            }
             _ => true,
         };
     }
@@ -1588,10 +1804,25 @@ fn watch_relevant(repo: &Path, path: &Path) -> bool {
     true
 }
 
+fn module_metadata_relevant(inner: &str) -> bool {
+    let Some(rest) = inner.strip_prefix("modules/") else { return true };
+    !rest.split('/').any(|part| matches!(part, "objects" | "logs" | "lfs" | "info" | "hooks" | "FETCH_HEAD" | "ORIG_HEAD"))
+}
+
+fn submodule_relative(checkouts: &[PathBuf], path: &Path) -> Option<String> {
+    let path_key = watch_key(&lexical_clean(path));
+    checkouts.iter().find_map(|checkout| {
+        let checkout = lexical_clean(checkout);
+        let checkout_key = watch_key(&checkout);
+        let relative = path_key.strip_prefix(checkout_key).ok()?;
+        (!relative.as_os_str().is_empty()).then(|| relative.to_string_lossy().replace('\\', "/"))
+    })
+}
+
 #[tauri::command]
 async fn open_terminal(path: Option<String>, cli: Option<tools::TerminalCli>) -> Result<(), String> {
     if let Some(cli) = cli {
-        return tauri::async_runtime::spawn_blocking(move || tools::open_terminal_cli(cli, &repo_from(path)?))
+        return tauri::async_runtime::spawn_blocking(move || tools::open_terminal_cli(&cli, &repo_from(path)?))
             .await.map_err(|error| error.to_string())?;
     }
     let repo = repo_from(path)?;
@@ -1899,7 +2130,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 #[tauri::command]
 fn file_preview(path: Option<String>, file: String, staged: Option<bool>) -> Result<Option<awegit_git::FilePreview>, String> {
     let repo = repo_from(path)?;
-    tasks::wait_for_writes(&repo);
+    tasks::wait_for_file_writes(&repo);
     if staged.unwrap_or(false) {
         awegit_git::index_preview(&repo, &file).map_err(|error| error.to_string())
     } else {
@@ -2081,7 +2312,7 @@ struct ConflictSidesReport {
 #[tauri::command]
 fn conflict_sides(path: Option<String>, file: String) -> Result<ConflictSidesReport, String> {
     let repo = repo_from(path)?;
-    tasks::wait_for_writes(&repo);
+    tasks::wait_for_file_writes(&repo);
     let sides = awegit_git::conflict_sides(&repo, &file).map_err(|error| error.to_string())?;
     let version = tasks::content_version(&sides);
     Ok(ConflictSidesReport { sides, version })
@@ -2096,7 +2327,7 @@ fn stash_patch(path: Option<String>, rev: String) -> Result<String, String> {
 #[tauri::command]
 fn conflict_view(path: Option<String>, file: String) -> Result<awegit_git::ConflictView, String> {
     let repo = repo_from(path)?;
-    tasks::wait_for_writes(&repo);
+    tasks::wait_for_file_writes(&repo);
     let stamp = flows::checkpoint_stamp(&repo);
     let worktree = std::fs::metadata(repo.join(&file)).ok().map(|meta| (meta.len(), meta.modified().ok()));
     let key = format!("conflict:{}:{}:{stamp:?}:{worktree:?}:{file}", awegit_git::repo_key(&repo), changes::revision(&repo));
@@ -2605,6 +2836,20 @@ fn open_editor(path: Option<String>, file: String, line: u32, tool: Option<Strin
     Ok(())
 }
 
+#[tauri::command]
+fn open_worktree_editor(path: Option<String>, tool: Option<String>) -> Result<(), String> {
+    let repo = repo_from(path)?;
+    if let Some(tool) = tool.filter(|item| !item.trim().is_empty()) {
+        return awegit_git::launch_folder_editor(&repo, &tool).map_err(|error| error.to_string());
+    }
+    for program in ["cursor", "code", "zed"] {
+        let mut command = std::process::Command::new(program);
+        awegit_git::hide_console(&mut command);
+        if command.arg(&repo).spawn().is_ok() { return Ok(()); }
+    }
+    Err("No editor found / 找不到可打开目录的编辑器".into())
+}
+
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WindowNav {
@@ -2990,6 +3235,11 @@ pub fn run() {
             commit_detail,
             locate_ref,
             repository_refs,
+            submodule_remote_status,
+            linked_worktree_paths,
+            worktree_details,
+            worktree_compare,
+            worktree_prune_preview,
             commit_files,
             show_commit_file,
             in_progress,
@@ -3017,6 +3267,7 @@ pub fn run() {
             external_tools,
             common_tools,
             detect_terminal_clis,
+            terminal_cli_presets,
             editor_tools,
             program_exists,
             watch_repository,
@@ -3093,6 +3344,7 @@ pub fn run() {
             read_ssh_config,
             write_ssh_config,
             open_editor,
+            open_worktree_editor,
             open_window,
             reveal_commit,
             request_history_action,
@@ -3240,6 +3492,13 @@ mod watch_plan_tests {
         assert!(!super::watch_relevant(&worktree, &common.join("objects/ab/cd")));
         assert!(super::classify_changes(&worktree, &[git.join("index")]).is_some_and(|change| !change.refs));
         assert!(super::classify_changes(&worktree, &[common.join("refs/heads/main")]).is_some_and(|change| change.refs));
+        let other = common.join("worktrees/other");
+        for name in ["HEAD", "gitdir", "locked"] {
+            let path = other.join(name);
+            assert!(super::watch_relevant(&worktree, &path));
+            assert!(super::classify_changes(&worktree, &[path]).is_some_and(|change| change.refs));
+        }
+        assert!(!super::watch_relevant(&worktree, &other.join("index")));
         assert!(super::classify_changes(&worktree, &[worktree.join(".git")]).is_some_and(|change| change.refs));
         fs::remove_dir_all(root).unwrap();
     }
@@ -3254,6 +3513,7 @@ mod watch_plan_tests {
         fs::create_dir_all(&gitdir).unwrap();
         fs::create_dir_all(&submodule).unwrap();
         fs::write(submodule.join(".git"), "gitdir: ../../.git/modules/Packages/HlwdFramework\n").unwrap();
+        fs::write(root.join(".gitmodules"), "[submodule \"framework\"]\n\tpath = Packages/HlwdFramework\n").unwrap();
         fs::write(gitdir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
         fs::write(submodule.join("note.txt"), "note\n").unwrap();
         let escaped = |name: &str| submodule.join(format!("../../.git/modules/Packages/HlwdFramework/{name}"));
@@ -3263,6 +3523,20 @@ mod watch_plan_tests {
         assert!(super::classify_changes(&submodule, &[escaped("index")]).is_some_and(|change| !change.refs && change.paths.is_none()));
         assert!(super::classify_changes(&root, &[escaped("FETCH_HEAD")]).is_none());
         assert!(super::classify_changes(&submodule, &[submodule.join("note.txt")]).is_some_and(|change| change.paths.as_deref() == Some(&["note.txt".into()][..])));
+        assert!(super::watch_relevant(&root, &escaped("HEAD")));
+        assert!(super::classify_changes(&root, &[escaped("HEAD")]).is_some_and(|change| change.refs && change.paths.is_none()));
+        for events in [
+            [submodule.join("note.txt"), escaped("HEAD")],
+            [escaped("HEAD"), submodule.join("note.txt")],
+        ] {
+            assert!(super::classify_changes(&root, &events).is_some_and(|change| change.refs && change.paths.is_none()));
+        }
+        assert!(super::classify_changes(&root, &[root.join(".git/index")]).is_some_and(|change| change.refs));
+        assert!(!super::watch_relevant(&root, &escaped("logs/HEAD")));
+        assert!(super::classify_changes(&root, &[submodule.join("note.txt")]).is_some_and(|change| !change.refs && change.paths.is_none()));
+        assert!(super::classify_changes(&root, &[submodule.join(".git")]).is_some_and(|change| change.refs && change.paths.is_none()));
+        assert!(super::submodule_watch_needs_rearm(&root, &submodule.join(".git")));
+        assert!(super::classify_changes(&root, &[root.join(".gitmodules")]).is_some_and(|change| change.refs && change.paths.is_none()));
         fs::remove_dir_all(root).unwrap();
     }
 

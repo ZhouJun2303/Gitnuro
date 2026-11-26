@@ -81,10 +81,28 @@ pub(crate) fn ensure_lab_path(path: &Path) -> Result<(), String> {
     }
     let root = normalize(&lab_root()?);
     let candidate = normalize(path);
-    let root_text = folder_key(&root);
-    let path_text = folder_key(&candidate);
-    if path_text == root_text || path_text.starts_with(&(root_text.clone() + "\\")) {
-        return Ok(());
+    let contains = |root: &Path, candidate: &Path| {
+        if !cfg!(windows) { return candidate.starts_with(root); }
+        let root = folder_key(root);
+        let candidate = folder_key(candidate);
+        candidate == root || candidate.starts_with(&(root + "\\"))
+    };
+    if contains(&root, &candidate) {
+        let physical_root = root.canonicalize().map_err(|error| error.to_string())?;
+        // New paths may have missing parents. Check the closest existing ancestor,
+        // retaining the original path so directory links are resolved by the OS.
+        for ancestor in path.ancestors() {
+            match std::fs::symlink_metadata(ancestor) {
+                Ok(_) => {
+                    if ancestor.canonicalize().is_ok_and(|actual| contains(&physical_root, &actual)) {
+                        return Ok(());
+                    }
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(_) => break,
+            }
+        }
     }
     Err(format!("path is outside the lab: {}", path.display()))
 }
@@ -99,8 +117,10 @@ fn guard_value(value: &Value, nested: bool) -> Result<(), String> {
     let Some(object) = value.as_object() else {
         return Ok(());
     };
+    let worktree_request = matches!(object.get("action").and_then(Value::as_str),
+        Some("addWorktree" | "removeWorktree" | "setWorktreeLock" | "moveWorktree" | "repairWorktree"));
     for (key, item) in object {
-        let repo_key = matches!(key.as_str(), "root" | "destination" | "repo") || (nested && key == "path");
+        let repo_key = matches!(key.as_str(), "root" | "destination" | "repo") || (nested && key == "path" && !worktree_request);
         if repo_key {
             if let Some(text) = item.as_str() {
                 if !text.trim().is_empty() {
@@ -197,8 +217,13 @@ fn layout() -> Result<Value, String> {
         "checkout-index": text(repos.join("checkout-index")),
         "checkout-conflict": text(repos.join("checkout-conflict")),
         "unstage-initial": text(repos.join("unstage-initial")),
+        "discard-unstaged": text(repos.join("discard-unstaged")),
+        "worktree": text(repos.join("worktree")),
+        "worktree-bare.git": text(repos.join("worktree-bare.git")),
         "stage-conflict-paths": text(repos.join("stage-conflict-paths")),
         "submodule-diff": text(repos.join("submodule-diff")),
+        "submodule-remote": text(repos.join("submodule-remote")),
+        "submodule-foreign-path": text(repos.join("submodule-foreign-path")),
         "submodule-health": text(repos.join("submodule-health")),
         "cherry": text(repos.join("cherry")),
         "revert": text(repos.join("revert")),
@@ -317,10 +342,16 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             req(args, "order")?,
             req(args, "revs")?,
             req(args, "offset")?,
+            req(args, "default_branch")?,
         )),
         "commit_detail" => done_result(super::commit_detail(req(args, "path")?, req(args, "id")?)),
         "locate_ref" => done_result(super::locate_ref(req(args, "path")?, req(args, "name")?, req(args, "order")?)),
         "repository_refs" => done_result(super::repository_refs(req(args, "path")?)),
+        "submodule_remote_status" => done_result(super::submodule_remote_status(req(args, "path")?, req(args, "submodule")?)),
+        "linked_worktree_paths" => done(super::linked_worktree_paths(req(args, "paths")?)),
+        "worktree_details" => done_result(super::worktree_details(req(args, "path")?, req(args, "target")?)),
+        "worktree_compare" => done_result(super::worktree_compare(req(args, "path")?, req(args, "head")?, req(args, "base")?)),
+        "worktree_prune_preview" => done_result(super::worktree_prune_preview(req(args, "path")?)),
         "commit_files" => done_result(super::commit_files(req(args, "path")?, req(args, "id")?)),
         "show_commit_file" => done_result(super::show_commit_file(
             req(args, "path")?,
@@ -362,7 +393,8 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         }
         "external_tools" => done(super::external_tools()),
         "common_tools" => done(crate::tools::common_tools()),
-        "detect_terminal_clis" => done(Vec::<crate::tools::TerminalCli>::new()),
+        "detect_terminal_clis" => done(std::collections::BTreeMap::<String, String>::new()),
+        "terminal_cli_presets" => done(crate::tools::default_terminal_clis()),
         "editor_tools" => done(super::editor_tools()),
         "program_exists" => done(super::program_exists(req(args, "path")?)),
         "watch_repository" => Ok(Value::Null),
@@ -483,7 +515,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
         "review_branch" => done("实验室审查：这个分支可以合并。".to_string()),
         "read_ssh_config" => done_result(read_lab_ssh()),
         "write_ssh_config" => done_result(write_lab_ssh(req(args, "text")?)),
-        "open_editor" => Ok(Value::Null),
+        "open_editor" | "open_worktree_editor" => Ok(Value::Null),
         "open_file" => {
             let path: String = req(args, "path")?;
             ensure_lab_path(Path::new(&path))?;

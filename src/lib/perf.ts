@@ -13,6 +13,7 @@ export type ClientStat = { name: string; count: number; totalMs: number; maxMs: 
 
 const SLOW_INVOKE_MS = 150;
 const LONG_TASK_MS = 100;
+const fileDiffReads = ["file_diff", "file_preview", "revision_preview", "conflict_view", "conflict_sides"];
 
 const live = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 const queue: Entry[] = [];
@@ -81,7 +82,12 @@ export async function invoke<T>(cmd: string, args?: Args, options?: Options, ope
   const at = Date.now();
   const trace = operation ? `${operation}-${++traceSequence}` : traceOperation();
   const tracedArgs = { ...args, __perf: trace };
-  if (repositoryWrites.has(cmd)) invalidateReads(String((tracedArgs as Record<string, unknown>).path ?? ""));
+  const writeArgs = repositoryWrites.has(cmd) ? tracedArgs as Record<string, unknown> : null;
+  const writePath = writeArgs ? String(writeArgs.path ?? "") : null;
+  const fetching = cmd === "mutate" && (writeArgs?.request as { action?: string } | undefined)?.action === "fetch"
+    && typeof writeArgs?.__pushCommit !== "string";
+  const keep = fetching ? fileDiffReads : undefined;
+  if (writePath !== null) invalidateReads(writePath, keep);
   try {
     const value = await runTask<T>(cmd, tracedArgs, trace, (taskArgs) => scheduleRead(cmd, taskArgs, (signal) => call<T>(cmd, taskArgs, options, signal)));
     const ms = performance.now() - start;
@@ -94,7 +100,7 @@ export async function invoke<T>(cmd: string, args?: Args, options?: Options, ope
     push({ level: "error", kind: "invoke", name: cmd, ms, detail: String(error), at, trace });
     throw error;
   } finally {
-    if (repositoryWrites.has(cmd)) invalidateReads(String((tracedArgs as Record<string, unknown>).path ?? ""));
+    if (writePath !== null) invalidateReads(writePath, keep);
   }
 }
 

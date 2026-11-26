@@ -31,14 +31,20 @@ async function openTools(page: Page, kind: Kind, theme: typeof themes[number]) {
 
 for (const theme of themes) {
   test(`${theme.name}: project terminal menu uses only manually detected CLIs`, async ({ page }) => {
-    await pinLabSettings(page, { terminalClis: null });
+    const configured = [
+      { id: "codex", name: "codex", path: "codex" },
+      { id: "grok", name: "grok", path: "grok" },
+      { id: "cursor-agent", name: "cursor-agent", path: "cursor-agent" },
+      { id: "claude", name: "claude", path: "claude" },
+    ];
+    await pinLabSettings(page, { terminalClis: configured, terminalCliFound: null });
     let scans = 0;
     let fail = false;
     let finishDetection = () => {};
     const initialDetection = new Promise<void>((resolve) => { finishDetection = resolve; });
-    let installed = ["codex", "grok", "cursor-agent"];
+    let installed: Record<string, string> = { codex: "C:/bin/codex.cmd", grok: "C:/bin/grok.cmd", "cursor-agent": "C:/bin/cursor-agent.cmd" };
     let layout: { even: string } | undefined;
-    const launches: Array<{ path: string; cli?: string }> = [];
+    const launches: Array<{ path: string; cli?: { id: string } }> = [];
     await page.route("**/__lab/invoke", async (route) => {
       const { cmd, args } = route.request().postDataJSON();
       if (cmd === "detect_terminal_clis") {
@@ -50,7 +56,7 @@ for (const theme of themes) {
       }
       if (cmd === "open_terminal") {
         launches.push({ path: args.path, cli: args.cli });
-        return route.fulfill({ json: args.cli === "cursor-agent"
+        return route.fulfill({ json: args.cli?.id === "cursor-agent"
           ? { ok: false, error: "terminal-cli-missing" }
           : { ok: true, value: null } });
       }
@@ -102,11 +108,11 @@ for (const theme of themes) {
     await terminal.hover();
     await expect(submenu.getByRole("menuitem")).toHaveText([/打开终端|Open terminal/, "codex", "grok", "cursor-agent"]);
     await submenu.getByRole("menuitem", { name: "codex" }).click();
-    await expect.poll(() => launches[1]).toEqual({ path: layout!.even, cli: "codex" });
+    await expect.poll(() => launches[1]).toEqual({ path: layout!.even, cli: configured[0] });
     await otherTab.click({ button: "right" });
     await terminal.hover();
     await submenu.getByRole("menuitem", { name: "cursor-agent" }).click();
-    await expect.poll(() => launches[2]).toEqual({ path: layout!.even, cli: "cursor-agent" });
+    await expect.poll(() => launches[2]).toEqual({ path: layout!.even, cli: configured[2] });
     await expect(page.locator(".identity-branch")).toContainText(/找不到 cursor-agent|cursor-agent could not be found/);
     await otherTab.click({ button: "right" });
     await terminal.hover();
@@ -122,7 +128,7 @@ for (const theme of themes) {
     expect(scans).toBe(2);
 
     fail = false;
-    installed = ["claude"];
+    installed = { claude: "C:/bin/claude.cmd" };
     await detect.click();
     await expect(clis.locator('[data-cli="claude"]')).toContainText(/已找到|Found/);
     await expect(detect).toBeEnabled();

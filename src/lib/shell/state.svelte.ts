@@ -37,9 +37,11 @@ import {
     type Settings,
     type StatusFile,
     type StatusSnapshot,
+    type SubmoduleRemoteRow,
     type Suggestion,
     type GitRuntime,
     type RepoScan,
+    type TerminalCli,
     type ToolRecord,
     type UpdateNotice,
     type UpdateProgress,
@@ -56,9 +58,10 @@ import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, sa
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone, MergeFileEntry } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 import { statusPathBefore, type StatusFingerprint } from "../status";
-import { mergeWatchNote, planStatusRefresh, type StatusProbe, type WatchNote } from "./status-plan";
+import { mergeWatchNote, planStatusRefresh, sameFingerprint, type StatusProbe, type WatchNote } from "./status-plan";
 import { enqueueStage, projectStages, stageActions, type PendingStage } from "./staging";
 import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../operation-policy";
+import { beginWorktree, finishWorktreeMutation, type WorktreeDialogState, type WorktreeHistory } from "./worktrees";
 import { projectRefs, runTask, subscribeTasks, taskDone, taskRefsPending, type OperationTask } from "../tasks";
 import { watchOperationTasks } from "./task-monitor";
 import { cancelReads, HISTORY_READS, invalidateReads, isReadSuperseded } from "../read-scheduler";
@@ -67,6 +70,13 @@ import { mergeFields, mergeResponse } from "../reconcile";
 import { sceneById } from "../lab/scenes";
 
 const initialErrors = readErrorLog();
+
+function withoutTerminalCli(found: Record<string, string> | null, id: string) {
+  if (!found || !(id in found)) return found;
+  const next = { ...found };
+  delete next[id];
+  return next;
+}
 
 /** Ids below this belong only to error rows. Notices use small negatives (-101…-106). */
 const ERROR_ENTRY_ID = -1_000_000;
@@ -144,7 +154,7 @@ function sameCommitRows(left: readonly CommitRow[], right: readonly CommitRow[])
 }
 
 function sameStatusFile(left: StatusFile, right: StatusFile): boolean {
-  return left.path === right.path && left.kind === right.kind && left.previousPath === right.previousPath;
+  return left.path === right.path && left.kind === right.kind && left.previousPath === right.previousPath && left.submoduleDirty === right.submoduleDirty;
 }
 
 function sameStatusFiles(left: readonly StatusFile[], right: readonly StatusFile[]): boolean {
@@ -215,13 +225,6 @@ function fullyPickedDirs(files: readonly Row[], picked: readonly string[]) {
     if (count === index.totals.get(dir)) dirs.add(dir);
   }
   return dirs;
-}
-
-function sameSnapshot(left: StatusSnapshot | null, right: StatusSnapshot | null): boolean {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  return left.path === right.path && left.branch === right.branch && left.commitIntent?.head === right.commitIntent?.head
-    && left.commitIntent?.index === right.commitIntent?.index && sameStatusFiles(left.staged, right.staged) && sameStatusFiles(left.unstaged, right.unstaged);
 }
 
 function sameValue(left: unknown, right: unknown): boolean {
@@ -382,7 +385,8 @@ export class ShellState {
     shellKind: "default",
     shellPath: "",
     shellArgs: "",
-    terminalClis: null,
+    terminalClis: [],
+    terminalCliFound: null,
     diffToolName: "",
     diffToolPath: "",
     diffToolArgs: "",
@@ -515,6 +519,7 @@ export class ShellState {
 
   /** Set as soon as a tab is chosen, before that repository's status returns. */
   focusPath = $state<string | null>(null);
+  openedFrom = "";
 
 
   openGen = 0;
@@ -570,6 +575,10 @@ export class ShellState {
 
   refs = $state<RefSnapshot | null>(null);
 
+  submoduleRemote = $state.raw<{ repo: string; rows: SubmoduleRemoteRow[]; pending: boolean; error: string }>({
+    repo: "", rows: [], pending: false, error: "",
+  });
+  submoduleRemoteRequest = 0;
 
   commitsLive = $state.raw<CommitRow[]>([]);
 
@@ -974,6 +983,20 @@ export class ShellState {
 
   graphBranches = $state<string[]>([]);
 
+  worktreeDialog = $state.raw<WorktreeDialogState>({ kind: "add" });
+  worktreeHistory = $state.raw<WorktreeHistory | null>(null);
+  worktreeHistoryRow = $derived(this.refs?.worktrees.find((row) => this.jobKey(row.path) === this.jobKey(this.worktreeHistory?.path)));
+  worktreeHeads = $derived.by(() => {
+    const byCommit = new Map<string, NonNullable<ShellState["refs"]>["worktrees"]>();
+    for (const row of this.refs?.worktrees ?? []) {
+      if (!row.head || (row.main && (this.refs?.worktrees.length ?? 0) < 2)) continue;
+      const rows = byCommit.get(row.head);
+      if (rows) rows.push(row);
+      else byCommit.set(row.head, [row]);
+    }
+    return byCommit;
+  });
+
   branchFilterSet = $derived(new Set(this.allBranches ? [] : this.graphBranches.length ? this.graphBranches : this.graphSolo ? [this.graphSolo] : []));
 
   storedHistoryFilter = "";
@@ -1142,7 +1165,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.18");
+  appVersion = $state("2.0.20");
 
   appInfo = $state<AppInfo | null>(null);
 
@@ -1471,7 +1494,7 @@ export class ShellState {
   collapsedDirs = $state<string[]>([]);
 
 
-  collapsedSide = $state<string[]>(["tags", "stashes", "submodules", "worktrees"]);
+  collapsedSide = $state<string[]>(["tags", "stashes", "submodules"]);
 
 
   sideSelected = $state<string | null>(null);
@@ -1756,8 +1779,8 @@ export class ShellState {
   viewing(path: string | null | undefined) {
     const key = this.jobKey(path);
     if (!key) return false;
-    if (key === this.jobKey(this.snapshot?.path)) return true;
-    return !this.snapshot && key === this.jobKey(this.focusPath);
+    if (!this.snapshot) return key === this.jobKey(this.focusPath);
+    return key === this.jobKey(this.snapshot.path) || key === this.jobKey(this.openedFrom);
   }
 
 
@@ -1780,7 +1803,7 @@ export class ShellState {
   refView = $derived(projectRefs(this.refs, this.operationTasks, this.repoPath() ?? "", this.contextRevision));
   writeBlocked = $derived(this.switching || this.mode !== "live");
   commitPending = $derived(this.operationTasks.some((task) => !taskDone(task) && task.action === "commit_changes" && this.jobKey(task.path) === this.jobKey(this.repoPath())));
-  flowPending = $derived(this.writeBlocked || this.operationTasks.some((task) => !taskDone(task) && ["merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "abort", "continue", "skip", "bisect"].includes(task.action) && this.jobKey(task.path) === this.jobKey(this.repoPath())));
+  flowPending = $derived(this.writeBlocked || this.operationTasks.some((task) => !taskDone(task) && ["merge", "mergeWorktree", "rebase", "rebaseInteractive", "cherryPick", "revert", "abort", "continue", "skip", "bisect"].includes(task.action) && this.jobKey(task.path) === this.jobKey(this.repoPath())));
   aiPending = $derived(this.operationTasks.some((task) => !taskDone(task) && task.action === "suggest_commit_message" && this.jobKey(task.path) === this.jobKey(this.repoPath())));
 
   pendingPaths = $derived.by(() => {
@@ -1790,7 +1813,7 @@ export class ShellState {
     for (const task of this.operationTasks) {
       if (task.kind === "service" || taskDone(task) || this.jobKey(task.path) !== this.jobKey(this.repoPath())) continue;
       if (!areasFor(task.action).some((area) => area === "worktree" || area === "index")) continue;
-      if (!task.targets.length || (task.targetCount ?? 0) > task.targets.length || ["checkout", "checkoutRemote", "pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "reset", "abort", "continue", "skip", "stash", "stashPop", "stashApply", "stashBranch", "gitFlowStart", "gitFlowFinish", "custom", "lfsPull"].includes(task.action)) all = true;
+      if (!task.targets.length || (task.targetCount ?? 0) > task.targets.length || ["checkout", "checkoutRemote", "pull", "pullRef", "merge", "mergeWorktree", "rebase", "rebaseInteractive", "cherryPick", "revert", "reset", "abort", "continue", "skip", "stash", "stashPop", "stashApply", "stashBranch", "gitFlowStart", "gitFlowFinish", "custom", "lfsPull"].includes(task.action)) all = true;
       for (const target of task.targets) {
         let parent = target.replaceAll("\\", "/");
         targets.add(parent);
@@ -1827,11 +1850,13 @@ export class ShellState {
       addRemote: "chrome.remotes", removeRemote: "menu.remove", setRemoteUrl: "chrome.remotes",
       stash: "chrome.stash", stashPaths: "chrome.stash", stashRename: "menu.renameStash", stashPatch: "menu.stashPatch",
       stageHunk: "menu.stageHunk", stageLine: "menu.stageLine", stageLines: "menu.stageLines", stagePaths: "menu.stage",
-      discardHunk: "menu.discardHunk", discardLine: "menu.discardLine", discardLines: "menu.discardLines", discard: "chrome.discardSelected", discardPaths: "chrome.discardSelected",
+      discardHunk: "menu.discardHunk", discardLine: "menu.discardLine", discardLines: "menu.discardLines", discard: "chrome.discardSelected", discardPaths: "chrome.discardSelected", discardUnstaged: "chrome.discardSelected",
       delete: "chrome.deleteSelected", deletePaths: "chrome.deleteSelected", restoreFile: "menu.restoreFile", reword: "dialog.rewordAction", bisect: "chrome.bisect",
       appendIgnore: "dialog.gitignore", writeGitignore: "dialog.gitignore", writeMailmap: "chrome.mailmap", applyPatch: "flow.applyPatch",
       abort: "chrome.abort", continue: "chrome.continueAction", skip: "chrome.skip", resolve: "flow.resolveFile", resolvePaths: "flow.resolvePaths",
-      addWorktree: "chrome.worktrees", removeWorktree: "chrome.worktrees", submoduleAdd: "chrome.submodules", submoduleRemove: "chrome.submodules",
+      addWorktree: "worktree.add", removeWorktree: "worktree.remove", setWorktreeLock: "worktree.lock",
+      moveWorktree: "worktree.move", repairWorktree: "worktree.repair", pruneWorktrees: "worktree.prune",
+      submoduleAdd: "chrome.submodules", submoduleRemove: "chrome.submodules",
       submoduleInit: "chrome.submodules", submoduleSync: "chrome.submodules", submoduleUpdate: "chrome.submodules", submoduleUpdatePath: "chrome.submodules",
       gitFlowInit: "menu.initialize", gitFlowStart: "shortcuts.branch", gitFlowFinish: "flow.gitFlowFinish", lfsPull: "dialog.lfsPull", lfsPush: "dialog.lfsPush", lfsLock: "menu.lfsLock", lfsUnlock: "menu.lfsUnlock",
       setHidden: "chrome.repoSettings", setExpanded: "chrome.repoSettings", setSignOff: "chrome.repoSettings", custom: "chrome.activity",
@@ -2618,7 +2643,7 @@ export class ShellState {
     if (this.allBranches) return [];
     if (this.graphBranches.length) return this.graphBranches;
     if (this.mode === "sample") return this.graphSolo ? [this.graphSolo] : ["main", "origin/main"];
-    return this.exactRefs();
+    return this.exactRefs().map((name) => name.replace(/^refs\/(?:heads|remotes)\//, ""));
   });
 
 
@@ -2722,6 +2747,8 @@ export class ShellState {
       cmd("chrome.stash", () => this.openStash([])),
       cmd("chrome.pop", () => this.confirmPopStash()),
       cmd("chrome.refresh", () => void this.refresh()),
+      cmd("worktree.add", () => beginWorktree(this)),
+      cmd("worktree.manage", () => beginWorktree(this, { kind: "manage" })),
       cmd("chrome.stageAll", () => void this.runChange("stage_all")),
       cmd("chrome.commit", () => void this.submitCommit(false)),
       cmd("chrome.commitAndPush", () => void this.submitCommit(true)),
@@ -3244,11 +3271,9 @@ export class ShellState {
               : !progress;
           if (need) await invoke("lab_restore", { name: item.repo });
         }
-        const file = params.get("file");
-        if ((item.id === "file-history" || item.id === "file-history-unity" || item.id === "file-history-excel") && file) this.historyFilter = file;
-        await this.openRepo(path);
+        const file = ["file-history", "file-history-unity", "file-history-excel"].includes(item.id) ? params.get("file") : null;
+        await this.openRepo(path, { file, waitForHistory: true });
         if (!this.snapshot) throw new Error(this.actionError || `打不开 ${item.repo}`);
-        await this.loadContext();
         // The standalone merge scene opens its workbench before the initial
         // conflict preview finishes, so a gated conflict_sides read cannot
         // prevent the scene from becoming editable.
@@ -3262,7 +3287,8 @@ export class ShellState {
       if (runtime) this.gitRuntime = runtime;
       if (!isAppearance(params.get("theme"))) this.restoreAppearance(settings.theme);
       await applyLabScene(this, item);
-      if (params.get("locale") === "en") this.settings.locale = "en";
+      const locale = params.get("locale");
+      if (locale === "en" || locale === "zh") this.settings.locale = locale;
       this.labSceneId = item.id;
     } catch (error) {
       const text = this.message(error);
@@ -3413,15 +3439,7 @@ export class ShellState {
     const partialUpdate = !!value.statusPaths;
     const previousSelection = this.selectedPath;
     const previousSide = this.selectedSide;
-    const query = typeof this.fileQuery === "string" ? this.fileQuery.trim().toLowerCase() : "";
-    const conflictsOnly = this.conflictsOnly === true;
-    const shown = (files: readonly StatusFile[]) => files.filter((file) =>
-      (!query || file.path.toLowerCase().includes(query)) && (!conflictsOnly || file.kind === "conflict"),
-    );
-    const previousRows = this.snapshot?.path === value.path
-      ? shown(previousSide === "staged" ? this.snapshot.staged : this.snapshot.unstaged)
-      : [];
-    const previousIndex = previousSelection ? previousRows.findIndex((file) => file.path === previousSelection) : -1;
+    const previous = this.snapshot?.path === value.path ? this.snapshot : null;
     if (this.viewing(value.path) && value.revision != null && revision < Math.max(this.statusRevision, this.statusObservedRevision)) {
       // A late delta can cover an unrelated path; reconcile without rolling the list backward.
       this.scheduleStageRefresh();
@@ -3447,7 +3465,7 @@ export class ShellState {
       clearTimeout(this.stageRefreshTimer);
       this.stageRefreshTimer = null;
     }
-    if (this.snapshot?.path !== value.path) {
+    if (!previous && !this.viewing(value.path)) {
       this.contextRevision = 0;
       this.statusObservedRevision = 0;
       this.watchQueued = null;
@@ -3459,42 +3477,53 @@ export class ShellState {
       if (notes) {
         const key = this.jobKey(value.path);
         const noted = notes.get(key);
-        if (!noted || noted.revision <= revision) notes.delete(key);
+        if (noted && noted.revision <= revision && (noted.scope === "status" || noted.revision <= this.contextRevision)) notes.delete(key);
       }
     }
     this.stageStatusUnverified = partialUpdate;
     if (revision > 0) this.statusObservedRevision = revision;
     this.statusGen += 1;
-    if (!sameSnapshot(this.snapshot, value)) {
-      const previous = this.snapshot?.path === value.path ? this.snapshot : null;
-      this.snapshot = previous ? {
-        ...value,
-        staged: sameStatusFiles(previous.staged, value.staged) ? previous.staged : value.staged,
-        unstaged: sameStatusFiles(previous.unstaged, value.unstaged) ? previous.unstaged : value.unstaged,
-      } : value;
+    if (!previous) {
+      this.snapshot = value;
+    } else {
+      const staged = sameStatusFiles(previous.staged, value.staged) ? previous.staged : value.staged;
+      const unstaged = sameStatusFiles(previous.unstaged, value.unstaged) ? previous.unstaged : value.unstaged;
+      const fingerprint = sameFingerprint(previous.fingerprint, value.fingerprint) ? previous.fingerprint : value.fingerprint;
+      if (staged !== previous.staged || unstaged !== previous.unstaged || fingerprint !== previous.fingerprint
+        || previous.branch !== value.branch
+        || previous.commitIntent?.head !== value.commitIntent?.head || previous.commitIntent?.index !== value.commitIntent?.index) {
+        this.snapshot = { ...value, staged, unstaged, fingerprint };
+      }
     }
     this.mode = "live";
     this.loadError = "";
-    if (value.path && !this.repos.includes(value.path)) this.repos = [...this.repos, value.path];
+    const tabKey = this.jobKey(value.path);
+    if (tabKey && !this.repos.some((path) => this.jobKey(path) === tabKey)) this.repos = [...this.repos, value.path];
     const visible = this.pendingStages?.length ? this.stageView : value;
-    const sameSide = (this.selectedSide === "staged" ? visible.staged : visible.unstaged).some(
-      (file) => file.path === this.selectedPath,
-    );
-    if (this.selectedPath && sameSide) return;
+    const sameSide = this.selectedSide === "staged" ? visible.staged : visible.unstaged;
+    if (this.selectedPath && sameSide.some((file) => file.path === this.selectedPath)) return;
     const otherSide: Side = this.selectedSide === "staged" ? "unstaged" : "staged";
     const other = otherSide === "staged" ? visible.staged : visible.unstaged;
     if (this.selectedPath && other.some((file) => file.path === this.selectedPath)) {
       this.selectedSide = otherSide;
       return;
     }
-    if (previousSelection && previousIndex >= 0) {
-      const adjacent = shown(previousSide === "staged" ? visible.staged : visible.unstaged);
-      const next = adjacent[previousIndex] ?? adjacent[previousIndex - 1];
-      if (next) {
-        this.selectedSide = previousSide;
-        this.selectedPath = next.path;
-        this.selectedIndex = adjacent.indexOf(next);
-        return;
+    if (previous && previousSelection) {
+      const query = this.fileQuery?.trim().toLowerCase() ?? "";
+      const shown = (files: readonly StatusFile[]) => files.filter((file) =>
+        (!query || file.path.toLowerCase().includes(query)) && (!this.conflictsOnly || file.kind === "conflict"));
+      const previousRows = shown(previousSide === "staged" ? previous.staged : previous.unstaged);
+      const previousIndex = previousRows.findIndex((file) => file.path === previousSelection);
+      if (previousIndex >= 0) {
+        const adjacent = shown(previousSide === "staged" ? visible.staged : visible.unstaged);
+        const index = Math.min(previousIndex, adjacent.length - 1);
+        const next = adjacent[index];
+        if (next) {
+          this.selectedSide = previousSide;
+          this.selectedPath = next.path;
+          this.selectedIndex = index;
+          return;
+        }
       }
     }
     const conflict = visible.unstaged.find((file) => file.kind === "conflict");
@@ -3706,6 +3735,9 @@ export class ShellState {
       if (described) this.recordCommand("stagePaths", described, value.log ?? "", true, "user");
       if (openGen === this.openGen && this.viewing(path)) {
         this.applySnapshot(value);
+        if (this.refs?.submodules.length && ["stage_path", "unstage_path", "stage_all", "unstage_all"].includes(command)) {
+          this.scheduleAuxiliary(["refs"]);
+        }
         if (allowReads) refreshDiff = true;
         else refreshDiff = true;
       }
@@ -3829,13 +3861,17 @@ export class ShellState {
         return { title: `${this.tr("menu.checkout")} ${remote}/${text("branch")}`, command: "" };
       case "merge":
         return { title: `${this.tr("menu.merge")} ${text("name")}`, command: this.gitLine(["merge", request.squash ? "--squash" : "", request.noFf ? "--no-ff" : "", text("summary") ? "-m" : "", text("summary"), text("name")]) };
+      case "mergeWorktree":
+        return { title: this.tr("worktree.mergeInto", { branch: text("into") }), command: this.gitLine(["merge", request.noFf ? "--no-ff" : "", "-m", text("summary"), text("head")]) };
       case "revert":
         return { title: this.tr("dialog.revert"), command: this.gitLine(["revert", request.noCommit ? "--no-commit" : "", text("rev")]) };
       case "discard":
         return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--recurse-submodules", "--", text("file")]) };
-      case "discardPaths": {
+      case "discardPaths":
+      case "discardUnstaged": {
         const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
-        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", "--source=HEAD", "--recurse-submodules", "--", ...files.slice(0, 8)]) };
+        const source = action === "discardPaths" ? ["--source=HEAD", "--recurse-submodules"] : [];
+        return { title: this.tr("chrome.discardSelected"), command: this.gitLine(["restore", "--worktree", ...source, "--", ...files.slice(0, 8)]) };
       }
       case "resolvePaths": {
         const files = Array.isArray(request.files) ? request.files.map((file) => String(file)) : [];
@@ -4135,7 +4171,7 @@ export class ShellState {
       if (!background) this.mergeConflictRestore = false;
       const described = this.describeRequest(request);
       const dialogBefore = this.dialog;
-      if (!background && dialogBefore && dialogBefore !== "prefs") this.dialog = null;
+      if (!background && dialogBefore && dialogBefore !== "prefs" && dialogBefore !== "worktree") this.dialog = null;
       const dialogAfter = this.dialog;
       const refreshContext = this.needsContext(action);
       const followSubmodules = this.settings.updateSubmodulesOnCheckout && (action === "checkout" || action === "checkoutRemote") && (this.refs?.submodules.length ?? 0) > 0;
@@ -4181,6 +4217,11 @@ export class ShellState {
         }
         // Only a Git error from this action fails it.
         if (value.outcome === "failed" || (value.outcome === "conflict" && value.error)) throw new Error(value.error || value.log || "Git conflict");
+        if (current() && ["fetch", "pull", "pullRef"].includes(action)) void this.checkSubmoduleRemote();
+        if (current() && ["addRemote", "removeRemote", "setRemoteUrl", "setUpstream"].includes(action)) {
+          ++this.submoduleRemoteRequest;
+          this.submoduleRemote = { repo: "", rows: [], pending: false, error: "" };
+        }
         if (followSubmodules) {
           const follow = await invoke<StatusSnapshot & import("../operation-flow").MutationResult>("mutate", { path, request: { action: "submoduleUpdate" } }, undefined, operation);
           if (follow.outcome === "failed") {
@@ -4189,7 +4230,10 @@ export class ShellState {
             if (follow.staleLock) report = follow;
             throw new Error(follow.error || follow.log);
           }
-          if (this.viewing(path)) this.applySnapshot(follow);
+          if (this.viewing(path)) {
+            this.applySnapshot(follow);
+            if (follow.refreshScope !== "status") this.scheduleAuxiliary(follow.refreshAreas ?? areasFor("submoduleUpdate"), operation);
+          }
           this.recordCommand("submoduleUpdate", this.describeRequest({ action: "submoduleUpdate" }), follow.log ?? "", true, "background");
         }
         this.noteActivity(`${action}${output ? " output" : " ok"}`);
@@ -4203,8 +4247,8 @@ export class ShellState {
             this.dialog = "mergeConflict";
             this.actionError = null;
             this.stashRetry = null;
-          } else if (dialogBefore === "prefs") {
-            // Preferences stay open for LFS/author actions; the operation is recorded below.
+          } else if (dialogBefore === "prefs" || (dialogBefore === "worktree" && !(action === "removeWorktree" && output))) {
+            // Dialogs with their own action flows keep their current form.
           } else if (output) {
             this.commandOutput = output;
             this.dialog = "output";
@@ -4212,6 +4256,7 @@ export class ShellState {
             this.dialog = null;
           }
         }
+        finishWorktreeMutation(this, request, value, current() && this.dialog === dialogAfter);
         return "completed" as const;
       } catch (error) {
         if (!backendFinished) backendFinished = performance.now();
@@ -4273,7 +4318,7 @@ export class ShellState {
 
   /** True when git refused a write because the work tree has changes it would overwrite. */
   stashBlocked(action: string, text: string) {
-    const retryable = ["checkout", "checkoutRemote", "merge", "pull", "pullRef", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashApply", "stashPop", "applyPatch", "continue", "gitFlowFinish"];
+    const retryable = ["checkout", "checkoutRemote", "merge", "mergeWorktree", "pull", "pullRef", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashApply", "stashPop", "applyPatch", "continue", "gitFlowFinish"];
     if (!retryable.includes(action)) return false;
     const lower = text.toLowerCase();
     return lower.includes("would be overwritten") || lower.includes("please commit your changes") || lower.includes("please move or remove");
@@ -4439,6 +4484,32 @@ export class ShellState {
     });
   }
 
+  async checkSubmoduleRemote(submodule?: string) {
+    const path = this.repoPath();
+    if (!path || !this.backend() || this.refs?.submodules.length === 0) return;
+    const repo = this.jobKey(path);
+    const openGen = this.openGen;
+    const previous = this.submoduleRemote.repo === repo ? this.submoduleRemote.rows : [];
+    const request = ++this.submoduleRemoteRequest;
+    const current = () => request === this.submoduleRemoteRequest && openGen === this.openGen && this.viewing(path);
+    this.submoduleRemote = { repo, rows: previous, pending: true, error: "" };
+    try {
+      const rows = await invoke<SubmoduleRemoteRow[]>("submodule_remote_status", { path, submodule });
+      if (!current()) return;
+      this.submoduleRemote = {
+        repo, rows: submodule ? [...previous.filter((row) => row.path !== submodule), ...rows] : rows, pending: false, error: "",
+      };
+    } catch (error) {
+      if (current()) {
+        this.submoduleRemote = { repo, rows: submodule ? previous.filter((row) => row.path !== submodule) : [], pending: false, error: this.message(error) };
+      }
+    } finally {
+      if (request === this.submoduleRemoteRequest && this.submoduleRemote.pending) {
+        this.submoduleRemote = { ...this.submoduleRemote, pending: false };
+      }
+    }
+  }
+
   cancelAutomaticFetch() {
     if (this.automaticFetchTimer !== null) clearTimeout(this.automaticFetchTimer);
     this.automaticFetchTimer = null;
@@ -4462,6 +4533,7 @@ export class ShellState {
 
   /** Pull/merge-style writes that leave unmerged paths get Fork-style conflict dialog. */
   shouldShowMergeConflict(action: string, text: string) {
+    if (action === "mergeWorktree") return this.conflictCount > 0;
     const ops = new Set(["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "stashPop", "stashApply", "continue", "skip", "gitFlowFinish"]);
     if (!ops.has(action)) return false;
     if (this.conflictCount > 0) return true;
@@ -4521,13 +4593,13 @@ export class ShellState {
 
   /** Writes that start a new flow; a paused flow owns HEAD until it ends. */
   startsFlow(action: string) {
-    return ["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "cherryPick", "revert", "checkout", "checkoutRemote", "reset", "reword", "squash", "stashBranch", "gitFlowStart", "gitFlowFinish"].includes(action);
+    return ["pull", "pullRef", "merge", "mergeWorktree", "rebase", "rebaseInteractive", "cherryPick", "revert", "checkout", "checkoutRemote", "reset", "reword", "squash", "stashBranch", "gitFlowStart", "gitFlowFinish"].includes(action);
   }
 
 
   /** Writes whose autostash can conflict after the operation itself finished. */
   flowConflictAction(action: string) {
-    return ["pull", "pullRef", "merge", "rebase", "rebaseInteractive", "checkout", "checkoutRemote", "cherryPick", "revert", "continue", "skip", "abort", "squash", "gitFlowFinish"].includes(action);
+    return ["pull", "pullRef", "merge", "mergeWorktree", "rebase", "rebaseInteractive", "checkout", "checkoutRemote", "cherryPick", "revert", "continue", "skip", "abort", "squash", "gitFlowFinish"].includes(action);
   }
 
 
@@ -4608,16 +4680,28 @@ export class ShellState {
 
   adoptSettings(value: Settings, resetHistory = false) {
     this.prefsBaseline = value;
-    const recovered = value.recoveryNotice === "recovered-backup";
+    const recovery = value.recoveryNotice === "recovered-backup"
+      ? "chrome.settingsRecovered"
+      : value.recoveryNotice === "reset-corrupt" ? "chrome.settingsResetCorrupt" : "";
     this.settings = this.withSourceRoots({
       ...this.defaultSettings,
       ...value,
       recent: value.recent ?? [],
       recentRepoPins: value.recentRepoPins ?? [],
-      workspaces: (value.workspaces ?? []).map((item) => ({
-        ...item,
-        tabWidth: item.tabWidth || workspaceTabWidth(item.repositories?.length || item.openTabs?.length || 0),
-      })),
+      workspaces: (value.workspaces ?? []).map((item) => {
+        const savedTabs = item.openTabs?.length ? item.openTabs : item.repositories ?? [];
+        const selected = savedTabs[Math.min(item.selectedTab, savedTabs.length - 1)];
+        const repositories = this.dedupeRepos(item.repositories ?? []);
+        const openTabs = this.dedupeRepos(item.openTabs ?? []);
+        const tabs = openTabs.length ? openTabs : repositories;
+        return {
+          ...item,
+          repositories,
+          openTabs,
+          selectedTab: Math.max(0, tabs.findIndex((path) => this.jobKey(path) === this.jobKey(selected))),
+          tabWidth: item.tabWidth || workspaceTabWidth(repositories.length || openTabs.length),
+        };
+      }),
       commands: (value.commands ?? []).map((item) => ({ ...item, prompt: item.prompt ?? "", shared: item.shared !== false, repo: item.repo ?? "" })),
       shortcuts: value.shortcuts ?? {},
       expandedGroups: value.expandedGroups ?? [],
@@ -4638,7 +4722,7 @@ export class ShellState {
     configureShortcuts(this.settings.shortcuts);
     applyCommitTypes(this);
     this.syncRecentWorkspace();
-    if (recovered) this.settings = { ...this.settings, recoveryNotice: "" };
+    if (recovery) this.settings = { ...this.settings, recoveryNotice: "" };
     if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
     if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
     if (this.settings.aiLanguage !== "zh" && this.settings.aiLanguage !== "en") {
@@ -4671,7 +4755,7 @@ export class ShellState {
     if (resetHistory || this.logLimit === 500) this.logLimit = limit;
     this.signOff = this.settings.signOff;
     this.showPendingUpdate(false);
-    if (recovered && !this.actionError) this.actionError = this.tr("chrome.settingsRecovered");
+    if (recovery && !this.actionError) this.actionError = this.tr(recovery);
   }
 
   showPendingUpdate(force: boolean) {
@@ -4684,6 +4768,12 @@ export class ShellState {
       this.updateNotice = null;
       if (this.updatePhase === "available") this.updatePhase = "idle";
       return;
+    }
+    if (this.updateNotice && (this.updateNotice.appVersion !== value.appVersion || this.updateNotice.downloadUrl !== value.downloadUrl)) {
+      this.updatePercent = null;
+      this.updateReceived = 0;
+      this.updateTotal = 0;
+      this.updateSpeed = null;
     }
     this.updateNotice = value;
     if (this.updatePhase === "idle") this.updatePhase = "available";
@@ -5680,15 +5770,16 @@ export class ShellState {
     const historySize = Math.max(12, this.settings.recentWorkspaceLimit, this.settings.recent.length);
     const recent = this.dedupeRepos([path, ...this.settings.recent]).slice(0, historySize);
     const currentId = this.settings.currentWorkspace;
+    const key = this.jobKey(path);
     const workspaces = this.settings.workspaces.map((workspace) => {
       if (!currentId || currentId === recentWorkspaceId || workspace.id !== currentId) return workspace;
-      const openTabs = workspace.openTabs.includes(path) ? workspace.openTabs : [...workspace.openTabs, path];
-      const repositories = workspace.repositories.includes(path) ? workspace.repositories : [...workspace.repositories, path];
+      const openTabs = this.dedupeRepos([...workspace.openTabs, path]);
+      const repositories = this.dedupeRepos([...workspace.repositories, path]);
       return {
         ...workspace,
         repositories,
         openTabs,
-        selectedTab: Math.max(0, openTabs.indexOf(path)),
+        selectedTab: Math.max(0, openTabs.findIndex((tab) => this.jobKey(tab) === key)),
         tabWidth: workspaceTabWidth(repositories.length),
       };
     });
@@ -5751,6 +5842,48 @@ export class ShellState {
       }
       this.recentStats = stats;
     }
+    this.syncRecentWorkspace();
+    void this.savePrefs(false);
+  }
+
+  relocateRepo(path: string, destination: string) {
+    const match = (value: string) => this.jobKey(value) === this.jobKey(path);
+    const replace = (value: string) => match(value) ? destination : value;
+    const rewrite = (paths: string[]) => this.dedupeRepos(paths.map(replace));
+    const keyed = (items: string[]) => items.map((item) => {
+      const tab = item.indexOf("\t");
+      return tab < 0 ? replace(item) : replace(item.slice(0, tab)) + item.slice(tab);
+    });
+    this.settings = {
+      ...this.settings,
+      recent: rewrite(this.settings.recent),
+      recentRepoPins: this.settings.recentRepoPins.map((pin) => ({ ...pin, path: replace(pin.path) })),
+      workspaces: this.settings.workspaces.map((workspace) => {
+        const openTabs = rewrite(workspace.openTabs);
+        return {
+          ...workspace,
+          repositories: rewrite(workspace.repositories),
+          openTabs,
+          selectedTab: Math.max(0, openTabs.findIndex((tab) =>
+            this.jobKey(tab) === this.jobKey(replace(workspace.openTabs[workspace.selectedTab] ?? "")))),
+        };
+      }),
+      tabLabels: keyed(this.settings.tabLabels),
+      tabColors: keyed(this.settings.tabColors),
+      pinnedRefs: keyed(this.settings.pinnedRefs),
+    };
+    this.repos = rewrite(this.repos);
+    this.closedTabs = rewrite(this.closedTabs);
+    for (const [key, draft] of this.drafts) {
+      if (!match(key)) continue;
+      this.drafts.delete(key);
+      this.drafts.set(destination, draft);
+      break;
+    }
+    if (this.worktreeHistory && match(this.worktreeHistory.path)) {
+      this.worktreeHistory = { ...this.worktreeHistory, path: destination };
+    }
+    this.repositoryViews.delete(this.jobKey(path));
     this.syncRecentWorkspace();
     void this.savePrefs(false);
   }
@@ -5893,7 +6026,7 @@ export class ShellState {
 
 
 
-  repositoryViews = new Map<string, Pick<ShellState, "snapshot" | "refs" | "commitsLive" | "progress" | "selectedPath" | "selectedSide" | "selectedCommit" | "commitDetail" | "commitFiles" | "historyFile" | "historyFilter" | "sideTop" | "historyTop" | "fileTop" | "stagedTop" | "combinedTop" | "commitScrollTop" | "commitListTop" | "diffTop" | "historyDiffTop" | "selectedIndex" | "statusRevision" | "statusObservedRevision" | "stageStatusUnverified" | "contextRevision">>();
+  repositoryViews = new Map<string, Pick<ShellState, "snapshot" | "refs" | "commitsLive" | "progress" | "mergeState" | "mergeProgressAutoSummary" | "signOff" | "selectedPath" | "selectedSide" | "selectedCommit" | "commitDetail" | "commitFiles" | "historyFile" | "historyFilter" | "historyFillPending" | "historyRefreshPending" | "worktreeHistory" | "sideTop" | "historyTop" | "fileTop" | "stagedTop" | "combinedTop" | "commitScrollTop" | "commitListTop" | "diffTop" | "historyDiffTop" | "selectedIndex" | "statusRevision" | "statusObservedRevision" | "stageStatusUnverified" | "contextRevision">>();
 
   /** Watcher events for a repository that is not on screen. Capped with the view cache. */
   repoWatchNotes = new Map<string, WatchNote>();
@@ -5904,8 +6037,11 @@ export class ShellState {
     this.repositoryViews.delete(key);
     this.repositoryViews.set(key, {
       snapshot: this.snapshot, refs: this.refs, commitsLive: this.commitsLive, progress: this.progress,
+      mergeState: this.mergeState, mergeProgressAutoSummary: this.mergeProgressAutoSummary, signOff: this.signOff,
       selectedPath: this.selectedPath, selectedSide: this.selectedSide, selectedCommit: this.selectedCommit,
       commitDetail: this.commitDetail, commitFiles: this.commitFiles, historyFile: this.historyFile, historyFilter: this.historyFilter,
+      historyFillPending: this.historyFillPending, historyRefreshPending: this.historyRefreshPending,
+      worktreeHistory: this.worktreeHistory,
       sideTop: this.sideTop, historyTop: this.historyTop, fileTop: this.fileTop, stagedTop: this.stagedTop, combinedTop: this.combinedTop,
       commitScrollTop: this.commitScrollTop, commitListTop: this.commitListTop, diffTop: this.diffTop, historyDiffTop: this.historyDiffTop,
       selectedIndex: this.selectedIndex, statusRevision: this.statusRevision, statusObservedRevision: this.statusObservedRevision, stageStatusUnverified: this.stageStatusUnverified, contextRevision: this.contextRevision,
@@ -5943,10 +6079,11 @@ export class ShellState {
     return this.mode === "live";
   }
 
-  async openRepo(path: string) {
+  async openRepo(path: string, { file = null, waitForHistory = false }: { file?: string | null; waitForHistory?: boolean } = {}) {
     if (!this.backend() || !path.trim()) return;
+    const previousPath = this.repoPath();
     if (!this.viewing(path)) this.commitSelection.clear();
-    const stayingOnRepo = this.viewing(path);
+    const stayingOnRepo = !!this.snapshot && this.viewing(path);
     if (!stayingOnRepo) this.cancelAutomaticFetch();
     if (!stayingOnRepo) this.rememberRepositoryView();
     this.dialog = null;
@@ -5964,18 +6101,32 @@ export class ShellState {
     this.commitQuerySearchGen += 1;
     window.clearTimeout(this.commitQuerySearchTimer);
     this.commitQueryMessageHits = [];
-    if (this.snapshot?.path && !this.viewing(path)) cancelReads(this.snapshot.path);
+    if (previousPath && !this.viewing(path)) cancelReads(previousPath);
     this.focusPath = path;
     if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description, commitType: this.commitType });
+    if (!stayingOnRepo) this.openedFrom = path;
     if (!stayingOnRepo) {
+      this.watchQueued = null; this.watchRevision = 0; this.watchPaths = null;
       const cached = this.repositoryViews.get(this.jobKey(path));
       if (cached) { Object.assign(this, cached); this.mode = "live"; }
       else {
+        this.worktreeHistory = null;
         this.snapshot = null; this.refs = null; this.commitsLive = []; this.mode = "loading";
         this.historyFillPending = false;
+        this.historyRefreshPending = false;
+        this.resetCommitView();
         this.selectedPath = null; this.selectedCommit = null; this.commitDetail = null; this.commitFiles = [];
-        this.contentHits = null; this.expandedMerges = []; this.historyTop = 0;
+        this.contentHits = null; this.expandedMerges = [];
+        this.drops = []; this.comparePair = null; this.historyTab = "commit";
+        this.detailQuery = ""; this.searchOpen.detail = false;
+        this.sideTop = 0; this.historyTop = 0;
+        this.fileTop = 0; this.stagedTop = 0; this.combinedTop = 0;
+        this.commitScrollTop = 0; this.commitListTop = 0;
+        this.selectedIndex = 0; this.diffTop = 0; this.blameTop = 0; this.historyDiffTop = 0;
         this.progress = null; this.statusRevision = 0; this.statusObservedRevision = 0; this.stageStatusUnverified = false; this.contextRevision = 0;
+        this.mergeState = null;
+        this.mergeProgressAutoSummary = "";
+        this.signOff = this.settings.signOff;
         if (this.standalone !== "history") this.historyFilter = "";
       }
       this.historyLoading = false;
@@ -5986,12 +6137,13 @@ export class ShellState {
       const draftType = draft?.commitType ?? "";
       this.commitType = isCommitType(draftType) ? draftType : this.preferredCommitType();
       this.restoreHistoryFilter(path);
+      this.normalizeSummary();
     }
-    let historyStarted = false;
+    if (file) this.historyFilter = file;
+    let historyRead: Promise<void> | undefined;
     const startHistory = (force: boolean) => {
-      if (historyStarted || (!force && this.commitsLive.length > 0 && this.refs)) return;
-      historyStarted = true;
-      void this.loadContext().catch((error) => {
+      if (historyRead || (!force && this.commitsLive.length > 0 && this.refs)) return;
+      historyRead = this.loadContext().catch((error) => {
         if (gen === this.openGen && this.viewing(path)) this.actionError = this.message(error);
       });
     };
@@ -6002,6 +6154,7 @@ export class ShellState {
     let held = false;
     try {
       const painted = () => this.mode === "live" && !!this.snapshot && (this.viewing(path) || this.viewing(this.snapshot.path));
+      if (!stayingOnRepo && !this.refs) startHistory(true);
       if (!stayingOnRepo && !painted() && !this.labPage) {
         try {
           const stored = await invoke<Parameters<ShellState["showStoredStatus"]>[0] | null>("load_status_cache", { path });
@@ -6014,19 +6167,24 @@ export class ShellState {
       if (!stayingOnRepo && painted()) {
         // The list on screen is usable. A fingerprint stat must not keep the window in the open latch.
         this.focusPath = null;
-        let headSame = false;
+        let keepHistory = false;
         let plan: ReturnType<typeof planStatusRefresh> = { kind: "full" };
-        try {
+        if (!this.stageStatusUnverified) try {
           const probe = await invoke<StatusProbe>("status_probe", { path });
           if (gen !== this.openGen) return;
           const previous = this.snapshot?.fingerprint;
-          headSame = !!previous && previous.head === probe.fingerprint.head && previous.refId === probe.fingerprint.refId;
+          const note = this.repoWatchNotes.get(this.jobKey(this.snapshot?.path ?? path)) ?? null;
+          const headSame = !!previous && previous.head === probe.fingerprint.head && previous.refId === probe.fingerprint.refId
+            && (previous.submoduleSum ?? "") === (probe.fingerprint.submoduleSum ?? "")
+            && (previous.worktreeSum ?? "") === (probe.fingerprint.worktreeSum ?? "");
+          keepHistory = headSame && probe.watcherAlive && this.contextRevision >= (note?.scope === "full" ? note.revision : 0)
+            && (probe.revision <= this.statusRevision || (note?.scope === "status" && note.revision >= probe.revision));
           plan = planStatusRefresh({
             fingerprint: previous,
-            seen: this.snapshot?.revision ?? 0,
+            seen: this.statusRevision,
             unverified: this.stageStatusUnverified,
             probe,
-            note: this.repoWatchNotes.get(this.jobKey(this.snapshot?.path ?? path)) ?? null,
+            note,
           });
         } catch {
           plan = { kind: "full" };
@@ -6035,8 +6193,7 @@ export class ShellState {
         this.armOpenExtras(path, gen);
         // Commits do not wait on the work tree. A quiet index can still have history,
         // and a painted status cache does not include the commit list.
-        const keepHistory = headSame && this.commitsLive.length > 0 && !!this.refs;
-        startHistory(!keepHistory);
+        startHistory(!keepHistory || this.commitsLive.length === 0 || !this.refs);
         if (plan.kind === "trust") {
           this.stageStatusUnverified = false;
           void this.loadDiff();
@@ -6058,54 +6215,31 @@ export class ShellState {
       if (!stayingOnRepo) startHistory(true);
       const value = await invoke<StatusSnapshot>("workspace_status", { path });
       if (gen !== this.openGen) return;
-      // Reopening the repository already on screen keeps the message being written.
-      // focusPath stands in for the snapshot until status returns. That must not
-      // count as reopening the same repository and keep the previous scroll.
-      const staying = stayingOnRepo || (this.mode === "live" && (this.viewing(path) || this.viewing(value.path)));
       this.aliasJob(path, value.path);
       stopAt = value.path;
-      this.applySnapshot(value);
-      if (!staying) {
-        this.sideTop = 0;
-        this.resetCommitView();
-        this.selectedCommit = null;
-        this.commitDetail = null;
-        this.commitFiles = [];
-        this.historyDiff = null;
-        this.restoreHistoryFilter(value.path);
-        this.drops = [];
-        this.contentHits = null;
-        this.comparePair = null;
-        this.blameLines = null;
-        this.expandedMerges = [];
-        this.historyTab = "commit";
-        this.detailQuery = "";
-        this.searchOpen.detail = false;
-        this.historyTop = 0;
-        this.fileTop = 0;
-        this.stagedTop = 0;
-        this.combinedTop = 0;
-        this.commitScrollTop = 0;
-        this.commitListTop = 0;
-        this.selectedIndex = 0;
-        this.diffTop = 0;
-        this.blameTop = 0;
-        this.historyDiffTop = 0;
-        const saved = this.drafts.get(path) ?? this.drafts.get(value.path);
-        const savedType = saved?.commitType ?? "";
-        this.commitType = isCommitType(savedType) ? savedType : this.preferredCommitType();
-        this.summary = saved?.summary ?? "";
-        this.description = saved?.description ?? "";
-        this.normalizeSummary();
+      if (!stayingOnRepo && path !== value.path && !this.drafts.has(path)) {
+        const draft = this.drafts.get(value.path);
+        if (draft) {
+          this.summary = draft.summary;
+          this.description = draft.description;
+          const type = draft.commitType ?? "";
+          this.commitType = isCommitType(type) ? type : this.preferredCommitType();
+          this.normalizeSummary();
+        }
       }
-      if (!historyStarted && this.standalone !== "history") this.historyFilter = "";
-      if (!historyStarted) void this.loadContext().catch((error) => { if (gen === this.openGen) this.actionError = this.message(error); });
+      this.applySnapshot(value);
+      if (!historyRead && !file && this.standalone !== "history") this.historyFilter = "";
+      startHistory(true);
       if (this.standalone !== "merge") void this.loadDiff();
       this.armOpenExtras(path, gen);
     } catch (error) {
       if (gen !== this.openGen) return;
       const text = this.message(error);
       this.actionError = text;
+      if (!this.snapshot) {
+        this.mode = "error";
+        this.loadError = text;
+      }
       if (this.missingRepoPath(text)) await this.dropMissingRepo(path, text);
     } finally {
       if (held) this.stopWork(stopAt);
@@ -6113,6 +6247,7 @@ export class ShellState {
         this.focusPath = null;
         queueHistoryFill(this);
       }
+      if (waitForHistory) await historyRead;
     }
   }
 
@@ -6129,7 +6264,7 @@ export class ShellState {
       .catch(() => {
         if (gen === this.openGen) this.lfsAvailable = false;
       });
-    void this.rememberRepo(path);
+    void this.rememberRepo(this.snapshot?.path ?? path);
     this.facts = null;
     this.factsPath = "";
     void this.fillTemplate();
@@ -6174,17 +6309,51 @@ export class ShellState {
 
   detectingTerminalClis = $state(false);
 
-  async detectTerminalClis() {
+  async detectTerminalClis(silent = false) {
     if (this.detectingTerminalClis) return;
     this.detectingTerminalClis = true;
-    this.actionError = null;
+    if (!silent) this.actionError = null;
     try {
-      this.settings.terminalClis = await invoke<NonNullable<Settings["terminalClis"]>>("detect_terminal_clis");
+      this.settings.terminalCliFound = await invoke<Record<string, string>>("detect_terminal_clis", { clis: this.settings.terminalClis });
       await this.savePrefs(false);
     } catch (error) {
-      this.actionError = this.message(error);
+      if (!silent) this.actionError = this.message(error);
     } finally {
       this.detectingTerminalClis = false;
+    }
+  }
+
+  addTerminalCli() {
+    const cli: TerminalCli = { id: `cli-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name: "", path: "" };
+    this.settings.terminalClis = [...this.settings.terminalClis, cli];
+    void this.savePrefs(false);
+  }
+
+  removeTerminalCli(id: string) {
+    this.settings.terminalClis = this.settings.terminalClis.filter((cli) => cli.id !== id);
+    this.settings.terminalCliFound = withoutTerminalCli(this.settings.terminalCliFound, id);
+    void this.savePrefs(false);
+  }
+
+  setTerminalCliField(id: string, field: "name" | "path", value: string) {
+    const cli = this.settings.terminalClis.find((item) => item.id === id);
+    if (!cli || cli[field] === value) return;
+    this.settings.terminalClis = this.settings.terminalClis.map((item) => (item.id === id ? { ...item, [field]: value } : item));
+    this.settings.terminalCliFound = withoutTerminalCli(this.settings.terminalCliFound, id);
+    void this.savePrefs(false);
+  }
+
+  /** Adds the preset CLIs that are missing, keeping custom entries and their order. */
+  async restoreTerminalCliPresets() {
+    try {
+      const presets = await invoke<TerminalCli[]>("terminal_cli_presets");
+      const existing = new Set(this.settings.terminalClis.map((cli) => cli.id));
+      const missing = presets.filter((cli) => !existing.has(cli.id));
+      if (missing.length === 0) return;
+      this.settings.terminalClis = [...this.settings.terminalClis, ...missing];
+      void this.savePrefs(false);
+    } catch (error) {
+      this.actionError = this.message(error);
     }
   }
 
@@ -6875,8 +7044,8 @@ export class ShellState {
 
 
 
-  discardChosen(files: string[], focusConfirm = false, candidates = files) {
-    return discardChosen(this, files, focusConfirm, candidates);
+  discardChosen(files: string[], focusConfirm = false, candidates = files, side: Side = "unstaged") {
+    return discardChosen(this, files, focusConfirm, candidates, side);
   }
 
 
@@ -7229,7 +7398,7 @@ export class ShellState {
     const seen = new Set<string>();
     const unique: string[] = [];
     for (const path of paths) {
-      const key = this.normalPath(path);
+      const key = this.jobKey(path);
       if (!key || seen.has(key)) continue;
       seen.add(key);
       unique.push(path);
@@ -7532,7 +7701,7 @@ export class ShellState {
 
   cycleTab(delta: number) {
     if (this.repos.length < 2 || !this.snapshot) return;
-    const index = this.repos.indexOf(this.snapshot.path);
+    const index = this.repos.findIndex((path) => this.viewing(path));
     const next = this.repos[(index + delta + this.repos.length) % this.repos.length];
     void this.openRepo(next);
   }
@@ -7564,8 +7733,10 @@ export class ShellState {
 
 
   closeTab(path: string) {
-    this.closedTabs = [path, ...this.closedTabs.filter((item) => item !== path)].slice(0, 12);
-    const next = this.repos.filter((repo) => repo !== path);
+    const key = this.jobKey(path);
+    const isTab = (item: string) => this.jobKey(item) === key;
+    this.closedTabs = [path, ...this.closedTabs.filter((item) => !isTab(item))].slice(0, 12);
+    const next = this.repos.filter((repo) => !isTab(repo));
     this.repos = next;
     const currentId = this.settings.currentWorkspace;
     if (currentId) {
@@ -7573,12 +7744,12 @@ export class ShellState {
         ...this.settings,
         workspaces: this.settings.workspaces.map((workspace) => {
           if (workspace.id !== currentId) return workspace;
-          const openTabs = workspace.openTabs.filter((item) => item !== path);
+          const openTabs = workspace.openTabs.filter((item) => !isTab(item));
           return { ...workspace, openTabs, selectedTab: Math.min(workspace.selectedTab, Math.max(0, openTabs.length - 1)) };
         }),
       };
     }
-    if (this.snapshot?.path !== path) {
+    if (!this.viewing(path)) {
       if (currentId) void this.savePrefs(false);
       return;
     }
@@ -8243,6 +8414,7 @@ export class ShellState {
     this.lastPlace = next;
     });
     $effect(() => {
+    if (!this.launchOpen) return;
     const max = Math.max(0, this.matches.length - 1);
     if (this.launchIndex > max) this.launchIndex = max;
     });
@@ -8256,7 +8428,7 @@ export class ShellState {
     for (const path of this.settings.recent.slice(0, 12)) {
     if (this.recentStats[path] || this.recentAsked.has(path)) continue;
     this.recentAsked.add(path);
-    void invoke<{ branch: string; ahead: number; behind: number; lastSummary: string }>("repository_summary", { path })
+    void invoke<{ branch: string; ahead: number; behind: number; lastSummary: string }>("repository_summary", { path, __prefetch: true })
     .then((value) => {
     this.recentStats = { ...this.recentStats, [path]: value };
     })
@@ -8372,7 +8544,6 @@ export class ShellState {
     introduce = this.takeFeaturesIntro();
     if (introduce || onboard) void this.savePrefs(false);
     void invoke<string>("settings_path").then((path) => (this.settingsPath = path)).catch(() => {});
-    await this.loadExternalTools();
     if (value.windowWidth > 200 && value.windowHeight > 200 && !this.standalone) {
     try {
     const win = getCurrentWindow();
@@ -8451,8 +8622,7 @@ export class ShellState {
     const queryView = params.get("view");
     if (queryRepo) {
     targeted = true;
-    if (queryView === "history" && queryFile) this.historyFilter = queryFile;
-    await this.openRepo(queryRepo);
+    await this.openRepo(queryRepo, { file: queryView === "history" ? queryFile : null });
     if (queryView === "blame" && queryFile) await this.showBlame(queryFile);
     if (queryView === "history" && queryFile) await this.showFileHistory(queryFile);
     if (queryView === "blob" && queryFile) {
@@ -8493,6 +8663,10 @@ export class ShellState {
     this.mode = "error";
     }
     } finally {
+    if (!stopped) {
+      void this.loadExternalTools();
+      if (this.settings.terminalCliFound == null && this.settings.terminalClis.length > 0) void this.detectTerminalClis(true);
+    }
     if (!stopped && !targeted && introduce) this.dialog = "features";
     if (!stopped && onboard) firstRunTimer = window.setTimeout(() => { if (!stopped) void this.runFirstRunSetup(); }, 2500);
     }

@@ -2,9 +2,39 @@
 
 ## 待处理
 
-- [ ] 正式安装包实机复测：记录启动、点击到 Git 完成及界面刷新耗时、真实远端网络长尾和系统峰值内存；补原生窗口重启和多屏/DPI 验证。按启动测量决定是否拆分主界面及试验台入口。现有本地基准不涵盖这些结果，历史 TLS 失败也尚未用真实远端复核。
+- [ ] 正式安装包实机复测，覆盖真实远端网络长尾、系统峰值内存、原生窗口重启和多屏/DPI。历史 TLS 失败待真实远端复核。启动与命令的本地测量见 [性能记录](dev-docs/performance-plan.md#13-2026-11-26-真实仓库打开与常用命令复测对照-eaa465ad)。
 
 ## 最近完成
+
+- [x] 大仓库打开时先显示可操作侧栏，历史与工作区扫描、标签排序并行。复用引用和可达数据，减少读取提交差异时的 Git 调用。修复切换后迟到的读取、已删除上游、无 HEAD 的仓库搜索，以及引用未加载时的提交签署。本条所在提交 `perf: 加快大仓库打开和历史读取`。回归见 `e2e/status-switch.spec.ts`、`e2e/performance-refresh.spec.ts`、`current_history_uses_existing_visible_upstream`、`remote_inventory_preserves_names_and_local_urls_with_spaces`、`repository_search_can_read_other_branches_with_an_unborn_head` 和 `queued_commit_resolves_repository_sign_off_when_the_choice_is_omitted`。
+
+- [x] 删除工作树时默认勾选同时删除对应的本地分支，取消勾选可保留分支。实现见本条所在提交 `feat: 删除工作树时可同时删除本地分支`。回归见 `worktree_remove_deletes_only_the_reviewed_branch`、`worktree_remove_reports_a_branch_deletion_failure` 及 `e2e/worktrees.spec.ts` 的工作树删除用例，覆盖三套主题。
+
+- [x] 设置文件损坏且没有可用备份时，之前会直接报错并停在错误页。现在把损坏文件另存为 `settings.json.corrupt-<时间戳>`，用默认设置启动，系统凭据库里的 token 继续保留；`.bak` 可用时仍优先恢复，`.bak` 属于更新版本或读取失败时仍不覆盖。界面提示区分“已从备份恢复”和“已重置为默认设置”。设置 schema 同时升到 2：旧正式版读到 dev 写入的新格式会提示“由更新的版本写入”并保持文件不变，不再误判为损坏。修复见 `3f75883c` 及本条所在提交 `fix: 设置 schema 升到 2 避免误判损坏`。回归见 `settings_corrupt_file_without_a_backup_is_kept_and_defaults_are_written`、`settings_corrupt_file_and_corrupt_backup_fall_back_to_defaults`、`settings_corrupt_file_does_not_replace_a_newer_backup`、`settings_old_terminal_clis_migrate_to_presets_at_the_new_schema` 及 `e2e/lab.spec.ts` 的 `damaged settings use the recovery banner`。
+
+- [x] 顶栏「活动」打开的命令记录面板和仓库管理器在点击内部按钮时被透明关闭层拦截，面板随即关闭，复制按钮无法使用。关闭层改回位于弹出面板之下，菜单关闭层仍保持在对话框之上。本条所在提交 `fix: 修复活动面板点击即关闭`。回归见 `e2e/lab.spec.ts` 的 `command log stays open while its buttons are clicked`、`repo picker stays open while it is clicked`，覆盖三套主题。
+
+- [x] 子模块暂存、取消暂存和外部提交会刷新指针状态，差异按子模块实际改动统计文件。Fetch 复查远端提交，并显示目标分支、完整 SHA、冲突阶段和 Git 错误。推送校验提交历史中的子模块指针。修复见本条所在提交 `fix: 修复子模块状态刷新并完善远端诊断`。回归见 `submodule_remote_status_tracks_merge_without_moving_pins_or_using_cached_refs`、`submodule_squash_keeps_old_sha_outside_target_and_checks_unpublished_history`、`submodule_status_keeps_dirty_counts_separate_and_reports_index_conflict_stages`、`submodule_gitdir_fetch_head_is_metadata_not_a_worktree_path` 及 `e2e/lab.spec.ts` 的子模块用例，覆盖三套主题。
+
+- [x] 在管理工作树等弹窗里右键工作树时，菜单被对话框遮罩盖住，只在窗口底部露出一截。菜单层改为位于对话框之上、确认框之下，点遮罩关闭菜单。本条所在提交 `fix: 修复弹窗内右键菜单被对话框遮罩盖住`。回归见 `e2e/worktrees.spec.ts` 的 `worktree dialog context menu stays above the dialog`，覆盖三套主题。
+
+- [x] 未暂存列表的单文件和批量丢弃从索引恢复工作区，保留已暂存版本。加深已暂存、未暂存两栏的选中文件和目录背景，当前预览行的高亮更明显。修复见本条所在提交 `fix: 丢弃未暂存时保留暂存版本并加深选中背景`。回归见 `discard_unstaged_restores_only_the_worktree`、`discard_unstaged_uses_index_gitlink`、`queued_discard_preserves_later_disk_and_index_changes` 及 `e2e/common-operations.spec.ts` 的 `discard unstaged restores the index and highlights selections`，覆盖三套主题。
+
+- [x] 打开或从下拉列表切换到含跨平台子模块文件名的仓库时，状态读取回退到只读的 Git 命令，保留子模块和普通文件的改动。修复提交 `fix: 修复子模块路径导致的仓库打开失败`。回归见 `status_reads_a_submodule_with_windows_incompatible_tree_paths` 和 `e2e/status-switch.spec.ts`。
+
+- [x] Fetch 等待远端时可以切换修改文件并加载差异，Fetch 完成时保留正在读取的预览。本条所在提交 `fix: Fetch 期间并行加载文件差异`。回归见 `file_diff_waits_for_a_queued_index_write` 及 `e2e/operation-responsiveness.spec.ts` 的 `file diffs update while fetch waits for the remote`。
+
+- [x] 工作树右键直接合并到主工作树当前分支，并按规范化路径复用标签页。本条所在提交 `feat: 新增工作树一键合并并修复重复标签页`。回归见 `worktree_merge_preserves_local_changes_and_is_repeatable`、`worktree_merge_rejects_dirty_missing_and_changed_checkouts`、`worktree_merge_conflict_can_abort_and_restore_main_changes` 及 `e2e/worktrees.spec.ts`。
+
+- [x] 关联工作树的项目标签显示独立徽标，空间不足时缩为 `WT`。实现提交 `feat: 为工作树项目标签添加徽标`。回归见 `e2e/worktrees.spec.ts` 的 `worktree tab badges` 和 `worktree creation, branch switching and removal`。
+
+- [x] 管理工作树和删除确认以只读方式检查 Git 状态，消除了索引写入触发的循环刷新。修复提交 `fix: 修复工作树弹窗循环刷新`。回归见 `worktree_details_preserves_checkout_and_submodule_indexes` 和 `e2e/worktrees.spec.ts`。
+
+- [x] 远程分支的检出入口会打开同名本地分支所在的工作树。裸仓库可从本地分支、远程分支、标签或提交的检出入口创建工作树。实现提交 `fix: 衔接远程分支与裸仓库的工作树检出`。回归见 `worktree_can_be_created_from_bare_repository` 和 `e2e/worktrees.spec.ts`。
+
+- [x] 侧栏支持新建、切换和管理工作树。提交图标记各工作树的 HEAD，并支持独立历史和基准比较。删除前复核文件和游离提交，移动、修复、锁定及清理使用 Git 的工作树操作。实现提交 `feat: 完善工作树管理和提交比较`。回归见 `worktree_modes_history_and_shared_registry`、`worktree_remove_requires_current_review_and_preserves_branch`、`worktree_lock_move_repair_and_protected_prune`、`e2e/worktrees.spec.ts`。
+
+- [x] 仓库状态、子模块工作区和子模块 Git 元数据变更会及时通知界面；切换回仓库会比较子模块指纹，checkout 完成后的分支等待标记会在引用快照到达后清除。修复提交：本条所在提交 `fix: 修复仓库状态刷新延迟`。回归：`watch_plan_tests::submodule_gitdir_fetch_head_is_metadata_not_a_worktree_path`、`fingerprint::tests::submodule_checkout_changes_move_the_fingerprint`、`e2e/status-switch.spec.ts`、`e2e/checkout.spec.ts`、`e2e/operation-scheduler.spec.ts`。
 
 - [x] 全新安装第一次启动后，在首屏绘制完成时后台自动同步本机已登录账号、导入 Fork 设置、启用 AI 提交说明接口并开启 Killer 推送；只执行一次，不弹窗、不阻塞打开仓库，失败就跳过。回归：`missing_onboarding_counts_as_seen`、`e2e/first-run.spec.ts`。实现：本条所在提交 `feat: 新装首次启动后台自动准备本地设置并更新功能页`。
 

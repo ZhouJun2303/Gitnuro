@@ -13,6 +13,7 @@ export const STATUS_READS = ["workspace_status", "workspace_status_paths"];
 /** History and ref reads. A status refresh must not cancel the list already on its way. */
 export const HISTORY_READS = ["commit_log", "repository_refs", "file_history", "search_log", "reflog", "in_progress", "merge_state", "blame_source", "blame_file"];
 const alongsideStatus = new Set(HISTORY_READS);
+alongsideStatus.add("repository_summary");
 
 const flights = new Map<string, Promise<unknown>>();
 const cache = new Map<string, { value: unknown; bytes: number }>();
@@ -172,8 +173,9 @@ export function scheduleRead<T>(command: string, args: Record<string, unknown>, 
   if (lane) {
     const superseded = [...waiting, ...activeJobs].filter((job) => job.lane === lane && job.mutable);
     const hasActive = superseded.some((job) => job.started && !job.released);
-    const stableActive = [...activeJobs].some((job) => job.repo === repo && job.started && !job.released && !job.mutable);
-    if (hasActive && !stableActive) requestRepositoryCancel(path);
+    // The backend cancellation is per repository. Preserve reads for other panels.
+    const otherActive = [...activeJobs].some((job) => job.repo === repo && !job.released && !superseded.includes(job));
+    if (hasActive && !otherActive) requestRepositoryCancel(path);
     for (const job of superseded) {
       const index = waiting.indexOf(job);
       if (index >= 0) waiting.splice(index, 1);

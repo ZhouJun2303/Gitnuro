@@ -41,18 +41,16 @@ for (const theme of ["apple", "light", "dark"] as const) {
 
   test(`${theme}: a deleted upstream does not enter the history filter`, async ({ page }) => {
     await pinLabSettings(page, { theme });
-    const requests: string[][] = [];
+    const requests: { revs?: string[]; defaultBranch?: boolean }[] = [];
     page.on("request", (request) => {
       if (!request.url().endsWith("/__lab/invoke")) return;
       const body = request.postDataJSON();
-      if (body?.cmd === "commit_log") requests.push(body.args?.revs ?? []);
+      if (body?.cmd === "commit_log") requests.push(body.args);
     });
     await openLabScene(page, "history-gone-upstream", ".filter-bar", { locale: "en" });
-    expect(requests.length).toBeGreaterThan(0);
-    for (const revs of requests) {
-      expect(revs).toHaveLength(1);
-      expect(revs[0]).toMatch(/^(refs\/heads\/)?Dev\/EnterFast_2026_10_27$/);
-    }
+    const filtered = requests.filter(({ defaultBranch }) => !defaultBranch);
+    expect(filtered.length).toBeGreaterThan(0);
+    for (const { revs } of filtered) expect(revs).toEqual(["refs/heads/Dev/EnterFast_2026_10_27"]);
     await expect(page.locator(".filter-bar")).toContainText("'Dev/EnterFast_2026_10_27'");
     await expect(page.locator('.identity-floor[data-layer="error"]')).toHaveCount(0);
     await expect(page.locator(".commit-row").first()).toBeVisible();

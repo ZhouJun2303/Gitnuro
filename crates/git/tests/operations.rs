@@ -1058,6 +1058,8 @@ fn submodule_and_worktree() {
         Mutation::AddWorktree {
             path: wt.display().to_string(),
             branch: "extra".into(),
+            mode: Default::default(),
+            start: None,
         },
     )
     .unwrap();
@@ -1213,6 +1215,31 @@ fn discard_paths_in_unborn_repository_still_removes_untracked_files() {
     fs::write(app.path.join("new.txt"), "untracked\n").unwrap();
     perform(&app.path, Mutation::DiscardPaths { files: vec!["new.txt".into()] }).unwrap();
     assert!(!app.path.join("new.txt").exists());
+}
+
+#[test]
+fn discard_unstaged_uses_index_gitlink() {
+    let lib = repo();
+    commit_file(&lib, "lib.txt", "first\n", "first");
+    let app = repo();
+    app.git(&["-c", "protocol.file.allow=always", "submodule", "add", &file_url(&lib.path), "vendor"]);
+    app.git(&["commit", "-m", "add submodule"]);
+    let vendor = app.path.join("vendor");
+    fs::write(vendor.join("lib.txt"), "staged commit\n").unwrap();
+    git_at(&vendor, &["add", "lib.txt"]);
+    git_at(&vendor, &["-c", "core.hooksPath=.git/no-hooks", "commit", "-m", "second"]);
+    app.git(&["add", "vendor"]);
+    let staged = app.output(&["rev-parse", ":vendor"]);
+
+    fs::write(vendor.join("lib.txt"), "later commit\n").unwrap();
+    git_at(&vendor, &["add", "lib.txt"]);
+    git_at(&vendor, &["-c", "core.hooksPath=.git/no-hooks", "commit", "-m", "third"]);
+    fs::write(vendor.join("untracked.txt"), "keep\n").unwrap();
+
+    perform(&app.path, Mutation::DiscardUnstaged { files: vec!["vendor".into()] }).unwrap();
+    assert_eq!(git_at(&vendor, &["rev-parse", "HEAD"]), staged);
+    assert_eq!(app.output(&["rev-parse", ":vendor"]), staged);
+    assert_eq!(fs::read_to_string(vendor.join("untracked.txt")).unwrap(), "keep\n");
 }
 
 #[test]
@@ -2806,6 +2833,37 @@ fn discard_paths_restores_tracked_and_deletes_the_rest() {
         after.staged.is_empty() && after.unstaged.is_empty(),
         "{after:?}"
     );
+}
+
+#[test]
+fn discard_unstaged_restores_only_the_worktree() {
+    let repo = repo();
+    commit_file(&repo, "mixed.txt", "committed\n", "base");
+    commit_file(&repo, "deleted.txt", "committed\n", "base delete");
+    for file in ["mixed.txt", "[new].txt"] {
+        fs::write(repo.path.join(file), "staged version\n").unwrap();
+    }
+    repo.git(&["--literal-pathspecs", "add", "--", "mixed.txt", "[new].txt"]);
+    repo.git(&["rm", "--", "deleted.txt"]);
+    fs::write(repo.path.join("mixed.txt"), "later edit\n").unwrap();
+    fs::remove_file(repo.path.join("[new].txt")).unwrap();
+    fs::write(repo.path.join("deleted.txt"), "recreated after staged deletion\n").unwrap();
+    fs::write(repo.path.join("untracked.txt"), "remove\n").unwrap();
+    fs::write(repo.path.join("unselected.txt"), "keep\n").unwrap();
+    let index = repo.output(&["ls-files", "--stage", "-z"]);
+
+    let files = ["mixed.txt", "[new].txt", "deleted.txt", "untracked.txt", "missing.txt"];
+    for _ in 0..2 {
+        perform(&repo.path, Mutation::DiscardUnstaged { files: files.map(String::from).to_vec() }).unwrap();
+        assert_eq!(repo.output(&["ls-files", "--stage", "-z"]), index);
+        for file in ["mixed.txt", "[new].txt"] {
+            assert_eq!(fs::read_to_string(repo.path.join(file)).unwrap(), "staged version\n");
+        }
+        for file in ["deleted.txt", "untracked.txt"] {
+            assert!(!repo.path.join(file).exists());
+        }
+        assert_eq!(repo.output(&["status", "--porcelain"]), "A  [new].txt\nD  deleted.txt\nM  mixed.txt\n?? unselected.txt\n");
+    }
 }
 
 #[test]

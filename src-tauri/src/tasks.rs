@@ -47,6 +47,7 @@ struct Task {
     progress: Progress,
     after: Option<String>,
     lane: String,
+    fetch_only: bool,
     intent: Result<Option<Arc<Intent>>, String>,
     commit: Option<(String, String)>,
     queued: Instant,
@@ -283,6 +284,8 @@ fn enqueue_in_lane(command: &str, args: &Value, target: PathBuf, lane: String) -
     let id = args.get("__task").and_then(Value::as_str).map(str::to_string)
         .unwrap_or_else(|| format!("task-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     let action = request.get("action").and_then(Value::as_str).unwrap_or(command).to_string();
+    let fetch_only = command == "mutate" && action == "fetch"
+        && args.get("__pushCommit").and_then(Value::as_str).is_none();
     let depends_on: Vec<String> = args.get("__dependsOn").and_then(Value::as_array).map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
     let after = args.get("__after").and_then(Value::as_str).map(str::to_string).filter(|earlier| !depends_on.contains(earlier));
     let intent = Intent::capture(command, &target, args).map(|intent| intent.map(Arc::new));
@@ -316,7 +319,7 @@ fn enqueue_in_lane(command: &str, args: &Value, target: PathBuf, lane: String) -
         touch(&mut snapshot);
         registry.lanes.entry(lane.clone()).or_default().push_back(id.clone());
         let cancelled = registry.cancelled_before_enqueue.remove(&id);
-        registry.tasks.insert(id.clone(), Task { progress: Progress::new(&snapshot.action), snapshot: snapshot.clone(), after, lane: lane.clone(), intent, commit: None,
+        registry.tasks.insert(id.clone(), Task { progress: Progress::new(&snapshot.action), snapshot: snapshot.clone(), after, lane: lane.clone(), fetch_only, intent, commit: None,
             queued: Instant::now(), started: None, verifying: None, cancelled: Arc::new(AtomicBool::new(cancelled)) });
         if reorder { order_lane(&mut registry, &lane); }
         self::registry().1.notify_all();
@@ -466,13 +469,22 @@ pub fn snapshot(id: &str) -> Option<Snapshot> {
 
 /// Mutable reads wait for writes already submitted, without delaying later writes.
 pub fn wait_for_writes(repo: &Path) {
+    wait_for_pending_writes(repo, |_| true);
+}
+
+/// Fetch updates remote refs and objects. File diffs depend on HEAD, the index and the worktree.
+pub fn wait_for_file_writes(repo: &Path) {
+    wait_for_pending_writes(repo, |task| !task.fetch_only);
+}
+
+fn wait_for_pending_writes(repo: &Path, blocks: impl Fn(&Task) -> bool) {
     if CURRENT.with(|current| current.borrow().is_some()) { return; }
     let lane = awegit_git::common_repo_key(repo);
     await_admissions(&lane);
     let (lock, ready) = registry();
     let mut registry = lock.lock().unwrap_or_else(|error| error.into_inner());
     let pending = registry.lanes.get(&lane).cloned().unwrap_or_default();
-    while pending.iter().any(|id| registry.tasks.get(id).is_some_and(|task| !terminal(&task.snapshot.state))) {
+    while pending.iter().any(|id| registry.tasks.get(id).is_some_and(|task| blocks(task) && !terminal(&task.snapshot.state))) {
         registry = ready.wait(registry).unwrap_or_else(|error| error.into_inner());
     }
 }
@@ -752,6 +764,29 @@ mod tests {
     }
 
     #[test]
+    fn file_diff_waits_for_a_queued_index_write() {
+        let repo = Repo::new();
+        std::fs::write(repo.0.join("note.txt"), "base\n").unwrap();
+        repo.git(&["add", "note.txt"]);
+        repo.git(&["commit", "-qm", "test: seed staged diff"]);
+        std::fs::write(repo.0.join("note.txt"), "staged\n").unwrap();
+
+        let args = json!({ "path": repo.0, "file": "note.txt" });
+        let id = enqueue("stage_path", &args).unwrap();
+        let path = repo.0.to_string_lossy().into_owned();
+        let (send, diff) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let _ = send.send(super::super::file_diff(Some(path), "note.txt".into(), true, None, None, None));
+        });
+        let before = diff.recv_timeout(Duration::from_millis(300));
+        run(&id, || execute("stage_path", &args), ok).unwrap();
+        assert!(matches!(before, Err(mpsc::RecvTimeoutError::Timeout)));
+        let report = diff.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+        assert!(report.diff.lines.iter().any(|line| line.text == "+staged"));
+        reader.join().unwrap();
+    }
+
+    #[test]
     fn a_noop_pull_reports_its_command_phases_and_finishes_after_verification() {
         let repo = Repo::new();
         std::fs::write(repo.0.join("note.txt"), "one\n").unwrap();
@@ -842,7 +877,7 @@ mod tests {
         repo.git(&["commit", "-m", "test: seed"]);
         for staged in [false, true] {
             std::fs::write(&file, "selected version\n").unwrap();
-            let args = json!({ "path": repo.0, "request": { "action": "discard", "file": "tracked.txt" } });
+            let args = json!({ "path": repo.0, "request": { "action": "discardUnstaged", "files": ["tracked.txt"] } });
             let earlier = enqueue("mutate", &repo.args()).unwrap();
             let id = enqueue("mutate", &args).unwrap();
             run(&earlier, || {
@@ -859,6 +894,27 @@ mod tests {
         json!({ "path": repo.0, "summary": "test: queued commit", "description": "", "amend": false,
             "signOff": false, "skipHooks": true, "__branch": awegit_git::current_branch(&repo.0).unwrap(),
             "__expectedCommit": awegit_git::commit_intent(&repo.0).unwrap() })
+    }
+
+    #[test]
+    fn queued_commit_resolves_repository_sign_off_when_the_choice_is_omitted() {
+        let repo = Repo::new();
+        repo.git(&["config", "user.name", "Task Test"]);
+        repo.git(&["config", "user.email", "task@example.test"]);
+        repo.git(&["commit", "--allow-empty", "-m", "test: seed"]);
+        awegit_git::write_sign_off(&repo.0, true, "Signed-off-by: %user <%email>").unwrap();
+        for override_sign_off in [false, true] {
+            std::fs::write(repo.0.join("note.txt"), format!("{override_sign_off}\n")).unwrap();
+            repo.git(&["add", "note.txt"]);
+            let mut args = commit_args(&repo);
+            if !override_sign_off {
+                args.as_object_mut().unwrap().remove("signOff");
+            }
+            let id = enqueue("commit_changes", &args).unwrap();
+            run(&id, || execute("commit_changes", &args), ok).unwrap();
+            let message = repo.git(&["log", "-1", "--format=%B"]);
+            assert_eq!(message.contains("Signed-off-by: Task Test <task@example.test>"), !override_sign_off);
+        }
     }
 
     #[test]
@@ -957,6 +1013,8 @@ mod tests {
     #[test]
     fn stage_verification_is_scoped_and_does_not_fail_for_unrelated_conflicts() {
         let repo = Repo::new();
+        repo.git(&["config", "user.name", "Task Test"]);
+        repo.git(&["config", "user.email", "task@example.test"]);
         for file in ["conflict.txt", "stage.txt", "untouched.txt"] { std::fs::write(repo.0.join(file), "base\n").unwrap(); }
         repo.git(&["add", "."]); repo.git(&["commit", "-m", "test: seed"]);
         repo.git(&["checkout", "-b", "other"]);
@@ -966,6 +1024,7 @@ mod tests {
         std::fs::write(repo.0.join("conflict.txt"), "main\n").unwrap();
         repo.git(&["commit", "-am", "test: main"]);
         assert!(awegit_git::perform(&repo.0, awegit_git::Mutation::Merge { name: "other".into(), no_ff: false, squash: false, autostash: false, summary: String::new(), description: String::new() }).is_err());
+        assert!(repo.git(&["ls-files", "-u"]).contains("conflict.txt"));
         for file in ["stage.txt", "untouched.txt"] { std::fs::write(repo.0.join(file), "new\n").unwrap(); }
         let args = json!({ "path": repo.0, "request": { "action": "stagePaths", "files": ["stage.txt"], "unstage": false } });
         let id = enqueue("mutate", &args).unwrap();

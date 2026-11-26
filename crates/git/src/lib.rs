@@ -1,6 +1,7 @@
 //! Repository status, diffs, and the writes that change the index or `HEAD`.
 //!
-//! Status is read with gitoxide. Staging, committing, and diff text go through `git`.
+//! Status uses gitoxide with a Git fallback for unsupported trees and submodules.
+//! Staging, committing, and diff text go through `git`.
 
 mod autostash;
 mod change;
@@ -13,7 +14,10 @@ mod model;
 mod ops;
 mod proc;
 mod pull;
+mod status_fallback;
+mod submodule;
 mod timing;
+pub mod worktree;
 
 use std::path::{Path, PathBuf};
 
@@ -23,7 +27,7 @@ pub use pull::{refresh_state as pull_refresh_state, RefreshState as PullRefreshS
 pub use change::{
     blob_preview, blob_view, commit, conflict_sides, conflict_view, discard_hunk, discard_line,
     discard_lines, file_diff, file_diff_with, file_preview, index_preview, launch_diff_pair, launch_diff_tool,
-    launch_editor, launch_merge_tool, porcelain_z_paths, range_diff, resolve_conflict,
+    launch_editor, launch_folder_editor, launch_merge_tool, porcelain_z_paths, range_diff, resolve_conflict,
     compact_directory_paths, resolve_conflicts, revision_bytes, stage_all, stage_hunk, stage_line, stage_lines, stage_paths,
     staged_diff, unstage_all, unstage_paths, workspace_diff, BlobView, CommitRequest,
     ConflictSides, ConflictView, DiffLine, DiffLineKind, FileDiff, FilePreview, LineEdit,
@@ -35,19 +39,21 @@ pub use cli::{
     common_repo_key, check_cancelled, cancel_token, check_path, with_cancellation, without_cancellation, with_operation_repo, GitRuntime, HttpsCredential, Session, Trace,
 };
 pub use fingerprint::{status_fingerprint, StatusFingerprint};
+pub use submodule::{submodule_remote_status, submodule_urls, SubmoduleRemoteRow};
 pub use model::{
     blame_file, blame_source, blame_file_range, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log,
-    commit_log_sorted, commit_tree, commits_from, compare_file, compare_files, file_history,
+    commit_log_sorted, commit_tree, commits_from, compare_file, compare_files, current_branch_log_revisions, file_history,
     ignored_paths, in_progress, index_lock_path, lfs_available, lfs_locks, locate_ref,
-    prompt_facts, rebase_conflicts, reflog, remove_stale_index_lock, repo_sign_off_format,
+    prompt_facts, rebase_conflicts, reflog, remove_stale_index_lock, repo_sign_off_enabled, repo_sign_off_format,
     repository_refs, repository_summary, search_log, show_commit_file, show_commit_file_with,
     remote_account_overrides, stale_index_lock, stale_index_lock_for_error,
     write_expanded_groups, write_hidden_refs, write_remote_account, write_sign_off, BlameLine,
     BlameSource, BranchRow, CommitDetail, CommitRow, InProgress, LfsLockRow, LocatedRef, RefSnapshot,
     commit_log_page, commit_log_page_with_revision, file_history_page, file_history_page_with_revision,
     search_log_page, search_log_page_with_revision, reflog_page,
-    ReflogRow, RemoteRow, RepoSummary, StaleIndexLock, StashRow, SubmoduleRow, TagRow, WorktreeRow,
+    ReflogRow, RemoteRow, RepoSummary, StaleIndexLock, StashRow, SubmoduleRow, TagRow,
 };
+pub use worktree::WorktreeRow;
 pub use ops::{
     approve_credential, cherry_preview, merge_preview, merge_state, merged_branches, perform, perform_stashed,
     pick_history, push_commit_target, push_is_up_to_date, repo_facts, repo_facts_brief, scan_repositories, search_commits, set_repo_author,
@@ -65,6 +71,9 @@ pub struct FileChange {
     pub path: String,
     pub kind: ChangeKind,
     pub previous_path: Option<String>,
+    /// Number of changed paths inside a modified submodule, independent of its gitlink.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submodule_dirty: Option<usize>,
 }
 
 /// How a path changed, matching what `git status` would show.
@@ -213,21 +222,26 @@ fn status_patterns(path: &Path, fakeignore: bool, patterns: Vec<gix::bstr::BStri
     let branch = head
         .referent_name()
         .map(|name| name.shorten().to_string());
+    if repo.is_bare() {
+        return Ok(StatusSnapshot {
+            revision: 0,
+            path: worktree.display().to_string(),
+            branch,
+            commit_intent: CommitIntent { head: head.id().map(|id| id.to_string()), index: String::new() },
+            staged: Vec::new(),
+            unstaged: Vec::new(),
+            fingerprint: None,
+        });
+    }
     let commit_intent = index_intent(&repo, head.id().map(|id| id.to_string()), None)?;
 
-    let mut staged = Vec::new();
-    let mut unstaged = Vec::new();
-    let iter = repo
-        .status(gix::progress::Discard)?
-        .untracked_files(gix::status::UntrackedFiles::Files)
-        .into_iter(patterns)?;
-
-    for item in iter {
-        match item? {
-            gix::status::Item::TreeIndex(change) => push_staged(&mut staged, change),
-            gix::status::Item::IndexWorktree(change) => push_unstaged(&mut unstaged, change),
+    let (mut staged, mut unstaged) = match gitoxide_changes(&repo, &patterns) {
+        Ok(changes) => changes,
+        Err(error) if status_fallback::can_retry(&error) => {
+            status_fallback::read_changes(&repo, &worktree, &patterns)?
         }
-    }
+        Err(error) => return Err(error),
+    };
 
     sort_changes(&mut staged);
     sort_changes(&mut unstaged);
@@ -245,6 +259,25 @@ fn status_patterns(path: &Path, fakeignore: bool, patterns: Vec<gix::bstr::BStri
         unstaged,
         fingerprint: None,
     })
+}
+
+fn gitoxide_changes(
+    repo: &gix::Repository,
+    patterns: &[gix::bstr::BString],
+) -> Result<(Vec<FileChange>, Vec<FileChange>), Error> {
+    let mut staged = Vec::new();
+    let mut unstaged = Vec::new();
+    let iter = repo
+        .status(gix::progress::Discard)?
+        .untracked_files(gix::status::UntrackedFiles::Files)
+        .into_iter(patterns.iter().cloned())?;
+    for item in iter {
+        match item? {
+            gix::status::Item::TreeIndex(change) => push_staged(&mut staged, change),
+            gix::status::Item::IndexWorktree(change) => push_unstaged(&mut unstaged, change),
+        }
+    }
+    Ok((staged, unstaged))
 }
 
 /// Codex artifact directories (`.tmp_artifact`, `.tmp_artifact2`, …). They are not repository changes.
@@ -298,11 +331,11 @@ fn classify_open(path: &Path, source: gix::open::Error) -> Error {
     }
 }
 
-/// Walk upward from `start` until a repository work tree is found.
+/// Walk upward from `start` until a worktree or bare repository is found.
 pub fn discover(start: impl AsRef<Path>) -> Option<PathBuf> {
     let mut dir = start.as_ref().to_path_buf();
     loop {
-        if dir.join(".git").exists() {
+        if dir.join(".git").exists() || (dir.join("HEAD").is_file() && dir.join("objects").is_dir() && dir.join("refs").is_dir()) {
             return Some(dir);
         }
         if !dir.pop() {
@@ -355,11 +388,23 @@ fn push_unstaged(out: &mut Vec<FileChange>, change: gix::status::index_worktree:
             EntryStatus::Change(Change::Removed) => {
                 push(out, rela_path.as_ref(), ChangeKind::Deleted, None)
             }
-            EntryStatus::Change(
-                Change::Modification { .. }
-                | Change::Type { .. }
-                | Change::SubmoduleModification(_),
-            ) => push(out, rela_path.as_ref(), ChangeKind::Modified, None),
+            EntryStatus::Change(Change::SubmoduleModification(status)) => {
+                let submodule_dirty = status.changes.as_ref().map(|changes| {
+                    let mut paths = std::collections::HashSet::new();
+                    for change in changes {
+                        match change {
+                            gix::status::Item::TreeIndex(change) => { paths.insert(change.location()); }
+                            gix::status::Item::IndexWorktree(change) => { paths.insert(change.rela_path()); }
+                        }
+                    }
+                    paths.len()
+                });
+                push(out, rela_path.as_ref(), ChangeKind::Modified, None);
+                if let Some(file) = out.last_mut() { file.submodule_dirty = submodule_dirty; }
+            }
+            EntryStatus::Change(Change::Modification { .. } | Change::Type { .. }) => {
+                push(out, rela_path.as_ref(), ChangeKind::Modified, None)
+            }
             EntryStatus::IntentToAdd => push(out, rela_path.as_ref(), ChangeKind::Added, None),
             EntryStatus::NeedsUpdate(_) => {}
         },
@@ -398,6 +443,7 @@ fn push(out: &mut Vec<FileChange>, path: &BStr, kind: ChangeKind, previous: Opti
         path: path.to_string(),
         kind,
         previous_path: previous.map(ToString::to_string),
+        submodule_dirty: None,
     });
 }
 

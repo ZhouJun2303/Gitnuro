@@ -118,7 +118,14 @@
           {/each}
         </div>
       {/if}
-      {#if notice.fileName}<p class="meta update-file">{shell.tr("chrome.updateFileName", { name: notice.fileName })}</p>{/if}
+      {#if notice.fileName}
+        <div class="update-file" title={notice.fileName}>
+          <svg class="update-file-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 1.5h4L12 5v9.5H4.5z"></path><path d="M8.5 1.5V5H12"></path></svg>
+          <span class="update-file-label">{shell.tr("chrome.updateFileLabel")}</span>
+          <code class="update-file-name">{notice.fileName}</code>
+          {#if shell.updateTotal > 0}<span class="update-file-size">{formatBytes(shell.updateTotal)}</span>{/if}
+        </div>
+      {/if}
     </section>
 
     {#if phase === "downloading"}

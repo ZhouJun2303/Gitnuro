@@ -5,6 +5,7 @@ export type StatusFile = {
   path: string;
   kind: ChangeKind;
   previousPath: string | null;
+  submoduleDirty?: number;
 };
 
 /** HEAD text, branch id, and the index trailer. A match means those files did not change. */
@@ -13,6 +14,9 @@ export type StatusFingerprint = {
   refId: string;
   indexLen: number;
   indexSum: string;
+  /** Stable signature of the checked-out submodule HEADs and indexes. */
+  submoduleSum?: string;
+  worktreeSum?: string;
 };
 
 export type StatusSnapshot = {
@@ -129,17 +133,46 @@ export type TagRow = { name: string; id: string };
 export type StashRow = { name: string; summary: string; id?: string; parent?: string };
 export type SubmoduleRow = {
   path: string;
-  /** Checked-out commit, or the index gitlink while the checkout is missing. */
+  /** Checked-out commit. Empty if HEAD is unavailable. */
   id: string;
   /** Gitlink commit recorded in the superproject index. */
   recorded: string;
+  conflict?: [string | null, string | null, string | null];
   /** Checked-out branch. Empty for a detached HEAD or a missing checkout. */
   branch: string;
-  /** Branch named in `.gitmodules`. Empty when the entry sets none. */
+  /** Target branch named in `.gitmodules`, with "." resolved against the superproject. */
   configuredBranch: string;
+  inheritsBranch: boolean;
   ready: boolean;
+  brokenCheckout: boolean;
+  configError?: string;
+  configKey: string;
 };
-export type WorktreeRow = { path: string; branch: string | null; detached: boolean };
+export type SubmoduleRemoteCommit = {
+  id: string;
+  state: "inTarget" | "outsideTarget" | "targetMissing" | "reachable" | "unreachable";
+  ref?: string;
+};
+export type SubmoduleRemoteRow = {
+  path: string;
+  configKey: string;
+  target: string;
+  url: string;
+  recorded?: SubmoduleRemoteCommit;
+  checkout?: SubmoduleRemoteCommit;
+  error?: string;
+};
+export type WorktreeRow = {
+  path: string;
+  branch: string | null;
+  head: string | null;
+  detached: boolean;
+  main: boolean;
+  bare: boolean;
+  missing: boolean;
+  locked: string | null;
+  prunable: string | null;
+};
 
 export type RefSnapshot = {
   labels?: Record<string, string[]>;
@@ -198,8 +231,13 @@ export type ToolRecord = {
   fallback: boolean;
 };
 
-export const terminalCliNames = ["codex", "grok", "cursor-agent", "claude"] as const;
-export type TerminalCli = (typeof terminalCliNames)[number];
+/** One configured terminal CLI: a label and the command or path to launch. */
+export type TerminalCli = {
+  id: string;
+  name: string;
+  /** A command on PATH or an absolute executable path. Empty launches `name`. */
+  path: string;
+};
 
 export type Settings = {
   theme: string;
@@ -315,7 +353,10 @@ export type Settings = {
   shellKind: string;
   shellPath: string;
   shellArgs: string;
-  terminalClis: TerminalCli[] | null;
+  /** Configured terminal CLIs, in launch-menu order. */
+  terminalClis: TerminalCli[];
+  /** CLI id to the executable found by the last scan. null means not scanned yet. */
+  terminalCliFound: Record<string, string> | null;
   diffToolName: string;
   diffToolPath: string;
   diffToolArgs: string;
@@ -366,7 +407,7 @@ export type Settings = {
   featuresIntro: string;
   /** `pending` asks a new install to show the first-run setup once. */
   onboarding: string;
-  /** `recovered-backup` when the last load restored a damaged settings file. */
+  /** `recovered-backup` when the last load restored a damaged settings file; `reset-corrupt` when the damaged file was kept and defaults were loaded. */
   recoveryNotice?: string;
   /** Draw the full conflicted file and every block in the changes pane. Off, because large files stall the window. */
   showConflictPreview: boolean;

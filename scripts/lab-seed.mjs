@@ -412,6 +412,50 @@ function seedUnstageInitialRepo() {
   write(path, "new.txt", "edited after staging\n");
 }
 
+function seedDiscardUnstagedRepo() {
+  const path = join(repos, "discard-unstaged");
+  wipe(path); initWork(path);
+  for (const name of ["first", "third"]) {
+    commit(path, `Assets/${name}.txt`, `committed ${name}\n`, `base ${name}`);
+  }
+  for (const name of ["first", "second", "third"]) {
+    const file = `Assets/${name}.txt`;
+    write(path, file, `staged ${name}\n`);
+    git(path, ["add", "--", file]);
+    write(path, file, `edited after staging ${name}\n`);
+  }
+  write(path, "other.txt", "keep this file\n");
+}
+
+function seedWorktreeRepo() {
+  const main = join(repos, "worktree");
+  const checkouts = join(repos, "worktree-checkouts");
+  const bare = join(repos, "worktree-bare.git");
+  for (const path of [main, checkouts, bare]) wipe(path);
+  initWork(main);
+  mkdirSync(checkouts, { recursive: true });
+  commit(main, ".gitignore", "ignored.txt\n", "worktree base");
+  git(main, ["branch", "available"]);
+  git(main, ["tag", "base"]);
+  const topic = join(checkouts, "topic");
+  const detached = join(checkouts, "detached");
+  const missing = join(checkouts, "missing");
+  git(main, ["worktree", "add", "-b", "topic", topic]);
+  commit(topic, "topic.txt", "committed on topic\n", "worktree topic commit");
+  write(topic, "topic.txt", "modified in topic\n");
+  write(topic, "local.txt", "untracked in topic\n");
+  write(topic, "ignored.txt", "ignored in topic\n");
+  git(main, ["worktree", "lock", "--reason", "external disk", topic]);
+  git(main, ["worktree", "add", "--detach", detached, "base"]);
+  commit(detached, "detached.txt", "detached history\n", "worktree detached commit");
+  git(main, ["worktree", "add", "-b", "missing", missing]);
+  wipe(missing);
+  commit(main, "main.txt", "only on main\n", "worktree main commit");
+  git(main, ["clone", "--bare", main, bare]);
+  git(main, ["remote", "add", "origin", bare]);
+  git(main, ["update-ref", "refs/remotes/origin/topic", "refs/heads/topic"]);
+}
+
 function seedStageConflictPathsRepo() {
   const path = join(repos, "stage-conflict-paths");
   wipe(path); initWork(path);
@@ -629,6 +673,53 @@ function seedSubmoduleDiffRepo() {
   if (latest !== initial) git(join(path, "vendor"), ["checkout", "--detach", latest]);
 }
 
+function seedSubmoduleRemoteRepo() {
+  const path = join(repos, "submodule-remote");
+  const source = join(repos, "submodule-remote-author");
+  const parentRemote = join(lab, "submodule-remote-parent.git");
+  const childRemote = join(lab, "submodule-remote-child.git");
+  for (const repo of [path, source, parentRemote, childRemote]) wipe(repo);
+  initBare(parentRemote);
+  initBare(childRemote);
+  initWork(source);
+  commit(source, "lib.txt", "base\n", "child base");
+  git(source, ["remote", "add", "origin", fileUrl(childRemote)]);
+  git(source, ["push", "-u", "origin", "main"]);
+  initWork(path);
+  git(path, ["remote", "add", "origin", fileUrl(parentRemote)]);
+  git(path, ["-c", "protocol.file.allow=always", "submodule", "add", "-b", "main", "../submodule-remote-child.git", "vendor"]);
+  git(path, ["commit", "-m", "add submodule"]);
+  git(path, ["push", "-u", "origin", "main"]);
+  const vendor = join(path, "vendor");
+  git(vendor, ["checkout", "-b", "topic"]);
+  commit(vendor, "lib.txt", "feature\n", "child feature");
+  git(vendor, ["push", "-u", "origin", "topic"]);
+  git(path, ["add", "vendor"]);
+  git(path, ["commit", "-m", "pin the feature commit"]);
+}
+
+function seedSubmoduleForeignPathRepo() {
+  const path = join(repos, "submodule-foreign-path");
+  wipe(path);
+  initWork(path);
+  const child = join(path, "third_party", "child");
+  git(path, ["-c", "protocol.file.allow=always", "submodule", "add", fileUrl(subBare), "third_party/child"]);
+  git(child, ["config", "gitoxide.core.protectWindows", "true"]);
+  // A commit created on another platform can contain a filename Windows cannot check out.
+  const blob = Buffer.from(git(child, ["rev-parse", "HEAD:lib.txt"]).stdout.trim(), "hex");
+  const treeFile = join(path, ".git", "foreign-tree");
+  writeFileSync(treeFile, Buffer.concat([
+    Buffer.from("100644 fixture?.txt\0"), blob, Buffer.from("100644 lib.txt\0"), blob,
+  ]));
+  const tree = git(child, ["hash-object", "-w", "-t", "tree", treeFile]).stdout.trim();
+  const head = git(child, ["commit-tree", tree, "-p", "HEAD", "-m", "test: foreign filename"]).stdout.trim();
+  git(child, ["update-ref", "HEAD", head]);
+  write(path, "regular.txt", "base\n");
+  git(path, ["add", "."]);
+  git(path, ["commit", "-m", "test: add submodule and regular file"]);
+  write(path, "regular.txt", "local edit\n");
+}
+
 function seedSubmoduleHealthRepo() {
   const path = join(repos, "submodule-health");
   wipe(path);
@@ -636,6 +727,8 @@ function seedSubmoduleHealthRepo() {
   commit(path, "README.md", "submodule health\n", "base");
 
   const src = join(repos, "health-src");
+  wipe(healthBare);
+  initBare(healthBare);
   wipe(src);
   initWork(src);
   commit(src, "health.txt", "shared\n", "health base");
@@ -674,8 +767,12 @@ const restore = {
   "checkout-index": () => seedCheckoutRepo("checkout-index"),
   "checkout-conflict": () => seedCheckoutRepo("checkout-conflict"),
   "unstage-initial": seedUnstageInitialRepo,
+  "discard-unstaged": seedDiscardUnstagedRepo,
+  worktree: seedWorktreeRepo,
   "stage-conflict-paths": seedStageConflictPathsRepo,
   "submodule-diff": seedSubmoduleDiffRepo,
+  "submodule-remote": seedSubmoduleRemoteRepo,
+  "submodule-foreign-path": seedSubmoduleForeignPathRepo,
   "submodule-health": seedSubmoduleHealthRepo,
   "gone-upstream": seedGoneUpstreamRepo,
   "pull-deleted": seedPullDeletedRepo,
@@ -715,7 +812,6 @@ writeFileSync(join(lab, "gitconfig"), "");
 initBare(remote);
 initBare(remotePush);
 initBare(subBare);
-initBare(healthBare);
 const subSrc = join(repos, "sub-src");
 initWork(subSrc);
 commit(subSrc, "lib.txt", "library\n", "lib");
@@ -725,7 +821,9 @@ const subSha = git(subSrc, ["rev-parse", "HEAD"]).stdout.trim();
 commit(subSrc, "lib.txt", "library update\n", "lib update");
 git(subSrc, ["push", "origin", "HEAD:main"]);
 seedSubmoduleDiffRepo();
+seedSubmoduleForeignPathRepo();
 seedSubmoduleHealthRepo();
+seedSubmoduleRemoteRepo();
 
 const writer = join(repos, "writer");
 initWork(writer);
@@ -894,6 +992,8 @@ seedMergeRepo();
 seedRebaseRepo();
 seedOperationRepo();
 seedUnstageInitialRepo();
+seedDiscardUnstagedRepo();
+seedWorktreeRepo();
 seedStageConflictPathsRepo();
 seedPullDeletedRepo();
 seedPullNoopRepo();

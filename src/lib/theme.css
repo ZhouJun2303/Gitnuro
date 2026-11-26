@@ -100,11 +100,12 @@
   --image-checker-a: #e6e6e6;
   --image-checker-b: #ffffff;
   /* Overlay layers */
-  --z-menu: 30;
   --z-popover: 31;
   --z-palette: 40;
   --z-dialog: 50;
   --z-merge: 55;
+  /* Menus can open from inside a dialog, so they sit above the dialog layer. */
+  --z-menu: 56;
   --z-confirm: 60;
   --scrollbar-thumb: rgba(24, 24, 27, 0.18);
   --scrollbar-thumb-hover: rgba(24, 24, 27, 0.38);

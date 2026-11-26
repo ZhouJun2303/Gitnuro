@@ -391,6 +391,8 @@
 
 .pref-card-actions .text-button { margin-left: 0; }
 
+.pref-card-actions .grow { flex: 1; }
+
 .pref-list {
   display: flex;
   flex-direction: column;
@@ -477,6 +479,31 @@
 .diff-sample.plain .tok-word { color: inherit; }
 
 .tool-grid { display: grid; grid-template-columns: 200px 1fr; gap: 12px; }
+
+.cli-list { display: flex; flex-direction: column; max-height: 240px; overflow-y: auto; }
+
+.cli-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) 56px auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+
+.cli-row + .cli-row { border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+
+.cli-row input { min-width: 0; width: 100%; }
+
+.cli-command { font-family: var(--mono); font-size: 12px; }
+
+.cli-status { text-align: right; font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+
+.cli-status.found { color: var(--accent); }
+
+.cli-remove { margin-left: 0; padding: 2px 6px; color: var(--text-secondary); }
+
+.cli-remove:hover { color: var(--deleted); }
 
 .pref-tabs {
   display: inline-flex;

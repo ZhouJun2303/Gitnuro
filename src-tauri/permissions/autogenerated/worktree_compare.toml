@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-worktree-compare"
+description = "Enables the worktree_compare command without any pre-configured scope."
+commands.allow = ["worktree_compare"]
+
+[[permission]]
+identifier = "deny-worktree-compare"
+description = "Denies the worktree_compare command without any pre-configured scope."
+commands.deny = ["worktree_compare"]

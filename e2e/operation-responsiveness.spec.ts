@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { once } from "node:events";
 import { mkdirSync, mkdtempSync } from "node:fs";
+import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { pinLabSettings } from "./helpers";
@@ -22,6 +24,75 @@ async function open(page: Page, theme: string) {
 }
 
 for (const theme of ["apple", "light", "dark"]) {
+  test(`file diffs update while fetch waits for the remote (${theme})`, async ({ page, request }) => {
+    test.setTimeout(60_000);
+    await restore(request);
+    const originalRemote = git("remote", "get-url", "origin");
+    const head = git("rev-parse", "HEAD");
+    let requested = false;
+    let releaseFetch!: () => void;
+    let releaseDiff = () => {};
+    const fetchGate = new Promise<void>((resolve) => { releaseFetch = resolve; });
+    const remote = createServer(async (req, res) => {
+      if (req.url === "/repo.git/HEAD") return res.end("ref: refs/heads/main\n");
+      if (!req.url?.startsWith("/repo.git/info/refs")) return res.writeHead(404).end();
+      requested = true;
+      await fetchGate;
+      res.writeHead(200, { "content-type": "text/plain" }).end(`${head}\trefs/heads/main\n`);
+    });
+    try {
+      remote.listen(0, "127.0.0.1");
+      await once(remote, "listening");
+      const address = remote.address();
+      if (!address || typeof address === "string") throw new Error("Missing test remote address");
+      git("remote", "set-url", "origin", `http://127.0.0.1:${address.port}/repo.git`);
+      await pinLabSettings(page, { fetchAllRemotes: false, diffStyle: "unified" });
+      await open(page, theme);
+
+      await page.locator('.chrome-left [title="获取"]').click();
+      await page.locator('[data-dialog="fetch"] button.commit').click();
+      await expect.poll(() => requested).toBe(true);
+      const diff = page.locator("section.diff .diff-body");
+      const staged = page.locator('.staged-pane .file-select[title="note.txt"]');
+      await staged.click();
+      await expect(diff).toContainText("staged");
+      await page.locator('.unstaged-pane .file-select[title="loose/file-0.txt"]').click();
+      await expect(diff).toContainText("untracked");
+      await expect(page.getByRole("progressbar")).toBeVisible();
+
+      // Finish Fetch while the next diff response is still on its way to the pane.
+      let diffReads = 0;
+      const diffGate = new Promise<void>((resolve) => { releaseDiff = resolve; });
+      await page.route("**/__lab/invoke", async (route) => {
+        const body = route.request().postDataJSON();
+        if (body.cmd !== "file_diff" || body.args.file !== "note.txt" || !body.args.staged) return route.fallback();
+        const response = await route.fetch();
+        diffReads++;
+        await diffGate;
+        return route.fulfill({ response });
+      });
+      await staged.click();
+      await expect.poll(() => diffReads).toBe(1);
+      const finished = page.waitForResponse((response) => response.url().endsWith("/__lab/invoke")
+        && response.request().postDataJSON()?.args?.request?.action === "fetch");
+      releaseFetch();
+      const payload = await (await finished).json();
+      expect(payload.ok && payload.value.outcome, payload.value?.error).toBe("completed");
+      await page.waitForFunction(async (modulePath) => {
+        const { clientStats } = await import(/* @vite-ignore */ modulePath);
+        return clientStats().some((entry: { name: string }) => entry.name === "mutate");
+      }, "/src/lib/perf.ts");
+      releaseDiff();
+      await expect(diff).toContainText("staged");
+      expect(diffReads).toBe(1);
+    } finally {
+      releaseFetch();
+      releaseDiff();
+      remote.close();
+      git("remote", "set-url", "origin", originalRemote);
+    }
+  });
+
   test(`account testing preserves a new token entered while the response is pending (${theme})`, async ({ page }) => {
     await pinLabSettings(page, { locale: "zh", theme, fetchAutomatically: false, statusInterval: 0 });
     await page.goto(`/?scene=prefs-accounts&theme=${theme}&locale=zh`);

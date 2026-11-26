@@ -208,8 +208,14 @@
 .side.section:hover .section-tools .side-actions,
   .side.section:focus-within .section-tools .side-actions { display: flex; }
 
-.side.section:hover:has(.side-actions) .count,
-  .side.section:focus-within:has(.side-actions) .count {
+.side.section[data-section="worktrees"] .section-tools .side-actions {
+    display: flex;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+.side.section:not([data-section="worktrees"]):hover:has(.side-actions) .count,
+  .side.section:not([data-section="worktrees"]):focus-within:has(.side-actions) .count {
     visibility: hidden;
   }
 
@@ -525,3 +531,8 @@
 .side.nav.selected .count { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 .reference-pending { width: 11px; height: 11px; flex: 0 0 11px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: reference-spin 1s linear infinite; opacity: .7; }
 @keyframes reference-spin { to { transform: rotate(360deg); } }
+.sidebar .worktree-note {
+  font-size: 0.85em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}

@@ -5,6 +5,8 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { branchGroup, onVirtualScroll, windowSlice } from "../view";
   import { liveSideRows, type SideRow } from "./sideRows";
+  import { beginWorktree, occupiedWorktree, openWorktree, worktreeMarks, worktreeMenu, worktreeName } from "./worktrees";
+  import type { WorktreeRow } from "../status";
 
   const shell = getShell();
   const pageSize = 10;
@@ -120,11 +122,14 @@
   });
 
   function sectionActions(row: Extract<SideRow, { kind: "section" }>) {
-    const actions: { label: string; run: () => void; icon?: "add" }[] = [];
+    const actions: { label: string; run: () => void; icon?: "add" | "gear" }[] = [];
     if (row.add === "branch") actions.push({ label: shell.tr("chrome.new"), icon: "add", run: () => { shell.draft = ""; shell.draftExtra = ""; shell.dialog = "branch"; } });
     if (row.add === "remote") actions.push({ label: shell.tr("chrome.add"), icon: "add", run: () => { shell.remoteEdit = false; shell.draft = ""; shell.draftExtra = ""; shell.dialog = "remote"; } });
     if (row.add === "submodule") actions.push({ label: shell.tr("chrome.add"), icon: "add", run: () => { shell.draft = ""; shell.draftExtra = ""; shell.dialog = "submodule"; } });
-    if (row.add === "worktree") actions.push({ label: shell.tr("chrome.add"), icon: "add", run: () => { shell.draft = ""; shell.draftExtra = shell.snapshot?.branch ?? ""; shell.dialog = "worktree"; } });
+    if (row.add === "worktree") actions.push(
+      { label: shell.tr("worktree.manage"), icon: "gear", run: () => beginWorktree(shell, { kind: "manage" }) },
+      { label: shell.tr("worktree.add"), icon: "add", run: () => beginWorktree(shell) },
+    );
     if (row.showAll) actions.push({ label: shell.tr("chrome.showAll"), run: () => shell.showAllRefs() });
     return actions;
   }
@@ -198,6 +203,7 @@
         {@render glyph("commits")}
         <span class="name">{shell.tr("chrome.allCommits")}</span>
       </button>
+      {#if shell.mode !== "loading"}
       <div class="side-tools">
         <button class="icon-btn side-tool" class:on={shell.sideView === "refs"} type="button" title={shell.tr("chrome.localBranches")} aria-label={shell.tr("chrome.localBranches")} aria-pressed={shell.sideView === "refs"} onclick={() => shell.showSideRefs()}>{@render glyph("branch")}</button>
         <button class="icon-btn side-tool" class:on={shell.sideView === "search"} type="button" title={shell.tr("chrome.searchCommits")} aria-label={shell.tr("chrome.searchCommits")} aria-pressed={shell.sideView === "search"} onclick={() => shell.showSideSearch()}>{@render glyph("search")}</button>
@@ -208,6 +214,7 @@
         <input placeholder={shell.tr("chrome.filter")} aria-label={shell.tr("chrome.filterSidebar")} bind:this={shell.sideFilter} bind:value={shell.sideQuery} onkeydown={(event) => { if (event.key === "Escape") { event.stopPropagation(); shell.sideQuery = ""; } }} />
         {#if shell.sideQuery}<button class="side-filter-clear" type="button" aria-label={shell.tr("chrome.clearFilter")} onclick={() => (shell.sideQuery = "")}>×</button>{/if}
       </label>
+      {/if}
       {/if}
       </div>
 
@@ -223,8 +230,8 @@
         </div>
       {/snippet}
 
-      {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void; icon?: "add" }[] = [], empty = count === 0, filter = false)}
-        <div class="side section" class:selected={shell.sideSelected === key} role="group">
+      {#snippet sideHead(key: string, label: string, count: number | null = null, actions: { label: string; run: () => void; icon?: "add" | "gear" }[] = [], empty = count === 0, filter = false)}
+        <div class="side section" class:selected={shell.sideSelected === key} data-section={key} role="group">
           <button class="file-select" type="button" aria-expanded={shell.sideOpen(key)} onclick={() => shell.pickSide(key)}>
             <span class="twist">{@render chevron(shell.sideOpen(key))}</span>
             <span class="name">{label}</span>
@@ -234,8 +241,8 @@
           {#if actions.length > 0}
             <div class="side-actions">
               {#each actions as action (action.label)}
-                {#if action.icon === "add"}
-                  <button class="icon-btn side-add" type="button" title={action.label} aria-label={action.label} onclick={action.run}>{@render glyph("add")}</button>
+                {#if action.icon}
+                  <button class="icon-btn side-add" type="button" title={action.label} aria-label={action.label} onclick={action.run}>{@render glyph(action.icon)}</button>
                 {:else}
                   <button class="text-button" type="button" onclick={action.run}>{action.label}</button>
                 {/if}
@@ -268,6 +275,7 @@
           </button>
         {:else if row.kind === "local"}
           {@const remoteState = shell.branchRemoteState(row.name)}
+          {@const checkedOut = occupiedWorktree(shell, row.name)}
           {@const syncTitle = [row.ahead > 0 ? shell.tr("chrome.syncAhead", { count: String(row.ahead) }) : "", row.behind > 0 ? shell.tr("chrome.syncBehind", { count: String(row.behind) }) : ""].filter(Boolean).join(" · ") + (row.upstream ? ` · ${row.upstream}` : "")}
           <div
             class="side nested"
@@ -277,7 +285,7 @@
             role="group"
             oncontextmenu={(event) => shell.openMenu(event, [
               ...(!row.current ? [
-                { label: shell.tr("menu.checkout"), disabled: !!shell.progress, run: () => shell.requestCheckout(row.name) },
+                { label: shell.tr(checkedOut ? "worktree.open" : "menu.checkout"), disabled: checkedOut ? checkedOut.missing : !!shell.progress, run: () => shell.requestCheckout(row.name) },
                 { label: shell.tr("menu.compareBranches"), disabled: !shell.compareWith || shell.compareWith === row.name, run: () => { shell.drops = [shell.compareWith, row.name]; void shell.compareDrops(); } },
                 { label: shell.tr("menu.pushAs"), run: () => { shell.draft = row.name; shell.draftExtra = shell.refs?.remotes[0]?.name ?? "origin"; shell.draftUser = row.name; shell.dialog = "pushAs"; } },
                 { label: shell.tr("menu.merge"), disabled: !!shell.progress, run: () => { shell.draft = row.name; shell.draftExtra = shell.settings.mergeNoFf ? "no-ff" : "ff"; shell.dialog = "merge"; } },
@@ -285,6 +293,7 @@
                 { label: shell.tr("menu.delete"), run: () => shell.removeBranch(row.name) },
                 { label: shell.tr("menu.forceDelete"), run: () => shell.ask(shell.tr("dialog.forceDeleteBranch"), shell.tr("dialog.forceDeleteBranchBody"), shell.bindMutation({ action: "deleteBranch", name: row.name, force: true }), [], { subject: row.name, danger: true, confirmLabel: shell.tr("menu.forceDelete") }) },
               ] : []),
+              { label: shell.tr("worktree.add"), run: () => beginWorktree(shell, { kind: "add", source: "refs/heads/" + row.name, branch: row.name }) },
               { label: shell.pinnedHere.has(row.name) ? shell.tr("menu.unpin") : shell.tr("menu.pin"), run: () => shell.togglePin(row.name) },
               { label: shell.tr("menu.createPr"), disabled: !shell.pullRequestUrl(row.name), run: () => void openUrl(shell.pullRequestUrl(row.name)) },
               { label: shell.tr("menu.rename"), run: () => { shell.draft = row.name; shell.draftExtra = row.name; shell.dialog = "rename"; } },
@@ -297,7 +306,7 @@
           >
             <button class="file-select" type="button" title={remoteState === "missing" ? `${row.name} · ${shell.tr("chrome.localOnly")}` : row.name} onclick={(event) => { clearLocate(); shell.sideSelected = `local:${row.name}`; if (event.ctrlKey || event.metaKey) shell.compareWith = row.name; else locate(event, row.name); }} ondblclick={() => !row.current && checkout(row.name)}>
               <span class="twist"></span>
-              {@render glyph(row.current ? "check" : "branch")}
+              {@render glyph(row.current ? "check" : checkedOut ? "worktree" : "branch")}
               {#if remoteState === "missing"}
                 <span class="track-dot missing" title={shell.tr("chrome.localOnly")}></span>
               {:else if remoteState === "mirrored"}
@@ -330,13 +339,15 @@
         {:else if row.kind === "remoteHead"}
           <div class="side nested deep quiet"><span class="twist"></span>{@render glyph("branch")}<span class="name">HEAD → {row.head}</span></div>
         {:else if row.kind === "remoteBranch"}
+          {@const checkedOut = occupiedWorktree(shell, row.name)}
           <div
             class="side nested deep"
             class:deeper={row.deeper}
             class:selected={shell.sideSelected === `remote:${row.remote}:${row.name}`}
             role="group"
             oncontextmenu={(event) => shell.openMenu(event, [
-              { label: shell.tr("menu.checkout"), run: () => shell.mutate({ action: "checkoutRemote", remote: row.remote, branch: row.name }) },
+              { label: shell.tr(checkedOut ? "worktree.open" : "menu.checkout"), disabled: checkedOut?.missing, run: () => checkout(`${row.remote}/${row.name}`, { remote: row.remote, branch: row.name }) },
+              { label: shell.tr("worktree.add"), run: () => beginWorktree(shell, { kind: "add", source: "refs/remotes/" + row.remote + "/" + row.name }) },
               { label: shell.tr("menu.pullInto"), run: () => shell.mutate({ action: "pullRef", remote: row.remote, branch: row.name, rebase: shell.settings.pullRebase, autostash: true }) },
               { label: shell.tr("menu.pushHere"), run: () => shell.mutate({ action: "pushRef", remote: row.remote, branch: row.name, forceWithLease: shell.settings.forceWithLease, killerPush: shell.settings.killerPush, rebase: shell.settings.pullRebase }) },
               { label: shell.tr("menu.deleteRemote"), run: () => shell.ask(shell.tr("menu.deleteRemote"), shell.tr("dialog.deleteRemoteBody"), shell.bindMutation({ action: "deleteRemoteBranch", remote: row.remote, branch: row.name }), [], { subject: `${row.remote}/${row.name}`, danger: true, confirmLabel: shell.tr("menu.deleteRemote") }) },
@@ -345,7 +356,7 @@
           >
             <button class="file-select" type="button" title={`${row.remote}/${row.name}`} onclick={(event) => { shell.sideSelected = `remote:${row.remote}:${row.name}`; locate(event, `${row.remote}/${row.name}`); }} ondblclick={() => checkout(`${row.remote}/${row.name}`, { remote: row.remote, branch: row.name })}>
               <span class="twist"></span>
-              {@render glyph("branch")}
+              {@render glyph(checkedOut ? "worktree" : "branch")}
               <span class="name">{row.label}</span>
               {#if shell.pendingReference(row.name) || shell.pendingReference(`${row.remote}/${row.name}`)}<span class="reference-pending" role="status" aria-label={shell.tr("chrome.taskQueued")}></span>{/if}
             </button>
@@ -353,7 +364,8 @@
           </div>
         {:else if row.kind === "tag"}
           <div class="side nested" class:deep={row.deep} class:selected={shell.sideSelected === `tag:${row.name}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
-            { label: shell.tr("menu.checkout"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "checkout", name: row.name }) },
+            { label: shell.tr("worktree.add"), run: () => beginWorktree(shell, { kind: "add", source: "refs/tags/" + row.name }) },
+            { label: shell.tr("menu.checkout"), disabled: shell.mode !== "live", run: () => checkout("refs/tags/" + row.name) },
             { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), shell.tr("dialog.deleteTagBody"), shell.bindMutation({ action: "deleteTag", name: row.name }), [], { subject: row.name, danger: true }) },
             { label: shell.tr("menu.deleteRemoteTag"), disabled: shell.mode !== "live" || !shell.refs?.remotes[0], run: () => { const remote = shell.refs?.remotes[0]?.name ?? ""; shell.ask(shell.tr("menu.deleteRemoteTag"), shell.tr("dialog.deleteRemoteTagBody"), shell.bindMutation({ action: "deleteRemoteTag", remote, name: row.name }), [], { subject: `${remote} ${row.name}`, danger: true }); } },
             { label: shell.tr("menu.copyName"), run: () => shell.copyText(row.name) },
@@ -375,6 +387,8 @@
           <div class="side nested" class:selected={shell.sideSelected === `submodule:${row.path}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
             { label: shell.tr("menu.initialize"), disabled: shell.mode !== "live" || row.ready, run: () => shell.mutate({ action: "submoduleInit", path: row.path }) },
             { label: shell.tr("menu.openFile"), disabled: !row.ready, run: () => shell.openRepo(shell.fullPath(row.path)) },
+            { label: shell.tr("chrome.submoduleCheckRemote"), disabled: shell.mode !== "live", run: () => void shell.checkSubmoduleRemote(row.path) },
+            { label: shell.tr("chrome.submoduleDiagnostics"), run: () => { shell.commandOutput = row.title; shell.dialog = "output"; } },
             { label: shell.tr("menu.sync"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "submoduleSync", path: row.path }) },
             { label: shell.tr("menu.update"), disabled: shell.mode !== "live", run: () => shell.mutate({ action: "submoduleUpdatePath", path: row.path }) },
             { label: shell.tr("menu.delete"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.delete"), shell.tr("dialog.removeSubmoduleBody"), shell.bindMutation({ action: "submoduleRemove", path: row.path }), [], { subject: row.path, danger: true }) },
@@ -387,16 +401,32 @@
             <span class="name">{row.note}</span>
           </div>
         {:else if row.kind === "worktree"}
-          <div class="side nested" class:selected={shell.sideSelected === `worktree:${row.path}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
-            { label: shell.tr("menu.openFile"), disabled: shell.mode !== "live", run: () => shell.openRepo(row.path) },
-            { label: shell.tr("menu.remove"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.remove"), shell.tr("dialog.removeWorktreeBody"), shell.bindMutation({ action: "removeWorktree", path: row.path }), [], { subject: row.path, danger: true }) },
-          ])}>
-            <button class="file-select" type="button" title={row.path} onclick={() => (shell.sideSelected = `worktree:${row.path}`)} ondblclick={() => !shell.pendingReference(row.path) && shell.mode === "live" && shell.openRepo(row.path)}><span class="twist"></span>{@render glyph("worktree")}<span class="name">{row.branch ?? shell.folderName(row.path)}</span>{#if shell.pendingReference(row.path)}<span class="reference-pending" role="status" aria-label={shell.tr("chrome.taskQueued")}></span>{/if}</button>
-          </div>
+          {@render worktreeRow(row.worktree)}
         {/if}
       {/snippet}
 
-      {#if shell.sideView === "refs"}
+      {#snippet worktreeRow(row: WorktreeRow)}
+        {@const current = shell.viewing(row.path)}
+        {@const marks = worktreeMarks(shell, row)}
+        <div class="side nested" class:current class:selected={shell.sideSelected === "worktree:" + row.path}
+          role="group" oncontextmenu={(event) => shell.openMenu(event, worktreeMenu(shell, row))}>
+          <button class="file-select" type="button" data-worktree-path={row.path} aria-current={current ? "true" : undefined}
+            title={[row.path, ...marks, row.locked, row.prunable].filter(Boolean).join(" · ")}
+            onclick={(event) => {
+              shell.sideSelected = "worktree:" + row.path;
+              if (event.detail === 0) void openWorktree(shell, row);
+            }} ondblclick={() => void openWorktree(shell, row)}>
+            <span class="twist"></span>{@render glyph(current ? "check" : "worktree")}
+            <span class="name">{worktreeName(shell, row)}</span>
+            {#if marks.length}<span class="worktree-note">{marks.at(-1)}</span>{/if}
+            {#if shell.pendingReference(row.path)}<span class="reference-pending" role="status" aria-label={shell.tr("chrome.taskQueued")}></span>{/if}
+          </button>
+        </div>
+      {/snippet}
+
+      {#if shell.mode === "loading"}
+        <div class="side-scroll" aria-busy="true"></div>
+      {:else if shell.sideView === "refs"}
       <div class="side-scroll" bind:this={sideScroll} onscroll={onSideScroll}>
       {#if shell.mode === "live" && shell.refs}
         {#if sideRows.length > 60}
@@ -534,19 +564,14 @@
         {/each}
       {/if}
       {#if shell.settings.showWorktrees}
-      {@render sideHead("worktrees", shell.tr("chrome.worktrees"), shell.refs?.worktrees.length ?? (shell.mode === "sample" ? 1 : 0), [
-        { label: shell.tr("chrome.add"), icon: "add", run: () => { shell.draft = ""; shell.draftExtra = shell.snapshot?.branch ?? ""; shell.dialog = "worktree"; } },
-      ])}
+      {@render sideHead("worktrees", shell.tr("chrome.worktrees"), shell.refs?.worktrees.length ?? (shell.mode === "sample" ? 1 : 0), [])}
       {#if shell.sideOpen("worktrees")}
-        {#each (shell.refs?.worktrees ?? (shell.mode === "sample" ? [{ path: "this repository", branch: "main" }] : [])) as row (row.path)}
+        {#each (shell.refs?.worktrees ?? []) as row (row.path)}
           {#if shell.matchesQuery(row.path, shell.sideQuery) || shell.matchesQuery(row.branch ?? "", shell.sideQuery)}
-          <div class="side nested" class:selected={shell.sideSelected === `worktree:${row.path}`} role="group" oncontextmenu={(event) => shell.openMenu(event, [
-            { label: shell.tr("menu.openFile"), disabled: shell.mode !== "live", run: () => shell.openRepo(row.path) },
-            { label: shell.tr("menu.remove"), disabled: shell.mode !== "live", run: () => shell.ask(shell.tr("menu.remove"), shell.tr("dialog.removeWorktreeBody"), shell.bindMutation({ action: "removeWorktree", path: row.path }), [], { subject: row.path, danger: true }) },
-          ])}>
-            <button class="file-select" type="button" title={row.path} onclick={() => (shell.sideSelected = `worktree:${row.path}`)} ondblclick={() => !shell.pendingReference(row.path) && shell.mode === "live" && shell.openRepo(row.path)}><span class="twist"></span>{@render glyph("worktree")}<span class="name">{row.branch ?? shell.folderName(row.path)}</span>{#if shell.pendingReference(row.path)}<span class="reference-pending" role="status" aria-label={shell.tr("chrome.taskQueued")}></span>{/if}</button>
-          </div>
+            {@render worktreeRow(row)}
           {/if}
+        {:else}
+          {#if shell.mode === "sample"}<div class="side nested"><span class="twist"></span>{@render glyph("worktree")}<span class="name">main</span></div>{/if}
         {/each}
       {/if}
       {/if}

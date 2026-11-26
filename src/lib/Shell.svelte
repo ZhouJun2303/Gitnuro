@@ -222,7 +222,8 @@
 
 .menu button, .menu-dismiss { font: inherit; }
 
-.scrim.menu-dismiss { position: fixed; inset: 0; z-index: 29; background: transparent; border: 0; backdrop-filter: none; animation: none; }
+.scrim.menu-dismiss { position: fixed; inset: 0; z-index: calc(var(--z-popover, 31) - 1); background: transparent; border: 0; backdrop-filter: none; animation: none; }
+.scrim.menu-dismiss.menu-layer { z-index: calc(var(--z-menu, 56) - 1); }
 
 .scrim.confirm-scrim { z-index: var(--z-confirm, 60); }
 
@@ -947,7 +948,7 @@
   {:else}
   <Chrome />
 
-  {#if !shell.snapshot && shell.mode !== "sample"}
+  {#if !shell.snapshot && shell.mode !== "sample" && !(shell.mode === "loading" && shell.focusPath)}
     <Welcome />
   {:else}
   <div class="body">
@@ -968,7 +969,13 @@
     />
 
     {#if shell.section === "changes"}
-      <ChangesView />
+      {#if shell.mode === "loading"}
+        <section class="stage" aria-busy="true">
+          <p class="empty" role="status">{shell.tr("chrome.readingStatus")}</p>
+        </section>
+      {:else}
+        <ChangesView />
+      {/if}
     {:else}
       <HistoryView />
     {/if}
@@ -1155,7 +1162,7 @@
         {@render menuList(shell.submenu.items, true)}
       </div>
     {/if}
-    <button class="scrim menu-dismiss" type="button" aria-label={shell.tr("chrome.close")} onclick={() => shell.dismissMenu()}></button>
+    <button class="scrim menu-dismiss menu-layer" type="button" aria-label={shell.tr("chrome.close")} onclick={() => shell.dismissMenu()}></button>
   {/if}
   {#if shell.confirmAsk}
     {@const ask = shell.confirmAsk}
