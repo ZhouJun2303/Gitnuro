@@ -564,6 +564,10 @@ async function fillSurface(shell: ShellState, id: string) {
     shell.adoptSettings({ ...shell.settings, recoveryNotice: "recovered-backup" });
     return;
   }
+  if (id === "settings-reset-corrupt") {
+    shell.adoptSettings({ ...shell.settings, recoveryNotice: "reset-corrupt" });
+    return;
+  }
   if (id === "text-merge-many") {
     await showChange(shell, "src/many-hunks.ts", "unstaged");
     await shell.openTextMerge("src/many-hunks.ts");

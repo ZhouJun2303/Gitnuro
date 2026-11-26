@@ -17,7 +17,9 @@ fn schema_current() -> u32 {
 pub struct Settings {
     #[serde(default = "schema_current")]
     pub schema: u32,
-    /// `recovered-backup` when this load restored `settings.json.bak`. Not written to disk.
+    /// `recovered-backup` when this load restored `settings.json.bak`;
+    /// `reset-corrupt` when the file was unreadable and no backup could be used,
+    /// so the damaged file was kept next to it and defaults were written. Not written to disk.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub recovery_notice: String,
     #[serde(default = "theme_default")]
@@ -872,11 +874,14 @@ fn sibling(path: &Path, suffix: &str) -> PathBuf {
 
 /// A temp name only this process can own, so two app instances never truncate each other's write.
 fn temp_sibling(path: &Path) -> PathBuf {
-    let stamp = std::time::SystemTime::now()
+    sibling(path, &format!(".tmp-{}-{}", std::process::id(), now_nanos()))
+}
+
+fn now_nanos() -> u128 {
+    std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_nanos())
-        .unwrap_or(0);
-    sibling(path, &format!(".tmp-{}-{stamp}", std::process::id()))
+        .unwrap_or(0)
 }
 
 fn remove_on_error(tmp: &Path, error: std::io::Error) -> String {
@@ -932,15 +937,34 @@ fn load_at(path: &Path) -> Result<Settings, String> {
 
 fn recover_at(path: &Path) -> Result<Settings, String> {
     let bak = sibling(path, ".bak");
-    let Ok(stored) = read_stored(&bak) else {
-        return Err("设置文件已损坏，没有可恢复的备份。".into());
-    };
-    let mut settings = stored.settings;
-    settings.schema = SETTINGS_SCHEMA;
-    let _imported = crate::secrets::import_plaintext(&settings)?;
+    if !bak.is_file() {
+        return reset_corrupt(path);
+    }
+    match read_stored(&bak) {
+        Ok(stored) => {
+            let mut settings = stored.settings;
+            settings.schema = SETTINGS_SCHEMA;
+            let _imported = crate::secrets::import_plaintext(&settings)?;
+            crate::secrets::fill(&mut settings)?;
+            save_at(path, &settings)?;
+            settings.recovery_notice = "recovered-backup".into();
+            Ok(settings)
+        }
+        Err(ReadIssue::Newer(schema)) => Err(format!("设置文件由更新的版本写入（schema {schema}），这次没有覆盖。")),
+        Err(ReadIssue::Io(message)) => Err(message),
+        Err(ReadIssue::Corrupt) => reset_corrupt(path),
+    }
+}
+
+/// No usable backup: keep the unreadable file for manual repair and start from defaults.
+fn reset_corrupt(path: &Path) -> Result<Settings, String> {
+    let mut settings = Settings::default();
     crate::secrets::fill(&mut settings)?;
+    let kept = sibling(path, &format!(".corrupt-{}", now_nanos()));
+    std::fs::rename(path, &kept)
+        .map_err(|error| format!("设置文件已损坏，无法另存为 {}：{error}", kept.display()))?;
     save_at(path, &settings)?;
-    settings.recovery_notice = "recovered-backup".into();
+    settings.recovery_notice = "reset-corrupt".into();
     Ok(settings)
 }
 
@@ -2176,12 +2200,58 @@ mod tests {
     }
 
     #[test]
-    fn settings_corrupt_file_without_a_backup_is_left_in_place() {
+    fn settings_corrupt_file_without_a_backup_is_kept_and_defaults_are_written() {
         let dir = TempSettings::new();
         std::fs::write(&dir.path, b"[]").unwrap();
+        let loaded = load_at(&dir.path).unwrap();
+        assert_eq!(loaded.recovery_notice, "reset-corrupt");
+        assert_eq!(loaded.theme, "apple");
+        assert_eq!(loaded.github_token, "");
+
+        let kept: Vec<_> = std::fs::read_dir(&dir.dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with("settings.json.corrupt-"))
+            })
+            .collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(std::fs::read(&kept[0]).unwrap(), b"[]");
+
+        let disk = std::fs::read_to_string(&dir.path).unwrap();
+        assert!(disk.contains("\"schema\""), "{disk}");
+        assert!(!disk.contains("recoveryNotice"), "{disk}");
+        let again = load_at(&dir.path).unwrap();
+        assert!(again.recovery_notice.is_empty());
+        assert_eq!(again.theme, "apple");
+    }
+
+    #[test]
+    fn settings_corrupt_file_and_corrupt_backup_fall_back_to_defaults() {
+        let dir = TempSettings::new();
+        save_at(&dir.path, &sample_settings()).unwrap();
+        std::fs::write(&dir.path, b"{nope").unwrap();
+        std::fs::write(sibling(&dir.path, ".bak"), b"{nope").unwrap();
+        let loaded = load_at(&dir.path).unwrap();
+        assert_eq!(loaded.recovery_notice, "reset-corrupt");
+        assert_eq!(loaded.theme, "apple");
+        assert_eq!(loaded.commit_type, "feat");
+        // Tokens live in the vault, so the reset keeps them.
+        assert_eq!(loaded.github_token, "secret");
+        assert!(sibling(&dir.path, ".bak").is_file());
+    }
+
+    #[test]
+    fn settings_corrupt_file_does_not_replace_a_newer_backup() {
+        let dir = TempSettings::new();
+        std::fs::write(&dir.path, b"{nope").unwrap();
+        let newer = r#"{"schema":99,"theme":"dark"}"#;
+        std::fs::write(sibling(&dir.path, ".bak"), newer).unwrap();
         let error = load_at(&dir.path).unwrap_err();
-        assert!(error.contains("备份"), "{error}");
-        assert_eq!(std::fs::read(&dir.path).unwrap(), b"[]");
+        assert!(error.contains("99"), "{error}");
+        assert_eq!(std::fs::read(&dir.path).unwrap(), b"{nope");
+        assert_eq!(std::fs::read_to_string(sibling(&dir.path, ".bak")).unwrap(), newer);
     }
 
     #[test]

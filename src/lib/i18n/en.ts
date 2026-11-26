@@ -299,6 +299,7 @@ export const en: Messages = {
     updateSilentInstall: "Silent install",
     updateSilentInstallHint: "Install without the setup wizard and reopen AweGit when it finishes.",
     settingsRecovered: "Settings were damaged. The last saved copy was restored.",
+    settingsResetCorrupt: "Settings were damaged and no backup could be restored. The damaged file was kept and defaults were loaded.",
     localOnly: "This branch is not on any remote",
     trackedRemote: "A remote branch with this name exists",
     syncAhead: "{count} ahead",

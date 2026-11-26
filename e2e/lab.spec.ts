@@ -1164,6 +1164,8 @@ test("a truncated repository scan says more remain", async ({ page }) => {
 test("damaged settings use the recovery banner", async ({ page }) => {
   await openLabScene(page, "settings-recovered", '.identity-floor[data-layer="error"]');
   await expect(page.locator('.identity-floor[data-layer="error"]')).toContainText(/restored|已恢复/);
+  await openLabScene(page, "settings-reset-corrupt", '.identity-floor[data-layer="error"]');
+  await expect(page.locator('.identity-floor[data-layer="error"]')).toContainText(/defaults were loaded|默认设置/);
 });
 
 test("returning to changes reloads a diff cleared by a history refresh", async ({ page }) => {

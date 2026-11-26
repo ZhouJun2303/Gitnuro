@@ -4686,7 +4686,9 @@ export class ShellState {
 
   adoptSettings(value: Settings, resetHistory = false) {
     this.prefsBaseline = value;
-    const recovered = value.recoveryNotice === "recovered-backup";
+    const recovery = value.recoveryNotice === "recovered-backup"
+      ? "chrome.settingsRecovered"
+      : value.recoveryNotice === "reset-corrupt" ? "chrome.settingsResetCorrupt" : "";
     this.settings = this.withSourceRoots({
       ...this.defaultSettings,
       ...value,
@@ -4726,7 +4728,7 @@ export class ShellState {
     configureShortcuts(this.settings.shortcuts);
     applyCommitTypes(this);
     this.syncRecentWorkspace();
-    if (recovered) this.settings = { ...this.settings, recoveryNotice: "" };
+    if (recovery) this.settings = { ...this.settings, recoveryNotice: "" };
     if (!this.settings.dateFormat.trim()) this.settings = { ...this.settings, dateFormat: "dd MMM yyyy" };
     if (!this.settings.proxyType) this.settings = { ...this.settings, proxyType: "http" };
     if (this.settings.aiLanguage !== "zh" && this.settings.aiLanguage !== "en") {
@@ -4759,7 +4761,7 @@ export class ShellState {
     if (resetHistory || this.logLimit === 500) this.logLimit = limit;
     this.signOff = this.settings.signOff;
     this.showPendingUpdate(false);
-    if (recovered && !this.actionError) this.actionError = this.tr("chrome.settingsRecovered");
+    if (recovery && !this.actionError) this.actionError = this.tr(recovery);
   }
 
   showPendingUpdate(force: boolean) {

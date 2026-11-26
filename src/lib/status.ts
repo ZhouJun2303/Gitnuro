@@ -407,7 +407,7 @@ export type Settings = {
   featuresIntro: string;
   /** `pending` asks a new install to show the first-run setup once. */
   onboarding: string;
-  /** `recovered-backup` when the last load restored a damaged settings file. */
+  /** `recovered-backup` when the last load restored a damaged settings file; `reset-corrupt` when the damaged file was kept and defaults were loaded. */
   recoveryNotice?: string;
   /** Draw the full conflicted file and every block in the changes pane. Off, because large files stall the window. */
   showConflictPreview: boolean;

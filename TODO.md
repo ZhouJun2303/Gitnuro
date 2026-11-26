@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 设置文件损坏且没有可用备份时，之前会直接报错并停在错误页。现在把损坏文件另存为 `settings.json.corrupt-<时间戳>`，用默认设置启动，系统凭据库里的 token 继续保留；`.bak` 可用时仍优先恢复，`.bak` 属于更新版本或读取失败时仍不覆盖。界面提示区分“已从备份恢复”和“已重置为默认设置”。本条所在提交 `fix: 设置文件损坏且无备份时保留原文件并启动`。回归见 `settings_corrupt_file_without_a_backup_is_kept_and_defaults_are_written`、`settings_corrupt_file_and_corrupt_backup_fall_back_to_defaults`、`settings_corrupt_file_does_not_replace_a_newer_backup` 及 `e2e/lab.spec.ts` 的 `damaged settings use the recovery banner`。
+
 - [x] 顶栏「活动」打开的命令记录面板和仓库管理器在点击内部按钮时被透明关闭层拦截，面板随即关闭，复制按钮无法使用。关闭层改回位于弹出面板之下，菜单关闭层仍保持在对话框之上。本条所在提交 `fix: 修复活动面板点击即关闭`。回归见 `e2e/lab.spec.ts` 的 `command log stays open while its buttons are clicked`、`repo picker stays open while it is clicked`，覆盖三套主题。
 
 - [x] 子模块暂存、取消暂存和外部提交会刷新指针状态，差异按子模块实际改动统计文件。Fetch 复查远端提交，并显示目标分支、完整 SHA、冲突阶段和 Git 错误。推送校验提交历史中的子模块指针。修复见本条所在提交 `fix: 修复子模块状态刷新并完善远端诊断`。回归见 `submodule_remote_status_tracks_merge_without_moving_pins_or_using_cached_refs`、`submodule_squash_keeps_old_sha_outside_target_and_checks_unpublished_history`、`submodule_status_keeps_dirty_counts_separate_and_reports_index_conflict_stages`、`submodule_gitdir_fetch_head_is_metadata_not_a_worktree_path` 及 `e2e/lab.spec.ts` 的子模块用例，覆盖三套主题。

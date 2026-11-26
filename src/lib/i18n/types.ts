@@ -225,6 +225,7 @@ export type Messages = {
     updateSilentInstall: string;
     updateSilentInstallHint: string;
     settingsRecovered: string;
+    settingsResetCorrupt: string;
     localOnly: string;
     trackedRemote: string;
     syncAhead: string;
