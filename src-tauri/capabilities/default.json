@@ -60,6 +60,7 @@
     "allow-external-tools",
     "allow-common-tools",
     "allow-detect-terminal-clis",
+    "allow-terminal-cli-presets",
     "allow-editor-tools",
     "allow-program-exists",
     "allow-watch-repository",
