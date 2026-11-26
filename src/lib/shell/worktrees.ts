@@ -12,6 +12,7 @@ export type WorktreeDialogState = {
   detached?: boolean;
 };
 export type WorktreeDetails = {
+  branch: string | null;
   changes: { code: string; path: string }[];
   changeCount: number;
   hasSubmodules: boolean;

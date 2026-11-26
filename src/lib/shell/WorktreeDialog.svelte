@@ -28,6 +28,7 @@
   let reason = $state("");
   let busy = $state(false);
   let force = $state(false);
+  let deleteBranch = $state(true);
   let backupBranch = $state(suggestion);
   let details = $state<WorktreeDetails | null>(null);
   let reviewError = $state("");
@@ -48,6 +49,10 @@
     row.name.includes(branch) || !branchExists).slice(0, 40));
   const recentCommits = $derived(shell.commitsLive.slice(0, 8));
   const needsForce = $derived(!!details && (details.changeCount > 0 || details.hasSubmodules));
+  const branchToDelete = $derived(deleteBranch ? details?.branch ?? null : null);
+  const removeLabel = $derived(branchToDelete
+    ? (force ? "worktree.forceRemoveWithBranch" : "worktree.removeWithBranch")
+    : (force ? "worktree.force" : "worktree.remove"));
   const inside = () => shell.dialog === "worktree" && shell.worktreeDialog === initial && shell.repoPath() === sourceRepo;
 
   $effect(() => {
@@ -122,7 +127,7 @@
       (branch.trim() && (mode === "new" ? !branchExists : branchExists && !assigned)))) {
       void write({ action: "addWorktree", path: destination, branch: branch.trim(), mode, start: mode === "existing" ? null : start.trim() || "HEAD", openAfter });
     } else if (view.kind === "remove" && target && details && !loading && !reviewError && !target.main && target.locked == null && !details.protectsCommit && (!needsForce || force)) {
-      void write({ action: "removeWorktree", path: target.path, force, expected: details.stamp }, target.path);
+      void write({ action: "removeWorktree", path: target.path, force, expected: details.stamp, deleteBranch: branchToDelete }, target.path);
     } else if (view.kind === "move" && target && !target.main && !target.missing && target.locked == null && destination) {
       void write({ action: "moveWorktree", path: target.path, to: destination }, target.path);
     } else if (view.kind === "lock" && target && !target.main && target.locked == null) {
@@ -269,6 +274,12 @@
       <p class="empty">{shell.tr(target?.missing ? "worktree.removeMissing" : "worktree.removeBody")}</p>
       {#if target && shell.viewing(target.path)}<p class="empty">{shell.tr("worktree.switchFirst")}</p>{/if}
       {@render checkoutStatus()}
+      {#if details?.branch}
+        <label class="check" title={shell.tr("worktree.deleteBranchHint")}>
+          <input type="checkbox" bind:checked={deleteBranch} disabled={busy} data-delete-worktree-branch />
+          {shell.tr("worktree.deleteBranch", { branch: details.branch })}
+        </label>
+      {/if}
       {#if details?.protectsCommit}
         <p class="empty">{shell.tr("worktree.saveFirst")}</p>
         <label>{shell.tr("dialog.branch")}<input bind:value={backupBranch} /></label>
@@ -311,7 +322,7 @@
           (view.kind === "lock" && (!target || target.main || target.locked != null)) ||
           (view.kind === "move" && (!target || target.main || target.missing || target.locked != null)) ||
           ((view.kind === "move" || view.kind === "repair") && !destination) ||
-          (view.kind === "prune" && (!prune?.output || prune.protectedPaths.length > 0))}>{shell.tr(view.kind === "prune" ? "worktree.confirmPrune" : view.kind === "remove" && force ? "worktree.force" : "worktree." + view.kind)}</button>
+          (view.kind === "prune" && (!prune?.output || prune.protectedPaths.length > 0))}>{shell.tr(view.kind === "prune" ? "worktree.confirmPrune" : view.kind === "remove" ? removeLabel : "worktree." + view.kind)}</button>
     </div>
   {/if}
   {#if busy}<p class="empty" role="status">{shell.tr("worktree.pending")}</p>{/if}

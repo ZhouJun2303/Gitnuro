@@ -4253,7 +4253,7 @@ export class ShellState {
             this.dialog = "mergeConflict";
             this.actionError = null;
             this.stashRetry = null;
-          } else if (dialogBefore === "prefs" || dialogBefore === "worktree") {
+          } else if (dialogBefore === "prefs" || (dialogBefore === "worktree" && !(action === "removeWorktree" && output))) {
             // Dialogs with their own action flows keep their current form.
           } else if (output) {
             this.commandOutput = output;

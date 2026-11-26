@@ -314,6 +314,7 @@ fn worktree_remove_requires_current_review_and_preserves_branch() {
                 path: "checkout".into(),
                 force,
                 expected,
+                delete_branch: None,
             },
         )
     };
@@ -326,6 +327,61 @@ fn worktree_remove_requires_current_review_and_preserves_branch() {
     let preview = worktree::details(&repo.path, "checkout").unwrap();
     remove(true, Some(preview.stamp)).unwrap();
     assert!(!checkout.exists());
+    repo.git(&["show-ref", "--verify", "refs/heads/topic"]);
+}
+
+#[test]
+fn worktree_remove_deletes_only_the_reviewed_branch() {
+    let repo = repository();
+    add(&repo, "checkout", "topic/worktree", AddMode::New, None);
+    repo.git(&["update-ref", "refs/remotes/origin/topic/worktree", "HEAD"]);
+    let remove = |branch: &str, expected| {
+        perform(
+            &repo.path,
+            Mutation::RemoveWorktree {
+                path: "checkout".into(),
+                force: false,
+                expected,
+                delete_branch: Some(branch.into()),
+            },
+        )
+    };
+
+    let preview = worktree::details(&repo.path, "checkout").unwrap();
+    assert_eq!(preview.branch.as_deref(), Some("topic/worktree"));
+    assert!(remove("topic/worktree", None).is_err());
+    assert!(remove("main", Some(preview.stamp.clone())).is_err());
+    repo.git(&["-C", "checkout", "commit", "--allow-empty", "-m", "new branch tip"]);
+    assert!(remove("topic/worktree", Some(preview.stamp)).is_err());
+    assert!(repo.path.join("checkout").is_dir());
+    repo.git(&["show-ref", "--verify", "refs/heads/topic/worktree"]);
+
+    let preview = worktree::details(&repo.path, "checkout").unwrap();
+    assert!(remove("topic/worktree", Some(preview.stamp)).unwrap().is_empty());
+    assert!(!repo.path.join("checkout").exists());
+    assert_eq!(repo.code(&["show-ref", "--verify", "--quiet", "refs/heads/topic/worktree"]), 1);
+    repo.git(&["show-ref", "--verify", "refs/remotes/origin/topic/worktree"]);
+    repo.git(&["show-ref", "--verify", "refs/heads/main"]);
+}
+
+#[test]
+fn worktree_remove_reports_a_branch_deletion_failure() {
+    let repo = repository();
+    add(&repo, "checkout", "topic", AddMode::New, None);
+    let preview = worktree::details(&repo.path, "checkout").unwrap();
+    fs::write(repo.path.join(".git/refs/heads/topic.lock"), "").unwrap();
+    let output = perform(
+        &repo.path,
+        Mutation::RemoveWorktree {
+            path: "checkout".into(),
+            force: false,
+            expected: Some(preview.stamp),
+            delete_branch: Some("topic".into()),
+        },
+    )
+    .unwrap();
+    assert!(output.contains("工作树已删除，分支 topic 删除失败"), "{output}");
+    assert!(!repo.path.join("checkout").exists());
     repo.git(&["show-ref", "--verify", "refs/heads/topic"]);
 }
 
@@ -348,7 +404,8 @@ fn worktree_lock_move_repair_and_protected_prune() {
         Mutation::RemoveWorktree {
             path: "side".into(),
             force: false,
-            expected: None
+            expected: None,
+            delete_branch: None,
         }
     )
     .is_err());
@@ -399,7 +456,8 @@ fn worktree_lock_move_repair_and_protected_prune() {
         Mutation::RemoveWorktree {
             path: "detached-one".into(),
             force: true,
-            expected: Some(details.stamp)
+            expected: Some(details.stamp),
+            delete_branch: None,
         }
     )
     .is_err());

@@ -387,6 +387,8 @@ pub enum Mutation {
         force: bool,
         #[serde(default)]
         expected: Option<String>,
+        #[serde(default)]
+        delete_branch: Option<String>,
     },
     SetWorktreeLock {
         path: String,
@@ -554,6 +556,9 @@ pub fn perform(repo: &Path, mutation: Mutation) -> Result<String, Error> {
     }
     if let Mutation::StashPatch { name } = &mutation {
         return stash_patch(repo, name);
+    }
+    if let Mutation::RemoveWorktree { path, force, expected, delete_branch } = &mutation {
+        return crate::worktree::remove(repo, path, *force, expected.as_deref(), delete_branch.as_deref());
     }
     apply(repo, mutation).map(|_| String::new())
 }
@@ -1191,7 +1196,7 @@ fn apply_unguarded(repo: &Path, mutation: Mutation) -> Result<(), Error> {
         )
         .map(|_| ()),
         Mutation::AddWorktree { path, branch, mode, start } => crate::worktree::add(repo, &path, &branch, mode, start.as_deref()),
-        Mutation::RemoveWorktree { path, force, expected } => crate::worktree::remove(repo, &path, force, expected.as_deref()),
+        Mutation::RemoveWorktree { .. } => Ok(()),
         Mutation::SetWorktreeLock { path, locked, reason } => crate::worktree::set_lock(repo, &path, locked, reason.as_deref()),
         Mutation::MoveWorktree { path, to } => crate::worktree::move_to(repo, &path, &to),
         Mutation::RepairWorktree { path } => crate::worktree::repair(repo, path.as_deref()),

@@ -119,6 +119,9 @@ for (const theme of ["apple", "light", "dark"] as const) {
     expect(git(resolve(checkouts, "created"), "branch", "--show-current")).toBe(branch);
 
     await worktreeAction(page, "created", "删除工作树");
+    const deleteBranch = dialog(page).getByRole("checkbox", { name: `同时删除本地分支「${branch}」`, exact: true });
+    await expect(deleteBranch).toBeChecked();
+    await deleteBranch.uncheck();
     await button(page, "删除工作树").click();
     await expect.poll(() => existsSync(resolve(checkouts, "created"))).toBe(false);
     await expect(row(page, "worktree")).toHaveAttribute("aria-current", "true");
@@ -144,6 +147,19 @@ for (const theme of ["apple", "light", "dark"] as const) {
     expect(git(main, "branch", "--show-current")).toBe("main");
   });
 
+  test(`worktree branch deletion is checked by default (${theme})`, async ({ page }) => {
+    const locale = theme === "dark" ? "en" : "zh";
+    await openLabScene(page, "worktree-remove-branch", "[data-delete-worktree-branch]", { theme, locale });
+    const label = locale === "zh" ? "同时删除本地分支「missing」" : "Also delete local branch “missing”";
+    const confirm = locale === "zh" ? "删除工作树和分支" : "Remove Worktree and Branch";
+    const checkbox = dialog(page).getByRole("checkbox", { name: label, exact: true });
+    await expect(checkbox).toBeVisible();
+    await expect(checkbox).toBeChecked();
+    await button(page, confirm).click();
+    await expect(row(page, "missing")).toHaveCount(0);
+    await expect.poll(() => git(main, "for-each-ref", "--format=%(refname)", "refs/heads/missing")).toBe("");
+  });
+
   test(`worktree history and detached commit protection (${theme})`, async ({ page }) => {
     test.setTimeout(90_000);
     await openLabScene(page, "worktree", '[data-worktree-path$="/detached"]', { theme, locale: "zh" });
@@ -163,6 +179,7 @@ for (const theme of ["apple", "light", "dark"] as const) {
 
     await worktreeAction(page, "detached", "删除工作树");
     await expect(button(page, "保存为分支")).toBeVisible();
+    await expect(dialog(page).locator("[data-delete-worktree-branch]")).toHaveCount(0);
     await expect(button(page, "删除工作树")).toBeDisabled();
     const saved = "saved-detached";
     await dialog(page).getByLabel("分支", { exact: true }).fill(saved);
@@ -200,10 +217,11 @@ test("worktree unlock, stale removal review, move, repair and prune", async ({ p
   const force = dialog(page).getByRole("checkbox", { name: "强制删除并丢弃本地内容" });
   await force.check();
   writeFileSync(resolve(checkouts, "topic/ignored.txt"), "changed since preview\n");
-  await button(page, "强制删除并丢弃本地内容").click();
+  await button(page, "强制删除工作树和分支").click();
   await expect(dialog(page).getByRole("alert")).toContainText("请刷新并核对工作树状态后删除");
   await expect(force).not.toBeChecked();
   expect(existsSync(resolve(checkouts, "topic/ignored.txt"))).toBe(true);
+  expect(git(main, "show-ref", "--verify", "refs/heads/topic")).toContain("refs/heads/topic");
 
   await button(page, "取消").click();
   await button(page, "移动工作树").click();

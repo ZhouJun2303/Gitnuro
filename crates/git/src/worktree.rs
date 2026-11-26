@@ -36,6 +36,7 @@ pub enum AddMode {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeDetails {
+    pub branch: Option<String>,
     pub changes: Vec<WorktreeChange>,
     pub change_count: usize,
     pub has_submodules: bool,
@@ -450,6 +451,7 @@ fn removal_details(
         }
     }
     Ok(WorktreeDetails {
+        branch: row.branch.clone().filter(|_| row.head.is_some()),
         changes,
         change_count,
         has_submodules,
@@ -539,7 +541,8 @@ pub(crate) fn remove(
     path: &str,
     force: bool,
     expected: Option<&str>,
-) -> Result<(), Error> {
+    delete_branch: Option<&str>,
+) -> Result<String, Error> {
     let rows = list(repo)?;
     let row = registered(repo, &rows, path)?;
     if row.main || same_path(repo, Path::new(&row.path)) {
@@ -557,7 +560,9 @@ pub(crate) fn remove(
     if details.protects_commit {
         return Err(Error::Git("Save the detached HEAD to a branch before removing this worktree. / 请先将游离 HEAD 保存为分支。".into()));
     }
-    if (force || expected.is_some()) && expected != Some(details.stamp.as_str()) {
+    let branch_changed = delete_branch.is_some() && delete_branch != details.branch.as_deref();
+    let needs_review = force || expected.is_some() || delete_branch.is_some();
+    if branch_changed || (needs_review && expected != Some(details.stamp.as_str())) {
         return Err(Error::Git("Review the current worktree contents before removing it. / 请刷新并核对工作树状态后删除。".into()));
     }
     if !force && (details.change_count != 0 || details.has_submodules) {
@@ -565,12 +570,35 @@ pub(crate) fn remove(
             "Worktree contains local files or submodules. / 工作树包含本地改动或子模块。".into(),
         ));
     }
+    if delete_branch.is_some_and(|branch| {
+        rows.iter()
+            .any(|other| other.path != row.path && other.branch.as_deref() == Some(branch))
+    }) {
+        return Err(Error::Git("The branch is checked out in another worktree. Clear the branch deletion checkbox to proceed. / 分支已在其他工作树检出，请取消勾选同时删除分支。".into()));
+    }
     let mut args = vec!["worktree", "remove"];
     if force {
         args.push("--force");
     }
     args.extend(["--", &row.path]);
-    run(repo, &args).map(|_| ())
+    run(repo, &args)?;
+    let Some(branch) = delete_branch else {
+        return Ok(String::new());
+    };
+
+    let reference = format!("refs/heads/{branch}");
+    let deletion = run(repo, &["rev-parse", "--verify", "--quiet", &reference]).and_then(|output| {
+        let tip = String::from_utf8_lossy(&output.stdout);
+        if Some(tip.trim()) != row.head.as_deref() {
+            return Err(Error::Git("The branch tip changed. / 分支指向已变化。".into()));
+        }
+        run(repo, &["branch", "-D", "--", branch]).map(|_| ())
+    });
+    // The checkout is already gone. Refresh its tabs even if the branch could not be deleted.
+    Ok(match deletion {
+        Ok(()) => String::new(),
+        Err(error) => format!("Worktree removed. Could not delete branch {branch}. / 工作树已删除，分支 {branch} 删除失败。\n{error}"),
+    })
 }
 
 pub(crate) fn set_lock(

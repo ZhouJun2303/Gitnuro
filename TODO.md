@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 删除工作树时默认勾选同时删除对应的本地分支，取消勾选可保留分支。实现见本条所在提交 `feat: 删除工作树时可同时删除本地分支`。回归见 `worktree_remove_deletes_only_the_reviewed_branch`、`worktree_remove_reports_a_branch_deletion_failure` 及 `e2e/worktrees.spec.ts` 的工作树删除用例，覆盖三套主题。
+
 - [x] 设置文件损坏且没有可用备份时，之前会直接报错并停在错误页。现在把损坏文件另存为 `settings.json.corrupt-<时间戳>`，用默认设置启动，系统凭据库里的 token 继续保留；`.bak` 可用时仍优先恢复，`.bak` 属于更新版本或读取失败时仍不覆盖。界面提示区分“已从备份恢复”和“已重置为默认设置”。设置 schema 同时升到 2：旧正式版读到 dev 写入的新格式会提示“由更新的版本写入”并保持文件不变，不再误判为损坏。修复见 `3f75883c` 及本条所在提交 `fix: 设置 schema 升到 2 避免误判损坏`。回归见 `settings_corrupt_file_without_a_backup_is_kept_and_defaults_are_written`、`settings_corrupt_file_and_corrupt_backup_fall_back_to_defaults`、`settings_corrupt_file_does_not_replace_a_newer_backup`、`settings_old_terminal_clis_migrate_to_presets_at_the_new_schema` 及 `e2e/lab.spec.ts` 的 `damaged settings use the recovery banner`。
 
 - [x] 顶栏「活动」打开的命令记录面板和仓库管理器在点击内部按钮时被透明关闭层拦截，面板随即关闭，复制按钮无法使用。关闭层改回位于弹出面板之下，菜单关闭层仍保持在对话框之上。本条所在提交 `fix: 修复活动面板点击即关闭`。回归见 `e2e/lab.spec.ts` 的 `command log stays open while its buttons are clicked`、`repo picker stays open while it is clicked`，覆盖三套主题。

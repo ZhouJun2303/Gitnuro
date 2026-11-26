@@ -506,6 +506,10 @@ async function fillSurface(shell: ShellState, id: string) {
     }
     if (id === "worktree-manage") beginWorktree(shell, { kind: "manage", path: rows.find((row) => row.branch === "topic")?.path });
     if (id === "worktree-remove" && detached) beginWorktree(shell, { kind: "remove", path: detached.path });
+    if (id === "worktree-remove-branch") {
+      const missing = rows.find((row) => row.branch === "missing");
+      if (missing) beginWorktree(shell, { kind: "remove", path: missing.path });
+    }
     if (id === "worktree-prune") beginWorktree(shell, { kind: "prune" });
     if (id === "worktree-history" && detached) viewWorktreeHistory(shell, detached);
     return;
