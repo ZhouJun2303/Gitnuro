@@ -494,7 +494,7 @@ fn commit_changes(
 #[tauri::command]
 fn file_diff(path: Option<String>, file: String, staged: bool, unified: Option<u32>, ignore_space: Option<bool>, load: Option<bool>) -> Result<DiffReport, String> {
     let repo = repo_from(path)?;
-    tasks::wait_for_writes(&repo);
+    tasks::wait_for_file_writes(&repo);
     let diff = awegit_git::file_diff_with(&repo, &file, staged, unified.unwrap_or(3), ignore_space.unwrap_or(false), load.unwrap_or(false)).map_err(|error| error.to_string())?;
     Ok(DiffReport { version: tasks::diff_version(&diff), diff })
 }
@@ -2086,7 +2086,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Ou
 #[tauri::command]
 fn file_preview(path: Option<String>, file: String, staged: Option<bool>) -> Result<Option<awegit_git::FilePreview>, String> {
     let repo = repo_from(path)?;
-    tasks::wait_for_writes(&repo);
+    tasks::wait_for_file_writes(&repo);
     if staged.unwrap_or(false) {
         awegit_git::index_preview(&repo, &file).map_err(|error| error.to_string())
     } else {
@@ -2268,7 +2268,7 @@ struct ConflictSidesReport {
 #[tauri::command]
 fn conflict_sides(path: Option<String>, file: String) -> Result<ConflictSidesReport, String> {
     let repo = repo_from(path)?;
-    tasks::wait_for_writes(&repo);
+    tasks::wait_for_file_writes(&repo);
     let sides = awegit_git::conflict_sides(&repo, &file).map_err(|error| error.to_string())?;
     let version = tasks::content_version(&sides);
     Ok(ConflictSidesReport { sides, version })
@@ -2283,7 +2283,7 @@ fn stash_patch(path: Option<String>, rev: String) -> Result<String, String> {
 #[tauri::command]
 fn conflict_view(path: Option<String>, file: String) -> Result<awegit_git::ConflictView, String> {
     let repo = repo_from(path)?;
-    tasks::wait_for_writes(&repo);
+    tasks::wait_for_file_writes(&repo);
     let stamp = flows::checkpoint_stamp(&repo);
     let worktree = std::fs::metadata(repo.join(&file)).ok().map(|meta| (meta.len(), meta.modified().ok()));
     let key = format!("conflict:{}:{}:{stamp:?}:{worktree:?}:{file}", awegit_git::repo_key(&repo), changes::revision(&repo));

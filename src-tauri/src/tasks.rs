@@ -47,6 +47,7 @@ struct Task {
     progress: Progress,
     after: Option<String>,
     lane: String,
+    fetch_only: bool,
     intent: Result<Option<Arc<Intent>>, String>,
     commit: Option<(String, String)>,
     queued: Instant,
@@ -283,6 +284,8 @@ fn enqueue_in_lane(command: &str, args: &Value, target: PathBuf, lane: String) -
     let id = args.get("__task").and_then(Value::as_str).map(str::to_string)
         .unwrap_or_else(|| format!("task-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
     let action = request.get("action").and_then(Value::as_str).unwrap_or(command).to_string();
+    let fetch_only = command == "mutate" && action == "fetch"
+        && args.get("__pushCommit").and_then(Value::as_str).is_none();
     let depends_on: Vec<String> = args.get("__dependsOn").and_then(Value::as_array).map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
     let after = args.get("__after").and_then(Value::as_str).map(str::to_string).filter(|earlier| !depends_on.contains(earlier));
     let intent = Intent::capture(command, &target, args).map(|intent| intent.map(Arc::new));
@@ -316,7 +319,7 @@ fn enqueue_in_lane(command: &str, args: &Value, target: PathBuf, lane: String) -
         touch(&mut snapshot);
         registry.lanes.entry(lane.clone()).or_default().push_back(id.clone());
         let cancelled = registry.cancelled_before_enqueue.remove(&id);
-        registry.tasks.insert(id.clone(), Task { progress: Progress::new(&snapshot.action), snapshot: snapshot.clone(), after, lane: lane.clone(), intent, commit: None,
+        registry.tasks.insert(id.clone(), Task { progress: Progress::new(&snapshot.action), snapshot: snapshot.clone(), after, lane: lane.clone(), fetch_only, intent, commit: None,
             queued: Instant::now(), started: None, verifying: None, cancelled: Arc::new(AtomicBool::new(cancelled)) });
         if reorder { order_lane(&mut registry, &lane); }
         self::registry().1.notify_all();
@@ -466,13 +469,22 @@ pub fn snapshot(id: &str) -> Option<Snapshot> {
 
 /// Mutable reads wait for writes already submitted, without delaying later writes.
 pub fn wait_for_writes(repo: &Path) {
+    wait_for_pending_writes(repo, |_| true);
+}
+
+/// Fetch updates remote refs and objects. File diffs depend on HEAD, the index and the worktree.
+pub fn wait_for_file_writes(repo: &Path) {
+    wait_for_pending_writes(repo, |task| !task.fetch_only);
+}
+
+fn wait_for_pending_writes(repo: &Path, blocks: impl Fn(&Task) -> bool) {
     if CURRENT.with(|current| current.borrow().is_some()) { return; }
     let lane = awegit_git::common_repo_key(repo);
     await_admissions(&lane);
     let (lock, ready) = registry();
     let mut registry = lock.lock().unwrap_or_else(|error| error.into_inner());
     let pending = registry.lanes.get(&lane).cloned().unwrap_or_default();
-    while pending.iter().any(|id| registry.tasks.get(id).is_some_and(|task| !terminal(&task.snapshot.state))) {
+    while pending.iter().any(|id| registry.tasks.get(id).is_some_and(|task| blocks(task) && !terminal(&task.snapshot.state))) {
         registry = ready.wait(registry).unwrap_or_else(|error| error.into_inner());
     }
 }
@@ -749,6 +761,29 @@ mod tests {
             assert_eq!(snapshot.state, if succeeds { "completed" } else { "failed" });
             assert_eq!(snapshot.percent, if succeeds { 100 } else { 66 });
         }
+    }
+
+    #[test]
+    fn file_diff_waits_for_a_queued_index_write() {
+        let repo = Repo::new();
+        std::fs::write(repo.0.join("note.txt"), "base\n").unwrap();
+        repo.git(&["add", "note.txt"]);
+        repo.git(&["commit", "-qm", "test: seed staged diff"]);
+        std::fs::write(repo.0.join("note.txt"), "staged\n").unwrap();
+
+        let args = json!({ "path": repo.0, "file": "note.txt" });
+        let id = enqueue("stage_path", &args).unwrap();
+        let path = repo.0.to_string_lossy().into_owned();
+        let (send, diff) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let _ = send.send(super::super::file_diff(Some(path), "note.txt".into(), true, None, None, None));
+        });
+        let before = diff.recv_timeout(Duration::from_millis(300));
+        run(&id, || execute("stage_path", &args), ok).unwrap();
+        assert!(matches!(before, Err(mpsc::RecvTimeoutError::Timeout)));
+        let report = diff.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
+        assert!(report.diff.lines.iter().any(|line| line.text == "+staged"));
+        reader.join().unwrap();
     }
 
     #[test]
