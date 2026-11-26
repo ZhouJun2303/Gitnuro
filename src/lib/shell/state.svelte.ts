@@ -1165,7 +1165,7 @@ export class ShellState {
 
   updateCancelRequested = false;
 
-  appVersion = $state("2.0.19");
+  appVersion = $state("2.0.20");
 
   appInfo = $state<AppInfo | null>(null);
 
