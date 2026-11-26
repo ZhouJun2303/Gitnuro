@@ -6,6 +6,8 @@
 
 ## 最近完成
 
+- [x] 在管理工作树等弹窗里右键工作树时，菜单被对话框遮罩盖住，只在窗口底部露出一截。菜单层改为位于对话框之上、确认框之下，点遮罩关闭菜单。本条所在提交 `fix: 修复弹窗内右键菜单被对话框遮罩盖住`。回归见 `e2e/worktrees.spec.ts` 的 `worktree dialog context menu stays above the dialog`，覆盖三套主题。
+
 - [x] 未暂存列表的单文件和批量丢弃从索引恢复工作区，保留已暂存版本。加深已暂存、未暂存两栏的选中文件和目录背景，当前预览行的高亮更明显。修复见本条所在提交 `fix: 丢弃未暂存时保留暂存版本并加深选中背景`。回归见 `discard_unstaged_restores_only_the_worktree`、`discard_unstaged_uses_index_gitlink`、`queued_discard_preserves_later_disk_and_index_changes` 及 `e2e/common-operations.spec.ts` 的 `discard unstaged restores the index and highlights selections`，覆盖三套主题。
 
 - [x] 打开或从下拉列表切换到含跨平台子模块文件名的仓库时，状态读取回退到只读的 Git 命令，保留子模块和普通文件的改动。修复提交 `fix: 修复子模块路径导致的仓库打开失败`。回归见 `status_reads_a_submodule_with_windows_incompatible_tree_paths` 和 `e2e/status-switch.spec.ts`。

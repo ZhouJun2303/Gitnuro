@@ -48,6 +48,7 @@ export async function selectPrefTab(shell: ShellState, tab: PrefTab) {
 
 export async function openLaunch(shell: ShellState) {
     if (shell.dialog || shell.textMerge || shell.confirmAsk || shell.forgeOpen) return;
+    shell.dismissMenu(false);
     shell.repoPickerOpen = false;
     shell.commandLogOpen = false;
     shell.launch = "";

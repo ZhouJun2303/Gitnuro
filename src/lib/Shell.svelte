@@ -222,7 +222,7 @@
 
 .menu button, .menu-dismiss { font: inherit; }
 
-.scrim.menu-dismiss { position: fixed; inset: 0; z-index: 29; background: transparent; border: 0; backdrop-filter: none; animation: none; }
+.scrim.menu-dismiss { position: fixed; inset: 0; z-index: calc(var(--z-menu, 30) - 1); background: transparent; border: 0; backdrop-filter: none; animation: none; }
 
 .scrim.confirm-scrim { z-index: var(--z-confirm, 60); }
 

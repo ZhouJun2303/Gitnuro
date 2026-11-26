@@ -175,6 +175,15 @@ for (const theme of ["apple", "light", "dark"] as const) {
   });
 }
 
+for (const theme of ["apple", "light", "dark"] as const) {
+  test(`worktree dialog context menu stays above the dialog (${theme})`, async ({ page }) => {
+    await openLabScene(page, "worktree-manage", ".checkout-list-row.active", { theme, locale: "zh" });
+    await dialog(page).locator(".checkout-list-row").filter({ hasText: "游离 HEAD" }).click({ button: "right" });
+    await page.getByRole("menuitem", { name: "管理工作树", exact: true }).click();
+    await expect(dialog(page).locator(".checkout-list-row.active")).toContainText("游离 HEAD");
+  });
+}
+
 test("worktree unlock, stale removal review, move, repair and prune", async ({ page }) => {
   test.setTimeout(90_000);
   await openLabScene(page, "worktree-manage", ".checkout-list-row.active", { theme: "dark", locale: "zh" });
