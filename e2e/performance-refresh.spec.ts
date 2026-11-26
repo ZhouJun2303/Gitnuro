@@ -201,9 +201,8 @@ for (const switchRepo of [false, true]) {
     expect(result).toEqual({ same: true, revision: switchRepo ? 20 : 10, head: switchRepo ? "head-20" : "head-10" });
     expect(calls.filter(({ cmd }) => cmd === "repository_refs")).toHaveLength(switchRepo ? 2 : 1);
     const logs = calls.filter(({ cmd }) => cmd === "commit_log");
-    expect(logs).toHaveLength(1);
-    expect(logs[0].path).toBe(switchRepo ? "D:/perf/two" : "D:/perf/one");
-    expect(logs[0].trace).toMatch(switchRepo ? /^operation-new-/ : /^operation-test-/);
+    expect(logs.map(({ path }) => path).sort()).toEqual(switchRepo ? ["D:/perf/one", "D:/perf/two"] : ["D:/perf/one"]);
+    for (const log of logs) expect(log.trace).toMatch(log.path.endsWith("two") ? /^operation-new-/ : /^operation-test-/);
   });
 }
 

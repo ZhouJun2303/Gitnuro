@@ -203,6 +203,7 @@
         {@render glyph("commits")}
         <span class="name">{shell.tr("chrome.allCommits")}</span>
       </button>
+      {#if shell.mode !== "loading"}
       <div class="side-tools">
         <button class="icon-btn side-tool" class:on={shell.sideView === "refs"} type="button" title={shell.tr("chrome.localBranches")} aria-label={shell.tr("chrome.localBranches")} aria-pressed={shell.sideView === "refs"} onclick={() => shell.showSideRefs()}>{@render glyph("branch")}</button>
         <button class="icon-btn side-tool" class:on={shell.sideView === "search"} type="button" title={shell.tr("chrome.searchCommits")} aria-label={shell.tr("chrome.searchCommits")} aria-pressed={shell.sideView === "search"} onclick={() => shell.showSideSearch()}>{@render glyph("search")}</button>
@@ -213,6 +214,7 @@
         <input placeholder={shell.tr("chrome.filter")} aria-label={shell.tr("chrome.filterSidebar")} bind:this={shell.sideFilter} bind:value={shell.sideQuery} onkeydown={(event) => { if (event.key === "Escape") { event.stopPropagation(); shell.sideQuery = ""; } }} />
         {#if shell.sideQuery}<button class="side-filter-clear" type="button" aria-label={shell.tr("chrome.clearFilter")} onclick={() => (shell.sideQuery = "")}>×</button>{/if}
       </label>
+      {/if}
       {/if}
       </div>
 
@@ -422,7 +424,9 @@
         </div>
       {/snippet}
 
-      {#if shell.sideView === "refs"}
+      {#if shell.mode === "loading"}
+        <div class="side-scroll" aria-busy="true"></div>
+      {:else if shell.sideView === "refs"}
       <div class="side-scroll" bind:this={sideScroll} onscroll={onSideScroll}>
       {#if shell.mode === "live" && shell.refs}
         {#if sideRows.length > 60}

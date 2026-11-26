@@ -21,6 +21,7 @@ export type OpenPlan =
 const PATH_LIMIT = 512;
 
 export function sameFingerprint(left: StatusFingerprint | null | undefined, right: StatusFingerprint | null | undefined) {
+  if (left === right) return true;
   return !!left && !!right && left.head === right.head && left.refId === right.refId && left.indexLen === right.indexLen
     && left.indexSum === right.indexSum && (left.submoduleSum ?? "") === (right.submoduleSum ?? "")
     && (left.worktreeSum ?? "") === (right.worktreeSum ?? "");
@@ -38,7 +39,7 @@ export function planStatusRefresh(input: {
   probe: StatusProbe | null;
   note: WatchNote | null;
 }): OpenPlan {
-  if (input.unverified || !input.probe?.watcherAlive || !sameFingerprint(input.fingerprint, input.probe.fingerprint)) {
+  if (input.unverified || !input.fingerprint || !input.probe?.watcherAlive || !sameFingerprint(input.fingerprint, input.probe.fingerprint)) {
     return { kind: "full" };
   }
   const seen = input.seen || 0;

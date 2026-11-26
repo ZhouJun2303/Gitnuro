@@ -342,6 +342,7 @@ fn dispatch(command: &str, args: &Value) -> Result<Value, String> {
             req(args, "order")?,
             req(args, "revs")?,
             req(args, "offset")?,
+            req(args, "default_branch")?,
         )),
         "commit_detail" => done_result(super::commit_detail(req(args, "path")?, req(args, "id")?)),
         "locate_ref" => done_result(super::locate_ref(req(args, "path")?, req(args, "name")?, req(args, "order")?)),

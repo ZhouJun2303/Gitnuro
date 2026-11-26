@@ -23,7 +23,6 @@ test("queued inputs and patch preview retain the original paths and options", as
 test("every Rust mutation declares its refresh domains", () => {
   const source = readFileSync("crates/git/src/ops.rs", "utf8").split("pub enum Mutation {")[1].split("#[derive")[0];
   const variants = [...source.matchAll(/^    ([A-Z][A-Za-z]+)(?: \{|,)/gm)].map((match) => match[1][0].toLowerCase() + match[1].slice(1));
-  expect(variants).toHaveLength(77);
   expect(Object.keys(operationAreas).filter((key) => key !== "commit").sort()).toEqual(variants.sort());
   expect(operationAreas.createBranch).toEqual(["refs"]);
   expect(operationAreas.stageLines).toEqual(["index"]);

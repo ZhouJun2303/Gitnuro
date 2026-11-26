@@ -102,7 +102,7 @@
             {/if}
           {:else if shell.mode !== "sample"}
             {#if shell.historyItems.length === 0}
-              <p class="empty">{shell.historyFilter ? shell.tr("chrome.noMatch") : shell.historyLoading ? shell.tr("chrome.reading") : shell.tr("chrome.noCommits")}</p>
+              <p class="empty">{shell.historyLoading ? shell.tr("chrome.reading") : shell.historyFilter ? shell.tr("chrome.noMatch") : shell.tr("chrome.noCommits")}</p>
             {:else}
               <div class="commit-window" style:height="{shell.historyItems.length * shell.rowCommit}px">
                 {#each shell.historyRows as commit, index (commit.id)}

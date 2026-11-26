@@ -1,7 +1,67 @@
 import { expect, test } from "@playwright/test";
-import { openLabScene } from "./helpers";
+import { openLabScene, pinLabSettings } from "./helpers";
 
 for (const theme of ["apple", "light", "dark"] as const) {
+  test(`${theme} reads and selects history while the initial file status and refs are pending`, async ({ page }) => {
+    let finishStatus!: () => void;
+    const gate = new Promise<void>((resolve) => { finishStatus = resolve; });
+    const commands: string[] = [];
+    await openLabScene(page, "welcome", ".recent-card", { theme });
+    await page.route("**/__lab/invoke", async (route) => {
+      const { cmd } = route.request().postDataJSON();
+      commands.push(cmd);
+      if (cmd === "workspace_status" || cmd === "repository_refs") await gate;
+      await route.fallback();
+    });
+    try {
+      await page.locator(".recent-card").first().click();
+      const pending = page.locator(".body > section[aria-busy='true']");
+      await expect(pending).toBeVisible();
+      await page.locator('.sidebar [data-section="history"]').click();
+      const commit = page.locator(".commit-row[data-commit-id]").first();
+      await expect(commit).toBeVisible();
+      await commit.click();
+      await expect(commit).toHaveAttribute("aria-pressed", "true");
+      expect(commands).not.toContain("merge_state");
+      finishStatus();
+      await expect(page.locator(".sidebar [data-section='branches']")).toBeVisible();
+      await expect(commit).toHaveAttribute("aria-pressed", "true");
+      await page.locator('.sidebar [data-section="changes"]').click();
+      await expect(pending).toHaveCount(0);
+      await expect(page.locator(".unstaged-pane")).toBeVisible();
+    } finally {
+      finishStatus();
+    }
+  });
+
+  test(`${theme} submits an amend with the repository sign-off choice while refs are pending`, async ({ page }) => {
+    let releaseRefs!: () => void;
+    const refsPending = new Promise<void>((resolve) => { releaseRefs = resolve; });
+    const commits: Record<string, unknown>[] = [];
+    await pinLabSettings(page, { pushOnCommit: false });
+    await openLabScene(page, "welcome", ".recent-card", { theme });
+    await page.route("**/__lab/invoke", async (route) => {
+      const { cmd, args } = route.request().postDataJSON();
+      if (cmd === "repository_refs") await refsPending;
+      if (cmd === "commit_changes") {
+        commits.push(args);
+        await route.fulfill({ json: { ok: false, error: "fixture: leave the index unchanged" } });
+        return;
+      }
+      await route.fallback();
+    });
+    try {
+      await page.locator(".recent-card").first().click();
+      await page.locator('.composer .check input[type="checkbox"]').check();
+      await page.locator(".composer .summary-input").fill("commit while loading refs");
+      await page.locator(".composer button.commit").click();
+      await expect.poll(() => commits.length).toBe(1);
+      expect(commits[0]).not.toHaveProperty("signOff");
+    } finally {
+      releaseRefs();
+    }
+  });
+
   test(`${theme} opens and switches to a repository with a Windows-incompatible submodule path`, async ({ page }) => {
     const regularChange = ".file .file-select[title='regular.txt']";
     const submoduleChange = ".file .file-select[title='third_party/child']";

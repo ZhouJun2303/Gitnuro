@@ -101,6 +101,8 @@ fn worktree_merge_rejects_dirty_missing_and_changed_checkouts() {
 #[test]
 fn worktree_merge_conflict_can_abort_and_restore_main_changes() {
     let repo = repository();
+    repo.git(&["config", "user.name", "Test"]);
+    repo.git(&["config", "user.email", "test@example.com"]);
     let file = repo.path.join("shared.txt");
     fs::write(&file, "base\n").unwrap();
     repo.git(&["add", "shared.txt"]);

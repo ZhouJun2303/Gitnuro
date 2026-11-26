@@ -144,8 +144,8 @@ export function commitMenu(shell: ShellState, commit: { id: string; summary: str
       { label: shell.tr("menu.revert"), disabled: locked || !!shell.progress, run: () => shell.confirmRevert(commit.id, commit.summary) },
       { label: shell.tr("menu.reset"), disabled: locked || !!shell.progress, run: () => shell.openReset(commit.id, commit.summary) },
       { sep: true, label: "" },
-      { label: shell.tr("menu.createBranch"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "branch"; } },
-      { label: shell.tr("menu.createTag"), run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "tag"; } },
+      { label: shell.tr("menu.createBranch"), disabled: shell.mode === "loading", run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "branch"; } },
+      { label: shell.tr("menu.createTag"), disabled: shell.mode === "loading", run: () => { shell.draft = ""; shell.draftExtra = commit.id; shell.dialog = "tag"; } },
       { label: shell.tr("menu.editMessage"), disabled: locked || !!shell.progress || !shell.refs?.head || commit.id !== shell.refs.head, run: () => { shell.draft = commit.summary; shell.draftExtra = commit.id; shell.dialog = "reword"; } },
       { label: shell.tr("menu.interactiveRebase"), disabled: locked || !!shell.progress, run: () => { shell.selectedCommit = commit.id; shell.openRebase(); } },
       { label: shell.tr("menu.copySha"), run: () => shell.copyText(commit.id) },
@@ -292,7 +292,7 @@ export function helpItems(shell: ShellState) {
 
 export function commitExtras(shell: ShellState) {
     return [
-      { label: `${shell.signOff ? "✓ " : ""}${shell.tr("chrome.signOff")}`, run: () => { shell.signOff = !shell.signOff; if (shell.mode === "live") void shell.mutate({ action: "setSignOff", enabled: shell.signOff, format: shell.refs?.signOffFormat || shell.settings.signOffFormat }); } },
+      { label: `${shell.signOff ? "✓ " : ""}${shell.tr("chrome.signOff")}`, disabled: shell.mode === "live" && !shell.refs, run: () => { shell.signOff = !shell.signOff; if (shell.mode === "live") void shell.mutate({ action: "setSignOff", enabled: shell.signOff, format: shell.refs?.signOffFormat || shell.settings.signOffFormat }); } },
       { label: `${shell.skipHooks ? "✓ " : ""}${shell.tr("chrome.skipHooks")}`, run: () => (shell.skipHooks = !shell.skipHooks) },
       { label: shell.tr("chrome.suggestGenerate", { style: shell.tr(shell.settings.aiPromptStyle === "long" ? "chrome.promptLong" : "chrome.promptShort") }), disabled: shell.writeBlocked || shell.staged.length === 0, run: () => void shell.suggestMessage() },
       { label: shell.tr("chrome.commitAndPush"), disabled: !shell.canCommit, run: () => void shell.submitCommit(true) },

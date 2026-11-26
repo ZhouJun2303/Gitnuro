@@ -2,9 +2,11 @@
 
 ## 待处理
 
-- [ ] 正式安装包实机复测：记录启动、点击到 Git 完成及界面刷新耗时、真实远端网络长尾和系统峰值内存；补原生窗口重启和多屏/DPI 验证。按启动测量决定是否拆分主界面及试验台入口。现有本地基准不涵盖这些结果，历史 TLS 失败也尚未用真实远端复核。
+- [ ] 正式安装包实机复测，覆盖真实远端网络长尾、系统峰值内存、原生窗口重启和多屏/DPI。历史 TLS 失败待真实远端复核。启动与命令的本地测量见 [性能记录](dev-docs/performance-plan.md#13-2026-11-26-真实仓库打开与常用命令复测对照-eaa465ad)。
 
 ## 最近完成
+
+- [x] 大仓库打开时先显示可操作侧栏，历史与工作区扫描、标签排序并行。复用引用和可达数据，减少读取提交差异时的 Git 调用。修复切换后迟到的读取、已删除上游、无 HEAD 的仓库搜索，以及引用未加载时的提交签署。本条所在提交 `perf: 加快大仓库打开和历史读取`。回归见 `e2e/status-switch.spec.ts`、`e2e/performance-refresh.spec.ts`、`current_history_uses_existing_visible_upstream`、`remote_inventory_preserves_names_and_local_urls_with_spaces`、`repository_search_can_read_other_branches_with_an_unborn_head` 和 `queued_commit_resolves_repository_sign_off_when_the_choice_is_omitted`。
 
 - [x] 删除工作树时默认勾选同时删除对应的本地分支，取消勾选可保留分支。实现见本条所在提交 `feat: 删除工作树时可同时删除本地分支`。回归见 `worktree_remove_deletes_only_the_reviewed_branch`、`worktree_remove_reports_a_branch_deletion_failure` 及 `e2e/worktrees.spec.ts` 的工作树删除用例，覆盖三套主题。
 

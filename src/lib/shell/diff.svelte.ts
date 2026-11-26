@@ -1,7 +1,7 @@
 import { invoke } from "../perf";
 import { cancelReads, isReadSuperseded } from "../read-scheduler";
 import { commits, diffs, sampleImages, sampleNotices, samplePulls, sampleReflog, staged as sampleStaged, unstaged as sampleUnstaged, type FileChange } from "../sample";
-import { highlight } from "../highlight";
+import type { Token } from "../highlight";
 import { comparePixels, PixelDiffLimitError } from "../pixel-diff";
 import { branchGroup, changedRanges, commitGraph, formatWhen, gravatarUrl, laneColors, markTokens, numberedDiff, splitDiff, windowSlice, type GraphCell, type SplitRow } from "../view";
 import {
@@ -674,8 +674,16 @@ export function toggleCommitDir(shell: ShellState, path: string) {
     shell.commitCollapsed = shell.commitCollapsed.includes(path) ? shell.commitCollapsed.filter((item) => item !== path) : [...shell.commitCollapsed, path];
   }
 
-export function paint(shell: ShellState, text: string, path: string) {
-    const tokens = shell.settings.disableSyntaxHighlight || shell.heavyWrap ? [{ text, cls: "" }] : highlight(text, path);
+let highlighter = $state.raw<typeof import("../highlight")>();
+let highlightRequested = false;
+
+export function paint(shell: ShellState, text: string, path: string): Token[] {
+    const syntax = !shell.settings.disableSyntaxHighlight && !shell.heavyWrap;
+    if (syntax && text && !highlightRequested) {
+      highlightRequested = true;
+      void import("../highlight").then((value) => { highlighter = value; }).catch(() => {});
+    }
+    const tokens = (syntax && highlighter?.highlight(text, path)) || [{ text, cls: "" }];
     if (!shell.settings.showWhitespace) return tokens;
     return tokens.map((token) => ({ ...token, text: token.text.replace(/ /g, "·").replace(/\t/g, "→") }));
   }

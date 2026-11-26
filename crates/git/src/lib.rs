@@ -42,9 +42,9 @@ pub use fingerprint::{status_fingerprint, StatusFingerprint};
 pub use submodule::{submodule_remote_status, submodule_urls, SubmoduleRemoteRow};
 pub use model::{
     blame_file, blame_source, blame_file_range, branch_commits, branch_commits_sorted, commit_detail, commit_files, commit_log,
-    commit_log_sorted, commit_tree, commits_from, compare_file, compare_files, file_history,
+    commit_log_sorted, commit_tree, commits_from, compare_file, compare_files, current_branch_log_revisions, file_history,
     ignored_paths, in_progress, index_lock_path, lfs_available, lfs_locks, locate_ref,
-    prompt_facts, rebase_conflicts, reflog, remove_stale_index_lock, repo_sign_off_format,
+    prompt_facts, rebase_conflicts, reflog, remove_stale_index_lock, repo_sign_off_enabled, repo_sign_off_format,
     repository_refs, repository_summary, search_log, show_commit_file, show_commit_file_with,
     remote_account_overrides, stale_index_lock, stale_index_lock_for_error,
     write_expanded_groups, write_hidden_refs, write_remote_account, write_sign_off, BlameLine,

@@ -175,7 +175,7 @@ fn report_path(given: Option<String>, repo: &Path) -> PathBuf {
 /// Settings keep their call order. Writes run together, and each repository keeps its own order.
 fn dispatch(command: &str, job: Job) {
     let lane = match command {
-        "load_settings" | "save_settings" | "save_window_bounds" | "settings_path" | "import_fork_settings" | "watch_repository" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
+        "load_settings" | "save_settings" | "save_window_bounds" | "settings_path" | "import_fork_settings" | "set_passphrase" | "read_ssh_config" | "write_ssh_config"
         | "log_client" => Some((&SETTINGS_LANE, "awegit-settings")),
         _ => None,
     };
@@ -351,7 +351,7 @@ fn watcher_alive(state: &RepoWatch, repo: &Path) -> bool {
     let key = watch_key(repo);
     state
         .0
-        .lock()
+        .try_lock()
         .ok()
         .and_then(|slots| slots.get(&key).map(|slot| slot.alive.load(Ordering::Acquire)))
         .unwrap_or(false)
@@ -442,14 +442,19 @@ fn commit_changes(
     summary: String,
     description: String,
     amend: bool,
-    sign_off: bool,
+    sign_off: Option<bool>,
     skip_hooks: Option<bool>,
 ) -> Result<ChangeReport, String> {
     let repo = repo_from(path.clone())?;
+    let preferences = settings::load().ok();
+    let sign_off = sign_off.unwrap_or_else(|| {
+        awegit_git::repo_sign_off_enabled(&repo)
+            .unwrap_or_else(|| preferences.as_ref().is_some_and(|values| values.sign_off))
+    });
     let sign_off_format = if sign_off {
         let local = awegit_git::repo_sign_off_format(&repo);
         if local.trim().is_empty() {
-            settings::load().map(|values| values.sign_off_format).unwrap_or_default()
+            preferences.as_ref().map(|values| values.sign_off_format.clone()).unwrap_or_default()
         } else {
             local
         }
@@ -458,7 +463,7 @@ fn commit_changes(
     };
     let peel = use_fakeignore();
     let skip_hooks = skip_hooks.unwrap_or(false);
-    let types = settings::load()
+    let types = preferences
         .map(|values| {
             values
                 .commit_types
@@ -523,15 +528,21 @@ fn commit_log(
     order: Option<String>,
     revs: Option<Vec<String>>,
     offset: Option<usize>,
+    default_branch: Option<bool>,
 ) -> Result<Vec<awegit_git::CommitRow>, String> {
     let repo = repo_from(path)?;
     tasks::wait_for_writes(&repo);
     let limit = limit.unwrap_or(500);
     let topo = order.as_deref() == Some("topo");
     let revision = changes::revision(&repo);
-    let key = format!("log:{}:{revision}:{limit}:{topo}:{all:?}:{revs:?}:{offset:?}", awegit_git::repo_key(&repo));
+    let default_branch = default_branch.unwrap_or(false);
+    let key = format!("log:{}:{revision}:{limit}:{topo}:{all:?}:{revs:?}:{offset:?}:{default_branch}", awegit_git::repo_key(&repo));
     reads::shared(key, || {
-        awegit_git::commit_log_page_with_revision(&repo, limit, all.unwrap_or(true), &revs.unwrap_or_default(), topo, offset.unwrap_or(0), Some(revision)).map_err(|error| error.to_string())
+        let mut revisions = revs.unwrap_or_default();
+        if default_branch && revisions.is_empty() {
+            revisions = awegit_git::current_branch_log_revisions(&repo).map_err(|error| error.to_string())?;
+        }
+        awegit_git::commit_log_page_with_revision(&repo, limit, all.unwrap_or(true), &revisions, topo, offset.unwrap_or(0), Some(revision)).map_err(|error| error.to_string())
     })
 }
 

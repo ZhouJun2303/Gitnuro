@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::ScopedJoinHandle;
 
 use serde::{Deserialize, Serialize};
@@ -27,8 +27,8 @@ fn capped_output_error(limit: usize) -> Error {
 
 struct RemoteStateCache {
     has_remotes: bool,
-    local_only: HashSet<String>,
-    remote_only: HashMap<String, HashSet<String>>,
+    local_only: Arc<HashSet<String>>,
+    remote_only: HashMap<String, Arc<HashSet<String>>>,
 }
 
 fn remote_state_cache() -> &'static Mutex<BTreeMap<String, RemoteStateCache>> {
@@ -211,6 +211,34 @@ pub fn branch_commits_sorted(
     log_with(repo, limit, false, &[], &[], topo)
 }
 
+/// History of the checked-out branch and its visible upstream. An empty scope
+/// asks the caller for all branches, including detached worktree tips.
+pub fn current_branch_log_revisions(repo: &Path) -> Result<Vec<String>, Error> {
+    let opened = crate::open_repo(repo)?;
+    let head = opened.head()?;
+    let Some(current) = head.referent_name().filter(|_| !opened.is_bare() && head.id().is_some()) else {
+        return Ok(Vec::new());
+    };
+    let current_ref = current.as_bstr().to_string();
+    let mut revisions = vec![current_ref.clone()];
+    if opened.branch_remote_ref_name(current, gix::remote::Direction::Fetch).is_none() {
+        return Ok(revisions);
+    }
+    let upstream = with_read(|| run_output(repo, &["rev-parse", "--verify", "--quiet", "--symbolic-full-name", "@{upstream}"]))?;
+    if upstream.status.success() {
+        let output = String::from_utf8_lossy(&upstream.stdout);
+        let upstream_ref = output.trim();
+        let name = upstream_ref.strip_prefix("refs/remotes/").or_else(|| upstream_ref.strip_prefix("refs/heads/"));
+        let visible = name.is_some_and(|name| {
+            !hidden_refs(repo).iter().any(|hidden| name == hidden || (hidden.ends_with('/') && name.starts_with(hidden)))
+        });
+        if upstream_ref != current_ref && visible {
+            revisions.push(upstream_ref.to_string());
+        }
+    }
+    Ok(revisions)
+}
+
 /// Commits reachable from the named revisions, such as the current branch and its upstream.
 pub fn commits_from(
     repo: &Path,
@@ -262,11 +290,8 @@ pub fn search_log_page_with_revision(
     if field == "path" && query.contains("..") {
         return Err(Error::Path(query.to_string()));
     }
-    let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]));
-    match head {
-        Err(error) => return Err(error),
-        Ok(output) if output.status.success() => {}
-        Ok(_) => return Ok(Vec::new()),
+    if scope == "branch" && !has_head(repo)? {
+        return Ok(Vec::new());
     }
     let limit_text = limit.clamp(1, 100_000).to_string();
     let order = if topo { "--topo-order" } else { "--date-order" };
@@ -307,7 +332,7 @@ pub fn search_log_page_with_revision(
     }
     let mut commits = parse_commits(&String::from_utf8_lossy(&output.stdout));
     assign_lanes(&mut commits);
-    mark_remote_state(repo, &mut commits, &[], revision);
+    with_read(|| mark_remote_state(repo, &mut commits, &[], revision));
     Ok(commits)
 }
 
@@ -422,9 +447,8 @@ fn log_page(
     offset: usize,
     revision: Option<u64>,
 ) -> Result<Vec<CommitRow>, Error> {
-    if revs.is_empty() && (!all || !path.is_empty()) {
-        let head = with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]))?;
-        if !head.status.success() { return Ok(Vec::new()); }
+    if revs.is_empty() && (!all || !path.is_empty()) && !has_head(repo)? {
+        return Ok(Vec::new());
     }
     let limit = limit.clamp(1, 100_000).to_string();
     let order = if topo { "--topo-order" } else { "--date-order" };
@@ -465,6 +489,13 @@ fn log_page(
     Ok(commits)
 }
 
+fn has_head(repo: &Path) -> Result<bool, Error> {
+    if let Ok(head) = crate::open_repo(repo).and_then(|opened| Ok(opened.head()?.id().is_some())) {
+        return Ok(head);
+    }
+    with_read(|| run_output(repo, &["rev-parse", "--verify", "HEAD"]).map(|output| output.status.success()))
+}
+
 fn mark_remote_state(repo: &Path, commits: &mut [CommitRow], revs: &[&str], revision: Option<u64>) {
     if commits.is_empty() {
         return;
@@ -487,7 +518,7 @@ fn remote_sets(
     repo: &Path,
     scope: &Option<(Vec<String>, Vec<String>)>,
     revision: Option<u64>,
-) -> Option<(HashSet<String>, HashSet<String>)> {
+) -> Option<(Arc<HashSet<String>>, Arc<HashSet<String>>)> {
     let cache_key = match revision {
         Some(revision) if revision > 0 => Some(format!("{}:revision:{revision}", crate::repo_key(repo))),
         Some(_) => {
@@ -502,6 +533,7 @@ fn remote_sets(
         .as_ref()
         .map(|(remote, local)| format!("r:{}|l:{}", remote.join("\x1f"), local.join("\x1f")))
         .unwrap_or_else(|| "all".into());
+    let mut local_only = None;
     if let Some(key) = cache_key.as_deref() {
         if let Some(cached) = remote_state_cache().lock().ok()?.get(key) {
             if !cached.has_remotes {
@@ -510,12 +542,13 @@ fn remote_sets(
             if let Some(remote_only) = cached.remote_only.get(&scope_key) {
                 return Some((cached.local_only.clone(), remote_only.clone()));
             }
+            local_only = Some(cached.local_only.clone());
         }
     }
-    if !has_remotes(repo) {
+    if local_only.is_none() && !has_remotes(repo) {
         if let Some(key) = cache_key {
             if let Ok(mut cache) = remote_state_cache().lock() {
-                cache.insert(key, RemoteStateCache { has_remotes: false, local_only: HashSet::new(), remote_only: HashMap::new() });
+                cache.insert(key, RemoteStateCache { has_remotes: false, local_only: Arc::default(), remote_only: HashMap::new() });
                 while cache.len() > 64 {
                     let Some(oldest) = cache.keys().next().cloned() else { break };
                     cache.remove(&oldest);
@@ -524,20 +557,10 @@ fn remote_sets(
         }
         return None;
     }
-    let local_only = run(
-        repo,
-        &["rev-list", "--all", "--not", "--remotes", "--max-count=20000"],
-    )
-    .ok()
-    .map(|output| {
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-            .map(str::to_string)
-            .collect::<HashSet<_>>()
-    })
-    .unwrap_or_default();
+    let local_only = match local_only {
+        Some(cached) => cached,
+        None => read_commit_ids(repo, &["rev-list", "--all", "--not", "--remotes", "--max-count=20000"])?,
+    };
     let mut remote_only_args = vec!["rev-list", "--max-count=20000"];
     match scope {
         Some((remote, local)) => {
@@ -545,19 +568,14 @@ fn remote_sets(
             remote_only_args.push("--not");
             remote_only_args.extend(local.iter().map(String::as_str));
         }
-        None => remote_only_args.extend(["--remotes", "--not", "--branches", "HEAD"]),
+        None => {
+            remote_only_args.extend(["--remotes", "--not", "--branches"]);
+            if has_head(repo).ok()? {
+                remote_only_args.push("HEAD");
+            }
+        }
     }
-    let remote_only = run(repo, &remote_only_args)
-        .ok()
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-                .map(str::to_string)
-                .collect::<HashSet<_>>()
-        })
-        .unwrap_or_default();
+    let remote_only = read_commit_ids(repo, &remote_only_args)?;
     if let Some(key) = cache_key {
         if let Ok(mut cache) = remote_state_cache().lock() {
             let entry = cache.entry(key).or_insert_with(|| RemoteStateCache { has_remotes: true, local_only: local_only.clone(), remote_only: HashMap::new() });
@@ -573,23 +591,38 @@ fn remote_sets(
     Some((local_only, remote_only))
 }
 
+fn read_commit_ids(repo: &Path, args: &[&str]) -> Option<Arc<HashSet<String>>> {
+    let output = run(repo, args).ok()?;
+    let ids = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect();
+    Some(Arc::new(ids))
+}
+
 /// Remote and local refs among the revisions a filtered view walks. `None` when the view is
 /// not scoped to refs (all branches, file history), so the comparison covers the repository.
 fn remote_scope(repo: &Path, revs: &[&str]) -> Option<(Vec<String>, Vec<String>)> {
     if revs.is_empty() {
         return None;
     }
-    let mut args = vec!["rev-parse", "--symbolic-full-name"];
-    args.extend_from_slice(revs);
-    let output = run(repo, &args).ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
+    let resolved;
+    let refs: Vec<&str> = if revs.iter().all(|rev| rev.starts_with("refs/")) {
+        revs.to_vec()
+    } else {
+        let mut args = vec!["rev-parse", "--symbolic-full-name"];
+        args.extend_from_slice(revs);
+        resolved = String::from_utf8_lossy(&run(repo, &args).ok()?.stdout).into_owned();
+        resolved.lines().collect()
+    };
     let mut remote = Vec::new();
     let mut local = Vec::new();
-    for (rev, full) in revs.iter().zip(text.lines()) {
+    for full in refs {
         if full.starts_with("refs/remotes/") {
-            remote.push((*rev).to_string());
+            remote.push(full.to_string());
         } else if full.starts_with("refs/heads/") {
-            local.push((*rev).to_string());
+            local.push(full.to_string());
         }
     }
     if remote.is_empty() || local.is_empty() {
@@ -733,23 +766,33 @@ fn repository_refs_uncached(repo: &Path) -> Result<RefSnapshot, Error> {
             .unwrap_or_default()
     };
     let sign_off = first(&local, "signoff", "enabled");
-    let head = run(repo, &["rev-parse", "--verify", "--quiet", "HEAD"])
-        .ok()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .filter(|id| !id.is_empty());
+    let head = crate::open_repo(repo)
+        .and_then(|opened| Ok(opened.head()?.id().map(|id| id.to_string())))
+        .unwrap_or_else(|_| {
+            run(repo, &["rev-parse", "--verify", "--quiet", "HEAD"])
+                .ok()
+                .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+                .filter(|id| !id.is_empty())
+        });
     std::thread::scope(|scope| {
         let branches = scope.spawn(crate::timing::inherit(|| local_branches(repo)));
-        let remotes = scope.spawn(crate::timing::inherit(|| remotes(repo)));
+        let remotes = scope.spawn(crate::timing::inherit(|| remote_urls(repo)));
+        let refs = scope.spawn(crate::timing::inherit(|| {
+            run(repo, &["for-each-ref", "--format=%(objectname)%09%(*objectname)%09%(refname)%09%(symref)",
+                "refs/heads", "refs/remotes", "refs/tags", "refs/stash"])
+        }));
         let tags = scope.spawn(crate::timing::inherit(|| tags(repo)));
         let stashes = scope.spawn(crate::timing::inherit(|| stashes(repo)));
         let submodules = scope.spawn(crate::timing::inherit(|| submodules(repo)));
         let worktrees = worktree::list(repo);
+        let mut remotes = joined(remotes)?;
+        let labels = read_ref_inventory(&joined(refs)?.stdout, &mut remotes);
         Ok(RefSnapshot {
             revision: 0,
             head,
             branches: joined(branches)?,
-            labels: ref_labels(repo)?,
-            remotes: joined(remotes)?,
+            labels,
+            remotes,
             tags: joined(tags)?,
             stashes: joined(stashes)?,
             submodules: joined(submodules)?,
@@ -771,7 +814,7 @@ fn refs_stamp(repo: &Path) -> String {
     let mut stamp = worktree::registry_stamp(&common).to_string();
     for (root, files) in [
         (&git, &["HEAD", "index", "config.worktree", "awegit", "gitnuro"][..]),
-        (&common, &["HEAD", "config", "packed-refs", "logs/refs/stash"][..]),
+        (&common, &["HEAD", "config", "packed-refs", "refs/stash", "logs/refs/stash"][..]),
     ] {
         for relative in files {
             stamp.push('|');
@@ -867,19 +910,45 @@ fn tree_mark(root: &Path) -> String {
     entries.join("|")
 }
 
-/// Ref decorations are small metadata; changing a label never requires another log walk.
-fn ref_labels(repo: &Path) -> Result<BTreeMap<String, Vec<String>>, Error> {
-    let output = run(repo, &["for-each-ref", "--format=%(objectname)%09%(*objectname)%09%(refname)"])?;
+/// Use one ref enumeration for decorations and remote branch names.
+fn read_ref_inventory(bytes: &[u8], remotes: &mut [RemoteRow]) -> BTreeMap<String, Vec<String>> {
     let mut labels: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
+    let indexes: HashMap<String, usize> = remotes.iter().enumerate()
+        .map(|(index, remote)| (remote.name.clone(), index))
+        .collect();
+    for line in String::from_utf8_lossy(bytes).lines() {
         let mut fields = line.split('\t');
-        let object = fields.next().unwrap_or(""); let peeled = fields.next().unwrap_or(""); let name = fields.next().unwrap_or("");
-        if name.ends_with("/HEAD") { continue; }
-        let short = name.strip_prefix("refs/heads/").or_else(|| name.strip_prefix("refs/remotes/")).or_else(|| name.strip_prefix("refs/tags/"))
+        let object = fields.next().unwrap_or("");
+        let peeled = fields.next().unwrap_or("");
+        let name = fields.next().unwrap_or("");
+        let symref = fields.next().unwrap_or("");
+        let remote = name.strip_prefix("refs/remotes/");
+        if let Some(remote_ref) = remote {
+            for (split, _) in remote_ref.rmatch_indices('/') {
+                let remote_name = &remote_ref[..split];
+                let Some(&index) = indexes.get(remote_name) else { continue };
+                let branch = &remote_ref[split + 1..];
+                if branch == "HEAD" {
+                    let prefix = format!("refs/remotes/{remote_name}/");
+                    remotes[index].head = symref.strip_prefix(&prefix).map(str::to_string);
+                } else {
+                    remotes[index].branches.push(branch.to_string());
+                }
+                break;
+            }
+        }
+        if remote.is_some_and(|name| name.ends_with("/HEAD") && !symref.is_empty()) { continue; }
+        let short = name.strip_prefix("refs/heads/").or(remote).or_else(|| name.strip_prefix("refs/tags/"))
             .or_else(|| (name == "refs/stash").then_some("stash"));
-        if let Some(short) = short { labels.entry(if peeled.is_empty() { object } else { peeled }.to_string()).or_default().push(short.to_string()); }
+        if let Some(short) = short {
+            let id = if peeled.is_empty() { object } else { peeled };
+            labels.entry(id.to_string()).or_default().push(short.to_string());
+        }
     }
-    Ok(labels)
+    for remote in remotes {
+        remote.branches.sort_unstable();
+    }
+    labels
 }
 
 fn joined<T>(handle: ScopedJoinHandle<'_, Result<T, Error>>) -> Result<T, Error> {
@@ -1117,12 +1186,18 @@ pub(crate) fn absolute_git_dir(repo: &Path) -> Result<PathBuf, Error> {
             return Ok(dir);
         }
     }
-    let output = run(repo, &["rev-parse", "--absolute-git-dir"])?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if text.is_empty() {
-        return Err(Error::Git("could not find the git directory".into()));
-    }
-    let dir = PathBuf::from(text);
+    let dir = match crate::open_repo(repo).ok().and_then(|opened| std::path::absolute(opened.git_dir()).ok()) {
+        Some(dir) => dir,
+        None => {
+            let output = run(repo, &["rev-parse", "--absolute-git-dir"])?;
+            let text = String::from_utf8_lossy(&output.stdout);
+            let text = text.trim();
+            if text.is_empty() {
+                return Err(Error::Git("could not find the git directory".into()));
+            }
+            PathBuf::from(text)
+        }
+    };
     if let Ok(mut dirs) = GIT_DIRS.lock() {
         dirs.insert(repo.to_path_buf(), dir.clone());
     }
@@ -1303,6 +1378,12 @@ pub fn write_expanded_groups(repo: &Path, names: &[String]) -> Result<(), Error>
 /// `signoff.format` from `.git/awegit`. Empty when this repository has not set one.
 pub fn repo_sign_off_format(repo: &Path) -> String {
     value_key(repo, "signoff", "format")
+}
+
+/// The repository's sign-off override, if configured.
+pub fn repo_sign_off_enabled(repo: &Path) -> Option<bool> {
+    let value = value_key(repo, "signoff", "enabled");
+    (!value.is_empty()).then(|| value.eq_ignore_ascii_case("true"))
 }
 
 /// `remote<TAB>account` pairs from `.git/awegit`. Empty when this repository has not chosen any.
@@ -1517,27 +1598,10 @@ fn push_sign_off(out: &mut String, enabled: bool, format: &str) {
     }
 }
 
-/// For a merge commit (a stash is one too), the first parent to diff against.
-/// Plain `diff-tree` and `show` print nothing for such commits.
-fn merge_base_of(repo: &Path, id: &str) -> Option<String> {
-    let second = format!("{id}^2");
-    let output = run_output(repo, &["rev-parse", "--verify", "-q", &second]).ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    Some(format!("{id}^1"))
-}
-
 pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
     let id = check_rev(id)?;
-    let base = merge_base_of(repo, id);
-    let (output, truncated) = with_read(|| match base {
-        Some(ref base) => run_capped(
-            repo,
-            &["diff", "--name-status", "-z", "-r", "-M", base, id],
-            8_000_000,
-        ),
-        None => run_capped(
+    let (output, truncated) = with_read(|| {
+        run_capped(
             repo,
             &[
                 "diff-tree",
@@ -1547,10 +1611,11 @@ pub fn commit_files(repo: &Path, id: &str) -> Result<Vec<FileChange>, Error> {
                 "-r",
                 "-M",
                 "--root",
+                "--diff-merges=first-parent",
                 id,
             ],
             8_000_000,
-        ),
+        )
     })?;
     if truncated {
         return Err(capped_output_error(8_000_000));
@@ -1711,24 +1776,8 @@ pub fn show_commit_file_with(
     let id = check_rev(id)?;
     let path = check_path(path)?;
     let unified = format!("--unified={}", context.min(1_000_000));
-    let base = merge_base_of(repo, id);
-    let (output, capped) = with_read(|| match base {
-        Some(ref base) => run_capped(
-            repo,
-            &[
-                "--literal-pathspecs",
-                "diff",
-                "--no-ext-diff",
-                "--no-color",
-                &unified,
-                base,
-                id,
-                "--",
-                path,
-            ],
-            8_000_000,
-        ),
-        None => run_capped(
+    let (output, capped) = with_read(|| {
+        run_capped(
             repo,
             &[
                 "--literal-pathspecs",
@@ -1737,18 +1786,18 @@ pub fn show_commit_file_with(
                 "--no-color",
                 &unified,
                 "--format=",
+                "--diff-merges=first-parent",
                 id,
                 "--",
                 path,
             ],
             8_000_000,
-        ),
+        )
     })?;
     let mut parsed = parse_diff(path, false, &String::from_utf8_lossy(&output.stdout));
     parsed.truncated |= capped;
     if parsed.binary {
-        let old_rev = base.unwrap_or_else(|| format!("{id}^"));
-        parsed.old_bytes = spec_size(repo, &format!("{old_rev}:{path}"));
+        parsed.old_bytes = spec_size(repo, &format!("{id}^1:{path}"));
         parsed.new_bytes = spec_size(repo, &format!("{id}:{path}"));
     }
     Ok(parsed)
@@ -1933,61 +1982,18 @@ fn local_branches(repo: &Path) -> Result<Vec<BranchRow>, Error> {
     Ok(branches)
 }
 
-fn remotes(repo: &Path) -> Result<Vec<RemoteRow>, Error> {
+fn remote_urls(repo: &Path) -> Result<Vec<RemoteRow>, Error> {
     let output = run(repo, &["remote", "-v"])?;
     let text = String::from_utf8_lossy(&output.stdout);
     let mut rows: Vec<RemoteRow> = Vec::new();
     for line in text.lines() {
-        let mut parts = line.split_whitespace();
-        let name = parts.next().unwrap_or("");
-        let url = parts.next().unwrap_or("");
-        let kind = parts.next().unwrap_or("");
-        if name.is_empty() || kind != "(fetch)" {
-            continue;
-        }
+        let Some((name, url)) = line.strip_suffix(" (fetch)").and_then(|entry| entry.split_once('\t')) else { continue };
         rows.push(RemoteRow {
             name: name.to_string(),
             url: Some(url.to_string()),
             head: None,
             branches: Vec::new(),
         });
-    }
-    let refs = run(
-        repo,
-        &[
-            "for-each-ref",
-            "--format=%(refname:short)%09%(symref:short)",
-            "refs/remotes",
-        ],
-    )?;
-    let refs = String::from_utf8_lossy(&refs.stdout);
-    for line in refs.lines() {
-        let mut fields = line.split('\t');
-        let name = fields.next().unwrap_or("");
-        let symref = fields.next().unwrap_or("");
-        let Some((remote, branch)) = name.split_once('/') else {
-            continue;
-        };
-        let Some(row) = rows.iter_mut().find(|row| row.name == remote) else {
-            continue;
-        };
-        if branch == "HEAD" {
-            row.head = symref
-                .split_once('/')
-                .map(|(_, branch)| branch.to_string())
-                .or_else(|| {
-                    if symref.is_empty() {
-                        None
-                    } else {
-                        Some(symref.to_string())
-                    }
-                });
-        } else {
-            row.branches.push(branch.to_string());
-        }
-    }
-    for row in &mut rows {
-        row.branches.sort();
     }
     Ok(rows)
 }
@@ -2020,7 +2026,9 @@ fn tags(repo: &Path) -> Result<Vec<TagRow>, Error> {
 }
 
 fn stashes(repo: &Path) -> Result<Vec<StashRow>, Error> {
-    if crate::open_repo(repo).is_ok_and(|repo| repo.is_bare()) {
+    if crate::open_repo(repo).is_ok_and(|opened| {
+        opened.is_bare() || matches!(opened.try_find_reference("refs/stash"), Ok(None))
+    }) {
         return Ok(Vec::new());
     }
     let output = run(

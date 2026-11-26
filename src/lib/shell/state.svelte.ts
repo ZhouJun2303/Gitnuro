@@ -58,7 +58,7 @@ import { selectPrefTab, openLaunch, closeLaunch, runLaunch, onLaunchKey, ask, sa
 import type { Mode, Side, Row, Dialog, MergePiece, MergePick, RepoFacts, MenuItem, MenuItems, ConfirmAsk, TreeEntry, RepoEntry, CommandEntry, CommandFilter, RepoJob, PrefTab, LaunchItem, Place, SearchKey, StoredError, StatusNotice, StatusNoticeId, StatusNoticeAction, StatusTone, MergeFileEntry } from "./types";
 import { STATUS_NOTICE_ENTRY } from "./types";
 import { statusPathBefore, type StatusFingerprint } from "../status";
-import { mergeWatchNote, planStatusRefresh, type StatusProbe, type WatchNote } from "./status-plan";
+import { mergeWatchNote, planStatusRefresh, sameFingerprint, type StatusProbe, type WatchNote } from "./status-plan";
 import { enqueueStage, projectStages, stageActions, type PendingStage } from "./staging";
 import { areasFor, patchActions, repositoryKey, type RefreshArea } from "../operation-policy";
 import { beginWorktree, finishWorktreeMutation, type WorktreeDialogState, type WorktreeHistory } from "./worktrees";
@@ -225,13 +225,6 @@ function fullyPickedDirs(files: readonly Row[], picked: readonly string[]) {
     if (count === index.totals.get(dir)) dirs.add(dir);
   }
   return dirs;
-}
-
-function sameSnapshot(left: StatusSnapshot | null, right: StatusSnapshot | null): boolean {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  return left.path === right.path && left.branch === right.branch && left.commitIntent?.head === right.commitIntent?.head
-    && left.commitIntent?.index === right.commitIntent?.index && sameStatusFiles(left.staged, right.staged) && sameStatusFiles(left.unstaged, right.unstaged);
 }
 
 function sameValue(left: unknown, right: unknown): boolean {
@@ -526,6 +519,7 @@ export class ShellState {
 
   /** Set as soon as a tab is chosen, before that repository's status returns. */
   focusPath = $state<string | null>(null);
+  openedFrom = "";
 
 
   openGen = 0;
@@ -1785,8 +1779,8 @@ export class ShellState {
   viewing(path: string | null | undefined) {
     const key = this.jobKey(path);
     if (!key) return false;
-    if (key === this.jobKey(this.snapshot?.path)) return true;
-    return !this.snapshot && key === this.jobKey(this.focusPath);
+    if (!this.snapshot) return key === this.jobKey(this.focusPath);
+    return key === this.jobKey(this.snapshot.path) || key === this.jobKey(this.openedFrom);
   }
 
 
@@ -2649,7 +2643,7 @@ export class ShellState {
     if (this.allBranches) return [];
     if (this.graphBranches.length) return this.graphBranches;
     if (this.mode === "sample") return this.graphSolo ? [this.graphSolo] : ["main", "origin/main"];
-    return this.exactRefs();
+    return this.exactRefs().map((name) => name.replace(/^refs\/(?:heads|remotes)\//, ""));
   });
 
 
@@ -3277,11 +3271,9 @@ export class ShellState {
               : !progress;
           if (need) await invoke("lab_restore", { name: item.repo });
         }
-        const file = params.get("file");
-        if ((item.id === "file-history" || item.id === "file-history-unity" || item.id === "file-history-excel") && file) this.historyFilter = file;
-        await this.openRepo(path);
+        const file = ["file-history", "file-history-unity", "file-history-excel"].includes(item.id) ? params.get("file") : null;
+        await this.openRepo(path, { file, waitForHistory: true });
         if (!this.snapshot) throw new Error(this.actionError || `打不开 ${item.repo}`);
-        await this.loadContext();
         // The standalone merge scene opens its workbench before the initial
         // conflict preview finishes, so a gated conflict_sides read cannot
         // prevent the scene from becoming editable.
@@ -3447,15 +3439,7 @@ export class ShellState {
     const partialUpdate = !!value.statusPaths;
     const previousSelection = this.selectedPath;
     const previousSide = this.selectedSide;
-    const query = typeof this.fileQuery === "string" ? this.fileQuery.trim().toLowerCase() : "";
-    const conflictsOnly = this.conflictsOnly === true;
-    const shown = (files: readonly StatusFile[]) => files.filter((file) =>
-      (!query || file.path.toLowerCase().includes(query)) && (!conflictsOnly || file.kind === "conflict"),
-    );
-    const previousRows = this.snapshot?.path === value.path
-      ? shown(previousSide === "staged" ? this.snapshot.staged : this.snapshot.unstaged)
-      : [];
-    const previousIndex = previousSelection ? previousRows.findIndex((file) => file.path === previousSelection) : -1;
+    const previous = this.snapshot?.path === value.path ? this.snapshot : null;
     if (this.viewing(value.path) && value.revision != null && revision < Math.max(this.statusRevision, this.statusObservedRevision)) {
       // A late delta can cover an unrelated path; reconcile without rolling the list backward.
       this.scheduleStageRefresh();
@@ -3481,7 +3465,7 @@ export class ShellState {
       clearTimeout(this.stageRefreshTimer);
       this.stageRefreshTimer = null;
     }
-    if (this.snapshot?.path !== value.path) {
+    if (!previous && !this.viewing(value.path)) {
       this.contextRevision = 0;
       this.statusObservedRevision = 0;
       this.watchQueued = null;
@@ -3493,43 +3477,53 @@ export class ShellState {
       if (notes) {
         const key = this.jobKey(value.path);
         const noted = notes.get(key);
-        if (!noted || noted.revision <= revision) notes.delete(key);
+        if (noted && noted.revision <= revision && (noted.scope === "status" || noted.revision <= this.contextRevision)) notes.delete(key);
       }
     }
     this.stageStatusUnverified = partialUpdate;
     if (revision > 0) this.statusObservedRevision = revision;
     this.statusGen += 1;
-    if (!sameSnapshot(this.snapshot, value)) {
-      const previous = this.snapshot?.path === value.path ? this.snapshot : null;
-      this.snapshot = previous ? {
-        ...value,
-        staged: sameStatusFiles(previous.staged, value.staged) ? previous.staged : value.staged,
-        unstaged: sameStatusFiles(previous.unstaged, value.unstaged) ? previous.unstaged : value.unstaged,
-      } : value;
+    if (!previous) {
+      this.snapshot = value;
+    } else {
+      const staged = sameStatusFiles(previous.staged, value.staged) ? previous.staged : value.staged;
+      const unstaged = sameStatusFiles(previous.unstaged, value.unstaged) ? previous.unstaged : value.unstaged;
+      const fingerprint = sameFingerprint(previous.fingerprint, value.fingerprint) ? previous.fingerprint : value.fingerprint;
+      if (staged !== previous.staged || unstaged !== previous.unstaged || fingerprint !== previous.fingerprint
+        || previous.branch !== value.branch
+        || previous.commitIntent?.head !== value.commitIntent?.head || previous.commitIntent?.index !== value.commitIntent?.index) {
+        this.snapshot = { ...value, staged, unstaged, fingerprint };
+      }
     }
     this.mode = "live";
     this.loadError = "";
     const tabKey = this.jobKey(value.path);
     if (tabKey && !this.repos.some((path) => this.jobKey(path) === tabKey)) this.repos = [...this.repos, value.path];
     const visible = this.pendingStages?.length ? this.stageView : value;
-    const sameSide = (this.selectedSide === "staged" ? visible.staged : visible.unstaged).some(
-      (file) => file.path === this.selectedPath,
-    );
-    if (this.selectedPath && sameSide) return;
+    const sameSide = this.selectedSide === "staged" ? visible.staged : visible.unstaged;
+    if (this.selectedPath && sameSide.some((file) => file.path === this.selectedPath)) return;
     const otherSide: Side = this.selectedSide === "staged" ? "unstaged" : "staged";
     const other = otherSide === "staged" ? visible.staged : visible.unstaged;
     if (this.selectedPath && other.some((file) => file.path === this.selectedPath)) {
       this.selectedSide = otherSide;
       return;
     }
-    if (previousSelection && previousIndex >= 0) {
-      const adjacent = shown(previousSide === "staged" ? visible.staged : visible.unstaged);
-      const next = adjacent[previousIndex] ?? adjacent[previousIndex - 1];
-      if (next) {
-        this.selectedSide = previousSide;
-        this.selectedPath = next.path;
-        this.selectedIndex = adjacent.indexOf(next);
-        return;
+    if (previous && previousSelection) {
+      const query = this.fileQuery?.trim().toLowerCase() ?? "";
+      const shown = (files: readonly StatusFile[]) => files.filter((file) =>
+        (!query || file.path.toLowerCase().includes(query)) && (!this.conflictsOnly || file.kind === "conflict"));
+      const previousRows = shown(previousSide === "staged" ? previous.staged : previous.unstaged);
+      const previousIndex = previousRows.findIndex((file) => file.path === previousSelection);
+      if (previousIndex >= 0) {
+        const adjacent = shown(previousSide === "staged" ? visible.staged : visible.unstaged);
+        const index = Math.min(previousIndex, adjacent.length - 1);
+        const next = adjacent[index];
+        if (next) {
+          this.selectedSide = previousSide;
+          this.selectedPath = next.path;
+          this.selectedIndex = index;
+          return;
+        }
       }
     }
     const conflict = visible.unstaged.find((file) => file.kind === "conflict");
@@ -6032,7 +6026,7 @@ export class ShellState {
 
 
 
-  repositoryViews = new Map<string, Pick<ShellState, "snapshot" | "refs" | "commitsLive" | "progress" | "selectedPath" | "selectedSide" | "selectedCommit" | "commitDetail" | "commitFiles" | "historyFile" | "historyFilter" | "worktreeHistory" | "sideTop" | "historyTop" | "fileTop" | "stagedTop" | "combinedTop" | "commitScrollTop" | "commitListTop" | "diffTop" | "historyDiffTop" | "selectedIndex" | "statusRevision" | "statusObservedRevision" | "stageStatusUnverified" | "contextRevision">>();
+  repositoryViews = new Map<string, Pick<ShellState, "snapshot" | "refs" | "commitsLive" | "progress" | "mergeState" | "mergeProgressAutoSummary" | "signOff" | "selectedPath" | "selectedSide" | "selectedCommit" | "commitDetail" | "commitFiles" | "historyFile" | "historyFilter" | "historyFillPending" | "historyRefreshPending" | "worktreeHistory" | "sideTop" | "historyTop" | "fileTop" | "stagedTop" | "combinedTop" | "commitScrollTop" | "commitListTop" | "diffTop" | "historyDiffTop" | "selectedIndex" | "statusRevision" | "statusObservedRevision" | "stageStatusUnverified" | "contextRevision">>();
 
   /** Watcher events for a repository that is not on screen. Capped with the view cache. */
   repoWatchNotes = new Map<string, WatchNote>();
@@ -6043,8 +6037,10 @@ export class ShellState {
     this.repositoryViews.delete(key);
     this.repositoryViews.set(key, {
       snapshot: this.snapshot, refs: this.refs, commitsLive: this.commitsLive, progress: this.progress,
+      mergeState: this.mergeState, mergeProgressAutoSummary: this.mergeProgressAutoSummary, signOff: this.signOff,
       selectedPath: this.selectedPath, selectedSide: this.selectedSide, selectedCommit: this.selectedCommit,
       commitDetail: this.commitDetail, commitFiles: this.commitFiles, historyFile: this.historyFile, historyFilter: this.historyFilter,
+      historyFillPending: this.historyFillPending, historyRefreshPending: this.historyRefreshPending,
       worktreeHistory: this.worktreeHistory,
       sideTop: this.sideTop, historyTop: this.historyTop, fileTop: this.fileTop, stagedTop: this.stagedTop, combinedTop: this.combinedTop,
       commitScrollTop: this.commitScrollTop, commitListTop: this.commitListTop, diffTop: this.diffTop, historyDiffTop: this.historyDiffTop,
@@ -6083,10 +6079,11 @@ export class ShellState {
     return this.mode === "live";
   }
 
-  async openRepo(path: string) {
+  async openRepo(path: string, { file = null, waitForHistory = false }: { file?: string | null; waitForHistory?: boolean } = {}) {
     if (!this.backend() || !path.trim()) return;
+    const previousPath = this.repoPath();
     if (!this.viewing(path)) this.commitSelection.clear();
-    const stayingOnRepo = this.viewing(path);
+    const stayingOnRepo = !!this.snapshot && this.viewing(path);
     if (!stayingOnRepo) this.cancelAutomaticFetch();
     if (!stayingOnRepo) this.rememberRepositoryView();
     this.dialog = null;
@@ -6104,19 +6101,32 @@ export class ShellState {
     this.commitQuerySearchGen += 1;
     window.clearTimeout(this.commitQuerySearchTimer);
     this.commitQueryMessageHits = [];
-    if (this.snapshot?.path && !this.viewing(path)) cancelReads(this.snapshot.path);
+    if (previousPath && !this.viewing(path)) cancelReads(previousPath);
     this.focusPath = path;
     if (this.snapshot?.path && !this.viewing(path)) this.drafts.set(this.snapshot.path, { summary: this.summary, description: this.description, commitType: this.commitType });
+    if (!stayingOnRepo) this.openedFrom = path;
     if (!stayingOnRepo) {
+      this.watchQueued = null; this.watchRevision = 0; this.watchPaths = null;
       const cached = this.repositoryViews.get(this.jobKey(path));
       if (cached) { Object.assign(this, cached); this.mode = "live"; }
       else {
         this.worktreeHistory = null;
         this.snapshot = null; this.refs = null; this.commitsLive = []; this.mode = "loading";
         this.historyFillPending = false;
+        this.historyRefreshPending = false;
+        this.resetCommitView();
         this.selectedPath = null; this.selectedCommit = null; this.commitDetail = null; this.commitFiles = [];
-        this.contentHits = null; this.expandedMerges = []; this.historyTop = 0;
+        this.contentHits = null; this.expandedMerges = [];
+        this.drops = []; this.comparePair = null; this.historyTab = "commit";
+        this.detailQuery = ""; this.searchOpen.detail = false;
+        this.sideTop = 0; this.historyTop = 0;
+        this.fileTop = 0; this.stagedTop = 0; this.combinedTop = 0;
+        this.commitScrollTop = 0; this.commitListTop = 0;
+        this.selectedIndex = 0; this.diffTop = 0; this.blameTop = 0; this.historyDiffTop = 0;
         this.progress = null; this.statusRevision = 0; this.statusObservedRevision = 0; this.stageStatusUnverified = false; this.contextRevision = 0;
+        this.mergeState = null;
+        this.mergeProgressAutoSummary = "";
+        this.signOff = this.settings.signOff;
         if (this.standalone !== "history") this.historyFilter = "";
       }
       this.historyLoading = false;
@@ -6127,12 +6137,13 @@ export class ShellState {
       const draftType = draft?.commitType ?? "";
       this.commitType = isCommitType(draftType) ? draftType : this.preferredCommitType();
       this.restoreHistoryFilter(path);
+      this.normalizeSummary();
     }
-    let historyStarted = false;
+    if (file) this.historyFilter = file;
+    let historyRead: Promise<void> | undefined;
     const startHistory = (force: boolean) => {
-      if (historyStarted || (!force && this.commitsLive.length > 0 && this.refs)) return;
-      historyStarted = true;
-      void this.loadContext().catch((error) => {
+      if (historyRead || (!force && this.commitsLive.length > 0 && this.refs)) return;
+      historyRead = this.loadContext().catch((error) => {
         if (gen === this.openGen && this.viewing(path)) this.actionError = this.message(error);
       });
     };
@@ -6143,6 +6154,7 @@ export class ShellState {
     let held = false;
     try {
       const painted = () => this.mode === "live" && !!this.snapshot && (this.viewing(path) || this.viewing(this.snapshot.path));
+      if (!stayingOnRepo && !this.refs) startHistory(true);
       if (!stayingOnRepo && !painted() && !this.labPage) {
         try {
           const stored = await invoke<Parameters<ShellState["showStoredStatus"]>[0] | null>("load_status_cache", { path });
@@ -6155,21 +6167,24 @@ export class ShellState {
       if (!stayingOnRepo && painted()) {
         // The list on screen is usable. A fingerprint stat must not keep the window in the open latch.
         this.focusPath = null;
-        let headSame = false;
+        let keepHistory = false;
         let plan: ReturnType<typeof planStatusRefresh> = { kind: "full" };
-        try {
+        if (!this.stageStatusUnverified) try {
           const probe = await invoke<StatusProbe>("status_probe", { path });
           if (gen !== this.openGen) return;
           const previous = this.snapshot?.fingerprint;
-          headSame = !!previous && previous.head === probe.fingerprint.head && previous.refId === probe.fingerprint.refId
+          const note = this.repoWatchNotes.get(this.jobKey(this.snapshot?.path ?? path)) ?? null;
+          const headSame = !!previous && previous.head === probe.fingerprint.head && previous.refId === probe.fingerprint.refId
             && (previous.submoduleSum ?? "") === (probe.fingerprint.submoduleSum ?? "")
             && (previous.worktreeSum ?? "") === (probe.fingerprint.worktreeSum ?? "");
+          keepHistory = headSame && probe.watcherAlive && this.contextRevision >= (note?.scope === "full" ? note.revision : 0)
+            && (probe.revision <= this.statusRevision || (note?.scope === "status" && note.revision >= probe.revision));
           plan = planStatusRefresh({
             fingerprint: previous,
-            seen: this.snapshot?.revision ?? 0,
+            seen: this.statusRevision,
             unverified: this.stageStatusUnverified,
             probe,
-            note: this.repoWatchNotes.get(this.jobKey(this.snapshot?.path ?? path)) ?? null,
+            note,
           });
         } catch {
           plan = { kind: "full" };
@@ -6178,8 +6193,7 @@ export class ShellState {
         this.armOpenExtras(path, gen);
         // Commits do not wait on the work tree. A quiet index can still have history,
         // and a painted status cache does not include the commit list.
-        const keepHistory = headSame && this.commitsLive.length > 0 && !!this.refs;
-        startHistory(!keepHistory);
+        startHistory(!keepHistory || this.commitsLive.length === 0 || !this.refs);
         if (plan.kind === "trust") {
           this.stageStatusUnverified = false;
           void this.loadDiff();
@@ -6201,54 +6215,31 @@ export class ShellState {
       if (!stayingOnRepo) startHistory(true);
       const value = await invoke<StatusSnapshot>("workspace_status", { path });
       if (gen !== this.openGen) return;
-      // Reopening the repository already on screen keeps the message being written.
-      // focusPath stands in for the snapshot until status returns. That must not
-      // count as reopening the same repository and keep the previous scroll.
-      const staying = stayingOnRepo || (this.mode === "live" && (this.viewing(path) || this.viewing(value.path)));
       this.aliasJob(path, value.path);
       stopAt = value.path;
-      this.applySnapshot(value);
-      if (!staying) {
-        this.sideTop = 0;
-        this.resetCommitView();
-        this.selectedCommit = null;
-        this.commitDetail = null;
-        this.commitFiles = [];
-        this.historyDiff = null;
-        this.restoreHistoryFilter(value.path);
-        this.drops = [];
-        this.contentHits = null;
-        this.comparePair = null;
-        this.blameLines = null;
-        this.expandedMerges = [];
-        this.historyTab = "commit";
-        this.detailQuery = "";
-        this.searchOpen.detail = false;
-        this.historyTop = 0;
-        this.fileTop = 0;
-        this.stagedTop = 0;
-        this.combinedTop = 0;
-        this.commitScrollTop = 0;
-        this.commitListTop = 0;
-        this.selectedIndex = 0;
-        this.diffTop = 0;
-        this.blameTop = 0;
-        this.historyDiffTop = 0;
-        const saved = this.drafts.get(path) ?? this.drafts.get(value.path);
-        const savedType = saved?.commitType ?? "";
-        this.commitType = isCommitType(savedType) ? savedType : this.preferredCommitType();
-        this.summary = saved?.summary ?? "";
-        this.description = saved?.description ?? "";
-        this.normalizeSummary();
+      if (!stayingOnRepo && path !== value.path && !this.drafts.has(path)) {
+        const draft = this.drafts.get(value.path);
+        if (draft) {
+          this.summary = draft.summary;
+          this.description = draft.description;
+          const type = draft.commitType ?? "";
+          this.commitType = isCommitType(type) ? type : this.preferredCommitType();
+          this.normalizeSummary();
+        }
       }
-      if (!historyStarted && this.standalone !== "history") this.historyFilter = "";
-      if (!historyStarted) void this.loadContext().catch((error) => { if (gen === this.openGen) this.actionError = this.message(error); });
+      this.applySnapshot(value);
+      if (!historyRead && !file && this.standalone !== "history") this.historyFilter = "";
+      startHistory(true);
       if (this.standalone !== "merge") void this.loadDiff();
       this.armOpenExtras(path, gen);
     } catch (error) {
       if (gen !== this.openGen) return;
       const text = this.message(error);
       this.actionError = text;
+      if (!this.snapshot) {
+        this.mode = "error";
+        this.loadError = text;
+      }
       if (this.missingRepoPath(text)) await this.dropMissingRepo(path, text);
     } finally {
       if (held) this.stopWork(stopAt);
@@ -6256,6 +6247,7 @@ export class ShellState {
         this.focusPath = null;
         queueHistoryFill(this);
       }
+      if (waitForHistory) await historyRead;
     }
   }
 
@@ -8422,6 +8414,7 @@ export class ShellState {
     this.lastPlace = next;
     });
     $effect(() => {
+    if (!this.launchOpen) return;
     const max = Math.max(0, this.matches.length - 1);
     if (this.launchIndex > max) this.launchIndex = max;
     });
@@ -8435,7 +8428,7 @@ export class ShellState {
     for (const path of this.settings.recent.slice(0, 12)) {
     if (this.recentStats[path] || this.recentAsked.has(path)) continue;
     this.recentAsked.add(path);
-    void invoke<{ branch: string; ahead: number; behind: number; lastSummary: string }>("repository_summary", { path })
+    void invoke<{ branch: string; ahead: number; behind: number; lastSummary: string }>("repository_summary", { path, __prefetch: true })
     .then((value) => {
     this.recentStats = { ...this.recentStats, [path]: value };
     })
@@ -8551,8 +8544,6 @@ export class ShellState {
     introduce = this.takeFeaturesIntro();
     if (introduce || onboard) void this.savePrefs(false);
     void invoke<string>("settings_path").then((path) => (this.settingsPath = path)).catch(() => {});
-    await this.loadExternalTools();
-    if (this.settings.terminalCliFound == null && this.settings.terminalClis.length > 0) void this.detectTerminalClis(true);
     if (value.windowWidth > 200 && value.windowHeight > 200 && !this.standalone) {
     try {
     const win = getCurrentWindow();
@@ -8631,8 +8622,7 @@ export class ShellState {
     const queryView = params.get("view");
     if (queryRepo) {
     targeted = true;
-    if (queryView === "history" && queryFile) this.historyFilter = queryFile;
-    await this.openRepo(queryRepo);
+    await this.openRepo(queryRepo, { file: queryView === "history" ? queryFile : null });
     if (queryView === "blame" && queryFile) await this.showBlame(queryFile);
     if (queryView === "history" && queryFile) await this.showFileHistory(queryFile);
     if (queryView === "blob" && queryFile) {
@@ -8673,6 +8663,10 @@ export class ShellState {
     this.mode = "error";
     }
     } finally {
+    if (!stopped) {
+      void this.loadExternalTools();
+      if (this.settings.terminalCliFound == null && this.settings.terminalClis.length > 0) void this.detectTerminalClis(true);
+    }
     if (!stopped && !targeted && introduce) this.dialog = "features";
     if (!stopped && onboard) firstRunTimer = window.setTimeout(() => { if (!stopped) void this.runFirstRunSetup(); }, 2500);
     }

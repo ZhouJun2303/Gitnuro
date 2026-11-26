@@ -897,6 +897,27 @@ mod tests {
     }
 
     #[test]
+    fn queued_commit_resolves_repository_sign_off_when_the_choice_is_omitted() {
+        let repo = Repo::new();
+        repo.git(&["config", "user.name", "Task Test"]);
+        repo.git(&["config", "user.email", "task@example.test"]);
+        repo.git(&["commit", "--allow-empty", "-m", "test: seed"]);
+        awegit_git::write_sign_off(&repo.0, true, "Signed-off-by: %user <%email>").unwrap();
+        for override_sign_off in [false, true] {
+            std::fs::write(repo.0.join("note.txt"), format!("{override_sign_off}\n")).unwrap();
+            repo.git(&["add", "note.txt"]);
+            let mut args = commit_args(&repo);
+            if !override_sign_off {
+                args.as_object_mut().unwrap().remove("signOff");
+            }
+            let id = enqueue("commit_changes", &args).unwrap();
+            run(&id, || execute("commit_changes", &args), ok).unwrap();
+            let message = repo.git(&["log", "-1", "--format=%B"]);
+            assert_eq!(message.contains("Signed-off-by: Task Test <task@example.test>"), !override_sign_off);
+        }
+    }
+
+    #[test]
     fn queued_commit_does_not_include_paths_staged_after_confirmation() {
         let repo = Repo::new(); repo.git(&["commit", "--allow-empty", "-m", "test: seed"]);
         for file in ["selected.txt", "other.txt"] { std::fs::write(repo.0.join(file), file).unwrap(); }
@@ -992,6 +1013,8 @@ mod tests {
     #[test]
     fn stage_verification_is_scoped_and_does_not_fail_for_unrelated_conflicts() {
         let repo = Repo::new();
+        repo.git(&["config", "user.name", "Task Test"]);
+        repo.git(&["config", "user.email", "task@example.test"]);
         for file in ["conflict.txt", "stage.txt", "untouched.txt"] { std::fs::write(repo.0.join(file), "base\n").unwrap(); }
         repo.git(&["add", "."]); repo.git(&["commit", "-m", "test: seed"]);
         repo.git(&["checkout", "-b", "other"]);
@@ -1001,6 +1024,7 @@ mod tests {
         std::fs::write(repo.0.join("conflict.txt"), "main\n").unwrap();
         repo.git(&["commit", "-am", "test: main"]);
         assert!(awegit_git::perform(&repo.0, awegit_git::Mutation::Merge { name: "other".into(), no_ff: false, squash: false, autostash: false, summary: String::new(), description: String::new() }).is_err());
+        assert!(repo.git(&["ls-files", "-u"]).contains("conflict.txt"));
         for file in ["stage.txt", "untouched.txt"] { std::fs::write(repo.0.join(file), "new\n").unwrap(); }
         let args = json!({ "path": repo.0, "request": { "action": "stagePaths", "files": ["stage.txt"], "unstage": false } });
         let id = enqueue("mutate", &args).unwrap();
